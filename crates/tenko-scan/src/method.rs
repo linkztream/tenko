@@ -39,15 +39,17 @@ pub enum MethodKind {
     ArpSweep,
     /// TCP SYN scan over raw sockets (not implemented yet).
     TcpSyn,
-    /// OS fingerprinting over raw sockets (not implemented yet).
+    /// OS fingerprinting over raw sockets (WP3.14).
     OsFingerprint,
-    /// LLDP listening over raw sockets (not implemented yet).
+    /// Passive LLDP and CDP listening over raw sockets (WP3.14).
     Lldp,
+    /// Passive DHCPv4 snooping over raw sockets (WP3.14).
+    DhcpSnoop,
 }
 
 impl MethodKind {
     /// Every method, in scheduling order.
-    pub const ALL: [MethodKind; 12] = [
+    pub const ALL: [MethodKind; 13] = [
         MethodKind::Arp,
         MethodKind::Nd,
         MethodKind::Icmp,
@@ -60,6 +62,7 @@ impl MethodKind {
         MethodKind::TcpSyn,
         MethodKind::OsFingerprint,
         MethodKind::Lldp,
+        MethodKind::DhcpSnoop,
     ];
 
     /// The name in the configuration, the CLI and the source key.
@@ -77,6 +80,7 @@ impl MethodKind {
             MethodKind::TcpSyn => "tcp_syn",
             MethodKind::OsFingerprint => "os_fingerprint",
             MethodKind::Lldp => "lldp",
+            MethodKind::DhcpSnoop => "dhcp_snoop",
         }
     }
 
@@ -101,6 +105,7 @@ impl MethodKind {
             MethodKind::TcpSyn => ProbeMethod::TcpSyn,
             MethodKind::OsFingerprint => ProbeMethod::OsFingerprint,
             MethodKind::Lldp => ProbeMethod::Lldp,
+            MethodKind::DhcpSnoop => ProbeMethod::DhcpSnoop,
         }
     }
 
@@ -112,6 +117,7 @@ impl MethodKind {
                 | MethodKind::TcpSyn
                 | MethodKind::OsFingerprint
                 | MethodKind::Lldp
+                | MethodKind::DhcpSnoop
         )
     }
 
@@ -131,7 +137,10 @@ impl MethodKind {
     /// Whether the method sends packets at all; blackout windows hold every method that
     /// does. The neighbour tables are read from the operating system and send nothing.
     pub const fn sends_packets(self) -> bool {
-        !matches!(self, MethodKind::Arp | MethodKind::Nd | MethodKind::Lldp)
+        !matches!(
+            self,
+            MethodKind::Arp | MethodKind::Nd | MethodKind::Lldp | MethodKind::DhcpSnoop
+        )
     }
 
     /// Whether the method works on the addresses the other methods discovered, so its
@@ -313,7 +322,8 @@ mod tests {
                 MethodKind::ArpSweep,
                 MethodKind::TcpSyn,
                 MethodKind::OsFingerprint,
-                MethodKind::Lldp
+                MethodKind::Lldp,
+                MethodKind::DhcpSnoop
             ]
         );
         assert!(!MethodKind::Arp.sends_packets());

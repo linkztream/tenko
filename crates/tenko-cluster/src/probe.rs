@@ -384,6 +384,7 @@ fn method_to_proto(method: ProbeMethod) -> v1::ProbeMethod {
         ProbeMethod::ReverseDns => v1::ProbeMethod::ReverseDns,
         ProbeMethod::Llmnr => v1::ProbeMethod::Llmnr,
         ProbeMethod::ArpSweep => v1::ProbeMethod::ArpSweep,
+        ProbeMethod::DhcpSnoop => v1::ProbeMethod::DhcpSnoop,
     }
 }
 
@@ -401,6 +402,7 @@ fn method_from_proto(value: i32) -> Result<ProbeMethod, ClusterError> {
         Ok(v1::ProbeMethod::ReverseDns) => ProbeMethod::ReverseDns,
         Ok(v1::ProbeMethod::Llmnr) => ProbeMethod::Llmnr,
         Ok(v1::ProbeMethod::ArpSweep) => ProbeMethod::ArpSweep,
+        Ok(v1::ProbeMethod::DhcpSnoop) => ProbeMethod::DhcpSnoop,
         Ok(v1::ProbeMethod::Unspecified) | Err(_) => {
             return Err(invalid("the batch names no probe method it knows"));
         }
@@ -905,6 +907,7 @@ mod tests {
             ProbeMethod::ReverseDns,
             ProbeMethod::Llmnr,
             ProbeMethod::ArpSweep,
+            ProbeMethod::DhcpSnoop,
         ] {
             let wire: i32 = method_to_proto(method).into();
             assert_eq!(method_from_proto(wire).expect("method"), method);

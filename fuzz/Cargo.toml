@@ -53,6 +53,29 @@ test = false
 doc = false
 bench = false
 
+# WP3.14 raw-socket frame parsers (marked block).
+[[bin]]
+name = "scan_lldp_cdp"
+path = "fuzz_targets/scan_lldp_cdp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan_arp"
+path = "fuzz_targets/scan_arp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan_dhcp_snoop"
+path = "fuzz_targets/scan_dhcp_snoop.rs"
+test = false
+doc = false
+bench = false
+# End WP3.14 raw-socket frame parsers.
+
 [[bin]]
 name = "connect_hass_ws_frame"
 path = "fuzz_targets/connect_hass_ws_frame.rs"

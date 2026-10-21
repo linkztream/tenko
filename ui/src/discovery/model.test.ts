@@ -351,7 +351,7 @@ describe("sources", () => {
   });
 
   it("has a word for every probe method and keeps one it does not know", () => {
-    expect(["arp", "nd", "mdns", "lldp", "icmp", "tcp_syn", "os_fingerprint", "snmp", "tcp_connect", "reverse_dns", "llmnr", "arp_sweep"].map(probeMethodWord)).toEqual([
+    expect(["arp", "nd", "mdns", "lldp", "icmp", "tcp_syn", "os_fingerprint", "snmp", "tcp_connect", "reverse_dns", "llmnr", "arp_sweep", "dhcp_snoop"].map(probeMethodWord)).toEqual([
       "ARP",
       "neighbour discovery",
       "mDNS",
@@ -364,6 +364,7 @@ describe("sources", () => {
       "reverse DNS",
       "LLMNR",
       "ARP sweep",
+      "DHCP snoop",
     ]);
     expect(probeMethodWord("ble_scan")).toBe("ble_scan");
   });

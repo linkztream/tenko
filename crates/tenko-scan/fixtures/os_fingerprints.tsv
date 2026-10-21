@@ -1,0 +1,33 @@
+# Passive TCP/IP fingerprint table for the `os_fingerprint` method (WP3.14, SCAN-04).
+#
+# Each row is one signature matched against a SYN-ACK (or a SYN) the probe saw: the guessed
+# initial TTL, the advertised window, the TCP option layout and the don't-fragment flag.
+# The style is p0f's: an initial TTL of 64, 128 or 255 (the observed hop count rounded up),
+# a window that is an exact value or `*`, and an option layout as single letters in order
+# (M = MSS, S = SACK permitted, T = timestamps, W = window scale, N = NOP, . = other/end).
+# The family is one of: Windows, Linux, FreeBSD, macOS, Apple mobile, network gear, printer,
+# unknown. A product name is never guessed beyond the family. Confidence is a percent.
+#
+# This table is intentionally small and conservative; it is edited by hand. A row matches
+# when its TTL equals the guessed initial TTL, its window is `*` or equal, its option layout
+# is `*` or equal, and its DF (`y`, `n` or `*`) matches. The most confident matching row
+# wins; with no match the method falls back to the TTL family at a low confidence.
+#
+# family<TAB>ttl<TAB>window<TAB>options<TAB>df<TAB>confidence
+Linux	64	65160	MSTNW	y	80
+Linux	64	64240	MSTNW	y	78
+Linux	64	29200	MSTNW	y	75
+Linux	64	*	MSTNW	y	70
+Linux	64	*	MSTN	y	60
+macOS	64	65535	MNWNNT	y	75
+macOS	64	65535	MNWNNTS	y	72
+Apple mobile	64	65535	MNWNNTSNN	y	60
+FreeBSD	64	65535	MNWSNNT	y	72
+FreeBSD	64	65535	MNWNNT	n	60
+Windows	128	65535	MNWNNS	y	78
+Windows	128	64240	MNWNNS	y	80
+Windows	128	8192	MNWNNS	y	72
+Windows	128	*	MNWNNS	y	68
+Windows	128	*	MNNS	y	60
+network gear	255	*	*	*	65
+network gear	255	4128	M	*	70

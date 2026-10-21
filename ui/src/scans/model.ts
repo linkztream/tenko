@@ -28,7 +28,12 @@ export type DiffCounts = S["DiffCounts"];
 export type ProbeConfigView = S["ProbeConfigView"];
 /** The `[scan]` configuration a controller stores for a probe. */
 export type ScanConfig = S["ScanConfig"];
-export type ScanRawMethod = S["ScanRawMethod"];
+/** The sections of the raw-socket methods (docs/scanning.md, 2.8 to 2.12). */
+export type ScanArpSweepMethod = S["ScanArpSweepMethod"];
+export type ScanTcpSynMethod = S["ScanTcpSynMethod"];
+export type ScanOsFingerprintMethod = S["ScanOsFingerprintMethod"];
+export type ScanLldpMethod = S["ScanLldpMethod"];
+export type ScanDhcpSnoopMethod = S["ScanDhcpSnoopMethod"];
 /** A probe as the scan pages list it. */
 export type ProbeSummary = S["ProbeSummary"];
 export type ProbeList = S["ProbeList"];
@@ -81,9 +86,10 @@ export type ConfigMethod =
   | "arp_sweep"
   | "tcp_syn"
   | "os_fingerprint"
-  | "lldp";
+  | "lldp"
+  | "dhcp_snoop";
 
-/** The methods of a configuration in display order; `raw` ones need raw sockets and do not run yet. */
+/** The methods of a configuration in display order; `raw` ones need raw sockets (CAP_NET_RAW on Linux; unsupported on Windows). */
 export const CONFIG_METHODS: readonly { readonly key: ConfigMethod; readonly raw: boolean }[] = [
   { key: "arp", raw: false },
   { key: "nd", raw: false },
@@ -97,6 +103,7 @@ export const CONFIG_METHODS: readonly { readonly key: ConfigMethod; readonly raw
   { key: "tcp_syn", raw: true },
   { key: "os_fingerprint", raw: true },
   { key: "lldp", raw: true },
+  { key: "dhcp_snoop", raw: true },
 ];
 
 /** A configuration field the server would refuse: the field path and a stable code. */
@@ -144,6 +151,8 @@ export function validateScanConfig(config: ScanConfig): ConfigFieldError[] {
     if ("timeout_ms" in method) atLeastOne(`${key}.timeout_ms`, method.timeout_ms);
   }
   atLeastOne("mdns.listen_secs", config.mdns.listen_secs);
+  atLeastOne("lldp.listen_secs", config.lldp.listen_secs);
+  atLeastOne("dhcp_snoop.listen_secs", config.dhcp_snoop.listen_secs);
   port("mdns.unicast_port", config.mdns.unicast_port);
   port("llmnr.port", config.llmnr.port);
   config.tcp_connect.ports.forEach((p, i) => port(`tcp_connect.ports[${i}]`, p));

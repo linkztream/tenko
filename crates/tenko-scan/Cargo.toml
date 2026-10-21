@@ -37,6 +37,13 @@ utoipa = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 
+# Raw link-layer sockets for the raw-socket methods (WP3.14): sending ARP requests and TCP
+# SYN segments and listening for ARP replies, LLDP, CDP and DHCP frames, through a safe API
+# (AF_PACKET on Linux). Linux only: these methods answer `unsupported` on Windows, which
+# needs Npcap that Tenko does not bundle. MIT OR Apache-2.0, accepted by `cargo deny`.
+[target.'cfg(target_os = "linux")'.dependencies]
+pnet_datalink = "0.35.0"
+
 [dev-dependencies]
 tenko-jobs = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["testing"] }

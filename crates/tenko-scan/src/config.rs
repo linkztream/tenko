@@ -173,14 +173,16 @@ pub struct ScanConfig {
     pub llmnr: LlmnrMethod,
     /// SNMPv3 polling of switches.
     pub snmp: SnmpMethod,
-    /// ARP sweep over raw sockets (declared; not implemented yet).
-    pub arp_sweep: RawMethod,
-    /// TCP SYN scan over raw sockets (declared; not implemented yet).
-    pub tcp_syn: RawMethod,
-    /// OS fingerprinting over raw sockets (declared; not implemented yet).
-    pub os_fingerprint: RawMethod,
-    /// LLDP listening over raw sockets (declared; not implemented yet).
-    pub lldp: RawMethod,
+    /// ARP sweep over raw sockets (WP3.14, SCAN-04).
+    pub arp_sweep: ArpSweepMethod,
+    /// TCP SYN scan over raw sockets (WP3.14, SCAN-04).
+    pub tcp_syn: TcpSynMethod,
+    /// OS fingerprinting over raw sockets (WP3.14, SCAN-04).
+    pub os_fingerprint: OsFingerprintMethod,
+    /// Passive LLDP and CDP listening over raw sockets (WP3.14, SCAN-02, SCAN-05).
+    pub lldp: LldpMethod,
+    /// Passive DHCPv4 snooping over raw sockets (WP3.14, SCAN-03).
+    pub dhcp_snoop: DhcpSnoopMethod,
 }
 
 impl Default for ScanConfig {
@@ -206,10 +208,11 @@ impl Default for ScanConfig {
             mdns: MdnsMethod::default(),
             llmnr: LlmnrMethod::default(),
             snmp: SnmpMethod::default(),
-            arp_sweep: RawMethod::default(),
-            tcp_syn: RawMethod::default(),
-            os_fingerprint: RawMethod::default(),
-            lldp: RawMethod::default(),
+            arp_sweep: ArpSweepMethod::default(),
+            tcp_syn: TcpSynMethod::default(),
+            os_fingerprint: OsFingerprintMethod::default(),
+            lldp: LldpMethod::default(),
+            dhcp_snoop: DhcpSnoopMethod::default(),
         }
     }
 }
@@ -566,26 +569,258 @@ impl Default for SnmpMethod {
     }
 }
 
-/// A raw-socket method: declared, switched off, not implemented yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// A port in a raw-method port list: a single port, or a range `"a-b"` (inclusive). TOML
+/// writes the list as a mixed array, such as `ports = [22, 80, "1-1024"]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+#[schema(as = ScanPortSpec)]
+pub enum PortSpec {
+    /// A single port.
+    Single(u16),
+    /// A range `"a-b"`, inclusive.
+    Range(String),
+}
+
+/// Default ports for the SYN scan when none are configured: the connect-scan default set.
+fn default_syn_ports() -> Vec<PortSpec> {
+    DEFAULT_TCP_PORTS
+        .iter()
+        .map(|p| PortSpec::Single(*p))
+        .collect()
+}
+
+/// Default ports for the fingerprint: a short set across remote access, web, file sharing
+/// and directory, so most hosts answer at least one.
+fn default_fingerprint_ports() -> Vec<PortSpec> {
+    [22u16, 80, 135, 139, 443, 445, 3389]
+        .iter()
+        .map(|p| PortSpec::Single(*p))
+        .collect()
+}
+
+/// Expands a port list to sorted, unique ports, failing on a bad range or an out-of-range
+/// port. The result holds at most 65,535 ports.
+///
+/// # Errors
+///
+/// Returns [`ScanError`] when a port is 0 or out of range, or a range is malformed or
+/// reversed.
+pub fn expand_ports(specs: &[PortSpec], section: &str) -> Result<Vec<u16>, ScanError> {
+    let mut ports = std::collections::BTreeSet::new();
+    for spec in specs {
+        match spec {
+            PortSpec::Single(port) => {
+                if *port == 0 {
+                    return Err(ScanError::config(format!(
+                        "scan.{section}.ports: 0 is not a port"
+                    )));
+                }
+                ports.insert(*port);
+            }
+            PortSpec::Range(text) => {
+                let (start, end) = text.split_once('-').ok_or_else(|| {
+                    ScanError::config(format!(
+                        "scan.{section}.ports: `{text}` is not a port or an `a-b` range"
+                    ))
+                })?;
+                let start: u16 = start.trim().parse().map_err(|_| {
+                    ScanError::config(format!("scan.{section}.ports: `{text}` has a bad start"))
+                })?;
+                let end: u16 = end.trim().parse().map_err(|_| {
+                    ScanError::config(format!("scan.{section}.ports: `{text}` has a bad end"))
+                })?;
+                if start == 0 || start > end {
+                    return Err(ScanError::config(format!(
+                        "scan.{section}.ports: `{text}` is not a valid range (1 to 65535, a<=b)"
+                    )));
+                }
+                ports.extend(start..=end);
+            }
+        }
+    }
+    Ok(ports.into_iter().collect())
+}
+
+/// `[scan.arp_sweep]`: an active ARP sweep over raw sockets (SCAN-04). Disabled by
+/// default; needs `CAP_NET_RAW` on Linux and `active`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(default, deny_unknown_fields)]
-#[schema(as = ScanRawMethod)]
-pub struct RawMethod {
-    /// Runs on schedule once implemented (default false).
+#[schema(as = ScanArpSweepMethod)]
+pub struct ArpSweepMethod {
+    /// Runs on schedule (default false).
+    pub enabled: bool,
+    /// Seconds between two sweeps (default 3600).
+    pub interval_secs: u64,
+    /// Seconds a sighting stays current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+    /// Milliseconds to wait for ARP replies after the last request (default 2000).
+    pub timeout_ms: u64,
+    /// The interface to sweep on; not set: the one the probe's address chooses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
+}
+
+impl Default for ArpSweepMethod {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 3600,
+            ttl_secs: None,
+            timeout_ms: 2000,
+            interface: None,
+        }
+    }
+}
+
+/// `[scan.tcp_syn]`: a half-open TCP SYN scan over raw sockets (SCAN-04). The port list may
+/// hold up to the full range of 65,535 ports, which the connect scan cannot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ScanTcpSynMethod)]
+pub struct TcpSynMethod {
+    /// Runs on schedule (default false; needs `active`).
+    pub enabled: bool,
+    /// Seconds between two scans (default 3600).
+    pub interval_secs: u64,
+    /// Seconds a sighting stays current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+    /// The ports, as single ports and `"a-b"` ranges (default [`DEFAULT_TCP_PORTS`]).
+    pub ports: Vec<PortSpec>,
+    /// `known` (default) or `all`.
+    pub targets: TcpTargets,
+    /// Milliseconds to wait for a reply after the last SYN (default 2000).
+    pub timeout_ms: u64,
+    /// The interface to scan on; not set: the one the probe's address chooses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
+}
+
+impl Default for TcpSynMethod {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 3600,
+            ttl_secs: None,
+            ports: default_syn_ports(),
+            targets: TcpTargets::Known,
+            timeout_ms: 2000,
+            interface: None,
+        }
+    }
+}
+
+/// `[scan.os_fingerprint]`: passive and active-assisted OS fingerprinting (SCAN-04). It
+/// SYNs a short port list and classifies the SYN-ACKs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ScanOsFingerprintMethod)]
+pub struct OsFingerprintMethod {
+    /// Runs on schedule (default false; needs `active`).
     pub enabled: bool,
     /// Seconds between two runs (default 3600).
     pub interval_secs: u64,
     /// Seconds a sighting stays current.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_secs: Option<u64>,
+    /// A short port list to probe, as single ports and `"a-b"` ranges.
+    pub ports: Vec<PortSpec>,
+    /// Milliseconds to wait for a reply after the last SYN (default 2000).
+    pub timeout_ms: u64,
+    /// The interface to probe on; not set: the one the probe's address chooses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
 }
 
-impl Default for RawMethod {
+impl Default for OsFingerprintMethod {
     fn default() -> Self {
         Self {
             enabled: false,
             interval_secs: 3600,
             ttl_secs: None,
+            ports: default_fingerprint_ports(),
+            timeout_ms: 2000,
+            interface: None,
+        }
+    }
+}
+
+/// `[scan.lldp]`: passive LLDP and CDP listening over raw sockets (SCAN-02, SCAN-05). It
+/// sends nothing, so blackout windows do not hold it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ScanLldpMethod)]
+pub struct LldpMethod {
+    /// Runs on schedule (default false).
+    pub enabled: bool,
+    /// Seconds between two listens (default 3600).
+    pub interval_secs: u64,
+    /// Seconds a sighting stays current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+    /// Seconds to listen for LLDP (and CDP) frames (default 35, one LLDP interval plus a
+    /// margin; raised to at least 65 when `cdp` is on, since CDP sends every 60 seconds).
+    pub listen_secs: u64,
+    /// Also listen for CDP frames and parse them (default true).
+    pub cdp: bool,
+    /// The interface to listen on; not set: the one the probe's address chooses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
+}
+
+impl Default for LldpMethod {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 3600,
+            ttl_secs: None,
+            listen_secs: 35,
+            cdp: true,
+            interface: None,
+        }
+    }
+}
+
+impl LldpMethod {
+    /// The listen window: `listen_secs`, but at least 65 seconds when CDP is on.
+    pub fn window_secs(&self) -> u64 {
+        if self.cdp {
+            self.listen_secs.max(65)
+        } else {
+            self.listen_secs
+        }
+    }
+}
+
+/// `[scan.dhcp_snoop]`: passive DHCPv4 snooping over raw sockets (SCAN-03). It listens for
+/// DISCOVER, REQUEST and ACK on UDP 67 and 68 and sends nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schema(as = ScanDhcpSnoopMethod)]
+pub struct DhcpSnoopMethod {
+    /// Runs on schedule (default false).
+    pub enabled: bool,
+    /// Seconds between two listens (default 3600).
+    pub interval_secs: u64,
+    /// Seconds a sighting stays current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
+    /// Seconds to listen for DHCP frames in one run (default 120).
+    pub listen_secs: u64,
+    /// The interface to listen on; not set: the one the probe's address chooses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
+}
+
+impl Default for DhcpSnoopMethod {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 3600,
+            ttl_secs: None,
+            listen_secs: 120,
+            interface: None,
         }
     }
 }
@@ -626,10 +861,31 @@ impl ScanConfig {
                 self.snmp.interval_secs,
                 self.snmp.ttl_secs,
             ),
-            MethodKind::ArpSweep => raw(&self.arp_sweep),
-            MethodKind::TcpSyn => raw(&self.tcp_syn),
-            MethodKind::OsFingerprint => raw(&self.os_fingerprint),
-            MethodKind::Lldp => raw(&self.lldp),
+            MethodKind::ArpSweep => (
+                self.arp_sweep.enabled,
+                self.arp_sweep.interval_secs,
+                self.arp_sweep.ttl_secs,
+            ),
+            MethodKind::TcpSyn => (
+                self.tcp_syn.enabled,
+                self.tcp_syn.interval_secs,
+                self.tcp_syn.ttl_secs,
+            ),
+            MethodKind::OsFingerprint => (
+                self.os_fingerprint.enabled,
+                self.os_fingerprint.interval_secs,
+                self.os_fingerprint.ttl_secs,
+            ),
+            MethodKind::Lldp => (
+                self.lldp.enabled,
+                self.lldp.interval_secs,
+                self.lldp.ttl_secs,
+            ),
+            MethodKind::DhcpSnoop => (
+                self.dhcp_snoop.enabled,
+                self.dhcp_snoop.interval_secs,
+                self.dhcp_snoop.ttl_secs,
+            ),
         };
         Schedule {
             enabled,
@@ -733,6 +989,9 @@ impl ScanConfig {
             ("reverse_dns", self.reverse_dns.timeout_ms),
             ("llmnr", self.llmnr.timeout_ms),
             ("snmp", self.snmp.timeout_ms),
+            ("arp_sweep", self.arp_sweep.timeout_ms),
+            ("tcp_syn", self.tcp_syn.timeout_ms),
+            ("os_fingerprint", self.os_fingerprint.timeout_ms),
         ];
         for (name, timeout) in timeouts {
             if !(10..=60_000).contains(&timeout) {
@@ -758,6 +1017,28 @@ impl ScanConfig {
             ));
         }
         self.mdns_group()?;
+        let syn_ports = expand_ports(&self.tcp_syn.ports, "tcp_syn")?;
+        if syn_ports.is_empty() {
+            return Err(ScanError::config(
+                "scan.tcp_syn.ports must list at least one port between 1 and 65535",
+            ));
+        }
+        let fingerprint_ports = expand_ports(&self.os_fingerprint.ports, "os_fingerprint")?;
+        if fingerprint_ports.is_empty() {
+            return Err(ScanError::config(
+                "scan.os_fingerprint.ports must list at least one port between 1 and 65535",
+            ));
+        }
+        for (name, secs) in [
+            ("lldp", self.lldp.listen_secs),
+            ("dhcp_snoop", self.dhcp_snoop.listen_secs),
+        ] {
+            if !(1..=3600).contains(&secs) {
+                return Err(ScanError::config(format!(
+                    "scan.{name}.listen_secs must be between 1 and 3600"
+                )));
+            }
+        }
         if self.snmp.retries > 10 {
             return Err(ScanError::config("scan.snmp.retries must be at most 10"));
         }
@@ -836,10 +1117,6 @@ impl ScanConfig {
             ))
         })
     }
-}
-
-fn raw(method: &RawMethod) -> (bool, u64, Option<u64>) {
-    (method.enabled, method.interval_secs, method.ttl_secs)
 }
 
 fn parse_server(text: &str) -> Result<SocketAddr, ScanError> {

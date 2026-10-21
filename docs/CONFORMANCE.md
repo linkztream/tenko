@@ -26,13 +26,15 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 
 | RFC | Title | Area | Target phase | Status | Requirements | Notes |
 |---|---|---|---|---|---|---|
+| 793 | Transmission Control Protocol | Other | 1 | Partial | SCAN-04 | The `tcp_syn` scan builds SYN and RST segments and reads SYN-ACK and RST flags, the window and the options; it is not a TCP stack. Superseded by RFC 9293. Tests in `crates/tenko-scan/src/frame/tcp.rs` |
+| 826 | An Ethernet Address Resolution Protocol | Other | 1 | Implemented | SCAN-04 | The `arp_sweep` method builds ARP requests and reads replies over Ethernet/IPv4. Tests in `crates/tenko-scan/src/frame/arp.rs` |
 | 1034 | Domain Names: Concepts and Facilities | DNS | 2 | Planned | DNS-01 | |
 | 1035 | Domain Names: Implementation and Specification | DNS | 2 | Planned | DNS-01, MIG-15 | Zone file format also used for import and export |
 | 1123 | Requirements for Internet Hosts: Application and Support | DNS | 2 | Planned | DNS-05 | |
 | 1918 | Address Allocation for Private Internets | Other | 1 | Planned | IPAM-01 | Overlapping private space handled with tenants and VRFs |
 | 1995 | Incremental Zone Transfer in DNS | DNS | 2 | Planned | DNS-09 | |
 | 1996 | A Mechanism for Prompt Notification of Zone Changes (DNS NOTIFY) | DNS | 2 | Planned | DNS-09 | |
-| 2131 | Dynamic Host Configuration Protocol | DHCP | 3 | Partial | DHCP-01 | Implemented: wire format (section 2 fixed header, section 3 magic cookie and message types, section 4.1 option areas, minimum size and reply limit, table 3 fields copied into a reply); the server and its state machine are Planned. Tests in `crates/tenko-dhcp/tests/` (`fixtures.rs`, `malformed.rs`, `alloc.rs`), fuzz target `dhcp_v4` |
+| 2131 | Dynamic Host Configuration Protocol | DHCP | 1 (snoop), 3 (server) | Partial | DHCP-01, SCAN-03 | Phase 1: the probe's `dhcp_snoop` method passively reads op, xid, chaddr, yiaddr and options 53, 12, 60, 61, 50 and 54 with a small local parser (`crates/tenko-scan/src/frame/dhcp.rs`), to be replaced by the codec below. Implemented: wire format (section 2 fixed header, section 3 magic cookie and message types, section 4.1 option areas, minimum size and reply limit, table 3 fields copied into a reply); the server and its state machine are Planned. Tests in `crates/tenko-dhcp/tests/` (`fixtures.rs`, `malformed.rs`, `alloc.rs`), fuzz target `dhcp_v4` |
 | 2132 | DHCP Options and BOOTP Vendor Extensions | DHCP | 3 | Partial | DHCP-02, DHCP-15 | Includes option 6 (DNS servers) and option 42 (NTP). Implemented: wire format, typed reads and writes of options 1, 3, 6, 12, 15, 26, 28, 42, 43, 50 to 61, 66 and 67 (sections 3 to 9), every other option as raw octets; option 52 overload read and written. Option inheritance and custom definitions are Planned. Tests in `crates/tenko-dhcp/tests/` |
 | 2136 | Dynamic Updates in the Domain Name System (DNS UPDATE) | DNS | 2 | Planned | DNS-11, CONN-13 | |
 | 2308 | Negative Caching of DNS Queries (DNS NCACHE) | DNS | 2 | Planned | DNS-02 | |
@@ -96,6 +98,7 @@ Area is one of DNS, DHCP or Other. Rows are sorted by RFC number.
 | 9103 | DNS Zone Transfer over TLS | DNS | 2 | Planned | DNS-09 | XoT |
 | 9156 | DNS Query Name Minimisation to Improve Privacy | DNS | 5 | Planned | DNS-34 | |
 | 9250 | DNS over Dedicated QUIC Connections | DNS | 5 | Planned | DNS-16 | DoQ |
+| 9293 | Transmission Control Protocol | Other | 1 | Partial | SCAN-04 | Current TCP specification; the `tcp_syn` scan reads and builds only the SYN handshake and RST (see RFC 793). Tests in `crates/tenko-scan/src/frame/tcp.rs` |
 | 9432 | DNS Catalog Zones | DNS | 2 | Planned | DNS-10 | |
 
 ## Superseded RFCs
@@ -126,7 +129,8 @@ Standards and de facto behaviors outside the RFC series that Tenko depends on, i
 | Windows DNS aging and scavenging semantics | DNS | 4 | Planned | DNS-29 | |
 | Windows Global Query Block List and GlobalNames zone | DNS | 4 | Planned | DNS-31, DNS-32 | |
 | WINS and WINS-R lookup (Windows DNS extension) | DNS | n/a | Deliberately skipped | CON-12 | |
-| IEEE 802.1AB (LLDP) | Other | 1 | Planned | SCAN-02, SCAN-05 | |
+| IEEE 802.1AB (LLDP) | Other | 1 | Partial | SCAN-02, SCAN-05 | The passive `lldp` method parses the mandatory and the common optional TLVs (chassis id, port id, TTL, port description, system name and description, capabilities, management address, 802.1 PVID and VLAN name); Tenko does not transmit LLDP. Tests in `crates/tenko-scan/src/frame/lldp.rs` |
+| Cisco Discovery Protocol (CDP) version 2 | Other | 1 | Partial | SCAN-02, SCAN-05 | The passive `lldp` method also parses CDP v2 (device id, addresses, port id, capabilities, software version, platform, native VLAN); Tenko does not transmit CDP. Tests in `crates/tenko-scan/src/frame/cdp.rs` |
 | W3C Web Authentication (WebAuthn, passkeys) | Other | 1 | Planned | IAM-06 | |
 | NIST SP 800-63B (password semantics) | Other | 1 | Planned | IAM-03 | |
 | OpenMetrics | Other | 1 | Planned | OPS-05 | |

@@ -11584,7 +11584,7 @@ export interface components {
          * @description How a probe saw its subject.
          * @enum {string}
          */
-        ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "arp_sweep";
+        ProbeMethod: "arp" | "nd" | "mdns" | "lldp" | "icmp" | "tcp_syn" | "os_fingerprint" | "snmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "arp_sweep" | "dhcp_snoop";
         /** @description One probe's part of a scan as the API shows it. */
         ProbeProgress: {
             /**
@@ -13054,6 +13054,40 @@ export interface components {
          * @enum {string}
          */
         RunTrigger: "schedule" | "manual";
+        /**
+         * @description `[scan.arp_sweep]`: an active ARP sweep over raw sockets (SCAN-04). Disabled by
+         *     default; needs `CAP_NET_RAW` on Linux and `active`.
+         */
+        ScanArpSweepMethod: {
+            /**
+             * @description Runs on schedule (default false).
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * @description The interface to sweep on; not set: the one the probe's address chooses.
+             * @default null
+             */
+            interface: string | null;
+            /**
+             * Format: int64
+             * @description Seconds between two sweeps (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for ARP replies after the last request (default 2000).
+             * @default 2000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
         /** @description A method with only the schedule keys. */
         ScanBasicMethod: {
             /**
@@ -13091,13 +13125,14 @@ export interface components {
              */
             arp: components["schemas"]["ScanBasicMethod"];
             /**
-             * @description ARP sweep over raw sockets (declared; not implemented yet).
+             * @description ARP sweep over raw sockets (WP3.14, SCAN-04).
              * @default {
              *       "enabled": false,
-             *       "interval_secs": 3600
+             *       "interval_secs": 3600,
+             *       "timeout_ms": 2000
              *     }
              */
-            arp_sweep: components["schemas"]["ScanRawMethod"];
+            arp_sweep: components["schemas"]["ScanArpSweepMethod"];
             /**
              * @description Blackout windows such as `mon-fri 08:00-17:00`: no method that sends packets runs in
              *     them, and a run that reaches one stops.
@@ -13109,6 +13144,15 @@ export interface components {
              * @default 32
              */
             concurrency: number;
+            /**
+             * @description Passive DHCPv4 snooping over raw sockets (WP3.14, SCAN-03).
+             * @default {
+             *       "enabled": false,
+             *       "interval_secs": 3600,
+             *       "listen_secs": 120
+             *     }
+             */
+            dhcp_snoop: components["schemas"]["ScanDhcpSnoopMethod"];
             /**
              * @description Runs the scanner when the node has the `probe` role (default true).
              * @default true
@@ -13129,13 +13173,15 @@ export interface components {
              */
             icmp: components["schemas"]["IcmpMethod"];
             /**
-             * @description LLDP listening over raw sockets (declared; not implemented yet).
+             * @description Passive LLDP and CDP listening over raw sockets (WP3.14, SCAN-02, SCAN-05).
              * @default {
+             *       "cdp": true,
              *       "enabled": false,
-             *       "interval_secs": 3600
+             *       "interval_secs": 3600,
+             *       "listen_secs": 35
              *     }
              */
-            lldp: components["schemas"]["ScanRawMethod"];
+            lldp: components["schemas"]["ScanLldpMethod"];
             /**
              * @description LLMNR.
              * @default {
@@ -13174,13 +13220,23 @@ export interface components {
              */
             nd: components["schemas"]["ScanBasicMethod"];
             /**
-             * @description OS fingerprinting over raw sockets (declared; not implemented yet).
+             * @description OS fingerprinting over raw sockets (WP3.14, SCAN-04).
              * @default {
              *       "enabled": false,
-             *       "interval_secs": 3600
+             *       "interval_secs": 3600,
+             *       "ports": [
+             *         22,
+             *         80,
+             *         135,
+             *         139,
+             *         443,
+             *         445,
+             *         3389
+             *       ],
+             *       "timeout_ms": 2000
              *     }
              */
-            os_fingerprint: components["schemas"]["ScanRawMethod"];
+            os_fingerprint: components["schemas"]["ScanOsFingerprintMethod"];
             /**
              * Format: int32
              * @description Probes per second; overrides `rate` when set.
@@ -13269,13 +13325,45 @@ export interface components {
              */
             tcp_connect: components["schemas"]["TcpConnectMethod"];
             /**
-             * @description TCP SYN scan over raw sockets (declared; not implemented yet).
+             * @description TCP SYN scan over raw sockets (WP3.14, SCAN-04).
              * @default {
              *       "enabled": false,
-             *       "interval_secs": 3600
+             *       "interval_secs": 3600,
+             *       "ports": [
+             *         21,
+             *         22,
+             *         23,
+             *         25,
+             *         53,
+             *         80,
+             *         110,
+             *         135,
+             *         139,
+             *         143,
+             *         389,
+             *         443,
+             *         445,
+             *         515,
+             *         548,
+             *         554,
+             *         631,
+             *         636,
+             *         1883,
+             *         3306,
+             *         3389,
+             *         5432,
+             *         5900,
+             *         6053,
+             *         8006,
+             *         8080,
+             *         8123,
+             *         8443
+             *       ],
+             *       "targets": "known",
+             *       "timeout_ms": 2000
              *     }
              */
-            tcp_syn: components["schemas"]["ScanRawMethod"];
+            tcp_syn: components["schemas"]["ScanTcpSynMethod"];
             /**
              * @description The time zone of `blackout` (an IANA name such as `Europe/Stockholm`); not set: the
              *     system time zone.
@@ -13288,6 +13376,40 @@ export interface components {
              * @default null
              */
             vrf: string | null;
+        };
+        /**
+         * @description `[scan.dhcp_snoop]`: passive DHCPv4 snooping over raw sockets (SCAN-03). It listens for
+         *     DISCOVER, REQUEST and ACK on UDP 67 and 68 and sends nothing.
+         */
+        ScanDhcpSnoopMethod: {
+            /**
+             * @description Runs on schedule (default false).
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * @description The interface to listen on; not set: the one the probe's address chooses.
+             * @default null
+             */
+            interface: string | null;
+            /**
+             * Format: int64
+             * @description Seconds between two listens (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds to listen for DHCP frames in one run (default 120).
+             * @default 120
+             */
+            listen_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
         };
         /** @description What a scan found compared with the facts before it (SCAN-09). */
         ScanDiff: {
@@ -13306,23 +13428,38 @@ export interface components {
          */
         ScanKind: "passive_refresh" | "port_scan" | "snmp_poll" | "os_fingerprint";
         /**
-         * @description The rate profile of TGL-19.
-         * @enum {string}
+         * @description `[scan.lldp]`: passive LLDP and CDP listening over raw sockets (SCAN-02, SCAN-05). It
+         *     sends nothing, so blackout windows do not hold it.
          */
-        ScanRateProfile: "normal" | "slow" | "slowest" | "unlimited";
-        /** @description A raw-socket method: declared, switched off, not implemented yet. */
-        ScanRawMethod: {
+        ScanLldpMethod: {
             /**
-             * @description Runs on schedule once implemented (default false).
+             * @description Also listen for CDP frames and parse them (default true).
+             * @default true
+             */
+            cdp: boolean;
+            /**
+             * @description Runs on schedule (default false).
              * @default false
              */
             enabled: boolean;
             /**
+             * @description The interface to listen on; not set: the one the probe's address chooses.
+             * @default null
+             */
+            interface: string | null;
+            /**
              * Format: int64
-             * @description Seconds between two runs (default 3600).
+             * @description Seconds between two listens (default 3600).
              * @default 3600
              */
             interval_secs: number;
+            /**
+             * Format: int64
+             * @description Seconds to listen for LLDP (and CDP) frames (default 35, one LLDP interval plus a
+             *     margin; raised to at least 65 when `cdp` is on, since CDP sends every 60 seconds).
+             * @default 35
+             */
+            listen_secs: number;
             /**
              * Format: int64
              * @description Seconds a sighting stays current.
@@ -13330,6 +13467,63 @@ export interface components {
              */
             ttl_secs: number | null;
         };
+        /**
+         * @description `[scan.os_fingerprint]`: passive and active-assisted OS fingerprinting (SCAN-04). It
+         *     SYNs a short port list and classifies the SYN-ACKs.
+         */
+        ScanOsFingerprintMethod: {
+            /**
+             * @description Runs on schedule (default false; needs `active`).
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * @description The interface to probe on; not set: the one the probe's address chooses.
+             * @default null
+             */
+            interface: string | null;
+            /**
+             * Format: int64
+             * @description Seconds between two runs (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * @description A short port list to probe, as single ports and `"a-b"` ranges.
+             * @default [
+             *       22,
+             *       80,
+             *       135,
+             *       139,
+             *       443,
+             *       445,
+             *       3389
+             *     ]
+             */
+            ports: components["schemas"]["ScanPortSpec"][];
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for a reply after the last SYN (default 2000).
+             * @default 2000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
+        /**
+         * @description A port in a raw-method port list: a single port, or a range `"a-b"` (inclusive). TOML
+         *     writes the list as a mixed array, such as `ports = [22, 80, "1-1024"]`.
+         */
+        ScanPortSpec: number | string;
+        /**
+         * @description The rate profile of TGL-19.
+         * @enum {string}
+         */
+        ScanRateProfile: "normal" | "slow" | "slowest" | "unlimited";
         /** @description `POST /scans`. */
         ScanRequest: {
             /**
@@ -13369,6 +13563,79 @@ export interface components {
          * @enum {string}
          */
         ScanTargetKind: "prefix" | "host" | "address" | "network";
+        /**
+         * @description `[scan.tcp_syn]`: a half-open TCP SYN scan over raw sockets (SCAN-04). The port list may
+         *     hold up to the full range of 65,535 ports, which the connect scan cannot.
+         */
+        ScanTcpSynMethod: {
+            /**
+             * @description Runs on schedule (default false; needs `active`).
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * @description The interface to scan on; not set: the one the probe's address chooses.
+             * @default null
+             */
+            interface: string | null;
+            /**
+             * Format: int64
+             * @description Seconds between two scans (default 3600).
+             * @default 3600
+             */
+            interval_secs: number;
+            /**
+             * @description The ports, as single ports and `"a-b"` ranges (default [`DEFAULT_TCP_PORTS`]).
+             * @default [
+             *       21,
+             *       22,
+             *       23,
+             *       25,
+             *       53,
+             *       80,
+             *       110,
+             *       135,
+             *       139,
+             *       143,
+             *       389,
+             *       443,
+             *       445,
+             *       515,
+             *       548,
+             *       554,
+             *       631,
+             *       636,
+             *       1883,
+             *       3306,
+             *       3389,
+             *       5432,
+             *       5900,
+             *       6053,
+             *       8006,
+             *       8080,
+             *       8123,
+             *       8443
+             *     ]
+             */
+            ports: components["schemas"]["ScanPortSpec"][];
+            /**
+             * @description `known` (default) or `all`.
+             * @default known
+             */
+            targets: components["schemas"]["ScanTcpTargets"];
+            /**
+             * Format: int64
+             * @description Milliseconds to wait for a reply after the last SYN (default 2000).
+             * @default 2000
+             */
+            timeout_ms: number;
+            /**
+             * Format: int64
+             * @description Seconds a sighting stays current.
+             * @default null
+             */
+            ttl_secs: number | null;
+        };
         /**
          * @description Which addresses `tcp_connect` scans.
          * @enum {string}

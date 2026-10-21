@@ -400,7 +400,7 @@ export function ScanConfigForm(props: {
     );
   };
 
-  const timeout = (key: "icmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "snmp") => (
+  const timeout = (key: "icmp" | "tcp_connect" | "reverse_dns" | "llmnr" | "snmp" | "arp_sweep" | "tcp_syn" | "os_fingerprint") => (
     <NumberField
       name={`${key}.timeout_ms`}
       label={t("nodes.scan.method.timeout")}
@@ -411,8 +411,89 @@ export function ScanConfigForm(props: {
     />
   );
 
+  /** The interface override of a raw-socket method; empty means the one the probe's address chooses. */
+  const rawInterface = (key: "arp_sweep" | "tcp_syn" | "os_fingerprint" | "lldp" | "dhcp_snoop") => (
+    <Field name={`${key}.interface`} label={t("nodes.scan.raw.interface")} help={t("nodes.scan.raw.interface_help")} error={errorText(`${key}.interface`)}>
+      {(c) => (
+        <input
+          {...c}
+          class="input mono"
+          spellcheck={false}
+          autocomplete="off"
+          value={draft.config[key].interface ?? ""}
+          onInput={(e) => {
+            const text = e.currentTarget.value.trim();
+            setMethod(key, "interface", text === "" ? null : text);
+          }}
+        />
+      )}
+    </Field>
+  );
+
+  /** The listen window of a passive raw-socket method. */
+  const listen = (key: "lldp" | "dhcp_snoop") => (
+    <NumberField
+      name={`${key}.listen_secs`}
+      label={t("nodes.scan.raw.listen")}
+      help={t("nodes.scan.raw.listen_help")}
+      error={errorText(`${key}.listen_secs`)}
+      value={draft.config[key].listen_secs}
+      onChange={(v) => setMethod(key, "listen_secs", v ?? Number.NaN)}
+    />
+  );
+
   const methodFields = (key: ConfigMethod): JSX.Element => (
     <Switch>
+      <Match when={key === "arp_sweep"}>
+        <FieldRow>
+          {timeout("arp_sweep")}
+          {rawInterface("arp_sweep")}
+        </FieldRow>
+      </Match>
+      <Match when={key === "tcp_syn"}>
+        <FieldRow>
+          {timeout("tcp_syn")}
+          <Field name="tcp_syn.targets" label={t("nodes.scan.tcp.targets")} help={t("nodes.scan.tcp.targets_help")} error={errorText("tcp_syn.targets")}>
+            {(c) => (
+              <SelectInput
+                {...c}
+                value={draft.config.tcp_syn.targets}
+                options={[
+                  { value: "known", label: t("nodes.scan.tcp.targets_known") },
+                  { value: "all", label: t("nodes.scan.tcp.targets_all") },
+                ]}
+                onChange={(v) => setMethod("tcp_syn", "targets", v)}
+              />
+            )}
+          </Field>
+        </FieldRow>
+        {rawInterface("tcp_syn")}
+      </Match>
+      <Match when={key === "os_fingerprint"}>
+        <FieldRow>
+          {timeout("os_fingerprint")}
+          {rawInterface("os_fingerprint")}
+        </FieldRow>
+      </Match>
+      <Match when={key === "lldp"}>
+        <FieldRow>
+          {listen("lldp")}
+          {rawInterface("lldp")}
+        </FieldRow>
+        <SwitchField
+          name="lldp.cdp"
+          label={t("nodes.scan.lldp.cdp")}
+          help={t("nodes.scan.lldp.cdp_help")}
+          checked={draft.config.lldp.cdp}
+          onChange={(v) => setMethod("lldp", "cdp", v)}
+        />
+      </Match>
+      <Match when={key === "dhcp_snoop"}>
+        <FieldRow>
+          {listen("dhcp_snoop")}
+          {rawInterface("dhcp_snoop")}
+        </FieldRow>
+      </Match>
       <Match when={key === "icmp"}>{timeout("icmp")}</Match>
       <Match when={key === "tcp_connect"}>
         <Field name="tcp_connect.ports" label={t("nodes.scan.tcp.ports")} help={t("nodes.scan.tcp.ports_help")} error={errorText("tcp_connect.ports", "entries")}>

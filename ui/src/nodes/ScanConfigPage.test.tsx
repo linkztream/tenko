@@ -138,6 +138,17 @@ describe("the seeded configuration", () => {
       expect(within(fieldset).getByTestId(`field-${key}.interval_secs`)).toBeTruthy();
     }
     expect(screen.getByTestId("method-lldp-raw").textContent).toContain("Needs raw sockets");
+    expect(screen.getByTestId("method-dhcp_snoop-raw").textContent).toContain("Needs raw sockets");
+    expect(screen.getByTestId("scan-group-methods").textContent).not.toContain("not implemented");
+    for (const key of ["arp_sweep", "tcp_syn", "os_fingerprint"]) {
+      expect(within(screen.getByTestId(`method-${key}`)).getByTestId(`field-${key}.timeout_ms`)).toBeTruthy();
+    }
+    for (const key of ["arp_sweep", "tcp_syn", "os_fingerprint", "lldp", "dhcp_snoop"]) {
+      expect(within(screen.getByTestId(`method-${key}`)).getByTestId(`field-${key}.interface`)).toBeTruthy();
+    }
+    expect(field("lldp.listen_secs").value).toBe("35");
+    expect(field("dhcp_snoop.listen_secs").value).toBe("120");
+    expect(within(screen.getByTestId("method-lldp")).getByTestId("field-lldp.cdp")).toBeTruthy();
     expect(field("icmp.timeout_ms").value).toBe("1000");
     expect(within(screen.getByTestId("method-mdns")).getByTestId("field-mdns.group")).toBeTruthy();
     expect(within(screen.getByTestId("method-reverse_dns")).getByTestId("field-reverse_dns.servers")).toBeTruthy();
@@ -222,6 +233,26 @@ describe("saving", () => {
     expect(body.tcp_connect.ports).toEqual([22, 443, 8443]);
     expect(body.snmp.devices).toEqual([{ address: "192.0.2.2", port: 161, user: "tenko", auth: "sha256", context: "" }]);
     await waitFor(() => expect(probe().config.snmp.devices).toHaveLength(1));
+  });
+
+  it("sends the raw-socket method fields, an empty interface as null", async () => {
+    const puts = recordPuts();
+    await openLoaded();
+    type("dhcp_snoop.interface", " eth1 ");
+    type("dhcp_snoop.listen_secs", "60");
+    type("tcp_syn.timeout_ms", "3000");
+    type("lldp.interface", "");
+    fireEvent.click(save());
+    await waitFor(() => expect(puts).toHaveLength(1));
+    const body = puts[0]?.body as {
+      dhcp_snoop: { interface: string | null; listen_secs: number };
+      tcp_syn: { timeout_ms: number; ports: (number | string)[] };
+      lldp: { interface: string | null; cdp: boolean };
+    };
+    expect(body.dhcp_snoop).toMatchObject({ interface: "eth1", listen_secs: 60 });
+    expect(body.tcp_syn.timeout_ms).toBe(3000);
+    expect(body.tcp_syn.ports).toHaveLength(28);
+    expect(body.lldp).toMatchObject({ interface: null, cdp: true });
   });
 
   it("refuses a bad prefix on the client, names the line and sends nothing", async () => {

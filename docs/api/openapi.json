@@ -47164,7 +47164,8 @@
           "tcp_connect",
           "reverse_dns",
           "llmnr",
-          "arp_sweep"
+          "arp_sweep",
+          "dhcp_snoop"
         ]
       },
       "ProbeProgress": {
@@ -50584,6 +50585,50 @@
           "manual"
         ]
       },
+      "ScanArpSweepMethod": {
+        "type": "object",
+        "description": "`[scan.arp_sweep]`: an active ARP sweep over raw sockets (SCAN-04). Disabled by\ndefault; needs `CAP_NET_RAW` on Linux and `active`.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default false).",
+            "default": false
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interface to sweep on; not set: the one the probe's address chooses.",
+            "default": null
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two sweeps (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for ARP replies after the last request (default 2000).",
+            "default": 2000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ScanBasicMethod": {
         "type": "object",
         "description": "A method with only the schedule keys.",
@@ -50631,11 +50676,12 @@
             }
           },
           "arp_sweep": {
-            "$ref": "#/components/schemas/ScanRawMethod",
-            "description": "ARP sweep over raw sockets (declared; not implemented yet).",
+            "$ref": "#/components/schemas/ScanArpSweepMethod",
+            "description": "ARP sweep over raw sockets (WP3.14, SCAN-04).",
             "default": {
               "enabled": false,
-              "interval_secs": 3600
+              "interval_secs": 3600,
+              "timeout_ms": 2000
             }
           },
           "blackout": {
@@ -50651,6 +50697,15 @@
             "description": "Most probes in flight at once (default 32).",
             "default": 32,
             "minimum": 0
+          },
+          "dhcp_snoop": {
+            "$ref": "#/components/schemas/ScanDhcpSnoopMethod",
+            "description": "Passive DHCPv4 snooping over raw sockets (WP3.14, SCAN-03).",
+            "default": {
+              "enabled": false,
+              "interval_secs": 3600,
+              "listen_secs": 120
+            }
           },
           "enabled": {
             "type": "boolean",
@@ -50675,11 +50730,13 @@
             }
           },
           "lldp": {
-            "$ref": "#/components/schemas/ScanRawMethod",
-            "description": "LLDP listening over raw sockets (declared; not implemented yet).",
+            "$ref": "#/components/schemas/ScanLldpMethod",
+            "description": "Passive LLDP and CDP listening over raw sockets (WP3.14, SCAN-02, SCAN-05).",
             "default": {
+              "cdp": true,
               "enabled": false,
-              "interval_secs": 3600
+              "interval_secs": 3600,
+              "listen_secs": 35
             }
           },
           "llmnr": {
@@ -50720,11 +50777,21 @@
             }
           },
           "os_fingerprint": {
-            "$ref": "#/components/schemas/ScanRawMethod",
-            "description": "OS fingerprinting over raw sockets (declared; not implemented yet).",
+            "$ref": "#/components/schemas/ScanOsFingerprintMethod",
+            "description": "OS fingerprinting over raw sockets (WP3.14, SCAN-04).",
             "default": {
               "enabled": false,
-              "interval_secs": 3600
+              "interval_secs": 3600,
+              "ports": [
+                22,
+                80,
+                135,
+                139,
+                443,
+                445,
+                3389
+              ],
+              "timeout_ms": 2000
             }
           },
           "packets_per_second": {
@@ -50821,11 +50888,43 @@
             }
           },
           "tcp_syn": {
-            "$ref": "#/components/schemas/ScanRawMethod",
-            "description": "TCP SYN scan over raw sockets (declared; not implemented yet).",
+            "$ref": "#/components/schemas/ScanTcpSynMethod",
+            "description": "TCP SYN scan over raw sockets (WP3.14, SCAN-04).",
             "default": {
               "enabled": false,
-              "interval_secs": 3600
+              "interval_secs": 3600,
+              "ports": [
+                21,
+                22,
+                23,
+                25,
+                53,
+                80,
+                110,
+                135,
+                139,
+                143,
+                389,
+                443,
+                445,
+                515,
+                548,
+                554,
+                631,
+                636,
+                1883,
+                3306,
+                3389,
+                5432,
+                5900,
+                6053,
+                8006,
+                8080,
+                8123,
+                8443
+              ],
+              "targets": "known",
+              "timeout_ms": 2000
             }
           },
           "timezone": {
@@ -50843,6 +50942,50 @@
             ],
             "description": "The VRF of the addresses (a VRF id); not set: the VRF of the probe's enrolment\ntoken, else the default VRF.",
             "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanDhcpSnoopMethod": {
+        "type": "object",
+        "description": "`[scan.dhcp_snoop]`: passive DHCPv4 snooping over raw sockets (SCAN-03). It listens for\nDISCOVER, REQUEST and ACK on UDP 67 and 68 and sends nothing.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default false).",
+            "default": false
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interface to listen on; not set: the one the probe's address chooses.",
+            "default": null
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two listens (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "listen_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds to listen for DHCP frames in one run (default 120).",
+            "default": 120,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -50889,30 +51032,40 @@
           "os_fingerprint"
         ]
       },
-      "ScanRateProfile": {
-        "type": "string",
-        "description": "The rate profile of TGL-19.",
-        "enum": [
-          "normal",
-          "slow",
-          "slowest",
-          "unlimited"
-        ]
-      },
-      "ScanRawMethod": {
+      "ScanLldpMethod": {
         "type": "object",
-        "description": "A raw-socket method: declared, switched off, not implemented yet.",
+        "description": "`[scan.lldp]`: passive LLDP and CDP listening over raw sockets (SCAN-02, SCAN-05). It\nsends nothing, so blackout windows do not hold it.",
         "properties": {
+          "cdp": {
+            "type": "boolean",
+            "description": "Also listen for CDP frames and parse them (default true).",
+            "default": true
+          },
           "enabled": {
             "type": "boolean",
-            "description": "Runs on schedule once implemented (default false).",
+            "description": "Runs on schedule (default false).",
             "default": false
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interface to listen on; not set: the one the probe's address chooses.",
+            "default": null
           },
           "interval_secs": {
             "type": "integer",
             "format": "int64",
-            "description": "Seconds between two runs (default 3600).",
+            "description": "Seconds between two listens (default 3600).",
             "default": 3600,
+            "minimum": 0
+          },
+          "listen_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds to listen for LLDP (and CDP) frames (default 35, one LLDP interval plus a\nmargin; raised to at least 65 when `cdp` is on, since CDP sends every 60 seconds).",
+            "default": 35,
             "minimum": 0
           },
           "ttl_secs": {
@@ -50927,6 +51080,91 @@
           }
         },
         "additionalProperties": false
+      },
+      "ScanOsFingerprintMethod": {
+        "type": "object",
+        "description": "`[scan.os_fingerprint]`: passive and active-assisted OS fingerprinting (SCAN-04). It\nSYNs a short port list and classifies the SYN-ACKs.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default false; needs `active`).",
+            "default": false
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interface to probe on; not set: the one the probe's address chooses.",
+            "default": null
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two runs (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanPortSpec"
+            },
+            "description": "A short port list to probe, as single ports and `\"a-b\"` ranges.",
+            "default": [
+              22,
+              80,
+              135,
+              139,
+              443,
+              445,
+              3389
+            ]
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for a reply after the last SYN (default 2000).",
+            "default": 2000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScanPortSpec": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "format": "int32",
+            "description": "A single port.",
+            "minimum": 0
+          },
+          {
+            "type": "string",
+            "description": "A range `\"a-b\"`, inclusive."
+          }
+        ],
+        "description": "A port in a raw-method port list: a single port, or a range `\"a-b\"` (inclusive). TOML\nwrites the list as a mixed array, such as `ports = [22, 80, \"1-1024\"]`."
+      },
+      "ScanRateProfile": {
+        "type": "string",
+        "description": "The rate profile of TGL-19.",
+        "enum": [
+          "normal",
+          "slow",
+          "slowest",
+          "unlimited"
+        ]
       },
       "ScanRequest": {
         "type": "object",
@@ -51006,6 +51244,92 @@
           "address",
           "network"
         ]
+      },
+      "ScanTcpSynMethod": {
+        "type": "object",
+        "description": "`[scan.tcp_syn]`: a half-open TCP SYN scan over raw sockets (SCAN-04). The port list may\nhold up to the full range of 65,535 ports, which the connect scan cannot.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Runs on schedule (default false; needs `active`).",
+            "default": false
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The interface to scan on; not set: the one the probe's address chooses.",
+            "default": null
+          },
+          "interval_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between two scans (default 3600).",
+            "default": 3600,
+            "minimum": 0
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScanPortSpec"
+            },
+            "description": "The ports, as single ports and `\"a-b\"` ranges (default [`DEFAULT_TCP_PORTS`]).",
+            "default": [
+              21,
+              22,
+              23,
+              25,
+              53,
+              80,
+              110,
+              135,
+              139,
+              143,
+              389,
+              443,
+              445,
+              515,
+              548,
+              554,
+              631,
+              636,
+              1883,
+              3306,
+              3389,
+              5432,
+              5900,
+              6053,
+              8006,
+              8080,
+              8123,
+              8443
+            ]
+          },
+          "targets": {
+            "$ref": "#/components/schemas/ScanTcpTargets",
+            "description": "`known` (default) or `all`.",
+            "default": "known"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds to wait for a reply after the last SYN (default 2000).",
+            "default": 2000,
+            "minimum": 0
+          },
+          "ttl_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds a sighting stays current.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "ScanTcpTargets": {
         "type": "string",

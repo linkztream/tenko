@@ -1143,6 +1143,7 @@ export type MessageKey =
   | "discovery.lookup.submit"
   | "discovery.method.arp"
   | "discovery.method.arp_sweep"
+  | "discovery.method.dhcp_snoop"
   | "discovery.method.icmp"
   | "discovery.method.lldp"
   | "discovery.method.llmnr"
@@ -3852,6 +3853,8 @@ export type MessageKey =
   | "nodes.scan.ks.stopped"
   | "nodes.scan.ks.title"
   | "nodes.scan.lacking"
+  | "nodes.scan.lldp.cdp"
+  | "nodes.scan.lldp.cdp_help"
   | "nodes.scan.llmnr.port"
   | "nodes.scan.mdns.group"
   | "nodes.scan.mdns.group_help"
@@ -3865,6 +3868,8 @@ export type MessageKey =
   | "nodes.scan.method.arp.name"
   | "nodes.scan.method.arp_sweep.help"
   | "nodes.scan.method.arp_sweep.name"
+  | "nodes.scan.method.dhcp_snoop.help"
+  | "nodes.scan.method.dhcp_snoop.name"
   | "nodes.scan.method.enabled"
   | "nodes.scan.method.icmp.help"
   | "nodes.scan.method.icmp.name"
@@ -3904,6 +3909,10 @@ export type MessageKey =
   | "nodes.scan.rate.slow"
   | "nodes.scan.rate.slowest"
   | "nodes.scan.rate.unlimited"
+  | "nodes.scan.raw.interface"
+  | "nodes.scan.raw.interface_help"
+  | "nodes.scan.raw.listen"
+  | "nodes.scan.raw.listen_help"
   | "nodes.scan.resume.done"
   | "nodes.scan.resume.failed"
   | "nodes.scan.snmp.lldp_ports"
@@ -7492,6 +7501,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.lookup.submit",
   "discovery.method.arp",
   "discovery.method.arp_sweep",
+  "discovery.method.dhcp_snoop",
   "discovery.method.icmp",
   "discovery.method.lldp",
   "discovery.method.llmnr",
@@ -10201,6 +10211,8 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.scan.ks.stopped",
   "nodes.scan.ks.title",
   "nodes.scan.lacking",
+  "nodes.scan.lldp.cdp",
+  "nodes.scan.lldp.cdp_help",
   "nodes.scan.llmnr.port",
   "nodes.scan.mdns.group",
   "nodes.scan.mdns.group_help",
@@ -10214,6 +10226,8 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.scan.method.arp.name",
   "nodes.scan.method.arp_sweep.help",
   "nodes.scan.method.arp_sweep.name",
+  "nodes.scan.method.dhcp_snoop.help",
+  "nodes.scan.method.dhcp_snoop.name",
   "nodes.scan.method.enabled",
   "nodes.scan.method.icmp.help",
   "nodes.scan.method.icmp.name",
@@ -10253,6 +10267,10 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.scan.rate.slow",
   "nodes.scan.rate.slowest",
   "nodes.scan.rate.unlimited",
+  "nodes.scan.raw.interface",
+  "nodes.scan.raw.interface_help",
+  "nodes.scan.raw.listen",
+  "nodes.scan.raw.listen_help",
   "nodes.scan.resume.done",
   "nodes.scan.resume.failed",
   "nodes.scan.snmp.lldp_ports",

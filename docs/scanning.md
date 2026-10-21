@@ -2,7 +2,7 @@
 
 This page describes the discovery methods of the Tenko DDI probe: what each method does, what it needs from the host and the network, what it reports to the reconciler and how often it runs, how its traffic is limited and held back (rate limits, blackout windows, the kill switch), how an operator starts a scan by hand or from the controller and reads the state of the scanner, what an IDS or EDR product is likely to make of the traffic and how to allow-list the probe, and every key of the `[scan]` section. It is for the administrator who adds a probe to a segment, for the security team that has to tolerate or tune it, and for a developer who adds a method. It describes the behavior of the `tenko-scan` crate (the scanner and the scan control of the controllers), of `tenko node scan` and of the scanner wiring in the node process of `tenko serve` in the `tenko` crate, and of the `/scans` and `/nodes/{id}/scan-config` routes of `tenko-api`; where this page and the code differ, the code is right. The requirements are SCAN-01 to SCAN-09 in [REQUIREMENTS.md](REQUIREMENTS.md) and the toggles TGL-18 and TGL-19 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md).
 
-This release ships the methods that need no special privileges: the neighbor tables of the probe host, ICMP echo, TCP connect scans, reverse DNS, mDNS, LLMNR and SNMPv3 polling. The methods that need raw sockets (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and capability-checked but do not run yet (section 9). The controllers hold the scan configuration of each probe, start scans on demand and switch the kill switch (sections 7.5 to 7.7); how this travels to the probes is in [node-sync.md](node-sync.md). Section 14 lists what comes next.
+This release ships the methods that need no special privileges: the neighbor tables of the probe host, ICMP echo, TCP connect scans, reverse DNS, mDNS, LLMNR and SNMPv3 polling. It also ships the methods that need raw sockets: the active `arp_sweep`, `tcp_syn` and `os_fingerprint`, and the passive `lldp` (with CDP) and `dhcp_snoop`. On Linux these need `CAP_NET_RAW`; on Windows they answer `unsupported`, because raw sockets need Npcap, which Tenko does not bundle (section 9). The controllers hold the scan configuration of each probe, start scans on demand and switch the kill switch (sections 7.5 to 7.7); how this travels to the probes is in [node-sync.md](node-sync.md). Section 14 lists what comes next.
 
 Terms used below: a **probe** is a node with the role `probe`; ARP and neighbor discovery do not cross routers, so there is one probe per segment (SCAN-01) and the probe in a DMZ is its own trust zone. A **method** is one way of looking at the segment (`arp`, `icmp`, `snmp` and so on). A **run** is one execution of a method. A **batch** is what one run hands over: the sightings of the run, a flag that says whether the batch is complete, and the time it was collected. A **sighting** is one thing a probe saw. A **fact** is the reconciler's latest knowledge of one subject from one source (see [reconciliation.md](reconciliation.md)). The **scope** is the set of prefixes a probe may look at, minus the exclusions. The **known addresses** are the addresses this probe saw recently through any method.
 
@@ -74,7 +74,11 @@ tenko node scan run arp --dry-run --data-dir /var/lib/tenko
 | `mdns` | Browses DNS-SD services, queries known addresses, listens for announcements | Unprivileged; UDP from an ephemeral port. Optionally shares UDP 5353 | No | Yes | 15 minutes | `address`, `name`, `services`, `os` |
 | `llmnr` | Sends a unicast reverse query to every known address | Unprivileged; UDP to port 5355 | No | Yes | 1 hour | `address`, `name` |
 | `snmp` | Polls the configured switches over SNMPv3 | Unprivileged; UDP to the devices, SNMPv3 credentials | No | Yes | 15 minutes | `name`, `os`, `address`, `attachment`, `link`, `vendor` |
-| `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Declared; not implemented yet (section 9) | Raw sockets | `arp_sweep`, `tcp_syn`, `os_fingerprint`: yes. `lldp`: no | All but `lldp` | 1 hour | Nothing yet |
+| `arp_sweep` | ARP request to every IPv4 address of the scope (section 2.8) | Raw sockets (`CAP_NET_RAW`) | Yes | Yes | 1 hour | `address` with MAC, `vendor` |
+| `tcp_syn` | Half-open SYN scan of a port list, up to all 65,535 ports (section 2.9) | Raw sockets | Yes | Yes | 1 hour | `services` (open ports) |
+| `os_fingerprint` | SYNs a short port list and classifies the SYN-ACKs (section 2.10) | Raw sockets | Yes | Yes | 1 hour | `os` with a confidence |
+| `lldp` | Listens for LLDP and CDP frames (section 2.11) | Raw sockets | No | No | 1 hour | `link`, `attachment`, `address`, `name`, `os`, `vendor` |
+| `dhcp_snoop` | Listens for DHCPv4 DISCOVER, REQUEST, ACK (section 2.12) | Raw sockets | No | No | 1 hour | `address`, `name`, `os`, `vendor` |
 
 "Active probing" is the class that TGL-18 switches (section 6). "Held by blackout windows" means the method sends packets, so a blackout window stops it (section 5). Passive in the TGL-18 sense is not the same as silent: `reverse_dns`, `mdns`, `llmnr` and `snmp` send packets and are therefore held by blackout windows although `active = false` leaves them running.
 
@@ -172,6 +176,28 @@ What a poll reports per device:
 
 Scope applies to the address sightings only; the name and OS of the polled device, the attachments and the links are not filtered by the prefixes. A run is complete only when every device answered and no table was cut or failed; a device that did not answer, a rejected user (`scan.snmp.auth`) or a cut table makes the batch partial and adds a note, for example `192.0.2.2:161: [scan.snmp.timeout] no answer from 192.0.2.2:161 to ...`. The method is `unavailable` while `[scan.snmp]` lists no device. Credentials, their files and the warning about passwords in the file are in section 12.3.
 
+### 2.8 `arp_sweep`
+
+An active ARP sweep (SCAN-04). It sends an ARP request (RFC 826) for every usable IPv4 address of the scope from the probe's interface, honouring the rate limit (one probe per request), and collects the replies for `timeout_ms` (default 2000) after the last request. Each reply makes the same facts the passive `arp` method makes: an `address` sighting with the MAC address, and a `vendor` sighting for each MAC the OUI table knows (section 11). The host view and the IPAM observation path therefore see no difference between a swept and a passively read address. An ARP request to an on-link address also fills the operating system's neighbor table, so the next `arp` run sees it too.
+
+The interface is the one whose address lies in the scope, or the `interface` key when set. IPv6 is left to the passive `nd` method; a neighbor-solicitation sweep is a follow-up, and the run notes so when the scope has an IPv6 prefix. A run is complete when a request was sent for every target and nothing stopped it; absence of a reply is not a closed address, only an address that did not answer.
+
+### 2.9 `tcp_syn`
+
+A half-open TCP SYN scan over raw sockets (SCAN-04, SCAN-08). The ports are the list `ports`, which takes single ports and `"a-b"` ranges and may hold up to all 65,535 ports, which the connect scan cannot (section 6). The targets are the known addresses in scope (`targets = "known"`, the default) or, with `targets = "all"`, also the addresses a sweep enumerates. A half-open scan is a link-layer send, so the method first resolves each target's MAC with an ARP request; a target that does not answer ARP (off-link or absent) is skipped and counted in a note. For each (host, port) it sends a raw SYN, honouring the rate limit, the blackout windows and the kill switch, and classifies the reply: a SYN-ACK is an open port, an RST is a closed port, silence is a filtered port. It sends an RST to close every open port it found. Each host with at least one open port becomes one `services` sighting with its `open_tcp` ports; `tcp_syn` reports no TLS hint (`tls_tcp` is empty). IPv4 only; an IPv6 SYN scan is a follow-up.
+
+### 2.10 `os_fingerprint`
+
+Passive and active-assisted OS fingerprinting (SCAN-04). It SYNs a short port list (`ports`) across the scope with the same engine as `tcp_syn` and classifies the first SYN-ACK of each host, p0f-style, from the TTL, the window size, the TCP option layout and the don't-fragment flag. The signatures are a small table in a fixture file (`crates/tenko-scan/fixtures/os_fingerprints.tsv`) compiled into the binary; a signature gives a family and a confidence, and with no match the family the TTL alone suggests is reported at a low confidence. The families are Windows, Linux, FreeBSD, macOS, Apple mobile, network gear, printer and unknown; a product name is never guessed beyond the family. Each classified host becomes one `os` sighting with its guess and confidence, which the host view's OS field reads.
+
+### 2.11 `lldp` (and CDP)
+
+Passive link-layer discovery (SCAN-02, SCAN-05). It listens on the probe's interface for LLDP frames (ethertype `0x88cc`) and, with `cdp = true` (the default), CDP frames (SNAP, Cisco OUI, protocol `0x2000`) for the listen window (`listen_secs`, default 35, raised to at least 65 when CDP is on, since CDP announces every 60 seconds), and parses their TLVs: chassis id, port id, TTL, port description, system name, system description, capabilities, management address and, for LLDP, the 802.1 port VLAN id and VLAN name; for CDP the device id, addresses, port id, capabilities, software version, platform and native VLAN. For each neighbour it emits facts in the shape of the SNMP LLDP neighbours, so the port mapping of section 3 merges them: a `link` between the probe's interface and the switch port, an `attachment` of the probe's own MAC to that switch port and VLAN, and, for a management address in scope, an `address`, a `name` (the system name) and a low-confidence `os` (the system description). It sends nothing, so blackout windows do not hold it; its batch is never complete, because the protocols announce periodically and one window may miss a frame.
+
+### 2.12 `dhcp_snoop`
+
+Passive DHCPv4 snooping (SCAN-03). It listens for DHCPv4 DISCOVER, REQUEST and ACK on the segment (UDP 67 and 68, broadcast and relayed) for the listen window (`listen_secs`, default 120) and reports, for each client, the MAC, the host name (option 12), the vendor class (60), the client id (61), the address offered or acknowledged (`yiaddr`) and the server that answered (54). The address in scope becomes an `address` sighting with the client MAC, the host name a `name`, the vendor class a low-confidence `os` (for example `MSFT` maps to Windows, `android-dhcp` to Android, `dhcpcd` to Linux), and the client MAC a `vendor`. The client id and the server identifier go into the run's notes, since no sighting subject carries them; full lease facts come with Tenko DHCP. The parse is a small local one of the four fields, replaced by `tenko-dhcp`'s DHCPv4 codec once it merges. It sends nothing, so blackout windows do not hold it; its batch is never complete.
+
 ## 3. What the facts mean
 
 ### 3.1 Subjects and keys
@@ -180,13 +206,13 @@ The controller turns each sighting into a fact. Facts of different sources are n
 
 | Fact | Subject key | Reported by | What it says |
 |---|---|---|---|
-| `address` | `address:<vrf>/<ip>` | `arp`, `nd`, `icmp`, `mdns`, `llmnr`, `snmp` | The address is in use; with the MAC address behind it when the method shows one (`arp`, `nd`, `snmp`) |
-| `services` | `services:<ip>` | `tcp_connect`, `mdns` | Open TCP ports; `tls_tcp` lists those that answered a TLS handshake (`tcp_connect` only) |
-| `os` | `os:<ip>` | `mdns`, `snmp` | An OS guess with a confidence in percent |
-| `name` | `name:<ip>` | `reverse_dns`, `mdns`, `llmnr`, `snmp` | A name found for the address |
-| `vendor` | `vendor:<mac>` | `arp`, `nd`, `snmp` | The organization the OUI of the MAC address is registered to |
-| `attachment` | `attachment:<mac>` | `snmp` | The switch, port and VLAN of a client |
-| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | `snmp` | An LLDP link between two devices |
+| `address` | `address:<vrf>/<ip>` | `arp`, `nd`, `icmp`, `mdns`, `llmnr`, `snmp`, `arp_sweep`, `lldp`, `dhcp_snoop` | The address is in use; with the MAC address behind it when the method shows one (`arp`, `nd`, `snmp`, `arp_sweep`, `dhcp_snoop`) |
+| `services` | `services:<ip>` | `tcp_connect`, `mdns`, `tcp_syn` | Open TCP ports; `tls_tcp` lists those that answered a TLS handshake (`tcp_connect` only) |
+| `os` | `os:<ip>` | `mdns`, `snmp`, `os_fingerprint`, `lldp`, `dhcp_snoop` | An OS guess with a confidence in percent |
+| `name` | `name:<ip>` | `reverse_dns`, `mdns`, `llmnr`, `snmp`, `lldp`, `dhcp_snoop` | A name found for the address |
+| `vendor` | `vendor:<mac>` | `arp`, `nd`, `snmp`, `arp_sweep`, `lldp`, `dhcp_snoop` | The organization the OUI of the MAC address is registered to |
+| `attachment` | `attachment:<mac>` | `snmp`, `lldp` | The switch, port and VLAN of a client |
+| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | `snmp`, `lldp` | An LLDP or CDP link between two devices |
 
 A batch carries each subject once; when a run sees a subject twice, the later sighting wins.
 
@@ -326,7 +352,7 @@ The profiles map to the settings of the probe's file like this:
 | Hardened | Off (passive only) unless enabled per segment | Slowest | `active = false`, `rate = "slowest"`; `active = true` for a segment where scanning is allowed |
 | Lab | On | Unlimited | `active = true`, `rate = "unlimited"` |
 
-`active` and `rate` are set in the configuration the controllers hold for the probe (section 7.5), or in the probe's own file while it holds none. The profile matrix also names OS fingerprinting for Home and the full port range for Lab. In this release OS fingerprinting is the declared raw method `os_fingerprint` (section 9), and the connect scan takes a list of at most 1,024 ports, so the full range of 65,535 ports cannot be listed.
+`active` and `rate` are set in the configuration the controllers hold for the probe (section 7.5), or in the probe's own file while it holds none. The profile matrix also names OS fingerprinting for Home and the full port range for Lab. OS fingerprinting is the raw method `os_fingerprint` (sections 2.10 and 9). The connect scan `tcp_connect` takes a list of at most 1,024 ports, so the full range of 65,535 ports cannot be listed; the raw `tcp_syn` scan takes single ports and `"a-b"` ranges and may list the whole range, which is the Lab profile's full port range. With `active = false` the raw active methods `arp_sweep`, `tcp_syn` and `os_fingerprint` are `disabled` along with `icmp` and `tcp_connect`; the passive raw methods `lldp` and `dhcp_snoop` keep listening, like the other passive methods, as long as the host has `CAP_NET_RAW`.
 
 ## 7. Kill switch, on-demand runs and status
 
@@ -395,10 +421,10 @@ snmp            idle         15m    2026-10-10T08:08:20.733481Z     complete   3
 tcp_connect     idle         6h     2026-10-10T02:21:44.190766Z     complete   11         2026-10-10T08:23:31.652983Z
 reverse_dns     idle         1h     2026-10-10T07:48:10.058329Z     partial    12         2026-10-10T08:49:02.880417Z
 arp_sweep       unavailable  1h     -                               -          -          -
-                needs raw sockets and is not implemented yet (CAP_NET_RAW is missing; grant it with AmbientCapabilities=CAP_NET_RAW or setcap cap_net_raw+ep)
+                needs raw sockets: CAP_NET_RAW is missing; grant it with AmbientCapabilities=CAP_NET_RAW or setcap cap_net_raw+ep
 ```
 
-The rows of `tcp_syn`, `os_fingerprint` and `lldp` look like the one of `arp_sweep` and are left out. Below a row, the command prints why a method is unavailable, a note `switched off in [scan]` for a method that is switched off, the error of the last run when it had one (`last run: stopped by a blackout window`), and `the batch could not be queued: ...` when its batch could not be handed on. Without a running scanner the first line reads `scanner:        not running on this node (no current status file)`, and with `[scan] enabled = false` it reads `switched off ([scan] enabled = false)`.
+The rows of `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` look like the one of `arp_sweep` and are left out; with `CAP_NET_RAW` granted they are `disabled` (switched off by default) until enabled, and then `idle` like any other method. Below a row, the command prints why a method is unavailable, a note `switched off in [scan]` for a method that is switched off, the error of the last run when it had one (`last run: stopped by a blackout window`), and `the batch could not be queued: ...` when its batch could not be handed on. Without a running scanner the first line reads `scanner:        not running on this node (no current status file)`, and with `[scan] enabled = false` it reads `switched off ([scan] enabled = false)`.
 
 `status` always exits with 0 unless the configuration does not load (3). With `--json` it prints `{"running", "enabled", "status"}`. The `status` object has these fields:
 
@@ -524,16 +550,16 @@ Batches that `tenko node scan run` queues go to `<data_dir>/node/buffer/incoming
 
 ## 9. Raw-socket methods
 
-`arp_sweep`, `tcp_syn`, `os_fingerprint` and `lldp` are declared: the configuration has a section for each (`enabled = false`, `interval_secs` 3600), the scheduler and the status know them, and the batches would be filed under `probe:<node>:arp_sweep` and so on. They do not run yet. `tenko node scan status` shows each as `unavailable` with the reason `needs raw sockets and is not implemented yet`, followed by what the host allows. A later release implements them (section 14). This section describes what a host needs so that it is ready then (SCAN-04).
+`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` send and listen at the link layer, so they need a raw socket. On Linux this is `CAP_NET_RAW` and an `AF_PACKET` socket, taken through a safe dependency (`pnet_datalink`); the workspace uses no `unsafe` of its own. Each method's batch is filed under `probe:<node>:<method>` like any other. With the capability the methods run; without it they answer `unsupported` with the reason, and `tenko node scan status` says so. The frame parsers (Ethernet, ARP, IPv4, TCP, LLDP, CDP, DHCPv4) are in `crates/tenko-scan/src/frame/` and have fuzz targets (`scan_lldp_cdp`, `scan_arp`, `scan_dhcp_snoop`).
 
 | Platform | What the methods need | Setup |
 |---|---|---|
-| Linux, native | `CAP_NET_RAW` in the effective set of the process | With systemd, a drop-in for the unit: `AmbientCapabilities=CAP_NET_RAW` and `CapabilityBoundingSet=CAP_NET_RAW`, where the bounding set also lists any other capability the unit needs. Without systemd, `setcap cap_net_raw+ep` on the `tenko` binary; a replaced binary loses the file capability, so repeat the command after an update |
+| Linux, native | `CAP_NET_RAW` in the effective set of the process | With systemd, the drop-in `deploy/systemd/probe.conf`: `AmbientCapabilities=CAP_NET_RAW`, `CapabilityBoundingSet=CAP_NET_RAW` (plus any other capability the unit needs) and `AF_PACKET` in `RestrictAddressFamilies`. Without systemd, `setcap cap_net_raw+ep` on the `tenko` binary; a replaced binary loses the file capability, so repeat the command after an update |
 | Linux, Docker | `NET_RAW` in the capabilities of the container | Docker's default set includes it. If the container drops all capabilities (`--cap-drop=ALL`, `cap_drop: [ALL]`), add `NET_RAW` back (`--cap-add=NET_RAW`) |
-| Linux, LXC | `net_raw` in the capabilities of the container | An unprivileged container needs the capability kept in the container configuration (`lxc.cap.keep` lists it, or `lxc.cap.drop` does not). Check the result with `tenko node scan status` inside the container |
-| Windows | Npcap | Install Npcap on the probe host. Read its license terms before installing it on several hosts |
+| Linux, unprivileged LXC | `net_raw` kept in the container | An unprivileged container drops `CAP_NET_RAW` by default. Keep it in the container configuration: either list it in `lxc.cap.keep`, or make sure `lxc.cap.drop` does not name `net_raw` (and does not drop everything). On Proxmox VE this is a line in `/etc/pve/lxc/<id>.conf` such as `lxc.cap.keep: net_raw`; the container must be restarted. Check the result with `tenko node scan status` inside the container: the raw methods are `unavailable` until it is kept. A privileged container already has it |
+| Windows | Npcap (not bundled) | The raw methods answer `unsupported` with `raw sockets need Npcap, which Tenko does not bundle`, because Tenko ships no packet driver. A later release may add a build that uses a user-installed Npcap (section 14); until then the passive and unprivileged methods cover a Windows probe |
 
-The detection that `tenko node scan status` shows: on Linux the scanner reads `CapEff` in `/proc/self/status` and looks at bit 13, `CAP_NET_RAW`; on Windows it looks for `System32\Npcap\wpcap.dll`. The status line says which of the two it found, for example `raw sockets: yes (CAP_NET_RAW is in the effective set)` or, without the capability, `raw sockets: no (CAP_NET_RAW is missing; grant it with AmbientCapabilities=CAP_NET_RAW or setcap cap_net_raw+ep)`. Everything else in this release works without raw sockets.
+The detection that `tenko node scan status` shows: on Linux the scanner reads `CapEff` in `/proc/self/status` and looks at bit 13, `CAP_NET_RAW`; on Windows it looks for `System32\Npcap\wpcap.dll`. The status line says which of the two it found, for example `raw sockets: yes (CAP_NET_RAW is in the effective set)` or, without the capability, `raw sockets: no (CAP_NET_RAW is missing; grant it with AmbientCapabilities=CAP_NET_RAW or setcap cap_net_raw+ep)`; a method then reports `needs raw sockets: <that reason>`. Everything else in this release works without raw sockets.
 
 ## 10. IDS and EDR
 
@@ -622,7 +648,11 @@ Every method has a section `[scan.<method>]` with `enabled`, `interval_secs` and
 | `[scan.mdns]` | `true` | 900 | `listen_secs` (4): collection window, 1 to 60. `passive` (`true`): also listen on port 5353. `group` (`"224.0.0.251:5353"`): where queries go. `unicast_port` (5353): the port of unicast queries to known addresses |
 | `[scan.llmnr]` | `true` | 3,600 | `timeout_ms` (1,000): wait for answers after the last query. `port` (5355) |
 | `[scan.snmp]` | `true` (needs a device) | 900 | `timeout_ms` (2,000): wait for an answer. `retries` (2): resends of an unanswered request, 0 to 10. `attach_on_lldp_ports` (`false`): section 2.7. `devices`: the switches (section 12.3) |
-| `[scan.arp_sweep]`, `[scan.tcp_syn]`, `[scan.os_fingerprint]`, `[scan.lldp]` | `false` | 3,600 | None. Declared, not implemented yet (section 9) |
+| `[scan.arp_sweep]` | `false` (needs `active`) | 3,600 | `timeout_ms` (2,000): wait for ARP replies. `interface`: override the interface |
+| `[scan.tcp_syn]` | `false` (needs `active`) | 3,600 | `ports`: single ports and `"a-b"` ranges, up to 65,535 ports. `targets` (`"known"`): `known` or `all`. `timeout_ms` (2,000). `interface` |
+| `[scan.os_fingerprint]` | `false` (needs `active`) | 3,600 | `ports`: a short list, single ports and `"a-b"` ranges. `timeout_ms` (2,000). `interface` |
+| `[scan.lldp]` | `false` | 3,600 | `listen_secs` (35; at least 65 with `cdp`). `cdp` (`true`): also parse CDP. `interface` |
+| `[scan.dhcp_snoop]` | `false` | 3,600 | `listen_secs` (120). `interface` |
 
 ### 12.3 SNMP devices
 
@@ -677,8 +707,10 @@ A key the scanner does not know stops the start with `config.parse` (`config.env
 |---|---|
 | `interval_secs` of every method | 30 to 604,800 |
 | `ttl_secs` of every method | 60 to 2,592,000 |
-| `timeout_ms` of `icmp`, `tcp_connect`, `reverse_dns`, `llmnr` and `snmp` | 10 to 60,000 |
+| `timeout_ms` of `icmp`, `tcp_connect`, `reverse_dns`, `llmnr`, `snmp`, `arp_sweep`, `tcp_syn` and `os_fingerprint` | 10 to 60,000 |
 | `tcp_connect.ports` | 1 to 1,024 ports, each from 1 to 65,535 |
+| `tcp_syn.ports`, `os_fingerprint.ports` | single ports and `"a-b"` ranges, each from 1 to 65,535 (up to all 65,535) |
+| `listen_secs` of `lldp` and `dhcp_snoop` | 1 to 3,600 |
 
 A key is also set by an environment variable: `TENKO_SCAN__` plus the key in upper case, and a nested key joins its section with a double underscore. A list is given as a TOML array.
 
@@ -727,7 +759,8 @@ The last column is the exit status of `tenko node scan run` when it ends with th
 
 ## 14. What comes next
 
-- **Raw-socket methods.** `arp_sweep`, `tcp_syn`, `os_fingerprint` and passive `lldp` (SCAN-02, SCAN-04, SCAN-08), with the capability setup of section 9. They are planned only if the owner decides so (S3-Q17, WP3.14 in [plans/slice-3-plan.md](plans/slice-3-plan.md)); until then the probes refuse the method `os_fingerprint` with `scan.unavailable`, so a scan of that kind alone fails on them.
+- **Raw-socket methods on Windows.** `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` run on Linux with `CAP_NET_RAW` (section 9); on Windows they answer `unsupported`. A later release may add a build that uses a user-installed Npcap.
+- **An IPv6 neighbor-discovery sweep.** `arp_sweep` covers IPv4; IPv6 is left to the passive `nd` method. A neighbor-solicitation sweep and an IPv6 SYN scan are follow-ups.
+- **The DHCPv4 codec for the snoop.** `dhcp_snoop` parses the four fields it needs locally; once `tenko-dhcp`'s DHCPv4 codec merges, the snoop calls it instead, and full lease facts come with Tenko DHCP.
 - **A fresher OUI registry at every release**: the table is regenerated by hand today (section 11); a release step could do it.
 - **The scan scope for the orphan rule.** The probes report their effective scope to the controllers (`applied` in section 7.5), but the reconciler does not yet use it to tell a device that is gone from one that was not scanned (see [reconciliation.md](reconciliation.md#8-what-later-sources-add)).
-- **Further sources.** SCAN-03 names DHCP snooping, which this release does not have; DHCP lease facts come with Tenko DHCP. CDP tables of switches are not read; the SNMP method reads LLDP.

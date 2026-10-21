@@ -2,6 +2,10 @@
 <xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
   <file id="tenko-ui">
     <group id="discovery">
+      <unit id="discovery.method.dhcp_snoop">
+        <notes><note category="description">The discovery method word for DHCP snooping.</note></notes>
+        <segment><source>DHCP snoop</source></segment>
+      </unit>
       <unit id="shell.status.proposals">
         <notes><note category="description">Status bar item that links to the proposal inbox: the number of open proposals.</note></notes>
         <segment><source>{count, plural, one {# open proposal} other {# open proposals}}</source></segment>

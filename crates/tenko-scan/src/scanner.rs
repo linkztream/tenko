@@ -38,7 +38,7 @@ use crate::{
         icmp::{IcmpSweep, pinger_for},
         names::NameQuery,
         neighbours::NeighbourTable,
-        raw::RawSocketMethod,
+        raw,
         rdns::ReverseDns,
         snmp::SnmpPoll,
         tcp::TcpConnect,
@@ -251,12 +251,27 @@ pub fn build_methods(
                     )
                     .with_secrets(environment.secrets.clone()),
                 ),
-                MethodKind::ArpSweep
-                | MethodKind::TcpSyn
-                | MethodKind::OsFingerprint
-                | MethodKind::Lldp => {
-                    Arc::new(RawSocketMethod::new(kind, &environment.capabilities))
-                }
+                // WP3.14: the raw-socket methods, from their config sections.
+                MethodKind::ArpSweep => Arc::new(raw::ArpSweep::new(
+                    raw::RawSupport::detect(&environment.capabilities),
+                    &config.arp_sweep,
+                )),
+                MethodKind::TcpSyn => Arc::new(raw::TcpSynScan::new(
+                    raw::RawSupport::detect(&environment.capabilities),
+                    &config.tcp_syn,
+                )),
+                MethodKind::OsFingerprint => Arc::new(raw::OsFingerprintScan::new(
+                    raw::RawSupport::detect(&environment.capabilities),
+                    &config.os_fingerprint,
+                )),
+                MethodKind::Lldp => Arc::new(raw::LldpListen::new(
+                    raw::RawSupport::detect(&environment.capabilities),
+                    &config.lldp,
+                )),
+                MethodKind::DhcpSnoop => Arc::new(raw::DhcpSnoop::new(
+                    raw::RawSupport::detect(&environment.capabilities),
+                    &config.dhcp_snoop,
+                )),
             })
         })
         .collect::<Result<_, _>>()?;

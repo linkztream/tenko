@@ -484,7 +484,7 @@
       </unit>
       <unit id="nodes.scan.method.arp_sweep.help">
         <notes><note category="description">One line about the scan method arp_sweep.</note></notes>
-        <segment><source>Declared; not implemented yet.</source></segment>
+        <segment><source>Asks every IPv4 address of the prefixes over ARP. Needs active probing.</source></segment>
       </unit>
       <unit id="nodes.scan.method.tcp_syn.name">
         <notes><note category="description">Name of the scan method tcp_syn.</note></notes>
@@ -492,7 +492,7 @@
       </unit>
       <unit id="nodes.scan.method.tcp_syn.help">
         <notes><note category="description">One line about the scan method tcp_syn.</note></notes>
-        <segment><source>Declared; not implemented yet.</source></segment>
+        <segment><source>Half-open SYN scan of a port list, up to all 65,535 ports. Needs active probing.</source></segment>
       </unit>
       <unit id="nodes.scan.method.os_fingerprint.name">
         <notes><note category="description">Name of the scan method os_fingerprint.</note></notes>
@@ -500,7 +500,7 @@
       </unit>
       <unit id="nodes.scan.method.os_fingerprint.help">
         <notes><note category="description">One line about the scan method os_fingerprint.</note></notes>
-        <segment><source>Declared; not implemented yet.</source></segment>
+        <segment><source>Guesses the operating system family from the answers to a few SYNs. Needs active probing.</source></segment>
       </unit>
       <unit id="nodes.scan.method.lldp.name">
         <notes><note category="description">Name of the scan method lldp.</note></notes>
@@ -508,7 +508,39 @@
       </unit>
       <unit id="nodes.scan.method.lldp.help">
         <notes><note category="description">One line about the scan method lldp.</note></notes>
-        <segment><source>Declared; not implemented yet.</source></segment>
+        <segment><source>Listens for LLDP and CDP from the switch the probe is attached to.</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.dhcp_snoop.name">
+        <notes><note category="description">Name of the scan method dhcp_snoop.</note></notes>
+        <segment><source>DHCP snooping</source></segment>
+      </unit>
+      <unit id="nodes.scan.method.dhcp_snoop.help">
+        <notes><note category="description">One line about the scan method dhcp_snoop.</note></notes>
+        <segment><source>Listens for DHCPv4 DISCOVER, REQUEST and ACK and reports the clients it sees.</source></segment>
+      </unit>
+      <unit id="nodes.scan.raw.interface">
+        <notes><note category="description">Label of the network interface a raw-socket scan method uses.</note></notes>
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="nodes.scan.raw.interface_help">
+        <notes><note category="description">Help text of the interface of a raw-socket scan method.</note></notes>
+        <segment><source>Empty: the interface whose address lies in the prefixes.</source></segment>
+      </unit>
+      <unit id="nodes.scan.raw.listen">
+        <notes><note category="description">Label of how long a passive raw-socket method listens per run.</note></notes>
+        <segment><source>Listening time (seconds)</source></segment>
+      </unit>
+      <unit id="nodes.scan.raw.listen_help">
+        <notes><note category="description">Help text of the listening time of a passive raw-socket method.</note></notes>
+        <segment><source>1 to 3,600.</source></segment>
+      </unit>
+      <unit id="nodes.scan.lldp.cdp">
+        <notes><note category="description">Switch label: also read Cisco Discovery Protocol frames.</note></notes>
+        <segment><source>Also read CDP</source></segment>
+      </unit>
+      <unit id="nodes.scan.lldp.cdp_help">
+        <notes><note category="description">Help text of the CDP switch of the LLDP method.</note></notes>
+        <segment><source>Listens at least 65 seconds, since CDP announces every 60 seconds.</source></segment>
       </unit>
       <unit id="nodes.scan.tcp.ports">
         <notes><note category="description">Label of the TCP ports to try.</note></notes>

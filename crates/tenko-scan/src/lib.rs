@@ -28,6 +28,7 @@ pub mod config;
 pub mod control;
 pub mod dns;
 pub mod error;
+pub mod frame;
 pub mod known;
 pub mod limit;
 pub mod method;

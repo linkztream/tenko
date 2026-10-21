@@ -99,6 +99,8 @@ pub enum ProbeMethod {
     Llmnr,
     /// An active ARP sweep (raw sockets).
     ArpSweep,
+    /// Passive DHCPv4 snooping (raw sockets, WP3.14, SCAN-03).
+    DhcpSnoop,
 }
 
 /// What was observed.

@@ -94,13 +94,14 @@ export function defaultScanConfig(prefixes: string[] = []): ScanConfig {
   return {
     active: true,
     arp: { enabled: true, interval_secs: 300, ttl_secs: null },
-    arp_sweep: { enabled: false, interval_secs: 3600, ttl_secs: null },
+    arp_sweep: { enabled: false, interface: null, interval_secs: 3600, timeout_ms: 2000, ttl_secs: null },
     blackout: [],
     concurrency: 32,
+    dhcp_snoop: { enabled: false, interface: null, interval_secs: 3600, listen_secs: 120, ttl_secs: null },
     enabled: true,
     exclude: [],
     icmp: { enabled: true, interval_secs: 1800, timeout_ms: 1000, ttl_secs: null },
-    lldp: { enabled: false, interval_secs: 3600, ttl_secs: null },
+    lldp: { cdp: true, enabled: false, interface: null, interval_secs: 3600, listen_secs: 35, ttl_secs: null },
     llmnr: { enabled: true, interval_secs: 3600, port: 5355, timeout_ms: 1000, ttl_secs: null },
     max_hosts_per_prefix: 4096,
     mdns: {
@@ -113,7 +114,14 @@ export function defaultScanConfig(prefixes: string[] = []): ScanConfig {
       unicast_port: 5353,
     },
     nd: { enabled: true, interval_secs: 300, ttl_secs: null },
-    os_fingerprint: { enabled: false, interval_secs: 3600, ttl_secs: null },
+    os_fingerprint: {
+      enabled: false,
+      interface: null,
+      interval_secs: 3600,
+      ports: [22, 80, 135, 139, 443, 445, 3389],
+      timeout_ms: 2000,
+      ttl_secs: null,
+    },
     packets_per_second: null,
     per_host_interval_ms: 100,
     prefixes,
@@ -137,10 +145,18 @@ export function defaultScanConfig(prefixes: string[] = []): ScanConfig {
       tls_hint: true,
       ttl_secs: null,
     },
-    tcp_syn: { enabled: false, interval_secs: 3600, ttl_secs: null },
+    tcp_syn: {
+      enabled: false,
+      interface: null,
+      interval_secs: 3600,
+      ports: [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 515, 548, 554, 631, 636, 1883, 3306, 3389, 5432, 5900, 6053, 8006, 8080, 8123, 8443],
+      targets: "known",
+      timeout_ms: 2000,
+      ttl_secs: null,
+    },
     timezone: null,
     vrf: null,
-  } as ScanConfig;
+  } satisfies ScanConfig;
 }
 
 /** The methods that run on schedule under a configuration, by name. */

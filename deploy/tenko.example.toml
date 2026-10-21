@@ -631,12 +631,36 @@ attach_on_lldp_ports = false
 # privacy = "aes128"
 # privacy_password_file = "/etc/tenko/snmp-switch-a-priv"
 
-# Methods that need raw sockets; declared, not implemented yet.
+# Methods that need raw sockets (CAP_NET_RAW on Linux, Npcap on Windows; docs/scanning.md
+# section 9). All off by default; enable the ones you want once the host is set up.
+#
+# ARP sweep: an active sweep of the IPv4 scope (needs `active`).
 [scan.arp_sweep]
 enabled = false
+# timeout_ms = 2000           # wait for ARP replies after the last request
+# interface = "eth0"          # override the interface the probe's address chooses
+#
+# TCP SYN scan: a half-open port scan (needs `active`). The port list may hold ranges and
+# up to the full 65,535 ports, which the connect scan cannot.
 [scan.tcp_syn]
 enabled = false
+# ports = [22, 80, 443, "1-1024"]
+# targets = "known"           # "known" or "all"
+# timeout_ms = 2000
+#
+# OS fingerprinting: SYNs a short port list and classifies the SYN-ACKs (needs `active`).
 [scan.os_fingerprint]
 enabled = false
+# ports = [22, 80, 135, 139, 443, 445, 3389]
+# timeout_ms = 2000
+#
+# Passive LLDP and CDP listening (sends nothing).
 [scan.lldp]
 enabled = false
+# listen_secs = 35            # raised to at least 65 when cdp is on
+# cdp = true                  # also parse Cisco Discovery Protocol frames
+#
+# Passive DHCPv4 snooping (sends nothing).
+[scan.dhcp_snoop]
+enabled = false
+# listen_secs = 120

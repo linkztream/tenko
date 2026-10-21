@@ -50,9 +50,9 @@ describe("diffTotals", () => {
 
 describe("CONFIG_METHODS", () => {
   it("names every method key once, the raw-socket ones last", () => {
-    expect(CONFIG_METHODS.map((m) => m.key)).toHaveLength(12);
-    expect(new Set(CONFIG_METHODS.map((m) => m.key)).size).toBe(12);
-    expect(CONFIG_METHODS.filter((m) => m.raw).map((m) => m.key)).toEqual(["arp_sweep", "tcp_syn", "os_fingerprint", "lldp"]);
+    expect(CONFIG_METHODS.map((m) => m.key)).toHaveLength(13);
+    expect(new Set(CONFIG_METHODS.map((m) => m.key)).size).toBe(13);
+    expect(CONFIG_METHODS.filter((m) => m.raw).map((m) => m.key)).toEqual(["arp_sweep", "tcp_syn", "os_fingerprint", "lldp", "dhcp_snoop"]);
     expect(CONFIG_METHODS.slice(0, 8).some((m) => m.raw)).toBe(false);
   });
 });
@@ -84,10 +84,20 @@ describe("validateScanConfig", () => {
         c.snmp.interval_secs = -5;
         c.tcp_connect.timeout_ms = 0;
         c.lldp.interval_secs = 0;
+        c.tcp_syn.timeout_ms = 0;
+        c.dhcp_snoop.listen_secs = 0;
       }),
     );
     expect(errors.map((e) => e.field).sort()).toEqual(
-      ["concurrency", "icmp.interval_secs", "lldp.interval_secs", "snmp.interval_secs", "tcp_connect.timeout_ms"].sort(),
+      [
+        "concurrency",
+        "dhcp_snoop.listen_secs",
+        "icmp.interval_secs",
+        "lldp.interval_secs",
+        "snmp.interval_secs",
+        "tcp_connect.timeout_ms",
+        "tcp_syn.timeout_ms",
+      ].sort(),
     );
     expect(errors.every((e) => e.code === "scans.config.min")).toBe(true);
   });

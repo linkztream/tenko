@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --check`
 
-86 Phase 1 requirements; 62 named by at least one test, 24 not; 0 named by no test, measurement or document.
+86 Phase 1 requirements; 65 named by at least one test, 21 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -91,10 +91,10 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 | OPS-26 | Must | `crates/tenko/tests/acceptance_partition.rs`<br>`crates/tenko/tests/acceptance_partition.rs::ops_26_an_isolated_controller_shows_its_banner_data_and_drains_its_queue_after_the_heal`<br>`crates/tenko/tests/cluster_partition.rs`<br>`crates/tenko/tests/cluster_support/scenarios.rs`<br>`crates/tenko/tests/partition.rs`<br>and 3 more | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/middleware/quorum.rs`<br>`crates/tenko-api/src/routes/queue.rs`<br>`crates/tenko-cluster/src/admin.rs`<br>`crates/tenko-cluster/src/node_sync/codes.rs`<br>and 22 more |
 | OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>and 19 more |
 | SCAN-01 | Must | - | - | `crates/tenko-scan/src/lib.rs`<br>`crates/tenko/src/config.rs`<br>`crates/tenko/src/node/scan/mod.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>and 5 more |
-| SCAN-02 | Must | - | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko-scan/src/methods/neighbours.rs`<br>`crates/tenko/src/config.rs`<br>and 9 more |
-| SCAN-03 | Should | - | - | `crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko/src/config.rs`<br>`crates/tenko/src/node/scan/mod.rs`<br>`docs/CONFORMANCE.md`<br>and 8 more |
-| SCAN-04 | Must | - | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/icmp.rs`<br>`crates/tenko-scan/src/methods/tcp.rs`<br>`crates/tenko/src/config.rs`<br>and 10 more |
-| SCAN-05 | Must | `ui/e2e/scans.spec.ts` | - | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>`crates/tenko-cluster/src/node_sync/secrets.rs`<br>`crates/tenko-cluster/src/service/config.rs`<br>`crates/tenko-core/src/observe.rs`<br>and 18 more |
+| SCAN-02 | Must | `crates/tenko/tests/node_scan_raw.rs` | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/config.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko-scan/src/methods/neighbours.rs`<br>and 11 more |
+| SCAN-03 | Should | `crates/tenko/tests/node_scan_raw.rs` | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/config.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko-scan/src/methods/raw/dhcp_snoop.rs`<br>and 11 more |
+| SCAN-04 | Must | `crates/tenko/tests/node_scan_raw.rs` | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/config.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/icmp.rs`<br>`crates/tenko-scan/src/methods/raw/arp.rs`<br>and 15 more |
+| SCAN-05 | Must | `crates/tenko/tests/node_scan_raw.rs`<br>`ui/e2e/scans.spec.ts` | - | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>`crates/tenko-cluster/src/node_sync/secrets.rs`<br>`crates/tenko-cluster/src/service/config.rs`<br>`crates/tenko-core/src/observe.rs`<br>and 20 more |
 | SCAN-06 | Must | - | - | `crates/tenko-scan/src/blackout.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/limit.rs`<br>`crates/tenko-scan/src/scanner.rs`<br>`crates/tenko/src/config.rs`<br>and 6 more |
 | SCAN-07 | Must | - | - | `crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/limit.rs`<br>`crates/tenko/src/config.rs`<br>`crates/tenko/src/node/scan/mod.rs`<br>`docs/ROADMAP.md`<br>and 4 more |
 | SCAN-08 | Must | - | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-ipam/src/observe/model.rs`<br>`crates/tenko-ipam/src/observe/view.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/tcp.rs`<br>and 7 more |
@@ -139,9 +139,6 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - OPS-02 (Must)
 - OPS-19 (Must)
 - SCAN-01 (Must)
-- SCAN-02 (Must)
-- SCAN-03 (Should)
-- SCAN-04 (Must)
 - SCAN-06 (Must)
 - SCAN-07 (Must)
 - SCAN-08 (Must)

@@ -33,6 +33,7 @@ enum ProbeMethod {
   PROBE_METHOD_REVERSE_DNS = 10;
   PROBE_METHOD_LLMNR = 11;
   PROBE_METHOD_ARP_SWEEP = 12;
+  PROBE_METHOD_DHCP_SNOOP = 13;
 }
 
 message IngestRequest {
