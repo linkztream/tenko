@@ -1,41 +1,56 @@
 /* The live metrics of the start page (MetricsTiles.tsx). Token colors only. */
-.dash-metrics { display: grid; gap: var(--sp-4); }
+.dash-metrics { display: grid; gap: var(--sp-4); container-type: inline-size; }
 .dash-metrics > h2 { font-size: var(--fs-14); display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
 .dash-metrics > h2 .aside { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); }
-/* A stable shape: a tile never changes height from one sample to the next, so the grid below
-   does not move. The card has a fixed block size with room for its fullest content: border,
-   padding, the title, the value with its unit, the sparkline (drawn even without history), a
-   hint of two lines, and on the list tiles (queries with the warning, answers with five RCODE
-   rows, blocked with three list rows) the largest list. Overflow is cut as a guard. The Raft
-   tile keeps the simple height as a minimum and grows with its controllers, which is real. */
+/* Full rows at every width: twelve tracks, the controller's eight tiles four to a row and the
+   DNS six three to a row (both two to a row on a narrow page, one on a phone), so no row of a
+   group is left half empty and the tiles of a group are equally wide. */
+.metrics-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--sp-5); }
+.metrics-grid > * { grid-column: span 12; }
+@container (inline-size >= 520px) {
+  .metrics-grid > .metrics-tile { grid-column: span 6; }
+}
+@container (inline-size >= 900px) {
+  .metrics-grid > .metrics-tile { grid-column: span 3; }
+  .metrics-grid > .metrics-group ~ .metrics-group ~ .metrics-tile { grid-column: span 4; }
+}
+.metrics-group { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
+.metrics-group:not(:first-child) { margin-block-start: var(--sp-3); }
+/* One shape for every tile: the title, the value line, a chart area of fixed height and a footer
+   of two lines, each row of fixed height, so every tile is as tall as the others and no sample
+   changes it. The chart area fits the sparkline or the bars and a list of four rows under them
+   (the controllers; the RCODEs two to a row; the busiest lists); without a list the chart fills it. */
 .metrics-tile {
   --m-line: calc(var(--fs-12) * var(--lh-ui));
-  --m-base: calc(2px + 2 * var(--sp-5) + var(--fs-12) * var(--lh-tight) + var(--fs-24) * var(--lh-tight) + 28px + 2 * var(--m-line) + 3 * var(--sp-3));
-  --m-list: calc(var(--m-base) + var(--sp-3) + 5 * var(--m-line) + 4 * var(--sp-1));
-  block-size: var(--m-base);
+  --m-chart: calc(28px + var(--sp-3) + 4 * var(--m-line) + 3 * var(--sp-1));
+  grid-template-rows: calc(var(--fs-12) * var(--lh-tight)) calc(var(--fs-24) * var(--lh-tight)) var(--m-chart) calc(2 * var(--m-line));
+  grid-template-columns: minmax(0, 1fr);
+  min-inline-size: 0;
   overflow: hidden;
-  align-content: start;
 }
-.metrics-tile.metrics-tile-list { block-size: var(--m-list); }
-.metrics-tile.metrics-tile-grows { block-size: auto; min-block-size: var(--m-base); overflow: visible; }
-.metrics-tile .tile-value { min-block-size: calc(var(--fs-24) * var(--lh-tight)); font-variant-numeric: tabular-nums; }
-.metrics-tile .sparkline, .metrics-tile .bars { inline-size: 100%; block-size: 28px; }
-.metrics-tile > p.muted { min-block-size: calc(2 * var(--fs-12) * var(--lh-ui)); overflow: hidden; }
-/* The cache tile fits its two short lines (the window, the entries) in the area of the two-line hint, one line each. */
-.metrics-lines { display: grid; grid-template-columns: minmax(0, 1fr); min-block-size: calc(2 * var(--fs-12) * var(--lh-ui)); overflow: hidden; }
-.metrics-lines > p.muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.metrics-tile h3 { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
+.metrics-tile h4 { font-size: var(--fs-12); font-weight: var(--fw-medium); line-height: var(--lh-tight); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metrics-tile .tile-value { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
 .metrics-unit { margin-inline-start: var(--sp-2); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
-.metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-12); min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
-.metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
-.metrics-raft li > :nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metrics-chart { display: flex; flex-direction: column; gap: var(--sp-3); min-block-size: 0; }
+/* The drawing takes what the list leaves, at least the 28px of a sparkline, over a baseline that
+   shows even before the first sample. */
+.metrics-plot { position: relative; flex: 1 1 auto; min-block-size: 28px; border-block-end: 1px solid var(--line); }
+.metrics-plot > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; }
+.metrics-foot { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; font-size: var(--fs-12); line-height: var(--lh-ui); overflow: hidden; }
+.metrics-foot > p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A hint alone may take both lines. */
+.metrics-foot > p:only-child { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.metrics-raft { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-12); line-height: var(--lh-ui); flex: 0 1 auto; min-block-size: 0; overflow-y: auto; }
+.metrics-raft:empty { display: none; }
+.metrics-raft li { display: flex; align-items: baseline; gap: var(--sp-4); min-inline-size: 0; }
+.metrics-raft li > :nth-child(2) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metrics-raft li .lag { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.metrics-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-12); }
-.metrics-rows-3 { min-block-size: calc(3 * var(--fs-12) * var(--lh-ui) + 2 * var(--sp-1)); align-content: start; }
-.metrics-rows-5 { min-block-size: calc(5 * var(--fs-12) * var(--lh-ui) + 4 * var(--sp-1)); align-content: start; }
-.metrics-rows li { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
+.metrics-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1) var(--sp-6); font-size: var(--fs-12); line-height: var(--lh-ui); flex: 0 0 auto; }
+.metrics-rows:empty { display: none; }
+.metrics-rows-pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.metrics-rows li { display: flex; align-items: baseline; gap: var(--sp-4); min-inline-size: 0; }
 .metrics-rows li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metrics-rows li .rate { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.metrics-warn { font-size: var(--fs-12); color: var(--warn-ink); min-block-size: calc(var(--fs-12) * var(--lh-ui)); }
+.metrics-warn { color: var(--warn-ink); }
 .metrics-warn[data-state="idle"] { visibility: hidden; }
 .metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

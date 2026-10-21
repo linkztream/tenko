@@ -3532,6 +3532,7 @@ export type MessageKey =
   | "metrics.dns.cache_window"
   | "metrics.dns.encrypted"
   | "metrics.dns.encrypted_hint"
+  | "metrics.dns.encrypted_none"
   | "metrics.dns.log_dropped"
   | "metrics.dns.queries"
   | "metrics.dns.queries_hint"
@@ -3541,6 +3542,8 @@ export type MessageKey =
   | "metrics.dns.upstreams"
   | "metrics.dns.upstreams_hint"
   | "metrics.dns.upstreams_idle"
+  | "metrics.group.controller"
+  | "metrics.group.dns"
   | "metrics.raft.lag"
   | "metrics.raft.node"
   | "metrics.raft.stale"
@@ -9878,6 +9881,7 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.dns.cache_window",
   "metrics.dns.encrypted",
   "metrics.dns.encrypted_hint",
+  "metrics.dns.encrypted_none",
   "metrics.dns.log_dropped",
   "metrics.dns.queries",
   "metrics.dns.queries_hint",
@@ -9887,6 +9891,8 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.dns.upstreams",
   "metrics.dns.upstreams_hint",
   "metrics.dns.upstreams_idle",
+  "metrics.group.controller",
+  "metrics.group.dns",
   "metrics.raft.lag",
   "metrics.raft.node",
   "metrics.raft.stale",

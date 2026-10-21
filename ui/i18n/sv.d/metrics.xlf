@@ -188,6 +188,18 @@
         <notes><note category="description">DoT and DoH are the protocol names DNS over TLS and DNS over HTTPS; not translated.</note></notes>
         <segment><source>DoT {dot, number}, DoH {doh, number}</source><target>DoT {dot, number}, DoH {doh, number}</target></segment>
       </unit>
+      <unit id="metrics.dns.encrypted_none">
+        <notes><note category="description">The line under the encrypted connections tile while the DNS role serves neither DNS over TLS nor DNS over HTTPS; DoT and DoH are not translated.</note></notes>
+        <segment><source>Neither DoT nor DoH is served</source><target>Varken DoT eller DoH erbjuds</target></segment>
+      </unit>
+      <unit id="metrics.group.controller">
+        <notes><note category="description">Heading of the group of live metrics tiles with the figures of the controllers (API, store, Raft, jobs, observations, event stream, nodes); the node role name.</note></notes>
+        <segment><source>Controller</source><target>Controller</target></segment>
+      </unit>
+      <unit id="metrics.group.dns">
+        <notes><note category="description">Heading of the group of live metrics tiles with the figures of the DNS role.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

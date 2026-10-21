@@ -68,6 +68,10 @@ function mount() {
 
 const tile = (name: string) => screen.getByTestId(`metrics-tile-${name}`);
 
+/** The parts of a tile, in order: every tile has the same four. */
+const SHAPE = ["H4", "tile-value", "metrics-chart", "metrics-foot"];
+const parts = (el: HTMLElement) => [...el.children].map((child) => (child.tagName === "H4" ? "H4" : child.className));
+
 beforeEach(async () => {
   FakeSource.all = [];
   await setLocale("en");
@@ -90,6 +94,15 @@ describe("metrics tiles", () => {
     await waitFor(() => expect(screen.getByTestId("metrics-tiles").dataset.state).toBe("live"));
     expect(screen.getByTestId("metrics-waiting")).toBeTruthy();
     expect(tile("requests").dataset.value).toBeUndefined();
+    // Before the first sample every tile is there, in its full shape, with an empty chart.
+    expect(screen.getAllByTestId(/^metrics-tile-/)).toHaveLength(8);
+    for (const el of screen.getAllByTestId(/^metrics-tile-/)) {
+      expect(parts(el)).toEqual(SHAPE);
+      expect(el.querySelector(".metrics-plot > svg")).not.toBeNull();
+      expect(el.querySelector(".metrics-plot polyline, .metrics-plot rect")).toBeNull();
+    }
+    expect(screen.getByTestId("metrics-group-controller").textContent).toBe("Controller");
+    expect(screen.queryByTestId("metrics-group-dns")).toBeNull();
     unmount();
     expect(source.closed).toBe(true);
   });
@@ -304,6 +317,42 @@ describe("DNS tiles", () => {
     expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
   });
 
+  it("have the shape of the other tiles, their lists inside the chart area, in a group of their own", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart({ log_dropped_per_second: 1 }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    for (const el of screen.getAllByTestId(/^metrics-tile-/)) expect(parts(el), el.dataset.testid).toEqual(SHAPE);
+    const chart = (name: string) => tile(name).querySelector<HTMLElement>(".metrics-chart")!;
+    expect(within(chart("raft")).getAllByTestId("metrics-raft-node")).toHaveLength(1);
+    expect(within(chart("dns-answers")).getAllByTestId("metrics-dns-rcode")).toHaveLength(5);
+    expect(within(chart("dns-answers")).getByTestId("metrics-bars")).toBeTruthy();
+    expect(chart("dns-answers").querySelector(".metrics-rows-pairs")).not.toBeNull();
+    expect(within(chart("dns-blocked")).getAllByTestId("metrics-dns-list")).toHaveLength(3);
+    // The warning is the second line of the footer, the window the first line of the ratio tiles.
+    const foot = (name: string) => tile(name).querySelector<HTMLElement>(".metrics-foot")!;
+    expect(within(foot("dns-queries")).getByTestId("metrics-dns-log-dropped").dataset.state).toBe("dropping");
+    expect(foot("dns-cache").firstElementChild?.getAttribute("data-testid")).toBe("metrics-window");
+    // The answers tile says only its window, which may take both lines.
+    expect(foot("dns-answers").children).toHaveLength(1);
+    // The DNS tiles follow their own heading, after the controller's tiles.
+    const grid = screen.getByTestId("metrics-tiles").querySelector(".metrics-grid")!;
+    expect([...grid.children].map((el) => el.getAttribute("data-testid")!.replace(/^metrics-(tile|group)-/, ""))).toEqual([
+      "controller",
+      "requests",
+      "commit",
+      "store",
+      "raft",
+      "jobs",
+      "ingest",
+      "sse",
+      "nodes",
+      "dns",
+      ...DNS_TILES,
+    ]);
+  });
+
   it("say when the role is idle, has no lists, serves no encrypted transport and drops log entries", async () => {
     mount();
     await waitFor(() => expect(FakeSource.all).toHaveLength(1));
@@ -332,7 +381,10 @@ describe("DNS tiles", () => {
     expect(tile("dns-blocked").textContent).toContain("No list has blocked a query");
     expect(within(tile("dns-blocked")).queryAllByTestId("metrics-dns-list")).toHaveLength(0);
     expect(tile("dns-upstreams").textContent).toContain("No upstream answered in the last second");
-    expect(screen.queryByTestId("metrics-tile-dns-encrypted")).toBeNull();
+    // The encrypted connections keep their tile, without a number.
+    expect(tile("dns-encrypted").dataset.value).toBeUndefined();
+    expect(tile("dns-encrypted").textContent).toContain("Neither DoT nor DoH is served");
+    expect(parts(tile("dns-encrypted"))).toEqual(SHAPE);
   });
 
   it("show the share of the last 30 seconds, not of the newest second, and keep it through quiet seconds", async () => {
@@ -369,5 +421,6 @@ describe("DNS tiles", () => {
     expect(tile("dns-blocked").textContent).toContain("5 listor har blockerat frågor");
     expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");
     expect(tile("dns-encrypted").textContent).toContain("Krypterade anslutningar");
+    expect(screen.getByTestId("metrics-group-dns").textContent).toBe("DNS");
   });
 });

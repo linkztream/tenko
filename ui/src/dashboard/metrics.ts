@@ -55,7 +55,7 @@ export function snapshotOf(data: Record<string, unknown>): MetricsSnapshot | nul
 export const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"] as const;
 /**
  * The tiles of the `dns` role, after the others while the sample has `dns`; `dns-encrypted`
- * only while the role serves DoT or DoH.
+ * has no number while the role serves neither DoT nor DoH.
  */
 export const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"] as const;
 export type DnsTileName = (typeof DNS_TILES)[number];

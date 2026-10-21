@@ -9,6 +9,7 @@
 // through `Metrics.Snapshot`, which the Rust tests cover.
 
 import type { Page } from "@playwright/test";
+import { mockMetricsHistory } from "../../src/api/mock/metrics-model";
 import type { Schemas } from "./api";
 
 export type MetricsSample = Schemas["MetricsSample"];
@@ -58,6 +59,15 @@ export function dnsPart(patch: Partial<MetricsDns> = {}): MetricsDns {
     log_dropped_per_second: 0,
     ...patch,
   };
+}
+
+/**
+ * The last `count` snapshots of one controller, one second apart, with the `dns` part unless
+ * `dns` is false: the samples of the dev mock (src/api/mock/metrics-model.ts), whose figures
+ * move, so every sparkline and bar chart draws.
+ */
+export function mockHistory(count: number, dns = true): MetricsSnapshot[] {
+  return mockMetricsHistory(count, count, { dns });
 }
 
 /**

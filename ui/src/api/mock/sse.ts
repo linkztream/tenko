@@ -22,10 +22,12 @@ import {
   type MockEventData,
 } from "./db";
 import { advanceMockJobs } from "./job-store";
+import { mockMetricsHistory, mockMetricsSnapshot, type MockMetricsSnapshot } from "./metrics-model";
 import { fail } from "./reply";
 import { route } from "./route";
 
-// `metrics` is accepted and carries nothing here: the mock has no metrics to sample.
+// `metrics` carries a snapshot per second while the sampler runs (the browser mock, see
+// `startMetricsSampler`); in the unit tests it carries nothing.
 const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns"];
 /** The topics of a stream that names none: all but `metrics`, as on the server. */
 const DEFAULT_TOPICS: readonly Topic[] = TOPICS.filter((topic) => topic !== "metrics");
@@ -111,7 +113,7 @@ const events = route("get", "/api/v1/events", (ctx) => {
 
   // The first chunk carries the retry hint and the replay, like the server's. It must not
   // be empty: msw answers a request in Node only once the body has produced a chunk.
-  const first = `${HELLO}${replay(from, topics).join("")}`;
+  const first = `${HELLO}${replay(from, topics).join("")}${topics.has("metrics") ? metricsHistoryFrames() : ""}`;
   let open: OpenStream | undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -189,6 +191,47 @@ export function startJobTicker(intervalMs = 15_000): () => void {
     advanceMockJobs();
   }, intervalMs);
   return () => clearInterval(timer);
+}
+
+/** The second the metrics sampler counts from; null while it does not run. */
+let samplerStart: number | null = null;
+/** Snapshots a new `metrics` stream starts with, as if the page had listened for half a minute. */
+const METRICS_HISTORY = 30;
+
+function metricsFrame(snapshot: MockMetricsSnapshot): string {
+  return frame("metrics", { topic: "metrics", kind: "metrics.snapshot", metrics: snapshot });
+}
+
+function samplerSecond(): number {
+  return Math.floor((Date.now() - (samplerStart ?? 0)) / 1000);
+}
+
+function metricsOptions() {
+  return { dns: db.installation.roles.includes("dns") };
+}
+
+function metricsHistoryFrames(): string {
+  if (samplerStart === null) return "";
+  return mockMetricsHistory(METRICS_HISTORY, samplerSecond() - 1, metricsOptions()).map(metricsFrame).join("");
+}
+
+/**
+ * Samples the `metrics` topic once a second, like the server while a page listens: every open
+ * stream of the topic receives a snapshot (with the `dns` part while the installation has the
+ * `dns` role), and a new one starts with half a minute of history so the charts draw at once.
+ */
+export function startMetricsSampler(intervalMs = 1_000): () => void {
+  samplerStart = Date.now();
+  const timer = setInterval(() => {
+    const listening = [...streams].filter((stream) => stream.topics.has("metrics"));
+    if (listening.length === 0) return;
+    const text = metricsFrame(mockMetricsSnapshot(samplerSecond(), metricsOptions()));
+    for (const stream of listening) write(stream, text);
+  }, intervalMs);
+  return () => {
+    clearInterval(timer);
+    samplerStart = null;
+  };
 }
 
 export const eventRoutes: HttpHandler[] = [events];

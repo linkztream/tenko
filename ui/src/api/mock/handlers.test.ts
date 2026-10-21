@@ -42,7 +42,8 @@ import { checkPassword, isTrivial } from "./policy";
 import { PROFILE_MATRIX, banner, profileSettings, toggleStates } from "./profiles";
 import { FetchEventSource } from "./event-source";
 import { advanceMockJobs } from "./job-store";
-import { emitMockEvent, openStreamCount } from "./sse";
+import type { MockMetricsSnapshot } from "./metrics-model";
+import { emitMockEvent, openStreamCount, startMetricsSampler } from "./sse";
 
 // ---------------------------------------------------------------------------------
 // Helpers
@@ -1678,6 +1679,43 @@ describe("events", () => {
     emitMockEvent("ipam", { objects: [{ kind: "prefix", id: "p1" }] });
     expect(await stream.nextWithin(30)).toBeNull();
     await stream.close();
+  });
+
+  it("samples the metrics topic while the sampler runs: half a minute of history, then a snapshot per tick", async () => {
+    resetMockDb("signed-in");
+    // Without the sampler (the unit tests) the topic carries nothing.
+    const quiet = await openStream("?topics=metrics");
+    expect(await quiet.nextWithin(30)).toBeNull();
+    await quiet.close();
+
+    const stop = startMetricsSampler(20);
+    try {
+      const stream = await openStream("?topics=metrics");
+      const history = [];
+      for (let i = 0; i < 30; i++) history.push(await stream.next());
+      for (const message of history) {
+        expect(message.event).toBe("metrics");
+        expect(message.id).toBeNull();
+        expect(message.data.kind).toBe("metrics.snapshot");
+      }
+      const first = history[0]!.data.metrics as MockMetricsSnapshot;
+      const last = history[29]!.data.metrics as MockMetricsSnapshot;
+      expect(Date.parse(last.cluster.at) - Date.parse(first.cluster.at)).toBe(29_000);
+      // The installation has every role: the DNS part comes along.
+      expect(last.cluster.dns?.queries_per_second).toBeGreaterThan(0);
+      expect(last.nodes.map((n) => [n.node, n.raft.role])).toEqual([[1, "leader"]]);
+      const tick = await stream.next();
+      expect(tick.data.kind).toBe("metrics.snapshot");
+      await stream.close();
+
+      // Without the dns role the samples have no DNS part.
+      db.installation.roles = ["controller"];
+      const plain = await openStream("?topics=metrics");
+      expect(((await plain.next()).data.metrics as MockMetricsSnapshot).cluster.dns).toBeNull();
+      await plain.close();
+    } finally {
+      stop();
+    }
   });
 
   it("sends the writes of the mock as admin events with the revision as id", async () => {
