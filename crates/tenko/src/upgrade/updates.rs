@@ -304,10 +304,27 @@ impl Updates {
                     continue;
                 }
                 if let Err(error) = service.check().await {
-                    tracing::warn!(code = %error.code, detail = %error.detail, "the update check failed");
+                    if service.source_has_answered().await {
+                        tracing::warn!(code = %error.code, detail = %error.detail, "the update check failed");
+                    } else {
+                        tracing::info!(code = %error.code, detail = %error.detail, "the update check failed; no release source has answered yet");
+                    }
                 }
             }
         })
+    }
+
+    /// Whether a release source has answered on this installation: the stored manifest was
+    /// fetched, not uploaded. A failed check is a warning only then; before that (a fresh
+    /// node, no release published yet) it is expected and logged as a notice. A store that
+    /// cannot be read counts as answered, so that the failure is not hidden.
+    async fn source_has_answered(&self) -> bool {
+        match self.stored_manifest().await {
+            Ok(stored) => {
+                stored.is_some_and(|(stored, _)| stored.origin == ManifestOrigin::Fetched)
+            }
+            Err(_) => true,
+        }
     }
 
     /// Asks the source once and stores a changed manifest.
@@ -1134,6 +1151,40 @@ mod tests {
         assert_eq!(
             status.manifest.map(|info| info.origin),
             Some(ManifestOrigin::Uploaded)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_check_is_a_warning_only_once_a_source_has_answered() {
+        let store = Arc::new(MemStore::default());
+        let updates = service(&store, UpdateInstall::Ui, true);
+        let ctx = admin();
+        assert!(
+            !updates.source_has_answered().await,
+            "a fresh node has seen no manifest"
+        );
+        let error = updates
+            .check()
+            .await
+            .expect_err("nothing listens on port 9");
+        assert_eq!(error.code, "update.fetch_failed");
+        assert!(!updates.source_has_answered().await);
+        updates
+            .put_manifest(&ctx, manifest())
+            .await
+            .expect("upload");
+        assert!(
+            !updates.source_has_answered().await,
+            "an uploaded manifest is not an answer of the source"
+        );
+        updates
+            .store_manifest(&ctx, manifest(), ManifestOrigin::Fetched)
+            .await
+            .expect("fetched");
+        assert!(updates.source_has_answered().await);
+        assert!(
+            updates.check().await.is_err(),
+            "the code and the detail of the failure are kept"
         );
     }
 

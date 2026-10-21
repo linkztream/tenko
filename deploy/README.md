@@ -92,6 +92,7 @@ no simple pattern such as `1234`); the other profiles take a password.
 | `--release-url <url>` | | A directory with `SHA256SUMS` and the binary instead of GitHub (a mirror) |
 | `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
 | `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved |
+| `--use-self` | no (asked in interactive mode, default no) | With the dns role, point this host's own resolver at Tenko (`127.0.0.1`) once the node listens there; `--uninstall` restores the previous resolver |
 | `--reconfigure` | | Write `tenko.toml` again from the answers; the old file stays as `tenko.toml.<time>.bak` |
 | `--yes` | | No questions; the defaults for what no flag gives |
 | `--no-start` | | Everything except enabling and starting the service (containers without systemd) |
@@ -111,22 +112,38 @@ What it does, in this order:
    with the program's name.
 2. Gets the binary: `--binary`, or the release asset `tenko-<version>-linux-x86_64`, kept
    only when its SHA-256 is the one `SHA256SUMS` lists, and checked to report the version
-   asked for. The Linux asset is verified by `SHA256SUMS` only until a detached signature
+   asked for. A file that cannot be the binary is refused with the reason: its size (under
+   1 MiB: a script, an empty or partial file), its type (`file` says it is not an ELF
+   x86_64 executable), or the first two lines it printed to `--version` when it does not run.
+   The Linux asset is verified by `SHA256SUMS` only until a detached signature
    exists (the SIGNING marks in the release workflow): a checksum from the same release
    shows that the file is whole, not who published it.
 3. Installs it as `/usr/local/bin/tenko`, creates the account `tenko`, `/etc/tenko` (0750
    root:tenko), the data directory (0700 tenko) and `/var/log/tenko`.
 4. Creates the key-encryption key (below), writes `/etc/tenko/tenko.toml` from the answers
    (short, with the keys of `tenko.example.toml` it sets: `data_dir`, `roles`, `modules`,
-   `[profile]`, `[server] listen`, `[tls]` with the host name and `localhost` on the
-   certificate, `[dns] listen` and `forwarders`, and `[kek]` for a key file) and checks it
-   with `tenko config check`.
+   `[profile]`, `[server] listen` on IPv4 and IPv6 (`0.0.0.0:8443` and `[::]:8443`; IPv4
+   only on a kernel without IPv6), `[tls]` with the host name and `localhost` on the
+   certificate, plus the host's IPv4 and global IPv6 addresses when it has them, `[dns]
+   listen` and `forwarders`, and `[kek]` for a key file) and checks it with `tenko config
+   check`.
 5. Installs `systemd/tenko.service` unchanged (the script carries a copy; a test keeps the
    two equal) with its drop-ins, enables and starts it, and waits until `tenko health`
    reports the node ready.
 6. With `--admin`, completes first-run setup with `tenko setup`; otherwise it reads the
    setup token. The closing lines name the URL, the CA root and its SHA-256, the setup
    token or the administrator, the data directory, the key and how to back it up.
+7. With `--use-self` (or a yes to the question in interactive mode) and the dns role
+   answering on `127.0.0.1`, once the node accepts connections there: points the host's
+   resolver at Tenko. With systemd-resolved running, `DNS=127.0.0.1` and `Domains=~.` go
+   into `/etc/systemd/resolved.conf.d/tenko.conf` (next to `DNSStubListener=no` where step 1
+   turned the stub off) and the service restarts; otherwise `/etc/resolv.conf` becomes
+   `nameserver 127.0.0.1`, with its `search`, `domain` and `options` lines kept, and the
+   previous file or link is recorded. Names Tenko does not serve go to its forwarders, so
+   keep them set (the default is the host's former resolvers). Without the flag the host
+   keeps resolving through its uplink. `--uninstall` puts the previous resolver back before
+   it stops the service. With `--no-start` nothing is changed; run the installer again with
+   `--use-self` once the node runs.
 
 **The key-encryption key on each kind of host.** The installer prefers the unit's sealed
 credential (section Linux: systemd): it encrypts a new key with `systemd-creds` into
@@ -461,7 +478,8 @@ start that makes no progress still fails. See [../docs/upgrades.md](../docs/upgr
 `/var/lib/tenko/updates/<version>/` and points the link `current` at it, and `ExecStart=`
 runs `/var/lib/tenko/updates/current/tenko`. An update installed from the web UI is then a
 switch of that link and a restart; `RestartForceExitStatus=12` makes systemd start the
-server again when it stops itself with status 12. A newer binary placed at
+server again when it stops itself with status 12, and `SuccessExitStatus=12` keeps that
+deliberate stop out of the journal as a failure of the unit. A newer binary placed at
 `/usr/local/bin/tenko` is adopted at the next start. To keep the old layout, without
 updates from the UI, put `/usr/local/bin/tenko serve --config /etc/tenko/tenko.toml` in
 `ExecStart=` and delete the `ExecStartPre=` line. An installation made before the layout

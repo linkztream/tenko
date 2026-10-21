@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks of deploy/install.sh, the Linux installer that install/tenko-install.sh runs in a
 # Proxmox container:
-#   (1) its parsers and validators, sourced, against test/fixtures/tenko-release.json;
+#   (1) its parsers and validators, sourced, against test/fixtures/tenko-release.json, and its
+#       refusal of a file that is not the binary (a script, an empty file, a text file);
 #   (2) a dry run in ubuntu:24.04 that changes nothing;
 #   (3) an unattended --no-start install of a local binary in ubuntu:24.04, debian:12-slim and
 #       rockylinux/rockylinux:9-minimal (the release workflow's smoke images): the files and
@@ -77,7 +78,37 @@ unit_checks() {
       expect "release_asset_id of compact JSON (${mode})" "102" \
         "$(tr -d '\n ' <"${here}/fixtures/tenko-release.json" | release_asset_id tenko-0.0.1-linux-x86_64)"
     done
-    local v
+    # check_binary_case <what> <file> <exit> <message part> <message part>: check_binary refuses
+    # the file with that status and says why.
+    check_binary_case() {
+      local out rc=0
+      out="$(check_binary "$2" "$2" 2>&1)" || rc=$?
+      expect "check_binary refuses ${1}: exit" "$3" "$rc"
+      has "$out" "$4" "check_binary refuses ${1}: says why"
+      has "$out" "$5" "check_binary refuses ${1}: shows what it is"
+    }
+    local v tmp
+    tmp="$(mktemp -d)"
+    cp "$installer" "${tmp}/tenko"
+    check_binary_case "install.sh copied as tenko" "${tmp}/tenko" 5 "bytes, far too small for the Tenko binary" "starts with: #!/usr/bin/env bash"
+    : >"${tmp}/empty"
+    check_binary_case "an empty file" "${tmp}/empty" 5 "is empty (0 bytes)" "not the Tenko binary"
+    printf 'this is not a program\n' >"${tmp}/text"
+    check_binary_case "a text file" "${tmp}/text" 5 "is 22 bytes" "starts with: this is not a program"
+    if command -v file >/dev/null 2>&1; then
+      head -c 2097152 /dev/zero >"${tmp}/zeros"
+      check_binary_case "2 MiB of zeros" "${tmp}/zeros" 5 "is not an ELF x86_64 executable" "file says:"
+      if [[ -x /usr/sbin/nologin ]] && file -b /usr/sbin/nologin | grep -q 'ELF 64-bit LSB.*x86-64'; then
+        cp /usr/sbin/nologin "${tmp}/nologin"
+        head -c 2097152 /dev/zero >>"${tmp}/nologin"
+        chmod 0755 "${tmp}/nologin"
+        check_binary_case "an ELF that exits with a message" "${tmp}/nologin" 5 "does not run here (exit 1)" "not available"
+      fi
+    else
+      echo "SKIP  file is not installed here: the ELF checks"
+    fi
+    rm -rf "$tmp"
+    expect "--help lists --use-self" "yes" "$(bash "$installer" --help | grep -q -- '--use-self' && echo yes)"
     for v in tenko tenko.example.test a-b.example.test; do expect "valid_hostname ${v}" 0 "$(valid_hostname "$v"; echo $?)"; done
     for v in 192.0.2.1 -tenko "two words" tenko_1 ""; do expect "valid_hostname refuses '${v}'" 1 "$(valid_hostname "$v"; echo $?)"; done
     for v in /var/lib/tenko /srv/tenko-data /data/tenko; do expect "valid_data_dir ${v}" 0 "$(valid_data_dir "$v"; echo $?)"; done
@@ -155,6 +186,7 @@ check "the KEK drop-in resets the credential" grep -qx 'LoadCredentialEncrypted=
 check "tenko.toml: roles controller,dns" grep -qx 'roles = "controller,dns"' /etc/tenko/tenko.toml
 check "tenko.toml: the file provider" grep -qx 'provider = "file"' /etc/tenko/tenko.toml
 check "tenko.toml: forwarders" grep -qx 'forwarders = \["192.0.2.1"\]' /etc/tenko/tenko.toml
+check "tenko.toml: the API listens on IPv4 and IPv6" grep -qx 'listen = \["0.0.0.0:8443", "\[::\]:8443"\]' /etc/tenko/tenko.toml
 check "tenko config check" /usr/local/bin/tenko config check --config /etc/tenko/tenko.toml
 key_before="$(sha256sum </etc/tenko/kek.key)"
 
@@ -255,6 +287,15 @@ has "$out" "[dry-run] write /etc/tenko/tenko.toml" "dry run: the configuration"
 has "$out" "[dry-run] create the key-encryption key: /etc/tenko/kek.key" "dry run: the key"
 has "$out" "[dry-run] write /etc/systemd/system/tenko.service" "dry run: the unit"
 lacks "$out" "EXISTS" "the dry run changed nothing"
+out="$(docker run --rm -v "${work}:/i:ro" ubuntu:24.04 bash -c \
+  'bash /i/install.sh --dry-run --yes --no-start --use-self --binary /i/tenko --host-name tenko.example.test 2>&1; echo "EXIT=$?"')"
+has "$out" "EXIT=0" "dry run --use-self: exit 0"
+has "$out" "--use-self: the node is not started (--no-start)" "dry run --use-self: says that --no-start leaves the resolver"
+out="$(docker run --rm -v "${work}:/i:ro" ubuntu:24.04 bash -c \
+  'bash /i/install.sh --dry-run --yes --no-start --use-self --roles controller --binary /i/tenko 2>&1; echo "EXIT=$?"; bash /i/install.sh --dry-run --yes --no-start --use-self --dns-address 192.0.2.53 --binary /i/tenko 2>&1; echo "EXIT=$?"')"
+has "$out" "--use-self needs the dns role (--roles controller,dns)" "--use-self without the dns role is refused"
+has "$out" "--use-self needs the dns role to answer on 127.0.0.1 port 53" "--use-self with a dns address that excludes loopback is refused"
+expect "both refusals exit 2" "2 2" "$(grep -o 'EXIT=[0-9]*' <<<"$out" | sed 's/EXIT=//' | paste -sd' ')"
 
 echo
 echo "== (4) downloads from a loopback server"
@@ -378,6 +419,10 @@ EOF
     sleep 1
   done
   pass "systemd in the container: ${state}"
+  # As on Ubuntu and Debian with systemd-resolved: /etc/resolv.conf is the link to the stub's
+  # file (Docker mounts a plain file there, which the installer could not replace by a link).
+  in_sys 'umount /etc/resolv.conf 2>/dev/null; ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf'
+  expect "/etc/resolv.conf is the stub's link" "../run/systemd/resolve/stub-resolv.conf" "$(in_sys 'readlink /etc/resolv.conf')"
   # The Home profile signs in with a PIN: digits only, four or more, no simple pattern.
   password="48213907"
   args="--yes --binary /i/tenko --host-name tenko.example.test --forwarders 192.0.2.1"
@@ -416,6 +461,24 @@ EOF
   out="$(in_sys "bash /i/install.sh ${args} 2>&1")"
   has "$out" "nothing was changed" "rerun: nothing was changed"
 
+  echo "-- --use-self, systemd-resolved"
+  out="$(in_sys "bash /i/install.sh ${args} --use-self --dry-run 2>&1")"
+  has "$out" "[dry-run] write /etc/systemd/resolved.conf.d/tenko.conf" "dry run --use-self: the drop-in of systemd-resolved"
+  has "$out" "[dry-run] systemctl restart systemd-resolved" "dry run --use-self: resolved restarts"
+  expect "the dry run wrote no DNS=" "stub only" "$(in_sys 'grep -q "^DNS=" /etc/systemd/resolved.conf.d/tenko.conf && echo has DNS || echo stub only')"
+  rc=0
+  out="$(in_sys "bash /i/install.sh ${args} --use-self 2>&1")" || rc=$?
+  printf '%s\n' "$out" | grep -E '!!|ok  The host|xx' | sed 's/^/      /'
+  expect "--use-self exit" 0 "$rc"
+  has "$out" "The host resolves through Tenko: DNS=127.0.0.1" "--use-self: systemd-resolved is pointed at Tenko"
+  expect "the drop-in" "DNS=127.0.0.1" "$(in_sys 'grep "^DNS=" /etc/systemd/resolved.conf.d/tenko.conf')"
+  expect "the drop-in keeps the stub off" "DNSStubListener=no" "$(in_sys 'grep "^DNSStubListener=" /etc/systemd/resolved.conf.d/tenko.conf')"
+  has "$(in_sys 'resolvectl dns 2>&1')" "127.0.0.1" "systemd-resolved lists 127.0.0.1 as a DNS server"
+  expect "/etc/tenko keeps its group" "750 root:tenko" "$(in_sys 'stat -c "%a %U:%G" /etc/tenko')"
+  expect "the state records it" "resolved" "$(in_sys "sed -n 's/^use_self=//p' /etc/tenko/installer.state")"
+  out="$(in_sys "bash /i/install.sh ${args} --use-self 2>&1")"
+  has "$out" "nothing was changed" "--use-self again: nothing was changed"
+
   echo "-- upgrade to the newer binary"
   next="$("${work}/tenko-next" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[^ ]*' | head -n 1)"
   rc=0
@@ -437,6 +500,21 @@ EOF
   expect "systemd-resolved listens on 127.0.0.53 again" stub "$(in_sys 'test ! -e /etc/systemd/resolved.conf.d/tenko.conf && ss -Hlnup "sport = :53" | grep -q systemd-resolve && echo stub')"
   in_sys 'bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1'
   expect "after purge" "gone" "$(in_sys 'test -e /var/lib/tenko || test -e /etc/tenko || id tenko >/dev/null 2>&1 || echo gone')"
+
+  echo "-- --use-self without systemd-resolved: /etc/resolv.conf, restored by --uninstall"
+  in_sys 'systemctl stop systemd-resolved'
+  before="$(in_sys 'readlink /etc/resolv.conf || sha256sum </etc/resolv.conf')"
+  rc=0
+  out="$(in_sys "bash /i/install.sh ${args} --use-self 2>&1")" || rc=$?
+  printf '%s\n' "$out" | grep -E '!!|ok  The host|xx' | sed 's/^/      /'
+  expect "--use-self exit" 0 "$rc"
+  has "$out" "/etc/resolv.conf lists 127.0.0.1 only" "--use-self: /etc/resolv.conf is pointed at Tenko"
+  expect "resolv.conf names Tenko" "nameserver 127.0.0.1" "$(in_sys 'grep ^nameserver /etc/resolv.conf')"
+  has "$(in_sys 'cat /etc/resolv.conf')" "Written by the Tenko installer (--use-self)" "resolv.conf says who wrote it"
+  expect "the state records the link it replaced" "present" "$(in_sys 'grep -q "^use_self=resolv_conf" /etc/tenko/installer.state && grep -q "^use_self_resolv_link=" /etc/tenko/installer.state && echo present')"
+  in_sys 'bash /i/install.sh --yes --uninstall >/dev/null 2>&1'
+  expect "--uninstall restores resolv.conf" "$before" "$(in_sys 'readlink /etc/resolv.conf || sha256sum </etc/resolv.conf')"
+  in_sys 'bash /i/install.sh --yes --uninstall --purge >/dev/null 2>&1; systemctl start systemd-resolved'
 
   echo "-- systemd-creds cannot seal: a plain key file and the drop-in"
   in_sys 'mkdir -p /opt/shim && printf "#!/bin/sh\necho \"Failed to determine local credential key: Operation not permitted\" >&2\nexit 1\n" >/opt/shim/systemd-creds && chmod 0755 /opt/shim/systemd-creds'

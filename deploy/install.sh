@@ -62,6 +62,8 @@ readonly DROPIN_DIR=/etc/systemd/system/tenko.service.d
 readonly DROPIN_KEK=/etc/systemd/system/tenko.service.d/kek-file.conf
 readonly DROPIN_DATA=/etc/systemd/system/tenko.service.d/data-dir.conf
 readonly RESOLVED_DROPIN=/etc/systemd/resolved.conf.d/tenko.conf
+readonly RESOLV_CONF=/etc/resolv.conf
+readonly RESOLV_MARK='# Written by the Tenko installer (--use-self)'
 readonly LOG_DIR=/var/log/tenko
 readonly DEFAULT_DATA_DIR=/var/lib/tenko
 readonly API_PORT_DEFAULT=8443
@@ -70,7 +72,7 @@ readonly API_PORT_DEFAULT=8443
 OPT_YES=0 OPT_DRY=0 OPT_NO_START=0 OPT_RECONFIGURE=0 OPT_UNINSTALL=0 OPT_PURGE=0
 OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
 OPT_DATA_DIR="" OPT_VERSION="" OPT_LANGUAGE="" OPT_ADMIN="" OPT_PASSWORD_STDIN=0
-OPT_BINARY="" OPT_TOKEN="" OPT_REPO="" OPT_RELEASE_URL="" OPT_KEK="" OPT_KEEP_STUB=0
+OPT_BINARY="" OPT_TOKEN="" OPT_REPO="" OPT_RELEASE_URL="" OPT_KEK="" OPT_KEEP_STUB=0 OPT_USE_SELF=0
 SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0 SET_ADMIN=0
 
 usage() {
@@ -106,6 +108,9 @@ Behaviour:
   --kek auto|sealed|file              the key-encryption key: sealed with systemd-creds, a plain
                                       file, or sealed where that works [auto]
   --keep-resolved-stub                never turn off systemd-resolved's stub listener on port 53
+  --use-self                          with the dns role: point this host's own resolver at Tenko
+                                      (127.0.0.1) once the node listens; --uninstall restores
+                                      the previous resolver [asked in interactive mode, default no]
   --reconfigure                       write /etc/tenko/tenko.toml again from the answers (the old
                                       file is kept as tenko.toml.<time>.bak)
   --no-start                          everything except enabling and starting the service
@@ -372,9 +377,46 @@ primary_ipv4() {
   ip -4 -o route get 192.0.2.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n 1
 }
 
+# primary_ipv6: the global address of the interface with the default IPv6 route, or nothing
+# (no IPv6 route, or only a link-local address).
+primary_ipv6() {
+  local addr
+  have ip || return 0
+  addr="$(ip -6 -o route get 2001:db8::1 2>/dev/null | sed -n 's/.* src \([0-9A-Fa-f:]*\).*/\1/p' | head -n 1)"
+  [[ -n "$addr" && "${addr,,}" != fe80:* && "${addr,,}" != ::1 ]] && valid_ipv6 "$addr" && printf '%s' "$addr"
+  return 0
+}
+
 # ── Versions ────────────────────────────────────────────────────────────────────────────────
 # version_of <binary>: the version the binary reports.
 version_of() { "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | head -n 1; }
+
+# Anything smaller is not the Tenko binary (the release asset is several MiB).
+readonly MIN_BINARY_BYTES=1048576
+
+# check_binary <file> <name>: dies with the reason when the file cannot be the Tenko binary:
+# too small (a script, an empty or partial download), not an ELF x86_64 executable, or one
+# that does not run (the first two lines of what it printed are shown).
+check_binary() {
+  local f="$1" name="$2" size kind first out rc=0
+  size="$(stat -c %s "$f")"
+  if ((size == 0)); then
+    die "$E_DOWNLOAD" "${name} is empty (0 bytes), not the Tenko binary"
+  elif ((size < MIN_BINARY_BYTES)); then
+    first="$(head -c 80 "$f" | head -n 1 | tr -cd '[:print:]')"
+    die "$E_DOWNLOAD" "${name} is ${size} bytes, far too small for the Tenko binary (several MiB); it is not the binary${first:+ (it starts with: ${first})}. Pass the release file tenko-<version>-linux-x86_64"
+  fi
+  if have file; then
+    kind="$(file -b "$f" 2>/dev/null || true)"
+    if [[ "$kind" != *"ELF 64-bit LSB"* || "$kind" != *"x86-64"* ]]; then
+      die "$E_DOWNLOAD" "${name} is not an ELF x86_64 executable (file says: ${kind:-nothing}); a static x86_64 Linux binary is needed"
+    fi
+  fi
+  out="$("$f" --version 2>&1)" || rc=$?
+  if ((rc != 0)); then
+    die "$E_DOWNLOAD" "${name} does not run here (exit ${rc}): $(printf '%s\n' "$out" | head -n 2 | tr '\n' ' ')"
+  fi
+}
 
 # version_cmp <a> <b>: prints -1, 0 or 1 (SemVer precedence: a pre-release ranks below its
 # release; pre-release identifiers compare in version order).
@@ -455,9 +497,9 @@ get_binary() {
     NEW_BIN="${TMP}/tenko"
     cp "$OPT_BINARY" "$NEW_BIN"
     chmod 0755 "$NEW_BIN"
-    NEW_VERSION="$(version_of "$NEW_BIN")" ||
-      die "$E_DOWNLOAD" "${OPT_BINARY} does not run here (a static x86_64 Linux binary is needed)"
-    [[ -n "$NEW_VERSION" ]] || die "$E_DOWNLOAD" "${OPT_BINARY} reports no version"
+    check_binary "$NEW_BIN" "$OPT_BINARY"
+    NEW_VERSION="$(version_of "$NEW_BIN" || true)"
+    [[ -n "$NEW_VERSION" ]] || die "$E_DOWNLOAD" "${OPT_BINARY} reports no version ($("$NEW_BIN" --version 2>&1 | head -n 2 | tr '\n' ' '))"
     if [[ "$want" != latest && "$want" != "$NEW_VERSION" ]]; then
       die "$E_USAGE" "--binary is version ${NEW_VERSION}, not the --version ${want}"
     fi
@@ -515,7 +557,8 @@ get_binary() {
   NEW_BIN="${TMP}/tenko"
   mv "${TMP}/${name}" "$NEW_BIN"
   chmod 0755 "$NEW_BIN"
-  NEW_VERSION="$(version_of "$NEW_BIN")"
+  check_binary "$NEW_BIN" "$name"
+  NEW_VERSION="$(version_of "$NEW_BIN" || true)"
   [[ "$NEW_VERSION" == "$want" ]] || die "$E_DOWNLOAD" "${name} reports version '${NEW_VERSION}', not ${want}"
   ok "Downloaded ${name}, SHA-256 verified against SHA256SUMS"
 }
@@ -590,7 +633,7 @@ detect_installed() {
 
 # ── Answers ─────────────────────────────────────────────────────────────────────────────────
 DATA_DIR="" ROLES="" MODULES="" PROFILE="" HOST_NAME="" DNS_ADDRESS="" FORWARDERS=""
-LANGUAGE="" ADMIN="" PASSWORD="" API_PORT="$API_PORT_DEFAULT"
+LANGUAGE="" ADMIN="" PASSWORD="" API_PORT="$API_PORT_DEFAULT" USE_SELF=0 USE_SELF_DONE=0 STUB_OFF=0
 
 check_or_die() {
   local fn="$1" value="$2" what="$3"
@@ -668,6 +711,12 @@ answers() {
         printf 'Not a resolver list: %s\n' "$FORWARDERS" >"$TTY"
         SET_FORWARDERS=0
       done
+      if ((!OPT_USE_SELF)) && dns_listen "$DNS_ADDRESS" | grep -qE '"(0\.0\.0\.0|127\.0\.0\.1):53"'; then
+        ask_yes_no "Use Tenko as this host's own resolver (127.0.0.1)?
+
+Names the host looks up then go through Tenko: your zones first, forwarders for the rest. --uninstall puts the previous resolver back. Choose no to leave the host's resolver as it is." no &&
+          OPT_USE_SELF=1
+      fi
     fi
     while true; do
       [[ -n "$OPT_DATA_DIR" ]] || ask DATA_DIR "Data directory (on SSD or NVMe)" "$DATA_DIR"
@@ -685,11 +734,31 @@ answers() {
   dns_listen "$DNS_ADDRESS" >/dev/null || die "$E_USAGE" "--dns-address: invalid value '${DNS_ADDRESS}'"
   forwarder_list "$FORWARDERS" >/dev/null || die "$E_USAGE" "--forwarders: invalid value '${FORWARDERS}'"
   check_or_die valid_data_dir "$DATA_DIR" --data-dir
+  USE_SELF="$OPT_USE_SELF"
+  ((USE_SELF)) && check_use_self "$write_config"
 
   if ((!write_config)) && { ((SET_ROLES || SET_MODULES || SET_FORWARDERS || SET_DNS_ADDRESS)) ||
     [[ -n "$OPT_PROFILE" || -n "$OPT_HOST" || -n "$OPT_DATA_DIR" ]]; }; then
     warn "${CONFIG} exists and is kept; the configuration flags apply with --reconfigure"
   fi
+}
+
+# check_use_self <1 when the configuration is written now>: --use-self needs the dns role,
+# answering on 127.0.0.1 port 53 (a resolver address has no port). A kept configuration is
+# read for both; a [dns] section without a listen line answers on every address.
+check_use_self() {
+  local listen
+  if (($1)); then
+    [[ "$ROLES" == *dns* ]] || die "$E_USAGE" "--use-self needs the dns role (--roles controller,dns)"
+    listen="$(dns_listen "$DNS_ADDRESS")"
+  else
+    grep -qE '^roles = ".*dns' "$CONFIG" ||
+      die "$E_USAGE" "--use-self needs the dns role, and ${CONFIG} does not list it (--reconfigure --roles controller,dns)"
+    listen="$(awk '/^\[dns\]/ {f = 1; next} /^\[/ {f = 0} f && /^listen/' "$CONFIG")"
+    [[ -n "$listen" ]] || listen='"0.0.0.0:53"'
+  fi
+  grep -qE '"(0\.0\.0\.0|127\.0\.0\.1):53"' <<<"$listen" ||
+    die "$E_USAGE" "--use-self needs the dns role to answer on 127.0.0.1 port 53: --dns-address all, or a list with 127.0.0.1"
 }
 
 # setup_answers: first-run setup now (an administrator) or in the browser.
@@ -768,6 +837,7 @@ Turn its stub listener off (DNSStubListener=no in ${RESOLVED_DROPIN}) and point 
     run ln -sfn /run/systemd/resolve/resolv.conf /etc/resolv.conf
   fi
   state_set resolved_stub_off 1
+  STUB_OFF=1
   run systemctl restart systemd-resolved
   ok "systemd-resolved no longer listens on port 53; /etc/resolv.conf lists the upstream resolvers"
 }
@@ -776,13 +846,150 @@ Turn its stub listener off (DNSStubListener=no in ${RESOLVED_DROPIN}) and point 
 state_set() {
   local tmp
   ((OPT_DRY)) && return 0
-  install -d -m 0750 -o root -g root "$ETC"
+  # An existing directory is not touched: the account tenko owns its group once step_dirs ran.
+  [[ -d "$ETC" ]] || install -d -m 0750 -o root -g root "$ETC"
   tmp="$(mktemp "${TMP}/state.XXXXXX")"
   [[ -f "$STATE_FILE" ]] && grep -v "^${1}=" "$STATE_FILE" >"$tmp" || true
   printf '%s=%s\n' "$1" "$2" >>"$tmp"
   install -m 0600 -o root -g root "$tmp" "$STATE_FILE"
 }
-state_get() { [[ -f "$STATE_FILE" ]] && sed -n "s/^${1}=//p" "$STATE_FILE" | tail -n 1; }
+state_get() {
+  [[ -f "$STATE_FILE" ]] || return 0
+  sed -n "s/^${1}=//p" "$STATE_FILE" | tail -n 1
+}
+
+# resolved_manages: systemd-resolved runs and /etc/resolv.conf is one of its files, so the
+# host's lookups follow resolved's settings.
+resolved_manages() {
+  local target
+  ((SYSTEMD)) && systemctl is-active --quiet systemd-resolved 2>/dev/null || return 1
+  target="$(readlink -f "$RESOLV_CONF" 2>/dev/null || true)"
+  [[ "$target" == /run/systemd/resolve/* || "$target" == /usr/lib/systemd/resolv.conf ]]
+}
+
+# node_listens_dns: something accepts a TCP connection on 127.0.0.1:53. A query would prove
+# more, but the node forwards every name it does not serve and answers only when an upstream
+# does, so the listener is what can be checked at once.
+node_listens_dns() {
+  have timeout || return 0
+  for _ in 1 2 3 4 5; do
+    timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/53' 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# resolved_dropin: the drop-in of systemd-resolved: the stub listener off where the installer
+# turned it off, and Tenko as the DNS server for every name (the routing domain ~.).
+resolved_dropin() {
+  printf '# Written by the Tenko installer.\n[Resolve]\n'
+  if ((STUB_OFF)) || [[ "$(state_get resolved_stub_off)" == 1 ]]; then
+    printf '# The dns role of Tenko answers on port 53.\nDNSStubListener=no\n'
+  fi
+  if (($1)); then
+    printf '# --use-self: this host resolves through Tenko (127.0.0.1); a name that Tenko does not\n# serve goes to its forwarders. `install.sh --uninstall` removes this.\nDNS=127.0.0.1\nDomains=~.\n'
+  fi
+}
+
+# write_resolv_conf: standard input becomes /etc/resolv.conf, written in place (it can be a
+# bind mount in a container, which a rename cannot replace); a symbolic link is removed first.
+write_resolv_conf() {
+  local tmp
+  tmp="$(mktemp "${TMP}/resolv.XXXXXX")"
+  cat >"$tmp"
+  CHANGED=$((CHANGED + 1))
+  if ((OPT_DRY)); then
+    printf '  [dry-run] write %s (mode 0644, root:root, %s lines)\n' "$RESOLV_CONF" "$(wc -l <"$tmp")"
+    rm -f "$tmp"
+    return 0
+  fi
+  [[ -L "$RESOLV_CONF" ]] && rm -f "$RESOLV_CONF"
+  cat "$tmp" >"$RESOLV_CONF"
+  chmod 0644 "$RESOLV_CONF"
+  rm -f "$tmp"
+}
+
+# step_use_self: with --use-self, the host's resolver becomes 127.0.0.1, after the node listens.
+# systemd-resolved: DNS= in the installer's drop-in. Otherwise /etc/resolv.conf, whose
+# previous state is kept for --uninstall. Both are recorded in the installer's state file.
+step_use_self() {
+  ((USE_SELF)) || return 0
+  if ((OPT_NO_START)); then
+    warn "--use-self: the node is not started (--no-start), so the host's resolver is not changed; run the installer again with --use-self once it runs"
+    return 0
+  fi
+  if ((!OPT_DRY)) && ! node_listens_dns; then
+    warn "--use-self: nothing listens on 127.0.0.1:53, so the host's resolver is not changed (see journalctl -u tenko)"
+    return 0
+  fi
+  if resolved_manages; then
+    [[ -d /etc/systemd/resolved.conf.d ]] || run install -d -m 0755 /etc/systemd/resolved.conf.d
+    if resolved_dropin 1 | put "$RESOLVED_DROPIN" 0644 root:root; then
+      info "Pointing the host at Tenko through systemd-resolved (DNS=127.0.0.1)"
+      state_set use_self resolved
+      run systemctl restart systemd-resolved
+    fi
+    ok "The host resolves through Tenko: DNS=127.0.0.1 in ${RESOLVED_DROPIN}"
+  elif grep -qF "$RESOLV_MARK" "$RESOLV_CONF" 2>/dev/null; then
+    ok "${RESOLV_CONF} points at Tenko already"
+  else
+    local link="" kept
+    kept="$(grep -E '^(search|domain|options)[[:space:]]' "$RESOLV_CONF" 2>/dev/null || true)"
+    if [[ -L "$RESOLV_CONF" ]]; then
+      link="$(readlink "$RESOLV_CONF")"
+      state_set use_self_resolv_link "$link"
+    elif [[ -f "$RESOLV_CONF" ]]; then
+      [[ -d "$ETC" ]] || run install -d -m 0750 -o root -g root "$ETC"
+      run cp -p "$RESOLV_CONF" "${ETC}/resolv.conf.before"
+      state_set use_self_resolv_backup "${ETC}/resolv.conf.before"
+    fi
+    state_set use_self resolv_conf
+    info "Pointing ${RESOLV_CONF} at Tenko"
+    {
+      printf '%s: this host resolves through Tenko; install.sh --uninstall restores the previous file.\nnameserver 127.0.0.1\n' "$RESOLV_MARK"
+      [[ -z "$kept" ]] || printf '%s\n' "$kept"
+    } | write_resolv_conf
+    ok "The host resolves through Tenko: ${RESOLV_CONF} lists 127.0.0.1 only"
+  fi
+  USE_SELF_DONE=1
+  [[ "$FORWARDERS" == none ]] &&
+    warn "The dns role has no forwarders, so the host resolves your zones and nothing else; add upstream resolvers to [dns] forwarders in ${CONFIG}"
+  return 0
+}
+
+# restore_host_resolver: undoes step_use_self (before the service stops, so that the host
+# never points at a node that is gone).
+restore_host_resolver() {
+  local mode link backup
+  mode="$(state_get use_self)"
+  [[ -n "$mode" ]] || return 0
+  case "$mode" in
+  resolved)
+    if [[ "$(state_get resolved_stub_off)" == 1 ]]; then
+      STUB_OFF=1
+      resolved_dropin 0 | put "$RESOLVED_DROPIN" 0644 root:root || true
+    else
+      run rm -f "$RESOLVED_DROPIN"
+    fi
+    ((SYSTEMD)) && run systemctl restart systemd-resolved
+    ;;
+  resolv_conf)
+    if grep -qF "$RESOLV_MARK" "$RESOLV_CONF" 2>/dev/null; then
+      link="$(state_get use_self_resolv_link)"
+      backup="$(state_get use_self_resolv_backup)"
+      if [[ -n "$link" ]]; then
+        run ln -sfn "$link" "$RESOLV_CONF"
+      elif [[ -n "$backup" && -f "$backup" ]]; then
+        write_resolv_conf <"$backup"
+        run rm -f "$backup"
+      fi
+    else
+      warn "${RESOLV_CONF} was changed since --use-self; left as it is"
+    fi
+    ;;
+  esac
+  ok "The host's resolver is back as it was before --use-self"
+}
 
 step_account() {
   if id -u tenko >/dev/null 2>&1; then
@@ -886,7 +1093,7 @@ config_add_kek_file() {
 }
 
 step_config() {
-  local modules_line listen forwarders tls_addresses ip kek_section=""
+  local modules_line listen forwarders tls_addresses ip ip6 api_listen api_note kek_section=""
   if ((HAVE_CONFIG && !OPT_RECONFIGURE)); then
     ok "Keeping ${CONFIG} (--reconfigure writes it again from the answers)"
     if ((FRESH_KEY)) && [[ "$KEK_MODE" == file ]]; then
@@ -902,6 +1109,15 @@ step_config() {
   ip="$(primary_ipv4 || true)"
   tls_addresses='"127.0.0.1"'
   [[ -n "$ip" ]] && tls_addresses+=", \"${ip}\""
+  ip6="$(primary_ipv6 || true)"
+  [[ -n "$ip6" ]] && tls_addresses+=", \"${ip6}\""
+  # IPv4 and IPv6 as the dns role does; a kernel without IPv6 has no [::] to bind.
+  api_listen="\"0.0.0.0:${API_PORT}\""
+  api_note=" (IPv4 only: this kernel has no IPv6)"
+  if [[ -e /proc/net/if_inet6 ]]; then
+    api_listen+=", \"[::]:${API_PORT}\""
+    api_note=" on IPv4 and IPv6, as the dns role below"
+  fi
   if [[ "$KEK_TARGET" == file ]]; then
     kek_section="$(kek_file_section)
 "
@@ -921,7 +1137,8 @@ ${modules_line}
 name = \"${PROFILE}\"
 
 [server]
-listen = [\"0.0.0.0:${API_PORT}\"]
+# The API and the web UI${api_note}
+listen = [${api_listen}]
 
 [tls]
 # Tenko's internal CA issues the server certificate. Install ${DATA_DIR}/tls/ca-root.pem
@@ -1166,6 +1383,9 @@ Environment=TENKO_DATA_DIR=/var/lib/tenko
 Restart=on-failure
 RestartSec=5s
 # 12: stopped to be restarted (an installed update, a module change, a switch back).
+# Status 12 is a deliberate stop, so it counts as a success: the journal does not log
+# "Failed with result 'exit-code'" before the restart that RestartForceExitStatus= makes.
+SuccessExitStatus=12
 RestartForceExitStatus=12
 # Tells tenko that this unit restarts it after status 12, so that it may install updates
 # from the web UI and apply a module change by restarting itself. tenko does not infer this
@@ -1485,6 +1705,7 @@ summary() {
     printf '    %-14s %s\n' "Setup:" "after the first start: runuser -u tenko -- tenko setup token --config ${CONFIG}"
   fi
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
+  ((USE_SELF_DONE)) && printf '    %-14s %s\n' "Host resolver:" "127.0.0.1 (Tenko; --uninstall restores the previous one)"
   case "$KEK_MODE" in
   sealed)
     printf '    %-14s %s\n' "Key:" "${KEK_CRED} (sealed with systemd-creds to this host)"
@@ -1518,6 +1739,7 @@ uninstall() {
     IFS= read -r answer <"$TTY" || cancelled
     [[ "$answer" == purge ]] || cancelled
   fi
+  restore_host_resolver
   if ((SYSTEMD)) && [[ -f "$UNIT" ]]; then
     systemctl is-active --quiet tenko 2>/dev/null && run systemctl stop tenko
     systemctl is-enabled --quiet tenko 2>/dev/null && run systemctl disable tenko
@@ -1565,6 +1787,7 @@ parse_args() {
       unit_text
       exit 0
       ;;
+    --use-self) OPT_USE_SELF=1 ;;
     -h | --help)
       usage
       exit 0
@@ -1661,6 +1884,7 @@ main() {
   step_unit
   step_start
   step_setup
+  step_use_self
   summary
   [[ -n "${SETUP_FAILED:-}" ]] && exit "$E_SETUP"
   exit 0

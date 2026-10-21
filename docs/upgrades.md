@@ -1849,6 +1849,7 @@ The shipped unit (`deploy/systemd/tenko.service`) runs from the layout:
 ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 Restart=on-failure
+SuccessExitStatus=12
 RestartForceExitStatus=12
 RestartPreventExitStatus=2 3 4
 TimeoutStartSec=120s
@@ -1863,7 +1864,8 @@ that restarting the unit completes a manual upgrade (section 7.3, step 5). It ne
 `current` back.
 
 Status 12 is a request for a restart (an installed update, a switch back, a changed
-module set) and is always restarted. The unit sets `TENKO_SUPERVISED=1`, which tells tenko
+module set) and is always restarted; `SuccessExitStatus=12` makes it count as a success, so
+the journal does not log it as a failure of the unit. The unit sets `TENKO_SUPERVISED=1`, which tells tenko
 that a restart after status 12 happens (section 9.4); tenko does not infer it from the
 variables systemd passes to every process (`INVOCATION_ID`, `NOTIFY_SOCKET`), because a
 shell or a CI runner inside another service inherits them. The statuses 2, 3 and 4 (usage, invalid configuration

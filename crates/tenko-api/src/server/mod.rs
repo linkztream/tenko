@@ -34,9 +34,10 @@ use axum::{
     middleware::from_fn_with_state,
     response::{IntoResponse, Response},
 };
+use socket2::{Domain, Protocol, Socket, Type};
 use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService};
 use tokio::{
-    net::{TcpListener, TcpSocket},
+    net::TcpListener,
     sync::{Semaphore, oneshot, watch},
 };
 use tokio_rustls::TlsAcceptor;
@@ -552,17 +553,21 @@ fn bind_all(addrs: &[SocketAddr]) -> Result<Vec<TcpListener>, ServeError> {
 }
 
 fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
-    let socket = if addr.is_ipv4() {
-        TcpSocket::new_v4()?
-    } else {
-        TcpSocket::new_v6()?
-    };
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    // An IPv6 address serves IPv6 only, so that `listen = ["0.0.0.0:8443", "[::]:8443"]`
+    // (the same for both families) binds on Linux, where a plain `[::]` socket would
+    // also take the IPv4 port.
+    if addr.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
     // SO_REUSEADDR has port-stealing semantics on Windows; only set it elsewhere.
     #[cfg(not(windows))]
-    socket.set_reuseaddr(true)?;
-    socket.bind(addr)?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
     // A deep backlog absorbs reconnect storms (every SSE client reconnecting at once).
-    socket.listen(4096)
+    socket.listen(4096)?;
+    socket.set_nonblocking(true)?;
+    TcpListener::from_std(socket.into())
 }
 
 /// The server proper, on the API runtime.
@@ -663,4 +668,23 @@ fn spawn_housekeeping(layers: Arc<Layers>, mut stop: watch::Receiver<bool>) {
             layers.limiter.purge_idle(std::time::Instant::now());
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_ipv4_and_an_ipv6_wildcard_bind_the_same_port() {
+        // A host without IPv6 has nothing to check.
+        let Ok(probe) = bind("[::1]:0".parse().expect("address")) else {
+            return;
+        };
+        drop(probe);
+        let v4 = bind("0.0.0.0:0".parse().expect("address")).expect("the IPv4 wildcard binds");
+        let port = v4.local_addr().expect("local address").port();
+        let v6 = bind(SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port)))
+            .expect("the IPv6 wildcard binds next to the IPv4 one");
+        assert_eq!(v6.local_addr().expect("local address").port(), port);
+    }
 }
