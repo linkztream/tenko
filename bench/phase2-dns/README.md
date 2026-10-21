@@ -2,7 +2,7 @@
 
 The measurement harness of Phase 2 (DNS) of the Tenko DDI project: a load generator for any DNS
 server, a generator for the zone files and query files of the Phase 2 data sets, a report
-renderer, and the procedure scripts of the measurements M16, M17, M18, M19, M20, M21, M22, M24 and M25
+renderer, and the procedure scripts of the measurements M16 to M25
 (`docs/plans/phase-2-plan.md`, sections 2.10 and 6, work package WP4.6). It contains no server
 code: the target is the Tenko engine, the Spike B responder, BIND, NSD or anything else that
 answers DNS.
@@ -49,8 +49,10 @@ engine is measured against.
 | `src/zonegen.rs` | The zone file and query file generator |
 | `tests/cli_smoke.rs` | `zonegen`, then `load` for one second against an in-test UDP responder, then `report` |
 | `scripts/run-loopback.sh` | M16 and M22: the load generator against a server on loopback |
-| `scripts/run-dnsperf.sh` | M17: dnsperf from another host |
+| `scripts/run-dnsperf.sh` | M17: dnsperf from another host (UDP, TCP, DoT), with p50, p99 and p99.9 from dnsperf's latency histogram |
 | `scripts/run-flamethrower.sh` | M17: flamethrower from another host (UDP, TCP, DoT, DoH) |
+| `scripts/run-m17-remote.sh` | M17, M22 and M23 driven from a third host over ssh: the node's own instance, dnsperf, h2load, flamethrower and the harness from the load host and from the workstation, the metrics on and off, the M9 procedure with the home zones and a full cache, the report table |
+| `scripts/tune-udp.sh` | The load host's UDP and socket sysctls raised for a run and restored afterwards, the values before and after printed |
 | `scripts/run-m24-cache.sh` | M24: the resolver's cache (`tenko serve` forwarding to the engine's example server) in a 1 M-name mixed run at two cache bounds, and serve-stale under an upstream cut |
 | `scripts/run-m19-xfr.sh` | M19: a 100-record change on a 100,000-record Tenko zone reaching BIND 9 by NOTIFY and IXFR on the compose DNS lab (`deploy/compose/lab-dns`), the latency and the size of the delta |
 | `scripts/run-m18-load.sh` | M18: the zonegen data set imported into a new node, the time until the role serves the last name, a restart with the load from the store, and the RSS against an empty node |
@@ -205,6 +207,71 @@ step and extract the summary fields. The server's own CPU seconds and RSS come f
 record, and the link description (hosts, NICs, path, MTU, RTT), are listed at the head of each
 script; the write-up is the number that may be published. Neither tool is installed by this
 repository; the scripts check for them and say so.
+
+`scripts/run-m17-remote.sh` runs the whole of M17, M22 and M23 from a third host (the
+workstation) that reaches the server host (`node`) and the load host (`load`) by ssh without a
+password. On the node it runs an instance of its own as the ssh user from `~/m17` (its own data
+directory, the API on loopback port 18443, the dns role on the node's address with UDP and TCP on
+15353, DoT on 15853 and DoH on 15443), never a Tenko service installed there, and it stops only
+the pid it started. Write-up: `results/2026-10-21-m17-real-link.md`.
+
+```
+phase2-dns zonegen --records 100000 --out-dir data/100000
+scripts/run-m17-remote.sh --node user@node --node-addr 192.0.2.10 --load user@load --load-addr 192.0.2.20 \
+    --server-binary target/x86_64-unknown-linux-musl/release/tenko \
+    --harness target/x86_64-unknown-linux-musl/release/phase2-dns \
+    --example target/x86_64-unknown-linux-musl/release/examples/authoritative \
+    --data data/100000 --phases "prepare dnsperf tls flame harness workstation metrics m23 stop report"
+```
+
+The phases (the script's header has the detail): `prepare` (binary, zone and scripts copied,
+first-run setup and the zone import through the CLI), `dnsperf` (UDP and TCP at `--workers "1 2
+4"`, two runs of 30 s each, the node restarted per worker count), `tls` (the internal CA root
+fetched, the DoT and DoH certificates checked against it, dnsperf over DoT and h2load over DoH
+at a fixed rate and at the maximum), `flame` (flamethrower over UDP, TCP, DoT and DoH),
+`harness` (this directory's load generator from the load host, the tool of M16), `workstation`
+(dnsperf and the harness from the host that runs the script), `metrics` (M22), `m23`, `stop`
+and `report` (`report.tsv`: QPS, latency, the server's CPU seconds and cores, QPS per server
+core, RSS, the load host's busy cores per step). The load host needs dnsperf, flamethrower
+(`flame`), h2load (package `nghttp2-client`), `openssl`, `curl` and `python3`; the node needs
+`dig` and `python3`.
+
+`scripts/tune-udp.sh apply` on the load host saves the current values of `net.core.rmem_max`,
+`wmem_max`, `rmem_default`, `wmem_default`, `netdev_max_backlog` and
+`net.ipv4.ip_local_port_range` to `~/.tune-udp.state` and raises them (32 MiB, 32 MiB, 8 MiB,
+8 MiB, 30,000, 1024 to 65535) with `sudo sysctl -w`; `tune-udp.sh restore` writes the saved
+values back and `tune-udp.sh show` prints them. Nothing under `/etc` changes, so a reboot
+restores them as well. `run-m17-remote.sh` applies them before its first load phase, restores
+them in its `stop` phase and on any exit, and records both sets in its meta file. The server
+host's settings are never changed: they are part of what is measured.
+
+### M22 over the link: the metrics cost on the query path (`scripts/run-m17-remote.sh --phases metrics`)
+
+`tenko serve` has no switch for the engine's metrics (`docs/dns.md` 12.7: they are always on),
+so M22 measures the engine's example server (`crates/tenko-dns/examples/authoritative.rs`, built
+for musl like the binary) with `--metrics on` and `--metrics off`. By default (`--metrics-mode
+together`) both run at once on the node, each with half the worker count and half of
+`--metrics-rate` (200,000 queries per second in all), loaded by two dnsperf processes over UDP in
+the same window and their ports swapped every pair, so that the hypervisor's noise hits both
+alike; `--metrics-mode alternate` runs one server at the full worker count, on and off one after
+the other. The server CPU seconds of each pid are read before and after each window; the
+`report` phase prints the cost per pair (CPU seconds per query on over off), the mean of
+`--pairs` pairs with its standard error, and the p99 medians. Threshold: below 2 percent, p99
+unchanged. Write-up: `results/2026-10-21-m22-metrics-cost.md`.
+
+### M23: idle RSS with every role, the home zones and a full cache (`scripts/run-m17-remote.sh --phases m23`)
+
+The M9 procedure of Phase 1 (`bench/phase1-server/m9-idle-rss.sh`) on the node with the static
+musl binary, `--roles controller,probe,dns`, a key file, the forwarder pointed at the engine's
+example server on the load host (`--dns-forwarder`), and two hooks the script writes: before the
+idle phase ten small home zones (five forward, three IPv4 and two IPv6 reverse zones) are created
+and imported and the cache is filled to its bound of 10,000 entries (the Home profile's default)
+by the harness at 1,000 queries per second through the forwarder; after the idle phase the cache
+is counted again with `tenko dns cache list`. Then 600 s idle, sampled every 30 s. Threshold:
+below 100 MB (95.37 MiB). `--m23-prefixes N` changes the size of the M9 IPAM data set (200 by
+default; each network gets a reverse zone once a forward zone exists), `--m23-no-home` leaves the
+hooks out (the Phase 1 M9 run with the `dns` role, for the comparison). Write-up:
+`results/2026-10-21-m23-idle-rss.md`.
 
 ### M18: zone load and index memory at 1 M and 6 M RRsets
 

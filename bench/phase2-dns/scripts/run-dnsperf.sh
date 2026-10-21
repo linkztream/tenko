@@ -26,9 +26,10 @@
 #
 # Fields to record for the results file (dnsperf prints all of them):
 #   Queries sent / completed / lost, Response codes (NOERROR, NXDOMAIN), Run time, Queries per
-#   second, Average Latency (s) with min, max and standard deviation. Add p50/p99/p99.9 from the
-#   latency histogram if the installed dnsperf has one (dnsperf -h, look for latency-histogram
-#   under -O), else take them from flamethrower (run-flamethrower.sh) or the harness.
+#   second, Average Latency (s) with min, max and standard deviation. p50/p99/p99.9 come from
+#   the latency histogram when the run has --extra "-O latency-histogram" (dnsperf 2.x): the
+#   upper edge of the histogram bucket that holds the quantile, in microseconds, in the
+#   columns p50_us, p99_us and p999_us of summary.tsv, beside runtime_s.
 #   And, from the server host (scripts/server-cpu.sh PID before and after each step): the
 #   server's CPU seconds and RSS, so that QPS per server core can be computed.
 #   And the link: both hosts' CPU model and core count, the NIC speed, the one-way path (same
@@ -40,7 +41,7 @@
 #   --server ADDR       server IP address (required)
 #   --port N            server port (default 53)
 #   --names FILE        query file (required)
-#   --transport T       udp or tcp (default udp)
+#   --transport T       udp, tcp or dot (default udp; dnsperf 2.14 also speaks DoT)
 #   --rates LIST        space separated steps, queries per second (default "0"; 0 = unlimited)
 #   --duration SECONDS  length of a step (default 60)
 #   --clients N         dnsperf -c, client sockets per thread (default 32)
@@ -76,14 +77,14 @@ while [ $# -gt 0 ]; do
     --allow-dynamic) ALLOW_DYNAMIC=1; shift ;;
     --extra) EXTRA="$2"; shift 2 ;;
     --out-dir) OUTDIR="$2"; shift 2 ;;
-    -h|--help) sed -n '2,52p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,54p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [ -n "$SERVER" ] || die "--server ADDR is required"
 [ -n "$NAMES" ] && [ -f "$NAMES" ] || die "--names FILE is required (phase2-dns zonegen ...)"
-[ "$TRANSPORT" = udp ] || [ "$TRANSPORT" = tcp ] || die "--transport is udp or tcp"
+case "$TRANSPORT" in udp|tcp|dot) ;; *) die "--transport is udp, tcp or dot" ;; esac
 command -v dnsperf >/dev/null 2>&1 || die "dnsperf is not installed on this host (package dnsperf; this script installs nothing)"
 [ -n "$OUTDIR" ] || OUTDIR="$ROOT/results/raw/dnsperf-$STAMP"
 mkdir -p "$OUTDIR"
@@ -97,27 +98,45 @@ note "load: clients=$CLIENTS threads=$THREADS outstanding=$OUTSTANDING duration=
 note "the load host is not the server host; record the server host and the link in the results file"
 check_linkage "$SERVER_BINARY" "$ALLOW_DYNAMIC"
 
-printf 'rate\tsent\tcompleted\tlost\tqps\tavg_latency_s\tmin_latency_s\tmax_latency_s\tnoerror\tnxdomain\n' > "$OUTDIR/summary.tsv"
+printf 'rate\tsent\tcompleted\tlost\tqps\tavg_latency_s\tmin_latency_s\tmax_latency_s\tnoerror\tnxdomain\tp50_us\tp99_us\tp999_us\truntime_s\n' > "$OUTDIR/summary.tsv"
+
+# dnsperf prints a line per timed-out query; with a saturating load that is most of the
+# output, so it is suppressed where the installed version knows the option (2.x).
+QUIET=()
+dnsperf -H 2>&1 | grep -q 'suppress=' && QUIET=(-O suppress=timeout)
 
 for rate in $RATES; do
   out="$OUTDIR/step-$TRANSPORT-rate$rate.txt"
   args=(-s "$SERVER" -p "$PORT" -d "$NAMES" -m "$TRANSPORT" -l "$DURATION" -c "$CLIENTS"
-        -T "$THREADS" -q "$OUTSTANDING" -S 5)
+        -T "$THREADS" -q "$OUTSTANDING" -S 5 "${QUIET[@]}")
   [ "$EDNS" = 1 ] && args+=(-e)
   [ "$rate" = 0 ] || args+=(-Q "$rate")
   # shellcheck disable=SC2206
   [ -z "$EXTRA" ] || args+=($EXTRA)
   say "step: rate=$rate  dnsperf ${args[*]}"
   dnsperf "${args[@]}" > "$out" 2>&1 || note "dnsperf exited with an error at rate $rate (see $out)"
+  # The percentiles come from the latency histogram (-O latency-histogram, "lo - hi: count"
+  # per bucket): the upper edge of the bucket in which the cumulative count reaches the
+  # quantile, in microseconds. Without that option the three columns stay empty.
   awk -v rate="$rate" '
+    function q(p,   i, s) {
+      if (total == 0) return ""
+      s = 0
+      for (i = 1; i <= n; i++) { s += c[i]; if (s >= p * total) return sprintf("%.0f", hi[i] * 1e6) }
+      return sprintf("%.0f", hi[n] * 1e6)
+    }
     /Queries sent:/        { sent = $3 }
     /Queries completed:/   { completed = $3 }
     /Queries lost:/        { lost = $3 }
+    /Run time \(s\):/      { runtime = $4 }
     /Queries per second:/  { qps = $4 }
-    /Average Latency/      { avg = $4; min = $6; max = $8; sub(",", "", avg); sub(",", "", min) }
-    /NOERROR/              { noerror = $2 }
-    /NXDOMAIN/             { nx = $2 }
-    END { printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rate, sent, completed, lost, qps, avg, min, max, noerror, nx }
+    # Over DoT dnsperf prints a second latency block for the connections; the first block
+    # belongs to the queries.
+    /Average Latency/ && !avg { avg = $4; min = $6; max = $8; sub(",", "", avg); sub(",", "", min); sub(/\)/, "", max) }
+    /Response codes:/      { for (i = 3; i < NF; i++) { if ($i == "NOERROR") noerror = $(i + 1); if ($i == "NXDOMAIN") nx = $(i + 1) } }
+    /Latency bucket/       { block++ }
+    block == 1 && /^ *[0-9.]+ - [0-9.]+: +[0-9]+$/ { n++; hi[n] = $3 + 0; c[n] = $4 + 0; total += $4 }
+    END { printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rate, sent, completed, lost, qps, avg, min, max, noerror, nx, q(0.5), q(0.99), q(0.999), runtime }
   ' "$out" >> "$OUTDIR/summary.tsv"
 done
 

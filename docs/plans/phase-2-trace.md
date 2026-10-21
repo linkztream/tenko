@@ -7,39 +7,39 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 2`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 2 --check`
 
-29 Phase 2 requirements; 12 named by at least one test, 17 not; 0 named by no test, measurement or document.
+29 Phase 2 requirements; 13 named by at least one test, 16 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
 | ID | Priority | Tests | Measurements | Documents |
 |---|---|---|---|---|
 | DNS-01 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>`crates/tenko-dns/src/zone/records.rs`<br>`docs/CONFORMANCE.md`<br>and 5 more |
-| DNS-02 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/forwarders.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>`crates/tenko-dns/src/forward.rs`<br>and 8 more |
+| DNS-02 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/forwarders.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>`crates/tenko-dns/src/forward.rs`<br>and 9 more |
 | DNS-04 | Must | - | - | `crates/tenko-dns/src/transport/mod.rs`<br>`docs/dns.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-06 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-07 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/serial.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DNS-08 | Must | - | - | `crates/tenko-dns/src/outbound.rs`<br>`crates/tenko-dns/src/pool.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/dns-resolver.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-09 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/transfer.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 7 more |
+| DNS-09 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/transfer.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 8 more |
 | DNS-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-11 | Must | `crates/tenko-dns/tests/update.rs::an_add_is_answered_once_the_index_serves_it`<br>`crates/tenko-dns/tests/update.rs::the_key_and_the_access_lists_decide`<br>`crates/tenko/tests/acceptance_dns_update.rs::updates_are_applied_through_the_store_and_answered_from_the_index` | `bench/phase2-dns/results/2026-10-19-m21-update.md` | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/update/mod.rs`<br>`crates/tenko-dns/src/update/policy.rs`<br>`crates/tenko-dns/src/zone/keys.rs`<br>and 6 more |
-| DNS-12 | Must | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 2 more |
-| DNS-14 | Must | `crates/tenko/tests/acceptance_dns_tls.rs` | - | `crates/tenko-dns/src/tls/mod.rs`<br>`crates/tenko/src/config.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dns-resolver.md`<br>and 1 more |
-| DNS-15 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
-| DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`crates/tenko/src/config.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns-resolver.md`<br>and 1 more |
-| DNS-18 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns.md`<br>`docs/plans/phase-2-plan.md` |
-| DNS-20 | Must | `crates/tenko-dns/tests/views.rs`<br>`crates/tenko/tests/acceptance_dns_views.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/views.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>and 12 more |
-| DNS-21 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/lists.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/lists.rs`<br>`crates/tenko-dns/src/policy.rs`<br>and 5 more |
-| DNS-22 | Must | `crates/tenko/tests/acceptance_reverse.rs` | - | `crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/dns/mod.rs`<br>`crates/tenko-ipam/src/dns/reverse.rs`<br>`crates/tenko-ipam/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>and 4 more |
-| DNS-23 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/cache.rs`<br>`crates/tenko-dns/src/forward.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`crates/tenko/src/config.rs`<br>and 4 more |
-| DNS-24 | Must | `crates/tenko-core/tests/dns_model.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/rdata.rs`<br>`docs/adr/0017-dns-data-model-and-serving-path.md`<br>`docs/dns-contracts.md`<br>`docs/dns.md`<br>and 1 more |
-| DNS-25 | Could | - | - | `docs/plans/phase-2-plan.md` |
+| DNS-11 | Must | `crates/tenko-dns/tests/update.rs::an_add_is_answered_once_the_index_serves_it`<br>`crates/tenko-dns/tests/update.rs::the_key_and_the_access_lists_decide`<br>`crates/tenko/tests/acceptance_dns_update.rs::updates_are_applied_through_the_store_and_answered_from_the_index` | `bench/phase2-dns/results/2026-10-19-m21-update.md` | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/update/mod.rs`<br>`crates/tenko-dns/src/update/policy.rs`<br>`crates/tenko-dns/src/zone/keys.rs`<br>and 7 more |
+| DNS-12 | Must | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
+| DNS-14 | Must | `crates/tenko/tests/acceptance_dns_tls.rs` | - | `crates/tenko-dns/src/tls/mod.rs`<br>`crates/tenko/src/config.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dns-resolver.md`<br>and 2 more |
+| DNS-15 | Must | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/upstream.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 4 more |
+| DNS-17 | Must | - | - | `crates/tenko-dns/src/rate.rs`<br>`crates/tenko/src/config.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns-resolver.md`<br>and 2 more |
+| DNS-18 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-19 | Must | - | - | `crates/tenko-core/src/dns.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dns.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-20 | Must | `crates/tenko-dns/tests/views.rs`<br>`crates/tenko/tests/acceptance_dns_views.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/views.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/name.rs`<br>`crates/tenko-core/src/dns/rrset.rs`<br>and 13 more |
+| DNS-21 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/lists.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/lists.rs`<br>`crates/tenko-dns/src/policy.rs`<br>and 6 more |
+| DNS-22 | Must | `crates/tenko/tests/acceptance_reverse.rs` | - | `crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/dns/mod.rs`<br>`crates/tenko-ipam/src/dns/reverse.rs`<br>`crates/tenko-ipam/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>and 5 more |
+| DNS-23 | Must | `crates/tenko-dns/tests/policy.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/cache.rs`<br>`crates/tenko-dns/src/forward.rs`<br>`crates/tenko-dns/src/policy.rs`<br>`crates/tenko/src/config.rs`<br>and 5 more |
+| DNS-24 | Must | `crates/tenko-core/tests/dns_model.rs` | - | `crates/tenko-core/src/dns.rs`<br>`crates/tenko-core/src/dns/rdata.rs`<br>`docs/adr/0017-dns-data-model-and-serving-path.md`<br>`docs/dns-contracts.md`<br>`docs/dns.md`<br>and 2 more |
+| DNS-25 | Could | - | - | `docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | DNS-26 | Should | - | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-dns/src/log.rs`<br>`crates/tenko-dns/src/querylog.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 3 more |
-| DNS-27 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/adr/0001-implementation-language.md`<br>`docs/adr/0009-dns-wire-format-and-udp-io.md`<br>`docs/plans/phase-2-plan.md` |
+| DNS-27 | Should | `crates/tenko/tests/acceptance_dns_exit.rs`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e13_dns_27_the_newest_m17_run_over_a_real_link_is_documented` | `bench/phase2-dns/results/2026-10-21-m17-real-link.md` | `docs/ARCHITECTURE.md`<br>`docs/adr/0001-implementation-language.md`<br>`docs/adr/0009-dns-wire-format-and-udp-io.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 | MIG-15 | Must | `crates/tenko/tests/dns_cli.rs` | - | `crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/dns/records.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/zone/export.rs`<br>`crates/tenko-dns/src/zone/import.rs`<br>and 10 more |
 | OPS-06 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 1 more |
-| OPS-09 | Should | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns/model.rs`<br>`crates/tenko-dns/src/dnssec/health.rs`<br>`crates/tenko-dns/src/dnssec/mod.rs`<br>`docs/MIGRATION.md`<br>`docs/adr/0018-dnssec-key-handling-and-signing.md`<br>and 4 more |
+| OPS-09 | Should | `crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns/model.rs`<br>`crates/tenko-dns/src/dnssec/health.rs`<br>`crates/tenko-dns/src/dnssec/mod.rs`<br>`docs/MIGRATION.md`<br>`docs/adr/0018-dnssec-key-handling-and-signing.md`<br>and 5 more |
 | OPS-25 | Must | `crates/tenko/tests/upgrade_modules.rs` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/lib.rs`<br>`crates/tenko-api/src/modules.rs`<br>`crates/tenko-api/src/routes/dns.rs`<br>`crates/tenko-api/src/routes/mod.rs`<br>and 15 more |
 | OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>and 19 more |
 
@@ -47,7 +47,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 
 | ID | Check | Requirements | Tests |
 |---|---|---|---|
-| E13 | dnsperf and flamethrower numbers are documented for one Tenko node: per core on loopback and from a load generator on another host over a real link, UDP and TCP, with and without metrics | DNS-27, OPS-21 | - |
+| E13 | dnsperf and flamethrower numbers are documented for one Tenko node: per core on loopback and from a load generator on another host over a real link, UDP and TCP, with and without metrics | DNS-27, OPS-21 | `crates/tenko/tests/acceptance_dns_exit.rs`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e13_dns_27_the_newest_m17_run_over_a_real_link_is_documented`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e13_ops_21_the_link_figures_are_recorded_with_and_without_metrics`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e21_ops_21_the_newest_m22_metrics_cost_over_the_link_passes` |
 | E14 | A home network sends all of its queries through Tenko: the owner's clients resolve through a Tenko node that forwards AD zones to the domain controllers and everything else to a DoT upstream, with a blocklist active | DNS-02, DNS-15, DNS-21, DNS-23, TGL-14, TGL-22 | - |
 | E15 | BIND as secondary receives Tenko's zones (AXFR, IXFR, NOTIFY, TSIG, XoT) and Tenko as secondary receives a BIND zone; Windows DNS as primary of one zone into Tenko on the owner's go | DNS-09, DNS-19, TGL-10 | - |
 | E16 | Fuzz targets for the wire format, the zone file parser and TSIG run in the weekly fuzz smoke | API-14, API-15 | - |
@@ -55,7 +55,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | E18 | An RFC 2136 update signed with TSIG from `nsupdate` is applied through the store and answered from the index, refused without the key or outside the ACL, and answered SERVFAIL when the store refuses the write (the no-quorum path, exercised with the store's test hook on one node) | DNS-11, TGL-09 | `crates/tenko/tests/acceptance_dns_update.rs`<br>`crates/tenko/tests/acceptance_dns_update.rs::updates_are_applied_through_the_store_and_answered_from_the_index` |
 | E19 | A zone signed by Tenko (NSEC and NSEC3) validates in an external validator, a ZSK rollover completes without a validation failure, and CDS and CDNSKEY are published for the KSK | DNS-12, OPS-09 | `crates/tenko/tests/acceptance_dnssec.rs` |
 | E20 | DoT and DoH are served with the certificate of the configured TLS mode and answer `kdig`; RRL slows a reflection pattern; ANY answers are minimal; a TXT over 255 bytes round-trips split | DNS-14, DNS-17, DNS-18, DNS-24, TGL-11 | `crates/tenko/tests/acceptance_dns_tls.rs` |
-| E21 | Idle RSS below 100 MB with all Phase 1 roles plus `dns` serving the home zones and a 10,000-entry cache, on the musl binary, one node; metrics overhead on the query path below 2 percent | OPS-15, OPS-21 | - |
+| E21 | Idle RSS below 100 MB with all Phase 1 roles plus `dns` serving the home zones and a 10,000-entry cache, on the musl binary, one node; metrics overhead on the query path below 2 percent | OPS-15, OPS-21 | `crates/tenko/tests/acceptance_dns_exit.rs`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e21_ops_15_the_newest_m23_idle_rss_with_every_role_and_a_full_cache_passes`<br>`crates/tenko/tests/acceptance_dns_exit.rs::e21_ops_21_the_newest_m22_metrics_cost_over_the_link_passes` |
 
 ## Uncovered
 
@@ -76,7 +76,6 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 - DNS-19 (Must)
 - DNS-25 (Could)
 - DNS-26 (Should)
-- DNS-27 (Should)
 - OPS-06 (Must)
 
 ### No test, measurement or document

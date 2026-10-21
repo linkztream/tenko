@@ -14,18 +14,30 @@
 #
 # Flamethrower is not installed by this repository. Build or install it on the load host
 # (https://github.com/DNS-OARC/flamethrower, binary "flame") and check the flags below against
-# `flame -h` of that version: this script was written from the documented 0.11 command line
-# and has not been run. If a spelling differs, pass the corrected generator arguments with
-# --generator-args (they replace the default "-g file -f NAMES").
+# `flame -h` of that version. Run with flamethrower 0.12.0 for M17 (2026-10-21). If a
+# spelling differs, pass the corrected generator arguments with --generator-args (they
+# replace the default "-g file -f NAMES").
 #
 # The query file is the one zonegen writes (queries.txt, "name TYPE" per line):
 #   phase2-dns zonegen --records 1000000 --out-dir data/1000000
+# Give flame a file of about 100,000 lines (`head -n 100000 queries.txt`): flame 0.12 reads
+# the whole file before it sends and its time limit runs from before the read, so with the
+# million lines of queries.txt a 30 s run stops after the first burst.
 #
 # What one step does:
-#   flame -p PORT -P PROTOCOL -c TCOUNT -q QCOUNT -d DELAY -l DURATION [-Q QPS_PER_GENERATOR]
-#         -o OUT.json -g file -f NAMES SERVER
-# The steps are total rates (--rates); a total rate is split evenly over --generators, and 0
-# runs without a rate limit, flamethrower's own pacing (the saturation run).
+#   flame -p PORT -P PROTOCOL -c TCOUNT -q QCOUNT -l DURATION [-Q QPS] -o OUT.json
+#         -g file -f NAMES SERVER
+# The steps are total rates (--rates); flame's -Q is the rate of the whole process (checked
+# with 0.12.0: -c 10 -Q 1000 sends 1,000 per second), and 0 runs without a rate limit,
+# flamethrower's own pacing (the saturation run: --generators times --batch queries per
+# millisecond at most, from one thread).
+#
+# What flame 0.12.0 showed against Tenko (M17, results/2026-10-21-m17-real-link.md): over
+# TCP it opens a connection per burst, so its TCP rate measures connection set-up; over DoT
+# every answer waits about 40 ms (dnsperf over DoT against the same node: 0.1 ms), the
+# pattern of a small write held back until a delayed acknowledgement; over DoH it gets no
+# answer at all, while curl and h2load get every answer from the same listener. The DoT
+# and DoH figures of M17 therefore come from dnsperf (DoT) and h2load (DoH).
 #
 # Fields to record for the results file: from flamethrower's summary and its JSON output
 #   total requests sent, total responses received, timeouts and errors, average latency with
@@ -75,7 +87,7 @@ while [ $# -gt 0 ]; do
     --allow-dynamic) ALLOW_DYNAMIC=1; shift ;;
     --extra) EXTRA="$2"; shift 2 ;;
     --out-dir) OUTDIR="$2"; shift 2 ;;
-    -h|--help) sed -n '2,56p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,65p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -97,19 +109,37 @@ note "load: generators=$GENERATORS batch=$BATCH duration=${DURATION}s rates=[$RA
 note "the load host is not the server host; record the server host and the link in the results file"
 check_linkage "$SERVER_BINARY" "$ALLOW_DYNAMIC"
 
+printf 'rate\tsent\treceived\ttimeouts\tqps\tavg_latency_ms\tmax_latency_ms\tnoerror\tnxdomain\ttcp_connections\n' > "$OUTDIR/summary.tsv"
 for rate in $RATES; do
   out="$OUTDIR/step-$PROTOCOL-rate$rate"
   args=(-p "$PORT" -P "$PROTOCOL" -c "$GENERATORS" -q "$BATCH" -l "$DURATION" -o "$out.json")
-  if [ "$rate" != 0 ]; then
-    # Flamethrower paces each generator on its own: split the total rate.
-    args+=(-Q "$(( (rate + GENERATORS - 1) / GENERATORS ))")
-  fi
+  [ "$rate" = 0 ] || args+=(-Q "$rate")
   # shellcheck disable=SC2206
   args+=($GENARGS)
   # shellcheck disable=SC2206
   [ -z "$EXTRA" ] || args+=($EXTRA)
   say "step: rate=$rate  flame ${args[*]} $SERVER"
   flame "${args[@]}" "$SERVER" > "$out.txt" 2>&1 || note "flame exited with an error at rate $rate (see $out.txt)"
+  # The summary's "avg resp" is not a number in 0.12.0, so the mean latency is the mean of
+  # the per-second lines weighted by their answers; the rate is the answers over --duration.
+  awk -v rate="$rate" -v secs="$DURATION" '
+    /^[0-9.]+s: send:/ {
+      if (match($0, / recv: [0-9]+/)) { r = substr($0, RSTART + 7, RLENGTH - 7) + 0 } else r = 0
+      if (match($0, /resp: [0-9.]+\/[0-9.]+\/[0-9.]+ms/)) {
+        split(substr($0, RSTART + 6, RLENGTH - 8), m, "/"); w += r * m[2]; n += r; if (m[3] > mx) mx = m[3]
+      }
+    }
+    /^total sent/  { sent = $4 }
+    /^total rcvd/  { rcvd = $4 }
+    /^timeouts/    { to = $3 }
+    /^tcp conn/    { tcp = $4 }
+    /NOERROR:/     { ne = $2 }
+    /NXDOMAIN:/    { nx = $2 }
+    END {
+      printf "%s\t%s\t%s\t%s\t%.0f\t%s\t%s\t%s\t%s\t%s\n", rate, sent, rcvd, to, rcvd / secs,
+        (n > 0 ? sprintf("%.3f", w / n) : ""), mx, ne, nx, tcp
+    }' "$out.txt" >> "$OUTDIR/summary.tsv"
 done
 
-say "raw output: $OUTDIR (one .txt summary and one .json per step)"
+say "raw output: $OUTDIR (one .txt summary and one .json per step, summary.tsv)"
+cat "$OUTDIR/summary.tsv"

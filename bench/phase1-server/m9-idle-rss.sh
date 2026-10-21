@@ -14,9 +14,20 @@
 #                  [--interval-secs 30] [--workdir DIR] [--outdir DIR]
 #                  [--kek platform|file] [--keep-data]
 #                  [--roles controller[,probe][,dns]] [--dns-port 15353]
+#                  [--dns-forwarder ADDR[:PORT]] [--before-idle FILE] [--after-idle FILE]
 #
 # With the dns role the node answers on 127.0.0.1:<dns-port> (the default port 53 needs
-# privileges); every other `[dns]` key keeps its default.
+# privileges); every other `[dns]` key keeps its default. --dns-forwarder sets `[dns]
+# forwarders` to that one upstream, so that the node's cache can be filled (M23, OPS-15
+# with the DNS module).
+#
+# --before-idle and --after-idle name a bash script run after the IPAM data set (before
+# the idle phase) and after the last idle sample (before the stop). The script gets
+# M9_BINARY, M9_DATA (the data directory), M9_DNS (the role's address), M9_PID (the
+# server) and TENKO_CREDENTIALS (the logged-in client) in its environment; every line it
+# prints goes into the summary. M23 uses them to load the home zones and to fill the cache
+# to its bound before the idle phase, and to read the cache once more after it
+# (the m23 phase of bench/phase2-dns/scripts/run-m17-remote.sh). The idle samples are taken as without them.
 #
 # Put the work directory on a fast disk (default: a new directory under /tmp).
 #
@@ -39,6 +50,9 @@ KEK=platform
 KEEP=0
 ROLES=controller
 DNS_PORT=15353
+DNS_FORWARDER=""
+BEFORE_IDLE=""
+AFTER_IDLE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -53,7 +67,10 @@ while [ $# -gt 0 ]; do
     --keep-data) KEEP=1; shift ;;
     --roles) ROLES="$2"; shift 2 ;;
     --dns-port) DNS_PORT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    --dns-forwarder) DNS_FORWARDER="$2"; shift 2 ;;
+    --before-idle) BEFORE_IDLE="$2"; shift 2 ;;
+    --after-idle) AFTER_IDLE="$2"; shift 2 ;;
+    -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -62,6 +79,9 @@ done
 [ -x "$BINARY" ] || { echo "not executable: $BINARY" >&2; exit 2; }
 [ "$PREFIXES" -ge 6 ] || { echo "--prefixes must be at least 6" >&2; exit 2; }
 [ "$KEK" = platform ] || [ "$KEK" = file ] || { echo "--kek is platform or file" >&2; exit 2; }
+for hook in "$BEFORE_IDLE" "$AFTER_IDLE"; do
+  [ -z "$hook" ] || [ -r "$hook" ] || { echo "hook script not readable: $hook" >&2; exit 2; }
+done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -154,9 +174,23 @@ note "roles: $ROLES"
       echo
       echo '[dns]'
       echo "listen = [\"127.0.0.1:$DNS_PORT\"]"
+      [ -z "$DNS_FORWARDER" ] || echo "forwarders = [\"$DNS_FORWARDER\"]"
       ;;
   esac
 } > "$CFG"
+[ -z "$DNS_FORWARDER" ] || note "dns forwarder: $DNS_FORWARDER"
+
+# Runs a hook script (--before-idle, --after-idle); its output goes into the summary.
+run_hook() {
+  local what="$1" file="$2" line rc
+  [ -n "$file" ] || return 0
+  note "hook $what: $file"
+  M9_BINARY="$BINARY" M9_DATA="$DATA" M9_DNS="127.0.0.1:$DNS_PORT" M9_PID="$SERVER_PID" \
+    bash "$file" > "$WORKDIR/hook.out" 2>&1
+  rc=$?
+  while IFS= read -r line; do note "  $line"; done < "$WORKDIR/hook.out"
+  [ "$rc" -eq 0 ] || die "hook $what failed (status $rc)"
+}
 
 # Throwaway administrator PIN for this run (Home profile: digits only). Never printed.
 new_pin() { shuf -i 0-9 -n 6 | tr -d '\n'; }
@@ -237,6 +271,12 @@ sample load-end
 note "created $((${#CIDRS[@]} - failures)) of ${#CIDRS[@]} prefixes in $LOAD_SECS s ($failures failures); server lists $listed"
 note "peak during start-up and data creation: VmHWM $LAST_HWM MiB (now RSS $LAST_RSS MiB, anon $LAST_ANON MiB, file $LAST_FILE MiB)"
 LOAD_HWM=$LAST_HWM
+if [ -n "$BEFORE_IDLE" ]; then
+  run_hook before-idle "$BEFORE_IDLE"
+  sample hook
+  note "after the hook: VmHWM $LAST_HWM MiB (now RSS $LAST_RSS MiB, anon $LAST_ANON MiB, file $LAST_FILE MiB)"
+  LOAD_HWM=$LAST_HWM
+fi
 
 # ---- idle ---------------------------------------------------------------------------------
 note "idle phase: $IDLE_SECS s, one sample every $INTERVAL s"
@@ -256,6 +296,7 @@ done
 FINAL_RSS=$LAST_RSS
 sample idle-end
 END_HWM=$LAST_HWM
+run_hook after-idle "$AFTER_IDLE"
 
 STATS=$(sort -n "$IDLE_FILE" | awk '{ v[NR] = $1 } END {
   m = (NR % 2) ? v[(NR + 1) / 2] : (v[NR / 2] + v[NR / 2 + 1]) / 2
