@@ -2708,9 +2708,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -3055,7 +3055,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -3063,7 +3063,7 @@ dependencies = [
 
 [[package]]
 name = "tenko"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3124,7 +3124,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-api"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -3166,7 +3166,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-auth"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3203,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-cluster"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3288,7 +3288,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-hass"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3304,7 +3304,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-proxmox"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -3319,7 +3319,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-unifi"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -3337,11 +3337,11 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-windows"
-version = "0.0.1"
+version = "0.0.2"
 
 [[package]]
 name = "tenko-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3361,11 +3361,11 @@ dependencies = [
 
 [[package]]
 name = "tenko-dhcp"
-version = "0.0.1"
+version = "0.0.2"
 
 [[package]]
 name = "tenko-dns"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3408,7 +3408,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-ipam"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3440,7 +3440,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-jobs"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3460,11 +3460,11 @@ dependencies = [
 
 [[package]]
 name = "tenko-migrate"
-version = "0.0.1"
+version = "0.0.2"
 
 [[package]]
 name = "tenko-scan"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3494,7 +3494,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-store"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3513,7 +3513,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-vault"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "aws-lc-rs",

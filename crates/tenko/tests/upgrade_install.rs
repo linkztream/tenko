@@ -2,7 +2,7 @@
 //! mock release source serves a manifest and the release file; the test is the service
 //! manager that starts the server again when it exits with status 12.
 //!
-//! The release is this same build installed as version 0.0.2: debug builds started with
+//! The release is this same build installed as the next patch version: debug builds started with
 //! `TENKO_TEST_VERSION_FROM_LAYOUT=1` take their version from the layout directory they run
 //! from. Release builds ignore the variable.
 
@@ -21,7 +21,7 @@ use std::{
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::Command,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     thread,
     time::{Duration, Instant},
 };
@@ -31,8 +31,15 @@ use serve_support::{Node, Proc, api::Api, run, wait_for_setup_token};
 use sha2::{Digest as _, Sha256};
 use tenko_api::dto::release::current_platform;
 
-/// The version the test installs.
-const NEW: &str = "0.0.2";
+/// The version of this build, which the node runs before the install.
+const OLD: &str = env!("CARGO_PKG_VERSION");
+
+/// The version the test installs: this build's version with the patch number raised by one.
+static NEW: LazyLock<String> = LazyLock::new(|| {
+    let (rest, patch) = OLD.rsplit_once('.').expect("a SemVer version");
+    let patch: u64 = patch.parse().expect("a numeric patch version");
+    format!("{rest}.{}", patch + 1)
+});
 
 /// How long an install may take until the server exits for its restart.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -43,7 +50,7 @@ fn binary_name() -> &'static str {
 
 fn asset_name() -> String {
     let extension = if cfg!(windows) { ".exe" } else { "" };
-    format!("tenko-{NEW}-{}{extension}", current_platform())
+    format!("tenko-{}-{}{extension}", *NEW, current_platform())
 }
 
 /// A release source on the loopback interface: `/releases.json` and the release file.
@@ -100,7 +107,7 @@ fn serve_one(mut stream: TcpStream, manifest: &[u8], file: &[u8]) {
     let _ = stream.flush();
 }
 
-/// The manifest that offers this build as version 0.0.2.
+/// The manifest that offers this build as the next patch version.
 fn manifest(file: &[u8]) -> Vec<u8> {
     let sha256 = Sha256::digest(file)
         .iter()
@@ -113,7 +120,7 @@ fn manifest(file: &[u8]) -> Vec<u8> {
         "schema": 1,
         "project": "tenko",
         "releases": [{
-            "version": NEW,
+            "version": *NEW,
             "date": "2026-10-10",
             "notes": "### Fixed\n\n- A release for the install test.",
             "security": true,
@@ -207,15 +214,15 @@ fn installed_node(source: &ReleaseSource) -> (Node, Proc, Api) {
     (node, server, api)
 }
 
-/// Checks the source and starts the install of 0.0.2; returns the job id.
+/// Checks the source and starts the install of the next version; returns the job id.
 fn install(api: &Api) -> String {
     // A new manifest is one event on the `admin` topic, which the UI's notice follows.
     let mut events = api.events("topics=admin");
     let status = api.post("/system/updates/check", &json!({})).ok();
     let event = events.next_matching(Duration::from_secs(30), |event| event.event == "admin");
     assert!(event.is_some(), "no admin event for the new manifest");
-    assert_eq!(status["running"], "0.0.1", "{status}");
-    assert_eq!(status["latest"], NEW, "{status}");
+    assert_eq!(status["running"], OLD, "{status}");
+    assert_eq!(status["latest"], *NEW, "{status}");
     assert_eq!(status["update_available"], true);
     assert_eq!(status["security"], true);
     assert_eq!(status["install"]["policy"], "ui");
@@ -227,9 +234,12 @@ fn install(api: &Api) -> String {
     let notes = status["releases"][0]["notes"].as_str().unwrap_or_default();
     assert!(notes.contains("install test"), "{notes}");
     let started = api
-        .post("/system/updates/install", &json!({ "version": NEW }))
+        .post(
+            "/system/updates/install",
+            &json!({ "version": NEW.as_str() }),
+        )
         .expect(202);
-    assert_eq!(started["version"], NEW);
+    assert_eq!(started["version"], *NEW);
     started["job_id"].as_str().expect("a job id").to_owned()
 }
 
@@ -270,11 +280,11 @@ fn a_release_is_installed_from_the_ui_and_confirmed() {
     let (node, mut server, api) = installed_node(&source);
     let job = install(&api);
     exits_for_restart(&mut server);
-    assert_eq!(current_version(&node), NEW);
+    assert_eq!(current_version(&node), *NEW);
     assert!(
         node.data_dir()
             .join("updates")
-            .join(NEW)
+            .join(NEW.as_str())
             .join("release.json")
             .is_file()
     );
@@ -285,18 +295,21 @@ fn a_release_is_installed_from_the_ui_and_confirmed() {
     let mut api = Api::new(&node);
     api.login_password();
     let status = api.get("/system/updates").ok();
-    assert_eq!(status["running"], NEW, "{status}");
+    assert_eq!(status["running"], *NEW, "{status}");
     assert_eq!(status["update_available"], false);
     assert_eq!(status["attempt"]["state"], "confirmed", "{status}");
-    assert_eq!(status["attempt"]["from"], "0.0.1");
+    assert_eq!(status["attempt"]["from"], OLD);
     assert_eq!(status["attempt"]["job_id"], job.as_str());
     let finished = api.get(&format!("/jobs/{job}")).ok();
     assert_eq!(finished["job"]["state"], "succeeded", "{finished}");
     let record = wait_for_audit(&api, "sys.update.confirm");
-    assert_eq!(record["draft"]["details"]["context"]["to"], NEW, "{record}");
+    assert_eq!(
+        record["draft"]["details"]["context"]["to"], *NEW,
+        "{record}"
+    );
     // What is new for the administrator: they saw nothing before, so nothing is shown.
     let whats_new = api.get("/system/updates/whats-new").ok();
-    assert_eq!(whats_new["running"], NEW);
+    assert_eq!(whats_new["running"], *NEW);
     assert_eq!(whats_new["show"], false);
     server.stop().assert_code(0);
 }
@@ -309,7 +322,7 @@ fn a_release_that_does_not_start_is_switched_back() {
     let (node, mut server, api) = installed_node(&source);
     install(&api);
     exits_for_restart(&mut server);
-    assert_eq!(current_version(&node), NEW);
+    assert_eq!(current_version(&node), *NEW);
 
     // The new version cannot bind its port: it switches back and asks for a restart.
     let blocker = TcpListener::bind(("127.0.0.1", node.port)).expect("hold the server port");
@@ -324,14 +337,14 @@ fn a_release_that_does_not_start_is_switched_back() {
         outcome.diagnostics()
     );
     drop(blocker);
-    assert_eq!(current_version(&node), "0.0.1");
+    assert_eq!(current_version(&node), OLD);
 
     let mut server = serve_from_layout(&node);
     wait_ready(&server);
     let mut api = Api::new(&node);
     api.login_password();
     let status = api.get("/system/updates").ok();
-    assert_eq!(status["running"], "0.0.1", "{status}");
+    assert_eq!(status["running"], OLD, "{status}");
     assert_eq!(status["attempt"]["state"], "rolled_back", "{status}");
     assert_eq!(status["attempt"]["reason"], "start.api.bind", "{status}");
     assert_eq!(
@@ -360,7 +373,7 @@ fn a_release_with_the_wrong_checksum_is_not_switched_to() {
         finished["job"]["error"]["code"], "update.checksum_mismatch",
         "{finished}"
     );
-    assert_eq!(current_version(&node), "0.0.1");
+    assert_eq!(current_version(&node), OLD);
     assert!(server.is_running(), "a failed install does not restart");
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
@@ -379,7 +392,7 @@ fn a_release_with_the_wrong_checksum_is_not_switched_to() {
         !node
             .data_dir()
             .join("updates")
-            .join(NEW)
+            .join(NEW.as_str())
             .join(binary_name())
             .exists(),
         "a file that does not match is not kept"
@@ -400,7 +413,7 @@ fn without_verifiable_signatures_no_release_is_installed() {
         finished["job"]["error"]["code"], "update.signature_unverified",
         "{finished}"
     );
-    assert_eq!(current_version(&node), "0.0.1");
+    assert_eq!(current_version(&node), OLD);
     assert!(server.is_running(), "a refused release does not restart");
     server.stop().assert_code(0);
 }

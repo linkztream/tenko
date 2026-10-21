@@ -1,6 +1,6 @@
 [package]
 name = "tenko-migrate"
-version = "0.0.1"
+version = "0.0.2"
 description = "Plan, apply and verify migrations over connectors"
 edition.workspace = true
 rust-version.workspace = true

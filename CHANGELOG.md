@@ -166,6 +166,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Changed
 
+- The version is 0.0.2 (every crate, the UI package and the OpenAPI document), the first version a node can upgrade to from 0.0.1 through the installer or the updates page.
 - Switching to the Hardened profile, or setting the audit export to `required`, is refused with 409 `audit.export.required` until at least one export sink is enabled; the refusal is audited like the PIN coupling rule.
 - The API rate limiter and the login throttle count per controller: behind a load balancer over several controllers a client gets that many times the configured rate and free sign-in attempts before the replicated account lock takes over.
 - The API names the health of a connector's remote system `RemoteHealth`, apart from the liveness answer of the health route, so generated clients see the three health values.

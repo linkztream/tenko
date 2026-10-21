@@ -1,6 +1,6 @@
 [package]
 name = "tenko-cluster"
-version = "0.0.1"
+version = "0.0.2"
 description = "Node-to-node gRPC over mutual TLS, enrolment and the internal CA"
 edition.workspace = true
 rust-version.workspace = true
