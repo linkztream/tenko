@@ -538,37 +538,37 @@ Document changes the decisions imply (the lead's files, proposed here): DHCP-07 
 **P3-Q12. Classes and policies: conditions in the Windows shape, or an expression language?**
 - Options: (a) classes as named matches and policies as ordered AND or OR conditions with an action (section 2.4); (b) Kea's expression language for classes; (c) only vendor class, user class and MAC wildcard, no policies.
 - Trade-offs: (a) covers DHCP-03 and what Windows policies express, maps from the Phase 4 Windows export and onto Kea's `test` expressions, and compiles to a few comparisons. (b) is the most expressive and needs a parser, a fuzz target and an evaluator on the DORA path, and a UI nobody can use without the manual. (c) is too little for PXE by architecture and for option 82 policies.
-- Recommendation: (a). Recommended; the owner decides on 2026-10-22. Needed before: WP7.0.
+- Recommendation: (a). Decided by the owner on 2026-10-22: (a). Needed before: WP7.0.
 
 **P3-Q13. Lease history: where and how long?**
 - Options: (a) a bounded `dhcp.history` table in the store with a retention per profile (Home 30 days, Standard 90, Hardened by policy with export, Lab 7) and a toggle row in SECURITY-PROFILES.md; (b) a node-local file like the query log; (c) no history beyond the IPAM observation facts.
 - Trade-offs: (a) follows P3-Q1 (one durability story), is in the backup and is read through the API with a cursor; the cost is personal data in the replicated store, bounded by the retention. (b) keeps the data on the node and needs its own backup step, which P3-Q1 avoided. (c) misses DHCP-07's lease history and the "who had this address on Tuesday" question.
-- Recommendation: (a). Recommended; the owner decides on 2026-10-22. Needed before: WP7.2.
+- Recommendation: (a). Decided by the owner on 2026-10-22: (a). Needed before: WP7.2.
 
 **P3-Q14. What does the role answer while the store refuses a lease write?**
 - Options: (a) answer a renewal of an unexpired lease with the time it still has (no extension, nothing written), drop new requests (the client retries), report the state; (b) answer nothing at all until the store accepts; (c) answer from memory and write later (the asynchronous model of P3-Q1's fallback).
 - Trade-offs: (a) keeps every client that has an address working through a short outage and never promises more than is durable; new clients wait. (b) is the simplest and turns a short store outage into renewals that fail and clients that drop their addresses at expiry. (c) keeps serving fully but is the fallback model the owner reserved for poor measurements.
-- Recommendation: (a). On one node this path runs only on a disk failure or the test hook; in Phase 5 it is the quorum-loss behaviour until the failover protocol takes over. Recommended; the owner decides on 2026-10-22. Needed before: WP7.2.
+- Recommendation: (a). On one node this path runs only on a disk failure or the test hook; in Phase 5 it is the quorum-loss behaviour until the failover protocol takes over. Decided by the owner on 2026-10-22: (a). Needed before: WP7.2.
 
 **P3-Q15. Where does the fingerprint knowledge come from?**
 - Options: (a) a rule table written in the project from captured requests of common systems (the lab clients, the owner's devices with their consent, published descriptions of client behaviour), offline, small and testable; (b) a fingerprint database or an online lookup service; (c) no OS guess, only the vendor class in the vendor field.
 - Trade-offs: (a) is honest about coverage (common systems, families rather than builds), has no licence question and no outbound call. (b) has wide coverage and comes with licence terms or an online dependency that the Hardened profile would refuse. (c) does not meet DHCP-14.
-- Recommendation: (a), with the confidence field showing how strong a match is. Recommended; the owner decides on 2026-10-22. Needed before: WP8.2.
+- Recommendation: (a), with the confidence field showing how strong a match is. Decided by the owner on 2026-10-22: (a), a project-written table. p0f's signature file was considered as a seed and set aside: it describes TCP/IP stacks, not DHCP requests (the scanner's `os_fingerprint` is where such data would belong), it is LGPL-2.1 and unmaintained since 2016; a better source may replace the owner's decision later. Needed before: WP8.2.
 
 **P3-Q16. How deep does PXE go in Phase 3?**
 - Options: (a) the boot options per architecture, iPXE chain detection, UEFI HTTP boot and PXELINUX options in WP8.4, with ProxyDHCP on port 4011 as the package's last item; (b) the same without ProxyDHCP, which moves to Phase 5; (c) options 66 and 67 only.
 - Trade-offs: (a) meets DHCP-05 as written; ProxyDHCP matters where another server hands out addresses or clients use PXE boot-server discovery, and costs a few builder-days and a lab case. (b) saves those days; DHCP-05 would then be partial. (c) breaks UEFI clients, which need a different boot file than BIOS clients.
-- Recommendation: (a), with ProxyDHCP dropped to (b) only if WP8.4 runs long. Recommended; the owner decides on 2026-10-22. Needed before: WP8.4.
+- Recommendation: (a), with ProxyDHCP dropped to (b) only if WP8.4 runs long. Decided by the owner on 2026-10-22: (a). Needed before: WP8.4.
 
 **P3-Q17. What does the Kea export contain?**
 - Options: (a) Dhcp4 and Dhcp6 configurations with subnets, pools, reservations, options and definitions, shared networks, client classes translated from the policies, plus the leases as memfile CSV and a loss report; (b) the configuration only; (c) (a) plus a `kea-dhcp-ddns` configuration.
 - Trade-offs: (a) is a working exit: Kea starts with the configuration and keeps the clients' addresses. (b) loses every dynamic lease at the switch. (c) needs the DNS side to be a server Kea's DDNS daemon can update, which is the operator's choice after leaving.
-- Recommendation: (a), with the DDNS settings as comments in the loss report. Recommended; the owner decides on 2026-10-22. Needed before: WP9.3.
+- Recommendation: (a), with the DDNS settings as comments in the loss report. Decided by the owner on 2026-10-22: (a). Needed before: WP9.3.
 
 **P3-Q18. The carried UniFi items: DHCP relay verification and SSID writes?**
 - Options: (a) the relay is set and checked by hand in the cut-over runbook (the classic API shows no relay targets to verify, Phase 1 deviation 47); SSID writes stay out until a move needs them; (b) a connector package for both in Slice 8; (c) relay verification through a test request from the probe instead of the controller's API.
 - Trade-offs: (a) costs nothing and E23 needs only four relay settings once. (b) spends a builder on a vendor API that may not show what is needed. (c) is a real check that needs a probe in each network, which the reference environment has (SCAN-01): a DHCP INFORM from the probe through the gateway shows the relay works.
-- Recommendation: (a), with (c) as a small addition to WP8.7 if the probes are in place. Recommended; the owner decides on 2026-10-22. Needed before: WP8.7.
+- Recommendation: (a), with (c) as a small addition to WP8.7 if the probes are in place. Decided by the owner on 2026-10-22: (a) with (c). Needed before: WP8.7.
 
 ## 8. Risks
 
