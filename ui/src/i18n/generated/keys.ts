@@ -1129,13 +1129,19 @@ export type MessageKey =
   | "dhcp.classes.sub"
   | "dhcp.classes.title"
   | "dhcp.col.action"
+  | "dhcp.col.address"
   | "dhcp.col.classes"
+  | "dhcp.col.client_id"
+  | "dhcp.col.client_mac"
   | "dhcp.col.code"
   | "dhcp.col.condition"
   | "dhcp.col.description"
   | "dhcp.col.enabled"
+  | "dhcp.col.ends"
+  | "dhcp.col.event"
   | "dhcp.col.filter_kind"
   | "dhcp.col.first"
+  | "dhcp.col.host_name"
   | "dhcp.col.interface"
   | "dhcp.col.last"
   | "dhcp.col.lease"
@@ -1145,15 +1151,21 @@ export type MessageKey =
   | "dhcp.col.matches"
   | "dhcp.col.name"
   | "dhcp.col.network"
+  | "dhcp.col.node"
   | "dhcp.col.note"
   | "dhcp.col.order"
   | "dhcp.col.pools"
   | "dhcp.col.range"
+  | "dhcp.col.relay"
+  | "dhcp.col.reserved"
   | "dhcp.col.scope"
   | "dhcp.col.scopes"
   | "dhcp.col.server_managed"
   | "dhcp.col.size"
   | "dhcp.col.space"
+  | "dhcp.col.state"
+  | "dhcp.col.state_after"
+  | "dhcp.col.time"
   | "dhcp.col.type"
   | "dhcp.col.used_by"
   | "dhcp.col.utilization"
@@ -1181,7 +1193,9 @@ export type MessageKey =
   | "dhcp.defs.empty"
   | "dhcp.do.delete"
   | "dhcp.do.edit"
+  | "dhcp.do.history"
   | "dhcp.do.open"
+  | "dhcp.do.refresh"
   | "dhcp.effective.client_id"
   | "dhcp.effective.col.level"
   | "dhcp.effective.empty"
@@ -1191,6 +1205,15 @@ export type MessageKey =
   | "dhcp.effective.reservation"
   | "dhcp.effective.show"
   | "dhcp.effective.title"
+  | "dhcp.event.conflict"
+  | "dhcp.event.declined"
+  | "dhcp.event.expired"
+  | "dhcp.event.granted"
+  | "dhcp.event.rebound"
+  | "dhcp.event.reclaimed"
+  | "dhcp.event.released"
+  | "dhcp.event.renewed"
+  | "dhcp.example.addr"
   | "dhcp.example.mac"
   | "dhcp.example.mac_pattern"
   | "dhcp.exclusion.create"
@@ -1229,17 +1252,48 @@ export type MessageKey =
   | "dhcp.filters.note"
   | "dhcp.filters.sub"
   | "dhcp.filters.title"
+  | "dhcp.history.empty"
+  | "dhcp.history.empty_body"
+  | "dhcp.history.empty_filtered"
+  | "dhcp.history.empty_filtered_body"
+  | "dhcp.history.filters"
+  | "dhcp.history.lease_link"
+  | "dhcp.history.more"
+  | "dhcp.history.sub"
   | "dhcp.history.title"
   | "dhcp.join.and"
   | "dhcp.join.or"
   | "dhcp.lease.default"
+  | "dhcp.lease.history_link"
   | "dhcp.lease.inherit"
   | "dhcp.lease.legend"
   | "dhcp.lease.max"
   | "dhcp.lease.min"
+  | "dhcp.lease.reason"
+  | "dhcp.lease.reason_help"
+  | "dhcp.lease.release"
+  | "dhcp.lease.release_body"
+  | "dhcp.lease.release_confirm"
+  | "dhcp.lease.release_title"
+  | "dhcp.lease.released"
+  | "dhcp.lease.reserved"
   | "dhcp.lease.server_now"
   | "dhcp.lease.unit"
   | "dhcp.lease.words"
+  | "dhcp.leases.empty"
+  | "dhcp.leases.empty_body"
+  | "dhcp.leases.empty_filtered"
+  | "dhcp.leases.empty_filtered_body"
+  | "dhcp.leases.filters"
+  | "dhcp.leases.more"
+  | "dhcp.leases.state.abandoned"
+  | "dhcp.leases.state.active"
+  | "dhcp.leases.state.backup"
+  | "dhcp.leases.state.expired"
+  | "dhcp.leases.state.free"
+  | "dhcp.leases.state.released"
+  | "dhcp.leases.state.reset"
+  | "dhcp.leases.sub"
   | "dhcp.leases.title"
   | "dhcp.level.host"
   | "dhcp.level.policy"
@@ -1247,6 +1301,25 @@ export type MessageKey =
   | "dhcp.level.scope"
   | "dhcp.level.server"
   | "dhcp.level.shared_network"
+  | "dhcp.lfilter.addr"
+  | "dhcp.lfilter.addr_exact"
+  | "dhcp.lfilter.addr_placeholder"
+  | "dhcp.lfilter.from"
+  | "dhcp.lfilter.kind"
+  | "dhcp.lfilter.kind_any"
+  | "dhcp.lfilter.mac"
+  | "dhcp.lfilter.mac_invalid"
+  | "dhcp.lfilter.name"
+  | "dhcp.lfilter.name_placeholder"
+  | "dhcp.lfilter.reset"
+  | "dhcp.lfilter.scope"
+  | "dhcp.lfilter.scope_any"
+  | "dhcp.lfilter.state"
+  | "dhcp.lfilter.state_any"
+  | "dhcp.lfilter.to"
+  | "dhcp.live.folded"
+  | "dhcp.live.hint"
+  | "dhcp.live.label"
   | "dhcp.match.add"
   | "dhcp.match.architecture"
   | "dhcp.match.circuit_id"
@@ -1472,6 +1545,19 @@ export type MessageKey =
   | "dhcp.state.off_body"
   | "dhcp.state.off_link"
   | "dhcp.state.off_title"
+  | "dhcp.strip.accepting"
+  | "dhcp.strip.commit"
+  | "dhcp.strip.label"
+  | "dhcp.strip.listeners"
+  | "dhcp.strip.not_dhcp_body"
+  | "dhcp.strip.not_dhcp_title"
+  | "dhcp.strip.not_serving"
+  | "dhcp.strip.probe_off"
+  | "dhcp.strip.probe_on"
+  | "dhcp.strip.refusing"
+  | "dhcp.strip.revision"
+  | "dhcp.strip.scopes"
+  | "dhcp.strip.serving"
   | "dhcp.term.add"
   | "dhcp.term.class"
   | "dhcp.term.class_label"
@@ -6019,9 +6105,13 @@ export interface MessageArgs {
   "dhcp.filter.deleted": { mac: string | number };
   "dhcp.filter.edit_title": { mac: string | number };
   "dhcp.filter.saved": { mac: string | number };
+  "dhcp.lease.release_body": { addr: string | number; mac: string | number };
+  "dhcp.lease.release_title": { addr: string | number };
+  "dhcp.lease.released": { addr: string | number };
   "dhcp.lease.server_now": { lease: string | number };
   "dhcp.lease.unit": { name: string | number };
   "dhcp.lease.words": { default: string | number; max: string | number; min: string | number };
+  "dhcp.live.folded": { count: number };
   "dhcp.match.architecture": { value: string | number };
   "dhcp.match.circuit_id": { value: string | number };
   "dhcp.match.client_id": { value: string | number };
@@ -6062,6 +6152,10 @@ export interface MessageArgs {
   "dhcp.scope.saved": { network: string | number };
   "dhcp.settings.effective": { value: string | number };
   "dhcp.settings.effective_days": { days: number };
+  "dhcp.strip.commit": { ms: string | number };
+  "dhcp.strip.listeners": { count: number };
+  "dhcp.strip.revision": { revision: string | number };
+  "dhcp.strip.scopes": { count: number };
   "dhcp.term.class": { name: string | number };
   "dhcp.term.not_class": { name: string | number };
   "dhcp.term.not_match": { match: string | number };
@@ -8036,13 +8130,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.classes.sub",
   "dhcp.classes.title",
   "dhcp.col.action",
+  "dhcp.col.address",
   "dhcp.col.classes",
+  "dhcp.col.client_id",
+  "dhcp.col.client_mac",
   "dhcp.col.code",
   "dhcp.col.condition",
   "dhcp.col.description",
   "dhcp.col.enabled",
+  "dhcp.col.ends",
+  "dhcp.col.event",
   "dhcp.col.filter_kind",
   "dhcp.col.first",
+  "dhcp.col.host_name",
   "dhcp.col.interface",
   "dhcp.col.last",
   "dhcp.col.lease",
@@ -8052,15 +8152,21 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.col.matches",
   "dhcp.col.name",
   "dhcp.col.network",
+  "dhcp.col.node",
   "dhcp.col.note",
   "dhcp.col.order",
   "dhcp.col.pools",
   "dhcp.col.range",
+  "dhcp.col.relay",
+  "dhcp.col.reserved",
   "dhcp.col.scope",
   "dhcp.col.scopes",
   "dhcp.col.server_managed",
   "dhcp.col.size",
   "dhcp.col.space",
+  "dhcp.col.state",
+  "dhcp.col.state_after",
+  "dhcp.col.time",
   "dhcp.col.type",
   "dhcp.col.used_by",
   "dhcp.col.utilization",
@@ -8088,7 +8194,9 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.defs.empty",
   "dhcp.do.delete",
   "dhcp.do.edit",
+  "dhcp.do.history",
   "dhcp.do.open",
+  "dhcp.do.refresh",
   "dhcp.effective.client_id",
   "dhcp.effective.col.level",
   "dhcp.effective.empty",
@@ -8098,6 +8206,15 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.effective.reservation",
   "dhcp.effective.show",
   "dhcp.effective.title",
+  "dhcp.event.conflict",
+  "dhcp.event.declined",
+  "dhcp.event.expired",
+  "dhcp.event.granted",
+  "dhcp.event.rebound",
+  "dhcp.event.reclaimed",
+  "dhcp.event.released",
+  "dhcp.event.renewed",
+  "dhcp.example.addr",
   "dhcp.example.mac",
   "dhcp.example.mac_pattern",
   "dhcp.exclusion.create",
@@ -8136,17 +8253,48 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.filters.note",
   "dhcp.filters.sub",
   "dhcp.filters.title",
+  "dhcp.history.empty",
+  "dhcp.history.empty_body",
+  "dhcp.history.empty_filtered",
+  "dhcp.history.empty_filtered_body",
+  "dhcp.history.filters",
+  "dhcp.history.lease_link",
+  "dhcp.history.more",
+  "dhcp.history.sub",
   "dhcp.history.title",
   "dhcp.join.and",
   "dhcp.join.or",
   "dhcp.lease.default",
+  "dhcp.lease.history_link",
   "dhcp.lease.inherit",
   "dhcp.lease.legend",
   "dhcp.lease.max",
   "dhcp.lease.min",
+  "dhcp.lease.reason",
+  "dhcp.lease.reason_help",
+  "dhcp.lease.release",
+  "dhcp.lease.release_body",
+  "dhcp.lease.release_confirm",
+  "dhcp.lease.release_title",
+  "dhcp.lease.released",
+  "dhcp.lease.reserved",
   "dhcp.lease.server_now",
   "dhcp.lease.unit",
   "dhcp.lease.words",
+  "dhcp.leases.empty",
+  "dhcp.leases.empty_body",
+  "dhcp.leases.empty_filtered",
+  "dhcp.leases.empty_filtered_body",
+  "dhcp.leases.filters",
+  "dhcp.leases.more",
+  "dhcp.leases.state.abandoned",
+  "dhcp.leases.state.active",
+  "dhcp.leases.state.backup",
+  "dhcp.leases.state.expired",
+  "dhcp.leases.state.free",
+  "dhcp.leases.state.released",
+  "dhcp.leases.state.reset",
+  "dhcp.leases.sub",
   "dhcp.leases.title",
   "dhcp.level.host",
   "dhcp.level.policy",
@@ -8154,6 +8302,25 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.level.scope",
   "dhcp.level.server",
   "dhcp.level.shared_network",
+  "dhcp.lfilter.addr",
+  "dhcp.lfilter.addr_exact",
+  "dhcp.lfilter.addr_placeholder",
+  "dhcp.lfilter.from",
+  "dhcp.lfilter.kind",
+  "dhcp.lfilter.kind_any",
+  "dhcp.lfilter.mac",
+  "dhcp.lfilter.mac_invalid",
+  "dhcp.lfilter.name",
+  "dhcp.lfilter.name_placeholder",
+  "dhcp.lfilter.reset",
+  "dhcp.lfilter.scope",
+  "dhcp.lfilter.scope_any",
+  "dhcp.lfilter.state",
+  "dhcp.lfilter.state_any",
+  "dhcp.lfilter.to",
+  "dhcp.live.folded",
+  "dhcp.live.hint",
+  "dhcp.live.label",
   "dhcp.match.add",
   "dhcp.match.architecture",
   "dhcp.match.circuit_id",
@@ -8379,6 +8546,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.state.off_body",
   "dhcp.state.off_link",
   "dhcp.state.off_title",
+  "dhcp.strip.accepting",
+  "dhcp.strip.commit",
+  "dhcp.strip.label",
+  "dhcp.strip.listeners",
+  "dhcp.strip.not_dhcp_body",
+  "dhcp.strip.not_dhcp_title",
+  "dhcp.strip.not_serving",
+  "dhcp.strip.probe_off",
+  "dhcp.strip.probe_on",
+  "dhcp.strip.refusing",
+  "dhcp.strip.revision",
+  "dhcp.strip.scopes",
+  "dhcp.strip.serving",
   "dhcp.term.add",
   "dhcp.term.class",
   "dhcp.term.class_label",

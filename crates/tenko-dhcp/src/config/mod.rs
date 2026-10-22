@@ -141,6 +141,23 @@ impl ConfigService {
         Ok(self.store.read(consistency).await?)
     }
 
+    // WP7.5: the record of a node command executed in place.
+    /// Commits `batch` (the row of a node command of the `dhcp` role and its audit
+    /// record, staged by the caller) as an inline job `dhcp.edit`, as every write is.
+    ///
+    /// # Errors
+    ///
+    /// The job's or the store's error.
+    pub async fn commit_record(
+        &self,
+        cx: &RequestCtx,
+        summary: String,
+        targets: Vec<ObjectRef>,
+        batch: WriteBatch,
+    ) -> ConfigResult<Written> {
+        jobs::commit(self.jobs.as_ref(), cx, summary, targets, batch).await
+    }
+
     /// Plans with `plan` against fresh views and commits its batch as an inline job,
     /// planning again after a stale write.
     pub(crate) async fn execute<T, F>(

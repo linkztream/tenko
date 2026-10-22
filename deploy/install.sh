@@ -13,10 +13,11 @@
 # piped into bash it cannot ask questions. `bash install.sh --help` lists every option.
 #
 # What it does: checks the host (root, x86_64, systemd and its version, the tools, free
-# ports 8443 and 53), gets the binary (the GitHub release asset tenko-<version>-linux-x86_64,
-# verified against the release's SHA256SUMS, or --binary), installs it as /usr/local/bin/tenko,
-# creates the service account `tenko`, writes /etc/tenko/tenko.toml from the answers and
-# checks it with `tenko config check`, creates the key-encryption key (sealed with
+# ports 8443, 53 and, with the dhcp role, UDP 67), gets the binary (the GitHub release asset
+# tenko-<version>-linux-x86_64, verified against the release's SHA256SUMS, or --binary),
+# installs it as /usr/local/bin/tenko, creates the service account `tenko`, writes
+# /etc/tenko/tenko.toml from the answers and checks it with `tenko config check`, creates
+# the key-encryption key (sealed with
 # systemd-creds where that works, a plain file /etc/tenko/kek.key with a warning where it
 # does not), installs the unit of deploy/systemd/tenko.service (embedded below) with its
 # drop-ins, starts it, waits for `tenko health`, optionally completes first-run setup, and
@@ -80,7 +81,9 @@ usage() {
 Usage: bash install.sh [options]          as root
 
 Answers (asked when --yes is not given; the default is in brackets):
-  --roles controller|controller,dns   roles of the node [controller,dns]
+  --roles controller|controller,dns|controller,dhcp|controller,dns,dhcp   roles of the node
+                                      [controller,dns]; the dhcp role needs [dhcp] listen in
+                                      tenko.toml, see deploy/README.md, section "DHCP"
   --modules all|<list>|wizard         product modules: ipam,dns,dhcp,discovery; wizard leaves
                                       the choice to first-run setup [wizard]
   --profile home|standard|hardened|lab   security profile [home]
@@ -293,7 +296,7 @@ valid_hostname() {
     [[ ${#label} -le 63 && "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
   done
 }
-valid_roles() { [[ "$1" == "controller" || "$1" == "controller,dns" ]]; }
+valid_roles() { [[ "$1" == "controller" || "$1" == "controller,dns" || "$1" == "controller,dhcp" || "$1" == "controller,dns,dhcp" ]]; } # WP7.5: the dhcp role
 valid_modules() {
   local m IFS=,
   [[ "$1" == "wizard" || "$1" == "all" ]] && return 0
@@ -669,9 +672,12 @@ answers() {
   if ((!OPT_YES && write_config)); then
     while true; do
       if ((!SET_ROLES)); then
+        # WP7.5: the two choices with the dhcp role.
         ask_menu ROLES "Roles of this node" "$ROLES" \
           controller "API, web UI, store and IPAM" \
-          controller,dns "The same, and DNS on port 53"
+          controller,dns "The same, and DNS on port 53" \
+          controller,dhcp "The same, and DHCP on UDP port 67 (no DNS)" \
+          controller,dns,dhcp "The same, and DNS on port 53 and DHCP on UDP port 67"
       fi
       valid_roles "$ROLES" && break
       printf 'Not a choice: %s\n' "$ROLES" >"$TTY"
@@ -797,6 +803,27 @@ step_ports() {
   if line="$(ss -Hltnp "sport = :${API_PORT}" 2>/dev/null | head -n 1)" && [[ -n "$line" ]]; then
     holder="$(grep -oE 'users:\(\("[^"]+"' <<<"$line" | sed 's/users:(("//' || true)"
     die "$E_PORT" "Port ${API_PORT}/tcp is taken by ${holder:-another program}; stop it first"
+  fi
+  # WP7.5: the dhcp role binds UDP 67. Another DHCP server (dnsmasq, isc-dhcp-server, Kea)
+  # on every address of the host holds the port against any address the role would use, so
+  # that stops the install; one bound to a single address (a hypervisor's bridge) only
+  # conflicts when [dhcp] listen names that address, so it is a warning.
+  if [[ "$ROLES" == *dhcp* ]]; then
+    local listen67 local67 dhcp_other=""
+    listen67="$(ss -Hlnup 'sport = :67' 2>/dev/null)" || true
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      holder="$(grep -oE 'users:\(\("[^"]+"' <<<"$line" | sed 's/users:(("//' || true)"
+      local67="$(awk '{for (i = 1; i <= NF; i++) if ($i ~ /:67$/) {print $i; exit}}' <<<"$line")"
+      if [[ "$local67" == 0.0.0.0:67 || "$local67" == '*:67' || "$local67" == '[::]:67' ]]; then
+        dhcp_other="${holder:-unknown}"
+      else
+        warn "${holder:-A program} holds UDP ${local67}; the dhcp role must not listen on that address"
+      fi
+    done <<<"$listen67"
+    if [[ -n "$dhcp_other" ]]; then
+      die "$E_PORT" "Port 67/udp is taken by ${dhcp_other} on every address, another DHCP server (dnsmasq, isc-dhcp-server, kea-dhcp4 or a hypervisor's DHCP service); stop and disable it first"
+    fi
   fi
   [[ "$ROLES" == *dns* ]] || return 0
   local listen53 stub=0 other=""
@@ -1159,6 +1186,18 @@ listen = [${listen}]
 forwarders = [${forwarders}]
 "
   fi
+  # WP7.5: the dhcp role serves nothing until [dhcp] listen names an address.
+  if [[ "$ROLES" == *dhcp* ]]; then
+    body+="
+[dhcp]
+# Where the dhcp role listens (UDP 67): the node's own unicast address for a gateway that
+# relays to it (relay mode), or an interface for the broadcasts of clients on its link
+# (direct mode, which needs the drop-in deploy/systemd/dhcp-direct.conf). Set it, then
+# restart the service. Every key: tenko.example.toml.
+# listen = [{ address = \"192.0.2.10\", mode = \"relay\" }]
+# listen = [{ address = \"192.0.2.10\", mode = \"direct\", interface = \"eth0\" }]
+"
+  fi
   if ((HAVE_CONFIG)) && ((!OPT_DRY)); then
     local backup
     backup="${CONFIG}.$(date -u +%Y%m%dT%H%M%SZ).bak"
@@ -1312,9 +1351,10 @@ step_kek() {
 unit_text() {
   cat <<'TENKO_UNIT_END'
 # Hardened systemd unit for Tenko DDI: the controller role (REST API, web UI, replicated
-# store, IPAM) and, when tenko.toml lists it, the dns role in the same process (port 53).
-# The DHCP role does not exist yet; the end of this file lists what the unit gains when it
-# does.
+# store, IPAM) and, when tenko.toml lists them, the dns role (port 53) and the dhcp role
+# (UDP port 67) in the same process. The dhcp role in relay mode needs nothing beyond this
+# unit; its direct mode needs the drop-in deploy/systemd/dhcp-direct.conf (see the end of
+# this file).
 #
 # Needs systemd 250 or later (LoadCredentialEncrypted= and the %d specifier): Debian 12,
 # Ubuntu 24.04, RHEL 9 and newer.
@@ -1370,10 +1410,10 @@ StartLimitBurst=5
 Type=notify
 NotifyAccess=main
 # The configuration file names the node's settings; --roles defaults to the file's value
-# ("controller"). A controller node runs the dns and probe roles in its process when they
-# are listed (roles = "controller,dns"); a role list without `controller` exits with status
-# 2, and dhcp next to it is skipped with a notice. The binary is the
-# version that `current` points at; ExecStartPre= sets the layout up (see the top).
+# ("controller"). A controller node runs the dns, dhcp and probe roles in its process when
+# they are listed (roles = "controller,dns,dhcp"); a role list without `controller` exits
+# with status 2 when it names dns or dhcp. The binary is the version that `current` points
+# at; ExecStartPre= sets the layout up (see the top).
 ExecStartPre=/usr/local/bin/tenko upgrade layout --config /etc/tenko/tenko.toml
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 # The data directory is the state directory below; the unit pins it so that a data_dir in
@@ -1409,8 +1449,9 @@ TimeoutStopSec=30s
 User=tenko
 Group=tenko
 # The API listens on 8443 (above 1024) and nothing opens raw sockets. The one capability is
-# CAP_NET_BIND_SERVICE, for the dns role on port 53 ([dns] listen); a node without the dns
-# role does not use it, and removing both lines' value takes it away again.
+# CAP_NET_BIND_SERVICE, for the dns role on port 53 ([dns] listen) and the dhcp role on UDP
+# port 67 ([dhcp] listen; 547 joins it with DHCPv6, which is not served yet); a node with
+# neither role does not use it, and removing both lines' value takes it away again.
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
@@ -1493,8 +1534,8 @@ RemoveIPC=yes
 LimitCORE=0
 
 # Network
-# TCP and UDP listeners (AF_INET, AF_INET6: the API, the dns role, the forwarder's
-# upstream queries) and the sd_notify socket (AF_UNIX).
+# TCP and UDP listeners (AF_INET, AF_INET6: the API, the dns role, the dhcp role in relay
+# mode, the forwarder's upstream queries) and the sd_notify socket (AF_UNIX).
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 # System calls
@@ -1515,12 +1556,14 @@ LimitNOFILE=65536
 # (CAP_NET_RAW and the address families the scan methods need). Install it as
 # /etc/systemd/system/tenko.service.d/probe.conf; see its header.
 #
-# Later roles (not implemented yet). When the DHCP role exists, this unit gains:
-#   AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
-#   CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
-#       ports 67/547 and raw sockets for DHCP;
-#   RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
-#       interface discovery (AF_NETLINK) and layer-2 DHCP replies (AF_PACKET).
+# The dhcp role: it runs in this process when tenko.toml lists it (roles =
+# "controller,dhcp"). In relay mode (the gateway relays to the node's unicast address,
+# [dhcp] listen with mode = "relay") it binds UDP 67 and needs nothing but the
+# CAP_NET_BIND_SERVICE above. Direct mode (the node hears the broadcasts of clients on its
+# link) binds the interface with SO_BINDTODEVICE and answers a client without an address
+# through an AF_PACKET socket, which needs CAP_NET_RAW, AF_PACKET and AF_NETLINK:
+# deploy/systemd/dhcp-direct.conf is the drop-in for that. Install it as
+# /etc/systemd/system/tenko.service.d/dhcp-direct.conf; see its header.
 
 [Install]
 WantedBy=multi-user.target
@@ -1708,6 +1751,13 @@ summary() {
   fi
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
   ((USE_SELF_DONE)) && printf '    %-14s %s\n' "Host resolver:" "127.0.0.1 (Tenko; --uninstall restores the previous one)"
+  # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.
+  if [[ "$ROLES" == *dhcp* ]]; then
+    printf '    %-14s %s\n' "DHCP:" "set [dhcp] listen in ${CONFIG} (relay mode: the node's address, the gateway relays to it;" \
+      "" "direct mode: an interface, and install deploy/systemd/dhcp-direct.conf as" \
+      "" "/etc/systemd/system/tenko.service.d/dhcp-direct.conf); then restart the service." \
+      "" "UDP 67 must be open on the host's firewall; 547 (DHCPv6) is not served yet."
+  fi
   case "$KEK_MODE" in
   sealed)
     printf '    %-14s %s\n' "Key:" "${KEK_CRED} (sealed with systemd-creds to this host)"

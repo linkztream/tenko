@@ -14,9 +14,11 @@
 //! (`tenko_dhcp::config`), which the server adds as the request extension
 //! `Arc<ConfigService>`; every change is an inline job with its audit record, every read of
 //! one object carries its revision as the `ETag`, and a change or deletion with `If-Match`
-//! is refused with 412 when the object moved on. Until its package builds it, any other
-//! operation (reservations, leases, history, export, the node routes and `/ipam/reconcile`)
-//! checks the caller's scope and answers `501` with `sys.not_implemented`. The routes belong
+//! is refused with 412 when the object moved on. The leases, the history and the node
+//! routes are built (WP7.5, file `dhcp/leases.rs`) on the `dhcp` role of the process, which
+//! `tenko serve` puts in the request extension [`DhcpNodeSlot`]. Until its package builds
+//! it, any other operation (reservations, export and `/ipam/reconcile`) checks the caller's
+//! scope and answers `501` with `sys.not_implemented`. The routes belong
 //! to the DHCP module (OPS-25): a server without it registers none of them, so they answer
 //! 404 `sys.route_not_found`; a router without the configuration service answers the
 //! configuration routes with 409 `dhcp.module.disabled`. `/ipam/reconcile` belongs to the
@@ -108,6 +110,9 @@ mod options;
 mod pools;
 mod scopes;
 mod settings;
+// WP7.5: the leases, the history and the node routes.
+mod leases;
+pub use leases::DhcpNodeSlot;
 
 #[cfg(test)]
 mod tests;
@@ -408,20 +413,20 @@ fn filter_and_lease_routes() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(list_dhcp_reservations))
         .routes(routes!(get_dhcp_reservation))
-        .routes(routes!(list_dhcp_leases))
-        .routes(routes!(get_dhcp_lease))
-        .routes(routes!(release_dhcp_lease))
-        .routes(routes!(list_dhcp_history))
+        .routes(routes!(leases::list_dhcp_leases))
+        .routes(routes!(leases::get_dhcp_lease))
+        .routes(routes!(leases::release_dhcp_lease))
+        .routes(routes!(leases::list_dhcp_history))
         .routes(routes!(export_dhcp))
 }
 
 #[inline(never)]
 fn node_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(get_node_dhcp_status))
-        .routes(routes!(list_node_dhcp_leases))
-        .routes(routes!(release_node_dhcp_lease))
-        .routes(routes!(read_node_dhcp_history))
+        .routes(routes!(leases::get_node_dhcp_status))
+        .routes(routes!(leases::list_node_dhcp_leases))
+        .routes(routes!(leases::release_node_dhcp_lease))
+        .routes(routes!(leases::read_node_dhcp_history))
 }
 
 #[utoipa::path(
@@ -485,124 +490,6 @@ async fn get_dhcp_reservation(
 
 #[utoipa::path(
     get,
-    path = "/dhcp/leases",
-    tag = "dhcp",
-    operation_id = "list_dhcp_leases",
-    summary = "List DHCP leases",
-    description = "Scope: `dhcp.read`. Reading leases is audited (`dhcp.lease.read`).",
-    params(DhcpLeaseFilters),
-    responses(
-        (status = 200, description = "A page of leases by address", body = Page<DhcpLeaseItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_leases(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/leases"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/leases/{addr}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_lease",
-    summary = "Get the DHCP lease of an address",
-    description = "Scope: `dhcp.read`.",
-    params(("addr" = String, Path, description = "IPv4 address of the lease"), DhcpLeaseParams),
-    responses(
-        (status = 200, description = "The lease", body = DhcpLeaseItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No lease holds the address (`dhcp.lease.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_lease(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(addr): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_addr(&addr)?;
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/leases/{addr}"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/leases/{addr}/release",
-    tag = "dhcp",
-    operation_id = "release_dhcp_lease",
-    summary = "Release a DHCP lease (the address returns to the pool)",
-    description = "Scope: `dhcp.write`.",
-    params(("addr" = String, Path, description = "IPv4 address of the lease")),
-    request_body(content = DhcpLeaseRelease, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The released lease", body = DhcpLeaseItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No lease holds the address (`dhcp.lease.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The lease is not in a state the operation accepts (`dhcp.lease.state`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "The store refused the lease write (`dhcp.store_refused`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn release_dhcp_lease(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(addr): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_addr(&addr)?;
-    app.authorize(
-        &cx.principal,
-        Action::Execute,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("POST", "/dhcp/leases/{addr}/release"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/history",
-    tag = "dhcp",
-    operation_id = "list_dhcp_history",
-    summary = "Read the DHCP lease history",
-    description = "Scope: `dhcp.read`. Reading the history is audited (`dhcp.lease.read`).",
-    params(DhcpHistoryFilters),
-    responses(
-        (status = 200, description = "A page of lease events, newest first", body = Page<DhcpHistoryItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_history(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/history"))
-}
-
-#[utoipa::path(
-    get,
     path = "/dhcp/export",
     tag = "dhcp",
     operation_id = "export_dhcp",
@@ -620,143 +507,6 @@ async fn list_dhcp_history(
 async fn export_dhcp(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Read, &server_object())?;
     Err(not_implemented("GET", "/dhcp/export"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/nodes/{id}/dhcp",
-    tag = "dhcp",
-    operation_id = "get_node_dhcp_status",
-    summary = "Get the DHCP role of a node",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = u64, Path, description = "Node id")),
-    responses(
-        (status = 200, description = "The report of the DHCP role", body = DhcpNodeStatus),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dhcp role (`dhcp.node.not_dhcp`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_node_dhcp_status(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let node = parse_node(&id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/nodes/{id}/dhcp"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/nodes/{id}/dhcp/leases",
-    tag = "dhcp",
-    operation_id = "list_node_dhcp_leases",
-    summary = "List the leases a node's DHCP role holds",
-    description = "Scope: `dhcp.read`. The node command `dhcp.leases.list`, audited.",
-    params(("id" = u64, Path, description = "Node id"), DhcpLeaseFilters),
-    responses(
-        (status = 200, description = "A page of leases by address", body = Page<DhcpLeaseItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dhcp role (`dhcp.node.not_dhcp`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_node_dhcp_leases(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let node = parse_node(&id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/nodes/{id}/dhcp/leases"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/nodes/{id}/dhcp/leases/{addr}/release",
-    tag = "dhcp",
-    operation_id = "release_node_dhcp_lease",
-    summary = "Release a lease on a node's DHCP role",
-    description = "Scope: `dhcp.write`. The node command `dhcp.lease.release`.",
-    params(("id" = u64, Path, description = "Node id"), ("addr" = String, Path, description = "IPv4 address of the lease")),
-    request_body(content = DhcpLeaseRelease, content_type = "application/json"),
-    responses(
-        (status = 202, description = "The command is recorded", body = DhcpCommandAccepted),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dhcp role (`dhcp.node.not_dhcp`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn release_node_dhcp_lease(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path((id, addr)): Path<(String, String)>,
-) -> Result<Response, ApiError> {
-    let node = parse_node(&id)?;
-    parse_addr(&addr)?;
-    app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
-    app.authorize(
-        &cx.principal,
-        Action::Execute,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented(
-        "POST",
-        "/nodes/{id}/dhcp/leases/{addr}/release",
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/nodes/{id}/dhcp/history",
-    tag = "dhcp",
-    operation_id = "read_node_dhcp_history",
-    summary = "Read the lease history through a node's DHCP role",
-    description = "Scope: `dhcp.read`. The node command `dhcp.history.read`, audited.",
-    params(("id" = u64, Path, description = "Node id"), DhcpHistoryFilters),
-    responses(
-        (status = 200, description = "A page of lease events, newest first", body = Page<DhcpHistoryItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dhcp role (`dhcp.node.not_dhcp`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn read_node_dhcp_history(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let node = parse_node(&id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/nodes/{id}/dhcp/history"))
 }
 
 #[utoipa::path(

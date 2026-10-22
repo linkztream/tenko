@@ -44,6 +44,13 @@ use tenko_cluster::ca::TrustedProxies;
 use tenko_core::{NodeId, RoleSet, net::HostName};
 use tenko_vault::kek::{CredsKey, DEFAULT_CREDENTIAL, DpapiScope, KekConfig, KekOptions};
 
+// WP7.5: the `[dhcp]` section.
+mod dhcp;
+pub use dhcp::{
+    DhcpDdnsSection, DhcpDeclineSection, DhcpHistorySection, DhcpListen, DhcpListenMode,
+    DhcpProbeSection, DhcpSection,
+};
+
 /// Prefix of the environment variables that override configuration keys.
 pub const ENV_PREFIX: &str = "TENKO_";
 
@@ -54,9 +61,11 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 24] = [
+const TOP_LEVEL_KEYS: [&str; 25] = [
     "audit_export",
     "dns",
+    // WP7.5: the dhcp role.
+    "dhcp",
     "cluster",
     "scan",
     "telemetry",
@@ -91,8 +100,8 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<PathBuf>,
     /// Roles of this node: a comma-separated list of `controller`, `dns`, `dhcp` and
-    /// `probe`, or `all`. A controller node runs `dns` and `probe` in its own process;
-    /// `dhcp` is not implemented yet.
+    /// `probe`, or `all`. A controller node runs `dns`, `dhcp` and `probe` in its own
+    /// process.
     pub roles: String,
     /// The product modules this installation runs (OPS-25): a list of `ipam`, `dns`,
     /// `dhcp` and `discovery`, or `all`. Not set (the default): the choice made in the
@@ -143,6 +152,9 @@ pub struct Config {
     pub audit_export: AuditExportSection,
     /// The `dns` role of this node: listeners, workers, the plain forwarder, the query log.
     pub dns: DnsSection,
+    // WP7.5: the dhcp role.
+    /// The `dhcp` role of this node: listeners, workers, the offer hold, DECLINE, history.
+    pub dhcp: DhcpSection,
 }
 
 impl Default for Config {
@@ -172,6 +184,7 @@ impl Default for Config {
             backup: BackupSection::default(),
             audit_export: AuditExportSection::default(),
             dns: DnsSection::default(),
+            dhcp: DhcpSection::default(),
         }
     }
 }
@@ -2702,6 +2715,8 @@ impl Config {
         self.backup.validate()?;
         self.audit_export.validate()?;
         self.dns.validate()?;
+        // WP7.5: the dhcp role's section.
+        self.dhcp.validate()?;
         self.dns
             .tls
             .check_with(&self.dns.listen_addrs()?, &listen, &self.tls)?;

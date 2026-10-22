@@ -32,6 +32,8 @@ const PREFIX: &str = "0190d1c2-0000-7000-8000-000000000001";
 const OTHER: &str = "0190d1c2-0000-7000-8000-000000000002";
 const DISABLED: &str = "dhcp.module.disabled";
 const STUB: &str = "sys.not_implemented";
+// WP7.5: the lease routes of a server without the dhcp role.
+const NOT_DHCP: &str = "dhcp.node.not_dhcp";
 
 fn id(text: &str) -> Uuid {
     text.parse().expect("UUID")
@@ -113,19 +115,22 @@ fn kinds(policy: &Policy) -> Vec<(Action, ObjectKind)> {
     policy.asked().iter().map(|(a, o)| (*a, o.kind)).collect()
 }
 
-/// Sends every request and expects 409 `dhcp.module.disabled` (a configuration route
-/// without its service) or 501 (a route of a later package) after the check.
+/// Sends every request and expects, after the check, 409 `dhcp.module.disabled` (a
+/// configuration route without its service), 409 `dhcp.node.not_dhcp` (a lease or history
+/// route of a server without the dhcp role, WP7.5), 404 `cluster.node.not_found` (a node
+/// route for a node this server does not know) or 501 (a route of a later package).
 async fn expect_after_check(router: &Router, requests: &[(&str, String)]) {
     for (method, path) in requests {
         let later = path.contains("/reservations")
-            || path.contains("/leases")
-            || path.contains("/history")
             || path.contains("/export")
-            || path.starts_with("/nodes/")
             || path.starts_with("/ipam/");
         let reply = send(router, method, path).await;
         if later {
             reply.assert_problem(501, STUB);
+        } else if path.starts_with("/nodes/") {
+            reply.assert_problem(404, "cluster.node.not_found");
+        } else if path.contains("/leases") || path.contains("/history") {
+            reply.assert_problem(409, NOT_DHCP);
         } else if path == "/dhcp/option-catalog" {
             reply.assert_json(200);
         } else {
@@ -145,11 +150,7 @@ async fn an_allowed_call_reaches_the_service_or_the_stub() {
     .await
     .assert_problem(409, DISABLED);
     let reply = send(&router, "POST", "/dhcp/leases/192.0.2.50/release").await;
-    reply.assert_problem(501, STUB);
-    assert_eq!(
-        reply.body["params"]["path"],
-        "/api/v1/dhcp/leases/{addr}/release"
-    );
+    reply.assert_problem(409, NOT_DHCP);
     assert_eq!(
         policy.asked(),
         [
@@ -179,7 +180,7 @@ async fn a_reader_reads_and_is_refused_writes() {
         .assert_problem(403, "auth.forbidden");
     send(&router, "GET", "/dhcp/leases")
         .await
-        .assert_problem(501, STUB);
+        .assert_problem(409, NOT_DHCP);
     send(&router, "PUT", &format!("/dhcp/pools/{PREFIX}"))
         .await
         .assert_problem(403, "auth.forbidden");

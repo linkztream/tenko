@@ -29,6 +29,14 @@ serde = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }
 uuid = { workspace = true }
+# WP7.5: the in-process feed queues the stored bytes of changed rows (as the DNS feed does),
+# and the node commands take their arguments as CBOR; both crates are in the graph.
+bytes = { workspace = true }
+
+# WP7.5: the link-layer reply of direct mode (AF_PACKET), through the safe API the scanner's
+# raw methods use (WP3.14); Linux only, MIT OR Apache-2.0, already in the graph.
+[target.'cfg(target_os = "linux")'.dependencies]
+pnet_datalink = "0.35.0"
 
 [dev-dependencies]
 # The counting allocator of tests/alloc.rs (the DNS codec's allocation test).

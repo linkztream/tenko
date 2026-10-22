@@ -1396,6 +1396,266 @@
       <unit id="errors.dhcp.export.format">
         <segment><source>This export format is not known.</source></segment>
       </unit>
+      <!-- WP7.5: leases and history -->
+      <unit id="dhcp.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dhcp.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dhcp.col.client_mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.col.client_id">
+        <segment><source>Client identifier</source></segment>
+      </unit>
+      <unit id="dhcp.col.host_name">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="dhcp.col.ends">
+        <segment><source>Ends</source></segment>
+      </unit>
+      <unit id="dhcp.col.reserved">
+        <segment><source>Reserved</source></segment>
+      </unit>
+      <unit id="dhcp.col.relay">
+        <segment><source>Relay</source></segment>
+      </unit>
+      <unit id="dhcp.col.time">
+        <segment><source>Time</source></segment>
+      </unit>
+      <unit id="dhcp.col.event">
+        <segment><source>Event</source></segment>
+      </unit>
+      <unit id="dhcp.col.state_after">
+        <segment><source>State after</source></segment>
+      </unit>
+      <unit id="dhcp.col.node">
+        <segment><source>Node</source></segment>
+      </unit>
+      <unit id="dhcp.leases.sub">
+        <segment><source>The leases the server holds: the client, its name and when each ends.</source></segment>
+      </unit>
+      <unit id="dhcp.leases.filters">
+        <segment><source>Filter the leases</source></segment>
+      </unit>
+      <unit id="dhcp.leases.empty">
+        <segment><source>No leases</source></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_body">
+        <segment><source>Leases appear here when clients get an address from a scope.</source></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_filtered">
+        <segment><source>No lease matches</source></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_filtered_body">
+        <segment><source>Change or clear the filters.</source></segment>
+      </unit>
+      <unit id="dhcp.leases.more">
+        <segment><source>Load more leases</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.active">
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.released">
+        <segment><source>Released</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.abandoned">
+        <segment><source>Abandoned</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.reset">
+        <segment><source>Reset</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.free">
+        <segment><source>Free</source></segment>
+      </unit>
+      <unit id="dhcp.leases.state.backup">
+        <segment><source>Backup</source></segment>
+      </unit>
+      <unit id="dhcp.lease.reserved">
+        <segment><source>Reserved</source></segment>
+      </unit>
+      <unit id="dhcp.lease.history_link">
+        <segment><source>Show the history of this address</source></segment>
+      </unit>
+      <unit id="dhcp.lease.release">
+        <segment><source>Release</source></segment>
+      </unit>
+      <unit id="dhcp.lease.release_title">
+        <segment><source>Release {addr}</source></segment>
+      </unit>
+      <unit id="dhcp.lease.release_body">
+        <segment><source>The lease of {addr} held by {mac} ends now. The client can ask for an address again.</source></segment>
+      </unit>
+      <unit id="dhcp.lease.release_confirm">
+        <segment><source>Release the lease</source></segment>
+      </unit>
+      <unit id="dhcp.lease.reason">
+        <segment><source>Reason</source></segment>
+      </unit>
+      <unit id="dhcp.lease.reason_help">
+        <segment><source>Optional. It goes into the audit record.</source></segment>
+      </unit>
+      <unit id="dhcp.lease.released">
+        <segment><source>Released {addr}</source></segment>
+      </unit>
+      <unit id="dhcp.do.history">
+        <segment><source>History</source></segment>
+      </unit>
+      <unit id="dhcp.do.refresh">
+        <segment><source>Refresh</source></segment>
+      </unit>
+      <unit id="dhcp.live.label">
+        <segment><source>Live</source></segment>
+      </unit>
+      <unit id="dhcp.live.hint">
+        <segment><source>Follow the changes as they happen</source></segment>
+      </unit>
+      <unit id="dhcp.live.folded">
+        <segment><source>{count, plural, one {# change folded together} other {# changes folded together}}</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.scope">
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.scope_any">
+        <segment><source>All scopes</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr">
+        <segment><source>Address starts with</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr_exact">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr_placeholder">
+        <segment><source>192.0.2.</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.mac_invalid">
+        <segment><source>This is not a MAC address, for example 00:00:5e:00:53:01.</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.name">
+        <segment><source>Name contains</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.name_placeholder">
+        <segment><source>client-a</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.state_any">
+        <segment><source>Any state</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.kind">
+        <segment><source>Event</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.kind_any">
+        <segment><source>Any event</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.from">
+        <segment><source>From</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.to">
+        <segment><source>Until</source></segment>
+      </unit>
+      <unit id="dhcp.lfilter.reset">
+        <segment><source>Clear the filters</source></segment>
+      </unit>
+      <unit id="dhcp.example.addr">
+        <segment><source>192.0.2.50</source></segment>
+      </unit>
+      <unit id="dhcp.strip.label">
+        <segment><source>State of the DHCP role</source></segment>
+      </unit>
+      <unit id="dhcp.strip.serving">
+        <segment><source>Serving</source></segment>
+      </unit>
+      <unit id="dhcp.strip.not_serving">
+        <segment><source>Not serving</source></segment>
+      </unit>
+      <unit id="dhcp.strip.accepting">
+        <segment><source>Accepting lease writes</source></segment>
+      </unit>
+      <unit id="dhcp.strip.refusing">
+        <segment><source>Refusing lease writes</source></segment>
+      </unit>
+      <unit id="dhcp.strip.probe_on">
+        <segment><source>Conflict detection on</source></segment>
+      </unit>
+      <unit id="dhcp.strip.probe_off">
+        <segment><source>Conflict detection off</source></segment>
+      </unit>
+      <unit id="dhcp.strip.listeners">
+        <segment><source>{count, plural, one {# listener} other {# listeners}}</source></segment>
+      </unit>
+      <unit id="dhcp.strip.scopes">
+        <segment><source>{count, plural, one {# scope} other {# scopes}}</source></segment>
+      </unit>
+      <unit id="dhcp.strip.commit">
+        <segment><source>Last commit {ms} ms</source></segment>
+      </unit>
+      <unit id="dhcp.strip.revision">
+        <segment><source>Revision {revision}</source></segment>
+      </unit>
+      <unit id="dhcp.strip.not_dhcp_title">
+        <segment><source>This node does not run the DHCP role.</source></segment>
+      </unit>
+      <unit id="dhcp.strip.not_dhcp_body">
+        <segment><source>Add the role to the configuration of the node to serve clients from it.</source></segment>
+      </unit>
+      <unit id="dhcp.history.sub">
+        <segment><source>What happened to the leases, newest first.</source></segment>
+      </unit>
+      <unit id="dhcp.history.filters">
+        <segment><source>Filter the history</source></segment>
+      </unit>
+      <unit id="dhcp.history.empty">
+        <segment><source>No events</source></segment>
+      </unit>
+      <unit id="dhcp.history.empty_body">
+        <segment><source>Grants, renewals and releases of leases are recorded here.</source></segment>
+      </unit>
+      <unit id="dhcp.history.empty_filtered">
+        <segment><source>No event matches</source></segment>
+      </unit>
+      <unit id="dhcp.history.empty_filtered_body">
+        <segment><source>Change or clear the filters.</source></segment>
+      </unit>
+      <unit id="dhcp.history.more">
+        <segment><source>Load more events</source></segment>
+      </unit>
+      <unit id="dhcp.history.lease_link">
+        <segment><source>Show the leases of this address</source></segment>
+      </unit>
+      <unit id="dhcp.event.granted">
+        <segment><source>Granted</source></segment>
+      </unit>
+      <unit id="dhcp.event.renewed">
+        <segment><source>Renewed</source></segment>
+      </unit>
+      <unit id="dhcp.event.rebound">
+        <segment><source>Rebound</source></segment>
+      </unit>
+      <unit id="dhcp.event.released">
+        <segment><source>Released</source></segment>
+      </unit>
+      <unit id="dhcp.event.declined">
+        <segment><source>Declined</source></segment>
+      </unit>
+      <unit id="dhcp.event.expired">
+        <segment><source>Expired</source></segment>
+      </unit>
+      <unit id="dhcp.event.reclaimed">
+        <segment><source>Reclaimed</source></segment>
+      </unit>
+      <unit id="dhcp.event.conflict">
+        <segment><source>Conflict</source></segment>
+      </unit>
+      <!-- end of WP7.5: leases and history -->
     </group>
   </file>
 </xliff>

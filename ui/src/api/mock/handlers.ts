@@ -32,6 +32,8 @@ import { connectorRoutes } from "./routes-connectors";
 import { dnsRoutes } from "./routes-dns";
 // WP7.4
 import { dhcpRoutes } from "./routes-dhcp";
+// WP7.5: the leases, the history and the state of the dhcp role of a node.
+import { dhcpLeaseRoutes } from "./routes-dhcp-leases";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -79,6 +81,8 @@ export const happyPaths: HttpHandler[] = [
   ...dnsRoutes,
   // WP7.4: the DHCP configuration of Phase 3.
   ...dhcpRoutes,
+  // WP7.5: the leases and the history, ahead of the 501 stubs.
+  ...dhcpLeaseRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

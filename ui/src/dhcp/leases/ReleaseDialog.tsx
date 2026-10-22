@@ -1,0 +1,61 @@
+// The release of a lease (WP7.5): a confirmation with an optional reason for the audit record. The
+// server refuses a lease that is not active (409) or has gone (404); its message stays in the
+// dialog and the list is read again, so the row shows what the server has.
+import { createSignal } from "solid-js";
+import { ApiError } from "../../api/problem";
+import { ConfirmDialog } from "../../components/Dialog";
+import { ErrorNotice } from "../../components/Notice";
+import { toast } from "../../components/toast";
+import { t } from "../../i18n";
+import { releaseLease } from "./api";
+import { macOf, type Lease } from "./model";
+
+export function ReleaseDialog(props: { lease: Lease; onClose: () => void; onDone: () => void; onRefused: () => void }) {
+  const [reason, setReason] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<unknown>();
+  return (
+    <ConfirmDialog
+      title={t("dhcp.lease.release_title", { addr: props.lease.addr })}
+      testid="dialog-lease-release"
+      danger
+      busy={busy()}
+      confirmLabel={t("dhcp.lease.release_confirm")}
+      cancelLabel={t("common.action.cancel")}
+      onClose={props.onClose}
+      onConfirm={() => {
+        if (busy()) return;
+        setBusy(true);
+        setError(undefined);
+        releaseLease(props.lease, reason())
+          .then(() => {
+            toast({ kind: "ok", title: t("dhcp.lease.released", { addr: props.lease.addr }) });
+            props.onDone();
+          })
+          .catch((err: unknown) => {
+            setError(err);
+            if (err instanceof ApiError && (err.code === "dhcp.lease.state" || err.code === "dhcp.lease.not_found")) props.onRefused();
+          })
+          .finally(() => setBusy(false));
+      }}
+      body={
+        <>
+          <p>{t("dhcp.lease.release_body", { addr: props.lease.addr, mac: macOf(props.lease.client) })}</p>
+          <div class="field dhcp-reason">
+            <label for="dhcp-lease-reason">{t("dhcp.lease.reason")}</label>
+            <input
+              id="dhcp-lease-reason"
+              class="input"
+              value={reason()}
+              autocomplete="off"
+              data-testid="field-reason"
+              onInput={(e) => setReason(e.currentTarget.value)}
+            />
+            <span class="help">{t("dhcp.lease.reason_help")}</span>
+          </div>
+          <ErrorNotice error={error()} />
+        </>
+      }
+    />
+  );
+}

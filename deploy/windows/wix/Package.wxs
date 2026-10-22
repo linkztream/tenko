@@ -187,7 +187,8 @@
       </Component>
 
       <!-- Firewall rules (TENKO_FIREWALL=1): the web UI and API on TCP 8443 always, DNS on
-           TCP and UDP with the dns role. Removed with the product. -->
+           TCP and UDP with the dns role, UDP 67 with the dhcp role (below). Removed with the
+           product. -->
       <Component Id="FirewallApi" Directory="INSTALLFOLDER" Condition="TENKO_FIREWALL = &quot;1&quot;" Transitive="yes">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallApi" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallApiTcp" Name="Tenko DDI web UI and API (TCP 8443)" Description="Tenko DDI: the web UI and the API"
@@ -200,6 +201,15 @@
                               Port="[TENKO_DNS_PORT]" Protocol="udp" Scope="any" Profile="all" />
         <fw:FirewallException Id="FirewallDnsTcp" Name="Tenko DDI DNS (TCP)" Description="Tenko DDI: the dns role"
                               Port="[TENKO_DNS_PORT]" Protocol="tcp" Scope="any" Profile="all" />
+      </Component>
+      <!-- WP7.5: DHCP with the dhcp role, UDP 67 (the server port of the node's [dhcp]
+           section; relay agents and direct clients both send to it). Conditioned on the role
+           string like the DNS rule above. UDP 547 joins it with DHCPv6 in Slice 9. -->
+      <Component Id="FirewallDhcp" Directory="INSTALLFOLDER" Transitive="yes"
+                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_ROLES &gt;&lt; &quot;dhcp&quot; OR TENKO_ROLES = &quot;all&quot;)">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDhcp" Value="1" Type="integer" KeyPath="yes" />
+        <fw:FirewallException Id="FirewallDhcpUdp" Name="Tenko DDI DHCP (UDP)" Description="Tenko DDI: the dhcp role"
+                              Port="67" Protocol="udp" Scope="any" Profile="all" />
       </Component>
     </Feature>
 

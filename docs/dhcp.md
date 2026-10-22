@@ -7,6 +7,7 @@ Contents:
 1. [The wire format](#1-the-wire-format)
 8. [Leases](#8-leases)
 9. [The engine](#9-the-engine)
+10. [The role](#10-the-role)
 2. [The model](#2-the-model)
 3. [Scopes and pools](#3-scopes-and-pools)
 4. [Options and the catalog](#4-options-and-the-catalog)
@@ -360,11 +361,11 @@ Option 81 is answered as a server that performs no DNS update (RFC 4702 section 
 | Mode | Linux | Windows |
 |---|---|---|
 | `relay` | Binds the unicast address on port 67; only relayed and unicast traffic arrives. Needs `CAP_NET_BIND_SERVICE` only | The same |
-| `direct` | Binds `0.0.0.0` on port 67 with `SO_BINDTODEVICE` to the entry's interface and `SO_REUSEADDR`, so that each interface has its socket and its broadcasts; without an interface name one socket hears every link. Replies to a hardware address go out as broadcasts until the link-layer socket of WP7.5 | Binds the interface's address, on which Windows delivers that interface's broadcasts; replies to a hardware address are always broadcast |
+| `direct` | Binds `0.0.0.0` on port 67 with `SO_BINDTODEVICE` to the entry's interface and `SO_REUSEADDR`, so that each interface has its socket and its broadcasts; without an interface name one socket hears every link. Replies to a hardware address go out through the link-layer socket of the interface (section 10.3), else as broadcasts | Binds the interface's address, on which Windows delivers that interface's broadcasts; replies to a hardware address are always broadcast |
 
 A worker runs the engine and sends an OFFER, a NAK or an INFORM's ACK at once. For an ACK it copies the lease change and the reply into a slot of a fixed table under a ticket and hands the change to the `LeaseStore`; it never waits for the disk. The committer thread takes the store's completions: a committed change is applied to the lease table at once (the feed's copy of the row changes nothing later, `LeaseTable::apply`) and its ACK is sent; a refused one is dropped and counted. A full slot table or store queue drops the request as `queue`.
 
-The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type and outcome, `tenko_dhcp_dropped_total` by reason, the NAKs, the DECLINEs, the refused commits, and the histograms of DISCOVER to OFFER, REQUEST to ACK and the commit; `DhcpServer::metrics` sums them, and the role registers them in WP7.5.
+The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type and outcome, `tenko_dhcp_dropped_total` by reason, the NAKs, the DECLINEs, the refused commits, and the histograms of DISCOVER to OFFER, REQUEST to ACK and the commit; `DhcpServer::metrics` sums them, and the role registers them (section 10.6).
 
 ### 9.7 Tests and measurements
 
@@ -373,4 +374,97 @@ The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type
 - `tests/engine_allocator.rs` and `tests/engine_server.rs`: the allocator against the reference, and a relay listener on loopback running DORA, a renewal, a release and a refused commit through `MemLeaseStore`.
 - `crates/tenko-dhcp/examples/dhcp_server.rs` serves the engine on a port for perfdhcp and carries a load client; `bench/phase3-dhcp` runs M26 to M28 with it on loopback.
 
-What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).
+What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3). The link-layer reply and the role's wiring, configuration and metrics are section 10.
+
+## 10. The role
+
+The `dhcp` role runs in the controller's process, as the `dns` role does (ADR 0004, plan sections 2.10 and 2.12): `roles = "controller,dhcp"` (or `controller,dns,dhcp`) in `tenko.toml` or `--roles`, with the DHCP module on. A role list without the controller is refused with status 2 until Phase 5 brings nodes of their own. `crates/tenko-dhcp/src/role.rs` is the role; `crates/tenko/src/serve/dhcp.rs` is its start step.
+
+### 10.1 The start order
+
+The step `dhcp` is the fifteenth of `tenko serve`, after the API and the `dns` role, before the leader services start:
+
+1. The role's metric families join the process registry (section 10.6).
+2. The in-process feed registers with the store (`tenko_dhcp::store_feed`, the derived index `dhcp.serving` over the tables of `NODE_TABLES` and `NODE_IPAM_TABLES`) and gives the first image of the rows: the configuration, the leases and the IPAM prefixes, ranges, hosts, interfaces and addresses.
+3. The configuration image (section 3) and the lease table (`LeaseIndex` in a `SharedLeases`, section 8) are built from that image.
+4. The lease store on the replicated store (`StoreLeases`) and its committer start, with the refusal gate of P3-Q14 in front of it.
+5. The listeners of `[dhcp] listen` bind and the workers start over the image and the shared table. Only now does the node answer, from complete tables; the ready line says `dhcp role answering on <address>:<port> (<mode>), <n> scope(s) at revision <r>, <m> lease row(s)`.
+6. The leader services `dhcp.expiry` (over the role's table) and `dhcp.history.purge` (the retention of P3-Q13 with `[dhcp.history] days`) are registered; a follower keeps the retention's profile and the probe expectation current when the security profile changes.
+
+While it runs, the follower takes the feed's events. A delta's lease rows go into the table at the delta's revision: the role's own commits are there already (the committer applies a row before the ACK leaves), so the copy changes nothing, and an older copy never overwrites a newer row. A delta's configuration rows go into the kept rows, from which the image is rebuilt and swapped whole. After a snapshot install the store builds the index aside and hands the feed a new image: the role builds the image and the table from it aside, carries over the rows it committed after the image's revision, and swaps both under the table's write guard (`DhcpServer::swap`). A worker takes the table's read guard before it looks at the image, so no request is answered from a new image and an old table or the reverse. A feed that fails is read again whole after a second; the role keeps serving the rows it holds meanwhile (OPS-02).
+
+The role stops first when the process stops, with the `dns` role: the listeners close and the workers end, then the follower and the committer, whose queued changes are failed so that no ACK leaves for them; then the leader services and the store. A change of the module set stops the process with status 12 for a restart, as for every role.
+
+### 10.2 Configuration
+
+The node-local keys (`docs/dhcp-contracts.md` section 9, `deploy/tenko.example.toml`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[dhcp] listen` | none | Listeners: `{ address, mode = "relay" or "direct", interface }`, or an address alone for relay mode. Empty: the role builds its tables and answers nothing (the health row `dhcp.role.not_serving`) |
+| `[dhcp] port` | 67 | The server port |
+| `[dhcp] workers` | one per CPU, at most 8 | UDP workers per listener, 0 to 64 |
+| `[dhcp] offer_secs` | 10 | How long an offer holds its address in memory, 1 to 300 |
+| `[dhcp] relay_port`, `client_port` | 67, 68 | Where replies to relay agents and to clients go (tests and labs use other ports) |
+| `[dhcp.probe] timeout_ms`, `cache_secs` | 300, 600 | The conflict probe (WP8.5) |
+| `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
+| `[dhcp.ddns] retries`, `backoff_ms` | 5, 1,000 | The DDNS worker (WP8.3) |
+| `[dhcp.history] days` | the installation's setting, else the profile's | A node-local retention of the lease history, 1 to 3,650 days |
+
+`tenko config check` refuses an entry that is not a unicast IPv4 address, an interface on a relay listener, an address listed twice, and values outside the ranges above.
+
+### 10.3 The listeners per platform and mode
+
+| | Relay mode | Direct mode |
+|---|---|---|
+| Linux | Binds the unicast address on port 67; only relayed and unicast traffic arrives. One `SO_REUSEPORT` socket per worker | Binds `0.0.0.0:67` with `SO_BINDTODEVICE` to the interface, one socket that the workers share: Linux hands a broadcast to every socket of a `SO_REUSEPORT` group, so a socket per worker would answer each broadcast once per worker. A reply to a client without an address that did not ask for a broadcast goes to its hardware address through an `AF_PACKET` socket of the interface (`pnet_datalink`, the scanner's safe link-layer API; Ethernet, IPv4 and UDP headers framed by the role, UDP checksum zero); without `CAP_NET_RAW`, or without an interface name, it goes out as a broadcast |
+| Windows | Binds the unicast address; one socket shared by the workers | Binds the interface's address, on which Windows delivers that interface's broadcasts; replies to a hardware address are broadcast |
+
+The receiving address comes from the binding, not from `IP_PKTINFO`: `socket2` 0.6 has no safe way to ask for that control message, and every binding above names its interface or address, so none needs it; the configuration check refuses a wildcard listener for that reason. The reference topology (P3-Q5, E23) runs relay mode only: the gateway relays every network, the node's own included, to the node's address, so the node never answers a broadcast and a request never arrives twice (R56).
+
+### 10.4 Capabilities and deployment
+
+| Platform | Relay mode | Direct mode |
+|---|---|---|
+| systemd (`deploy/systemd/tenko.service`) | Nothing new: port 67 is covered by the unit's `CAP_NET_BIND_SERVICE` | The drop-in `deploy/systemd/dhcp-direct.conf`: `CAP_NET_RAW` (`SO_BINDTODEVICE` and the link-layer socket) and the address families `AF_NETLINK` (the interface list) and `AF_PACKET` |
+| Unprivileged LXC | Works: the container's root may bind port 67 | Needs `CAP_NET_RAW` and `AF_PACKET` in the container, which an unprivileged container usually withholds; use relay mode |
+| Containers | A published UDP port (`-p 67:67/udp`); the gateway relays to the host's address | `network_mode: host` or macvlan, with `CAP_NET_RAW` |
+| Windows (MSI) | The firewall rule for UDP 67 is added when `TENKO_ROLES` holds `dhcp` (or `all`) | The same rule; broadcast replies |
+
+UDP 547 (DHCPv6) joins in Slice 9. The installer (`deploy/install.sh`) offers `controller,dhcp` and `controller,dns,dhcp`, checks that no other process holds UDP 67, and reminds that `[dhcp] listen` must be set. `deploy/README.md` has the walk-through.
+
+### 10.5 The status route and the node commands
+
+`GET /nodes/{id}/dhcp` is the role's report `dhcp.status`: whether it answers (`serving`: it runs and has a listener), whether the store takes its lease writes (`accepting`, P3-Q14), whether a probe role runs (`probe`), the listeners with their address, port, mode, interface and workers, the scopes the image serves, the leases by binding state, the last commit's time from the hand-off to the durable commit (`last_commit_ms`) and the revision of the image. The report also carries, for the health view, the refusal finding, the probe expectation, the lag behind the store and the number of images installed since the start.
+
+The leases, the release and the history go through the node-command interface (`tenko_dhcp::role::DhcpNode`): local on the one node of Phase 3, the same kinds over the command stream to a remote `dhcp` node in Phase 5. The API executes a command in place and records it as a row of `cluster.node_commands` in the state it reached, through an inline job, with the audit record in the same write.
+
+| Kind | Route | What the role does |
+|---|---|---|
+| `dhcp.leases.list` | `GET /dhcp/leases`, `GET /dhcp/leases/{addr}`, `GET /nodes/{id}/dhcp/leases` | A page of the lease table in VRF and address order, by scope, address text, MAC, name or state, with each row's revision, whether it is the client's reservation and the reservation's host; audited `dhcp.lease.read` |
+| `dhcp.lease.release` | `POST /dhcp/leases/{addr}/release`, `POST /nodes/{id}/dhcp/leases/{addr}/release` | An active lease becomes `released` now with a history row of kind `reclaimed`, under a version precondition, so that a commit of the role in between makes the release fail with `dhcp.lease.state` instead of being overwritten; `dhcp.lease.not_found`, `dhcp.store_refused` (503); audited `dhcp.lease.release` with the reason |
+| `dhcp.history.read` | `GET /dhcp/history`, `GET /nodes/{id}/dhcp/history` | A page of `dhcp.history`, newest first, by address, MAC, scope, kind and time (both ends inclusive); audited `dhcp.lease.read` |
+| `dhcp.stats` | | The engine's counters, the committer's, the queue, the offers held, the table's size |
+
+A list shows only the leases and events of the scopes the caller may read. A server without the role answers 409 `dhcp.node.not_dhcp`. A released client keeps its address until it renews, is refused and starts again; the address is free for the allocator at once.
+
+### 10.6 Health rows and metrics
+
+`GET /system/status` carries the role's health rows:
+
+| Code | When |
+|---|---|
+| `dhcp.role.not_serving` | The role answers no request: `[dhcp] listen` is empty, or it stopped |
+| `dhcp.role.store_refused` | The store refuses the role's lease writes (P3-Q14): renewals are answered for the time they have left, new requests are dropped; cleared at the next commit |
+| `dhcp.probe.missing` | The Hardened profile expects conflict detection (TGL-16) and no `probe` role runs in the process |
+
+The families of `docs/dhcp-contracts.md` section 8 are registered under their names (`tenko_dhcp::role::metrics`): the engine's per-worker counters summed when the registry is read (`tenko_dhcp_packets_total{family="v4",type,outcome}`, `tenko_dhcp_exchange_duration_seconds{step}`, `tenko_dhcp_naks_total`, `tenko_dhcp_declines_total`, `tenko_dhcp_dropped_total{reason}` with the lease path's own drops added), the lazy gauges computed from the table at that time (`tenko_dhcp_leases{state}`, and `tenko_dhcp_pool_utilization{scope}` as the active bindings in the pools over the pools' addresses, by the scope's network), the lease path's `tenko_dhcp_commit_duration_seconds` and `tenko_dhcp_store_refused_total`, and `tenko_dhcp_expired_total`, `tenko_dhcp_history_rows` and `tenko_dhcp_history_purged_total` of WP7.2. The conflict and DDNS families read zero until WP8.5 and WP8.3 count them.
+
+### 10.7 Tests
+
+- `crates/tenko-dhcp/tests/role.rs`: the role over the in-memory store and a relay listener on loopback: the image built before the listener answers, a DORA exchange committed to `dhcp.leases` before the ACK, the four commands and the report, a scope written after the start reaching the image through the feed, and a snapshot install (the store builds the role's index aside and installs it after the role missed a scope and another node's lease) swapping image and table together while a client of the old table renews and a client of the missed scope gets a lease.
+- `crates/tenko/tests/acceptance_dhcp.rs`: through the binary with `--roles controller,dhcp`: a DORA exchange relayed from loopback, the report, the lease and history routes and the system status; sixty clients, more than the store's snapshot interval, and a restart after which the renewal of the first lease is acknowledged with its address, a returning client is offered its address again and the table holds every lease; a release through the API; a role without a listener in the health view.
+- `crates/tenko-dhcp/tests/direct_linux.rs` (Linux, root, ignored unless `TENKO_TEST_DIRECT_VETH=1`): a veth pair, a direct listener on one end, a client frame broadcast from the other without the broadcast flag; the OFFER arrives as a link-layer unicast to the client's MAC from the listener's address to `yiaddr`, each DISCOVER is answered once, and the link sender alone reaches the other end.
+- `crates/tenko-dhcp/src/server/link.rs`: the framing of the link-layer reply against a header checksum worked out by hand.
+
+The relay listeners with a socket per worker, the role test, the acceptance test and the direct-mode test were run on Linux on the lab node VM (Ubuntu 24.04, kernel 6.8) from binaries built in WSL; WSL itself (`networkingMode=VirtioProxy`) drops the first datagram a socket sends to a port bound after it, also outside Tenko, so tests that send a request once fail there and pass on the VM.

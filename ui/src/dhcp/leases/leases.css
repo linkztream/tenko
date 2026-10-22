@@ -1,0 +1,18 @@
+/* The lease and history views (WP7.5): the status strip of the role, the filter row, the live
+   toggle and the folded-changes line. The grid fills the rest of the page like the other lists
+   of the area (dhcp.css). */
+.dhcp-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); margin-inline: var(--sp-6); padding-block: var(--sp-3); font-size: var(--fs-12); color: var(--ink-2); }
+.dhcp-strip b { color: var(--ink); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.dhcp-strip .dhcp-fact { white-space: nowrap; }
+.dhcp-strip-note { margin-inline: var(--sp-6); }
+.dhcp-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-4) var(--sp-5); margin-inline: var(--sp-6); padding-block: var(--sp-3); }
+.dhcp-filters .field { min-width: 150px; }
+.dhcp-filters .field label { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); }
+.dhcp-filters .select, .dhcp-filters .input { width: 100%; }
+.dhcp-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.dhcp-live { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.dhcp-folded { font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.dhcp-ends { display: inline-flex; flex-direction: column; line-height: 1.25; }
+.dhcp-ends > span:last-child { font-size: var(--fs-12); }
+.dhcp-reason { display: grid; gap: var(--sp-2); margin-block-start: var(--sp-4); }
+.dhcp-reason .input { width: 100%; }

@@ -3208,8 +3208,10 @@ name = "tenko-dhcp"
 version = "0.0.2"
 dependencies = [
  "async-trait",
+ "bytes",
  "futures",
  "ipnet",
+ "pnet_datalink",
  "serde",
  "socket2",
  "tenko-core",

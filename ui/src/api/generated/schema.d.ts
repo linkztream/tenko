@@ -1042,7 +1042,7 @@ export interface paths {
         };
         /**
          * Read the DHCP lease history
-         * @description Scope: `dhcp.read`. Reading the history is audited (`dhcp.lease.read`).
+         * @description Scope: `dhcp.read`. The rows of `dhcp.history`, newest first; the node command `dhcp.history.read` of the one node. Reading the history is audited (`dhcp.lease.read`).
          */
         get: operations["list_dhcp_history"];
         put?: never;
@@ -1062,7 +1062,7 @@ export interface paths {
         };
         /**
          * List DHCP leases
-         * @description Scope: `dhcp.read`. Reading leases is audited (`dhcp.lease.read`).
+         * @description Scope: `dhcp.read`. The leases of the dhcp role's table in address order, filtered; the node command `dhcp.leases.list` of the one node. Reading leases is audited (`dhcp.lease.read`).
          */
         get: operations["list_dhcp_leases"];
         put?: never;
@@ -1082,7 +1082,7 @@ export interface paths {
         };
         /**
          * Get the DHCP lease of an address
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. Audited (`dhcp.lease.read`). Without `vrf`, the lease of the address in the one VRF that has one.
          */
         get: operations["get_dhcp_lease"];
         put?: never;
@@ -1104,7 +1104,7 @@ export interface paths {
         put?: never;
         /**
          * Release a DHCP lease (the address returns to the pool)
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release` of the one node: the active lease becomes `released` now (history kind `reclaimed`); the client keeps using the address until it renews and is refused. Audited (`dhcp.lease.release`).
          */
         post: operations["release_dhcp_lease"];
         delete?: never;
@@ -2915,7 +2915,7 @@ export interface paths {
         };
         /**
          * Get the DHCP role of a node
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image.
          */
         get: operations["get_node_dhcp_status"];
         put?: never;
@@ -2977,7 +2977,7 @@ export interface paths {
         put?: never;
         /**
          * Release a lease on a node's DHCP role
-         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release`.
+         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release`, recorded in the node's commands and audited.
          */
         post: operations["release_node_dhcp_lease"];
         delete?: never;
@@ -23929,7 +23929,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpHistoryItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23956,8 +23956,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description This server does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24000,7 +24000,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpLeaseItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24027,8 +24027,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description This server does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24098,8 +24098,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description This server does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24170,17 +24170,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The lease is not in a state the operation accepts (`dhcp.lease.state`) */
+            /** @description The lease is not active, or changed meanwhile (`dhcp.lease.state`), or this server does not run the dhcp role (`dhcp.node.not_dhcp`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33387,15 +33378,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     read_node_dhcp_history: {
@@ -33436,7 +33418,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpHistoryItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33474,15 +33456,6 @@ export interface operations {
             };
             /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33528,7 +33501,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpLeaseItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33566,15 +33539,6 @@ export interface operations {
             };
             /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -33638,7 +33602,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such node (`cluster.node.not_found`) */
+            /** @description No such node (`cluster.node.not_found`), or no lease holds the address (`dhcp.lease.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -33647,7 +33611,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`), or the lease is not active (`dhcp.lease.state`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -33656,8 +33620,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The store refused the lease write (`dhcp.store_refused`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

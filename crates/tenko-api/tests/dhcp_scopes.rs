@@ -396,10 +396,14 @@ async fn without_the_service_the_routes_say_the_module_is_off() {
             .await
             .assert_problem(409, "dhcp.module.disabled");
     }
-    // The routes of later packages are declared and answer 501.
-    send(&router, "GET", "/dhcp/leases", None, &[])
+    // The routes of later packages are declared and answer 501; the lease routes answer
+    // through the dhcp role, which this server does not run (WP7.5).
+    send(&router, "GET", "/dhcp/reservations", None, &[])
         .await
         .assert_problem(501, "sys.not_implemented");
+    send(&router, "GET", "/dhcp/leases", None, &[])
+        .await
+        .assert_problem(409, "dhcp.node.not_dhcp");
 }
 
 #[tokio::test]

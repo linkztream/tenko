@@ -20,6 +20,7 @@
 //! | 12 | `scans` | the scan control (probe configuration, scans on demand, the kill switch) and the probe role in process |
 //! | 13 | `api` | the HTTP API, the web UI and server-sent events; the metrics timer and the optional loopback metrics listener (`[metrics]`, [`metrics`]) |
 //! | 14 | `dns` | the `dns` role when the node runs it and the DNS module is on ([`dns`]): the index from the store, then the UDP and TCP listeners, the plain forwarder and the query log |
+//! | 15 | `dhcp` | the `dhcp` role when the node runs it and the DHCP module is on ([`dhcp`]): the configuration image and the lease table from the store, the lease committer, then the listeners of `[dhcp] listen`; the leader services `dhcp.expiry` and `dhcp.history.purge` |
 //!
 //! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
@@ -62,6 +63,8 @@
 //! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
 pub mod cluster_key;
+// WP7.5: the dhcp role.
+mod dhcp;
 mod dns;
 mod imports;
 pub(crate) mod leader;
@@ -121,7 +124,7 @@ pub const FSYNC_WARN_MICROS: u64 = 10_000;
 const RUNNER_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The start steps of the controller role, in order.
-pub const START_ORDER: [(&str, &str); 14] = [
+pub const START_ORDER: [(&str, &str); 15] = [
     ("kek", "key-encryption keys"),
     ("store", "replicated store (openraft over redb)"),
     (
@@ -148,6 +151,11 @@ pub const START_ORDER: [(&str, &str); 14] = [
         "dns",
         "dns role: the index from the store, then the UDP and TCP listeners",
     ),
+    // WP7.5: the dhcp role.
+    (
+        "dhcp",
+        "dhcp role: the image and the lease table from the store, then the listeners",
+    ),
 ];
 
 /// Arguments of `tenko serve`.
@@ -163,8 +171,8 @@ pub struct ServeArgs {
     pub data_dir: Option<PathBuf>,
 
     /// Roles to run: a comma-separated list of controller, dns, dhcp and probe, or `all`;
-    /// overrides `roles` of the file. A controller node runs dns and probe in its process;
-    /// dhcp is not implemented yet.
+    /// overrides `roles` of the file. A controller node runs dns, dhcp and probe in its
+    /// process.
     #[arg(long, value_name = "ROLES")]
     pub roles: Option<String>,
 
@@ -412,25 +420,11 @@ pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
 
 /// Reports roles this build does not run. Returns the exit status when the node has nothing
 /// to run: a node without the controller runs the probe role through `crate::node::agent`;
-/// a controller node runs the probe and dns roles in process when they are listed. `dhcp`
-/// is not implemented, and `dns` needs the controller in the same process until Phase 5.
+/// a controller node runs the probe, dns and dhcp roles in process when they are listed.
+/// `dns` and `dhcp` need the controller in the same process until Phase 5.
 pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
+    // WP7.5: the dhcp role runs in a controller's process.
     if roles.contains(Role::Controller) {
-        if roles.contains(Role::Dhcp) {
-            let mut running = vec!["controller"];
-            running.extend(
-                [Role::Dns, Role::Probe]
-                    .into_iter()
-                    .filter(|role| roles.contains(*role))
-                    .map(Role::as_str),
-            );
-            let _ = writeln!(
-                err,
-                "tenko serve: role(s) dhcp: not implemented in Phase 2; this node runs the {} \
-                 role(s)",
-                running.join(", ")
-            );
-        }
         return None;
     }
     let missing: Vec<&str> = roles
@@ -441,8 +435,9 @@ pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
     if !missing.is_empty() {
         let _ = writeln!(
             err,
-            "tenko serve: role(s) {}: not implemented without the controller role in Phase 2 \
-             (the dns role runs in a controller's process; a node of its own comes with Phase 5)",
+            "tenko serve: role(s) {}: not implemented without the controller role in Phase 3 \
+             (the dns and dhcp roles run in a controller's process; a node of their own comes \
+             with Phase 5)",
             missing.join(", ")
         );
     }
@@ -667,6 +662,9 @@ struct Running {
     store: Option<RaftStore>,
     /// The `dns` role; stopped first.
     dns: Option<dns::DnsRole>,
+    // WP7.5: the dhcp role, stopped with the dns role.
+    /// The `dhcp` role.
+    dhcp: Option<dhcp::DhcpRole>,
     /// The leader supervisor and its services, the leader's job runner among them.
     leader: Option<leader::SupervisorHandle>,
     /// The runner of the jobs pinned to this controller.
@@ -687,6 +685,7 @@ impl Running {
         Self {
             store: None,
             dns: None,
+            dhcp: None,
             leader: None,
             runner: None,
             stop,
@@ -702,6 +701,11 @@ impl Running {
             let began = Instant::now();
             role.stop().await;
             tracing::info!(elapsed_ms = millis(began.elapsed()), "dns role stopped");
+        }
+        if let Some(role) = self.dhcp.take() {
+            let began = Instant::now();
+            role.stop().await;
+            tracing::info!(elapsed_ms = millis(began.elapsed()), "dhcp role stopped");
         }
         if let Some(leader) = self.leader.take() {
             let began = Instant::now();
@@ -899,6 +903,8 @@ struct Services {
     lab_plain_http: bool,
     /// The line of the `dns` role, when it runs.
     dns: Option<String>,
+    /// The line of the `dhcp` role, when it runs.
+    dhcp: Option<String>,
 }
 
 /// Runs the start steps. Whatever started is recorded in `running` for the cleanup.
@@ -1612,6 +1618,9 @@ async fn start(
     // The dns role starts after the API (step `dns`); the API reaches it through the slot.
     let dns_on = dns::runs(resolved, modules);
     let dns_slot = tenko_api::routes::dns::DnsNodeSlot::default();
+    // WP7.5: the dhcp role starts after the dns role (step `dhcp`), reached the same way.
+    let dhcp_on = dhcp::runs(resolved, modules);
+    let dhcp_slot = tenko_api::routes::dhcp::DhcpNodeSlot::default();
     let metrics_stop = running.stop.subscribe();
     let (server, events, warnings_state, metrics_tasks) = steps
         .run("api", async {
@@ -1622,14 +1631,15 @@ async fn start(
                     event_routes: event_routes(),
                     node: NodeStatus {
                         id: Some(resolved.node_id),
-                        roles: if dns_on {
-                            vec![
-                                Role::Controller.as_str().to_owned(),
-                                Role::Dns.as_str().to_owned(),
-                            ]
-                        } else {
-                            vec![Role::Controller.as_str().to_owned()]
-                        },
+                        roles: [
+                            (Role::Controller, true),
+                            (Role::Dns, dns_on),
+                            (Role::Dhcp, dhcp_on),
+                        ]
+                        .into_iter()
+                        .filter(|(_, on)| *on)
+                        .map(|(role, _)| role.as_str().to_owned())
+                        .collect(),
                     },
                     modules,
                 },
@@ -1697,6 +1707,7 @@ async fn start(
                     ));
             }
             server.extensions.insert(dns_slot.clone());
+            server.extensions.insert(dhcp_slot.clone());
             // WP7.4: the DHCP configuration routes read and write through the service.
             if let Some(config) = &dhcp_config {
                 server.extensions.insert(Arc::clone(config));
@@ -1848,6 +1859,36 @@ async fn start(
         dns_slot.set(role.node());
         running.dns = Some(role);
     }
+    // WP7.5: the dhcp role, after the dns role and before the leader services start (it
+    // registers expiry and the history retention).
+    let dhcp_role = steps
+        .run("dhcp", async {
+            if !dhcp_on {
+                let why = if resolved.roles.contains(Role::Dhcp) {
+                    format!(
+                        "the DHCP module is off ({}), so the dhcp role does not run",
+                        crate::modules::describe(modules, config.modules)
+                    )
+                } else {
+                    "the dhcp role is not on this node".to_owned()
+                };
+                return Ok((None, why));
+            }
+            let (role, summary) = dhcp::start(dhcp::Parts {
+                resolved,
+                store: Arc::clone(&store_dyn),
+                metrics: warnings_state.metrics(),
+                leaders: &leaders,
+            })
+            .await?;
+            Ok((Some(role), summary))
+        })
+        .await?;
+    let dhcp_line = dhcp_role.as_ref().map(|role| role.announce().to_owned());
+    if let Some(role) = dhcp_role {
+        dhcp_slot.set(role.node());
+        running.dhcp = Some(role);
+    }
     leaders.register(leader::clock::beat_service(
         Arc::clone(&store_dyn),
         resolved.node_id,
@@ -1900,6 +1941,7 @@ async fn start(
         elapsed: steps.started.elapsed(),
         lab_plain_http,
         dns: dns_line,
+        dhcp: dhcp_line,
     })
 }
 
@@ -2106,6 +2148,10 @@ fn announce(resolved: &Resolved, services: &Services, ready: &Ready) {
         tracing::info!("{line}");
         let _ = writeln!(out, "{line}");
     }
+    if let Some(line) = &services.dhcp {
+        tracing::info!("{line}");
+        let _ = writeln!(out, "{line}");
+    }
     if let Some(sha256) = &services.ca_root_sha256 {
         let _ = writeln!(
             out,
@@ -2300,7 +2346,8 @@ mod tests {
                 "nodes",
                 "scans",
                 "api",
-                "dns"
+                "dns",
+                "dhcp"
             ]
         );
     }
@@ -2318,15 +2365,17 @@ mod tests {
     }
 
     #[test]
-    fn a_controller_runs_dns_and_probe_and_refuses_dhcp() {
+    fn a_controller_runs_dns_dhcp_and_probe() {
         let mut err = Vec::new();
         assert_eq!(check_roles(RoleSet::ALL, &mut err), None);
-        let text = String::from_utf8(err).expect("UTF-8");
-        assert!(
-            text.contains("dhcp: not implemented in Phase 2; this node runs the controller, dns, probe role(s)"),
-            "{text}"
-        );
-        for roles in ["controller", "controller,dns", "controller,dns,probe"] {
+        assert_eq!(err, b"");
+        for roles in [
+            "controller",
+            "controller,dns",
+            "controller,dns,probe",
+            "controller,dhcp",
+            "controller,dns,dhcp",
+        ] {
             let mut err = Vec::new();
             assert_eq!(check_roles(roles.parse().expect("roles"), &mut err), None);
             assert_eq!(err, b"", "{roles}");

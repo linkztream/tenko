@@ -65,6 +65,13 @@ export interface ServerOptions {
   layout?: boolean;
   /** With `layout`: take the version from the layout directory (default true). */
   versionFromLayout?: boolean;
+  // WP7.5: the dhcp role next to the controller, with one relay-mode listener on the loopback.
+  /**
+   * Runs the `dhcp` role: `roles = "controller,dhcp"` and a `[dhcp]` section with a listener in
+   * relay mode on UDP `port` of 127.0.0.1; replies go to `relayPort` (where a test plays the relay
+   * agent, support/dhcp-client.ts). Both are free UDP ports the test found (`freeUdpPort`).
+   */
+  dhcp?: { port: number; relayPort: number };
 }
 
 /** How long a server may take to print its readiness line and answer the probe. */
@@ -209,7 +216,8 @@ export class TenkoServer {
       : ["air_gapped = true"];
     return [
       `data_dir = ${tomlPath(this.dataDir)}`,
-      'roles = "controller"',
+      // WP7.5: the dhcp role is added when the test asks for it.
+      `roles = "${this.options.dhcp ? "controller,dhcp" : "controller"}"`,
       "",
       "[profile]",
       `name = "${this.profile}"`,
@@ -243,6 +251,17 @@ export class TenkoServer {
       "[log]",
       'level = "info"',
       "",
+      // WP7.5: the settings of the dhcp role.
+      ...(this.options.dhcp
+        ? [
+            "[dhcp]",
+            'listen = [{ address = "127.0.0.1", mode = "relay" }]',
+            `port = ${this.options.dhcp.port}`,
+            `relay_port = ${this.options.dhcp.relayPort}`,
+            "workers = 1",
+            "",
+          ]
+        : []),
     ].join("\n");
   }
 

@@ -28,7 +28,7 @@ including the output of every `tenko` command the installer ran.
 
 | Property | Default | Meaning |
 |---|---|---|
-| `TENKO_ROLES` | `controller` | `controller` or `controller,dns` (any `roles` value of `tenko.toml` works) |
+| `TENKO_ROLES` | `controller` | `controller`, `controller,dns`, `controller,dhcp` or `controller,dns,dhcp` (any `roles` value of `tenko.toml` works; the dhcp role also needs `[dhcp] listen`) |
 | `TENKO_MODULES` | not set | The modules, for example `ipam,dns`; not set lets the browser setup ask |
 | `TENKO_PROFILE` | `home` | The security profile until setup: `home`, `standard`, `hardened` or `lab` |
 | `TENKO_HOSTNAME` | not set | The certificate's name until setup stores the host name (`[tls] host_name`); `localhost` is added as an extra name. Not set: `localhost` |
@@ -104,9 +104,16 @@ with the product:
 | Tenko DDI web UI and API (TCP 8443) | TCP 8443 |
 | Tenko DDI DNS (UDP) | UDP `TENKO_DNS_PORT`, with the dns role |
 | Tenko DDI DNS (TCP) | TCP `TENKO_DNS_PORT`, with the dns role |
+| Tenko DDI DHCP (UDP) | UDP 67, with the dhcp role |
 
 Narrow them to your networks in Windows Defender Firewall if the server is reachable from
 networks that should not manage it.
+
+<!-- WP7.5 -->
+The DHCP rule is for the dhcp role (`TENKO_ROLES=controller,dhcp`); it opens UDP 67 only, so a
+`[dhcp] port` other than 67 needs a rule of your own. On Windows the role answers clients by
+broadcast, and the service needs no privilege for port 67. UDP 547 joins the rule with
+DHCPv6 in Slice 9; it is not served yet.
 
 ### First-run setup
 

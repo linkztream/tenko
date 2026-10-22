@@ -1396,6 +1396,266 @@
       <unit id="errors.dhcp.export.format">
         <segment><source>This export format is not known.</source><target>Exportformatet är okänt.</target></segment>
       </unit>
+      <!-- WP7.5: leases and history -->
+      <unit id="dhcp.col.address">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="dhcp.col.state">
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dhcp.col.client_mac">
+        <segment><source>MAC address</source><target>MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.col.client_id">
+        <segment><source>Client identifier</source><target>Klientidentitet</target></segment>
+      </unit>
+      <unit id="dhcp.col.host_name">
+        <segment><source>Host name</source><target>Värdnamn</target></segment>
+      </unit>
+      <unit id="dhcp.col.ends">
+        <segment><source>Ends</source><target>Slutar</target></segment>
+      </unit>
+      <unit id="dhcp.col.reserved">
+        <segment><source>Reserved</source><target>Reserverad</target></segment>
+      </unit>
+      <unit id="dhcp.col.relay">
+        <segment><source>Relay</source><target>Relä</target></segment>
+      </unit>
+      <unit id="dhcp.col.time">
+        <segment><source>Time</source><target>Tid</target></segment>
+      </unit>
+      <unit id="dhcp.col.event">
+        <segment><source>Event</source><target>Händelse</target></segment>
+      </unit>
+      <unit id="dhcp.col.state_after">
+        <segment><source>State after</source><target>Tillstånd efter</target></segment>
+      </unit>
+      <unit id="dhcp.col.node">
+        <segment><source>Node</source><target>Nod</target></segment>
+      </unit>
+      <unit id="dhcp.leases.sub">
+        <segment><source>The leases the server holds: the client, its name and when each ends.</source><target>Lånen som servern håller: klienten, dess namn och när varje lån slutar.</target></segment>
+      </unit>
+      <unit id="dhcp.leases.filters">
+        <segment><source>Filter the leases</source><target>Filtrera lånen</target></segment>
+      </unit>
+      <unit id="dhcp.leases.empty">
+        <segment><source>No leases</source><target>Inga lån</target></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_body">
+        <segment><source>Leases appear here when clients get an address from a scope.</source><target>Lån visas här när klienter får en adress från ett omfång.</target></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_filtered">
+        <segment><source>No lease matches</source><target>Inget lån matchar</target></segment>
+      </unit>
+      <unit id="dhcp.leases.empty_filtered_body">
+        <segment><source>Change or clear the filters.</source><target>Ändra eller rensa filtren.</target></segment>
+      </unit>
+      <unit id="dhcp.leases.more">
+        <segment><source>Load more leases</source><target>Visa fler lån</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.active">
+        <segment><source>Active</source><target>Aktivt</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.expired">
+        <segment><source>Expired</source><target>Utgånget</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.released">
+        <segment><source>Released</source><target>Frisläppt</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.abandoned">
+        <segment><source>Abandoned</source><target>Övergivet</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.reset">
+        <segment><source>Reset</source><target>Återställt</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.free">
+        <segment><source>Free</source><target>Ledigt</target></segment>
+      </unit>
+      <unit id="dhcp.leases.state.backup">
+        <segment><source>Backup</source><target>Reserv</target></segment>
+      </unit>
+      <unit id="dhcp.lease.reserved">
+        <segment><source>Reserved</source><target>Reserverad</target></segment>
+      </unit>
+      <unit id="dhcp.lease.history_link">
+        <segment><source>Show the history of this address</source><target>Visa historiken för adressen</target></segment>
+      </unit>
+      <unit id="dhcp.lease.release">
+        <segment><source>Release</source><target>Frisläpp</target></segment>
+      </unit>
+      <unit id="dhcp.lease.release_title">
+        <segment><source>Release {addr}</source><target>Frisläpp {addr}</target></segment>
+      </unit>
+      <unit id="dhcp.lease.release_body">
+        <segment><source>The lease of {addr} held by {mac} ends now. The client can ask for an address again.</source><target>Lånet på {addr} som {mac} håller slutar nu. Klienten kan be om en adress igen.</target></segment>
+      </unit>
+      <unit id="dhcp.lease.release_confirm">
+        <segment><source>Release the lease</source><target>Frisläpp lånet</target></segment>
+      </unit>
+      <unit id="dhcp.lease.reason">
+        <segment><source>Reason</source><target>Orsak</target></segment>
+      </unit>
+      <unit id="dhcp.lease.reason_help">
+        <segment><source>Optional. It goes into the audit record.</source><target>Valfri. Den hamnar i granskningsloggen.</target></segment>
+      </unit>
+      <unit id="dhcp.lease.released">
+        <segment><source>Released {addr}</source><target>Frisläppte {addr}</target></segment>
+      </unit>
+      <unit id="dhcp.do.history">
+        <segment><source>History</source><target>Historik</target></segment>
+      </unit>
+      <unit id="dhcp.do.refresh">
+        <segment><source>Refresh</source><target>Uppdatera</target></segment>
+      </unit>
+      <unit id="dhcp.live.label">
+        <segment><source>Live</source><target>Live</target></segment>
+      </unit>
+      <unit id="dhcp.live.hint">
+        <segment><source>Follow the changes as they happen</source><target>Följ ändringarna när de sker</target></segment>
+      </unit>
+      <unit id="dhcp.live.folded">
+        <segment><source>{count, plural, one {# change folded together} other {# changes folded together}}</source><target>{count, plural, one {# ändring sammanslagen} other {# ändringar sammanslagna}}</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.scope">
+        <segment><source>Scope</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.scope_any">
+        <segment><source>All scopes</source><target>Alla omfång</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr">
+        <segment><source>Address starts with</source><target>Adressen börjar med</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr_exact">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.addr_placeholder">
+        <segment><source>192.0.2.</source><target>192.0.2.</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.mac">
+        <segment><source>MAC address</source><target>MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.mac_invalid">
+        <segment><source>This is not a MAC address, for example 00:00:5e:00:53:01.</source><target>Det här är ingen MAC-adress, till exempel 00:00:5e:00:53:01.</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.name">
+        <segment><source>Name contains</source><target>Namnet innehåller</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.name_placeholder">
+        <segment><source>client-a</source><target>client-a</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.state">
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.state_any">
+        <segment><source>Any state</source><target>Alla tillstånd</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.kind">
+        <segment><source>Event</source><target>Händelse</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.kind_any">
+        <segment><source>Any event</source><target>Alla händelser</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.from">
+        <segment><source>From</source><target>Från</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.to">
+        <segment><source>Until</source><target>Till</target></segment>
+      </unit>
+      <unit id="dhcp.lfilter.reset">
+        <segment><source>Clear the filters</source><target>Rensa filtren</target></segment>
+      </unit>
+      <unit id="dhcp.example.addr">
+        <segment><source>192.0.2.50</source><target>192.0.2.50</target></segment>
+      </unit>
+      <unit id="dhcp.strip.label">
+        <segment><source>State of the DHCP role</source><target>Status för DHCP-rollen</target></segment>
+      </unit>
+      <unit id="dhcp.strip.serving">
+        <segment><source>Serving</source><target>Svarar</target></segment>
+      </unit>
+      <unit id="dhcp.strip.not_serving">
+        <segment><source>Not serving</source><target>Svarar inte</target></segment>
+      </unit>
+      <unit id="dhcp.strip.accepting">
+        <segment><source>Accepting lease writes</source><target>Tar emot lånskrivningar</target></segment>
+      </unit>
+      <unit id="dhcp.strip.refusing">
+        <segment><source>Refusing lease writes</source><target>Nekar lånskrivningar</target></segment>
+      </unit>
+      <unit id="dhcp.strip.probe_on">
+        <segment><source>Conflict detection on</source><target>Konfliktkontroll på</target></segment>
+      </unit>
+      <unit id="dhcp.strip.probe_off">
+        <segment><source>Conflict detection off</source><target>Konfliktkontroll av</target></segment>
+      </unit>
+      <unit id="dhcp.strip.listeners">
+        <segment><source>{count, plural, one {# listener} other {# listeners}}</source><target>{count, plural, one {# lyssnare} other {# lyssnare}}</target></segment>
+      </unit>
+      <unit id="dhcp.strip.scopes">
+        <segment><source>{count, plural, one {# scope} other {# scopes}}</source><target>{count, plural, one {# omfång} other {# omfång}}</target></segment>
+      </unit>
+      <unit id="dhcp.strip.commit">
+        <segment><source>Last commit {ms} ms</source><target>Senaste skrivning {ms} ms</target></segment>
+      </unit>
+      <unit id="dhcp.strip.revision">
+        <segment><source>Revision {revision}</source><target>Revision {revision}</target></segment>
+      </unit>
+      <unit id="dhcp.strip.not_dhcp_title">
+        <segment><source>This node does not run the DHCP role.</source><target>Noden kör inte DHCP-rollen.</target></segment>
+      </unit>
+      <unit id="dhcp.strip.not_dhcp_body">
+        <segment><source>Add the role to the configuration of the node to serve clients from it.</source><target>Lägg till rollen i nodens konfiguration för att betjäna klienter från den.</target></segment>
+      </unit>
+      <unit id="dhcp.history.sub">
+        <segment><source>What happened to the leases, newest first.</source><target>Vad som hänt med lånen, nyast först.</target></segment>
+      </unit>
+      <unit id="dhcp.history.filters">
+        <segment><source>Filter the history</source><target>Filtrera historiken</target></segment>
+      </unit>
+      <unit id="dhcp.history.empty">
+        <segment><source>No events</source><target>Inga händelser</target></segment>
+      </unit>
+      <unit id="dhcp.history.empty_body">
+        <segment><source>Grants, renewals and releases of leases are recorded here.</source><target>Utdelning, förnyelse och frisläppning av lån noteras här.</target></segment>
+      </unit>
+      <unit id="dhcp.history.empty_filtered">
+        <segment><source>No event matches</source><target>Ingen händelse matchar</target></segment>
+      </unit>
+      <unit id="dhcp.history.empty_filtered_body">
+        <segment><source>Change or clear the filters.</source><target>Ändra eller rensa filtren.</target></segment>
+      </unit>
+      <unit id="dhcp.history.more">
+        <segment><source>Load more events</source><target>Visa fler händelser</target></segment>
+      </unit>
+      <unit id="dhcp.history.lease_link">
+        <segment><source>Show the leases of this address</source><target>Visa lånen för adressen</target></segment>
+      </unit>
+      <unit id="dhcp.event.granted">
+        <segment><source>Granted</source><target>Beviljat</target></segment>
+      </unit>
+      <unit id="dhcp.event.renewed">
+        <segment><source>Renewed</source><target>Förnyat</target></segment>
+      </unit>
+      <unit id="dhcp.event.rebound">
+        <segment><source>Rebound</source><target>Omförhandlat</target></segment>
+      </unit>
+      <unit id="dhcp.event.released">
+        <segment><source>Released</source><target>Frisläppt</target></segment>
+      </unit>
+      <unit id="dhcp.event.declined">
+        <segment><source>Declined</source><target>Avvisat</target></segment>
+      </unit>
+      <unit id="dhcp.event.expired">
+        <segment><source>Expired</source><target>Utgånget</target></segment>
+      </unit>
+      <unit id="dhcp.event.reclaimed">
+        <segment><source>Reclaimed</source><target>Återtaget</target></segment>
+      </unit>
+      <unit id="dhcp.event.conflict">
+        <segment><source>Conflict</source><target>Konflikt</target></segment>
+      </unit>
+      <!-- end of WP7.5: leases and history -->
     </group>
   </file>
 </xliff>

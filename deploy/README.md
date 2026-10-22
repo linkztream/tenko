@@ -4,10 +4,10 @@ Tenko DDI is one binary, `tenko`. `tenko serve` runs the roles of a node; every 
 command (`config`, `setup`, `login`, `prefix`, `import`, `export`, ...) is the
 command-line client of the API. The `controller` role is the REST API and web UI on one
 port (8443 by default), the replicated store, IPAM and the zone service. Next to it the
-`dns` role (port 53, section "DNS: the dns role and port 53") and the `probe` role run in
-the same process when they are listed; `dhcp` is skipped with a notice. A role list
-without `controller` runs the probe role only, and exits with status 2 when it names
-`dns` or `dhcp`.
+`dns` role (port 53, section "DNS: the dns role and port 53"), the `dhcp` role (UDP 67,
+section "DHCP: the dhcp role and UDP 67") and the `probe` role run in the same process when
+they are listed. A role list without `controller` runs the probe role only, and exits with
+status 2 when it names `dns` or `dhcp`.
 
 | Path | Contents |
 |---|---|
@@ -15,7 +15,7 @@ without `controller` runs the probe role only, and exits with status 2 when it n
 | `systemd/tenko.service` | Hardened unit for Linux (`Type=notify`) |
 | `Dockerfile` | Multi-stage build of the container image (build from the repository root) |
 | `compose/controller.example.yml` | The controller on a bridge network, key from a Docker secret |
-| `compose/macvlan.example.yml` | The same on a macvlan network, for the later DHCP role |
+| `compose/macvlan.example.yml` | The same on a macvlan network, for the probe and for the dhcp role in direct mode |
 | `install.sh` | The Linux installer: one command installs or upgrades a node (below) |
 | `compose/quickstart.example.yml` | The published image with the dns role, for the Docker quick start (below) |
 | `proxmox/` | Proxmox VE container scripts, the Tenko container among them, see [proxmox/README.md](proxmox/README.md) |
@@ -75,7 +75,7 @@ no simple pattern such as `1234`); the other profiles take a password.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--roles controller\|controller,dns` | `controller,dns` | The roles of the node |
+| `--roles controller\|controller,dns\|controller,dhcp\|controller,dns,dhcp` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below) |
 | `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
 | `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)) |
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
@@ -104,7 +104,9 @@ What it does, in this order:
 1. Checks the host: root, x86_64 (other architectures stop: there is no release binary for
    them), the distribution (others get a warning), systemd as PID 1 and its version (250 or
    later for encrypted credentials), `curl` when it downloads, `useradd`, and the ports:
-   8443/tcp, and 53 when the dns role is chosen. When systemd-resolved's stub listener
+   8443/tcp, 53 when the dns role is chosen, and UDP 67 when the dhcp role is chosen (another
+   DHCP server on every address, such as dnsmasq, isc-dhcp-server or Kea, stops it with the
+   program's name; one bound to a single address only warns). When systemd-resolved's stub listener
    holds 127.0.0.53:53 and the dns role is to answer on every address, it asks (`--yes`
    answers yes) to set `DNSStubListener=no` in `/etc/systemd/resolved.conf.d/tenko.conf`
    and points `/etc/resolv.conf` at `/run/systemd/resolve/resolv.conf`, so the host keeps
@@ -125,8 +127,10 @@ What it does, in this order:
    `[profile]`, `[server] listen` on IPv4 and IPv6 (`0.0.0.0:8443` and `[::]:8443`; IPv4
    only on a kernel without IPv6), `[tls]` with the host name and `localhost` on the
    certificate, plus the host's IPv4 and global IPv6 addresses when it has them, `[dns]
-   listen` and `forwarders`, and `[kek]` for a key file) and checks it with `tenko config
-   check`.
+   listen` and `forwarders`, a commented `[dhcp] listen` example with the dhcp role, and
+   `[kek]` for a key file) and checks it with `tenko config check`. With the dhcp role it
+   closes with a reminder: set `[dhcp] listen`, and install `systemd/dhcp-direct.conf` for
+   direct mode (section "DHCP" below).
 5. Installs `systemd/tenko.service` unchanged (the script carries a copy; a test keeps the
    two equal) with its drop-ins, enables and starts it, and waits until `tenko health`
    reports the node ready.
@@ -509,6 +513,12 @@ other hardening setting stays. The probe works without it; the capability only m
 [../docs/scanning.md](../docs/scanning.md), section 9). `systemd-analyze security` rates
 the unit 1.2 without the drop-in and 1.6 with it.
 
+**The dhcp role.** UDP 67 is below 1024 and covered by the base unit's
+`CAP_NET_BIND_SERVICE`, so relay mode needs no change. Direct mode (the broadcasts of clients
+on a link) needs the drop-in `systemd/dhcp-direct.conf`, which grants the same
+capability and address families as the probe drop-in; section "DHCP: the dhcp role and UDP
+67" has the steps and the reasons.
+
 **The smoke test.** `systemd/smoke.sh` checks the unit end to end on a host where systemd
 is PID 1; the CI job `systemd-smoke` runs it on a Linux runner on the weekly schedule
 and when the workflow is started by hand. It installs the binary,
@@ -650,6 +660,10 @@ drop all of them. `NET_RAW` is needed only by the raw-socket methods (`arp_sweep
 [NET_RAW]` commented out. Without `cap_drop: [ALL]`, Docker's default set already has it.
 `tenko node scan status` inside the container shows whether the process holds it.
 
+The dhcp role in direct mode needs `NET_RAW` too (it binds the interface and answers by
+link-layer unicast), and `NET_BIND_SERVICE` where the host's sysctl for privileged ports
+applies (host networking); relay mode needs neither (section "DHCP: the dhcp role and UDP 67").
+
 ### Host networking
 
 `network_mode: host` puts the container into the host's network namespace
@@ -662,6 +676,10 @@ Docker manages no firewall rules for it (the host firewall is the only protectio
 and 8444), and `ports:` and `networks:` do not apply. Narrow `TENKO_SERVER__LISTEN` and
 `TENKO_CLUSTER__LISTEN` to the addresses that should serve. Only Linux has a real host
 network; Docker Desktop does not give one.
+
+The dhcp role in direct mode needs one of the two: a bridge network does not carry the
+link's broadcasts. Relay mode works on a bridge network with `-p 67:67/udp` (section "DHCP:
+the dhcp role and UDP 67").
 
 ### LXC
 
@@ -699,6 +717,12 @@ capability. To check on a given host, from inside the container, in this order:
   do not run yet, so this only matters when they arrive. The capability never reaches
   other containers' or the host's interfaces: a probe in a container sees the segments its
   own interfaces are on.
+- **The dhcp role.** Relay mode binds a unicast address on UDP 67 and works in an
+  unprivileged container (the unit's `CAP_NET_BIND_SERVICE` is enough; the gateway must
+  relay to the container's address). Direct mode needs `CAP_NET_RAW` and `AF_PACKET` in the
+  container, which an unprivileged container usually withholds: check as for raw sockets
+  above, and use the `deploy/systemd/dhcp-direct.conf` drop-in so that the capability
+  reaches the `tenko` account; otherwise use relay mode.
 - **systemd inside the container** works with the unit of `deploy/systemd`, but some of its
   hardening options need privileges that an unprivileged container does not have, and the
   unit then fails to start with status 226/NAMESPACE or 218/CAPABILITIES (`journalctl -u
@@ -805,6 +829,84 @@ Use the path the service runs (`<data_dir>\updates\current\tenko.exe` in the ver
 layout, see windows/README.md), and narrow the rules with
 `-RemoteAddress` to the client networks. On Windows the UDP workers of an address share one
 socket; `[dns] workers` sets how many threads read it.
+
+## DHCP: the dhcp role and UDP 67
+
+A controller node serves DHCPv4 when `roles` lists `dhcp` and the DHCP module is on: `roles =
+"controller,dhcp"` or `"controller,dns,dhcp"` in tenko.toml (or `--roles`, `TENKO_ROLES`; the
+installer offers both). The scopes, options, classes and leases live in the store; the
+`[dhcp]` section of `tenko.toml` says where and how this node listens (`listen`, `port`,
+`workers`, `offer_secs`, ...), see `tenko.example.toml`. Nothing is served until `listen`
+names an address, and `tenko config check` validates the section. DHCPv6 (UDP 547) comes in
+Slice 9 and is not served yet; the port is named here so that you can plan the firewall.
+
+**Relay mode and direct mode.** A listener has a mode:
+
+| | `relay` | `direct` |
+|---|---|---|
+| Binds | the node's unicast address, UDP 67 | `0.0.0.0:67`, tied to `interface` with `SO_BINDTODEVICE` (Linux); the interface's address (Windows) |
+| Hears | relayed (unicast) traffic only: the gateway forwards the clients' broadcasts | also the broadcasts of clients on the link |
+| Answers a client without an address | to the relay agent, which delivers it | Linux with the capabilities below: a link-layer unicast through an `AF_PACKET` socket; otherwise, and on Windows: by broadcast |
+| Linux capabilities | `CAP_NET_BIND_SERVICE` (the base unit has it) | `CAP_NET_BIND_SERVICE`, `CAP_NET_RAW`; address families `AF_NETLINK` and `AF_PACKET` |
+| Unprivileged LXC | works | usually not: it needs `CAP_NET_RAW` and `AF_PACKET` in the container |
+| Containers | works with a published port (`-p 67:67/udp`) | needs `network_mode: host` or a macvlan network |
+
+The reference topology uses relay mode only: the gateway relays every network, the node's
+own included, to one Tenko node (its address, UDP 67). Configure the gateway's relay (DHCP
+relay, "ip helper-address") with the node's address, and set `[dhcp] listen = [{ address =
+"192.0.2.10", mode = "relay" }]` to that same address. Use direct mode only for a link
+without a relay agent: `listen = [{ address = "192.0.2.10", mode = "direct", interface =
+"eth0" }]`.
+
+**Linux (systemd).** Port 67 is below 1024, covered by the `CAP_NET_BIND_SERVICE` of the
+base unit `systemd/tenko.service` (which it also needs for 547 later); relay mode needs
+nothing more. Direct mode needs the drop-in `systemd/dhcp-direct.conf`:
+
+```
+install -d /etc/systemd/system/tenko.service.d
+install -m 0644 deploy/systemd/dhcp-direct.conf /etc/systemd/system/tenko.service.d/dhcp-direct.conf
+systemctl daemon-reload && systemctl restart tenko
+```
+
+It adds `CAP_NET_RAW` (bounding set and ambient: `SO_BINDTODEVICE` and the link-layer reply
+need it) and the address families `AF_NETLINK` (the interface list) and `AF_PACKET`. It
+grants the same set as the probe drop-in `systemd/probe.conf`, so one of the two is enough
+when both roles run. Every other hardening setting stays. Without systemd,
+`setcap cap_net_bind_service,cap_net_raw+ep` on the binary does the same (repeat it after
+every update). Open the firewall for UDP 67 to the relay agents, or to the clients' link in
+direct mode, for example `nft add rule inet filter input udp dport 67 accept`, narrowed to
+their networks. The installer does not install the drop-in; it prints a reminder when the
+dhcp role is chosen.
+
+**Another DHCP server on UDP 67.** Only one process can hold UDP 67 on an address.
+dnsmasq, isc-dhcp-server, Kea, and the DHCP service of a hypervisor or home router software
+on the same host hold it on every address by default: stop and disable them first, or
+narrow them to other addresses. The installer stops with the program's name when another
+process holds UDP 67 on every address. Never run two DHCP servers for one network without a
+failover relationship.
+
+**Containers.** Relay mode works on a bridge network: publish the port with `-p
+67:67/udp`, and point the gateway's relay at the Docker host's address. A relayed packet
+carries the gateway's address as its source and the relay's address in `giaddr`, so the
+published port needs no host networking. Direct mode needs the broadcasts of the link, which
+a bridge network does not carry: use `network_mode: host` (`compose/host.example.yml`) or a
+macvlan network (`compose/macvlan.example.yml`), and give the container `cap_add:
+[NET_RAW]` (and `NET_BIND_SERVICE` with host networking, where the host's sysctl for
+privileged ports applies; a macvlan or bridge container may bind port 67 without it). Set
+the listener with variables, for example
+`TENKO_DHCP__LISTEN='[{ address = "192.0.2.10", mode = "relay" }]'`.
+
+**LXC and Proxmox VE.** An unprivileged container binds UDP 67 on its own address without
+trouble, so relay mode works there: give the container a bridged NIC with its own address,
+and let the gateway relay to it. Direct mode needs `CAP_NET_RAW` and `AF_PACKET` inside the
+container, which an unprivileged container usually does not get (see "LXC" above for how to
+check with `grep CapEff /proc/self/status`); use relay mode, or a privileged container or a
+virtual machine for direct mode.
+
+**Windows.** The service needs no privilege for port 67; the Windows DHCP Server role holds
+the port (see [windows/README.md](windows/README.md), "Coexistence with Windows roles"):
+stop and remove it first. The MSI adds a firewall rule for UDP 67 when `TENKO_ROLES` names
+the dhcp role. Direct mode answers by broadcast on Windows.
 
 ## DNS over TLS and DNS over HTTPS
 

@@ -17,6 +17,11 @@
 //!   Windows delivers the broadcasts arriving on that interface.
 //!
 //! Every socket may send broadcasts (`SO_BROADCAST`).
+//!
+//! WP7.5: a direct listener has one socket that its workers share, whatever the layout.
+//! Linux hands a broadcast to every socket of a `SO_REUSEPORT` group (only unicast is spread
+//! over the group), so one socket per worker would answer every broadcast request once per
+//! worker; `tests/direct_linux.rs` asserts that each DISCOVER is answered once.
 
 use std::{
     io,
@@ -117,7 +122,8 @@ pub(crate) fn bind(
     layout: SocketLayout,
     buffers: (usize, usize),
 ) -> io::Result<Bound> {
-    let reuse = layout == SocketLayout::ReusePort;
+    // WP7.5: a broadcast reaches every socket of a reuse-port group: one per direct listener.
+    let reuse = layout == SocketLayout::ReusePort && listen.mode == ListenMode::Relay;
     let (first, bound) = bind_one(listen, listen.address.port(), reuse, buffers)?;
     let mut sockets = vec![Arc::new(first)];
     if reuse {

@@ -212,7 +212,7 @@ fn internal_ca_mode_serves_https_with_the_published_ca_root() {
 }
 
 #[test]
-fn roles_all_runs_the_controller_dns_and_probe_roles() {
+fn roles_all_runs_the_controller_dns_dhcp_and_probe_roles() {
     let port = serve_support::free_port();
     let mut node = Node::new()
         .with_args(&["--roles", "all"])
@@ -224,9 +224,10 @@ workers = 1"
     let mut server = node.start();
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
-    outcome.assert_stderr_contains(
-        "dhcp: not implemented in Phase 2; this node runs the controller, dns, probe role(s)",
-    );
+    // WP7.5: the dhcp role runs too, here without a listener.
+    outcome.assert_stderr_contains(&step_marker("dhcp", "ready in "));
+    outcome.assert_stdout_contains("dhcp role answering on no listener");
+    outcome.assert_stderr_contains("dhcp role stopped");
     outcome.assert_stderr_contains(&step_marker("dns", "ready in "));
     outcome.assert_stdout_contains(&format!("dns role answering on 127.0.0.1:{port}"));
     outcome.assert_stderr_contains("dns role stopped");

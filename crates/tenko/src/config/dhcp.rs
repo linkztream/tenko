@@ -1,0 +1,370 @@
+//! `[dhcp]`: the node-local settings of the `dhcp` role (WP7.5, `docs/dhcp-contracts.md`
+//! section 9, `docs/dhcp.md` section 10). The replicated settings of the service (lease
+//! times, options, the history days of the installation) are `dhcp.settings` in the store.
+
+use std::net::{Ipv4Addr, SocketAddrV4};
+
+use serde::{Deserialize, Deserializer, Serialize, de};
+
+use super::ConfigError;
+
+/// How a listener receives (plan section 2.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DhcpListenMode {
+    /// The unicast address: relayed (and unicast) traffic only.
+    #[default]
+    Relay,
+    /// The interface: the broadcasts of clients on the link as well.
+    Direct,
+}
+
+/// One entry of `[dhcp] listen`: a table, or an address alone for relay mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DhcpListen {
+    /// The interface's IPv4 unicast address.
+    pub address: Ipv4Addr,
+    /// Relay (default) or direct.
+    pub mode: DhcpListenMode,
+    /// The interface of a direct listener (Linux binds to it with `SO_BINDTODEVICE` and
+    /// sends link-layer replies through it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListenTable {
+    address: String,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    interface: Option<String>,
+}
+
+fn mode<E: de::Error>(text: Option<&str>) -> Result<DhcpListenMode, E> {
+    match text.map(str::trim) {
+        None | Some("relay") => Ok(DhcpListenMode::Relay),
+        Some("direct") => Ok(DhcpListenMode::Direct),
+        Some(other) => Err(E::custom(format!(
+            "dhcp.listen: mode `{other}` is not relay or direct"
+        ))),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ListenEntry {
+    Address(String),
+    Table(ListenTable),
+}
+
+fn address<E: de::Error>(text: &str) -> Result<Ipv4Addr, E> {
+    text.trim().parse().map_err(|_| {
+        E::custom(format!(
+            "dhcp.listen: `{text}` is not an IPv4 address such as 192.0.2.10"
+        ))
+    })
+}
+
+impl<'de> Deserialize<'de> for DhcpListen {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match ListenEntry::deserialize(deserializer)? {
+            ListenEntry::Address(text) => Ok(Self {
+                address: address(&text)?,
+                mode: DhcpListenMode::Relay,
+                interface: None,
+            }),
+            ListenEntry::Table(table) => Ok(Self {
+                address: address(&table.address)?,
+                mode: mode(table.mode.as_deref())?,
+                interface: table
+                    .interface
+                    .map(|name| name.trim().to_owned())
+                    .filter(|name| !name.is_empty()),
+            }),
+        }
+    }
+}
+
+/// `[dhcp.probe]`: the conflict probe (WP8.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpProbeSection {
+    /// The probe's cap in milliseconds, 10 to 1,000 (default 300, P3-Q7).
+    pub timeout_ms: u64,
+    /// How long a clean probe result is kept, 0 to 86,400 seconds (default 600).
+    pub cache_secs: u64,
+}
+
+impl Default for DhcpProbeSection {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 300,
+            cache_secs: 600,
+        }
+    }
+}
+
+/// `[dhcp.decline]`: what a DECLINE does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpDeclineSection {
+    /// How long a declined address stays abandoned, 60 to 2,592,000 seconds (default one
+    /// day).
+    pub hold_secs: u32,
+}
+
+impl Default for DhcpDeclineSection {
+    fn default() -> Self {
+        Self { hold_secs: 86_400 }
+    }
+}
+
+/// `[dhcp.ddns]`: the DDNS worker's retries (WP8.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpDdnsSection {
+    /// Retries of a change set, 0 to 20 (default 5).
+    pub retries: u32,
+    /// The first backoff in milliseconds, 10 to 60,000 (default 1,000).
+    pub backoff_ms: u64,
+}
+
+impl Default for DhcpDdnsSection {
+    fn default() -> Self {
+        Self {
+            retries: 5,
+            backoff_ms: 1_000,
+        }
+    }
+}
+
+/// `[dhcp.history]`: the lease history of this node.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpHistorySection {
+    /// Days of history kept, 1 to 3,650; unset: the installation's setting, else the
+    /// profile's default (Home 30, Standard and Hardened 90, Lab 7; P3-Q13).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
+}
+
+/// `[dhcp]`: the `dhcp` role of this node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpSection {
+    /// The listeners: `{ address, mode = "relay" | "direct", interface }`, or an address
+    /// alone for relay mode. Empty (the default): the role builds its tables and answers
+    /// nothing, and the health view says so.
+    pub listen: Vec<DhcpListen>,
+    /// The server port (default 67).
+    pub port: u16,
+    /// UDP workers per listener, 0 to 64; 0 (the default) is one per CPU, at most 8.
+    pub workers: usize,
+    /// How long an offer holds its address in memory, 1 to 300 seconds (default 10).
+    pub offer_secs: u32,
+    /// The port replies to relay agents go to (default 67; tests and labs use another).
+    pub relay_port: u16,
+    /// The port replies to clients go to (default 68).
+    pub client_port: u16,
+    /// The conflict probe.
+    pub probe: DhcpProbeSection,
+    /// DECLINE.
+    pub decline: DhcpDeclineSection,
+    /// DDNS retries.
+    pub ddns: DhcpDdnsSection,
+    /// The lease history.
+    pub history: DhcpHistorySection,
+}
+
+impl Default for DhcpSection {
+    fn default() -> Self {
+        Self {
+            listen: Vec::new(),
+            port: 67,
+            workers: 0,
+            offer_secs: 10,
+            relay_port: 67,
+            client_port: 68,
+            probe: DhcpProbeSection::default(),
+            decline: DhcpDeclineSection::default(),
+            ddns: DhcpDdnsSection::default(),
+            history: DhcpHistorySection::default(),
+        }
+    }
+}
+
+impl DhcpSection {
+    /// The workers per listener: the setting, or one per CPU up to 8.
+    pub fn worker_count(&self) -> usize {
+        if self.workers == 0 {
+            std::thread::available_parallelism()
+                .map_or(1, std::num::NonZeroUsize::get)
+                .min(8)
+        } else {
+            self.workers
+        }
+    }
+
+    /// The socket address of a listener.
+    pub fn socket_addr(&self, listen: &DhcpListen) -> SocketAddrV4 {
+        SocketAddrV4::new(listen.address, self.port)
+    }
+
+    pub(super) fn validate(&self) -> Result<(), ConfigError> {
+        fn check(ok: bool, message: &str) -> Result<(), ConfigError> {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message.to_owned()))
+            }
+        }
+        for (index, listen) in self.listen.iter().enumerate() {
+            let address = listen.address;
+            check(
+                !address.is_unspecified() && !address.is_broadcast() && !address.is_multicast(),
+                &format!(
+                    "dhcp.listen[{index}]: {address} is not a unicast address; name the \
+                     interface's address"
+                ),
+            )?;
+            check(
+                listen.mode == DhcpListenMode::Direct || listen.interface.is_none(),
+                &format!(
+                    "dhcp.listen[{index}]: interface is for direct mode; a relay listener \
+                     binds its address"
+                ),
+            )?;
+            if let Some(name) = &listen.interface {
+                check(
+                    name.len() <= 15 && !name.contains(['/', ' ']),
+                    &format!("dhcp.listen[{index}]: `{name}` is not an interface name"),
+                )?;
+            }
+            let same = self
+                .listen
+                .iter()
+                .take(index)
+                .any(|other| other.address == address);
+            check(
+                !same,
+                &format!("dhcp.listen[{index}]: {address} is listed twice"),
+            )?;
+        }
+        check(self.port > 0, "dhcp.port must be between 1 and 65535")?;
+        check(
+            self.relay_port > 0 && self.client_port > 0,
+            "dhcp.relay_port and dhcp.client_port must be between 1 and 65535",
+        )?;
+        check(self.workers <= 64, "dhcp.workers must be between 0 and 64")?;
+        check(
+            (1..=300).contains(&self.offer_secs),
+            "dhcp.offer_secs must be between 1 and 300",
+        )?;
+        check(
+            (10..=1_000).contains(&self.probe.timeout_ms),
+            "dhcp.probe.timeout_ms must be between 10 and 1000",
+        )?;
+        check(
+            self.probe.cache_secs <= 86_400,
+            "dhcp.probe.cache_secs must be between 0 and 86400",
+        )?;
+        check(
+            (60..=2_592_000).contains(&self.decline.hold_secs),
+            "dhcp.decline.hold_secs must be between 60 and 2592000",
+        )?;
+        check(
+            self.ddns.retries <= 20,
+            "dhcp.ddns.retries must be between 0 and 20",
+        )?;
+        check(
+            (10..=60_000).contains(&self.ddns.backoff_ms),
+            "dhcp.ddns.backoff_ms must be between 10 and 60000",
+        )?;
+        check(
+            self.history
+                .days
+                .is_none_or(|days| (1..=3_650).contains(&days)),
+            "dhcp.history.days must be between 1 and 3650",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(text: &str) -> Result<DhcpSection, String> {
+        let section: DhcpSection = toml::from_str(text).map_err(|error| error.to_string())?;
+        section.validate().map_err(|error| error.to_string())?;
+        Ok(section)
+    }
+
+    #[test]
+    fn listeners_are_tables_or_addresses() {
+        let section = parse(
+            "listen = [\"192.0.2.10\", { address = \"198.51.100.1\", mode = \"direct\", \
+             interface = \"eth1\" }]\nworkers = 2\n",
+        )
+        .expect("valid");
+        assert_eq!(section.listen.len(), 2);
+        assert_eq!(section.listen[0].mode, DhcpListenMode::Relay);
+        assert_eq!(section.listen[1].mode, DhcpListenMode::Direct);
+        assert_eq!(section.listen[1].interface.as_deref(), Some("eth1"));
+        assert_eq!(
+            section.socket_addr(&section.listen[0]),
+            "192.0.2.10:67".parse().expect("address")
+        );
+        assert_eq!(section.worker_count(), 2);
+    }
+
+    #[test]
+    fn the_defaults_are_the_contracts() {
+        let section = parse("").expect("valid");
+        assert_eq!(section.listen.len(), 0);
+        assert_eq!(
+            (
+                section.port,
+                section.offer_secs,
+                section.relay_port,
+                section.client_port
+            ),
+            (67, 10, 67, 68)
+        );
+        assert_eq!(section.probe.timeout_ms, 300);
+        assert_eq!(section.probe.cache_secs, 600);
+        assert_eq!(section.decline.hold_secs, 86_400);
+        assert_eq!(section.history.days, None);
+        assert!((1..=8).contains(&section.worker_count()));
+    }
+
+    #[test]
+    fn bad_values_are_refused_with_their_key() {
+        for (text, key) in [
+            ("listen = [\"0.0.0.0\"]", "dhcp.listen[0]"),
+            ("listen = [\"192.0.2.300\"]", "dhcp.listen"),
+            ("listen = [\"2001:db8::1\"]", "dhcp.listen"),
+            (
+                "listen = [{ address = \"192.0.2.1\", interface = \"eth0\" }]",
+                "interface is for direct mode",
+            ),
+            ("listen = [\"192.0.2.1\", \"192.0.2.1\"]", "listed twice"),
+            (
+                "listen = [{ address = \"192.0.2.1\", mode = \"other\" }]",
+                "mode `other` is not relay or direct",
+            ),
+            ("offer_secs = 0", "dhcp.offer_secs"),
+            ("workers = 65", "dhcp.workers"),
+            ("port = 0", "dhcp.port"),
+            ("[probe]\ntimeout_ms = 5", "dhcp.probe.timeout_ms"),
+            ("[decline]\nhold_secs = 1", "dhcp.decline.hold_secs"),
+            ("[ddns]\nretries = 99", "dhcp.ddns.retries"),
+            ("[history]\ndays = 0", "dhcp.history.days"),
+            ("unknown = 1", "unknown"),
+        ] {
+            let error = parse(text).expect_err(text);
+            assert!(error.contains(key), "{text}: {error}");
+        }
+    }
+}

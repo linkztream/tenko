@@ -241,9 +241,9 @@ fn the_dhcp_configuration_round_trips_through_the_command_line() {
     let gone = api.delete(&format!("/prefixes/{prefix}?cascade=true"), None);
     assert_eq!(gone.status, 200, "{}", gone.json());
 
-    // The lease routes are later packages' and say so.
+    // WP7.5: the lease routes answer through the dhcp role, which this node does not run.
     node.client(&["dhcp", "lease", "list"])
         .assert_code(5)
-        .assert_stderr_contains("sys.not_implemented");
+        .assert_stderr_contains("dhcp.node.not_dhcp");
     server.stop().assert_graceful_shutdown();
 }

@@ -405,7 +405,8 @@ describe("the routes", () => {
     await expect(api.post("/api/v1/dhcp/filters", { body: { mac: "02:00:00:00:00:*", kind: "deny" } })).rejects.toMatchObject({ status: 403 });
   });
 
-  it("leaves the lease routes to the 501 stubs", async () => {
-    await expect(api.get("/api/v1/dhcp/leases")).rejects.toMatchObject({ status: 501 });
+  // WP7.5 answers the lease, history and node routes (routes-dhcp-leases.ts); the reservations stay stubs.
+  it("leaves the reservation routes to the 501 stubs", async () => {
+    await expect(api.get("/api/v1/dhcp/reservations")).rejects.toMatchObject({ status: 501 });
   });
 });

@@ -22,11 +22,20 @@
 //!
 //! Destinations ([`Destination`]): the relay at `giaddr` port 67, the client at `ciaddr`
 //! port 68, the broadcast address port 68. A reply to a client's hardware address (direct
-//! mode, no broadcast flag, no address yet) needs a link-layer socket (`AF_PACKET` and
-//! `CAP_NET_RAW` on Linux), which the role adds in WP7.5; until then, and always on
-//! Windows, it goes out as a broadcast, which every client accepts (RFC 2131 section 4.1
-//! allows it when unicast is not possible).
+//! mode, no broadcast flag, no address yet) goes through the listener's link-layer socket
+//! ([`link`], `AF_PACKET` with `CAP_NET_RAW` on Linux, WP7.5) when it has one; without one,
+//! and always on Windows, it goes out as a broadcast, which every client accepts (RFC 2131
+//! section 4.1 allows it when unicast is not possible).
+//!
+//! WP7.5: the lease table is reached through a [`TableHandle`]: a table the server owns
+//! (`RwLock<T>`, [`DhcpServer::start`]) or the role's [`SharedLeases`], which the
+//! production lease store applies its commits to and the feed follows
+//! ([`DhcpServer::start_with`]). A worker takes the table's read guard before it looks at
+//! the image, so [`DhcpServer::swap`], which replaces both under the table's write guard,
+//! is seen whole: no request is answered from a new image and an old table, or the
+//! reverse.
 
+pub mod link;
 mod socket;
 
 use std::{
@@ -40,13 +49,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub use link::LinkSender;
 pub use socket::STOP_POLL;
 use tenko_core::{NodeId, Timestamp};
 
 use crate::{
     allocator::SingleNode,
     image::ConfigImage,
-    lease::{LeaseTable, PendingChange},
+    lease::{LeaseTable, PendingChange, SharedLeases},
     store::{Completion, LeaseStore, SubmitError, Ticket},
     v4::{
         MessageType,
@@ -130,6 +140,69 @@ impl Default for ServerConfig {
     }
 }
 
+// WP7.5: the table behind a handle, so that the role's shared table serves the workers.
+/// Where the workers read the lease table, and where the committer writes it when the
+/// lease store does not.
+pub trait TableHandle: Send + Sync + 'static {
+    /// The table.
+    type Table: LeaseTable;
+
+    /// A read guard: the DORA path's lookups.
+    fn read(&self) -> impl std::ops::Deref<Target = Self::Table> + '_;
+
+    /// A write guard.
+    fn write(&self) -> impl std::ops::DerefMut<Target = Self::Table> + '_;
+
+    /// Whether the lease store applies its commits to this table itself before it reports
+    /// them ([`StoreLeases`](crate::lease::StoreLeases) does), so the committer does not.
+    fn applies_commits(&self) -> bool {
+        false
+    }
+}
+
+impl<T: LeaseTable + Send + Sync + 'static> TableHandle for RwLock<T> {
+    type Table = T;
+
+    fn read(&self) -> impl std::ops::Deref<Target = T> + '_ {
+        RwLock::read(self).unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn write(&self) -> impl std::ops::DerefMut<Target = T> + '_ {
+        RwLock::write(self).unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl TableHandle for SharedLeases {
+    type Table = crate::lease::LeaseIndex;
+
+    fn read(&self) -> impl std::ops::Deref<Target = Self::Table> + '_ {
+        SharedLeases::read(self)
+    }
+
+    fn write(&self) -> impl std::ops::DerefMut<Target = Self::Table> + '_ {
+        SharedLeases::write(self)
+    }
+
+    fn applies_commits(&self) -> bool {
+        true
+    }
+}
+
+/// What one listener is, for the role's status report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListenerInfo {
+    /// The configured address and the port bound.
+    pub address: SocketAddrV4,
+    /// Relay or direct.
+    pub mode: ListenMode,
+    /// The interface of a direct listener.
+    pub interface: Option<String>,
+    /// Workers on it.
+    pub workers: usize,
+    /// Whether direct replies to a hardware address go out at the link layer.
+    pub link_layer: bool,
+}
+
 /// A reply waiting for its commit.
 #[derive(Clone)]
 struct Slot {
@@ -186,10 +259,10 @@ fn split_ticket(ticket: Ticket) -> (usize, u32) {
 }
 
 /// What the workers and the committer share.
-struct Shared<T> {
+struct Shared<H> {
     image: RwLock<Arc<ConfigImage>>,
     generation: AtomicU64,
-    table: RwLock<T>,
+    table: H,
     offers: OfferTable,
     store: Arc<dyn LeaseStore>,
     drive: Option<Box<dyn Fn() + Send + Sync>>,
@@ -197,6 +270,11 @@ struct Shared<T> {
     in_flight: AtomicUsize,
     /// The first socket of each listener, for the committer's sends.
     sockets: Vec<Arc<UdpSocket>>,
+    // WP7.5: the link-layer replies of direct listeners.
+    /// Each listener's address and port, and its link-layer socket when it has one.
+    links: Vec<(SocketAddrV4, Option<LinkSender>)>,
+    /// The last commit's time from hand-off to completion, in microseconds (0: none yet).
+    last_commit_us: AtomicU64,
     /// One per worker, and the committer's last.
     metrics: Vec<WorkerMetrics>,
     stop: AtomicBool,
@@ -205,7 +283,7 @@ struct Shared<T> {
     node: NodeId,
 }
 
-impl<T> Shared<T> {
+impl<H> Shared<H> {
     fn wake_committer(&self) {
         if let Some(thread) = self
             .committer
@@ -219,13 +297,14 @@ impl<T> Shared<T> {
 }
 
 /// The running listeners, workers and committer.
-pub struct DhcpServer<T: LeaseTable + Send + Sync + 'static> {
-    shared: Arc<Shared<T>>,
+pub struct DhcpServer<H: TableHandle> {
+    shared: Arc<Shared<H>>,
     threads: Vec<JoinHandle<()>>,
     locals: Vec<SocketAddrV4>,
+    listeners: Vec<ListenerInfo>,
 }
 
-impl<T: LeaseTable + Send + Sync + 'static> std::fmt::Debug for DhcpServer<T> {
+impl<H: TableHandle> std::fmt::Debug for DhcpServer<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DhcpServer")
             .field("listen", &self.locals)
@@ -233,7 +312,7 @@ impl<T: LeaseTable + Send + Sync + 'static> std::fmt::Debug for DhcpServer<T> {
     }
 }
 
-impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
+impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<RwLock<T>> {
     /// Binds the listeners and starts the workers and the committer over `image`, the
     /// lease table `table` and `store`. `drive`, when given, is called by the committer
     /// before it collects completions (the in-memory store commits there).
@@ -248,6 +327,24 @@ impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
         store: Arc<dyn LeaseStore>,
         drive: Option<Box<dyn Fn() + Send + Sync>>,
     ) -> io::Result<Self> {
+        Self::start_with(config, image, RwLock::new(table), store, drive)
+    }
+}
+
+impl<H: TableHandle> DhcpServer<H> {
+    /// [`DhcpServer::start`] over a table behind `table` (WP7.5: the role's
+    /// [`SharedLeases`], which the production lease store applies its commits to).
+    ///
+    /// # Errors
+    ///
+    /// A listener that cannot be bound, or a thread that cannot be started.
+    pub fn start_with(
+        config: &ServerConfig,
+        image: ConfigImage,
+        table: H,
+        store: Arc<dyn LeaseStore>,
+        drive: Option<Box<dyn Fn() + Send + Sync>>,
+    ) -> io::Result<Self> {
         let workers = config.workers.max(1);
         let mut bound = Vec::with_capacity(config.listen.len());
         for listen in &config.listen {
@@ -259,16 +356,41 @@ impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
             )?);
         }
         let total = bound.len() * workers;
+        let links: Vec<(SocketAddrV4, Option<LinkSender>)> = config
+            .listen
+            .iter()
+            .zip(&bound)
+            .map(|(listen, bound)| {
+                (
+                    SocketAddrV4::new(bound.local, bound.address.port()),
+                    link_sender(listen),
+                )
+            })
+            .collect();
+        let listeners = config
+            .listen
+            .iter()
+            .zip(&links)
+            .map(|(listen, (address, link))| ListenerInfo {
+                address: *address,
+                mode: listen.mode,
+                interface: listen.interface.clone(),
+                workers,
+                link_layer: link.is_some(),
+            })
+            .collect();
         let shared = Arc::new(Shared {
             image: RwLock::new(Arc::new(image)),
             generation: AtomicU64::new(1),
-            table: RwLock::new(table),
+            table,
             offers: OfferTable::with_capacity(config.offers),
             store,
             drive,
             pending: Mutex::new(Pending::new(config.pending)),
             in_flight: AtomicUsize::new(0),
             sockets: bound.iter().map(|b| Arc::clone(&b.sockets[0])).collect(),
+            links,
+            last_commit_us: AtomicU64::new(0),
             metrics: (0..=total).map(|_| WorkerMetrics::default()).collect(),
             stop: AtomicBool::new(false),
             committer: Mutex::new(None),
@@ -309,7 +431,45 @@ impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
             shared,
             threads,
             locals: bound.iter().map(|b| b.address).collect(),
+            listeners,
         })
+    }
+
+    /// What each listener is.
+    pub fn listeners(&self) -> &[ListenerInfo] {
+        &self.listeners
+    }
+
+    // WP7.5: the snapshot reset and the completion wake-up of the role.
+    /// Replaces the image and, through `reset`, the lease table under the table's write
+    /// guard, so that the workers see both or neither (a snapshot install).
+    pub fn swap(&self, image: ConfigImage, reset: impl FnOnce(&mut H::Table)) {
+        let mut table = self.shared.table.write();
+        reset(&mut table);
+        *self
+            .shared
+            .image
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::new(image);
+        self.shared.generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// The image the workers answer from.
+    pub fn image(&self) -> Arc<ConfigImage> {
+        Arc::clone(
+            &self
+                .shared
+                .image
+                .read()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// A function that wakes the committer, for a lease store that reports its
+    /// completions from another thread.
+    pub fn waker(&self) -> impl Fn() + Send + Sync + 'static {
+        let shared = Arc::clone(&self.shared);
+        move || shared.wake_committer()
     }
 
     /// The addresses bound, per listener (the port the system chose for port 0).
@@ -328,17 +488,21 @@ impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
     }
 
     /// Runs `f` on the lease table (the feed applies rows here).
-    pub fn with_table<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        f(&mut self
-            .shared
-            .table
-            .write()
-            .unwrap_or_else(PoisonError::into_inner))
+    pub fn with_table<R>(&self, f: impl FnOnce(&mut H::Table) -> R) -> R {
+        f(&mut self.shared.table.write())
     }
 
     /// The counters summed over the workers.
     pub fn metrics(&self) -> MetricsSnapshot {
         WorkerMetrics::total(&self.shared.metrics)
+    }
+
+    /// The last commit's time from hand-off to completion, once there was one.
+    pub fn last_commit(&self) -> Option<Duration> {
+        match self.shared.last_commit_us.load(Ordering::Relaxed) {
+            0 => None,
+            micros => Some(Duration::from_micros(micros)),
+        }
     }
 
     /// The commits in flight.
@@ -365,18 +529,50 @@ impl<T: LeaseTable + Send + Sync + 'static> DhcpServer<T> {
     }
 }
 
-impl<T: LeaseTable + Send + Sync + 'static> Drop for DhcpServer<T> {
+impl<H: TableHandle> Drop for DhcpServer<H> {
     fn drop(&mut self) {
         self.halt();
     }
 }
 
-fn send(socket: &UdpSocket, dest: Destination, bytes: &[u8]) -> io::Result<usize> {
+/// The link-layer socket of a direct listener with an interface, when it can be opened.
+fn link_sender(listen: &Listen) -> Option<LinkSender> {
+    if listen.mode != ListenMode::Direct {
+        return None;
+    }
+    let interface = listen.interface.as_deref()?;
+    match LinkSender::open(interface) {
+        Ok(sender) => Some(sender),
+        Err(error) => {
+            tracing::info!(
+                interface,
+                %error,
+                "the dhcp role answers clients without an address on this interface by broadcast"
+            );
+            None
+        }
+    }
+}
+
+fn send(
+    socket: &UdpSocket,
+    link: &(SocketAddrV4, Option<LinkSender>),
+    dest: Destination,
+    bytes: &[u8],
+) -> io::Result<usize> {
     let target = match dest {
         Destination::Relay(address) | Destination::Client(address) => address,
-        Destination::Broadcast(port) | Destination::Link { port, .. } => {
+        Destination::Link { addr, mac, port } => {
+            if let (local, Some(sender)) = link
+                && sender
+                    .send((*local.ip(), local.port()), (mac, addr, port), bytes)
+                    .is_ok()
+            {
+                return Ok(bytes.len());
+            }
             SocketAddrV4::new(Ipv4Addr::BROADCAST, port)
         }
+        Destination::Broadcast(port) => SocketAddrV4::new(Ipv4Addr::BROADCAST, port),
     };
     socket.send_to(bytes, target)
 }
@@ -385,8 +581,8 @@ fn micros(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
 
-fn worker_loop<T: LeaseTable + Send + Sync>(
-    shared: &Shared<T>,
+fn worker_loop<H: TableHandle>(
+    shared: &Shared<H>,
     socket: &UdpSocket,
     listener: usize,
     me: usize,
@@ -405,13 +601,15 @@ fn worker_loop<T: LeaseTable + Send + Sync>(
             continue;
         };
         let received = Instant::now();
-        let generation = shared.generation.load(Ordering::Acquire);
-        if generation != seen {
-            image = Arc::clone(&shared.image.read().unwrap_or_else(PoisonError::into_inner));
-            seen = generation;
-        }
         let answer = {
-            let table = shared.table.read().unwrap_or_else(PoisonError::into_inner);
+            // The table first, then the image: a swap holds the table's write guard while
+            // it replaces both.
+            let table = shared.table.read();
+            let generation = shared.generation.load(Ordering::Acquire);
+            if generation != seen {
+                image = Arc::clone(&shared.image.read().unwrap_or_else(PoisonError::into_inner));
+                seen = generation;
+            }
             let ctx = Context {
                 image: &image,
                 leases: &*table,
@@ -436,7 +634,9 @@ fn worker_loop<T: LeaseTable + Send + Sync>(
         metrics.count(&answer);
         match answer.action {
             Action::Reply { kind, len, dest } => {
-                if send(socket, dest, &scratch.reply[..len]).is_ok() && kind == MessageType::Offer {
+                if send(socket, &shared.links[listener], dest, &scratch.reply[..len]).is_ok()
+                    && kind == MessageType::Offer
+                {
                     metrics.exchange[0].record(micros(received));
                 }
             }
@@ -467,8 +667,8 @@ fn worker_loop<T: LeaseTable + Send + Sync>(
 }
 
 /// Parks the reply under a ticket and hands the change to the store.
-fn hand_off<T>(
-    shared: &Shared<T>,
+fn hand_off<H>(
+    shared: &Shared<H>,
     scratch: &Scratch,
     request: Option<MessageType>,
     (len, dest): (usize, Destination),
@@ -516,7 +716,7 @@ fn hand_off<T>(
 }
 
 /// Frees a ticket's slot and returns it, when the ticket is current.
-fn release<T>(shared: &Shared<T>, ticket: Ticket) -> Option<Slot> {
+fn release<H>(shared: &Shared<H>, ticket: Ticket) -> Option<Slot> {
     let (index, generation) = split_ticket(ticket);
     let mut pending = shared
         .pending
@@ -532,7 +732,7 @@ fn release<T>(shared: &Shared<T>, ticket: Ticket) -> Option<Slot> {
     Some(taken)
 }
 
-fn commit_loop<T: LeaseTable + Send + Sync>(shared: &Shared<T>) {
+fn commit_loop<H: TableHandle>(shared: &Shared<H>) {
     let committer = shared.metrics.len() - 1;
     let mut done: Vec<Completion> = Vec::with_capacity(1_024);
     loop {
@@ -563,17 +763,20 @@ fn commit_loop<T: LeaseTable + Send + Sync>(shared: &Shared<T>) {
                 worker.retract(slot.request, DropReason::StoreRefused);
                 continue;
             }
-            {
-                let mut table = shared.table.write().unwrap_or_else(PoisonError::into_inner);
+            if !shared.table.applies_commits() {
+                let mut table = shared.table.write();
                 let previous = table.get(slot.change.vrf, slot.change.addr).cloned();
                 table.apply(slot.change.to_lease(shared.node, previous.as_ref()));
             }
-            shared.metrics[committer]
-                .commit
-                .record(micros(slot.submitted));
+            let commit_us = micros(slot.submitted);
+            shared.metrics[committer].commit.record(commit_us);
+            shared
+                .last_commit_us
+                .store(commit_us.max(1), Ordering::Relaxed);
             if slot.len > 0
                 && send(
                     &shared.sockets[slot.listener],
+                    &shared.links[slot.listener],
                     slot.dest,
                     &slot.reply[..slot.len],
                 )

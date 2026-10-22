@@ -229,6 +229,67 @@ pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarni
     Vec::new()
 }
 
+// WP7.5: the health rows of the dhcp role.
+/// Warning code of a `dhcp` role that answers no request: no listener, or stopped.
+pub const DHCP_ROLE_NOT_SERVING: &str = "dhcp.role.not_serving";
+
+/// Warning code of a `dhcp` role whose lease writes the store refuses (P3-Q14).
+pub const DHCP_ROLE_STORE_REFUSED: &str = tenko_dhcp::lease::refusal::FINDING;
+
+/// Warning code of a profile that expects conflict detection while no `probe` role runs
+/// (TGL-16 under Hardened).
+pub const DHCP_PROBE_MISSING: &str = "dhcp.probe.missing";
+
+/// The warnings of the `dhcp` role of this node.
+pub fn dhcp_role_warnings(role: &tenko_dhcp::role::DhcpStatus) -> Vec<StatusWarning> {
+    let node = || {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("node".to_owned(), role.node.to_string());
+        params
+    };
+    let mut warnings = Vec::new();
+    if !role.serving {
+        warnings.push(StatusWarning {
+            code: DHCP_ROLE_NOT_SERVING.to_owned(),
+            detail: if role.listeners.is_empty() {
+                "the dhcp role of this node has no listener ([dhcp] listen is empty), so it \
+                 answers no DHCP request"
+                    .to_owned()
+            } else {
+                "the dhcp role of this node has stopped answering DHCP requests".to_owned()
+            },
+            params: node(),
+        });
+    }
+    if let Some(refusal) = &role.refusal {
+        let mut params = node();
+        params.insert("since".to_owned(), refusal.since.to_rfc3339());
+        params.insert("refused".to_owned(), refusal.refused.to_string());
+        params.insert("dropped".to_owned(), refusal.dropped.to_string());
+        warnings.push(StatusWarning {
+            code: DHCP_ROLE_STORE_REFUSED.to_owned(),
+            detail: format!(
+                "the store refuses the dhcp role's lease writes since {}: renewals are \
+                 answered for the time their leases have left and new requests are dropped \
+                 ({})",
+                refusal.since.to_rfc3339(),
+                refusal.detail
+            ),
+            params,
+        });
+    }
+    if role.probe_expected && !role.probe {
+        warnings.push(StatusWarning {
+            code: DHCP_PROBE_MISSING.to_owned(),
+            detail: "the security profile expects conflict detection before an offer, and \
+                     no probe role runs on this node"
+                .to_owned(),
+            params: node(),
+        });
+    }
+    warnings
+}
+
 /// The warning of a pending migration that voters block, naming them.
 pub fn data_format_warnings(format: &DataFormatStatus) -> Vec<StatusWarning> {
     let Some(pending) = &format.pending else {
@@ -377,6 +438,10 @@ async fn ready(State(state): State<AppState>) -> Result<Json<Readiness>, ApiErro
     }))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one extractor per part of the status, each optional"
+)]
 #[utoipa::path(
     get,
     path = "/system/status",
@@ -397,6 +462,8 @@ async fn system_status(
     format: Option<Extension<DataFormatSource>>,
     dns: Option<Extension<super::dns::DnsNodeSlot>>,
     zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
+    // WP7.5: the dhcp role's health rows.
+    dhcp: Option<Extension<super::dhcp::DhcpNodeSlot>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -419,6 +486,11 @@ async fn system_status(
         && let Some(role) = slot.status()
     {
         status.warnings.extend(dns_role_warnings(&role));
+    }
+    if let Some(Extension(slot)) = dhcp
+        && let Some(role) = slot.status()
+    {
+        status.warnings.extend(dhcp_role_warnings(&role));
     }
     // WP6.3: the clock and expiry findings of signed zones (OPS-09), each naming its zone.
     if let Some(Extension(zones)) = zones
