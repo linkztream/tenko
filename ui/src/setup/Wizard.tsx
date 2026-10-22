@@ -12,6 +12,8 @@ import { firstBlockedStep, FOCUS, gateFor, LAST_STEP, STEP_COUNT, STEP_IDS, type
 import { Admin } from "./steps/Admin";
 import { DataDir } from "./steps/DataDir";
 import { Dns } from "./steps/Dns";
+// WP8.6
+import { Dhcp } from "./steps/Dhcp";
 import { Host } from "./steps/Host";
 import { ProfileStep } from "./steps/Profile";
 import { Result } from "./steps/Result";
@@ -31,6 +33,8 @@ const STEP_NAME = {
   disk: "setup.step.disk.name",
   roles: "setup.step.roles.name",
   dns: "setup.step.dns.name",
+  // WP8.6
+  dhcp: "setup.step.dhcp.name",
   done: "setup.step.done.name",
 } as const satisfies Record<StepId, string>;
 
@@ -42,6 +46,8 @@ const STEP_TITLE = {
   disk: "setup.step.disk.title",
   roles: "setup.step.roles.title",
   dns: "setup.step.dns.title",
+  // WP8.6
+  dhcp: "setup.step.dhcp.title",
   done: "setup.step.done.title",
 } as const satisfies Record<StepId, string>;
 
@@ -51,7 +57,7 @@ interface Meta {
 }
 
 /**
- * First-run setup (API-10, design/mockups/wizard.html): eight steps and one request at the
+ * First-run setup (API-10, design/mockups/wizard.html): nine steps (WP8.6 adds DHCP) and one request at the
  * end. The page is a focused page without the shell; it stays mounted after the request
  * signs the new administrator in, to show the recovery codes and what to do next.
  */
@@ -132,6 +138,13 @@ export default function Wizard() {
         return w.dnsWanted()
           ? { text: t("setup.steps.dns_meta", { count: splitUpstreams(w.state.dns.upstreams).length }) }
           : { text: t("setup.steps.dns_skipped") };
+      // WP8.6: the network of the first scope, or why there is none.
+      case "dhcp": {
+        if (!w.dhcpWanted()) return { text: t("setup.steps.dhcp_skipped") };
+        if (w.state.dhcp.mode === "later") return { text: t("setup.steps.dhcp_later") };
+        const plan = w.dhcpPlan();
+        return plan ? { text: plan.network } : null;
+      }
       default:
         return null;
     }
@@ -311,7 +324,11 @@ export default function Wizard() {
                     <Match when={w.state.step === 6}>
                       <Dns />
                     </Match>
-                    <Match when={w.state.step === 7}>
+                    {/* WP8.6: the DHCP step before the review. */}
+                    <Match when={STEP_IDS[w.state.step] === "dhcp"}>
+                      <Dhcp />
+                    </Match>
+                    <Match when={STEP_IDS[w.state.step] === "done"}>
                       <Review />
                     </Match>
                   </Switch>

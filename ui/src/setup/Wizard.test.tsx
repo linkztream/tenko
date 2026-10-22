@@ -66,6 +66,15 @@ async function heading(name: string | RegExp) {
   return screen.findByRole("heading", { level: 1, name });
 }
 
+// WP8.6: the DHCP step follows the DNS step; these tests set the first scope up later.
+async function passDhcpLater() {
+  await heading("The first DHCP scope");
+  const later = document.querySelector<HTMLInputElement>('[data-testid="setup-dhcp-mode"][data-key="later"]');
+  if (later) fireEvent.click(later);
+  next();
+  await heading("Review and finish");
+}
+
 function type(label: string | RegExp, value: string) {
   fireEvent.input(screen.getByLabelText(label), { target: { value } });
 }
@@ -218,7 +227,7 @@ describe("first-run wizard", () => {
     next();
     await heading("Where DNS asks next");
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     next();
     await heading("Setup complete");
     await waitFor(() => expect(authState()).toBe("signed-in"));
@@ -251,7 +260,7 @@ describe("first-run wizard", () => {
     next();
     await heading("Where DNS asks next");
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     next();
     await heading("Welcome to Tenko DDI");
     expect((await screen.findByRole("alert")).textContent).toContain("The setup token is wrong.");
@@ -291,7 +300,7 @@ describe("first-run wizard", () => {
     await heading("Where DNS asks next");
     expect(await axeViolations(container)).toEqual([]);
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     expect(await axeViolations(container)).toEqual([]);
     next();
     await heading("Setup complete");

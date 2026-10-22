@@ -80,6 +80,11 @@ async function finish() {
   // The DNS upstreams step (WP5.5) comes between the roles and the review.
   await heading("Where DNS asks next");
   next();
+  // WP8.6: the DHCP step follows; the first scope is set up later here.
+  await heading("The first DHCP scope");
+  const later = document.querySelector<HTMLInputElement>('[data-testid="setup-dhcp-mode"][data-key="later"]');
+  if (later) fireEvent.click(later);
+  next();
   await heading("Review and finish");
   next();
   await heading("Setup complete");

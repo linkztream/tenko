@@ -1,7 +1,7 @@
-// One scope (/dhcp/scopes/:prefix/:tab?): the network it serves and whether it is enabled, and four
-// tabs: the settings with the utilization figures, the pools, the exclusions and the options with
-// the effective options of a client. The scope follows the `dhcp` topic; a switched-off module or a
-// server without the service shows the notice.
+// One scope (/dhcp/scopes/:prefix/:tab?): the network it serves and whether it is enabled, and six
+// tabs: the settings with the utilization figures, the pools, the exclusions, the options with
+// the effective options of a client, DDNS and network boot (WP8.6). The scope follows the `dhcp`
+// topic; a switched-off module or a server without the service shows the notice.
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createSignal, For, Match, Show, Switch } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
@@ -19,9 +19,12 @@ import { DeleteScopeDialog } from "./ScopeDialogs";
 import { ExclusionsTab, PoolsTab } from "./ScopeLists";
 import { OptionsTab } from "./ScopeOptions";
 import { SettingsTab } from "./ScopeSettings";
+// WP8.6: the DDNS and the network boot tabs.
+import { BootTab } from "./boot/ScopeBoot";
+import { DdnsTab } from "./ddns/ScopeDdns";
 import "./dhcp.css";
 
-const TABS: readonly ScopeTab[] = ["settings", "pools", "exclusions", "options"];
+const TABS: readonly ScopeTab[] = ["settings", "pools", "exclusions", "options", "ddns", "boot"];
 
 export default function ScopePage() {
   const params = useParams<{ prefix: string; tab?: string }>();
@@ -127,6 +130,19 @@ export default function ScopePage() {
               </Match>
               <Match when={tab() === "options"}>
                 <OptionsTab scope={s()} />
+              </Match>
+              {/* WP8.6: DDNS and network boot. */}
+              <Match when={tab() === "ddns"}>
+                <DdnsTab
+                  scope={s()}
+                  onSaved={(next) => {
+                    setSaved(next);
+                    query.refetch();
+                  }}
+                />
+              </Match>
+              <Match when={tab() === "boot"}>
+                <BootTab scope={s()} />
               </Match>
             </Switch>
             <Show when={deleting()}>

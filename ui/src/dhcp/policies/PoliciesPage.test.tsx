@@ -5,6 +5,7 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DHCP_IDS } from "../../api/mock/dhcp-model";
+import { DNS_IDS } from "../../api/mock/dns-model";
 import { dhcpState } from "../../api/mock/routes-dhcp";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -37,7 +38,7 @@ describe("the policies", () => {
   it("lists the policy with its scope, the condition and the action in words, and says matching comes later", async () => {
     const view = open();
     await loaded();
-    expect(screen.getByTestId("policies-note").textContent).toContain("comes with a later package");
+    expect(screen.getByTestId("policies-note").textContent).toContain("first matching policy sets");
     const pxe = row("dhcp-policies", "pxe-boot");
     await waitFor(() => expect(within(pxe).getByTestId("policy-scope").dataset.key).toBe("192.0.2.0/24"));
     expect(within(pxe).getByTestId("policy-scope").getAttribute("href")).toBe(`/dhcp/scopes/${DHCP_IDS.lan}`);
@@ -168,6 +169,103 @@ describe("the policies", () => {
     expect(await screen.findByTestId("dhcp-policies-empty")).toBeTruthy();
   });
 
+  it("creates a policy for an architecture with a DDNS action, then continues with its options", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-policy-create"));
+    const dialog = await screen.findByTestId("dialog-policy-form");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "uefi-boot" } });
+    await chooseScope(dialog, DHCP_IDS.lan);
+    const first = termRows(dialog)[0]!;
+    fireEvent.change(within(first).getByTestId("term-kind"), { target: { value: "match" } });
+    fireEvent.change(within(first).getByTestId("match-kind"), { target: { value: "architecture" } });
+    fireEvent.change(within(first).getByTestId("match-arch"), { target: { value: "7" } });
+    // The options come once the policy exists.
+    expect(within(dialog).getByTestId("policy-options-new")).toBeTruthy();
+    expect(within(dialog).queryByTestId("policy-optset")).toBeNull();
+    // The DDNS action starts from the settings of the server, with DDNS on.
+    const ddns = within(dialog).getByTestId("policy-ddns");
+    expect(within(ddns).queryByTestId("ddns-fields")).toBeNull();
+    fireEvent.click(within(ddns).getByTestId("field-policy-ddns-on"));
+    const zone = within(ddns).getByTestId("field-ddns-zone") as HTMLSelectElement;
+    await waitFor(() => expect([...zone.options].map((o) => o.textContent)).toContain("example.test"));
+    expect([...zone.options].map((o) => o.textContent)).not.toContain("2.0.192.in-addr.arpa");
+    fireEvent.change(zone, { target: { value: DNS_IDS.zone.example } });
+    fireEvent.input(within(ddns).getByTestId("field-ddns-ttl"), { target: { value: "300" } });
+    fireEvent.click(within(ddns).getByTestId("field-ddns-client-a"));
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+
+    await waitFor(() => expect(rows("dhcp-policies").map((r) => r.dataset.key)).toEqual(["pxe-boot", "uefi-boot"]));
+    expect(writes().find((w) => w.method === "POST")?.body).toEqual({
+      name: "uefi-boot",
+      scope: DHCP_IDS.lan,
+      enabled: true,
+      condition: { join: "and", terms: [{ match: { architecture: { code: 7 } } }] },
+      action: {
+        ddns: { enabled: true, reverse: true, conflict: "protect", client_may_update_a: true, legacy_clients: true, refuse_foreign: false, forward_zone: DNS_IDS.zone.example, ttl: 300 },
+      },
+    });
+    await waitFor(() => expect(within(row("dhcp-policies", "uefi-boot")).getByTestId("policy-condition-words").textContent).toBe("client architecture UEFI x64 (7)"));
+    await waitFor(() => expect(within(row("dhcp-policies", "uefi-boot")).getByTestId("policy-action-words").textContent).toBe("DDNS on, zone example.test"));
+
+    // The dialog now edits the policy that exists, with the editor of its option set.
+    const editor = await screen.findByTestId("policy-optset");
+    const made = dhcpState().policies.find((p) => p.name === "uefi-boot")!;
+    expect(editor.dataset.owner).toBe(`policy:${made.id}`);
+    expect(screen.getByTestId("dialog-policy-form").textContent).toContain("Policy uefi-boot");
+    expect((screen.getByTestId("field-scope") as HTMLSelectElement).disabled).toBe(true);
+    await waitFor(() => expect(screen.getByTestId("optset-add")).toBeTruthy());
+    fireEvent.change(screen.getByTestId("optset-add"), { target: { value: "dhcp4|3" } });
+    const routers = await waitFor(() => within(editor).getAllByTestId("optset-row").find((r) => r.dataset.key === "dhcp4:3") as HTMLElement);
+    fireEvent.input(within(routers).getByTestId("optset-value"), { target: { value: "192.0.2.1" } });
+    fireEvent.click(within(editor).getByTestId("optset-save"));
+    await waitFor(() => expect(dhcpState().optionSets.get(`policy:${made.id}`)?.values).toHaveLength(1));
+    expect(writes().find((w) => w.method === "PUT")?.url).toContain(`/option-sets/policy%3A${made.id}`);
+    // The list says the policy has options now.
+    await waitFor(() => expect(within(row("dhcp-policies", "uefi-boot")).getByTestId("policy-action-words").textContent).toBe("DDNS on, zone example.test; options"));
+  });
+
+  it("edits the DDNS action of a policy and takes it away with the switch", async () => {
+    dhcpState().policies[0]!.action = { ddns: { enabled: true, ttl: 600, conflict: "replace" } };
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    await waitFor(() => expect(within(row("dhcp-policies", "pxe-boot")).getByTestId("policy-action-words").textContent).toBe("DDNS on"));
+    await rowAction(row("dhcp-policies", "pxe-boot"), "edit");
+    const dialog = await screen.findByTestId("dialog-policy-form");
+    expect((within(dialog).getByTestId("field-policy-ddns-on") as HTMLInputElement).checked).toBe(true);
+    expect((within(dialog).getByTestId("field-ddns-ttl") as HTMLInputElement).value).toBe("600");
+    expect((within(dialog).getByTestId("field-ddns-conflict") as HTMLSelectElement).value).toBe("replace");
+    // The editor of the policy's own option set is there for a policy that exists.
+    expect(await within(dialog).findByTestId("policy-optset")).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("field-policy-ddns-on"));
+    expect(within(dialog).queryByTestId("ddns-fields")).toBeNull();
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(dhcpState().policies[0]!.action?.ddns).toBeUndefined());
+    expect((writes().find((w) => w.method === "PATCH")?.body as { action: object }).action).toEqual({});
+  });
+
+  it("checks the TTL of the DDNS action and shows the refusal of the server under it", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    await rowAction(row("dhcp-policies", "pxe-boot"), "edit");
+    const dialog = await screen.findByTestId("dialog-policy-form");
+    fireEvent.click(within(dialog).getByTestId("field-policy-ddns-on"));
+    fireEvent.input(within(dialog).getByTestId("field-ddns-ttl"), { target: { value: "abc" } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(within(dialog).getAllByTestId("field-error").map((e) => e.dataset.field)).toEqual(["ddns-ttl"]));
+    expect(within(dialog).getByTestId("field-error").textContent).toContain("whole number of seconds");
+    expect(writes()).toHaveLength(0);
+    // A week and a second: the form accepts it, the server does not.
+    fireEvent.input(within(dialog).getByTestId("field-ddns-ttl"), { target: { value: "604801" } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(writes().filter((w) => w.method === "PATCH")).toHaveLength(1));
+    await waitFor(() => expect(within(dialog).getAllByTestId("field-error").map((e) => e.dataset.field)).toEqual(["ddns-ttl"]));
+    expect(dhcpState().policies[0]!.action?.ddns).toBeUndefined();
+  });
+
   it("offers a viewer nothing to change", async () => {
     await signInWithRoles(["viewer"]);
     open();
@@ -189,6 +287,6 @@ describe("the policies", () => {
     await loaded();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("DHCP-principer");
     await waitFor(() => expect(within(row("dhcp-policies", "pxe-boot")).getByTestId("policy-condition-words").textContent).toBe("i klassen pxe-clients"));
-    expect(screen.getByTestId("policies-note").textContent).toContain("senare paket");
+    expect(screen.getByTestId("policies-note").textContent).toContain("första matchande principen");
   });
 });

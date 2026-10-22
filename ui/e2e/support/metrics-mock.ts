@@ -66,8 +66,34 @@ export function dnsPart(patch: Partial<MetricsDns> = {}): MetricsDns {
  * `dns` is false: the samples of the dev mock (src/api/mock/metrics-model.ts), whose figures
  * move, so every sparkline and bar chart draws.
  */
-export function mockHistory(count: number, dns = true): MetricsSnapshot[] {
-  return mockMetricsHistory(count, count, { dns });
+export function mockHistory(count: number, dns = true, dhcp = false): MetricsSnapshot[] {
+  return mockMetricsHistory(count, count, { dns, dhcp });
+}
+
+// WP8.7: the `dhcp` part of a sample.
+export type MetricsDhcp = Schemas["MetricsDhcp"];
+
+/**
+ * The `dhcp` part of a sample of a controller that runs the `dhcp` role: 40 leases per second,
+ * four scopes with the three fullest, DDNS writing names; every figure can be changed with `patch`.
+ */
+export function dhcpPart(patch: Partial<MetricsDhcp> = {}): MetricsDhcp {
+  return {
+    leases_per_second: 40,
+    ack_p99_ms: 8.5,
+    naks_per_second: 0.5,
+    declines_per_second: 0,
+    active_leases: 1_200,
+    abandoned_leases: 2,
+    scopes: 4,
+    fullest: [
+      { scope: "192.0.2.0/26", utilization: 0.9 },
+      { scope: "198.51.100.0/24", utilization: 0.6 },
+      { scope: "203.0.113.0/25", utilization: 0.3 },
+    ],
+    ddns: { written: 6, removed: 2, refused: 1, failed: 0, skipped: 1, dropped: 0, queue: 3 },
+    ...patch,
+  };
 }
 
 /**

@@ -187,6 +187,13 @@ pub struct EffectiveOptionsParams {
     pub vendor_class: Option<String>,
     /// The user class the client sends (option 77).
     pub user_class: Option<String>,
+    // WP8.6: the other facts the matcher tests, for the "why this value" view of the UI.
+    /// The client system architecture (option 93, RFC 4578): 0 BIOS, 7 and 9 UEFI x64, 16 UEFI
+    /// HTTP boot x64.
+    #[param(minimum = 0, maximum = 65535)]
+    pub architecture: Option<u32>,
+    /// The host name the client sends (option 12).
+    pub host_name: Option<String>,
 }
 
 /// One option of a client's effective set, with where it came from.

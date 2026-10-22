@@ -9399,6 +9399,27 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "architecture",
+            "in": "query",
+            "description": "The client system architecture (option 93, RFC 4578): 0 BIOS, 7 and 9 UEFI x64, 16 UEFI\nHTTP boot x64.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 65535,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "host_name",
+            "in": "query",
+            "description": "The host name the client sends (option 12).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -49033,6 +49054,144 @@
           }
         }
       },
+      "MetricsDhcp": {
+        "type": "object",
+        "description": "The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its\nACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over\nthe interval.",
+        "required": [
+          "leases_per_second",
+          "naks_per_second",
+          "declines_per_second",
+          "active_leases",
+          "abandoned_leases",
+          "scopes",
+          "fullest",
+          "ddns"
+        ],
+        "properties": {
+          "abandoned_leases": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Leases held back as abandoned (a conflict found by the probe, or a DECLINE).",
+            "minimum": 0
+          },
+          "ack_p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile of the time from a REQUEST's arrival to its ACK in milliseconds,\nthe commit included; absent without an ACK."
+          },
+          "active_leases": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Leases in the role's table whose binding is active.",
+            "minimum": 0
+          },
+          "ddns": {
+            "$ref": "#/components/schemas/MetricsDhcpDdns",
+            "description": "DDNS change sets per second by outcome."
+          },
+          "declines_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "DECLINEs received per second."
+          },
+          "fullest": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetricsDhcpPool"
+            },
+            "description": "The three fullest scopes, the fullest first."
+          },
+          "leases_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Leases granted per second: REQUESTs answered with an ACK (new, renewed, rebound and\nafter a reboot)."
+          },
+          "naks_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "NAKs sent per second."
+          },
+          "scopes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Scopes with a pool that the role serves.",
+            "minimum": 0
+          }
+        }
+      },
+      "MetricsDhcpDdns": {
+        "type": "object",
+        "description": "DDNS change sets per second by outcome (`tenko_dhcp_ddns_total{outcome}`), and the queue.",
+        "required": [
+          "written",
+          "removed",
+          "refused",
+          "failed",
+          "skipped",
+          "dropped",
+          "queue"
+        ],
+        "properties": {
+          "dropped": {
+            "type": "number",
+            "format": "double",
+            "description": "Dropped from a full queue; the lease rows are read again."
+          },
+          "failed": {
+            "type": "number",
+            "format": "double",
+            "description": "The zone service or the store failed after the retries."
+          },
+          "queue": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests waiting for the worker.",
+            "minimum": 0
+          },
+          "refused": {
+            "type": "number",
+            "format": "double",
+            "description": "Refused: name protection, another origin's records, a zone that takes no DHCP updates."
+          },
+          "removed": {
+            "type": "number",
+            "format": "double",
+            "description": "Names removed on release, expiry or a change of name."
+          },
+          "skipped": {
+            "type": "number",
+            "format": "double",
+            "description": "Nothing to write: IPAM names the address, or the scope names no zone."
+          },
+          "written": {
+            "type": "number",
+            "format": "double",
+            "description": "Names written."
+          }
+        }
+      },
+      "MetricsDhcpPool": {
+        "type": "object",
+        "description": "How full the pools of one scope are.",
+        "required": [
+          "scope",
+          "utilization"
+        ],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "The scope by its network (`192.0.2.0/24`), as the `scope` label of\n`tenko_dhcp_pool_utilization` names it."
+          },
+          "utilization": {
+            "type": "number",
+            "format": "double",
+            "description": "Active bindings in the scope's pools over the pools' addresses, 0 to 1."
+          }
+        }
+      },
       "MetricsDns": {
         "type": "object",
         "description": "The `dns` role in a sample (OPS-20): the queries it answered, the cache, the upstreams, the\nblock lists, the encrypted transports and the query log over the interval.",
@@ -49425,6 +49584,17 @@
           "at": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the sample was taken, by the controller's clock."
+          },
+          "dhcp": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsDhcp",
+                "description": "The `dhcp` role of the controller's process; absent when the process does not run it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "dns": {
             "oneOf": [

@@ -19,6 +19,7 @@ Contents:
 14. [Conflict detection and DECLINE](#14-conflict-detection-and-decline)
 16. [Classes, policies, PXE and UEFI](#16-classes-policies-pxe-and-uefi)
 15. [Fingerprinting and the reconciliation view](#15-fingerprinting-and-the-reconciliation-view)
+17. [The home cut-over](#17-the-home-cut-over)
 
 ## 1. The wire format
 
@@ -204,7 +205,7 @@ A custom definition (`/dhcp/option-defs`) gives a code a name and a type: `ipv4_
 
 Options are set per owner: `server`, `shared_network:<id>`, `scope:<prefix>`, `pool:<range>`, `policy:<id>` and `host:<interface>` (a reservation's options, on the IPAM interface). `PUT /dhcp/option-sets/{owner}` replaces the whole set; each value is given in wire form (`data`, hexadecimal) or typed (`typed`, for example `{"ipv4": {"values": ["192.0.2.53"]}}`, `{"text": "example.test"}`, `{"unsigned": [1500]}`, `{"names": ["example.test"]}`) and stored in wire form after it has been checked against the type of its code: `dhcp.option.unknown` for a code without a type, `dhcp.option.invalid` for data that does not fit or a code given twice. An owner without options reads as an empty set at revision 0. Every value reads back with its name and its typed view.
 
-The options a client gets merge the levels from the least to the most specific, the later level winning per code in the order the codes first appear: the server, the scope's shared network, the scope, the policies that match the client (the first in order wins per code), and the client's reservation. `GET /dhcp/scopes/{prefix}/effective-options?mac=&client_id=&vendor_class=&user_class=` shows the result, each option with its level and owner, and the reservation the client has. Pool options depend on the address the allocator picks and are shown on the pool. Which classes and policies match a client is the compiled matcher the engine uses (section 16), so the route shows the classes and policies the client is in and the options they give it.
+The options a client gets merge the levels from the least to the most specific, the later level winning per code in the order the codes first appear: the server, the scope's shared network, the scope, the policies that match the client (the first in order wins per code), and the client's reservation. `GET /dhcp/scopes/{prefix}/effective-options?mac=&client_id=&vendor_class=&user_class=&architecture=&host_name=` (the client's MAC, option 61 in hexadecimal, options 60, 77, 93 and 12) shows the result, each option with its level and owner, and the reservation the client has. Pool options depend on the address the allocator picks and are shown on the pool. Which classes and policies match a client is the compiled matcher the engine uses (section 16), so the route shows the classes and policies the client is in and the options they give it.
 
 ## 5. Classes and policies
 
@@ -249,7 +250,7 @@ tenko dhcp filter list | add MAC-PATTERN --allow|--deny [--note TEXT] | delete I
 
 Every command takes `--json` for the API's answer as is. `crates/tenko/tests/acceptance_dhcp_config.rs` runs the configuration through the real binary: a scope, an exclusion, a pool's lease times, options from `CODE=HEXDATA` at two levels, a custom definition, a class, a filter and the settings, the effective options of a client, and the prefix that IPAM keeps while the scope exists.
 
-The web UI's DHCP area (`/dhcp`) has the scope list with utilization, the scope page with its pools, exclusions, options and effective options, the shared networks, the options with the catalog and the custom definitions, the classes and policies, the MAC filters, and the DHCP section of the settings (`/settings/dhcp`).
+The web UI's DHCP area (`/dhcp`) has the scope list with utilization, the scope page with its pools, exclusions, options and effective options, the shared networks, the options with the catalog and the custom definitions, the classes and policies, the MAC filters, and the DHCP section of the settings (`/settings/dhcp`). WP8.6 completes it: the scope page's DDNS tab (every field of the scope's DDNS settings, the server's settings it starts from and what the security profile does; a scope's own settings cannot be cleared back to the server's through the API, so the tab offers to copy the server's) and network boot tab (the boot server and file options 66, 67, 150 and 209 to 211, the scope's boot policies per client type and a dialog that adds one as a class, a policy and its option 67); the policy editor's four actions (options, range, lease time, DDNS) and an architecture picker for option 93 matches; the effective view that takes a client's MAC, client identifier, vendor class, user class, architecture and host name and says, per option, which level and which policy gave it; the lease list's live strip (the chosen scope's utilization, or a bar per scope, and the leases granted since the page was opened); the host page's DHCP reservations block (each address of a `reserved` host with the identity it is keyed by, the scope it falls in, whether the role serves it and its lease); and the first-run wizard's DHCP step (the first scope and the listener, written after setup, with the `[dhcp]` section on the result step).
 
 ## 8. Leases
 
@@ -856,3 +857,100 @@ proxy_port = 4011
 - `crates/tenko-dhcp/src/image.rs` (unit test) and the corpus case `requests/windows-reserved-discover.hex`: a Windows-style request (option 61 of type 1 with the MAC) gets the reservation keyed by its MAC.
 - `crates/tenko-dhcp/tests/alloc.rs`: the decision, the admission, the boot options and the proxy path allocate nothing.
 - E27's class and PXE rows in the compose lab (`deploy/compose/lab-dhcp`, section 11): a vendor-class policy and a MAC-wildcard policy select their options and ranges, a user-class client gets its policy's options, QEMU with its iPXE ROM boots in BIOS mode and OVMF in UEFI mode from the lab's TFTP and HTTP server, a UEFI HTTP boot client gets its URL and fetches it, and the proxy DHCP listener answers the boot server discovery.
+
+## 17. The home cut-over
+
+The procedure of exit criterion E23 (WP8.7, decisions P3-Q5 and P3-Q18): the reference home network runs DHCPv4 through one Tenko node for all four of its networks. The gateway relays each network to the node's address, giaddr (and option 82 where the gateway adds it) selects the scope, the clients keep their addresses across the switch, options 6 and 42 reach them, and the rollback is one setting per network on the gateway with the old server's scopes activated again (DHCP-01, DHCP-02, DHCP-04, DHCP-15). Until the gateway relays to the node, nothing in the network changes; the old DHCP server stays installed with its scopes deactivated until the cut-over has held for a while.
+
+Every name and address below is a placeholder. Put in your own:
+
+| Placeholder | Stands for |
+|---|---|
+| `192.0.2.10` | The node's fixed address, the one the gateway relays to |
+| `192.0.2.5` | The DHCP server the networks use today (a Windows DHCP server in the reference environment); it keeps running with its scopes deactivated |
+| `192.0.2.0/26`, `192.0.2.64/26`, `198.51.100.0/24`, `203.0.113.0/25` | The four networks: two LANs, the IoT network and the DMZ |
+| `192.0.2.1`, `192.0.2.65`, `198.51.100.1`, `203.0.113.1` | The gateway's address in each network (the router of option 3, and the giaddr of each network's relayed requests) |
+| `192.0.2.53`, `192.0.2.123` | The DNS server of option 6 and the NTP server of option 42 |
+| `home.example.test` | The domain name of option 15 and the zone DDNS writes into, if it is used |
+| `00:00:5e:00:53:01` | A client with a reservation |
+
+### 17.1 Before the day
+
+Each row is done and checked before the relay changes, in this order.
+
+| What | How | Checked by |
+|---|---|---|
+| A node with the `dhcp` role in relay mode | `roles = "controller,dhcp"` (or `controller,dns,dhcp`) and `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }]` in `tenko.toml` (section 10.2; the first-run wizard's DHCP step writes this section); UDP 67 open in the host's firewall from the gateway; the node itself on a fixed address, not a lease of the server it replaces | `tenko serve` prints `dhcp role answering on 192.0.2.10:67 (relay) ...`; `GET /api/v1/nodes/{id}/dhcp` has `"serving": true` and the listener in relay mode |
+| The four networks in IPAM | Each network a prefix of role network: from the spreadsheet import, or entered | The IPAM tree lists the four |
+| The scopes | A scope per network (`/dhcp`, or `tenko dhcp scope create PREFIX`), each with a pool as an IPAM range of role `dhcp_pool` that covers the same addresses as the old server's scope, and the old scope's exclusions as exclusions. Equal pools let the clients keep their addresses (section 17.2) | The scope list shows four scopes with pools; each scope's utilization reads its pool size |
+| The options | Option 6 (`192.0.2.53`), 42 (`192.0.2.123`) and 15 (`home.example.test`) on the server's set where they are the same everywhere, option 3 (the gateway's address of the network) on each scope; whatever else the old server set per scope (`Get-DhcpServerv4OptionValue -ScopeId 192.0.2.0 -All` lists them) | The scope's options tab shows, for a client's MAC, every option with the level it comes from |
+| The reservations | Every reservation of the old server as an IPAM host of mode `reserved` with the interface's MAC address (or client identifier) and its address (section 12.1); the host page shows the reservation, the scope it falls in and whether the role serves it, and the IPAM-18 warning for a host without one | `/ipam/reconcile` and each host page's DHCP reservations block: no "no identity" row, every reservation in a served scope |
+| Classes and policies | Only where the old server had policies that matter on day one (most homes need none, section 16) | The policy list |
+| DDNS | Optional: turned on per scope on the scope's DDNS tab, with the zone taking DHCP updates (section 13.1) | The DDNS tile of the start page counts names written once clients renew |
+| The lease time on the old server | A few days before, shorten the lease time of the old scopes to an hour (`Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -LeaseDuration 01:00:00`), so that on the day every client renews within half an hour and none holds a lease of days that the old server would still answer for. Wait one old lease time for the change to reach every client | A client's `ipconfig /all` shows a lease that expires within the hour |
+| The relay | Know where each network's DHCP relay is set on the gateway (the DHCP mode of the network: server or relay, and the relay's server address). The classic controller API shows no relay targets to check (P3-Q18), so the relay is set and checked by hand (section 17.3) | Each network's setting found |
+
+### 17.2 What the clients do
+
+A client with a reservation gets its reserved address from the first answer. A dynamic client asks for the address it had: renewing, it asks the old server by unicast and gets no answer (its scope is deactivated); rebinding, it broadcasts, the gateway relays, and Tenko grants the address when it is free in its pool; a client that restarts (INIT-REBOOT) and gets no answer goes back to DISCOVER with its old address as the requested one and is offered it when it is free. Tenko holds no leases of the old server, so with equal pools a client keeps its address unless another client took it in between; the verification rows check a few. A client of a network whose relay is not set yet gets no answer at all and keeps its address until its lease runs out, which is why the old lease time was shortened and why the relay is switched network by network.
+
+### 17.3 The switch
+
+For each network, one at a time, the node's own network last:
+
+1. Deactivate the old server's scope of the network: `Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -State InActive` (on Windows; elsewhere the scope's on/off setting). The old server must never answer on a network the gateway relays to the node: two servers answering give clients conflicting offers.
+2. On the gateway, set the network's DHCP to relay with the server `192.0.2.10`. The gateway then relays each network's requests to the node, giaddr naming the gateway's address in that network (`192.0.2.1` for `192.0.2.0/26`); where the gateway adds option 82, its circuit-id and remote-id go on the lease row. The node's own network is relayed too, so the node never answers a broadcast (section 2.5 of the plan, R56).
+3. Check from one client of the network (section 17.4); then go on with the next network.
+
+Where a probe node or any Linux host sits in a network, the relay can be checked without taking a lease: `nmap --script broadcast-dhcp-discover -e eth0` (or `sudo dhclient -v -d -sf /bin/true eth0`, stopped after the first offer) shows an offer whose server identifier is `192.0.2.10` and whose router is the gateway's address of that network. An offer from `192.0.2.5` means the old scope still answers; no offer at all means the relay is not set or UDP 67 does not reach the node.
+
+### 17.4 The check from one client per network
+
+| Client | Command | Expected |
+|---|---|---|
+| Windows | `ipconfig /release` then `ipconfig /renew`, then `ipconfig /all` | The address (the same as before for a reserved client), `DHCP Server . . . : 192.0.2.10`, the gateway, `DNS Servers` `192.0.2.53`, the lease time of the Tenko scope |
+| Linux | `sudo dhclient -r eth0; sudo dhclient -v eth0` | `DHCPOFFER of 192.0.2.40 from 192.0.2.1` (the relay) and `DHCPACK ... from 192.0.2.1`; `ip addr` and `resolvectl status` show the address and the DNS server |
+| A phone | Wi-Fi off and on, then the network details | The address, the router and the DNS server of the scope |
+| The node | `/dhcp/leases` with the network's scope chosen | The client's lease, `active`, its MAC, its name, the relay's giaddr; the history shows `granted` |
+| DNS | `dig @192.0.2.53 laptop.home.example.test` for a client whose name DDNS writes | The client's address; the lease's DDNS state on the lease row |
+
+### 17.5 The first hour
+
+The DHCP tiles of the start page show the node live (OPS-20), next to the controller's tiles:
+
+| Tile | Healthy | When it is not |
+|---|---|---|
+| Leases granted | Rises as the networks are switched and the clients renew, then settles at the renewals of an hour's lease (a home of 100 clients: a few a minute) | Nothing after a network was switched: its relay does not reach the node (section 17.3) |
+| REQUEST to ACK, p99 | A few milliseconds: the commit of the lease is in it | Hundreds of milliseconds: the store is slow (the controller's commit tile) |
+| Active leases | Grows towards the number of clients | |
+| Fullest pool | The three fullest scopes, each well below 100 percent | A pool near full: widen it in IPAM before clients are refused (`pool_full` drops) |
+| NAKs and DECLINEs | Near zero; a few NAKs at the switch from clients that ask for an address of another network | Many DECLINEs: an address in a pool is used by a device with a fixed address; the conflict and reconcile views name it |
+| DDNS names written | Names as clients renew, when DDNS is on | Refusals: the zone takes no DHCP updates, or a name belongs to another client (section 13.4) |
+
+The lease list's live strip shows how full the chosen scope's pools are and how many leases were granted since the page was opened; `/ipam/reconcile` lists rogues (a lease without intent), conflicts (two MACs on one address) and ghosts; `GET /api/v1/system/status` warns with `dhcp.role.not_serving` or `dhcp.role.store_refused` when the role stops answering or the store refuses its writes: roll back at once.
+
+### 17.6 The rollback
+
+1. On the gateway, set each network's DHCP back to what it was (the old server, or the relay to `192.0.2.5`).
+2. Activate the old server's scopes: `Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -State Active`, and set their lease time back.
+3. Renew the clients that matter now (`ipconfig /renew`); the others follow within half a lease time. The node keeps running with its leases and history for the follow-up; its scopes can be disabled (`enabled` off on the scope) so that a relay set by mistake gets no answer.
+
+Roll back when a network's clients get no address, when the role stops answering, when NAKs or DECLINEs keep rising, or when the household asks for it.
+
+### 17.7 Verification rows of E23
+
+E23 is met when every row holds; tick each with the date.
+
+| Done | Requirement | Command | Expected |
+|---|---|---|---|
+| [ ] | E23: all four networks through one node | `/dhcp/leases`, one scope at a time | Leases in each of the four scopes, written by the node |
+| [ ] | DHCP-04: giaddr selects the scope | `GET /api/v1/dhcp/leases/{addr}` for a client of each network | `relay.giaddr` is the gateway's address of that network and `scope` the network's scope |
+| [ ] | DHCP-04: option 82, where the gateway adds it | The same lease rows | `relay.circuit_id` and `relay.remote_id` present; otherwise giaddr alone selected, which is enough for one scope per network |
+| [ ] | DHCP-01: reservations | `ipconfig /all` on a reserved client (`00:00:5e:00:53:01`) after `/renew` | The reserved address; the lease row says `reserved: true` |
+| [ ] | E23: clients keep their addresses | A few dynamic clients, before and after their network's switch | The same address |
+| [ ] | DHCP-02: option 6 | `ipconfig /all`, `resolvectl status` | `192.0.2.53` |
+| [ ] | DHCP-15: option 42 | `w32tm /query /configuration` on a client that takes NTP from DHCP, or `dhclient -v` with `ntp-servers` requested | `192.0.2.123` |
+| [ ] | E23: the rollback is one setting | Section 17.6 on one network, then the switch again | The old server answers within a renewal; Tenko again after the switch |
+| [ ] | The relay check without the controller (P3-Q18) | Section 17.3, the offer from a host in each network | Server identifier `192.0.2.10`, the network's router |
+
+Record the date, the lease times used and the findings in the Phase 3 status (`docs/plans/phase-3-status.md`).

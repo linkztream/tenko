@@ -291,3 +291,73 @@ async fn the_effective_options_merge_the_levels_and_the_reservation() {
         .await
         .assert_problem(404, "dhcp.scope.not_found");
 }
+
+// WP8.6: the architecture and the host name reach the matcher of the effective view.
+#[tokio::test]
+async fn the_effective_options_take_the_architecture_and_the_host_name() {
+    let app = App::new();
+    let prefix = app.scope("192.0.2.0/24").await;
+    let uefi = app
+        .send(
+            "POST",
+            "/dhcp/classes",
+            Some(json!({ "name": "uefi", "matches": [{ "architecture": { "code": 7 } }] })),
+        )
+        .await;
+    uefi.assert_status(201);
+    let laptops = app
+        .send(
+            "POST",
+            "/dhcp/classes",
+            Some(json!({
+                "name": "laptops",
+                "matches": [{ "host_name": { "value": "laptop", "prefix": true } }],
+            })),
+        )
+        .await;
+    laptops.assert_status(201);
+    let policy = app
+        .send(
+            "POST",
+            "/dhcp/policies",
+            Some(json!({
+                "name": "uefi-boot",
+                "scope": prefix,
+                "condition": { "join": "or", "terms": [{ "class": uefi.text("id") }] },
+            })),
+        )
+        .await;
+    policy.assert_status(201);
+    let policy_id = policy.text("id");
+    app.send(
+        "PUT",
+        &format!("/dhcp/option-sets/policy:{policy_id}"),
+        Some(json!({ "values": [{ "code": 67, "typed": { "text": "ipxe.efi" } }] })),
+    )
+    .await
+    .assert_status(200);
+
+    let path = format!("/dhcp/scopes/{prefix}/effective-options?mac=00:00:5e:00:53:01");
+    let firmware = app
+        .get(&format!("{path}&architecture=7&host_name=laptop-7"))
+        .await;
+    firmware.assert_status(200);
+    assert_eq!(firmware.body["policies"], json!([policy_id]));
+    let classes = firmware.body["classes"].as_array().expect("classes");
+    assert!(classes.contains(&json!(uefi.text("id"))), "{classes:?}");
+    assert!(classes.contains(&json!(laptops.text("id"))), "{classes:?}");
+    let boot = firmware.body["options"]
+        .as_array()
+        .expect("options")
+        .iter()
+        .find(|o| o["value"]["code"] == 67)
+        .expect("option 67");
+    assert_eq!(boot["level"], "policy");
+
+    let bios = app.get(&format!("{path}&architecture=0")).await;
+    bios.assert_status(200);
+    assert_eq!(bios.body["policies"], json!([]));
+    app.get(&format!("{path}&architecture=70000"))
+        .await
+        .assert_problem(400, "sys.invalid_query");
+}

@@ -207,7 +207,8 @@ function samplerSecond(): number {
 }
 
 function metricsOptions() {
-  return { dns: db.installation.roles.includes("dns") };
+  // WP8.7: the `dhcp` part with the `dhcp` role.
+  return { dns: db.installation.roles.includes("dns"), dhcp: db.installation.roles.includes("dhcp") };
 }
 
 function metricsHistoryFrames(): string {

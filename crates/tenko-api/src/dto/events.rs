@@ -280,6 +280,10 @@ pub struct MetricsSample {
     /// The `dns` role of the controller's process; absent when the process does not run it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<MetricsDns>,
+    // WP8.7: the `dhcp` role's part of the sample (OPS-20, the DHCP tiles).
+    /// The `dhcp` role of the controller's process; absent when the process does not run it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp: Option<MetricsDhcp>,
 }
 
 impl MetricsSample {
@@ -299,6 +303,8 @@ impl MetricsSample {
             sse: MetricsSse::default(),
             nodes: Vec::new(),
             dns: None,
+            // WP8.7: the `dhcp` role's part.
+            dhcp: None,
         }
     }
 }
@@ -495,6 +501,64 @@ pub struct MetricsDnsConnections {
     pub dot: u64,
     /// Open DNS over HTTPS connections.
     pub doh: u64,
+}
+
+// WP8.7: the `dhcp` role in a sample (OPS-20, the DHCP tiles of the start page).
+/// The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its
+/// ACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over
+/// the interval.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDhcp {
+    /// Leases granted per second: REQUESTs answered with an ACK (new, renewed, rebound and
+    /// after a reboot).
+    pub leases_per_second: f64,
+    /// The 99th percentile of the time from a REQUEST's arrival to its ACK in milliseconds,
+    /// the commit included; absent without an ACK.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ack_p99_ms: Option<f64>,
+    /// NAKs sent per second.
+    pub naks_per_second: f64,
+    /// DECLINEs received per second.
+    pub declines_per_second: f64,
+    /// Leases in the role's table whose binding is active.
+    pub active_leases: u64,
+    /// Leases held back as abandoned (a conflict found by the probe, or a DECLINE).
+    pub abandoned_leases: u64,
+    /// Scopes with a pool that the role serves.
+    pub scopes: u64,
+    /// The three fullest scopes, the fullest first.
+    pub fullest: Vec<MetricsDhcpPool>,
+    /// DDNS change sets per second by outcome.
+    pub ddns: MetricsDhcpDdns,
+}
+
+/// How full the pools of one scope are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDhcpPool {
+    /// The scope by its network (`192.0.2.0/24`), as the `scope` label of
+    /// `tenko_dhcp_pool_utilization` names it.
+    pub scope: String,
+    /// Active bindings in the scope's pools over the pools' addresses, 0 to 1.
+    pub utilization: f64,
+}
+
+/// DDNS change sets per second by outcome (`tenko_dhcp_ddns_total{outcome}`), and the queue.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDhcpDdns {
+    /// Names written.
+    pub written: f64,
+    /// Names removed on release, expiry or a change of name.
+    pub removed: f64,
+    /// Refused: name protection, another origin's records, a zone that takes no DHCP updates.
+    pub refused: f64,
+    /// The zone service or the store failed after the retries.
+    pub failed: f64,
+    /// Nothing to write: IPAM names the address, or the scope names no zone.
+    pub skipped: f64,
+    /// Dropped from a full queue; the lease rows are read again.
+    pub dropped: f64,
+    /// Requests waiting for the worker.
+    pub queue: u64,
 }
 
 /// Why a `reset` event was sent: the client must reload its state at `revision` or later.

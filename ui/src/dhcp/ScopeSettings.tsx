@@ -3,6 +3,7 @@
 // description, saved with the scope's revision; DDNS as read-only text; and how full the scope is.
 // Only what changed is sent. The server cannot take back an authoritative setting or a server
 // identifier once the scope has one, so the form does not offer to.
+import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
 import { ErrorNotice } from "../components/Notice";
@@ -14,6 +15,7 @@ import { getSettings, getUtilization, listClasses, listSharedNetworks, updateSco
 import { LeaseChoice, leaseProblem } from "./LeaseFields";
 import { draftOfLease, leaseOfDraft, percentOf, sameLease, type LeaseDraft, type LeaseField } from "./model";
 import { Check, describedBy, errorFor, Field, fieldErrors, hasField } from "./Parts";
+import { dhcpPaths } from "./paths";
 import { boolOf, triOf, TriSelect, type Tri } from "./ScopeDialogs";
 import { NIL_ID } from "./types";
 import { leaseWords } from "./words";
@@ -206,8 +208,12 @@ export function SettingsTab(props: { scope: Scope; onSaved: (scope: Scope) => vo
           <Field id="description" label={t("dhcp.field.description")} error={errorFor(errors(), "description")}>
             <input id="dhcp-f-description" class="input" value={description()} disabled={!writable()} data-testid="field-description" onInput={(ev) => setDescription(ev.currentTarget.value)} />
           </Field>
+          {/* WP8.6: the DDNS settings have their own tab. */}
           <p class="muted" data-testid="scope-ddns" data-key={props.scope.ddns?.enabled ? "on" : "off"}>
-            {props.scope.ddns?.enabled ? t("dhcp.scope.ddns_on") : t("dhcp.scope.ddns_off")}
+            {props.scope.ddns?.enabled ? t("dhcp.scope.ddns_line_on") : t("dhcp.scope.ddns_line_off")}{" "}
+            <A href={dhcpPaths.scope(props.scope.prefix, "ddns")} data-testid="scope-ddns-link">
+              {t("dhcp.scope.ddns_link")}
+            </A>
           </p>
           <ErrorNotice error={error()} />
           <Show when={writable()}>

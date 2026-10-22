@@ -3,7 +3,9 @@
 // name and the state; they live in the URL. A status strip shows what this node's role does. The
 // view is live: it follows the `dhcp` event topic and reads the visible page again when the lease
 // table changed, sampled (sampler.ts), and says how many changes it folded when the server is
-// busier than the page can follow; the Live toggle pauses it. Principals with `dhcp.write` release
+// busier than the page can follow; the Live toggle pauses it. The live strip (WP8.6) names the
+// scope filter, shows how full the scope (or each of the first scopes) is and counts the leases
+// granted since the page was opened; the bars and the count are read again with each refresh. Principals with `dhcp.write` release
 // an active lease, with an optional reason. A 409 `dhcp.module.disabled` or a 404 of the route
 // shows the module-off state, a 501 the not-available notice.
 import { A, useNavigate, useSearchParams } from "@solidjs/router";
@@ -20,6 +22,7 @@ import { DhcpNav } from "../DhcpNav";
 import { DhcpProblem, unavailable } from "../Parts";
 import { SelectFilter, TextFilter } from "./Filters";
 import { createLiveRefresh, LEASE_TABLE, LiveControls } from "./live";
+import { LiveStrip } from "./LiveStrip";
 import {
   anyFilter,
   BINDING_STATES,
@@ -48,6 +51,8 @@ export default function LeasesPage() {
   const query = createMemo(() => leaseQuery(filters()), undefined, { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) });
   const [dialog, setDialog] = createSignal<Lease | null>(null);
   const [stripVersion, setStripVersion] = createSignal(0);
+  // When the page was opened (or the counter reset): the leases granted since are the new ones.
+  const [opened, setOpened] = createSignal(new Date().toISOString());
 
   // The scopes name the network of a lease; without them the identifier is shown.
   const [scopes] = createResource<Scope[]>(async () => {
@@ -205,6 +210,16 @@ export default function LeasesPage() {
         }
       >
         <NodeStrip version={stripVersion} />
+        <LiveStrip
+          scope={filters().scope}
+          scopes={scopeList()}
+          networkOf={networkOf}
+          version={stripVersion}
+          live={live.live}
+          since={opened()}
+          onReset={() => setOpened(new Date().toISOString())}
+          onPick={(prefix) => change("scope", prefix)}
+        />
         <form class="dhcp-filters" role="search" aria-label={t("dhcp.leases.filters")} data-testid="leases-filters" onSubmit={(e) => e.preventDefault()}>
           <SelectFilter id="scope" label={t("dhcp.lfilter.scope")} onCommit={(v) => change("scope", v)}>
             <option value="" selected={filters().scope === ""}>

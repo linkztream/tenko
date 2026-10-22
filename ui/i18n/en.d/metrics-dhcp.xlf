@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="metrics-dhcp">
+      <unit id="metrics.group.dhcp">
+        <notes><note category="description">Heading of the group of live metrics tiles with the figures of the DHCP role.</note></notes>
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.leases">
+        <notes><note category="description">Title of the tile with the DHCP leases granted per second.</note></notes>
+        <segment><source>Leases granted</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.leases_hint">
+        <notes><note category="description">Hint under the leases tile: what counts as a granted lease.</note></notes>
+        <segment><source>Requests answered with an ACK: new, renewed and rebound leases</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ack">
+        <notes><note category="description">Title of the tile with the 99th percentile of the time from a DHCP REQUEST to its ACK.</note></notes>
+        <segment><source>REQUEST to ACK, p99</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ack_hint">
+        <notes><note category="description">Hint under the REQUEST to ACK tile while there are ACKs.</note></notes>
+        <segment><source>Includes the commit of the lease before the ACK leaves</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ack_idle">
+        <notes><note category="description">Hint under the REQUEST to ACK tile when no ACK was sent in the last second.</note></notes>
+        <segment><source>No ACK in the last second</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.active">
+        <notes><note category="description">Title of the tile with the number of active DHCP leases.</note></notes>
+        <segment><source>Active leases</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.active_hint">
+        <notes><note category="description">Hint under the active leases tile: the addresses held back after a conflict or a DECLINE.</note></notes>
+        <segment><source>{abandoned, plural, =0 {No address held back after a conflict} one {# address held back after a conflict or DECLINE} other {# addresses held back after a conflict or DECLINE}}</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.pools">
+        <notes><note category="description">Title of the tile with how full the fullest DHCP pool is, with the three fullest scopes listed.</note></notes>
+        <segment><source>Fullest pool</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.pools_hint">
+        <notes><note category="description">Hint under the pools tile: how many scopes have a pool.</note></notes>
+        <segment><source>{scopes, plural, one {# scope with a pool} other {# scopes with a pool}}</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.pools_none">
+        <notes><note category="description">Hint under the pools tile when no scope has a pool.</note></notes>
+        <segment><source>No scope has a pool yet</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.naks">
+        <notes><note category="description">Title of the tile with the DHCP NAKs sent and DECLINEs received per second.</note></notes>
+        <segment><source>NAKs and DECLINEs</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.naks_hint">
+        <notes><note category="description">Hint under the NAKs and DECLINEs tile: what each means.</note></notes>
+        <segment><source>A NAK refuses an address of another network; a DECLINE reports an address in use</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.nak_row">
+        <notes><note category="description">Row of the NAKs and DECLINEs tile: NAKs sent.</note></notes>
+        <segment><source>NAKs sent</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.decline_row">
+        <notes><note category="description">Row of the NAKs and DECLINEs tile: DECLINEs received.</note></notes>
+        <segment><source>DECLINEs received</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns">
+        <notes><note category="description">Title of the tile with the DNS names the DHCP server writes for its clients (DDNS), per second.</note></notes>
+        <segment><source>DDNS names written</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns_hint">
+        <notes><note category="description">Hint under the DDNS tile: the requests waiting, and those with nothing to write or dropped from a full queue, per second.</note></notes>
+        <segment><source>{queue, plural, one {# waiting} other {# waiting}}, {skipped}/s skipped, {dropped}/s dropped</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns_outcome.written">
+        <notes><note category="description">Row of the DDNS tile: names written.</note></notes>
+        <segment><source>Written</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns_outcome.removed">
+        <notes><note category="description">Row of the DDNS tile: names removed on release or expiry.</note></notes>
+        <segment><source>Removed</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns_outcome.refused">
+        <notes><note category="description">Row of the DDNS tile: names refused, for example by name protection.</note></notes>
+        <segment><source>Refused</source></segment>
+      </unit>
+      <unit id="metrics.dhcp.ddns_outcome.failed">
+        <notes><note category="description">Row of the DDNS tile: writes that failed after the retries.</note></notes>
+        <segment><source>Failed</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

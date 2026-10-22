@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="setup-dhcp">
+      <unit id="setup.step.dhcp.name">
+        <notes><note category="description">Name of the DHCP step in the list of setup steps.</note></notes>
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="setup.step.dhcp.title">
+        <notes><note category="description">Title of the DHCP step of the setup wizard.</note></notes>
+        <segment><source>The first DHCP scope</source><target>Det första DHCP-scopet</target></segment>
+      </unit>
+      <unit id="setup.steps.dhcp_skipped">
+        <notes><note category="description">Note beside the DHCP step in the step list when DHCP is not part of the installation.</note></notes>
+        <segment><source>Not chosen</source><target>Inte valt</target></segment>
+      </unit>
+      <unit id="setup.steps.dhcp_later">
+        <notes><note category="description">Note beside the DHCP step in the step list when the first scope is set up later.</note></notes>
+        <segment><source>Later</source><target>Senare</target></segment>
+      </unit>
+      <unit id="setup.dhcp.skipped">
+        <notes><note category="description">Text of the DHCP step when the DHCP module or the dhcp role is not chosen.</note></notes>
+        <segment><source>DHCP is not part of this installation, so there is nothing to set here. Choose the DHCP module and the dhcp role on the roles step to set up a first scope.</source><target>DHCP ingår inte i den här installationen, så det finns inget att ställa in här. Välj DHCP-modulen och rollen dhcp i steget för roller för att ställa in ett första scope.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.lede">
+        <notes><note category="description">Introduction of the DHCP step.</note></notes>
+        <segment><source>Tenko can hand out addresses on one network right away. Describe the first scope here; it is created when setup finishes, and more scopes are added on the DHCP pages.</source><target>Tenko kan dela ut adresser på ett nät direkt. Beskriv det första scopet här; det skapas när installationen är klar, och fler scope läggs till på DHCP-sidorna.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.mode">
+        <notes><note category="description">Heading of the choice whether to set up the first DHCP scope now or later.</note></notes>
+        <segment><source>When</source><target>När</target></segment>
+      </unit>
+      <unit id="setup.dhcp.mode.now">
+        <notes><note category="description">Choice: set up the first DHCP scope during setup.</note></notes>
+        <segment><source>Set up the first scope now</source><target>Ställ in det första scopet nu</target></segment>
+      </unit>
+      <unit id="setup.dhcp.mode.now_description">
+        <notes><note category="description">Description of the choice to set up the first DHCP scope now.</note></notes>
+        <segment><source>The network, its pool, the router, the DNS servers and the lease time.</source><target>Nätet, dess pool, routern, DNS-servrarna och lånetiden.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.mode.later">
+        <notes><note category="description">Choice: set up the DHCP scopes later.</note></notes>
+        <segment><source>Later, on the DHCP pages</source><target>Senare, på DHCP-sidorna</target></segment>
+      </unit>
+      <unit id="setup.dhcp.mode.later_description">
+        <notes><note category="description">Description of the choice to set up DHCP later.</note></notes>
+        <segment><source>The dhcp role starts without a scope and answers no client until one exists.</source><target>Rollen dhcp startar utan scope och svarar inga klienter förrän det finns ett.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.safety">
+        <notes><note category="description">Safety note of the DHCP step: only one DHCP server may answer on a network.</note></notes>
+        <segment><source>Switch off any other DHCP server on the same network first (the router's, an old server's): two servers handing out addresses on one network give clients conflicting answers.</source><target>Stäng först av alla andra DHCP-servrar på samma nät (routerns, en gammal servers): två servrar som delar ut adresser på samma nät ger klienterna motstridiga svar.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.scope">
+        <notes><note category="description">Heading of the fields of the first DHCP scope.</note></notes>
+        <segment><source>The scope</source><target>Scopet</target></segment>
+      </unit>
+      <unit id="setup.dhcp.network">
+        <notes><note category="description">Label of the network of the first DHCP scope.</note></notes>
+        <segment><source>Network</source><target>Nät</target></segment>
+      </unit>
+      <unit id="setup.dhcp.network_help">
+        <notes><note category="description">Help of the network field of the DHCP step.</note></notes>
+        <segment><source>An IPv4 network such as 192.0.2.0/24. It is created in IPAM when it does not exist there yet.</source><target>Ett IPv4-nät som 192.0.2.0/24. Det skapas i IPAM om det inte finns där än.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.node_networks">
+        <notes><note category="description">Label before the buttons that fill in one of the networks this server is attached to.</note></notes>
+        <segment><source>This server's networks:</source><target>Den här serverns nät:</target></segment>
+      </unit>
+      <unit id="setup.dhcp.use_network">
+        <notes><note category="description">Button that fills in a network this server is attached to, with its interface.</note></notes>
+        <segment><source>{network} on {iface}</source><target>{network} på {iface}</target></segment>
+      </unit>
+      <unit id="setup.dhcp.pool_first">
+        <notes><note category="description">Label of the first address of the DHCP pool.</note></notes>
+        <segment><source>Pool from</source><target>Pool från</target></segment>
+      </unit>
+      <unit id="setup.dhcp.pool_last">
+        <notes><note category="description">Label of the last address of the DHCP pool.</note></notes>
+        <segment><source>Pool to</source><target>Pool till</target></segment>
+      </unit>
+      <unit id="setup.dhcp.pool_help">
+        <notes><note category="description">Help of the pool fields of the DHCP step.</note></notes>
+        <segment><source>The addresses handed out to clients. Keep servers, printers and other fixed addresses outside the pool.</source><target>Adresserna som delas ut till klienter. Håll servrar, skrivare och andra fasta adresser utanför poolen.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.router">
+        <notes><note category="description">Label of the router (default gateway) the DHCP clients get, option 3.</note></notes>
+        <segment><source>Router (default gateway)</source><target>Router (standardgateway)</target></segment>
+      </unit>
+      <unit id="setup.dhcp.router_help">
+        <notes><note category="description">Help of the router field of the DHCP step.</note></notes>
+        <segment><source>The gateway's address in this network; outside the pool.</source><target>Gatewayens adress i det här nätet; utanför poolen.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.dns">
+        <notes><note category="description">Label of the DNS servers the DHCP clients get, option 6.</note></notes>
+        <segment><source>DNS servers</source><target>DNS-servrar</target></segment>
+      </unit>
+      <unit id="setup.dhcp.dns_help">
+        <notes><note category="description">Help of the DNS servers field of the DHCP step.</note></notes>
+        <segment><source>Separated by commas. Empty: this server's address, so clients ask Tenko's DNS.</source><target>Åtskilda med kommatecken. Tomt: den här serverns adress, så att klienterna frågar Tenkos DNS.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.dns_placeholder">
+        <notes><note category="description">Placeholder of the DNS servers field while this server's address is not known yet.</note></notes>
+        <segment><source>this server's address</source><target>den här serverns adress</target></segment>
+      </unit>
+      <unit id="setup.dhcp.lease">
+        <notes><note category="description">Label of the lease time of the first DHCP scope.</note></notes>
+        <segment><source>Lease time</source><target>Lånetid</target></segment>
+      </unit>
+      <unit id="setup.dhcp.lease_unit">
+        <notes><note category="description">Label of the unit of the lease time.</note></notes>
+        <segment><source>Unit</source><target>Enhet</target></segment>
+      </unit>
+      <unit id="setup.dhcp.unit.hours">
+        <notes><note category="description">Unit of the lease time: hours.</note></notes>
+        <segment><source>hours</source><target>timmar</target></segment>
+      </unit>
+      <unit id="setup.dhcp.unit.days">
+        <notes><note category="description">Unit of the lease time: days.</note></notes>
+        <segment><source>days</source><target>dagar</target></segment>
+      </unit>
+      <unit id="setup.dhcp.hardened">
+        <notes><note category="description">Note of the DHCP step under the Hardened profile.</note></notes>
+        <segment><source>Under Hardened a new scope serves only clients on the allow list of the MAC filters. Add the clients' MAC addresses on the DHCP pages.</source><target>Med Hardened betjänar ett nytt scope bara klienter på tillåtlistan bland MAC-filtren. Lägg till klienternas MAC-adresser på DHCP-sidorna.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.listen">
+        <notes><note category="description">Heading of the choice how the dhcp role receives requests.</note></notes>
+        <segment><source>How requests reach this server</source><target>Hur förfrågningar når den här servern</target></segment>
+      </unit>
+      <unit id="setup.dhcp.listen.relay">
+        <notes><note category="description">Choice: requests are relayed by the gateway (relay mode).</note></notes>
+        <segment><source>Relayed by the gateway</source><target>Vidarebefordras av gatewayen</target></segment>
+      </unit>
+      <unit id="setup.dhcp.listen.relay_description">
+        <notes><note category="description">Description of relay mode.</note></notes>
+        <segment><source>The gateway relays the requests of each network to this server's address (a DHCP relay or helper address). Works in a container and on Windows; recommended.</source><target>Gatewayen vidarebefordrar förfrågningarna från varje nät till den här serverns adress (DHCP relay eller helper address). Fungerar i en container och på Windows; rekommenderas.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.listen.direct">
+        <notes><note category="description">Choice: the server answers clients on its own network directly (direct mode).</note></notes>
+        <segment><source>Directly on an interface</source><target>Direkt på ett gränssnitt</target></segment>
+      </unit>
+      <unit id="setup.dhcp.listen.direct_description">
+        <notes><note category="description">Description of direct mode.</note></notes>
+        <segment><source>This server answers the broadcasts of the network its interface is on. On Linux it needs the CAP_NET_RAW capability.</source><target>Den här servern svarar på broadcast-förfrågningar i nätet som gränssnittet sitter på. På Linux krävs behörigheten CAP_NET_RAW.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.address">
+        <notes><note category="description">Label of this server's address the DHCP listener binds.</note></notes>
+        <segment><source>This server's address</source><target>Den här serverns adress</target></segment>
+      </unit>
+      <unit id="setup.dhcp.address_relay_help">
+        <notes><note category="description">Help of the address field in relay mode.</note></notes>
+        <segment><source>The address the gateway relays to.</source><target>Adressen som gatewayen vidarebefordrar till.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.address_direct_help">
+        <notes><note category="description">Help of the address field in direct mode.</note></notes>
+        <segment><source>The interface's address in the network it serves.</source><target>Gränssnittets adress i nätet det betjänar.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.iface">
+        <notes><note category="description">Label of the interface of a direct DHCP listener.</note></notes>
+        <segment><source>Interface</source><target>Gränssnitt</target></segment>
+      </unit>
+      <unit id="setup.dhcp.others_off">
+        <notes><note category="description">Checkbox confirming that no other DHCP server answers on the network.</note></notes>
+        <segment><source>No other DHCP server answers on this network</source><target>Ingen annan DHCP-server svarar på det här nätet</target></segment>
+      </unit>
+      <unit id="setup.dhcp.others_off_description">
+        <notes><note category="description">Description of the checkbox confirming that other DHCP servers are switched off.</note></notes>
+        <segment><source>I have switched off the other DHCP server, or will do so before the role starts listening.</source><target>Jag har stängt av den andra DHCP-servern, eller gör det innan rollen börjar lyssna.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.privacy">
+        <notes><note category="description">Privacy note of the DHCP step: what the lease history keeps and for how long under the chosen profile.</note></notes>
+        <segment><source>Tenko keeps each client's MAC address, host name and the options it sends with its leases, and the lease history for {days, plural, one {# day} other {# days}} under this profile.</source><target>Tenko sparar varje klients MAC-adress, värdnamn och de alternativ den skickar tillsammans med lånen, och lånehistoriken i {days, plural, one {# dag} other {# dagar}} med den här profilen.</target></segment>
+      </unit>
+      <unit id="setup.dhcp.summary">
+        <notes><note category="description">Summary of the first DHCP scope as entered.</note></notes>
+        <segment><source>Clients in {network} get an address from {first} to {last}, the router {router} and the DNS servers {dns}.</source><target>Klienter i {network} får en adress från {first} till {last}, routern {router} och DNS-servrarna {dns}.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.network">
+        <notes><note category="description">Why the DHCP step cannot be left: the network is not an IPv4 network.</note></notes>
+        <segment><source>Enter the network as an IPv4 prefix such as 192.0.2.0/24 (length 8 to 30).</source><target>Ange nätet som ett IPv4-prefix som 192.0.2.0/24 (längd 8 till 30).</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.pool_first">
+        <notes><note category="description">Why the DHCP step cannot be left: the first pool address is wrong.</note></notes>
+        <segment><source>The first address of the pool must be a host address of the network.</source><target>Poolens första adress måste vara en värdadress i nätet.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.pool_last">
+        <notes><note category="description">Why the DHCP step cannot be left: the last pool address is wrong.</note></notes>
+        <segment><source>The last address of the pool must be a host address of the network.</source><target>Poolens sista adress måste vara en värdadress i nätet.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.pool_order">
+        <notes><note category="description">Why the DHCP step cannot be left: the pool's addresses are in the wrong order.</note></notes>
+        <segment><source>The pool must start before it ends.</source><target>Poolen måste börja före sitt slut.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.router">
+        <notes><note category="description">Why the DHCP step cannot be left: the router address is wrong.</note></notes>
+        <segment><source>Enter the router's address in this network.</source><target>Ange routerns adress i det här nätet.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.router_in_pool">
+        <notes><note category="description">Why the DHCP step cannot be left: the router lies in the pool.</note></notes>
+        <segment><source>The router's address must lie outside the pool.</source><target>Routerns adress måste ligga utanför poolen.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.dns">
+        <notes><note category="description">Why the DHCP step cannot be left: the DNS servers are wrong.</note></notes>
+        <segment><source>Enter one to eight IPv4 addresses of DNS servers, or this server's address.</source><target>Ange en till åtta IPv4-adresser till DNS-servrar, eller den här serverns adress.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.lease">
+        <notes><note category="description">Why the DHCP step cannot be left: the lease time is wrong.</note></notes>
+        <segment><source>The lease time is a whole number of hours or days, from one hour to one year.</source><target>Lånetiden är ett helt antal timmar eller dagar, från en timme till ett år.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.address">
+        <notes><note category="description">Why the DHCP step cannot be left: this server's address is missing or wrong.</note></notes>
+        <segment><source>Enter this server's IPv4 address for the listener.</source><target>Ange den här serverns IPv4-adress för lyssnaren.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.iface">
+        <notes><note category="description">Why the DHCP step cannot be left: the interface of direct mode is missing.</note></notes>
+        <segment><source>Enter the interface that direct mode answers on.</source><target>Ange gränssnittet som direktläget svarar på.</target></segment>
+      </unit>
+      <unit id="setup.gate.dhcp.others_off">
+        <notes><note category="description">Why the DHCP step cannot be left: the person has not confirmed that other DHCP servers are off.</note></notes>
+        <segment><source>Confirm that no other DHCP server answers on this network.</source><target>Bekräfta att ingen annan DHCP-server svarar på det här nätet.</target></segment>
+      </unit>
+      <unit id="setup.done.dhcp">
+        <notes><note category="description">Label of the DHCP row of the setup summary.</note></notes>
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="setup.done.dhcp_later">
+        <notes><note category="description">Summary text when the first DHCP scope is set up later.</note></notes>
+        <segment><source>Set up later on the DHCP pages</source><target>Ställs in senare på DHCP-sidorna</target></segment>
+      </unit>
+      <unit id="setup.done.dhcp_detail">
+        <notes><note category="description">Details of the first DHCP scope in the setup summary.</note></notes>
+        <segment><source>Pool {first} to {last}, router {router}</source><target>Pool {first} till {last}, router {router}</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.title">
+        <notes><note category="description">Heading of the DHCP part of the setup result.</note></notes>
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.saved">
+        <notes><note category="description">Setup result: the first DHCP scope was created.</note></notes>
+        <segment><source>The scope for {network} was created with its pool, router and DNS servers.</source><target>Scopet för {network} skapades med sin pool, router och sina DNS-servrar.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.open_scope">
+        <notes><note category="description">Link from the setup result to the new DHCP scope.</note></notes>
+        <segment><source>Open the scope</source><target>Öppna scopet</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.failed.prefix">
+        <notes><note category="description">Setup result: the network of the first DHCP scope could not be found or created in IPAM.</note></notes>
+        <segment><source>The network could not be created in IPAM: {reason}. Create it and the scope on the IPAM and DHCP pages.</source><target>Nätet kunde inte skapas i IPAM: {reason}. Skapa det och scopet på IPAM- och DHCP-sidorna.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.failed.pool">
+        <notes><note category="description">Setup result: the pool range of the first DHCP scope could not be created.</note></notes>
+        <segment><source>The network exists, but its pool could not be created: {reason}. Add the pool as a range of role DHCP pool on the network's page.</source><target>Nätet finns, men dess pool kunde inte skapas: {reason}. Lägg till poolen som ett intervall med rollen DHCP-pool på nätets sida.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.failed.scope">
+        <notes><note category="description">Setup result: the DHCP scope could not be created.</note></notes>
+        <segment><source>The network and its pool exist, but the scope could not be created: {reason}. The DHCP module may not run yet; create the scope on the DHCP pages.</source><target>Nätet och dess pool finns, men scopet kunde inte skapas: {reason}. DHCP-modulen kanske inte körs än; skapa scopet på DHCP-sidorna.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.failed.options">
+        <notes><note category="description">Setup result: the router and DNS options of the scope could not be set.</note></notes>
+        <segment><source>The scope exists, but its router and DNS servers could not be set: {reason}. Set them on the scope's options tab.</source><target>Scopet finns, men dess router och DNS-servrar kunde inte ställas in: {reason}. Ställ in dem på scopets flik för alternativ.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.none">
+        <notes><note category="description">Setup result when no DHCP scope was set up during setup.</note></notes>
+        <segment><source>No scope was created. The DHCP pages create scopes from the networks in IPAM.</source><target>Inget scope skapades. På DHCP-sidorna skapas scope från näten i IPAM.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.config_help">
+        <notes><note category="description">Help above the generated [dhcp] section for tenko.toml.</note></notes>
+        <segment><source>The role listens once this section is in tenko.toml and the server has restarted. With relay mode, set the DHCP relay of each network on the gateway to this server's address.</source><target>Rollen lyssnar när det här avsnittet finns i tenko.toml och servern har startats om. Med vidarebefordran ställer du in DHCP relay för varje nät på gatewayen till den här serverns adress.</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.copy">
+        <notes><note category="description">Button that copies the generated [dhcp] section.</note></notes>
+        <segment><source>Copy the [dhcp] section</source><target>Kopiera avsnittet [dhcp]</target></segment>
+      </unit>
+      <unit id="setup.result.dhcp.copied">
+        <notes><note category="description">Toast after copying the [dhcp] section.</note></notes>
+        <segment><source>The [dhcp] section was copied</source><target>Avsnittet [dhcp] kopierades</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

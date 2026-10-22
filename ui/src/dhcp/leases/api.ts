@@ -3,6 +3,7 @@
 // its `dhcp` role.
 import { api } from "../../api/client";
 import type { Lease, NodeStatus } from "./model";
+import { newQuery } from "./overview";
 
 /** Releases an active lease; the reason is for the audit record. Answers the released lease. */
 export function releaseLease(lease: Pick<Lease, "addr" | "vrf">, reason: string): Promise<Lease> {
@@ -23,6 +24,11 @@ export async function thisNode(signal?: AbortSignal): Promise<number | undefined
 /** The state of the `dhcp` role of a node. */
 export function nodeDhcp(id: number, signal?: AbortSignal): Promise<NodeStatus> {
   return api.get("/api/v1/nodes/{id}/dhcp", { path: { id }, signal });
+}
+
+/** One page of the grants since `since` (the "new since you opened the page" counter, WP8.6). */
+export function grantedSince(since: string, scope: string, signal?: AbortSignal) {
+  return api.get("/api/v1/dhcp/history", { query: newQuery(since, scope), signal });
 }
 
 /** The state of the `dhcp` role of this server's node; undefined when the server has no node. */

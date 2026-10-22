@@ -9,6 +9,11 @@
 // - The DNS step (P2-Q5, WP5.5): under Home the upstream is entered and DNS over TLS taken from
 //   the well-known resolver offer; the review shows it and the result step shows whether it was
 //   stored as the default forwarder with the generated [dns] section. Under Lab it is left empty.
+// - The DHCP step (WP8.6): under Home the first scope is filled in (the network, the proposed
+//   pool, the router, this server's address as the DNS server, relay mode), Continue waits for the
+//   confirmation that no other DHCP server answers, the review shows the network, and the result
+//   step shows the scope written through the real configuration routes with the generated [dhcp]
+//   section. Under Lab it is set up later and nothing is written.
 
 import type { Locator, Page } from "@playwright/test";
 import { ADMIN, type Schemas } from "./support/api";
@@ -23,7 +28,7 @@ async function next(page: Page, card: Locator, step: string): Promise<void> {
   await expect(card).toHaveAttribute("data-key", step);
 }
 
-/** Walks the eight steps with the administrator of the tests and finishes. */
+/** Walks the nine steps (WP8.6 adds DHCP) with the administrator of the tests and finishes. */
 async function completeWizard(page: Page, token: string, profile: "home" | "lab"): Promise<Locator> {
   const card = page.getByTestId("setup-card");
   await expect(card).toHaveAttribute("data-key", "welcome");
@@ -72,8 +77,29 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
     await expect(withKey(page, "setup-dns-switch", "log")).not.toBeChecked();
     await expect(withKey(page, "setup-dns-switch", "dot")).not.toBeChecked();
   }
+  // WP8.6: the DHCP step. The node reports no networks, so the step starts with "later"; under
+  // Home the first scope is filled in and must be confirmed before Continue lets go.
+  await next(page, card, "dhcp");
+  await expect(page.getByTestId("setup-dhcp")).toHaveAttribute("data-state", "wanted");
+  await expect(withKey(page, "setup-dhcp-mode", "later")).toBeChecked();
+  if (profile === "home") {
+    await withKey(page, "setup-dhcp-mode", "now").check();
+    await expect(page.getByTestId("setup-dhcp-safety")).toBeVisible();
+    await page.getByTestId("field-dhcp-network").fill("192.0.2.0/24");
+    await expect(page.getByTestId("field-dhcp-pool-first")).toHaveValue("192.0.2.128");
+    await expect(page.getByTestId("field-dhcp-pool-last")).toHaveValue("192.0.2.254");
+    await page.getByTestId("field-dhcp-router").fill("192.0.2.1");
+    await page.getByTestId("field-dhcp-address").fill("192.0.2.10");
+    await expect(withKey(page, "setup-dhcp-listen", "relay")).toBeChecked();
+    // Continue is aria-disabled while the step is blocked; a click shows why.
+    await page.getByTestId("setup-next").click({ force: true });
+    await expect(page.getByTestId("setup-blocker")).toContainText("Confirm that no other DHCP server answers on this network.");
+    await page.getByTestId("field-dhcp-others-off").check();
+    await expect(page.getByTestId("setup-dhcp-summary")).toContainText("the DNS servers 192.0.2.10");
+  }
   await next(page, card, "done");
   if (profile === "home") await expect(page.getByTestId("setup-review-dns")).toHaveAttribute("data-count", "1");
+  await expect(page.getByTestId("setup-review-dhcp")).toHaveAttribute("data-state", profile === "home" ? "now" : "later");
 
   await page.getByTestId("setup-next").click();
   await expect(card).toHaveAttribute("data-key", "result");
@@ -87,6 +113,18 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
   } else {
     await expect(dns).toHaveAttribute("data-state", "none");
     await expect(page.getByTestId("setup-dns-config")).toContainText("forwarders = []");
+  }
+  // WP8.6: the first scope is written through the configuration routes after setup, and the
+  // listener is the [dhcp] section to put in tenko.toml.
+  const dhcp = page.getByTestId("setup-result-dhcp");
+  await expect(dhcp).toBeVisible();
+  if (profile === "home") {
+    await expect(dhcp).toHaveAttribute("data-state", "saved");
+    await expect(page.getByTestId("setup-dhcp-saved")).toContainText("192.0.2.0/24");
+    await expect(page.getByTestId("setup-dhcp-config")).toContainText('listen = [{ address = "192.0.2.10", mode = "relay" }]');
+  } else {
+    await expect(dhcp).toHaveAttribute("data-state", "none");
+    await expect(page.getByTestId("setup-dhcp-config")).toContainText("listen = []");
   }
   return card;
 }

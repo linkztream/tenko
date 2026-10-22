@@ -67,6 +67,9 @@ test("creates a class, a policy on it and a MAC filter, and deletes them", async
   await policyForm.getByTestId("field-lease-max").fill("2");
   await policyForm.getByTestId("field-lease-max-unit").selectOption("hours");
   await policyForm.getByTestId("form-submit").click();
+  // WP8.6: a new policy stays open for its options; closing it leaves the policy as created.
+  await expect(policyForm.getByTestId("policy-optset")).toBeVisible();
+  await policyForm.getByTestId("form-cancel").click();
   await expect(policyForm).toHaveCount(0);
   const policyRow = gridRow(page, "dhcp-policies", "pxe-boot");
   await expect(policyRow.getByTestId("policy-condition-words")).toHaveText("in class pxe-clients");

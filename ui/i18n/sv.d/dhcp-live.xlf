@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp-live">
+      <unit id="dhcp.live.strip_label">
+        <notes><note category="description">Label of the strip above the lease filters: the scope, how full it is and the count of new leases.</note></notes>
+        <segment><source>Live view of the leases</source><target>Liveöversikt över lånen</target></segment>
+      </unit>
+      <unit id="dhcp.live.scope_open">
+        <notes><note category="description">Link in the live strip from the chosen scope to its page.</note></notes>
+        <segment><source>Open scope</source><target>Öppna omfånget</target></segment>
+      </unit>
+      <unit id="dhcp.live.scope_pick">
+        <notes><note category="description">Tooltip of a scope bar that chooses the scope as the filter; {network} is the scope network.</note></notes>
+        <segment><source>Show only the leases of {network}</source><target>Visa bara lånen i {network}</target></segment>
+      </unit>
+      <unit id="dhcp.live.scope_more">
+        <notes><note category="description">Link to the scope list when more scopes exist than the strip shows bars for; # is the number left out.</note></notes>
+        <segment><source>{count, plural, one {and # more scope} other {and # more scopes}}</source><target>{count, plural, one {och # omfång till} other {och # omfång till}}</target></segment>
+      </unit>
+      <unit id="dhcp.live.bars_label">
+        <notes><note category="description">Label of the group of scope bars in the live strip.</note></notes>
+        <segment><source>How full the scopes are</source><target>Hur fulla omfången är</target></segment>
+      </unit>
+      <unit id="dhcp.live.new">
+        <notes><note category="description">The count of leases granted since the page was opened; # is the number.</note></notes>
+        <segment><source>{count, plural, one {# new lease since you opened this page} other {# new leases since you opened this page}}</source><target>{count, plural, one {# nytt lån sedan du öppnade sidan} other {# nya lån sedan du öppnade sidan}}</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_capped">
+        <notes><note category="description">The count when a page of grants was not enough; {count} is the formatted number that was counted, the + says there are more.</note></notes>
+        <segment><source>{count}+ new leases since you opened this page</source><target>{count}+ nya lån sedan du öppnade sidan</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_paused">
+        <notes><note category="description">Shown instead of the count while the Live toggle is off.</note></notes>
+        <segment><source>New leases are not counted while Live is off</source><target>Nya lån räknas inte medan Live är av</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_label">
+        <notes><note category="description">Label of the group with the count of new leases, its link and its reset button.</note></notes>
+        <segment><source>New leases since you opened the page</source><target>Nya lån sedan du öppnade sidan</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_since">
+        <notes><note category="description">Tooltip of the count: when the counting started; {time} is a date and time.</note></notes>
+        <segment><source>Counting from {time}</source><target>Räknar från {time}</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_link">
+        <notes><note category="description">Link from the count of new leases to the history of those grants.</note></notes>
+        <segment><source>Show in history</source><target>Visa i historiken</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_reset">
+        <notes><note category="description">Button that moves the start of the count of new leases to now.</note></notes>
+        <segment><source>Reset</source><target>Nollställ</target></segment>
+      </unit>
+      <unit id="dhcp.live.new_reset_hint">
+        <notes><note category="description">Tooltip of the reset button.</note></notes>
+        <segment><source>Count from now on</source><target>Räkna från och med nu</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

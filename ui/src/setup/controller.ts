@@ -45,6 +45,8 @@ import { createForwarder } from "../dns/forwarders/api";
 import { checkRule, splitUpstreams, type ForwardTransport, type Upstream } from "../dns/forwarders/model";
 import { generatePassword, generatorFor, type DnsChoice, type GeneratorKind } from "./generate";
 import { parseProxyList, validateHostName } from "./validate";
+// WP8.6: the DHCP step.
+import { defaultPool, dhcpPlan, initialDhcp, saveDhcpScope, type DhcpOutcome, type DhcpPlan, type DhcpStepState } from "./dhcp";
 
 /** How long the password must rest before it is sent to the server for judging. */
 export const CHECK_DEBOUNCE_MS = 300;
@@ -141,6 +143,9 @@ export interface WizardState {
   networks: Record<string, boolean>;
   /** The DNS step (P2-Q5). */
   dns: DnsStepState;
+  // WP8.6: the DHCP step.
+  /** The DHCP step: the first scope and the listener. */
+  dhcp: DhcpStepState;
   submitting: boolean;
   /** A reason the request was refused, shown on the step it belongs to. */
   problem: { step: number; error: unknown } | null;
@@ -167,6 +172,8 @@ function initialState(): WizardState {
     modules: allModules(),
     networks: {},
     dns: initialDns("home"),
+    // WP8.6: filled from the node's networks when they arrive.
+    dhcp: initialDhcp(),
     submitting: false,
     problem: null,
   };
@@ -192,6 +199,8 @@ export type DnsOutcome = { status: "none" } | { status: "saved" } | { status: "f
 export interface AfterState {
   done: boolean;
   dns: DnsOutcome;
+  // WP8.6: what became of the first DHCP scope.
+  dhcp: DhcpOutcome;
   caFingerprint: string | null;
   codes: CodesState;
   codesSaved: boolean;
@@ -202,6 +211,8 @@ function initialAfter(): AfterState {
   return {
     done: false,
     dns: { status: "none" },
+    // WP8.6
+    dhcp: { status: "none" },
     caFingerprint: null,
     codes: { status: "loading", codes: [], error: null },
     codesSaved: false,
@@ -274,6 +285,12 @@ export interface Wizard {
   setDns: <K extends keyof DnsStepState>(key: K, value: DnsStepState[K]) => void;
   /** Sets the switches of the Home preset (or of the chosen profile). */
   applyDnsPreset: () => void;
+  // WP8.6: the DHCP step.
+  /** Whether the DHCP step applies: the DHCP module and the `dhcp` role are chosen. */
+  dhcpWanted: Accessor<boolean>;
+  setDhcp: <K extends keyof DhcpStepState>(key: K, value: DhcpStepState[K]) => void;
+  /** The scope the DHCP step describes, or null while it has a problem or is set up later. */
+  dhcpPlan: Accessor<DhcpPlan | null>;
   // Finishing
   submit: () => Promise<void>;
   finished: Accessor<boolean>;
@@ -317,6 +334,8 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
         setSetup(res);
         // Every network is ticked for the probe except a DMZ, which is a separate trust zone.
         setState("networks", Object.fromEntries((res.node?.networks ?? []).map((n) => [n.id, n.id !== "dmz"])));
+        // WP8.6: the DHCP step starts from the node's first IPv4 network.
+        setState("dhcp", initialDhcp(res.node?.networks ?? []));
       });
     } catch (err) {
       setLoadError(err);
@@ -399,6 +418,9 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
 
   const selectedNetworks = createMemo(() => networks().filter((n) => state.networks[n.id]).map((n) => n.id));
   const dnsWanted = createMemo(() => state.modules.dns && state.roles.dns);
+  // WP8.6: the DHCP step applies with the DHCP module and the `dhcp` role.
+  const dhcpWanted = createMemo(() => state.modules.dhcp && state.roles.dhcp);
+  const plan = createMemo(() => dhcpPlan(state.dhcp, dhcpWanted()));
 
   const gateInput = createMemo<GateInput>(() => ({
     token: state.token,
@@ -425,6 +447,8 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
       cache: state.dns.cache,
       cacheEntries: state.dns.cacheEntries,
     },
+    // WP8.6
+    dhcp: { wanted: dhcpWanted(), state: { ...state.dhcp } },
   }));
 
   // The roles step also holds the module choice, which has its own gate (src/updates/wizardModules.ts).
@@ -533,6 +557,19 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     setState("dns", { ...state.dns, ...dnsPreset("home"), touched: true });
   }
 
+  // WP8.6: a change of the network proposes its pool while the pool was the proposal of the old one.
+  function setDhcp<K extends keyof DhcpStepState>(key: K, value: DhcpStepState[K]): void {
+    batch(() => {
+      if (key === "network") {
+        const old = defaultPool(state.dhcp.network);
+        const proposed = defaultPool(String(value));
+        const untouched = (!old && state.dhcp.poolFirst === "" && state.dhcp.poolLast === "") || (old && old.first === state.dhcp.poolFirst && old.last === state.dhcp.poolLast);
+        if (untouched && proposed) setState("dhcp", { poolFirst: proposed.first, poolLast: proposed.last });
+      }
+      setState("dhcp", key, value);
+    });
+  }
+
   function setRole(role: NodeRole, on: boolean): void {
     batch(() => {
       setState("roles", role, on);
@@ -607,6 +644,8 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     await establish(result);
     await saveModules();
     await saveDns();
+    // WP8.6: the first DHCP scope.
+    await saveDhcp();
     scrollToTop();
     focusHeading();
     await loadCodes();
@@ -650,6 +689,19 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     } catch (error) {
       setAfter("dns", { status: "failed", error });
     }
+  }
+
+  // WP8.6
+  /**
+   * Writes the first DHCP scope of the DHCP step through the configuration routes with the new
+   * session: the IPAM network, the pool, the scope and its router and DNS options. A refusal (the
+   * DHCP module not running yet, a network or range that exists) is shown on the result step with
+   * the step it stopped at; the DHCP pages are then the way. The listener goes into `tenko.toml`.
+   */
+  async function saveDhcp(): Promise<void> {
+    const p = untrack(plan);
+    if (!p) return;
+    setAfter("dhcp", await saveDhcpScope(p));
   }
 
   async function loadCodes(): Promise<void> {
@@ -751,6 +803,10 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     dnsWanted,
     setDns,
     applyDnsPreset,
+    // WP8.6
+    dhcpWanted,
+    setDhcp,
+    dhcpPlan: plan,
     submit,
     finished,
     openGate,

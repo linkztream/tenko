@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp-reservations">
+      <unit id="dhcp.reservations.title">
+        <notes><note category="description">Heading of the DHCP reservations section on the page of a reserved host.</note></notes>
+        <segment><source>DHCP reservations</source><target>DHCP-reservationer</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.help">
+        <notes><note category="description">Introduction of the DHCP reservations section on the host page.</note></notes>
+        <segment><source>The reservation of an address follows the identity of its interface: the client identifier when the interface has one, else the MAC address.</source><target>Reservationen för en adress följer gränssnittets identitet: klientidentifieraren om gränssnittet har en, annars MAC-adressen.</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.empty">
+        <notes><note category="description">Shown when the reserved host has no IPv4 address on a live interface.</note></notes>
+        <segment><source>This host has no active or planned IPv4 address on an interface, so there is nothing to reserve.</source><target>Värden har ingen aktiv eller planerad IPv4-adress på ett gränssnitt, så det finns inget att reservera.</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.col_identity">
+        <notes><note category="description">Column header: what the reservation is keyed by.</note></notes>
+        <segment><source>Reserved for</source><target>Reserverad för</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.col_served">
+        <notes><note category="description">Column header: whether the DHCP server serves the reservation.</note></notes>
+        <segment><source>Served</source><target>Betjänas</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.col_lease">
+        <notes><note category="description">Column header: the lease on the address.</note></notes>
+        <segment><source>Lease</source><target>Lån</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.identity_client_id">
+        <notes><note category="description">Before the client identifier a reservation is keyed by.</note></notes>
+        <segment><source>Client identifier</source><target>Klientidentifierare</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.identity_mac">
+        <notes><note category="description">Before the MAC address a reservation is keyed by.</note></notes>
+        <segment><source>MAC address</source><target>MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.identity_none">
+        <notes><note category="description">The interface has neither a MAC address nor a client identifier (IPAM-18).</note></notes>
+        <segment><source>No MAC address or client identifier: no reservation</source><target>Ingen MAC-adress eller klientidentifierare: ingen reservation</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.scope_none">
+        <notes><note category="description">No DHCP scope covers the address.</note></notes>
+        <segment><source>No DHCP scope serves this network</source><target>Inget DHCP-omfång betjänar nätet</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.scope_setup">
+        <notes><note category="description">Link to the DHCP scopes, shown to people who may change them.</note></notes>
+        <segment><source>Set up a scope</source><target>Skapa ett omfång</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.state_served">
+        <notes><note category="description">The reservation is served.</note></notes>
+        <segment><source>Served</source><target>Betjänas</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.state_scope_disabled">
+        <notes><note category="description">The scope of the address is disabled.</note></notes>
+        <segment><source>The scope is disabled</source><target>Omfånget är inaktivt</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.state_not_serving">
+        <notes><note category="description">The dhcp role does not run on this server.</note></notes>
+        <segment><source>The dhcp role does not run on this server</source><target>DHCP-rollen körs inte på servern</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.lease_none">
+        <notes><note category="description">No lease on the address yet.</note></notes>
+        <segment><source>No lease yet: the client has not asked since the reservation exists</source><target>Inget lån ännu: klienten har inte frågat sedan reservationen fanns</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.lease_failed">
+        <notes><note category="description">The lease on the address could not be read.</note></notes>
+        <segment><source>The lease could not be read.</source><target>Lånet kunde inte läsas.</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.lease_ends">
+        <notes><note category="description">When an active lease ends; {when} is a relative time such as in 3 hours.</note></notes>
+        <segment><source>Ends {when}</source><target>Slutar {when}</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.lease_other">
+        <notes><note category="description">Warning: the lease is held by another client than the reservation is for; {client} is its hardware address.</note></notes>
+        <segment><source>Held by another client: {client}</source><target>Hålls av en annan klient: {client}</target></segment>
+      </unit>
+      <unit id="dhcp.reservations.ipv6_later">
+        <notes><note category="description">Shown when the host has IPv6 addresses.</note></notes>
+        <segment><source>IPv6 addresses get no DHCP reservation yet; that comes in a later version.</source><target>IPv6-adresser får ingen DHCP-reservation ännu; det kommer i en senare version.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

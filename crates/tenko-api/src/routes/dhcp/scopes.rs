@@ -372,6 +372,14 @@ pub(super) async fn get_dhcp_effective_options(
                 })
         })
         .transpose()?;
+    // WP8.6: an architecture type is two octets (RFC 4578).
+    let architecture = params
+        .architecture
+        .map(|code| {
+            u16::try_from(code)
+                .map_err(|_| ApiError::invalid_query("architecture", "an integer from 0 to 65535"))
+        })
+        .transpose()?;
     let service = configs.get()?;
     let view = service.view(None).await?;
     let client = ClientFacts {
@@ -379,6 +387,9 @@ pub(super) async fn get_dhcp_effective_options(
         client_id,
         vendor_class: params.vendor_class,
         user_class: params.user_class,
+        // WP8.6: the architecture and the host name of the "why this value" view.
+        architecture,
+        host_name: params.host_name,
         // WP8.4: the fields the query does not carry.
         ..ClientFacts::default()
     };

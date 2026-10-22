@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
-import type { MetricsDns, MetricsSample, MetricsSnapshot } from "./metrics";
+import type { MetricsDhcp, MetricsDns, MetricsSample, MetricsSnapshot } from "./metrics";
 import MetricsTiles from "./MetricsTiles";
 
 /** A stand-in for EventSource that the tests feed. */
@@ -422,5 +422,108 @@ describe("DNS tiles", () => {
     expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");
     expect(tile("dns-encrypted").textContent).toContain("Krypterade anslutningar");
     expect(screen.getByTestId("metrics-group-dns").textContent).toBe("DNS");
+  });
+});
+
+// WP8.7: the DHCP tiles.
+function dhcpPart(patch: Partial<MetricsDhcp> = {}): MetricsDhcp {
+  return {
+    leases_per_second: 40,
+    ack_p99_ms: 8.5,
+    naks_per_second: 0.5,
+    declines_per_second: 0.25,
+    active_leases: 1_200,
+    abandoned_leases: 2,
+    scopes: 4,
+    fullest: [
+      { scope: "192.0.2.0/26", utilization: 0.9 },
+      { scope: "198.51.100.0/24", utilization: 0.6 },
+      { scope: "203.0.113.0/25", utilization: 0.3 },
+    ],
+    ddns: { written: 6, removed: 2, refused: 1, failed: 0, skipped: 1, dropped: 0, queue: 3 },
+    ...patch,
+  };
+}
+
+const DHCP_TILES = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"];
+
+describe("DHCP tiles", () => {
+  it("are not shown while no controller runs the dhcp role", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart() });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    for (const name of DHCP_TILES) expect(screen.queryByTestId(`metrics-tile-${name}`)).toBeNull();
+    expect(screen.queryByTestId("metrics-group-dhcp")).toBeNull();
+  });
+
+  it("follow the DNS tiles with the leases, the ACK time, the pools, the NAKs and DECLINEs and DDNS", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    for (const leases of [10, 25, 40]) {
+      const own = sample(1, { dns: dnsPart(), dhcp: dhcpPart({ leases_per_second: leases }) });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("dhcp-leases").dataset.value).toBe("40"));
+    expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-']")].map((el) => el.getAttribute("data-testid"))).toEqual(
+      ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...DNS_TILES, ...DHCP_TILES].map((name) => `metrics-tile-${name}`),
+    );
+    expect(screen.getByTestId("metrics-sparkline-dhcp-leases").dataset.points).toBe("3");
+    expect(tile("dhcp-ack").dataset.value).toBe("8.5");
+    expect(tile("dhcp-ack").textContent).toContain("Includes the commit");
+    expect(tile("dhcp-active").dataset.value).toBe("1200");
+    expect(tile("dhcp-active").textContent).toContain("2 addresses held back after a conflict or DECLINE");
+    expect(tile("dhcp-pools").dataset.value).toBe("90");
+    expect(tile("dhcp-pools").textContent).toContain("4 scopes with a pool");
+    const pools = within(tile("dhcp-pools")).getAllByTestId("metrics-dhcp-pool");
+    expect(pools.map((row) => [row.dataset.scope, row.dataset.value])).toEqual([
+      ["192.0.2.0/26", "0.9"],
+      ["198.51.100.0/24", "0.6"],
+      ["203.0.113.0/25", "0.3"],
+    ]);
+    expect(pools[0]!.textContent).toContain("90%");
+    expect(tile("dhcp-naks").dataset.value).toBe("0.75");
+    expect(within(tile("dhcp-naks")).getByTestId("metrics-dhcp-nak").dataset.rate).toBe("0.5");
+    expect(within(tile("dhcp-naks")).getByTestId("metrics-dhcp-decline").dataset.rate).toBe("0.25");
+    expect(tile("dhcp-ddns").dataset.value).toBe("6");
+    const outcomes = within(tile("dhcp-ddns")).getAllByTestId("metrics-dhcp-ddns");
+    expect(outcomes.map((row) => [row.dataset.outcome, row.dataset.rate])).toEqual([
+      ["written", "6"],
+      ["removed", "2"],
+      ["refused", "1"],
+      ["failed", "0"],
+    ]);
+    expect(tile("dhcp-ddns").textContent).toContain("3 waiting");
+    for (const name of DHCP_TILES) expect(parts(tile(name))).toEqual(SHAPE);
+    expect(screen.getByTestId("metrics-group-dhcp").textContent).toBe("DHCP");
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("show the DHCP tiles without the DNS tiles, and say when there is no ACK and no pool", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dhcp: dhcpPart({ leases_per_second: 0, ack_p99_ms: null, scopes: 0, fullest: [] }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dhcp-leases").dataset.value).toBe("0"));
+    expect(screen.queryByTestId("metrics-group-dns")).toBeNull();
+    expect(tile("dhcp-ack").dataset.value).toBeUndefined();
+    expect(tile("dhcp-ack").textContent).toContain("No ACK in the last second");
+    expect(tile("dhcp-pools").dataset.value).toBeUndefined();
+    expect(tile("dhcp-pools").textContent).toContain("No scope has a pool yet");
+    expect(within(tile("dhcp-pools")).queryAllByTestId("metrics-dhcp-pool")).toHaveLength(0);
+  });
+
+  it("speak Swedish", async () => {
+    await setLocale("sv");
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dhcp: dhcpPart() });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dhcp-leases").dataset.value).toBe("40"));
+    expect(tile("dhcp-leases").textContent).toContain("Beviljade lån");
+    expect(tile("dhcp-pools").textContent).toContain("Fullaste poolen");
+    expect(tile("dhcp-ddns").textContent).toContain("Skrivna DDNS-namn");
   });
 });

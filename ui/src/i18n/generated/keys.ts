@@ -1079,10 +1079,74 @@ export type MessageKey =
   | "dashboard.waiting.none"
   | "dashboard.waiting.step"
   | "dashboard.waiting.title"
-  | "dhcp.action.ddns"
+  | "dhcp.action.ddns_off"
+  | "dhcp.action.ddns_on"
+  | "dhcp.action.ddns_on_zone"
   | "dhcp.action.lease"
   | "dhcp.action.none"
+  | "dhcp.action.options"
   | "dhcp.action.range"
+  | "dhcp.arch.empty"
+  | "dhcp.arch.label"
+  | "dhcp.arch.name.0"
+  | "dhcp.arch.name.10"
+  | "dhcp.arch.name.11"
+  | "dhcp.arch.name.15"
+  | "dhcp.arch.name.16"
+  | "dhcp.arch.name.19"
+  | "dhcp.arch.name.6"
+  | "dhcp.arch.name.7"
+  | "dhcp.arch.name.9"
+  | "dhcp.arch.none"
+  | "dhcp.arch.option"
+  | "dhcp.arch.other"
+  | "dhcp.arch.value_label"
+  | "dhcp.boot.add_button"
+  | "dhcp.boot.add_done"
+  | "dhcp.boot.add_file"
+  | "dhcp.boot.add_file_help"
+  | "dhcp.boot.add_kind"
+  | "dhcp.boot.add_matches"
+  | "dhcp.boot.add_order_first"
+  | "dhcp.boot.add_order_last"
+  | "dhcp.boot.add_order_tie"
+  | "dhcp.boot.add_partial_class"
+  | "dhcp.boot.add_partial_policy"
+  | "dhcp.boot.add_submit"
+  | "dhcp.boot.add_title"
+  | "dhcp.boot.check.file_empty"
+  | "dhcp.boot.check.long"
+  | "dhcp.boot.col.file"
+  | "dhcp.boot.field.file"
+  | "dhcp.boot.field.next_server"
+  | "dhcp.boot.field.pxe_config"
+  | "dhcp.boot.field.pxe_prefix"
+  | "dhcp.boot.field.pxe_reboot"
+  | "dhcp.boot.field.tftp_name"
+  | "dhcp.boot.form_help"
+  | "dhcp.boot.form_title"
+  | "dhcp.boot.hint.file"
+  | "dhcp.boot.hint.next_server"
+  | "dhcp.boot.hint.pxe_config"
+  | "dhcp.boot.hint.pxe_prefix"
+  | "dhcp.boot.hint.pxe_reboot"
+  | "dhcp.boot.hint.tftp_name"
+  | "dhcp.boot.inherited"
+  | "dhcp.boot.inherited_none"
+  | "dhcp.boot.kind.bios"
+  | "dhcp.boot.kind.http"
+  | "dhcp.boot.kind.http_x64"
+  | "dhcp.boot.kind.ipxe"
+  | "dhcp.boot.kind.uefi_arm64"
+  | "dhcp.boot.kind.uefi_x64"
+  | "dhcp.boot.policies_empty"
+  | "dhcp.boot.policies_help"
+  | "dhcp.boot.policies_link"
+  | "dhcp.boot.policies_note"
+  | "dhcp.boot.policies_title"
+  | "dhcp.boot.save"
+  | "dhcp.boot.saved"
+  | "dhcp.boot.unchanged"
   | "dhcp.catalog.managed"
   | "dhcp.check.def_code"
   | "dhcp.check.exclusion_first"
@@ -1173,6 +1237,55 @@ export type MessageKey =
   | "dhcp.coming.body"
   | "dhcp.coming.scopes"
   | "dhcp.coming.title"
+  | "dhcp.ddns.check.ttl"
+  | "dhcp.ddns.conflict.protect"
+  | "dhcp.ddns.conflict.replace"
+  | "dhcp.ddns.field.client_a"
+  | "dhcp.ddns.field.client_a_help"
+  | "dhcp.ddns.field.conflict"
+  | "dhcp.ddns.field.enabled"
+  | "dhcp.ddns.field.foreign"
+  | "dhcp.ddns.field.foreign_help"
+  | "dhcp.ddns.field.legacy"
+  | "dhcp.ddns.field.legacy_help"
+  | "dhcp.ddns.field.reverse"
+  | "dhcp.ddns.field.reverse_help"
+  | "dhcp.ddns.field.ttl"
+  | "dhcp.ddns.field.ttl_help"
+  | "dhcp.ddns.field.zone"
+  | "dhcp.ddns.follows"
+  | "dhcp.ddns.hardened_note"
+  | "dhcp.ddns.help"
+  | "dhcp.ddns.inherit"
+  | "dhcp.ddns.inherit_help"
+  | "dhcp.ddns.legend"
+  | "dhcp.ddns.needs_dns"
+  | "dhcp.ddns.profile_open"
+  | "dhcp.ddns.profile_strict"
+  | "dhcp.ddns.saved"
+  | "dhcp.ddns.server_now"
+  | "dhcp.ddns.title"
+  | "dhcp.ddns.words.client_a"
+  | "dhcp.ddns.words.foreign"
+  | "dhcp.ddns.words.legacy_off"
+  | "dhcp.ddns.words.legacy_on"
+  | "dhcp.ddns.words.off"
+  | "dhcp.ddns.words.on"
+  | "dhcp.ddns.words.protect"
+  | "dhcp.ddns.words.replace"
+  | "dhcp.ddns.words.reverse_off"
+  | "dhcp.ddns.words.reverse_on"
+  | "dhcp.ddns.words.ttl"
+  | "dhcp.ddns.words.ttl_third"
+  | "dhcp.ddns.words.zone"
+  | "dhcp.ddns.words.zone_domain"
+  | "dhcp.ddns.zone_none"
+  | "dhcp.ddns.zone_state.off"
+  | "dhcp.ddns.zone_state.on"
+  | "dhcp.ddns.zone_state.profile_off"
+  | "dhcp.ddns.zone_state.profile_on"
+  | "dhcp.ddns.zone_unavailable"
+  | "dhcp.ddns.zone_unknown"
   | "dhcp.def.create"
   | "dhcp.def.create_title"
   | "dhcp.def.created"
@@ -1196,15 +1309,30 @@ export type MessageKey =
   | "dhcp.do.history"
   | "dhcp.do.open"
   | "dhcp.do.refresh"
+  | "dhcp.effective.architecture"
+  | "dhcp.effective.classes"
   | "dhcp.effective.client_id"
   | "dhcp.effective.col.level"
+  | "dhcp.effective.col.why"
   | "dhcp.effective.empty"
-  | "dhcp.effective.help"
+  | "dhcp.effective.help_facts"
+  | "dhcp.effective.host_name"
   | "dhcp.effective.mac"
-  | "dhcp.effective.note"
+  | "dhcp.effective.no_classes"
+  | "dhcp.effective.no_policies"
+  | "dhcp.effective.note_live"
+  | "dhcp.effective.policies"
   | "dhcp.effective.reservation"
   | "dhcp.effective.show"
   | "dhcp.effective.title"
+  | "dhcp.effective.user_class"
+  | "dhcp.effective.vendor_class"
+  | "dhcp.effective.why.host"
+  | "dhcp.effective.why.policy"
+  | "dhcp.effective.why.pool"
+  | "dhcp.effective.why.scope"
+  | "dhcp.effective.why.server"
+  | "dhcp.effective.why.shared_network"
   | "dhcp.event.conflict"
   | "dhcp.event.declined"
   | "dhcp.event.expired"
@@ -1317,11 +1445,25 @@ export type MessageKey =
   | "dhcp.lfilter.state"
   | "dhcp.lfilter.state_any"
   | "dhcp.lfilter.to"
+  | "dhcp.live.bars_label"
   | "dhcp.live.folded"
   | "dhcp.live.hint"
   | "dhcp.live.label"
+  | "dhcp.live.new"
+  | "dhcp.live.new_capped"
+  | "dhcp.live.new_label"
+  | "dhcp.live.new_link"
+  | "dhcp.live.new_paused"
+  | "dhcp.live.new_reset"
+  | "dhcp.live.new_reset_hint"
+  | "dhcp.live.new_since"
+  | "dhcp.live.scope_more"
+  | "dhcp.live.scope_open"
+  | "dhcp.live.scope_pick"
+  | "dhcp.live.strip_label"
   | "dhcp.match.add"
   | "dhcp.match.architecture"
+  | "dhcp.match.architecture_named"
   | "dhcp.match.circuit_id"
   | "dhcp.match.client_id"
   | "dhcp.match.example.architecture"
@@ -1431,12 +1573,15 @@ export type MessageKey =
   | "dhcp.optset.value_of"
   | "dhcp.policies.empty"
   | "dhcp.policies.empty_body"
-  | "dhcp.policies.note"
+  | "dhcp.policies.note_live"
   | "dhcp.policies.sub"
   | "dhcp.policies.title"
   | "dhcp.policy.create"
   | "dhcp.policy.create_title"
   | "dhcp.policy.created"
+  | "dhcp.policy.ddns.help"
+  | "dhcp.policy.ddns.legend"
+  | "dhcp.policy.ddns.on"
   | "dhcp.policy.delete_body"
   | "dhcp.policy.delete_confirm"
   | "dhcp.policy.delete_title"
@@ -1454,6 +1599,10 @@ export type MessageKey =
   | "dhcp.policy.field.scope"
   | "dhcp.policy.field.scope_fixed"
   | "dhcp.policy.lease_inherit_help"
+  | "dhcp.policy.options.help"
+  | "dhcp.policy.options.label"
+  | "dhcp.policy.options.new"
+  | "dhcp.policy.options.title"
   | "dhcp.policy.save"
   | "dhcp.policy.saved"
   | "dhcp.policy.scope_server"
@@ -1475,11 +1624,31 @@ export type MessageKey =
   | "dhcp.pools.ipam_link"
   | "dhcp.pools.note"
   | "dhcp.pools.title"
+  | "dhcp.reservations.col_identity"
+  | "dhcp.reservations.col_lease"
+  | "dhcp.reservations.col_served"
+  | "dhcp.reservations.empty"
+  | "dhcp.reservations.help"
+  | "dhcp.reservations.identity_client_id"
+  | "dhcp.reservations.identity_mac"
+  | "dhcp.reservations.identity_none"
+  | "dhcp.reservations.ipv6_later"
+  | "dhcp.reservations.lease_ends"
+  | "dhcp.reservations.lease_failed"
+  | "dhcp.reservations.lease_none"
+  | "dhcp.reservations.lease_other"
+  | "dhcp.reservations.scope_none"
+  | "dhcp.reservations.scope_setup"
+  | "dhcp.reservations.state_not_serving"
+  | "dhcp.reservations.state_scope_disabled"
+  | "dhcp.reservations.state_served"
+  | "dhcp.reservations.title"
   | "dhcp.scope.create"
   | "dhcp.scope.create_title"
   | "dhcp.scope.created"
-  | "dhcp.scope.ddns_off"
-  | "dhcp.scope.ddns_on"
+  | "dhcp.scope.ddns_line_off"
+  | "dhcp.scope.ddns_line_on"
+  | "dhcp.scope.ddns_link"
   | "dhcp.scope.delete_body"
   | "dhcp.scope.delete_confirm"
   | "dhcp.scope.delete_title"
@@ -1509,6 +1678,8 @@ export type MessageKey =
   | "dhcp.scope.saved"
   | "dhcp.scope.settings"
   | "dhcp.scope.shared_none"
+  | "dhcp.scope.tab.boot"
+  | "dhcp.scope.tab.ddns"
   | "dhcp.scope.tab.exclusions"
   | "dhcp.scope.tab.options"
   | "dhcp.scope.tab.pools"
@@ -4273,6 +4444,26 @@ export type MessageKey =
   | "languages.version.percent"
   | "languages.version.previewed"
   | "metrics.bars"
+  | "metrics.dhcp.ack"
+  | "metrics.dhcp.ack_hint"
+  | "metrics.dhcp.ack_idle"
+  | "metrics.dhcp.active"
+  | "metrics.dhcp.active_hint"
+  | "metrics.dhcp.ddns"
+  | "metrics.dhcp.ddns_hint"
+  | "metrics.dhcp.ddns_outcome.failed"
+  | "metrics.dhcp.ddns_outcome.refused"
+  | "metrics.dhcp.ddns_outcome.removed"
+  | "metrics.dhcp.ddns_outcome.written"
+  | "metrics.dhcp.decline_row"
+  | "metrics.dhcp.leases"
+  | "metrics.dhcp.leases_hint"
+  | "metrics.dhcp.nak_row"
+  | "metrics.dhcp.naks"
+  | "metrics.dhcp.naks_hint"
+  | "metrics.dhcp.pools"
+  | "metrics.dhcp.pools_hint"
+  | "metrics.dhcp.pools_none"
   | "metrics.dns.answers"
   | "metrics.dns.answers_hint"
   | "metrics.dns.blocked"
@@ -4294,6 +4485,7 @@ export type MessageKey =
   | "metrics.dns.upstreams_hint"
   | "metrics.dns.upstreams_idle"
   | "metrics.group.controller"
+  | "metrics.group.dhcp"
   | "metrics.group.dns"
   | "metrics.raft.lag"
   | "metrics.raft.node"
@@ -5309,6 +5501,45 @@ export type MessageKey =
   | "setup.cluster.new"
   | "setup.cluster.new_description"
   | "setup.cluster.title"
+  | "setup.dhcp.address"
+  | "setup.dhcp.address_direct_help"
+  | "setup.dhcp.address_relay_help"
+  | "setup.dhcp.dns"
+  | "setup.dhcp.dns_help"
+  | "setup.dhcp.dns_placeholder"
+  | "setup.dhcp.hardened"
+  | "setup.dhcp.iface"
+  | "setup.dhcp.lease"
+  | "setup.dhcp.lease_unit"
+  | "setup.dhcp.lede"
+  | "setup.dhcp.listen"
+  | "setup.dhcp.listen.direct"
+  | "setup.dhcp.listen.direct_description"
+  | "setup.dhcp.listen.relay"
+  | "setup.dhcp.listen.relay_description"
+  | "setup.dhcp.mode"
+  | "setup.dhcp.mode.later"
+  | "setup.dhcp.mode.later_description"
+  | "setup.dhcp.mode.now"
+  | "setup.dhcp.mode.now_description"
+  | "setup.dhcp.network"
+  | "setup.dhcp.network_help"
+  | "setup.dhcp.node_networks"
+  | "setup.dhcp.others_off"
+  | "setup.dhcp.others_off_description"
+  | "setup.dhcp.pool_first"
+  | "setup.dhcp.pool_help"
+  | "setup.dhcp.pool_last"
+  | "setup.dhcp.privacy"
+  | "setup.dhcp.router"
+  | "setup.dhcp.router_help"
+  | "setup.dhcp.safety"
+  | "setup.dhcp.scope"
+  | "setup.dhcp.skipped"
+  | "setup.dhcp.summary"
+  | "setup.dhcp.unit.days"
+  | "setup.dhcp.unit.hours"
+  | "setup.dhcp.use_network"
   | "setup.disk.contents"
   | "setup.disk.detected"
   | "setup.disk.free_aside"
@@ -5389,6 +5620,9 @@ export type MessageKey =
   | "setup.done.change_item"
   | "setup.done.choices"
   | "setup.done.cluster"
+  | "setup.done.dhcp"
+  | "setup.done.dhcp_detail"
+  | "setup.done.dhcp_later"
   | "setup.done.disk"
   | "setup.done.disk_override"
   | "setup.done.disk_unknown"
@@ -5411,6 +5645,17 @@ export type MessageKey =
   | "setup.footer.open"
   | "setup.gate.codes_ack"
   | "setup.gate.codes_loading"
+  | "setup.gate.dhcp.address"
+  | "setup.gate.dhcp.dns"
+  | "setup.gate.dhcp.iface"
+  | "setup.gate.dhcp.lease"
+  | "setup.gate.dhcp.network"
+  | "setup.gate.dhcp.others_off"
+  | "setup.gate.dhcp.pool_first"
+  | "setup.gate.dhcp.pool_last"
+  | "setup.gate.dhcp.pool_order"
+  | "setup.gate.dhcp.router"
+  | "setup.gate.dhcp.router_in_pool"
   | "setup.gate.disk"
   | "setup.gate.display_name"
   | "setup.gate.dns_entries"
@@ -5496,6 +5741,17 @@ export type MessageKey =
   | "setup.result.codes.lede"
   | "setup.result.codes.loading"
   | "setup.result.codes.title"
+  | "setup.result.dhcp.config_help"
+  | "setup.result.dhcp.copied"
+  | "setup.result.dhcp.copy"
+  | "setup.result.dhcp.failed.options"
+  | "setup.result.dhcp.failed.pool"
+  | "setup.result.dhcp.failed.prefix"
+  | "setup.result.dhcp.failed.scope"
+  | "setup.result.dhcp.none"
+  | "setup.result.dhcp.open_scope"
+  | "setup.result.dhcp.saved"
+  | "setup.result.dhcp.title"
   | "setup.result.dns.config_help"
   | "setup.result.dns.copied"
   | "setup.result.dns.copy"
@@ -5551,6 +5807,8 @@ export type MessageKey =
   | "setup.roles.probe.title"
   | "setup.step.admin.name"
   | "setup.step.admin.title"
+  | "setup.step.dhcp.name"
+  | "setup.step.dhcp.title"
   | "setup.step.disk.name"
   | "setup.step.disk.title"
   | "setup.step.dns.name"
@@ -5567,6 +5825,8 @@ export type MessageKey =
   | "setup.step.welcome.title"
   | "setup.stepno"
   | "setup.steps.completed"
+  | "setup.steps.dhcp_later"
+  | "setup.steps.dhcp_skipped"
   | "setup.steps.dns_meta"
   | "setup.steps.dns_skipped"
   | "setup.steps.item"
@@ -6284,8 +6544,16 @@ export interface MessageArgs {
   "dashboard.use.more": { count: number };
   "dashboard.use.vrf": { tenant: string | number; vrf: string | number };
   "dashboard.waiting.step": { step: number; total: number };
+  "dhcp.action.ddns_on_zone": { zone: string | number };
   "dhcp.action.lease": { lease: string | number };
   "dhcp.action.range": { first: string | number; last: string | number };
+  "dhcp.arch.option": { code: string | number; name: string | number };
+  "dhcp.boot.add_done": { name: string | number };
+  "dhcp.boot.add_matches": { words: string | number };
+  "dhcp.boot.add_partial_class": { class: string | number };
+  "dhcp.boot.add_partial_policy": { policy: string | number };
+  "dhcp.boot.form_help": { network: string | number };
+  "dhcp.boot.inherited": { value: string | number };
   "dhcp.check.exclusion_first": { network: string | number };
   "dhcp.check.exclusion_last": { network: string | number };
   "dhcp.check.exclusion_order": { network: string | number };
@@ -6295,9 +6563,22 @@ export interface MessageArgs {
   "dhcp.class.deleted": { name: string | number };
   "dhcp.class.edit_title": { name: string | number };
   "dhcp.class.saved": { name: string | number };
+  "dhcp.ddns.hardened_note": { profile: string | number };
+  "dhcp.ddns.profile_open": { profile: string | number };
+  "dhcp.ddns.profile_strict": { profile: string | number };
+  "dhcp.ddns.saved": { network: string | number };
+  "dhcp.ddns.server_now": { words: string | number };
+  "dhcp.ddns.title": { network: string | number };
+  "dhcp.ddns.words.on": { parts: string | number };
+  "dhcp.ddns.words.ttl": { seconds: string | number };
+  "dhcp.ddns.words.zone": { zone: string | number };
+  "dhcp.ddns.zone_state.profile_off": { profile: string | number };
+  "dhcp.ddns.zone_state.profile_on": { profile: string | number };
+  "dhcp.ddns.zone_unknown": { id: string | number };
   "dhcp.def.created": { name: string | number };
   "dhcp.def.delete_title": { name: string | number };
   "dhcp.def.deleted": { name: string | number };
+  "dhcp.effective.why.policy": { name: string | number };
   "dhcp.exclusion.created": { count: number };
   "dhcp.exclusion.delete_title": { range: string | number };
   "dhcp.exclusion.deleted": { range: string | number };
@@ -6314,7 +6595,13 @@ export interface MessageArgs {
   "dhcp.lease.unit": { name: string | number };
   "dhcp.lease.words": { default: string | number; max: string | number; min: string | number };
   "dhcp.live.folded": { count: number };
+  "dhcp.live.new": { count: number };
+  "dhcp.live.new_capped": { count: string | number };
+  "dhcp.live.new_since": { time: string | number };
+  "dhcp.live.scope_more": { count: number };
+  "dhcp.live.scope_pick": { network: string | number };
   "dhcp.match.architecture": { value: string | number };
+  "dhcp.match.architecture_named": { code: string | number; name: string | number };
   "dhcp.match.circuit_id": { value: string | number };
   "dhcp.match.client_id": { value: string | number };
   "dhcp.match.host_name": { value: string | number };
@@ -6339,6 +6626,7 @@ export interface MessageArgs {
   "dhcp.policy.delete_title": { name: string | number };
   "dhcp.policy.deleted": { name: string | number };
   "dhcp.policy.edit_title": { name: string | number };
+  "dhcp.policy.options.label": { name: string | number };
   "dhcp.policy.saved": { name: string | number };
   "dhcp.pool.clear_title": { first: string | number; last: string | number };
   "dhcp.pool.cleared": { first: string | number; last: string | number };
@@ -6346,6 +6634,8 @@ export interface MessageArgs {
   "dhcp.pool.lease_range": { lease: string | number };
   "dhcp.pool.saved": { first: string | number; last: string | number };
   "dhcp.pools.ipam_link": { network: string | number };
+  "dhcp.reservations.lease_ends": { when: string | number };
+  "dhcp.reservations.lease_other": { client: string | number };
   "dhcp.scope.created": { network: string | number };
   "dhcp.scope.delete_body": { network: string | number };
   "dhcp.scope.delete_title": { network: string | number };
@@ -6902,6 +7192,9 @@ export interface MessageArgs {
   "languages.version.label": { version: string | number };
   "languages.version.percent": { percent: string | number };
   "metrics.bars": { name: string | number; seconds: string | number; values: string | number };
+  "metrics.dhcp.active_hint": { abandoned: number };
+  "metrics.dhcp.ddns_hint": { dropped: string | number; queue: number; skipped: string | number };
+  "metrics.dhcp.pools_hint": { scopes: number };
   "metrics.dns.blocked_hint": { lists: number };
   "metrics.dns.cache_hint": { entries: string | number; stale: string | number };
   "metrics.dns.encrypted_hint": { doh: number; dot: number };
@@ -7118,6 +7411,9 @@ export interface MessageArgs {
   "setup.admin.password.help.passphrase": { profile: string | number };
   "setup.admin.password.help.password": { profile: string | number };
   "setup.admin.password.help.pin": { profile: string | number };
+  "setup.dhcp.privacy": { days: number };
+  "setup.dhcp.summary": { dns: string | number; first: string | number; last: string | number; network: string | number; router: string | number };
+  "setup.dhcp.use_network": { iface: string | number; network: string | number };
   "setup.disk.free_aside": { size: string | number };
   "setup.disk.fsync": { time: string | number };
   "setup.disk.media_free": { media: string | number; size: string | number };
@@ -7125,6 +7421,7 @@ export interface MessageArgs {
   "setup.dns.cache_description": { entries: number };
   "setup.dns.known": { name: string | number; tls: string | number };
   "setup.done.change_item": { item: string | number };
+  "setup.done.dhcp_detail": { first: string | number; last: string | number; router: string | number };
   "setup.done.probe_on": { networks: string | number };
   "setup.done.proxies": { count: number };
   "setup.host.placeholder": { name: string | number };
@@ -7132,6 +7429,11 @@ export interface MessageArgs {
   "setup.profile.table.aside": { shown: string | number; total: string | number };
   "setup.profile.table.title": { profile: string | number };
   "setup.result.codes.lede": { user: string | number };
+  "setup.result.dhcp.failed.options": { reason: string | number };
+  "setup.result.dhcp.failed.pool": { reason: string | number };
+  "setup.result.dhcp.failed.prefix": { reason: string | number };
+  "setup.result.dhcp.failed.scope": { reason: string | number };
+  "setup.result.dhcp.saved": { network: string | number };
   "setup.result.dns.failed": { reason: string | number };
   "setup.roles.hint": { amount: string | number };
   "setup.roles.hint_probe": { amount: string | number };
@@ -8313,10 +8615,74 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.waiting.none",
   "dashboard.waiting.step",
   "dashboard.waiting.title",
-  "dhcp.action.ddns",
+  "dhcp.action.ddns_off",
+  "dhcp.action.ddns_on",
+  "dhcp.action.ddns_on_zone",
   "dhcp.action.lease",
   "dhcp.action.none",
+  "dhcp.action.options",
   "dhcp.action.range",
+  "dhcp.arch.empty",
+  "dhcp.arch.label",
+  "dhcp.arch.name.0",
+  "dhcp.arch.name.10",
+  "dhcp.arch.name.11",
+  "dhcp.arch.name.15",
+  "dhcp.arch.name.16",
+  "dhcp.arch.name.19",
+  "dhcp.arch.name.6",
+  "dhcp.arch.name.7",
+  "dhcp.arch.name.9",
+  "dhcp.arch.none",
+  "dhcp.arch.option",
+  "dhcp.arch.other",
+  "dhcp.arch.value_label",
+  "dhcp.boot.add_button",
+  "dhcp.boot.add_done",
+  "dhcp.boot.add_file",
+  "dhcp.boot.add_file_help",
+  "dhcp.boot.add_kind",
+  "dhcp.boot.add_matches",
+  "dhcp.boot.add_order_first",
+  "dhcp.boot.add_order_last",
+  "dhcp.boot.add_order_tie",
+  "dhcp.boot.add_partial_class",
+  "dhcp.boot.add_partial_policy",
+  "dhcp.boot.add_submit",
+  "dhcp.boot.add_title",
+  "dhcp.boot.check.file_empty",
+  "dhcp.boot.check.long",
+  "dhcp.boot.col.file",
+  "dhcp.boot.field.file",
+  "dhcp.boot.field.next_server",
+  "dhcp.boot.field.pxe_config",
+  "dhcp.boot.field.pxe_prefix",
+  "dhcp.boot.field.pxe_reboot",
+  "dhcp.boot.field.tftp_name",
+  "dhcp.boot.form_help",
+  "dhcp.boot.form_title",
+  "dhcp.boot.hint.file",
+  "dhcp.boot.hint.next_server",
+  "dhcp.boot.hint.pxe_config",
+  "dhcp.boot.hint.pxe_prefix",
+  "dhcp.boot.hint.pxe_reboot",
+  "dhcp.boot.hint.tftp_name",
+  "dhcp.boot.inherited",
+  "dhcp.boot.inherited_none",
+  "dhcp.boot.kind.bios",
+  "dhcp.boot.kind.http",
+  "dhcp.boot.kind.http_x64",
+  "dhcp.boot.kind.ipxe",
+  "dhcp.boot.kind.uefi_arm64",
+  "dhcp.boot.kind.uefi_x64",
+  "dhcp.boot.policies_empty",
+  "dhcp.boot.policies_help",
+  "dhcp.boot.policies_link",
+  "dhcp.boot.policies_note",
+  "dhcp.boot.policies_title",
+  "dhcp.boot.save",
+  "dhcp.boot.saved",
+  "dhcp.boot.unchanged",
   "dhcp.catalog.managed",
   "dhcp.check.def_code",
   "dhcp.check.exclusion_first",
@@ -8407,6 +8773,55 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.coming.body",
   "dhcp.coming.scopes",
   "dhcp.coming.title",
+  "dhcp.ddns.check.ttl",
+  "dhcp.ddns.conflict.protect",
+  "dhcp.ddns.conflict.replace",
+  "dhcp.ddns.field.client_a",
+  "dhcp.ddns.field.client_a_help",
+  "dhcp.ddns.field.conflict",
+  "dhcp.ddns.field.enabled",
+  "dhcp.ddns.field.foreign",
+  "dhcp.ddns.field.foreign_help",
+  "dhcp.ddns.field.legacy",
+  "dhcp.ddns.field.legacy_help",
+  "dhcp.ddns.field.reverse",
+  "dhcp.ddns.field.reverse_help",
+  "dhcp.ddns.field.ttl",
+  "dhcp.ddns.field.ttl_help",
+  "dhcp.ddns.field.zone",
+  "dhcp.ddns.follows",
+  "dhcp.ddns.hardened_note",
+  "dhcp.ddns.help",
+  "dhcp.ddns.inherit",
+  "dhcp.ddns.inherit_help",
+  "dhcp.ddns.legend",
+  "dhcp.ddns.needs_dns",
+  "dhcp.ddns.profile_open",
+  "dhcp.ddns.profile_strict",
+  "dhcp.ddns.saved",
+  "dhcp.ddns.server_now",
+  "dhcp.ddns.title",
+  "dhcp.ddns.words.client_a",
+  "dhcp.ddns.words.foreign",
+  "dhcp.ddns.words.legacy_off",
+  "dhcp.ddns.words.legacy_on",
+  "dhcp.ddns.words.off",
+  "dhcp.ddns.words.on",
+  "dhcp.ddns.words.protect",
+  "dhcp.ddns.words.replace",
+  "dhcp.ddns.words.reverse_off",
+  "dhcp.ddns.words.reverse_on",
+  "dhcp.ddns.words.ttl",
+  "dhcp.ddns.words.ttl_third",
+  "dhcp.ddns.words.zone",
+  "dhcp.ddns.words.zone_domain",
+  "dhcp.ddns.zone_none",
+  "dhcp.ddns.zone_state.off",
+  "dhcp.ddns.zone_state.on",
+  "dhcp.ddns.zone_state.profile_off",
+  "dhcp.ddns.zone_state.profile_on",
+  "dhcp.ddns.zone_unavailable",
+  "dhcp.ddns.zone_unknown",
   "dhcp.def.create",
   "dhcp.def.create_title",
   "dhcp.def.created",
@@ -8430,15 +8845,30 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.do.history",
   "dhcp.do.open",
   "dhcp.do.refresh",
+  "dhcp.effective.architecture",
+  "dhcp.effective.classes",
   "dhcp.effective.client_id",
   "dhcp.effective.col.level",
+  "dhcp.effective.col.why",
   "dhcp.effective.empty",
-  "dhcp.effective.help",
+  "dhcp.effective.help_facts",
+  "dhcp.effective.host_name",
   "dhcp.effective.mac",
-  "dhcp.effective.note",
+  "dhcp.effective.no_classes",
+  "dhcp.effective.no_policies",
+  "dhcp.effective.note_live",
+  "dhcp.effective.policies",
   "dhcp.effective.reservation",
   "dhcp.effective.show",
   "dhcp.effective.title",
+  "dhcp.effective.user_class",
+  "dhcp.effective.vendor_class",
+  "dhcp.effective.why.host",
+  "dhcp.effective.why.policy",
+  "dhcp.effective.why.pool",
+  "dhcp.effective.why.scope",
+  "dhcp.effective.why.server",
+  "dhcp.effective.why.shared_network",
   "dhcp.event.conflict",
   "dhcp.event.declined",
   "dhcp.event.expired",
@@ -8551,11 +8981,25 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.lfilter.state",
   "dhcp.lfilter.state_any",
   "dhcp.lfilter.to",
+  "dhcp.live.bars_label",
   "dhcp.live.folded",
   "dhcp.live.hint",
   "dhcp.live.label",
+  "dhcp.live.new",
+  "dhcp.live.new_capped",
+  "dhcp.live.new_label",
+  "dhcp.live.new_link",
+  "dhcp.live.new_paused",
+  "dhcp.live.new_reset",
+  "dhcp.live.new_reset_hint",
+  "dhcp.live.new_since",
+  "dhcp.live.scope_more",
+  "dhcp.live.scope_open",
+  "dhcp.live.scope_pick",
+  "dhcp.live.strip_label",
   "dhcp.match.add",
   "dhcp.match.architecture",
+  "dhcp.match.architecture_named",
   "dhcp.match.circuit_id",
   "dhcp.match.client_id",
   "dhcp.match.example.architecture",
@@ -8665,12 +9109,15 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.optset.value_of",
   "dhcp.policies.empty",
   "dhcp.policies.empty_body",
-  "dhcp.policies.note",
+  "dhcp.policies.note_live",
   "dhcp.policies.sub",
   "dhcp.policies.title",
   "dhcp.policy.create",
   "dhcp.policy.create_title",
   "dhcp.policy.created",
+  "dhcp.policy.ddns.help",
+  "dhcp.policy.ddns.legend",
+  "dhcp.policy.ddns.on",
   "dhcp.policy.delete_body",
   "dhcp.policy.delete_confirm",
   "dhcp.policy.delete_title",
@@ -8688,6 +9135,10 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.policy.field.scope",
   "dhcp.policy.field.scope_fixed",
   "dhcp.policy.lease_inherit_help",
+  "dhcp.policy.options.help",
+  "dhcp.policy.options.label",
+  "dhcp.policy.options.new",
+  "dhcp.policy.options.title",
   "dhcp.policy.save",
   "dhcp.policy.saved",
   "dhcp.policy.scope_server",
@@ -8709,11 +9160,31 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.pools.ipam_link",
   "dhcp.pools.note",
   "dhcp.pools.title",
+  "dhcp.reservations.col_identity",
+  "dhcp.reservations.col_lease",
+  "dhcp.reservations.col_served",
+  "dhcp.reservations.empty",
+  "dhcp.reservations.help",
+  "dhcp.reservations.identity_client_id",
+  "dhcp.reservations.identity_mac",
+  "dhcp.reservations.identity_none",
+  "dhcp.reservations.ipv6_later",
+  "dhcp.reservations.lease_ends",
+  "dhcp.reservations.lease_failed",
+  "dhcp.reservations.lease_none",
+  "dhcp.reservations.lease_other",
+  "dhcp.reservations.scope_none",
+  "dhcp.reservations.scope_setup",
+  "dhcp.reservations.state_not_serving",
+  "dhcp.reservations.state_scope_disabled",
+  "dhcp.reservations.state_served",
+  "dhcp.reservations.title",
   "dhcp.scope.create",
   "dhcp.scope.create_title",
   "dhcp.scope.created",
-  "dhcp.scope.ddns_off",
-  "dhcp.scope.ddns_on",
+  "dhcp.scope.ddns_line_off",
+  "dhcp.scope.ddns_line_on",
+  "dhcp.scope.ddns_link",
   "dhcp.scope.delete_body",
   "dhcp.scope.delete_confirm",
   "dhcp.scope.delete_title",
@@ -8743,6 +9214,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.scope.saved",
   "dhcp.scope.settings",
   "dhcp.scope.shared_none",
+  "dhcp.scope.tab.boot",
+  "dhcp.scope.tab.ddns",
   "dhcp.scope.tab.exclusions",
   "dhcp.scope.tab.options",
   "dhcp.scope.tab.pools",
@@ -11507,6 +11980,26 @@ export const messageKeys: readonly MessageKey[] = [
   "languages.version.percent",
   "languages.version.previewed",
   "metrics.bars",
+  "metrics.dhcp.ack",
+  "metrics.dhcp.ack_hint",
+  "metrics.dhcp.ack_idle",
+  "metrics.dhcp.active",
+  "metrics.dhcp.active_hint",
+  "metrics.dhcp.ddns",
+  "metrics.dhcp.ddns_hint",
+  "metrics.dhcp.ddns_outcome.failed",
+  "metrics.dhcp.ddns_outcome.refused",
+  "metrics.dhcp.ddns_outcome.removed",
+  "metrics.dhcp.ddns_outcome.written",
+  "metrics.dhcp.decline_row",
+  "metrics.dhcp.leases",
+  "metrics.dhcp.leases_hint",
+  "metrics.dhcp.nak_row",
+  "metrics.dhcp.naks",
+  "metrics.dhcp.naks_hint",
+  "metrics.dhcp.pools",
+  "metrics.dhcp.pools_hint",
+  "metrics.dhcp.pools_none",
   "metrics.dns.answers",
   "metrics.dns.answers_hint",
   "metrics.dns.blocked",
@@ -11528,6 +12021,7 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.dns.upstreams_hint",
   "metrics.dns.upstreams_idle",
   "metrics.group.controller",
+  "metrics.group.dhcp",
   "metrics.group.dns",
   "metrics.raft.lag",
   "metrics.raft.node",
@@ -12543,6 +13037,45 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.cluster.new",
   "setup.cluster.new_description",
   "setup.cluster.title",
+  "setup.dhcp.address",
+  "setup.dhcp.address_direct_help",
+  "setup.dhcp.address_relay_help",
+  "setup.dhcp.dns",
+  "setup.dhcp.dns_help",
+  "setup.dhcp.dns_placeholder",
+  "setup.dhcp.hardened",
+  "setup.dhcp.iface",
+  "setup.dhcp.lease",
+  "setup.dhcp.lease_unit",
+  "setup.dhcp.lede",
+  "setup.dhcp.listen",
+  "setup.dhcp.listen.direct",
+  "setup.dhcp.listen.direct_description",
+  "setup.dhcp.listen.relay",
+  "setup.dhcp.listen.relay_description",
+  "setup.dhcp.mode",
+  "setup.dhcp.mode.later",
+  "setup.dhcp.mode.later_description",
+  "setup.dhcp.mode.now",
+  "setup.dhcp.mode.now_description",
+  "setup.dhcp.network",
+  "setup.dhcp.network_help",
+  "setup.dhcp.node_networks",
+  "setup.dhcp.others_off",
+  "setup.dhcp.others_off_description",
+  "setup.dhcp.pool_first",
+  "setup.dhcp.pool_help",
+  "setup.dhcp.pool_last",
+  "setup.dhcp.privacy",
+  "setup.dhcp.router",
+  "setup.dhcp.router_help",
+  "setup.dhcp.safety",
+  "setup.dhcp.scope",
+  "setup.dhcp.skipped",
+  "setup.dhcp.summary",
+  "setup.dhcp.unit.days",
+  "setup.dhcp.unit.hours",
+  "setup.dhcp.use_network",
   "setup.disk.contents",
   "setup.disk.detected",
   "setup.disk.free_aside",
@@ -12623,6 +13156,9 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.done.change_item",
   "setup.done.choices",
   "setup.done.cluster",
+  "setup.done.dhcp",
+  "setup.done.dhcp_detail",
+  "setup.done.dhcp_later",
   "setup.done.disk",
   "setup.done.disk_override",
   "setup.done.disk_unknown",
@@ -12645,6 +13181,17 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.footer.open",
   "setup.gate.codes_ack",
   "setup.gate.codes_loading",
+  "setup.gate.dhcp.address",
+  "setup.gate.dhcp.dns",
+  "setup.gate.dhcp.iface",
+  "setup.gate.dhcp.lease",
+  "setup.gate.dhcp.network",
+  "setup.gate.dhcp.others_off",
+  "setup.gate.dhcp.pool_first",
+  "setup.gate.dhcp.pool_last",
+  "setup.gate.dhcp.pool_order",
+  "setup.gate.dhcp.router",
+  "setup.gate.dhcp.router_in_pool",
   "setup.gate.disk",
   "setup.gate.display_name",
   "setup.gate.dns_entries",
@@ -12730,6 +13277,17 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.result.codes.lede",
   "setup.result.codes.loading",
   "setup.result.codes.title",
+  "setup.result.dhcp.config_help",
+  "setup.result.dhcp.copied",
+  "setup.result.dhcp.copy",
+  "setup.result.dhcp.failed.options",
+  "setup.result.dhcp.failed.pool",
+  "setup.result.dhcp.failed.prefix",
+  "setup.result.dhcp.failed.scope",
+  "setup.result.dhcp.none",
+  "setup.result.dhcp.open_scope",
+  "setup.result.dhcp.saved",
+  "setup.result.dhcp.title",
   "setup.result.dns.config_help",
   "setup.result.dns.copied",
   "setup.result.dns.copy",
@@ -12785,6 +13343,8 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.roles.probe.title",
   "setup.step.admin.name",
   "setup.step.admin.title",
+  "setup.step.dhcp.name",
+  "setup.step.dhcp.title",
   "setup.step.disk.name",
   "setup.step.disk.title",
   "setup.step.dns.name",
@@ -12801,6 +13361,8 @@ export const messageKeys: readonly MessageKey[] = [
   "setup.step.welcome.title",
   "setup.stepno",
   "setup.steps.completed",
+  "setup.steps.dhcp_later",
+  "setup.steps.dhcp_skipped",
   "setup.steps.dns_meta",
   "setup.steps.dns_skipped",
   "setup.steps.item",

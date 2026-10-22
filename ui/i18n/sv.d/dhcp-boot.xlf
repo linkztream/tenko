@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp-boot">
+      <unit id="dhcp.scope.tab.boot">
+        <notes><note category="description">Tab of the scope page for network boot (PXE, iPXE, UEFI HTTP boot).</note></notes>
+        <segment><source>Network boot</source><target>Nätverksstart</target></segment>
+      </unit>
+      <unit id="dhcp.boot.form_title">
+        <notes><note category="description">Heading of the form for the boot server and the boot file on the network boot tab.</note></notes>
+        <segment><source>Boot server and file</source><target>Startserver och startfil</target></segment>
+      </unit>
+      <unit id="dhcp.boot.form_help">
+        <notes><note category="description">Introduction of the boot form; {network} is the scope's network.</note></notes>
+        <segment><source>Options of the scope {network} that PXE, iPXE and UEFI clients use to find their boot file. Only these six options are changed here; the other options of the scope stay as they are.</source><target>Alternativ för omfånget {network} som PXE-, iPXE- och UEFI-klienter använder för att hitta sin startfil. Bara de här sex alternativen ändras här; omfångets övriga alternativ förblir som de är.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.next_server">
+        <notes><note category="description">Label of the next server field (DHCP option 150).</note></notes>
+        <segment><source>Next server (150)</source><target>Nästa server (150)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.tftp_name">
+        <notes><note category="description">Label of the TFTP server name field (DHCP option 66).</note></notes>
+        <segment><source>TFTP server name (66)</source><target>TFTP-servernamn (66)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.file">
+        <notes><note category="description">Label of the default boot file field (DHCP option 67).</note></notes>
+        <segment><source>Default boot file (67)</source><target>Standardstartfil (67)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.pxe_config">
+        <notes><note category="description">Label of the PXELINUX configuration file field (DHCP option 209).</note></notes>
+        <segment><source>PXELINUX configuration file (209)</source><target>PXELINUX-konfigurationsfil (209)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.pxe_prefix">
+        <notes><note category="description">Label of the PXELINUX path prefix field (DHCP option 210).</note></notes>
+        <segment><source>PXELINUX path prefix (210)</source><target>PXELINUX-sökvägsprefix (210)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.field.pxe_reboot">
+        <notes><note category="description">Label of the PXELINUX reboot time field (DHCP option 211).</note></notes>
+        <segment><source>PXELINUX reboot time (211)</source><target>PXELINUX-omstartstid (211)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.next_server">
+        <notes><note category="description">Help under the next server field.</note></notes>
+        <segment><source>IPv4 addresses of the TFTP server. The first one is the next server of the reply.</source><target>TFTP-serverns IPv4-adresser. Den första blir svarets nästa server.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.tftp_name">
+        <notes><note category="description">Help under the TFTP server name field.</note></notes>
+        <segment><source>The name of the TFTP server, or its address.</source><target>TFTP-serverns namn eller adress.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.file">
+        <notes><note category="description">Help under the boot file field.</note></notes>
+        <segment><source>A TFTP path, or a URL for iPXE and UEFI HTTP boot.</source><target>En TFTP-sökväg, eller en URL för iPXE och UEFI HTTP-start.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.pxe_config">
+        <notes><note category="description">Help under the PXELINUX configuration file field.</note></notes>
+        <segment><source>The configuration file that PXELINUX loads (RFC 5071).</source><target>Konfigurationsfilen som PXELINUX läser in (RFC 5071).</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.pxe_prefix">
+        <notes><note category="description">Help under the PXELINUX path prefix field.</note></notes>
+        <segment><source>The path that PXELINUX puts before the names of its files (RFC 5071).</source><target>Sökvägen som PXELINUX sätter framför namnen på sina filer (RFC 5071).</target></segment>
+      </unit>
+      <unit id="dhcp.boot.hint.pxe_reboot">
+        <notes><note category="description">Help under the PXELINUX reboot time field.</note></notes>
+        <segment><source>Seconds that PXELINUX waits before it reboots (RFC 5071).</source><target>Antal sekunder som PXELINUX väntar innan den startar om (RFC 5071).</target></segment>
+      </unit>
+      <unit id="dhcp.boot.inherited">
+        <notes><note category="description">Shown under an empty boot field when the server sets the option; {value} is the server's value.</note></notes>
+        <segment><source>Not set here: the server's value applies, {value}.</source><target>Inte angivet här: serverns värde gäller, {value}.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.inherited_none">
+        <notes><note category="description">Shown under an empty boot field when the server sets no value either.</note></notes>
+        <segment><source>Not set here, and the server sets none.</source><target>Inte angivet här, och servern anger inget.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.save">
+        <notes><note category="description">Button that saves the boot form.</note></notes>
+        <segment><source>Save boot settings</source><target>Spara startinställningar</target></segment>
+      </unit>
+      <unit id="dhcp.boot.saved">
+        <notes><note category="description">Toast after the boot form was saved.</note></notes>
+        <segment><source>Boot settings saved</source><target>Startinställningarna sparade</target></segment>
+      </unit>
+      <unit id="dhcp.boot.unchanged">
+        <notes><note category="description">Toast when the boot form is saved without a change.</note></notes>
+        <segment><source>Nothing was changed.</source><target>Inget ändrades.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.check.long">
+        <notes><note category="description">Error under a boot text field that is longer than a DHCP option can hold.</note></notes>
+        <segment><source>Use at most 255 octets.</source><target>Använd högst 255 oktetter.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.check.file_empty">
+        <notes><note category="description">Error under the boot file field of the add dialog when it is empty.</note></notes>
+        <segment><source>Enter the boot file or URL.</source><target>Ange startfil eller URL.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.policies_title">
+        <notes><note category="description">Heading of the list of boot files per client type.</note></notes>
+        <segment><source>Boot file per client type</source><target>Startfil per klienttyp</target></segment>
+      </unit>
+      <unit id="dhcp.boot.policies_help">
+        <notes><note category="description">Introduction of the list of boot files per client type.</note></notes>
+        <segment><source>Policies of this scope that set a boot file (option 67) for the clients that match their condition.</source><target>Omfångets principer som anger en startfil (alternativ 67) för de klienter som uppfyller deras villkor.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.policies_empty">
+        <notes><note category="description">Shown when no policy of the scope sets a boot file.</note></notes>
+        <segment><source>No policy of this scope sets a boot file yet.</source><target>Ingen princip i omfånget anger någon startfil ännu.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.policies_note">
+        <notes><note category="description">Note under the list of boot files per client type.</note></notes>
+        <segment><source>The first matching policy wins. The chain policy for iPXE belongs first, so that firmware gets iPXE and iPXE gets its script.</source><target>Den första matchande principen gäller. Kedjeprincipen för iPXE hör hemma först, så att firmware får iPXE och iPXE får sitt skript.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.policies_link">
+        <notes><note category="description">Link from the boot tab to the page of the DHCP policies.</note></notes>
+        <segment><source>Open the policies</source><target>Öppna principerna</target></segment>
+      </unit>
+      <unit id="dhcp.boot.col.file">
+        <notes><note category="description">Column of the boot file in the list of boot files per client type.</note></notes>
+        <segment><source>Boot file</source><target>Startfil</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_button">
+        <notes><note category="description">Button that opens the dialog to add a boot file.</note></notes>
+        <segment><source>Add a boot file</source><target>Lägg till en startfil</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_title">
+        <notes><note category="description">Title of the dialog to add a boot file.</note></notes>
+        <segment><source>Add a boot file</source><target>Lägg till en startfil</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_kind">
+        <notes><note category="description">Label of the client type choice in the add dialog.</note></notes>
+        <segment><source>Client type</source><target>Klienttyp</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_matches">
+        <notes><note category="description">Under the client type choice; {words} is the condition of the class in words, such as client architecture 0.</note></notes>
+        <segment><source>Applies to clients with: {words}</source><target>Gäller klienter med: {words}</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_file">
+        <notes><note category="description">Label of the boot file field in the add dialog.</note></notes>
+        <segment><source>Boot file or URL</source><target>Startfil eller URL</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_file_help">
+        <notes><note category="description">Help under the boot file field in the add dialog.</note></notes>
+        <segment><source>A TFTP path such as undionly.kpxe, or a URL for iPXE and UEFI HTTP boot.</source><target>En TFTP-sökväg som undionly.kpxe, eller en URL för iPXE och UEFI HTTP-start.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_order_last">
+        <notes><note category="description">Help in the add dialog for every client type but iPXE.</note></notes>
+        <segment><source>The new policy goes after the others of this scope. The order can be changed on the policies page.</source><target>Den nya principen hamnar efter omfångets övriga. Ordningen kan ändras på principsidan.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_order_first">
+        <notes><note category="description">Help in the add dialog for the iPXE client type.</note></notes>
+        <segment><source>The iPXE policy goes before the others of this scope, so that firmware gets iPXE and iPXE gets its script. The order can be changed on the policies page.</source><target>iPXE-principen hamnar före omfångets övriga, så att firmware får iPXE och iPXE får sitt skript. Ordningen kan ändras på principsidan.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_order_tie">
+        <notes><note category="description">Help in the add dialog for iPXE when a policy of the scope already has order 0.</note></notes>
+        <segment><source>Another policy of this scope already has the order 0, so the iPXE policy shares it and the names decide. Change the order on the policies page so that the iPXE policy comes first.</source><target>En annan princip i omfånget har redan ordning 0, så iPXE-principen delar den och namnen avgör. Ändra ordningen på principsidan så att iPXE-principen kommer först.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_partial_policy">
+        <notes><note category="description">Shown in the add dialog when the policy was created but its boot file was not set; {policy} is its name.</note></notes>
+        <segment><source>The policy {policy} was created, but its boot file was not set. Try again to set the boot file.</source><target>Principen {policy} skapades, men dess startfil sattes inte. Försök igen för att ange startfilen.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_partial_class">
+        <notes><note category="description">Shown in the add dialog when the class was created but the policy was not; {class} is its name.</note></notes>
+        <segment><source>The class {class} was created, but the policy was not. Try again to create the policy.</source><target>Klassen {class} skapades, men principen skapades inte. Försök igen för att skapa principen.</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_submit">
+        <notes><note category="description">Button that adds the boot file in the add dialog.</note></notes>
+        <segment><source>Add</source><target>Lägg till</target></segment>
+      </unit>
+      <unit id="dhcp.boot.add_done">
+        <notes><note category="description">Toast after a boot file was added; {name} is the name of the new policy.</note></notes>
+        <segment><source>Boot file added with the policy {name}</source><target>Startfil tillagd med principen {name}</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.bios">
+        <notes><note category="description">Client type in the add dialog: PC BIOS firmware.</note></notes>
+        <segment><source>BIOS (architecture 0)</source><target>BIOS (arkitektur 0)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.uefi_x64">
+        <notes><note category="description">Client type in the add dialog: UEFI on x64.</note></notes>
+        <segment><source>UEFI x64 (architectures 7 and 9)</source><target>UEFI x64 (arkitektur 7 och 9)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.uefi_arm64">
+        <notes><note category="description">Client type in the add dialog: UEFI on ARM 64.</note></notes>
+        <segment><source>UEFI ARM 64 (architecture 11)</source><target>UEFI ARM 64 (arkitektur 11)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.http_x64">
+        <notes><note category="description">Client type in the add dialog: UEFI HTTP boot on x64.</note></notes>
+        <segment><source>UEFI HTTP boot x64 (architecture 16)</source><target>UEFI HTTP-start x64 (arkitektur 16)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.http">
+        <notes><note category="description">Client type in the add dialog: UEFI HTTP boot of any architecture.</note></notes>
+        <segment><source>UEFI HTTP boot, any architecture (vendor class HTTPClient)</source><target>UEFI HTTP-start, valfri arkitektur (tillverkarklass HTTPClient)</target></segment>
+      </unit>
+      <unit id="dhcp.boot.kind.ipxe">
+        <notes><note category="description">Client type in the add dialog: iPXE.</note></notes>
+        <segment><source>iPXE (user class iPXE)</source><target>iPXE (användarklass iPXE)</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

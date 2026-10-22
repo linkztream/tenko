@@ -15,6 +15,8 @@ import { fakeMetricsStream, mockHistory } from "./support/metrics-mock";
 
 const CONTROLLER = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
 const DNS = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
+// WP8.7: the six DHCP tiles, three to a row like the DNS group.
+const DHCP = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"];
 
 interface Box {
   name: string;
@@ -69,7 +71,8 @@ function overlaps(a: Box, b: Box): boolean {
 async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promise<void> {
   // Tall enough for every tile, so the screenshot shows them all.
   await page.setViewportSize({ width, height: 1600 });
-  await fakeMetricsStream(page, mockHistory(30));
+  // WP8.7: a controller with the `dhcp` role too, so the DHCP group is checked as well.
+  await fakeMetricsStream(page, mockHistory(30, true, true));
   await page.goto("/");
   const root = page.getByTestId("metrics-tiles");
   await expect(root).toHaveAttribute("data-controllers", "1");
@@ -77,7 +80,8 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   await expect(page.getByTestId("metrics-tile-dns-answers").getByTestId("metrics-dns-rcode")).toHaveCount(5);
 
   const { tiles, grid } = await tileBoxes(page);
-  expect(tiles.map((t) => t.name)).toEqual([...CONTROLLER, ...DNS]);
+  await expect(page.getByTestId("metrics-tile-dhcp-pools").getByTestId("metrics-dhcp-pool")).toHaveCount(3);
+  expect(tiles.map((t) => t.name)).toEqual([...CONTROLLER, ...DNS, ...DHCP]);
 
   // One height for every tile, and nothing in a tile cut off at its bottom or out of its chart area.
   const height = tiles[0]!.height;
@@ -96,6 +100,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   const groups = [
     { names: CONTROLLER, columns: 4 },
     { names: DNS, columns: 3 },
+    { names: DHCP, columns: 3 },
   ];
   for (const group of groups) {
     const lines = rows(tiles.filter((t) => group.names.includes(t.name)));

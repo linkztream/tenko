@@ -3,12 +3,16 @@
 import type { DataDirFacts, NodeRole, Profile, TlsMode } from "../api/types";
 import type { ForwardTransport } from "../dns/forwarders/model";
 import { dnsStepProblem, isValidUserName, parseProxyList, validateHostName } from "./validate";
+// WP8.6: the checks of the DHCP step.
+import { dhcpStepProblem, type DhcpStepProblem, type DhcpStepState } from "./dhcp";
 
 /**
  * The steps in order. The DNS step (P2-Q5) is always in the list; when the DNS module or the
  * `dns` role is not chosen it says so and has nothing to set.
  */
-export const STEP_IDS = ["welcome", "profile", "admin", "host", "disk", "roles", "dns", "done"] as const;
+export const STEP_IDS = ["welcome", "profile", "admin", "host", "disk", "roles", "dns", "dhcp", "done"] as const;
+// WP8.6: the DHCP step (after the DNS step) asks for the first scope while the `dhcp` role and
+// the DHCP module are chosen; otherwise it says so and has nothing to set.
 export type StepId = (typeof STEP_IDS)[number];
 export const STEP_COUNT = STEP_IDS.length;
 export const LAST_STEP = STEP_COUNT - 1;
@@ -34,6 +38,17 @@ export const FOCUS = {
   dnsUpstreams: "wz-dns-upstreams",
   dnsTlsName: "wz-dns-tls",
   dnsEntries: "wz-dns-entries",
+  // WP8.6: the controls of the DHCP step.
+  dhcpMode: "wz-dhcp-mode",
+  dhcpNetwork: "wz-dhcp-network",
+  dhcpPoolFirst: "wz-dhcp-pool-first",
+  dhcpPoolLast: "wz-dhcp-pool-last",
+  dhcpRouter: "wz-dhcp-router",
+  dhcpDns: "wz-dhcp-dns",
+  dhcpLease: "wz-dhcp-lease",
+  dhcpAddress: "wz-dhcp-address",
+  dhcpIface: "wz-dhcp-iface",
+  dhcpOthersOff: "wz-dhcp-others-off",
   passkey: "wz-passkey",
   codesAck: "wz-codes",
 } as const;
@@ -65,6 +80,8 @@ export type GateMessage =
   | "setup.gate.dns_upstreams"
   | "setup.gate.dns_tls_name"
   | "setup.gate.dns_entries"
+  // WP8.6: the DHCP step.
+  | `setup.gate.dhcp.${DhcpStepProblem}`
   | "setup.gate.codes_loading"
   | "setup.gate.codes_ack"
   | "setup.gate.passkey_waiting"
@@ -107,7 +124,24 @@ export interface GateInput {
     cache: boolean;
     cacheEntries: string;
   };
+  // WP8.6: the DHCP step: whether it applies (the module and the role are chosen) and what it holds.
+  dhcp?: { wanted: boolean; state: DhcpStepState };
 }
+
+// WP8.6: the control that fixes each problem of the DHCP step.
+const DHCP_FOCUS: Readonly<Record<DhcpStepProblem, string>> = {
+  network: FOCUS.dhcpNetwork,
+  pool_first: FOCUS.dhcpPoolFirst,
+  pool_last: FOCUS.dhcpPoolLast,
+  pool_order: FOCUS.dhcpPoolFirst,
+  router: FOCUS.dhcpRouter,
+  router_in_pool: FOCUS.dhcpRouter,
+  dns: FOCUS.dhcpDns,
+  lease: FOCUS.dhcpLease,
+  address: FOCUS.dhcpAddress,
+  iface: FOCUS.dhcpIface,
+  others_off: FOCUS.dhcpOthersOff,
+};
 
 export function rolesSelected(roles: Record<NodeRole, boolean>): number {
   return Object.values(roles).filter(Boolean).length;
@@ -169,6 +203,12 @@ export function gateFor(step: number, g: GateInput): Gate | null {
         default:
           return null;
       }
+    }
+    // WP8.6: the DHCP step.
+    case "dhcp": {
+      if (!g.dhcp) return null;
+      const problem = dhcpStepProblem(g.dhcp.state, g.dhcp.wanted);
+      return problem === null ? null : { message: `setup.gate.dhcp.${problem}`, focus: DHCP_FOCUS[problem] };
     }
     default:
       return null;

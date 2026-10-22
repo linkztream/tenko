@@ -45,6 +45,7 @@ import {
 } from "./dhcp-model";
 import { dhcpState } from "./routes-dhcp";
 import { mockUpdates } from "./routes-updates";
+import type { Term } from "../../dhcp/types";
 
 const NOW = Date.UTC(2026, 9, 17, 12);
 const POOL = DHCP_IDS.lanPool;
@@ -315,6 +316,104 @@ describe("the effective options of a client", () => {
   });
 });
 
+// WP8.6: the matcher behind the effective options (docs/dhcp.md section 16.1).
+describe("the matcher of the effective options", () => {
+  const MAC = "00:00:5e:00:53:01";
+  const OTHER = "02:00:00:00:00:01";
+  type Facts = Parameters<typeof effectiveOptions>[3];
+  const client = (q: Facts) => effectiveOptions(state, ctx, DHCP_IDS.lan, q);
+  const className = (id: string) => state.classes.find((c) => c.id === id)?.name;
+  const policyName = (id: string) => state.policies.find((p) => p.id === id)?.name;
+  const classesOf = (q: Facts) => (client(q).classes ?? []).map(className).sort();
+  const policiesOf = (q: Facts) => (client(q).policies ?? []).map(policyName);
+  const PXE: Term = { match: { vendor_class: { value: "PXEClient", prefix: true } } };
+
+  /** A policy that sets the domain name (15) and the boot file (67). */
+  const bootPolicy = (name: string, terms: Term[], text: string, extra: { scope?: string | null; order?: number; enabled?: boolean } = {}) => {
+    const body: Record<string, unknown> = { name, condition: { join: "and", terms }, enabled: extra.enabled ?? true };
+    if (extra.scope !== null) body.scope = extra.scope ?? DHCP_IDS.lan;
+    if (extra.order !== undefined) body.order = extra.order;
+    const policy = createPolicy(state, ctx, body);
+    putOptionSet(state, ctx, `policy:${policy.id}`, { values: [{ code: 15, typed: { text } }, { code: 67, typed: { text: `${name}.efi` } }] }, 0);
+    return policy;
+  };
+
+  it("finds a client in a class by what it sends: vendor class exact or prefix, user class, MAC pattern, client id, architecture, host name", () => {
+    createClass(state, ctx, { name: "uefi", matches: [{ architecture: { code: 7 } }, { architecture: { code: 9 } }] });
+    createClass(state, ctx, { name: "lab-gear", matches: [{ mac: { pattern: "00:00:5e:00:53:*" } }, { client_id: { value: "01aabb" } }] });
+    createClass(state, ctx, { name: "named", matches: [{ host_name: { value: "Printer", prefix: true } }, { user_class: { value: "lab" } }] });
+    createClass(state, ctx, { name: "exact", matches: [{ vendor_class: { value: "MSFT 5.0" } }] });
+    // The seeded class takes a vendor class that starts with PXEClient.
+    expect(classesOf({ mac: OTHER, vendor_class: "PXEClient:Arch:00007" })).toEqual(["pxe-clients"]);
+    expect(classesOf({ mac: OTHER, vendor_class: "PXE" })).toEqual([]);
+    expect(classesOf({ mac: MAC, architecture: 9 })).toEqual(["lab-gear", "uefi"]);
+    expect(classesOf({ mac: OTHER, architecture: 0 })).toEqual([]);
+    expect(classesOf({ mac: OTHER, client_id: "01AABB" })).toEqual(["lab-gear"]);
+    expect(classesOf({ mac: OTHER, host_name: "PRINTER-7" })).toEqual(["named"]);
+    expect(classesOf({ mac: OTHER, host_name: "my-printer" })).toEqual([]);
+    expect(classesOf({ mac: OTHER, user_class: "lab" })).toEqual(["named"]);
+    expect(classesOf({ mac: OTHER, vendor_class: "MSFT 5.0" })).toEqual(["exact"]);
+    expect(classesOf({ mac: OTHER, vendor_class: "MSFT 5.0 plus" })).toEqual([]);
+  });
+
+  it("never matches circuit-id and remote-id, and a fact that is absent matches nothing", () => {
+    createClass(state, ctx, { name: "relayed", matches: [{ circuit_id: { value: "0001" } }, { remote_id: { value: "0a0b" } }] });
+    createClass(state, ctx, { name: "arch-zero", matches: [{ architecture: { code: 0 } }] });
+    expect(client({ mac: MAC, client_id: "0001" }).classes).toEqual([]);
+    expect(client({ mac: MAC }).classes).toEqual([]);
+    expect(classesOf({ mac: MAC, architecture: 0 })).toEqual(["arch-zero"]);
+  });
+
+  it("joins the terms of a policy with and or or, with negations, and a deleted class is false", () => {
+    createPolicy(state, ctx, { name: "both", scope: DHCP_IDS.lan, order: 5, condition: { join: "and", terms: [{ class: DHCP_IDS.class }, { match: { host_name: { value: "pxe", prefix: true } } }] } });
+    createPolicy(state, ctx, { name: "either", scope: DHCP_IDS.lan, order: 6, condition: { join: "or", terms: [{ match: { architecture: { code: 7 } } }, { match: { host_name: { value: "nothing" } } }] } });
+    createPolicy(state, ctx, { name: "not-pxe", scope: DHCP_IDS.lan, order: 7, condition: { join: "and", terms: [{ not_class: DHCP_IDS.class }, { not_match: { architecture: { code: 7 } } }] } });
+    expect(policiesOf({ mac: MAC, vendor_class: "PXEClient", host_name: "pxe-1" })).toEqual(["pxe-boot", "both"]);
+    expect(policiesOf({ mac: MAC, vendor_class: "PXEClient" })).toEqual(["pxe-boot"]);
+    expect(policiesOf({ mac: MAC, architecture: 7 })).toEqual(["either"]);
+    expect(policiesOf({ mac: MAC })).toEqual(["not-pxe"]);
+    expect(policiesOf({ mac: MAC, architecture: 0 })).toEqual(["not-pxe"]);
+    // A class that is gone: a term that names it is false and its negation true.
+    state.classes = state.classes.filter((k) => k.id !== DHCP_IDS.class);
+    expect(policiesOf({ mac: MAC, vendor_class: "PXEClient", host_name: "pxe-1" })).toEqual(["not-pxe"]);
+  });
+
+  it("leaves out a policy that is disabled and puts the policies of the scope by order before those of the server", () => {
+    bootPolicy("everywhere", [PXE], "server.example.test", { scope: null, order: 1 });
+    bootPolicy("second", [PXE], "second.example.test", { order: 9 });
+    bootPolicy("off", [PXE], "off.example.test", { order: 0, enabled: false });
+    expect(policiesOf({ mac: MAC, vendor_class: "PXEClient:Arch:00007" })).toEqual(["pxe-boot", "second", "everywhere"]);
+  });
+
+  it("gives each option to the first matching policy that sets it, at the policy level between the scope and the reservation", () => {
+    const first = bootPolicy("first", [{ match: { architecture: { code: 7 } } }], "first.example.test", { order: 2 });
+    const second = bootPolicy("second", [{ match: { architecture: { code: 7 } } }], "second.example.test", { order: 3 });
+    // The second policy sets an option the first does not.
+    const set = state.optionSets.get(`policy:${second.id}`);
+    putOptionSet(state, ctx, `policy:${second.id}`, { values: [{ code: 15, typed: { text: "second.example.test" } }, { code: 67, typed: { text: "second.efi" } }, { code: 66, typed: { text: "tftp.example.test" } }] }, set?.revision ?? 0);
+    const result = client({ mac: MAC, architecture: 7 });
+    const by = Object.fromEntries(result.options.map((o) => [o.value.code, o]));
+    expect([by[15]?.level, by[15]?.owner, by[15]?.typed]).toEqual(["policy", { policy: first.id }, { text: "first.example.test" }]);
+    expect([by[67]?.owner, by[67]?.typed]).toEqual([{ policy: first.id }, { text: "first.efi" }]);
+    expect([by[66]?.level, by[66]?.owner]).toEqual(["policy", { policy: second.id }]);
+    // The codes of the lower levels stay where they first appeared; the codes a policy adds follow.
+    expect(result.options.map((o) => o.value.code)).toEqual([6, 15, 3, 67, 66]);
+    expect([by[6]?.level, by[3]?.level]).toEqual(["server", "scope"]);
+    // The reservation is the last level and wins over a policy.
+    putOptionSet(state, ctx, "host:0190d1c2-0000-7000-8000-000000000999", { values: [{ code: 15, typed: { text: "ap.example.test" } }] }, 0);
+    const reserved = effectiveOptions(state, ctx, DHCP_IDS.lan, { mac: "00:00:5e:00:53:04", architecture: 7 });
+    expect(reserved.options.find((o) => o.value.code === 15)).toMatchObject({ level: "host", typed: { text: "ap.example.test" } });
+    expect(reserved.options.find((o) => o.value.code === 67)).toMatchObject({ level: "policy" });
+  });
+
+  it("returns every class that matches, and none for a client that sends nothing", () => {
+    createClass(state, ctx, { name: "any-mac", matches: [{ mac: { pattern: "*:*:*:*:*:*" } }] });
+    expect(classesOf({ mac: MAC, vendor_class: "PXEClient" })).toEqual(["any-mac", "pxe-clients"]);
+    expect(client({}).classes).toEqual([]);
+    expect(client({}).policies).toEqual([]);
+  });
+});
+
 describe("classes", () => {
   it("is created with its matches in canonical form and not deleted while it is named", () => {
     const item = createClass(state, ctx, { name: "lab-macs", matches: [{ mac: { pattern: "00:00:5E:*" } }, { client_id: { value: "01:AA:bb" } }, { architecture: { code: 7 } }] });
@@ -392,6 +491,26 @@ describe("the routes", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBe("dhcp.class.invalid");
     expect((err as ApiError).fieldErrors.map((f) => f.field)).toEqual(["name"]);
+  });
+
+  it("answers the effective options of a client with the classes and policies the facts of the query match", async () => {
+    const base = { path: { prefix: DHCP_IDS.lan } };
+    const plain = await api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", { ...base, query: { mac: "00:00:5e:00:53:01" } });
+    expect([plain.classes, plain.policies]).toEqual([[], []]);
+    const pxe = await api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", {
+      ...base,
+      query: { mac: "00-00-5E-00-53-01", client_id: "01:AA", vendor_class: "PXEClient:Arch:00007", user_class: "lab", architecture: 7, host_name: "Boot-1" },
+    });
+    expect([pxe.classes, pxe.policies]).toEqual([[DHCP_IDS.class], [DHCP_IDS.policy]]);
+  });
+
+  it("refuses an architecture that is not a number from 0 to 65535, and a client identifier that is not hexadecimal", async () => {
+    for (const architecture of ["x", "-1", "65536", "1.5"]) {
+      await expect(api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", { path: { prefix: DHCP_IDS.lan }, query: { mac: "00:00:5e:00:53:01", architecture: architecture as never } })).rejects.toMatchObject({ status: 400, code: "sys.invalid_query" });
+    }
+    await expect(api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", { path: { prefix: DHCP_IDS.lan }, query: { mac: "00:00:5e:00:53:01", client_id: "zz" } })).rejects.toMatchObject({ status: 400, code: "sys.invalid_query" });
+    const ok = await api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", { path: { prefix: DHCP_IDS.lan }, query: { architecture: 0 as never } });
+    expect(ok.prefix).toBe(DHCP_IDS.lan);
   });
 
   it("answers 404 sys.route_not_found while the DHCP module is switched off", async () => {

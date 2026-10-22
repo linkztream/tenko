@@ -3,8 +3,8 @@
 // identifier of its IPAM prefix.
 import { seg } from "../app/paths";
 
-/** The tabs of the scope page. */
-export type ScopeTab = "settings" | "pools" | "exclusions" | "options";
+/** The tabs of the scope page; WP8.6 adds the DDNS and the network boot tabs. */
+export type ScopeTab = "settings" | "pools" | "exclusions" | "options" | "ddns" | "boot";
 
 export const DHCP_SETTINGS_PATH = "/settings/dhcp";
 

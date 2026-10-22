@@ -1,0 +1,10 @@
+/* The policy editor's additions (WP8.6): the architecture picker, the options of a policy, and the
+   facts form and result of the effective options. */
+.dhcp-arch { display: inline-flex; flex-wrap: wrap; flex: 1; gap: var(--sp-3); align-items: center; }
+.dhcp-arch .select { inline-size: auto; min-inline-size: 12em; }
+.dhcp-arch .input { flex: 1; min-inline-size: 8em; }
+.dhcp-policy-options { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4); margin: 0; display: grid; gap: var(--sp-3); }
+.dhcp-policy-options legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-block-end: var(--sp-2); }
+.dhcp-effective-lists { display: grid; gap: var(--sp-3); margin-block: var(--sp-3); }
+.dhcp-effective-lists h3 { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin: 0; }
+.dhcp-effective-lists ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }

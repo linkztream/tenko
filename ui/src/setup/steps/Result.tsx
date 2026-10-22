@@ -15,6 +15,9 @@ import { FOCUS } from "../gates";
 import { dnsChoice, useWizard } from "../controller";
 import { dnsChecklist } from "../checklist";
 import { generateDnsConfig } from "../generate";
+// WP8.6: the DHCP block.
+import { dhcpPaths } from "../../dhcp/paths";
+import { generateDhcpConfig } from "../dhcp";
 
 /**
  * After the request succeeded: recovery codes, the passkey, the CA fingerprint, the DNS upstreams
@@ -59,6 +62,17 @@ export function Result() {
     try {
       await navigator.clipboard.writeText(dnsConfig());
       toast({ title: t("setup.result.dns.copied"), kind: "ok" });
+    } catch {
+      toast({ title: t("setup.result.dns.copy_failed"), kind: "bad" });
+    }
+  };
+
+  // WP8.6: the `[dhcp]` section for the listener of the DHCP step.
+  const dhcpConfig = () => generateDhcpConfig(w.dhcpPlan());
+  const copyDhcp = async () => {
+    try {
+      await navigator.clipboard.writeText(dhcpConfig());
+      toast({ title: t("setup.result.dhcp.copied"), kind: "ok" });
     } catch {
       toast({ title: t("setup.result.dns.copy_failed"), kind: "bad" });
     }
@@ -216,6 +230,46 @@ export function Result() {
               )}
             </For>
           </ul>
+        </div>
+      </Show>
+
+      {/* WP8.6: the first DHCP scope and the `[dhcp]` section of tenko.toml. */}
+      <Show when={w.dhcpWanted()}>
+        <div class="wz-blk" data-testid="setup-result-dhcp" data-state={w.after.dhcp.status}>
+          <h2 id="wz-dhcp-config-title">{t("setup.result.dhcp.title")}</h2>
+          <Show when={w.after.dhcp.status === "saved" ? w.after.dhcp : undefined}>
+            {(saved) => (
+              <Notice kind="ok" role="status" testid="setup-dhcp-saved">
+                {t("setup.result.dhcp.saved", { network: w.dhcpPlan()?.network ?? "" })}{" "}
+                <A href={dhcpPaths.scope(saved().prefix)} data-testid="setup-dhcp-scope-link" onClick={guard}>
+                  {t("setup.result.dhcp.open_scope")}
+                </A>
+              </Notice>
+            )}
+          </Show>
+          <Show when={w.after.dhcp.status === "failed" ? w.after.dhcp : undefined}>
+            {(failed) => (
+              <Notice kind="warn" role="status" testid="setup-dhcp-failed">
+                {t(`setup.result.dhcp.failed.${failed().step}`, { reason: errorMessage(failed().error) })}
+              </Notice>
+            )}
+          </Show>
+          <Show when={w.after.dhcp.status === "none"}>
+            <p class="wz-help ink">{t("setup.result.dhcp.none")}</p>
+          </Show>
+          <p class="wz-help ink">{t("setup.result.dhcp.config_help")}</p>
+          <pre class="wz-dns-config mono" aria-labelledby="wz-dhcp-config-title" data-testid="setup-dhcp-config">
+            {dhcpConfig()}
+          </pre>
+          <div class="form-row">
+            <button type="button" class="btn sm" data-testid="setup-dhcp-copy" onClick={() => void copyDhcp()}>
+              <Icon name="copy" size="sm" />
+              {t("setup.result.dhcp.copy")}
+            </button>
+          </div>
+          <p class="wz-help ink" data-testid="setup-dhcp-reminder">
+            {t("setup.dhcp.safety")}
+          </p>
         </div>
       </Show>
 

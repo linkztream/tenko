@@ -52,6 +52,15 @@ async function heading(name: string | RegExp) {
   return screen.findByRole("heading", { level: 1, name });
 }
 
+// WP8.6: the DHCP step follows the DNS step; these tests set the first scope up later.
+async function passDhcpLater() {
+  await heading("The first DHCP scope");
+  const later = document.querySelector<HTMLInputElement>('[data-testid="setup-dhcp-mode"][data-key="later"]');
+  if (later) fireEvent.click(later);
+  next();
+  await heading("Review and finish");
+}
+
 function type(label: string | RegExp, value: string) {
   fireEvent.input(screen.getByLabelText(label), { target: { value } });
 }
@@ -123,7 +132,7 @@ describe("the DNS step of the wizard", () => {
     expect(screen.queryByTestId("field-dns-tls-name")).toBeNull();
     // The step can be left with no upstream at all.
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     expect(screen.getByTestId("setup-review-dns").dataset.count).toBe("0");
     expect(screen.getByTestId("setup-review-dns").textContent).toContain("None yet");
   });
@@ -163,7 +172,7 @@ describe("the DNS step of the wizard", () => {
     fireEvent.input(field("field-dns-tls-name"), { target: { value: "dns.example.test" } });
     expect(blocker()).toBe("");
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
   });
 
   it("blocks a bad upstream and stays on the step", async () => {
@@ -176,7 +185,7 @@ describe("the DNS step of the wizard", () => {
     upstreams("192.0.2.1\n198.51.100.7:5353");
     expect(blocker()).toBe("");
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
   });
 
   it("blocks a cache bound out of range", async () => {
@@ -187,7 +196,7 @@ describe("the DNS step of the wizard", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Where DNS asks next");
     fireEvent.input(field("field-dns-entries"), { target: { value: "20000" } });
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
   });
 
   it("presets the switches of the Home profile and the preset button restores them", async () => {
@@ -223,7 +232,7 @@ describe("the DNS step of the wizard", () => {
     fireEvent.input(field("field-dns-entries"), { target: { value: "0" } });
     fireEvent.click(switchFor("cache"));
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
   });
 
   it("lists the ports to open, and adds the TLS ports when DoT or DoH is served", async () => {
@@ -259,7 +268,7 @@ describe("the DNS step of the wizard", () => {
     expect(step.textContent).toContain("DNS is not part of this installation");
     expect(screen.queryByTestId("field-dns-upstreams")).toBeNull();
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     expect(screen.queryByTestId("setup-review-dns")).toBeNull();
   });
 
@@ -270,7 +279,7 @@ describe("the DNS step of the wizard", () => {
     await heading("Where DNS asks next");
     expect(screen.getByTestId("setup-dns").dataset.state).toBe("skipped");
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     expect(screen.queryByTestId("setup-review-dns")).toBeNull();
   });
 
@@ -278,7 +287,7 @@ describe("the DNS step of the wizard", () => {
     await toDns();
     await chooseQuad9Dot();
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     const row = screen.getByTestId("setup-review-dns");
     expect(row.dataset.count).toBe("2");
     expect(row.textContent).toBe("9.9.9.9, 149.112.112.112");
@@ -292,7 +301,7 @@ describe("the DNS step of the wizard", () => {
     await chooseQuad9Dot();
     fireEvent.click(switchFor("dot"));
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     next();
     await heading("Setup complete");
     await waitFor(() => expect(screen.getByTestId("setup-result-dns").dataset.state).toBe("saved"));
@@ -323,7 +332,7 @@ describe("the DNS step of the wizard", () => {
     const before = dnsResolverState().forwarders.length;
     await toDns();
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     next();
     await heading("Setup complete");
     const result = await screen.findByTestId("setup-result-dns");
@@ -346,7 +355,7 @@ describe("the DNS step of the wizard", () => {
     await toDns();
     await chooseQuad9Dot();
     next();
-    await heading("Review and finish");
+    await passDhcpLater();
     next();
     await heading("Setup complete");
     const failed = await screen.findByTestId("setup-dns-failed");

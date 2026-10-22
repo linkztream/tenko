@@ -221,3 +221,9 @@ table.wz-tg { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
 .wz-dns-tls, .wz-dns-entries { margin-top: var(--sp-4); max-width: 420px; }
 .wz-dns-checklist { margin: 0; padding-inline-start: var(--sp-6); display: grid; gap: var(--sp-2); font-size: var(--fs-12); color: var(--ink-2); }
 .wz-dns-config { margin: var(--sp-3) 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); font-size: var(--fs-12); overflow-x: auto; white-space: pre; }
+/* WP8.6: the DHCP step: fields side by side where they fit, the safety note above the scope. */
+.wz-dhcp-safety { margin-block-start: var(--sp-6); }
+.wz-dhcp-row { align-items: flex-start; }
+.wz-dhcp-row > .field { flex: 1 1 180px; min-inline-size: 0; }
+.wz-dhcp-networks { margin-block: var(--sp-3); }
+[data-testid="setup-dhcp"] .field { margin-block-start: var(--sp-4); max-inline-size: 420px; }

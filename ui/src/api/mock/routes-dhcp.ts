@@ -8,6 +8,7 @@
 // reconcile operations stay with the 501 stubs of stubs.ts. `dhcpStubs` answers every DHCP operation
 // with 501 for the tests of that state.
 import { http, type HttpHandler } from "msw";
+import { parseHex } from "../../dhcp/model";
 import type { ObjectRef } from "../types";
 import { apiOperations } from "../generated/operations";
 import { appendAudit, principalNow } from "./audit-store";
@@ -230,7 +231,21 @@ const scopes = [
     guard("dhcp.read", () => {
       const mac = query(ctx.url, "mac");
       if (mac !== null && !/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(mac)) throw new Problem("sys.invalid_query", { params: { name: "mac", value: mac } });
-      return ok(effectiveOptions(state, context, ctx.params.prefix, { mac: mac?.replace(/-/g, ":") ?? null })) as never;
+      // WP8.6: the facts the matcher tests.
+      const architecture = query(ctx.url, "architecture");
+      if (architecture !== null && (!/^\d{1,5}$/.test(architecture) || Number(architecture) > 65_535)) throw new Problem("sys.invalid_query", { params: { name: "architecture", value: architecture } });
+      const clientId = query(ctx.url, "client_id");
+      if (clientId !== null && clientId !== "" && parseHex(clientId) === null) throw new Problem("sys.invalid_query", { params: { name: "client_id", value: clientId } });
+      return ok(
+        effectiveOptions(state, context, ctx.params.prefix, {
+          mac: mac?.replace(/-/g, ":") ?? null,
+          client_id: clientId === null || clientId === "" ? null : parseHex(clientId),
+          vendor_class: query(ctx.url, "vendor_class"),
+          user_class: query(ctx.url, "user_class"),
+          architecture: architecture === null ? null : Number(architecture),
+          host_name: query(ctx.url, "host_name"),
+        }),
+      ) as never;
     }),
   ),
   route("get", "/api/v1/dhcp/scopes/{prefix}/exclusions", (ctx) =>

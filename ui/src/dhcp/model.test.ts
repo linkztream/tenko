@@ -4,6 +4,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale } from "../i18n";
 import {
+  ARCHITECTURES,
+  architectureOfText,
   checkExclusion,
   checkMac,
   checkMacPattern,
@@ -12,6 +14,7 @@ import {
   draftOfMatch,
   draftOfTerm,
   emptyMatch,
+  isKnownArchitecture,
   kindOfData,
   leaseOfDraft,
   matchKind,
@@ -30,7 +33,7 @@ import {
   type OptionShape,
 } from "./model";
 import type { Match, Policy, Term } from "./types";
-import { actionWords, conditionWords, kindWords, leaseWords, matchesWords, matchWords } from "./words";
+import { actionWords, conditionWords, ddnsWords, kindWords, leaseWords, matchesWords, matchWords } from "./words";
 
 afterEach(async () => {
   await setLocale("en");
@@ -251,6 +254,12 @@ describe("matches and terms", () => {
     expect(client.ok && client.match).toEqual({ client_id: { value: "01aabb" } });
   });
 
+  it("knows the client architectures and reads a number of 0 to 65535", () => {
+    expect([...ARCHITECTURES]).toEqual([0, 6, 7, 9, 10, 11, 15, 16, 19]);
+    expect([isKnownArchitecture(7), isKnownArchitecture(8), isKnownArchitecture(0)]).toEqual([true, false, true]);
+    expect([architectureOfText("7"), architectureOfText(" 65535 "), architectureOfText("65536"), architectureOfText("-1"), architectureOfText("x"), architectureOfText("")]).toEqual([7, 65_535, null, null, null, null]);
+  });
+
   it("round-trips the four kinds of term", () => {
     const terms: Term[] = [{ class: "c1" }, { not_class: "c2" }, { match: { host_name: { value: "pr", prefix: true } } }, { not_match: { architecture: { code: 0 } } }];
     for (const term of terms) {
@@ -267,7 +276,10 @@ describe("words", () => {
     expect(matchWords({ vendor_class: { value: "MSFT", prefix: true } })).toBe('vendor class starting with "MSFT"');
     expect(matchWords({ vendor_class: { value: "MSFT" } })).toBe('vendor class "MSFT"');
     expect(matchWords({ mac: { pattern: "00:00:5e:*:*:*" } })).toBe("MAC address 00:00:5e:*:*:*");
-    expect(matchWords({ architecture: { code: 7 } })).toBe("client architecture 7");
+    // WP8.6: a known architecture shows its name; any other number stays a number.
+    expect(matchWords({ architecture: { code: 7 } })).toBe("client architecture UEFI x64 (7)");
+    expect(matchWords({ architecture: { code: 0 } })).toBe("client architecture BIOS x86 (0)");
+    expect(matchWords({ architecture: { code: 33 } })).toBe("client architecture 33");
     expect(matchesWords([{ user_class: { value: "a" } }, { host_name: { value: "b", prefix: true } }])).toBe('user class "a" or host name starting with "b"');
     const names = (id: string) => (id === "c1" ? "pxe-clients" : id);
     expect(conditionWords({ join: "and", terms: [{ class: "c1" }, { not_match: { host_name: { value: "x" } } }] }, names)).toBe('in class pxe-clients and not host name "x"');
@@ -285,11 +297,34 @@ describe("words", () => {
     expect(kindWords("u16", false)).toBe("Number (0 to 65535)");
   });
 
+  it("says the DDNS action and options of a policy", () => {
+    const zoneName = (id: string) => (id === "z1" ? "example.test" : undefined);
+    expect(actionWords({ ddns: { enabled: false } })).toBe("DDNS off");
+    expect(actionWords({ ddns: { enabled: true } })).toBe("DDNS on");
+    expect(actionWords({ ddns: { enabled: true, forward_zone: "z1" } }, { zoneName })).toBe("DDNS on, zone example.test");
+    expect(actionWords({ ddns: { enabled: true, forward_zone: "zz" } }, { zoneName })).toBe("DDNS on, zone zz");
+    expect(actionWords({ lease: { default_secs: 3600, min_secs: 600, max_secs: 7200 }, ddns: { enabled: true } }, { options: true })).toBe(
+      "lease time default 1 hr, between 10 min and 2 hr; DDNS on; options",
+    );
+    expect(actionWords({}, { options: true })).toBe("options");
+  });
+
+  it("says DDNS settings in words", () => {
+    expect(ddnsWords(undefined)).toBe("DDNS is off");
+    expect(ddnsWords({})).toBe("DDNS is off");
+    expect(ddnsWords({ enabled: true })).toBe("DDNS is on with the zone of the domain name, PTR records, TTL a third of the lease time, names protected, and names for legacy clients");
+    expect(ddnsWords({ enabled: true, forward_zone: "z1", reverse: false, ttl: 300, conflict: "replace", client_may_update_a: true, legacy_clients: false, refuse_foreign: true }, (id) => (id === "z1" ? "example.test" : undefined))).toBe(
+      "DDNS is on with forward zone example.test, no PTR records, TTL 300 s, names replaced by the last client, clients may write their own A record, no names for legacy clients, and names outside the zone refused",
+    );
+  });
+
   it("speaks Swedish", async () => {
     await setLocale("sv");
     expect(matchWords({ vendor_class: { value: "MSFT", prefix: true } })).toBe('tillverkarklass som börjar med "MSFT"');
     expect(conditionWords({ join: "and", terms: [{ class: "c1" }, { class: "c2" }] }, (id) => id)).toBe("i klassen c1 och i klassen c2");
     expect(actionWords({})).toBe("ingen ändring");
+    expect(actionWords({ ddns: { enabled: true } }, { options: true })).toBe("DDNS på; alternativ");
+    expect(matchWords({ architecture: { code: 7 } })).toBe("klientarkitektur UEFI x64 (7)");
   });
 });
 

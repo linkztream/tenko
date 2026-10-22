@@ -3,7 +3,7 @@
 // a scope for a network that has none, open one, delete one. A 409 `dhcp.module.disabled` or a 404
 // of the route shows the module-off state, a 501 the not-available notice.
 import { A, useNavigate } from "@solidjs/router";
-import { createResource, createSignal, Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
 import { Icon } from "../components/Icon";
 import { PageHead } from "../components/PageHead";
@@ -11,37 +11,13 @@ import { DataGrid } from "../grid/DataGrid";
 import type { Column, RowAction } from "../grid/types";
 import { formatNumber, t } from "../i18n";
 import { mayWriteDhcp } from "./access";
-import { getUtilization, listScopes, type Scope } from "./api";
+import { listScopes, type Scope } from "./api";
 import { DhcpNav } from "./DhcpNav";
-import { percentOf } from "./model";
 import { DhcpProblem, unavailable } from "./Parts";
 import { dhcpPaths } from "./paths";
 import { CreateScopeDialog, DeleteScopeDialog } from "./ScopeDialogs";
+import { UtilizationBar } from "./UtilizationBar";
 import "./dhcp.css";
-
-/** How full a scope is: a bar and the percent, read for the row when it comes into view. */
-export function UtilizationBar(props: { prefix: string; revision?: number | undefined }) {
-  const [util] = createResource(
-    () => [props.prefix, props.revision] as const,
-    ([prefix]) => getUtilization(prefix),
-  );
-  const shown = () => (util.error ? undefined : util.latest);
-  return (
-    <Show when={shown()} fallback={<span class="muted">{util.error ? "" : "…"}</span>}>
-      {(u) => {
-        const pct = () => percentOf(u().utilization);
-        return (
-          <span class="dhcp-util" data-testid="scope-util" data-key={String(pct())}>
-            <span class="dhcp-bar" role="img" aria-label={t("dhcp.util.label", { percent: pct() })}>
-              <span style={{ width: `${pct()}%` }} classList={{ warn: pct() >= 70 && pct() < 90, crit: pct() >= 90 }} />
-            </span>
-            <span class="num">{formatNumber(pct() / 100, { style: "percent" })}</span>
-          </span>
-        );
-      }}
-    </Show>
-  );
-}
 
 export default function ScopesPage() {
   const navigate = useNavigate();

@@ -26,6 +26,14 @@
 // `-dns-answers` (the NOERROR share of the last 30 seconds, with the same `metrics-bars`, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` (without a number while the role serves neither DoT nor DoH).
+//
+// WP8.7: while the cluster's sample has `dhcp` (a controller runs the `dhcp` role) the six DHCP
+// tiles follow under `metrics-group-dhcp`: `metrics-tile-dhcp-leases` (leases granted per second,
+// the 60 s sparkline), `-dhcp-ack` (the REQUEST to ACK p99), `-dhcp-active` (active leases, the
+// abandoned ones in the hint), `-dhcp-pools` (the fullest pool in percent, the three fullest as
+// `metrics-dhcp-pool` with `data-scope` and `data-value` and a bar each), `-dhcp-naks` (NAKs and
+// DECLINEs per second, `metrics-dhcp-nak` and `metrics-dhcp-decline`), `-dhcp-ddns` (names written
+// per second, `metrics-dhcp-ddns` per outcome with `data-outcome`, the queue in the hint).
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { EventStream, type EventStreamOptions } from "../api/events";
 import { si } from "../app/format/si";
@@ -37,6 +45,8 @@ import { storeRoleLabel } from "../shell/TopBar";
 import {
   BUCKET_SECONDS,
   BUCKETS,
+  // WP8.7: the outcomes of the DDNS tile.
+  DDNS_OUTCOMES,
   droppedBatches,
   emptyHistory,
   lagOf,
@@ -150,6 +160,8 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   };
   const p = (key: "p50_ms" | "p99_ms") => cluster()?.api[key];
   const dns = () => cluster()?.dns ?? undefined;
+  // WP8.7: the `dhcp` part of the cluster's sample.
+  const dhcp = () => cluster()?.dhcp ?? undefined;
   const rows = createMemo(() => latest()?.nodes ?? []);
 
   return (
@@ -354,6 +366,99 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                   return c ? t("metrics.dns.encrypted_hint", { dot: c.dot, doh: c.doh }) : t("metrics.dns.encrypted_none");
                 })()}
               />
+            </>
+          )}
+        </Show>
+        {/* WP8.7: the DHCP tiles, while a controller runs the `dhcp` role. */}
+        <Show when={dhcp()}>
+          {(d) => (
+            <>
+              <h3 class="metrics-group" data-testid="metrics-group-dhcp">
+                {t("metrics.group.dhcp")}
+              </h3>
+              <Tile
+                name="dhcp-leases"
+                title={t("metrics.dhcp.leases")}
+                value={value("dhcp-leases")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dhcp-leases")}
+                hint={t("metrics.dhcp.leases_hint")}
+              />
+              <Tile
+                name="dhcp-ack"
+                title={t("metrics.dhcp.ack")}
+                value={value("dhcp-ack")}
+                unit={t("metrics.unit.ms")}
+                series={series("dhcp-ack")}
+                hint={d().ack_p99_ms != null ? t("metrics.dhcp.ack_hint") : t("metrics.dhcp.ack_idle")}
+              />
+              <Tile
+                name="dhcp-active"
+                title={t("metrics.dhcp.active")}
+                value={value("dhcp-active")}
+                series={series("dhcp-active")}
+                hint={t("metrics.dhcp.active_hint", { abandoned: d().abandoned_leases })}
+              />
+              <Tile
+                name="dhcp-pools"
+                title={t("metrics.dhcp.pools")}
+                value={value("dhcp-pools")}
+                unit={t("metrics.unit.percent")}
+                series={series("dhcp-pools")}
+                hint={d().scopes > 0 ? t("metrics.dhcp.pools_hint", { scopes: d().scopes }) : t("metrics.dhcp.pools_none")}
+              >
+                <ul class="metrics-rows">
+                  <For each={d().fullest}>
+                    {(pool) => (
+                      <li data-testid="metrics-dhcp-pool" data-scope={pool.scope} data-value={pool.utilization}>
+                        <span class="mono">{pool.scope}</span>
+                        <span class="metrics-pool-bar" aria-hidden="true">
+                          <span style={{ "inline-size": `${Math.round(Math.min(1, Math.max(0, pool.utilization)) * 100)}%` }} />
+                        </span>
+                        <span class="rate">{formatNumber(pool.utilization, { style: "percent", maximumFractionDigits: 0 })}</span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Tile>
+              <Tile
+                name="dhcp-naks"
+                title={t("metrics.dhcp.naks")}
+                value={value("dhcp-naks")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dhcp-naks")}
+                hint={t("metrics.dhcp.naks_hint")}
+              >
+                <ul class="metrics-rows">
+                  <li data-testid="metrics-dhcp-nak" data-rate={d().naks_per_second}>
+                    <span>{t("metrics.dhcp.nak_row")}</span>
+                    <span class="rate">{t("metrics.dns.rate", { rate: decimal(d().naks_per_second) })}</span>
+                  </li>
+                  <li data-testid="metrics-dhcp-decline" data-rate={d().declines_per_second}>
+                    <span>{t("metrics.dhcp.decline_row")}</span>
+                    <span class="rate">{t("metrics.dns.rate", { rate: decimal(d().declines_per_second) })}</span>
+                  </li>
+                </ul>
+              </Tile>
+              <Tile
+                name="dhcp-ddns"
+                title={t("metrics.dhcp.ddns")}
+                value={value("dhcp-ddns")}
+                unit={t("metrics.unit.per_second")}
+                series={series("dhcp-ddns")}
+                hint={t("metrics.dhcp.ddns_hint", { queue: d().ddns.queue, skipped: decimal(d().ddns.skipped), dropped: decimal(d().ddns.dropped) })}
+              >
+                <ul class="metrics-rows metrics-rows-pairs">
+                  <For each={DDNS_OUTCOMES}>
+                    {(outcome) => (
+                      <li data-testid="metrics-dhcp-ddns" data-outcome={outcome} data-rate={d().ddns[outcome]}>
+                        <span>{t(`metrics.dhcp.ddns_outcome.${outcome}`)}</span>
+                        <span class="rate">{t("metrics.dns.rate", { rate: decimal(d().ddns[outcome]) })}</span>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Tile>
             </>
           )}
         </Show>

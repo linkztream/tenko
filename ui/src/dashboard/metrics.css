@@ -51,6 +51,9 @@
 .metrics-rows li { display: flex; align-items: baseline; gap: var(--sp-4); min-inline-size: 0; }
 .metrics-rows li > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metrics-rows li .rate { margin-inline-start: auto; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* WP8.7: the bar of a pool on the DHCP pools tile, between the scope and its share. */
+.metrics-pool-bar { flex: 1 1 auto; min-inline-size: 24px; block-size: 6px; border-radius: 3px; background: var(--line); overflow: hidden; align-self: center; }
+.metrics-pool-bar > span { display: block; block-size: 100%; background: var(--accent); }
 .metrics-warn { color: var(--warn-ink); }
 .metrics-warn[data-state="idle"] { visibility: hidden; }
 .metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

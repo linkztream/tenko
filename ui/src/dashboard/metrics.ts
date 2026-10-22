@@ -7,6 +7,8 @@ type S = components["schemas"];
 export type MetricsSnapshot = S["MetricsSnapshot"];
 export type MetricsSample = S["MetricsSample"];
 export type MetricsDns = S["MetricsDns"];
+// WP8.7: the `dhcp` part of a sample.
+export type MetricsDhcp = S["MetricsDhcp"];
 
 /** The `kind` of the events of the `metrics` topic. */
 export const SNAPSHOT_KIND = "metrics.snapshot";
@@ -59,7 +61,39 @@ export const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "
  */
 export const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"] as const;
 export type DnsTileName = (typeof DNS_TILES)[number];
-export type TileName = (typeof TILES)[number] | DnsTileName;
+// WP8.7: the tiles of the `dhcp` role (OPS-20), after the DNS tiles while the sample has `dhcp`.
+/**
+ * The tiles of the `dhcp` role: leases granted per second, the REQUEST to ACK p99, the active
+ * leases, the fullest pool with the three fullest scopes, NAKs and DECLINEs, DDNS outcomes. Six,
+ * so the group fills its rows three to a row as the DNS group does.
+ */
+export const DHCP_TILES = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"] as const;
+export type DhcpTileName = (typeof DHCP_TILES)[number];
+
+/** The DDNS outcomes the DDNS tile lists, in order. */
+export const DDNS_OUTCOMES = ["written", "removed", "refused", "failed"] as const;
+
+function isDhcpTile(name: TileName): name is DhcpTileName {
+  return name.startsWith("dhcp-");
+}
+
+function dhcpValue(name: DhcpTileName, dhcp: MetricsDhcp): number | null {
+  switch (name) {
+    case "dhcp-leases":
+      return dhcp.leases_per_second;
+    case "dhcp-ack":
+      return dhcp.ack_p99_ms ?? null;
+    case "dhcp-active":
+      return dhcp.active_leases;
+    case "dhcp-pools":
+      return dhcp.fullest[0] ? dhcp.fullest[0].utilization * 100 : null;
+    case "dhcp-naks":
+      return dhcp.naks_per_second + dhcp.declines_per_second;
+    case "dhcp-ddns":
+      return dhcp.ddns.written;
+  }
+}
+export type TileName = (typeof TILES)[number] | DnsTileName | DhcpTileName;
 
 /** The RCODEs of the answers tile, in the order they are listed. */
 export const RCODES = ["noerror", "nxdomain", "servfail", "refused", "other"] as const;
@@ -123,6 +157,8 @@ export function droppedBatches(sample: MetricsSample): number | null {
 /** The number a tile shows for a sample; null when the sample has none. */
 export function tileValue(name: TileName, sample: MetricsSample): number | null {
   if (isDnsTile(name)) return sample.dns ? dnsValue(name, sample.dns) : null;
+  // WP8.7: the DHCP tiles.
+  if (isDhcpTile(name)) return sample.dhcp ? dhcpValue(name, sample.dhcp) : null;
   switch (name) {
     case "requests":
       return sample.api.requests_per_second;

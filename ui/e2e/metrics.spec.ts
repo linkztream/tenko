@@ -22,6 +22,9 @@
 //   p50 and p99, the cache hit ratio, the RCODE mix, the three busiest block lists, the
 //   upstreams and the encrypted connections. The figures themselves come from the registry
 //   (crates/tenko-api/src/sse/metrics/sample.rs and the `serve::metrics` tests).
+// - WP8.7, the DHCP tiles: the same way, a faked `dhcp` part (leases granted per second, the
+//   REQUEST to ACK p99, the active leases, the three fullest scopes, NAKs and DECLINEs, DDNS
+//   outcomes); the figures come from `crates/tenko-api/src/sse/metrics/sample/dhcp.rs`.
 //
 // Not covered here: the CPU cost of 100 streams (the acceptance test
 // `crates/tenko-api/tests/metrics_stream.rs`).
@@ -32,10 +35,12 @@ import type { Page } from "@playwright/test";
 import { signInAsViewer } from "./support/accounts";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
-import { dnsPart, fakeMetricsStream, refuseMetricsStream, sample, type MetricsSnapshot } from "./support/metrics-mock";
+import { dhcpPart, dnsPart, fakeMetricsStream, refuseMetricsStream, sample, type MetricsSnapshot } from "./support/metrics-mock";
 
 const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
 const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
+// WP8.7: the DHCP tiles.
+const DHCP_TILES = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"];
 
 /** Opens the start page and waits until the tiles show their first sample. */
 async function openWithSample(page: Page): Promise<void> {
@@ -229,6 +234,39 @@ test("OPS-20: a controller with the dns role adds the DNS tiles after the others
   await expect(tile("dns-upstreams")).toContainText("p99 42 ms");
   await expect(tile("dns-encrypted")).toHaveAttribute("data-value", "9");
   await expect(tile("dns-encrypted")).toContainText("DoT 6, DoH 3");
+  expect(await axeViolations(page, "[data-testid='metrics-tiles']")).toEqual([]);
+});
+
+// WP8.7: the DHCP tiles follow the DNS tiles while the cluster's sample has a `dhcp` part.
+test("OPS-20: a controller with the dhcp role adds the DHCP tiles after the DNS tiles (faked stream)", async ({ page, signedIn }) => {
+  void signedIn;
+  const base = fourControllers();
+  const rising = (leases: number): MetricsSnapshot => ({ ...base, cluster: { ...base.cluster, dhcp: dhcpPart({ leases_per_second: leases }) } });
+  await fakeMetricsStream(page, [rising(10), rising(25), rising(40)]);
+  await page.goto("/");
+  await expect(page.getByTestId("metrics-tiles")).toHaveAttribute("data-controllers", "4");
+  await expect(page.getByTestId("metrics-group-dhcp")).toBeVisible();
+
+  const order = await page
+    .getByTestId("metrics-tiles")
+    .locator("[data-testid^='metrics-tile-']")
+    .evaluateAll((tiles) => tiles.map((tile) => tile.getAttribute("data-testid")?.replace("metrics-tile-", "")));
+  expect(order).toEqual([...TILES, ...DNS_TILES, ...DHCP_TILES]);
+
+  const tile = (name: string) => page.getByTestId(`metrics-tile-${name}`);
+  await expect(tile("dhcp-leases")).toHaveAttribute("data-value", "40");
+  await expect(page.getByTestId("metrics-sparkline-dhcp-leases")).toHaveAttribute("data-points", "3");
+  await expect(tile("dhcp-ack")).toHaveAttribute("data-value", "8.5");
+  await expect(tile("dhcp-active")).toHaveAttribute("data-value", "1200");
+  // The fullest pool in percent and the three fullest scopes, fullest first.
+  await expect(tile("dhcp-pools")).toHaveAttribute("data-value", "90");
+  const pools = tile("dhcp-pools").getByTestId("metrics-dhcp-pool");
+  await expect(pools).toHaveCount(3);
+  expect(await pools.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-scope")))).toEqual(["192.0.2.0/26", "198.51.100.0/24", "203.0.113.0/25"]);
+  await expect(tile("dhcp-naks").getByTestId("metrics-dhcp-nak")).toHaveAttribute("data-rate", "0.5");
+  await expect(tile("dhcp-ddns")).toHaveAttribute("data-value", "6");
+  await expect(tile("dhcp-ddns").getByTestId("metrics-dhcp-ddns")).toHaveCount(4);
+  await expect(tile("dhcp-ddns").locator("[data-outcome='refused']")).toHaveAttribute("data-rate", "1");
   expect(await axeViolations(page, "[data-testid='metrics-tiles']")).toEqual([]);
 });
 

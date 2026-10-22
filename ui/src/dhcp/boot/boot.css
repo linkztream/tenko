@@ -1,0 +1,6 @@
+/* The network boot tab of a scope (WP8.6): the boot form and the list of the policies that set a
+   boot file. */
+.boot-tab .page-section { max-inline-size: 960px; }
+.boot-form { max-inline-size: 760px; }
+.boot-file { overflow-wrap: anywhere; }
+.boot-actions { padding-inline: 0; }

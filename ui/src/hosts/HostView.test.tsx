@@ -11,6 +11,7 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { applied, confirmPlan, recordWrites } from "../ipam/testkit";
+import { resetModules, setModulesForTest } from "../updates/modules"; // WP8.6
 import { connectTargets } from "./Connect";
 import HostView from "./HostView";
 
@@ -847,5 +848,36 @@ describe("accessibility", () => {
     await openHost("kiosk.example.test");
     expect(warning()).not.toBeNull();
     expect(await axeViolations(screen.getByTestId("page-host"))).toEqual([]);
+  });
+});
+
+// WP8.6: the DHCP reservations block of a reserved host (the block's own cases are in
+// src/dhcp/reservations).
+describe("the DHCP reservations of a reserved host", () => {
+  afterEach(() => resetModules());
+
+  it("shows the block with the reservation of the host's address", async () => {
+    await openHost("thermostat-1");
+    const block = await screen.findByTestId("host-reservations");
+    await waitFor(() => expect(within(block).getAllByTestId("host-reservation")).toHaveLength(1));
+    const row = within(block).getByTestId("host-reservation");
+    expect(row.dataset.key).toBe("192.0.2.41");
+    expect(row.dataset.state).toBe("served");
+    expect(within(row).getByTestId("host-reservation-identity").textContent).toContain("00:00:5e:00:53:29");
+  });
+
+  it("shows nothing for a host that is not reserved", async () => {
+    await openHost("printer-1");
+    expect(headingMode()).toBe("static");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByTestId("host-reservations")).toBeNull();
+  });
+
+  it("shows nothing while the DHCP module is switched off", async () => {
+    setModulesForTest(["ipam", "dns", "discovery"]);
+    await openHost("thermostat-1");
+    expect(headingMode()).toBe("reserved");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByTestId("host-reservations")).toBeNull();
   });
 });

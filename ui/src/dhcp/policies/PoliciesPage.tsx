@@ -1,9 +1,9 @@
 // The DHCP policies (/dhcp/policies): rules in evaluation order, those of each scope first (the
 // scopes by network) and then those of the server, with whether they apply, the condition in words
 // and the action in words. Create and edit with a condition editor (the join and terms over
-// classes and matches) and an action (an address range inside the scope, lease times); delete.
-// Matching clients to classes and policies comes with a later package: the policies are stored and
-// checked now.
+// classes and matches) and the four actions of docs/dhcp.md section 16.1: options (the option set
+// of the policy, edited once the policy exists), an address range inside the scope, lease times and
+// DDNS settings; delete. The DHCP engine matches clients to these classes and policies.
 import { A } from "@solidjs/router";
 import { createMemo, createResource, createSignal, For, Index, Show, untrack } from "solid-js";
 import { createLiveQuery, latest } from "../../api/live";
@@ -18,9 +18,12 @@ import { formatNumber, t } from "../../i18n";
 import { compareIp, containsIp, parseIp } from "../../ipam/ip";
 import { MatchRow, matchProblem } from "../classes/MatchEditor";
 import { mayWriteDhcp } from "../access";
-import { createPolicy, deletePolicy, getSettings, listClasses, listPolicies, listScopes, updatePolicy, type DhcpClass, type Join, type Policy, type PolicyAction, type Scope, type Term } from "../api";
+import { createPolicy, deletePolicy, getSettings, listClasses, listPolicies, listPolicyOptionSets, listScopes, updatePolicy, type DhcpClass, type Join, type Policy, type PolicyAction, type Scope, type Term } from "../api";
+import { createZoneChoices, DdnsFields, startingDraft, zoneNameIn } from "../ddns/DdnsFields";
+import { ddnsFieldErrors, ddnsOfDraft, draftOfDdns, namesDdns, type DdnsDraft, type DdnsField } from "../ddns/model";
 import { DhcpNav } from "../DhcpNav";
 import { LeaseChoice, leaseProblem } from "../LeaseFields";
+import { OptionSetEditor } from "../options/OptionSetEditor";
 import {
   draftOfLease,
   draftOfTerm,
@@ -40,6 +43,7 @@ import { Check, describedBy, DhcpProblem, errorFor, Field, fieldErrors, hasField
 import { dhcpPaths } from "../paths";
 import { actionWords, conditionWords } from "../words";
 import "../dhcp.css";
+import "./policies.css";
 
 const SERVER_LEASE = { default_secs: 86_400, min_secs: 3600, max_secs: 604_800 };
 
@@ -94,10 +98,21 @@ function TermEditor(props: { index: number; value: TermDraft; classes: readonly 
   );
 }
 
-function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes: readonly DhcpClass[]; onClose: () => void; onDone: () => void }) {
+function PolicyDialog(props: {
+  item?: Policy;
+  scopes: readonly Scope[];
+  classes: readonly DhcpClass[];
+  onClose: () => void;
+  onDone: () => void;
+  /** A new policy exists: the dialog continues with it, so that its options can be added. */
+  onCreated: (policy: Policy) => void;
+  /** The option set of the policy was saved. */
+  onOptionsSaved: () => void;
+}) {
   let nameInput!: HTMLInputElement;
   const item = untrack(() => props.item);
   const [settings] = createResource(() => getSettings());
+  const zones = createZoneChoices();
   const serverLease = () => (settings.error ? SERVER_LEASE : (settings.latest?.lease ?? SERVER_LEASE));
   const [name, setName] = createSignal(item?.name ?? "");
   const [scope, setScope] = createSignal(item?.scope ?? "");
@@ -109,10 +124,23 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
   const [rangeLast, setRangeLast] = createSignal(item?.action?.range?.last ?? "");
   const [inherit, setInherit] = createSignal(!item?.action?.lease);
   const [lease, setLease] = createSignal<LeaseDraft>(draftOfLease(item?.action?.lease ?? SERVER_LEASE));
+  const [ddnsOn, setDdnsOn] = createSignal(item?.action?.ddns !== undefined && item.action.ddns !== null);
+  const [ddns, setDdns] = createSignal<DdnsDraft>(item?.action?.ddns ? draftOfDdns(item.action.ddns) : startingDraft(undefined));
+  const [ddnsTouched, setDdnsTouched] = createSignal(false);
   const [description, setDescription] = createSignal(item?.description ?? "");
   const [errors, setErrors] = createSignal<Record<string, string>>({});
   const [termErrors, setTermErrors] = createSignal<Record<number, string>>({});
   const [leaseErrors, setLeaseErrors] = createSignal<Partial<Record<LeaseField, string>>>({});
+  const [ddnsErrors, setDdnsErrors] = createSignal<Partial<Record<DdnsField, string>>>({});
+  const editDdns = (next: DdnsDraft) => {
+    setDdnsTouched(true);
+    setDdns(next);
+  };
+  const toggleDdns = (on: boolean) => {
+    setDdnsOn(on);
+    // A DDNS action that is new starts from the settings of the server, with DDNS on.
+    if (on && !item?.action?.ddns && !ddnsTouched() && !settings.error && settings.latest) setDdns(startingDraft(settings.latest.ddns));
+  };
   const [error, setError] = createSignal<unknown>();
   const [busy, setBusy] = createSignal(false);
 
@@ -136,7 +164,13 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
       if (parsed.ok) built.push(parsed.term);
       else te[i] = parsed.problem === "class" ? t("dhcp.check.term_class") : matchProblem(parsed.problem);
     });
-    const action: PolicyAction = { ...(item?.action?.ddns ? { ddns: item.action.ddns } : {}) };
+    const de: Partial<Record<DdnsField, string>> = {};
+    const action: PolicyAction = {};
+    if (ddnsOn()) {
+      const parsed = ddnsOfDraft(ddns());
+      if (parsed.ok) action.ddns = parsed.ddns;
+      else de.ttl = t("dhcp.ddns.check.ttl");
+    }
     if (rangeFirst().trim() !== "" || rangeLast().trim() !== "") {
       const a = parseIp(rangeFirst());
       const b = parseIp(rangeLast());
@@ -154,7 +188,8 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
     setErrors(e);
     setTermErrors(te);
     setLeaseErrors(le);
-    if (Object.keys(e).length > 0 || Object.keys(te).length > 0 || Object.keys(le).length > 0) return;
+    setDdnsErrors(de);
+    if (Object.keys(e).length > 0 || Object.keys(te).length > 0 || Object.keys(le).length > 0 || Object.keys(de).length > 0) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -162,8 +197,10 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
       const text = description().trim();
       if (item) {
         await updatePolicy(item, { name: name().trim(), order: Number(order() || item.order), enabled: enabled(), condition, action, description: text });
+        toast({ kind: "ok", title: t("dhcp.policy.saved", { name: name().trim() }) });
+        props.onDone();
       } else {
-        await createPolicy({
+        const made = await createPolicy({
           name: name().trim(),
           ...(scope() !== "" ? { scope: scope() } : {}),
           ...(order().trim() !== "" ? { order: Number(order()) } : {}),
@@ -172,11 +209,12 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
           action,
           ...(text !== "" ? { description: text } : {}),
         });
+        toast({ kind: "ok", title: t("dhcp.policy.created", { name: name().trim() }) });
+        props.onCreated(made);
       }
-      toast({ kind: "ok", title: item ? t("dhcp.policy.saved", { name: name().trim() }) : t("dhcp.policy.created", { name: name().trim() }) });
-      props.onDone();
     } catch (err) {
       const fields = fieldErrors(err);
+      if (namesDdns(fields, "action.ddns")) setDdnsErrors(ddnsFieldErrors(fields, "action.ddns"));
       if (hasField(fields, ["name", "order", "condition", "action.range"])) {
         setErrors(fields);
         const rows: Record<number, string> = {};
@@ -185,7 +223,7 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
           if (m) rows[Number(m[1])] = fields[key] ?? "";
         }
         setTermErrors(rows);
-      } else setError(err);
+      } else if (!namesDdns(fields, "action.ddns")) setError(err);
     } finally {
       setBusy(false);
     }
@@ -195,116 +233,145 @@ function PolicyDialog(props: { item?: Policy; scopes: readonly Scope[]; classes:
   return (
     <Dialog label={title()} onClose={props.onClose} class="dialog wide dhcp-dialog" testid="dialog-policy-form" initialFocus={() => nameInput}>
       <h2 class="dialog-title">{title()}</h2>
-      <form class="dialog-body dhcp-form" onSubmit={(ev) => void submit(ev)} novalidate>
-        <div class="field-row">
-          <Field id="name" label={t("dhcp.policy.field.name")} error={errorFor(errors(), "name")} help={t("dhcp.field.name_help")}>
-            <input
-              ref={nameInput}
-              id="dhcp-f-name"
-              class="input mono"
-              value={name()}
-              spellcheck={false}
-              autocomplete="off"
-              aria-invalid={errors().name ? "true" : undefined}
-              aria-describedby={describedBy("name", errors().name, "help")}
-              data-testid="field-name"
-              onInput={(ev) => setName(ev.currentTarget.value)}
-            />
-          </Field>
-          <Field id="scope" label={t("dhcp.policy.field.scope")} help={item ? t("dhcp.policy.field.scope_fixed") : undefined}>
-            <select id="dhcp-f-scope" class="select" value={scope()} disabled={item !== undefined} data-testid="field-scope" onChange={(ev) => setScope(ev.currentTarget.value)}>
-              <option value="">{t("dhcp.policy.scope_server")}</option>
-              <For each={props.scopes}>{(s) => <option value={s.prefix}>{s.cidr}</option>}</For>
-            </select>
-          </Field>
-        </div>
-        <div class="field-row">
-          <Field id="order" label={t("dhcp.policy.field.order")} error={errorFor(errors(), "order")} help={t("dhcp.policy.field.order_help")}>
-            <input
-              id="dhcp-f-order"
-              class="input mono"
-              inputmode="numeric"
-              value={order()}
-              aria-invalid={errors().order ? "true" : undefined}
-              aria-describedby={describedBy("order", errors().order, "help")}
-              data-testid="field-order"
-              onInput={(ev) => setOrder(ev.currentTarget.value)}
-            />
-          </Field>
-          <Check id="enabled" label={t("dhcp.policy.field.enabled")} checked={enabled()} onChange={setEnabled} />
-        </div>
-        <fieldset class="dhcp-matches-field" data-testid="policy-condition">
-          <legend>{t("dhcp.policy.field.condition")}</legend>
-          <Field id="join" label={t("dhcp.policy.field.join")}>
-            <select id="dhcp-f-join" class="select" value={join()} data-testid="field-join" onChange={(ev) => setJoin(ev.currentTarget.value as Join)}>
-              <option value="and">{t("dhcp.join.and")}</option>
-              <option value="or">{t("dhcp.join.or")}</option>
-            </select>
-          </Field>
-          {/* By position, so that typing in a term does not rebuild it. */}
-          <Index each={terms()}>
-            {(term, i) => (
-              <TermEditor
-                index={i}
-                value={term()}
-                classes={props.classes}
-                error={termErrors()[i]}
-                onChange={(next) => replaceTerm(i, next)}
-                onRemove={terms().length > 1 ? () => setTerms((list) => list.filter((_, j) => j !== i)) : undefined}
-              />
-            )}
-          </Index>
-          <Show when={errorFor(errors(), "condition.terms") && Object.keys(termErrors()).length === 0}>
-            <span class="help bad" data-testid="field-error" data-field="terms">
-              {errorFor(errors(), "condition.terms")}
-            </span>
-          </Show>
-          <button type="button" class="btn" data-testid="term-add" onClick={() => setTerms((list) => [...list, emptyTerm()])}>
-            <Icon name="plus" />
-            {t("dhcp.term.add")}
-          </button>
-        </fieldset>
-        <fieldset class="dhcp-matches-field" data-testid="policy-action">
-          <legend>{t("dhcp.policy.field.action")}</legend>
+      <div class="dialog-body dhcp-form">
+        <form id="dhcp-policy-form" class="dhcp-form" onSubmit={(ev) => void submit(ev)} novalidate>
           <div class="field-row">
-            <Field id="range-first" label={t("dhcp.policy.field.range_first")} error={errors().range}>
-              <input id="dhcp-f-range-first" class="input mono" value={rangeFirst()} spellcheck={false} data-testid="field-range-first" onInput={(ev) => setRangeFirst(ev.currentTarget.value)} />
+            <Field id="name" label={t("dhcp.policy.field.name")} error={errorFor(errors(), "name")} help={t("dhcp.field.name_help")}>
+              <input
+                ref={nameInput}
+                id="dhcp-f-name"
+                class="input mono"
+                value={name()}
+                spellcheck={false}
+                autocomplete="off"
+                aria-invalid={errors().name ? "true" : undefined}
+                aria-describedby={describedBy("name", errors().name, "help")}
+                data-testid="field-name"
+                onInput={(ev) => setName(ev.currentTarget.value)}
+              />
             </Field>
-            <Field id="range-last" label={t("dhcp.policy.field.range_last")}>
-              <input id="dhcp-f-range-last" class="input mono" value={rangeLast()} spellcheck={false} data-testid="field-range-last" onInput={(ev) => setRangeLast(ev.currentTarget.value)} />
+            <Field id="scope" label={t("dhcp.policy.field.scope")} help={item ? t("dhcp.policy.field.scope_fixed") : undefined}>
+              <select id="dhcp-f-scope" class="select" value={scope()} disabled={item !== undefined} data-testid="field-scope" onChange={(ev) => setScope(ev.currentTarget.value)}>
+                <option value="">{t("dhcp.policy.scope_server")}</option>
+                <For each={props.scopes}>{(s) => <option value={s.prefix}>{s.cidr}</option>}</For>
+              </select>
             </Field>
           </div>
-          <Show when={errorFor(errors(), "action.range")}>
-            <span class="help bad" data-testid="field-error" data-field="action.range">
-              {errorFor(errors(), "action.range")}
-            </span>
-          </Show>
-          <LeaseChoice
-            id="lease"
-            inherit={inherit()}
-            onInherit={(on) => {
-              setInherit(on);
-              if (!on && !item?.action?.lease) setLease(draftOfLease(serverLease()));
-            }}
-            value={lease()}
-            onChange={setLease}
-            errors={leaseErrors()}
-            serverWords={t("dhcp.policy.lease_inherit_help")}
-          />
+          <div class="field-row">
+            <Field id="order" label={t("dhcp.policy.field.order")} error={errorFor(errors(), "order")} help={t("dhcp.policy.field.order_help")}>
+              <input
+                id="dhcp-f-order"
+                class="input mono"
+                inputmode="numeric"
+                value={order()}
+                aria-invalid={errors().order ? "true" : undefined}
+                aria-describedby={describedBy("order", errors().order, "help")}
+                data-testid="field-order"
+                onInput={(ev) => setOrder(ev.currentTarget.value)}
+              />
+            </Field>
+            <Check id="enabled" label={t("dhcp.policy.field.enabled")} checked={enabled()} onChange={setEnabled} />
+          </div>
+          <fieldset class="dhcp-matches-field" data-testid="policy-condition">
+            <legend>{t("dhcp.policy.field.condition")}</legend>
+            <Field id="join" label={t("dhcp.policy.field.join")}>
+              <select id="dhcp-f-join" class="select" value={join()} data-testid="field-join" onChange={(ev) => setJoin(ev.currentTarget.value as Join)}>
+                <option value="and">{t("dhcp.join.and")}</option>
+                <option value="or">{t("dhcp.join.or")}</option>
+              </select>
+            </Field>
+            {/* By position, so that typing in a term does not rebuild it. */}
+            <Index each={terms()}>
+              {(term, i) => (
+                <TermEditor
+                  index={i}
+                  value={term()}
+                  classes={props.classes}
+                  error={termErrors()[i]}
+                  onChange={(next) => replaceTerm(i, next)}
+                  onRemove={terms().length > 1 ? () => setTerms((list) => list.filter((_, j) => j !== i)) : undefined}
+                />
+              )}
+            </Index>
+            <Show when={errorFor(errors(), "condition.terms") && Object.keys(termErrors()).length === 0}>
+              <span class="help bad" data-testid="field-error" data-field="terms">
+                {errorFor(errors(), "condition.terms")}
+              </span>
+            </Show>
+            <button type="button" class="btn" data-testid="term-add" onClick={() => setTerms((list) => [...list, emptyTerm()])}>
+              <Icon name="plus" />
+              {t("dhcp.term.add")}
+            </button>
+          </fieldset>
+          <fieldset class="dhcp-matches-field" data-testid="policy-action">
+            <legend>{t("dhcp.policy.field.action")}</legend>
+            <div class="field-row">
+              <Field id="range-first" label={t("dhcp.policy.field.range_first")} error={errors().range}>
+                <input id="dhcp-f-range-first" class="input mono" value={rangeFirst()} spellcheck={false} data-testid="field-range-first" onInput={(ev) => setRangeFirst(ev.currentTarget.value)} />
+              </Field>
+              <Field id="range-last" label={t("dhcp.policy.field.range_last")}>
+                <input id="dhcp-f-range-last" class="input mono" value={rangeLast()} spellcheck={false} data-testid="field-range-last" onInput={(ev) => setRangeLast(ev.currentTarget.value)} />
+              </Field>
+            </div>
+            <Show when={errorFor(errors(), "action.range")}>
+              <span class="help bad" data-testid="field-error" data-field="action.range">
+                {errorFor(errors(), "action.range")}
+              </span>
+            </Show>
+            <LeaseChoice
+              id="lease"
+              inherit={inherit()}
+              onInherit={(on) => {
+                setInherit(on);
+                if (!on && !item?.action?.lease) setLease(draftOfLease(serverLease()));
+              }}
+              value={lease()}
+              onChange={setLease}
+              errors={leaseErrors()}
+              serverWords={t("dhcp.policy.lease_inherit_help")}
+            />
+          </fieldset>
+          <fieldset class="dhcp-matches-field" data-testid="policy-ddns">
+            <legend>{t("dhcp.policy.ddns.legend")}</legend>
+            <Check id="policy-ddns-on" label={t("dhcp.policy.ddns.on")} checked={ddnsOn()} onChange={toggleDdns} help={t("dhcp.policy.ddns.help")} />
+            <Show when={ddnsOn()}>
+              <DdnsFields value={ddns()} onChange={editDdns} zones={zones} errors={ddnsErrors()} />
+            </Show>
+          </fieldset>
+          <Field id="description" label={t("dhcp.field.description")}>
+            <input id="dhcp-f-description" class="input" value={description()} data-testid="field-description" onInput={(ev) => setDescription(ev.currentTarget.value)} />
+          </Field>
+          <ErrorNotice error={error()} />
+        </form>
+        {/* The option set has its own save button and sits outside the form, so that Enter in it never submits the policy. */}
+        <fieldset class="dhcp-policy-options" data-testid="policy-options">
+          <legend>{t("dhcp.policy.options.title")}</legend>
+          {item ? (
+            <>
+              <p class="muted">{t("dhcp.policy.options.help")}</p>
+              <OptionSetEditor
+                owner={`policy:${item.id}`}
+                label={t("dhcp.policy.options.label", { name: item.name })}
+                canWrite={mayWriteDhcp()}
+                testid="policy-optset"
+                onSaved={() => props.onOptionsSaved()}
+              />
+            </>
+          ) : (
+            <p class="muted" data-testid="policy-options-new">
+              {t("dhcp.policy.options.new")}
+            </p>
+          )}
         </fieldset>
-        <Field id="description" label={t("dhcp.field.description")}>
-          <input id="dhcp-f-description" class="input" value={description()} data-testid="field-description" onInput={(ev) => setDescription(ev.currentTarget.value)} />
-        </Field>
-        <ErrorNotice error={error()} />
         <div class="dialog-actions">
           <button type="button" class="btn ghost" data-testid="form-cancel" onClick={() => props.onClose()}>
             {t("common.action.cancel")}
           </button>
-          <button type="submit" class="btn primary" data-testid="form-submit" disabled={busy()}>
+          <button type="submit" form="dhcp-policy-form" class="btn primary" data-testid="form-submit" disabled={busy()}>
             {item ? t("dhcp.policy.save") : t("dhcp.policy.create")}
           </button>
         </div>
-      </form>
+      </div>
     </Dialog>
   );
 }
@@ -351,6 +418,14 @@ export default function PoliciesPage() {
       return { value: page.items, revision: page.revision };
     },
   });
+  // The option sets of the policies in one read: the words of a policy say "options" when its set has values.
+  const optionSets = createLiveQuery({
+    topics: ["dhcp"],
+    fetch: async (signal) => ({ value: await listPolicyOptionSets(signal) }),
+  });
+  const withOptions = createMemo(() => new Set((latest(optionSets) ?? []).filter((s) => s.values.length > 0).map((s) => s.path)));
+  const zones = createZoneChoices();
+  const actionText = (p: Policy) => actionWords(p.action, { zoneName: zoneNameIn(zones()), options: withOptions().has(`policy:${p.id}`) });
   const [classes] = createResource(async () => (await listClasses()).items);
   const [scopes] = createResource(async () => (await listScopes()).items);
   const classList = () => (classes.error ? [] : (classes.latest ?? []));
@@ -394,7 +469,7 @@ export default function PoliciesPage() {
       ),
     },
     { id: "condition", header: () => t("dhcp.col.condition"), text: (p) => conditionWords(p.condition, className), render: (p) => <span data-testid="policy-condition-words">{conditionWords(p.condition, className)}</span> },
-    { id: "action", header: () => t("dhcp.col.action"), width: 320, text: (p) => actionWords(p.action), render: (p) => <span data-testid="policy-action-words">{actionWords(p.action)}</span> },
+    { id: "action", header: () => t("dhcp.col.action"), width: 320, text: actionText, render: (p) => <span data-testid="policy-action-words">{actionText(p)}</span> },
   ];
   const actions: RowAction<Policy>[] = [
     { id: "edit", label: () => t("dhcp.do.edit"), hidden: () => !mayWriteDhcp(), run: (p) => setDialog({ kind: "edit", item: p }) },
@@ -425,7 +500,7 @@ export default function PoliciesPage() {
         }
       >
         <Notice kind="info" testid="policies-note">
-          {t("dhcp.policies.note")}
+          {t("dhcp.policies.note_live")}
         </Notice>
         <div class="dhcp-list-body">
           <DataGrid
@@ -455,7 +530,18 @@ export default function PoliciesPage() {
       <Show when={dialog()} keyed>
         {(d) =>
           d.kind === "edit" ? (
-            <PolicyDialog item={d.item} scopes={scopeList()} classes={classList()} onClose={() => close(false)} onDone={() => close(true)} />
+            <PolicyDialog
+              item={d.item}
+              scopes={scopeList()}
+              classes={classList()}
+              onClose={() => close(false)}
+              onDone={() => close(true)}
+              onCreated={(made) => {
+                setDialog({ kind: "edit", item: made });
+                query.refetch();
+              }}
+              onOptionsSaved={() => optionSets.refetch()}
+            />
           ) : (
             <DeletePolicyDialog item={d.item} onClose={() => close(false)} onDone={() => close(true)} />
           )

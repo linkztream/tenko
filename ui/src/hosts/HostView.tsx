@@ -4,7 +4,7 @@
 // Observations: what connectors and probes report about its MACs, addresses and name, with the
 // open ports and the operating system (SCAN-08) and the open proposals about it (WP2.9).
 import { A, useNavigate, useParams } from "@solidjs/router";
-import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
 import { ANY_REVISION, api } from "../api/client";
 import { events } from "../api/events";
 import { fetchAll } from "../api/paginate";
@@ -21,7 +21,7 @@ import { toast } from "../components/toast";
 import { DeletedTag, LockFlag, ModeBadge, StatusBadge, Tags, TimeAgo } from "../grid/cells";
 import { DataGrid } from "../grid/DataGrid";
 import { Menu } from "../grid/Menu";
-import { t } from "../i18n";
+import { t, withPacks } from "../i18n";
 import { DeleteDialog, RestoreDialog } from "../ipam/DeleteDialog";
 import { CustomValues } from "../ipam/fields/CustomFieldsEditor";
 import { HistoryPanel } from "../ipam/history/HistoryPanel";
@@ -40,12 +40,17 @@ import { JobStateChip } from "../jobs/StateChip";
 import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
 import { ScanNowLazy } from "../scans/ScanNowLazy";
+// WP8.6: the DHCP reservations block of a reserved host, loaded with the dhcp words.
+import { moduleRunning } from "../updates/modules";
 import { Connect } from "./Connect";
 import { DnsRecords } from "./DnsRecords";
 import { HostCredentialsSection } from "./credentials";
 import { HostForm, InterfaceForm } from "./HostForm";
 import "../ipam/ipam.css";
 import "./hosts.css";
+
+// WP8.6: lazily loaded with the dhcp words; nothing of it is in the first load.
+const HostReservations = lazy(withPacks(["dhcp"], () => import("../dhcp/reservations/HostReservations")));
 
 interface HostData {
   host: Host;
@@ -384,6 +389,11 @@ export default function HostView() {
                   </ul>
                 </Show>
               </section>
+
+              {/* WP8.6: the DHCP reservations of a reserved host. */}
+              <Show when={h().mode === "reserved" && !h().meta.deleted && data() && moduleRunning("dhcp")}>
+                <HostReservations host={h()} interfaces={interfaces()} addresses={addresses()} />
+              </Show>
 
               <DnsRecords addresses={addresses()} />
 

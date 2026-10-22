@@ -605,6 +605,10 @@ export const CATALOG: readonly CatalogEntry[] = [
   entry(119, "domain-search", "fqdn", true),
   entry(121, "classless-static-route", "classless_routes", false),
   entry(150, "tftp-server-address", "ipv4_address", true),
+  // WP8.6: the PXELINUX options of the network boot tab (RFC 5071), as in the server's catalog.
+  entry(209, "pxelinux-configfile", "string", false),
+  entry(210, "pxelinux-pathprefix", "string", false),
+  entry(211, "pxelinux-reboottime", "u32", false),
   entry(252, "wpad", "string", false),
 ];
 
@@ -1063,16 +1067,89 @@ export function putOptionSet(state: DhcpState, ctx: DhcpContext, path: string, b
   return setView(state, path, row, ctx);
 }
 
-/** The options a client gets in a scope: the levels merged from the least to the most specific, each option with its level. */
-export function effectiveOptions(state: DhcpState, ctx: DhcpContext, prefix: string, query: { mac?: string | null }): EffectiveOptions {
+// WP8.6: the matcher of docs/dhcp.md section 16.1 behind the effective options. What a request
+// carries that a class can test is a set of facts; a class holds when any of its matches holds, a
+// policy when its terms join (and/or) over classes, negated classes, matches and negated matches.
+
+/** What the client sends that the matcher tests; an absent fact never matches. */
+export interface ClientFacts {
+  mac?: string | null;
+  /** Option 61 in hexadecimal. */
+  client_id?: string | null;
+  /** Option 60. */
+  vendor_class?: string | null;
+  /** Option 77. */
+  user_class?: string | null;
+  /** Option 93. */
+  architecture?: number | null;
+  /** Option 12. */
+  host_name?: string | null;
+}
+
+/** Whether a MAC pattern (six octets, `*` for any) matches an address. */
+function macMatches(pattern: string, mac: string): boolean {
+  const want = pattern.toLowerCase().split(":");
+  const have = mac.toLowerCase().replace(/-/g, ":").split(":");
+  return want.length === have.length && want.every((octet, i) => octet === "*" || octet === have[i]);
+}
+
+/** Whether one match holds for the facts. Circuit-id and remote-id need a relay agent: they never hold here. */
+function matchHolds(match: Match, facts: ClientFacts): boolean {
+  if ("vendor_class" in match) {
+    const { value, prefix } = match.vendor_class;
+    const have = facts.vendor_class;
+    return have != null && have !== "" && (prefix ? have.startsWith(value) : have === value);
+  }
+  if ("user_class" in match) return facts.user_class != null && facts.user_class === match.user_class.value;
+  if ("mac" in match) return facts.mac != null && facts.mac !== "" && macMatches(match.mac.pattern, facts.mac);
+  if ("client_id" in match) return facts.client_id != null && facts.client_id !== "" && facts.client_id.toLowerCase() === match.client_id.value.toLowerCase();
+  if ("circuit_id" in match || "remote_id" in match) return false;
+  if ("architecture" in match) return facts.architecture != null && facts.architecture === match.architecture.code;
+  const { value, prefix } = match.host_name;
+  const have = facts.host_name?.toLowerCase();
+  return have != null && have !== "" && (prefix ? have.startsWith(value.toLowerCase()) : have === value.toLowerCase());
+}
+
+/** The classes (by identifier) the client is in. */
+function classesOf(state: DhcpState, facts: ClientFacts): string[] {
+  return state.classes.filter((c) => c.matches.some((m) => matchHolds(m, facts))).map((c) => c.id);
+}
+
+function termHolds(state: DhcpState, inClass: ReadonlySet<string>, term: Term, facts: ClientFacts): boolean {
+  // A term that names a deleted class is false, and its negation true.
+  if ("class" in term) return inClass.has(term.class) && state.classes.some((c) => c.id === term.class);
+  if ("not_class" in term) return !(inClass.has(term.not_class) && state.classes.some((c) => c.id === term.not_class));
+  if ("match" in term) return matchHolds(term.match, facts);
+  return !matchHolds(term.not_match, facts);
+}
+
+/** The enabled policies of the scope by `order`, then those of the server, that match the client. */
+function policiesOf(state: DhcpState, prefix: string, inClass: ReadonlySet<string>, facts: ClientFacts): Policy[] {
+  const byOrder = (a: Policy, b: Policy) => a.order - b.order || a.name.localeCompare(b.name);
+  const enabled = state.policies.filter((p) => p.enabled !== false);
+  const ordered = [...enabled.filter((p) => p.scope === prefix).sort(byOrder), ...enabled.filter((p) => !p.scope).sort(byOrder)];
+  return ordered.filter((p) => {
+    const tests = p.condition.terms.map((term) => termHolds(state, inClass, term, facts));
+    return p.condition.join === "and" ? tests.every(Boolean) : tests.some(Boolean);
+  });
+}
+
+/**
+ * The options a client gets in a scope: the levels merged from the least to the most specific
+ * (the server, the shared network, the scope, the matching policies, the reservation), each option
+ * with its level and owner; with the classes the client is in and the policies that match it, in
+ * order. Per code the first matching policy whose set holds it wins the policy level.
+ */
+export function effectiveOptions(state: DhcpState, ctx: DhcpContext, prefix: string, query: ClientFacts): EffectiveOptions {
   const scope = findScopeRow(state, prefix);
   const reservation = query.mac ? ctx.ipam.reservation(query.mac, prefix) : undefined;
-  const paths = ["server", ...(scope.shared_network ? [`shared_network:${scope.shared_network}`] : []), `scope:${prefix}`, ...(reservation ? [`host:${reservation}`] : [])];
+  const classIds = classesOf(state, query);
+  const matched = policiesOf(state, prefix, new Set(classIds), query);
   const merged: { key: string; item: S["EffectiveOption"] }[] = [];
-  for (const path of paths) {
-    const set = state.optionSets.get(path);
-    for (const value of set?.values ?? []) {
+  const apply = (path: string, accept: (key: string) => boolean) => {
+    for (const value of state.optionSets.get(path)?.values ?? []) {
       const key = `${value.space}:${value.code}`;
+      if (!accept(key)) continue;
       const view = valueItem(state, value);
       const item: S["EffectiveOption"] = { value: { space: value.space, code: value.code, data: value.data }, level: levelOf(path), owner: ownerOf(path) };
       if (view.name) item.name = view.name;
@@ -1081,8 +1158,21 @@ export function effectiveOptions(state: DhcpState, ctx: DhcpContext, prefix: str
       if (at >= 0) (merged[at] as { item: S["EffectiveOption"] }).item = item;
       else merged.push({ key, item });
     }
+  };
+  const always = () => true;
+  apply("server", always);
+  if (scope.shared_network) apply(`shared_network:${scope.shared_network}`, always);
+  apply(`scope:${prefix}`, always);
+  const taken = new Set<string>();
+  for (const policy of matched) {
+    apply(`policy:${policy.id}`, (key) => {
+      if (taken.has(key)) return false;
+      taken.add(key);
+      return true;
+    });
   }
-  const out: EffectiveOptions = { prefix, classes: [], policies: [], options: merged.map((m) => m.item) };
+  if (reservation) apply(`host:${reservation}`, always);
+  const out: EffectiveOptions = { prefix, classes: classIds, policies: matched.map((p) => p.id), options: merged.map((m) => m.item) };
   if (reservation) out.reservation = reservation;
   return out;
 }

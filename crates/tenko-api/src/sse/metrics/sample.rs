@@ -11,6 +11,9 @@
 //! `dns` role (`tenko_dns_queries_total`, registered when the role starts); the families of
 //! the encrypted transports and of the block lists are read when they are registered.
 
+// WP8.7: the `dhcp` part of a sample.
+mod dhcp;
+
 use std::{collections::BTreeMap, time::Instant};
 
 use tenko_core::{
@@ -79,6 +82,8 @@ struct Totals {
     ingest_facts: u64,
     /// The `dns` role's, while it runs.
     dns: Option<DnsTotals>,
+    // WP8.7: the `dhcp` role's, while it runs (`sample/dhcp.rs`).
+    dhcp: Option<dhcp::DhcpTotals>,
 }
 
 impl Totals {
@@ -90,6 +95,8 @@ impl Totals {
             ingest_batches: counter_total(snapshot, INGEST_BATCHES, None),
             ingest_facts: counter_total(snapshot, INGEST_FACTS, None),
             dns: DnsTotals::of(snapshot),
+            // WP8.7: the `dhcp` role's totals.
+            dhcp: dhcp::DhcpTotals::of(snapshot),
         }
     }
 }
@@ -259,6 +266,14 @@ impl SampleBuilder {
             });
             dns_sample(snapshot, dns, before)
         });
+        // WP8.7: the `dhcp` part, read as the DNS part is.
+        sample.dhcp = totals.dhcp.as_ref().map(|current| {
+            let before = previous.as_ref().and_then(|(then, before)| {
+                let seconds = now.saturating_duration_since(*then).as_secs_f64();
+                before.dhcp.as_ref().map(|before| (before, seconds))
+            });
+            dhcp::dhcp_sample(snapshot, current, before)
+        });
         if let Some((then, before)) = previous {
             let interval = now.saturating_duration_since(then);
             sample.interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
@@ -343,6 +358,10 @@ pub fn cluster_sum(samples: &[MetricsSample], at: Timestamp) -> MetricsSample {
         }
         if let Some(dns) = &sample.dns {
             add_dns(sum.dns.get_or_insert_with(MetricsDns::default), dns);
+        }
+        // WP8.7: the `dhcp` parts.
+        if let Some(part) = &sample.dhcp {
+            dhcp::add_dhcp(sum.dhcp.get_or_insert_with(Default::default), part);
         }
     }
     if let Some(dns) = &mut sum.dns {

@@ -16,3 +16,13 @@
 .dhcp-ends > span:last-child { font-size: var(--fs-12); }
 .dhcp-reason { display: grid; gap: var(--sp-2); margin-block-start: var(--sp-4); }
 .dhcp-reason .input { width: 100%; }
+
+/* The live strip (WP8.6): the scope, its bars and the count of the new leases. */
+.dhcp-live-strip { padding-block: var(--sp-2); }
+.dhcp-live-scope { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.dhcp-live-bar { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-5); }
+.dhcp-util-facts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-5); }
+.dhcp-scope-bars { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.dhcp-scope-bar { gap: var(--sp-3); font-weight: var(--fw-regular); }
+.dhcp-scope-bar .dhcp-bar { margin-inline-end: var(--sp-2); }
+.dhcp-new { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); margin-inline-start: auto; }

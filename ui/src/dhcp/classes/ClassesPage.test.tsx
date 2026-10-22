@@ -62,7 +62,9 @@ describe("the classes", () => {
       const [kind, value, prefix] = kinds[i]!;
       const line = matchRows(dialog)[i]!;
       fireEvent.change(within(line).getByTestId("match-kind"), { target: { value: kind } });
-      fireEvent.input(within(line).getByTestId("match-value"), { target: { value } });
+      // The architecture has a picker of the known codes; the other kinds a text input.
+      if (kind === "architecture") fireEvent.change(within(line).getByTestId("match-arch"), { target: { value } });
+      else fireEvent.input(within(line).getByTestId("match-value"), { target: { value } });
       if (prefix) fireEvent.click(within(line).getByTestId("match-prefix"));
     }
     expect(matchRows(dialog)).toHaveLength(8);
@@ -82,6 +84,49 @@ describe("the classes", () => {
       ],
     });
     expect(within(row("dhcp-classes", "lab-gear")).getAllByTestId("class-match")).toHaveLength(8);
+  });
+
+  it("picks an architecture by name, and takes any other number with the number input", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-class-create"));
+    const dialog = await screen.findByTestId("dialog-class-form");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "boot-arch" } });
+    const first = matchRows(dialog)[0]!;
+    fireEvent.change(within(first).getByTestId("match-kind"), { target: { value: "architecture" } });
+    const picker = within(first).getByTestId("match-arch") as HTMLSelectElement;
+    // The known codes of RFC 4578 and the registry, named, and "another number"; no number input for a known code.
+    expect([...picker.options].map((o) => o.value)).toEqual(["", "0", "6", "7", "9", "10", "11", "15", "16", "19", "other"]);
+    expect(picker.options[3]?.textContent).toBe("7: UEFI x64");
+    expect(within(first).queryByTestId("match-value")).toBeNull();
+    fireEvent.change(picker, { target: { value: "16" } });
+    expect(within(first).queryByTestId("match-value")).toBeNull();
+    // Another number shows the number input; a number with a name typed there stays in it.
+    fireEvent.click(within(dialog).getByTestId("match-add"));
+    const second = matchRows(dialog)[1]!;
+    fireEvent.change(within(second).getByTestId("match-kind"), { target: { value: "architecture" } });
+    fireEvent.change(within(second).getByTestId("match-arch"), { target: { value: "other" } });
+    const number = within(second).getByTestId("match-value") as HTMLInputElement;
+    fireEvent.input(number, { target: { value: "33" } });
+    expect((within(second).getByTestId("match-arch") as HTMLSelectElement).value).toBe("other");
+    expect(within(second).getByTestId("match-value")).toBe(number);
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(rows("dhcp-classes").map((r) => r.dataset.key)).toContain("boot-arch"));
+    expect(writes().find((w) => w.method === "POST")?.body).toMatchObject({ matches: [{ architecture: { code: 16 } }, { architecture: { code: 33 } }] });
+    const made = within(row("dhcp-classes", "boot-arch")).getAllByTestId("class-match");
+    expect(made.map((m) => m.textContent)).toEqual(["client architecture UEFI HTTP x64 (16)", "client architecture 33"]);
+  });
+
+  it("checks an architecture that is not chosen", async () => {
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-class-create"));
+    const dialog = await screen.findByTestId("dialog-class-form");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "none-picked" } });
+    fireEvent.change(within(matchRows(dialog)[0]!).getByTestId("match-kind"), { target: { value: "architecture" } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(within(dialog).getByTestId("field-error").textContent).toBe("Enter a value."));
   });
 
   it("keeps the focus in a row while its value is typed", async () => {

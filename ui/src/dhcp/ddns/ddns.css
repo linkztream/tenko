@@ -1,0 +1,6 @@
+/* The DDNS fields and the DDNS tab of a scope (WP8.6). */
+.dhcp-ddns { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
+.dhcp-ddns legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-block-end: var(--sp-2); }
+.dhcp-ddns .select { max-inline-size: 100%; }
+.ddns-tab .ddns-server { display: grid; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); }
+.ddns-tab .ddns-server p { margin: 0; }

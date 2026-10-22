@@ -10581,6 +10581,105 @@ export interface components {
             requests_per_second: number;
         };
         /**
+         * @description The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its
+         *     ACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over
+         *     the interval.
+         */
+        MetricsDhcp: {
+            /**
+             * Format: int64
+             * @description Leases held back as abandoned (a conflict found by the probe, or a DECLINE).
+             */
+            abandoned_leases: number;
+            /**
+             * Format: double
+             * @description The 99th percentile of the time from a REQUEST's arrival to its ACK in milliseconds,
+             *     the commit included; absent without an ACK.
+             */
+            ack_p99_ms?: number | null;
+            /**
+             * Format: int64
+             * @description Leases in the role's table whose binding is active.
+             */
+            active_leases: number;
+            /** @description DDNS change sets per second by outcome. */
+            ddns: components["schemas"]["MetricsDhcpDdns"];
+            /**
+             * Format: double
+             * @description DECLINEs received per second.
+             */
+            declines_per_second: number;
+            /** @description The three fullest scopes, the fullest first. */
+            fullest: components["schemas"]["MetricsDhcpPool"][];
+            /**
+             * Format: double
+             * @description Leases granted per second: REQUESTs answered with an ACK (new, renewed, rebound and
+             *     after a reboot).
+             */
+            leases_per_second: number;
+            /**
+             * Format: double
+             * @description NAKs sent per second.
+             */
+            naks_per_second: number;
+            /**
+             * Format: int64
+             * @description Scopes with a pool that the role serves.
+             */
+            scopes: number;
+        };
+        /** @description DDNS change sets per second by outcome (`tenko_dhcp_ddns_total{outcome}`), and the queue. */
+        MetricsDhcpDdns: {
+            /**
+             * Format: double
+             * @description Dropped from a full queue; the lease rows are read again.
+             */
+            dropped: number;
+            /**
+             * Format: double
+             * @description The zone service or the store failed after the retries.
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description Requests waiting for the worker.
+             */
+            queue: number;
+            /**
+             * Format: double
+             * @description Refused: name protection, another origin's records, a zone that takes no DHCP updates.
+             */
+            refused: number;
+            /**
+             * Format: double
+             * @description Names removed on release, expiry or a change of name.
+             */
+            removed: number;
+            /**
+             * Format: double
+             * @description Nothing to write: IPAM names the address, or the scope names no zone.
+             */
+            skipped: number;
+            /**
+             * Format: double
+             * @description Names written.
+             */
+            written: number;
+        };
+        /** @description How full the pools of one scope are. */
+        MetricsDhcpPool: {
+            /**
+             * @description The scope by its network (`192.0.2.0/24`), as the `scope` label of
+             *     `tenko_dhcp_pool_utilization` names it.
+             */
+            scope: string;
+            /**
+             * Format: double
+             * @description Active bindings in the scope's pools over the pools' addresses, 0 to 1.
+             */
+            utilization: number;
+        };
+        /**
          * @description The `dns` role in a sample (OPS-20): the queries it answered, the cache, the upstreams, the
          *     block lists, the encrypted transports and the query log over the interval.
          */
@@ -10820,6 +10919,7 @@ export interface components {
             api: components["schemas"]["MetricsApi"];
             /** @description When the sample was taken, by the controller's clock. */
             at: components["schemas"]["Timestamp"];
+            dhcp?: components["schemas"]["MetricsDhcp"] | null;
             dns?: components["schemas"]["MetricsDns"] | null;
             /** @description The observations the reconciler ingests. */
             ingest: components["schemas"]["MetricsIngest"];
@@ -27111,6 +27211,13 @@ export interface operations {
                 vendor_class?: string;
                 /** @description The user class the client sends (option 77). */
                 user_class?: string;
+                /**
+                 * @description The client system architecture (option 93, RFC 4578): 0 BIOS, 7 and 9 UEFI x64, 16 UEFI
+                 *     HTTP boot x64.
+                 */
+                architecture?: number;
+                /** @description The host name the client sends (option 12). */
+                host_name?: string;
             };
             header?: never;
             path: {

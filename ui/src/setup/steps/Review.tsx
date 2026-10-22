@@ -121,6 +121,24 @@ export function Review() {
               </div>
             </Row>
           </Show>
+          {/* WP8.6: the first DHCP scope and the listener. */}
+          <Show when={w.dhcpWanted()}>
+            <Row label={t("setup.done.dhcp")} change={{ step: stepIndex("dhcp"), item: t("setup.done.dhcp") }}>
+              <span data-testid="setup-review-dhcp" data-state={w.dhcpPlan() ? "now" : "later"}>
+                <Show when={w.dhcpPlan()} fallback={<span class="muted">{t("setup.done.dhcp_later")}</span>}>
+                  {(p) => <span class="mono">{p().network}</span>}
+                </Show>
+              </span>
+              <Show when={w.dhcpPlan()}>
+                {(p) => (
+                  <>
+                    <div class="wz-help">{t("setup.done.dhcp_detail", { first: p().poolFirst, last: p().poolLast, router: p().router })}</div>
+                    <div class="wz-help">{t(`setup.dhcp.listen.${p().listen}`)}</div>
+                  </>
+                )}
+              </Show>
+            </Row>
+          </Show>
           <Row label={t("setup.done.cluster")}>{t("setup.cluster.new")}</Row>
         </dl>
         <Show when={w.state.profile === "lab"}>

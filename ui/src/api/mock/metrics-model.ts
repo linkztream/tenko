@@ -16,6 +16,37 @@ export interface MockMetricsOptions {
   dns: boolean;
   /** The id of the controller. */
   node?: number;
+  // WP8.7: the `dhcp` role.
+  /** Whether the controller runs the `dhcp` role. */
+  dhcp?: boolean;
+}
+
+// WP8.7: the `dhcp` part of a sample: about 40 leases a second, four scopes, DDNS on.
+function dhcpPart(second: number): S["MetricsDhcp"] {
+  const leases = round(wave(40, 0.4, 35, second), 0);
+  return {
+    leases_per_second: leases,
+    ack_p99_ms: leases > 0 ? round(wave(9, 0.4, 22, second)) : null,
+    naks_per_second: round(wave(0.4, 1, 27, second)),
+    declines_per_second: second % 45 < 2 ? 1 : 0,
+    active_leases: 1_180 + (second % 120),
+    abandoned_leases: 2,
+    scopes: 4,
+    fullest: [
+      { scope: "192.0.2.0/26", utilization: round(wave(0.86, 0.04, 90, second), 2) },
+      { scope: "198.51.100.0/24", utilization: round(wave(0.61, 0.05, 70, second), 2) },
+      { scope: "203.0.113.0/25", utilization: round(wave(0.33, 0.1, 60, second), 2) },
+    ],
+    ddns: {
+      written: round(wave(6, 0.5, 31, second), 0),
+      removed: round(wave(2, 0.8, 41, second), 0),
+      refused: second % 30 < 3 ? 1 : 0,
+      failed: 0,
+      skipped: round(wave(1, 1, 19, second)),
+      dropped: 0,
+      queue: second % 7,
+    },
+  };
 }
 
 /** A fixed pseudo-random number from -1 to 1 for a second and a salt. */
@@ -93,6 +124,8 @@ export function mockMetricsSnapshot(second: number, options: MockMetricsOptions,
     sse: { subscribers: 3 },
     nodes,
     dns: options.dns ? dnsPart(second) : null,
+    // WP8.7: the `dhcp` part.
+    dhcp: options.dhcp ? dhcpPart(second) : null,
   });
   return { cluster: own(null), nodes: [own(node)] };
 }

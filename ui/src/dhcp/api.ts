@@ -87,11 +87,33 @@ export function getUtilization(prefix: string, signal?: AbortSignal): Promise<Ut
   return api.get("/api/v1/dhcp/scopes/{prefix}/utilization", { path: { prefix }, signal });
 }
 
-/** The options a client gets in a scope: its MAC address, and optionally its client identifier in hexadecimal. */
-export function getEffectiveOptions(prefix: string, client: { mac: string; clientId?: string | undefined }, signal?: AbortSignal): Promise<EffectiveOptions> {
+/** What a client sends that the matcher tests (WP8.6): the facts of "why did this client get this value". */
+export interface ClientFacts {
+  mac: string;
+  /** The client identifier (option 61) in hexadecimal. */
+  clientId?: string | undefined;
+  /** The vendor class (option 60). */
+  vendorClass?: string | undefined;
+  /** The user class (option 77). */
+  userClass?: string | undefined;
+  /** The client system architecture (option 93), 0 to 65535. */
+  architecture?: number | undefined;
+  /** The host name (option 12). */
+  hostName?: string | undefined;
+}
+
+/** The options a client gets in a scope, with the classes it is in and the policies that match it: the answer of the matcher the engine uses. */
+export function getEffectiveOptions(prefix: string, client: ClientFacts, signal?: AbortSignal): Promise<EffectiveOptions> {
   return api.get("/api/v1/dhcp/scopes/{prefix}/effective-options", {
     path: { prefix },
-    query: { mac: client.mac, client_id: client.clientId || undefined },
+    query: {
+      mac: client.mac,
+      client_id: client.clientId || undefined,
+      vendor_class: client.vendorClass || undefined,
+      user_class: client.userClass || undefined,
+      architecture: client.architecture,
+      host_name: client.hostName || undefined,
+    },
     signal,
   });
 }
@@ -173,6 +195,11 @@ export async function deleteOptionDef(def: Pick<OptionDef, "id" | "revision">): 
 /** The option set of an owner in its path form (`server`, `scope:<prefix>`); an owner without options reads as an empty set at revision 0. */
 export function getOptionSet(owner: string, signal?: AbortSignal): Promise<OptionSet> {
   return api.get("/api/v1/dhcp/option-sets/{owner}", { path: { owner }, signal });
+}
+
+/** The option sets of all policies in one read, to tell the policies that set options from those that do not. */
+export async function listPolicyOptionSets(signal?: AbortSignal): Promise<OptionSet[]> {
+  return (await all<OptionSet>("/api/v1/dhcp/option-sets", { query: { level: "policy" }, signal })).items;
 }
 
 /** Replaces the whole set of an owner. */

@@ -424,12 +424,6 @@
       <unit id="dhcp.scope.save">
         <segment><source>Save</source></segment>
       </unit>
-      <unit id="dhcp.scope.ddns_on">
-        <segment><source>Dynamic DNS updates are on for this scope. Their settings are managed by the DDNS support of a later package.</source></segment>
-      </unit>
-      <unit id="dhcp.scope.ddns_off">
-        <segment><source>Dynamic DNS updates are off for this scope. Their settings are managed by the DDNS support of a later package.</source></segment>
-      </unit>
       <unit id="dhcp.scope.in_ipam">
         <segment><source>Open in IPAM</source></segment>
       </unit>
@@ -709,9 +703,6 @@
       <unit id="dhcp.effective.title">
         <segment><source>Options of a client</source></segment>
       </unit>
-      <unit id="dhcp.effective.help">
-        <segment><source>Enter the MAC address of a client to see the options it gets in this scope and the level each comes from.</source></segment>
-      </unit>
       <unit id="dhcp.effective.mac">
         <segment><source>MAC address</source></segment>
       </unit>
@@ -723,9 +714,6 @@
       </unit>
       <unit id="dhcp.effective.reservation">
         <segment><source>This client has a reservation in IPAM; the options of the reservation are the last level.</source></segment>
-      </unit>
-      <unit id="dhcp.effective.note">
-        <segment><source>Policies are not matched against clients yet, so the policy level stays empty until a later package.</source></segment>
       </unit>
       <unit id="dhcp.effective.empty">
         <segment><source>No options are set at any level.</source></segment>
@@ -1030,9 +1018,6 @@
       <unit id="dhcp.policies.sub">
         <segment><source>Rules in the order they are evaluated: those of each scope, then those of the server.</source></segment>
       </unit>
-      <unit id="dhcp.policies.note">
-        <segment><source>Matching clients to classes and policies comes with a later package. The policies are stored and checked now, but they do not change what clients get yet.</source></segment>
-      </unit>
       <unit id="dhcp.policies.empty">
         <segment><source>No policies</source></segment>
       </unit>
@@ -1158,9 +1143,6 @@
       </unit>
       <unit id="dhcp.action.lease">
         <segment><source>lease time {lease}</source></segment>
-      </unit>
-      <unit id="dhcp.action.ddns">
-        <segment><source>its own DDNS settings</source></segment>
       </unit>
       <unit id="dhcp.action.none">
         <segment><source>no change</source></segment>

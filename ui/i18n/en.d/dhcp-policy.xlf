@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dhcp-policy">
+      <unit id="dhcp.scope.tab.ddns">
+        <notes><note category="description">Tab of the scope page for the DDNS settings of the scope.</note></notes>
+        <segment><source>DDNS</source></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_line_on">
+        <notes><note category="description">Line on the settings tab of a scope: DDNS is on; a link to the DDNS tab follows.</note></notes>
+        <segment><source>Dynamic DNS updates are on for this scope.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_line_off">
+        <notes><note category="description">Line on the settings tab of a scope: DDNS is off; a link to the DDNS tab follows.</note></notes>
+        <segment><source>Dynamic DNS updates are off for this scope.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_link">
+        <notes><note category="description">Link from the settings tab of a scope to its DDNS tab.</note></notes>
+        <segment><source>Change the DDNS settings</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.title">
+        <notes><note category="description">Heading of the DDNS tab of a scope; {network} is the scope's network.</note></notes>
+        <segment><source>DDNS of {network}</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.help">
+        <notes><note category="description">Introduction of the DDNS tab.</note></notes>
+        <segment><source>Tenko DHCP writes the names of the clients of the scope into the DNS zones that Tenko serves: an A record, a DHCID record and a PTR record.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.needs_dns">
+        <notes><note category="description">States that DDNS needs the DNS module.</note></notes>
+        <segment><source>DDNS writes into the zones of the DNS module, so the DNS module must be switched on.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.legend">
+        <notes><note category="description">Legend of the group of DDNS fields.</note></notes>
+        <segment><source>DDNS settings</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.enabled">
+        <notes><note category="description">Label of the switch that turns DDNS on.</note></notes>
+        <segment><source>Write names into DNS for the clients</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.zone">
+        <notes><note category="description">Label of the forward zone menu.</note></notes>
+        <segment><source>Forward zone</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_none">
+        <notes><note category="description">Menu entry that picks no forward zone.</note></notes>
+        <segment><source>None: the zone of the domain name of the scope (option 15)</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_unknown">
+        <notes><note category="description">Menu entry for a forward zone that is set but not in the zone list; {id} is the zone identifier.</note></notes>
+        <segment><source>{id} (not in the zone list)</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_unavailable">
+        <notes><note category="description">Shown when the list of DNS zones cannot be read.</note></notes>
+        <segment><source>The DNS zones cannot be read here: the DNS module may be switched off, or your role may not read zones. The current setting is kept as it is.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_state.on">
+        <notes><note category="description">The update policy of the chosen zone allows DHCP updates.</note></notes>
+        <segment><source>The update policy of this zone allows DHCP updates.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_state.off">
+        <notes><note category="description">The update policy of the chosen zone turns DHCP updates off.</note></notes>
+        <segment><source>The update policy of this zone does not allow DHCP updates, so names for it are refused.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_state.profile_on">
+        <notes><note category="description">The zone's update policy is silent and the profile lets the zone take DHCP updates; {profile} is the name of the security profile.</note></notes>
+        <segment><source>The update policy of this zone does not say; the {profile} profile lets it take DHCP updates.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.zone_state.profile_off">
+        <notes><note category="description">The zone's update policy is silent and the profile does not let the zone take DHCP updates; {profile} is the name of the security profile.</note></notes>
+        <segment><source>The update policy of this zone does not say; the {profile} profile does not let it take DHCP updates until you allow them in the zone.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.reverse">
+        <notes><note category="description">Label of the switch for PTR records.</note></notes>
+        <segment><source>Write PTR records (reverse names)</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.reverse_help">
+        <notes><note category="description">Help of the PTR switch.</note></notes>
+        <segment><source>In the reverse zone that Tenko serves for the address.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.ttl">
+        <notes><note category="description">Label of the TTL field, in seconds.</note></notes>
+        <segment><source>TTL of the records (seconds)</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.ttl_help">
+        <notes><note category="description">Help of the TTL field.</note></notes>
+        <segment><source>Empty: a third of the lease time. At most one week.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.conflict">
+        <notes><note category="description">Label of the name protection menu.</note></notes>
+        <segment><source>When another client holds the name</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.conflict.protect">
+        <notes><note category="description">Name protection: protect (RFC 4703).</note></notes>
+        <segment><source>Protect the name: the second client gets none (RFC 4703)</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.conflict.replace">
+        <notes><note category="description">Name protection: replace.</note></notes>
+        <segment><source>Replace the name: the last client wins</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.client_a">
+        <notes><note category="description">Label of the switch that lets clients write their own A record.</note></notes>
+        <segment><source>Let clients write their own A record</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.client_a_help">
+        <notes><note category="description">Help of that switch (DHCP option 81, flag S).</note></notes>
+        <segment><source>A client that asks to (option 81 with S clear) does so; the server then writes the PTR record only.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.legacy">
+        <notes><note category="description">Label of the switch for clients without option 81.</note></notes>
+        <segment><source>Update for legacy clients</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.legacy_help">
+        <notes><note category="description">Help of that switch.</note></notes>
+        <segment><source>Clients without option 81 get a name from their host name (option 12).</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.foreign">
+        <notes><note category="description">Label of the switch that refuses names outside the forward zone.</note></notes>
+        <segment><source>Refuse names outside the forward zone</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.field.foreign_help">
+        <notes><note category="description">Help of that switch.</note></notes>
+        <segment><source>Otherwise such a name is cut to its first label under the zone.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.check.ttl">
+        <notes><note category="description">Local check of the TTL field.</note></notes>
+        <segment><source>Enter a whole number of seconds from 1 to 2147483647, or leave it empty.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.hardened_note">
+        <notes><note category="description">Shown when Replace is chosen under the Hardened profile; {profile} is the name of the profile.</note></notes>
+        <segment><source>The {profile} profile always protects names: Replace is treated as Protect.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.profile_open">
+        <notes><note category="description">What the Home and Lab profiles do with zones; {profile} is the name of the profile.</note></notes>
+        <segment><source>The {profile} profile: a zone takes DHCP updates unless its update policy turns them off.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.profile_strict">
+        <notes><note category="description">What the Standard and Hardened profiles do with zones; {profile} is the name of the profile.</note></notes>
+        <segment><source>The {profile} profile: a zone takes DHCP updates only when its update policy turns them on.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.server_now">
+        <notes><note category="description">The DDNS settings of the server in words; {words} is the description.</note></notes>
+        <segment><source>The DDNS settings of the server: {words}.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.off">
+        <notes><note category="description">DDNS settings in words: off.</note></notes>
+        <segment><source>DDNS is off</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.on">
+        <notes><note category="description">DDNS settings in words: on; {parts} is a list of the settings.</note></notes>
+        <segment><source>DDNS is on with {parts}</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.zone">
+        <notes><note category="description">Part of the DDNS words; {zone} is the zone name.</note></notes>
+        <segment><source>forward zone {zone}</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.zone_domain">
+        <notes><note category="description">Part of the DDNS words: no forward zone is set.</note></notes>
+        <segment><source>the zone of the domain name</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.reverse_on">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>PTR records</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.reverse_off">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>no PTR records</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.ttl">
+        <notes><note category="description">Part of the DDNS words; {seconds} is the TTL.</note></notes>
+        <segment><source>TTL {seconds} s</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.ttl_third">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>TTL a third of the lease time</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.protect">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>names protected</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.replace">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>names replaced by the last client</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.client_a">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>clients may write their own A record</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.legacy_on">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>names for legacy clients</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.legacy_off">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>no names for legacy clients</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.words.foreign">
+        <notes><note category="description">Part of the DDNS words.</note></notes>
+        <segment><source>names outside the zone refused</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.inherit">
+        <notes><note category="description">Button that copies the server's DDNS settings into the form.</note></notes>
+        <segment><source>Copy the settings of the server into the form</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.inherit_help">
+        <notes><note category="description">Explains why the scope cannot go back to the server's settings.</note></notes>
+        <segment><source>A scope that has DDNS settings of its own cannot go back to following the server. Copy the current settings of the server to start from them.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.follows">
+        <notes><note category="description">Shown when the scope has no DDNS settings of its own.</note></notes>
+        <segment><source>This scope has no DDNS settings of its own; the settings of the server apply. Saving gives it its own.</source></segment>
+      </unit>
+      <unit id="dhcp.ddns.saved">
+        <notes><note category="description">Toast after the DDNS settings of a scope were saved; {network} is the scope's network.</note></notes>
+        <segment><source>DDNS settings of {network} saved</source></segment>
+      </unit>
+      <unit id="dhcp.policy.ddns.legend">
+        <notes><note category="description">Legend of the DDNS group in the policy form.</note></notes>
+        <segment><source>DDNS</source></segment>
+      </unit>
+      <unit id="dhcp.policy.ddns.on">
+        <notes><note category="description">Switch in the policy form: the policy sets DDNS for its clients.</note></notes>
+        <segment><source>Set DDNS for these clients</source></segment>
+      </unit>
+      <unit id="dhcp.policy.ddns.help">
+        <notes><note category="description">Help of that switch.</note></notes>
+        <segment><source>The first matching policy that sets DDNS decides for a client; without one the settings of the scope apply.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.options.title">
+        <notes><note category="description">Legend of the options group in the policy form.</note></notes>
+        <segment><source>Options of the policy</source></segment>
+      </unit>
+      <unit id="dhcp.policy.options.new">
+        <notes><note category="description">Shown in the form of a policy that does not exist yet.</note></notes>
+        <segment><source>The options of a policy are set once it exists. After you create it, this form switches to editing so that you can add them at once.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.options.help">
+        <notes><note category="description">Help of the options group in the form of an existing policy.</note></notes>
+        <segment><source>The options that a client gets when the policy matches it. For each option the first matching policy that sets it wins. The options are saved with their own button.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.options.label">
+        <notes><note category="description">Accessible name of the option editor of a policy; {name} is the policy's name.</note></notes>
+        <segment><source>Options of the policy {name}</source></segment>
+      </unit>
+      <unit id="dhcp.policies.note_live">
+        <notes><note category="description">Note above the list of policies.</note></notes>
+        <segment><source>A client gets what the first matching policy sets, for each of four things: its options, its address range, its lease times and its DDNS settings. The DHCP engine uses the classes and policies as they are listed here.</source></segment>
+      </unit>
+      <unit id="dhcp.action.ddns_on_zone">
+        <notes><note category="description">A policy action in words: DDNS on; {zone} is the forward zone's name.</note></notes>
+        <segment><source>DDNS on, zone {zone}</source></segment>
+      </unit>
+      <unit id="dhcp.action.ddns_on">
+        <notes><note category="description">A policy action in words: DDNS on.</note></notes>
+        <segment><source>DDNS on</source></segment>
+      </unit>
+      <unit id="dhcp.action.ddns_off">
+        <notes><note category="description">A policy action in words: DDNS off.</note></notes>
+        <segment><source>DDNS off</source></segment>
+      </unit>
+      <unit id="dhcp.action.options">
+        <notes><note category="description">A policy action in words: the policy has options of its own.</note></notes>
+        <segment><source>options</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.0">
+        <notes><note category="description">Client system architecture 0 (RFC 4578).</note></notes>
+        <segment><source>BIOS x86</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.6">
+        <notes><note category="description">Client system architecture 6.</note></notes>
+        <segment><source>UEFI x86</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.7">
+        <notes><note category="description">Client system architecture 7.</note></notes>
+        <segment><source>UEFI x64</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.9">
+        <notes><note category="description">Client system architecture 9; many x64 firmwares send it.</note></notes>
+        <segment><source>UEFI x64 (EBC id)</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.10">
+        <notes><note category="description">Client system architecture 10.</note></notes>
+        <segment><source>UEFI ARM 32</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.11">
+        <notes><note category="description">Client system architecture 11.</note></notes>
+        <segment><source>UEFI ARM 64</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.15">
+        <notes><note category="description">Client system architecture 15.</note></notes>
+        <segment><source>UEFI HTTP x86</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.16">
+        <notes><note category="description">Client system architecture 16.</note></notes>
+        <segment><source>UEFI HTTP x64</source></segment>
+      </unit>
+      <unit id="dhcp.arch.name.19">
+        <notes><note category="description">Client system architecture 19.</note></notes>
+        <segment><source>UEFI HTTP ARM 64</source></segment>
+      </unit>
+      <unit id="dhcp.arch.label">
+        <notes><note category="description">Accessible name of the architecture menu.</note></notes>
+        <segment><source>Architecture</source></segment>
+      </unit>
+      <unit id="dhcp.arch.empty">
+        <notes><note category="description">First entry of the architecture menu in a match: nothing chosen yet.</note></notes>
+        <segment><source>Choose an architecture</source></segment>
+      </unit>
+      <unit id="dhcp.arch.none">
+        <notes><note category="description">First entry of the architecture menu of the effective options form: the client sends none.</note></notes>
+        <segment><source>Not sent</source></segment>
+      </unit>
+      <unit id="dhcp.arch.other">
+        <notes><note category="description">Entry of the architecture menu that lets you type any other number.</note></notes>
+        <segment><source>Another number</source></segment>
+      </unit>
+      <unit id="dhcp.arch.option">
+        <notes><note category="description">Entry of the architecture menu; {code} is the number and {name} its name.</note></notes>
+        <segment><source>{code}: {name}</source></segment>
+      </unit>
+      <unit id="dhcp.arch.value_label">
+        <notes><note category="description">Accessible name of the field for another architecture number.</note></notes>
+        <segment><source>Architecture number</source></segment>
+      </unit>
+      <unit id="dhcp.match.architecture_named">
+        <notes><note category="description">A match in words for a known client architecture; {name} is its name and {code} the number.</note></notes>
+        <segment><source>client architecture {name} ({code})</source></segment>
+      </unit>
+      <unit id="dhcp.effective.help_facts">
+        <notes><note category="description">Introduction of the form that shows what a client gets.</note></notes>
+        <segment><source>Describe a client by its MAC address and, to see classes and policies at work, by what it sends. You see the classes it is in, the policies that match it and where each option comes from.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.vendor_class">
+        <notes><note category="description">Label of the vendor class field (DHCP option 60).</note></notes>
+        <segment><source>Vendor class (option 60, optional)</source></segment>
+      </unit>
+      <unit id="dhcp.effective.user_class">
+        <notes><note category="description">Label of the user class field (DHCP option 77).</note></notes>
+        <segment><source>User class (option 77, optional)</source></segment>
+      </unit>
+      <unit id="dhcp.effective.architecture">
+        <notes><note category="description">Label of the architecture menu (DHCP option 93).</note></notes>
+        <segment><source>Client architecture (option 93, optional)</source></segment>
+      </unit>
+      <unit id="dhcp.effective.host_name">
+        <notes><note category="description">Label of the host name field (DHCP option 12).</note></notes>
+        <segment><source>Host name (option 12, optional)</source></segment>
+      </unit>
+      <unit id="dhcp.effective.note_live">
+        <notes><note category="description">Note under the result of the effective options.</note></notes>
+        <segment><source>Classes and policies are matched as the DHCP engine matches them. The options of a pool depend on the address that is picked and are shown on the pool.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.classes">
+        <notes><note category="description">Heading of the classes the client is in.</note></notes>
+        <segment><source>Classes the client is in</source></segment>
+      </unit>
+      <unit id="dhcp.effective.no_classes">
+        <notes><note category="description">The client is in no class.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="dhcp.effective.policies">
+        <notes><note category="description">Heading of the policies that match the client.</note></notes>
+        <segment><source>Policies that match, in order</source></segment>
+      </unit>
+      <unit id="dhcp.effective.no_policies">
+        <notes><note category="description">No policy matches the client.</note></notes>
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="dhcp.effective.col.why">
+        <notes><note category="description">Column of the effective options: why the option has this value.</note></notes>
+        <segment><source>Why</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.server">
+        <notes><note category="description">Why an option has its value: it comes from the server level.</note></notes>
+        <segment><source>From the options of the server</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.shared_network">
+        <notes><note category="description">Why an option has its value: it comes from the shared network.</note></notes>
+        <segment><source>From the options of the shared network of the scope</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.scope">
+        <notes><note category="description">Why an option has its value: it comes from the scope.</note></notes>
+        <segment><source>From the options of this scope</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.pool">
+        <notes><note category="description">Why an option has its value: it comes from a pool.</note></notes>
+        <segment><source>From the options of a pool</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.host">
+        <notes><note category="description">Why an option has its value: it comes from the reservation.</note></notes>
+        <segment><source>From the reservation of this client</source></segment>
+      </unit>
+      <unit id="dhcp.effective.why.policy">
+        <notes><note category="description">Why an option has its value: it comes from a policy; {name} is the policy's name.</note></notes>
+        <segment><source>From policy {name}, the first matching policy that sets it</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

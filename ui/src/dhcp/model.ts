@@ -275,6 +275,20 @@ export function kindOfData(data: OptionData): OptionKind {
 export type MatchKind = "vendor_class" | "user_class" | "mac" | "client_id" | "circuit_id" | "remote_id" | "architecture" | "host_name";
 export const MATCH_KINDS: readonly MatchKind[] = ["vendor_class", "user_class", "mac", "client_id", "circuit_id", "remote_id", "architecture", "host_name"];
 
+/** The client system architectures the pickers name (RFC 4578 and the IANA registry); any other number can still be typed. */
+export const ARCHITECTURES = [0, 6, 7, 9, 10, 11, 15, 16, 19] as const;
+export type Architecture = (typeof ARCHITECTURES)[number];
+
+export function isKnownArchitecture(code: number): code is Architecture {
+  return (ARCHITECTURES as readonly number[]).includes(code);
+}
+
+/** An architecture type as typed: a whole number from 0 to 65535, or null. */
+export function architectureOfText(text: string): number | null {
+  const s = text.trim();
+  return /^\d{1,5}$/.test(s) && Number(s) <= 65_535 ? Number(s) : null;
+}
+
 /** Kinds whose value can be an exact text or a prefix. */
 export function hasPrefix(kind: MatchKind): boolean {
   return kind === "vendor_class" || kind === "host_name";

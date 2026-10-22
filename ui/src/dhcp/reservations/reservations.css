@@ -1,0 +1,6 @@
+/* The DHCP reservations block on the page of a reserved host (WP8.6): the state tags and the
+   warning about a lease held by another client. */
+.host-reservations td { vertical-align: top; }
+.tag.reservation-state.served { background: var(--ok-wash); color: var(--ok-ink); }
+.tag.reservation-state.scope_disabled, .tag.reservation-state.not_serving { background: var(--discrepancy-wash); color: var(--discrepancy); }
+.host-reservations .note { margin-block-start: var(--sp-2); }

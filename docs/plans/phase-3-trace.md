@@ -27,7 +27,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>and 1 more |
 | DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 9 more |
 | DHCP-14 | Should | `crates/tenko/tests/acceptance_reconcile.rs` | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/fingerprint.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`docs/ROADMAP.md`<br>and 2 more |
-| DHCP-15 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-15 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-16 | Must | `crates/tenko-ipam/tests/move_dhcp.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/dhcp.md`<br>`docs/moves.md`<br>and 2 more |
 | DHCP-17 | Should | - | - | `docs/plans/phase-3-plan.md` |
 | DHCP-18 | Must | - | - | `docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/plans/phase-3-plan.md` |

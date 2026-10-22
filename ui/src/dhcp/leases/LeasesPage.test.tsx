@@ -1,12 +1,15 @@
 // The leases: the grid with the client, the name, the network of the scope and when a lease ends,
 // the filters sent as query parameters, paging with the cursor, the release with its dialog (the body
 // sent, the refusal of the server shown, who sees it), the live view with its sampling, the status
-// strip of the role (and a node that does not run it), the states without a service, Swedish.
+// strip of the role (and a node that does not run it), the live strip (the scope, the utilization
+// bars and the count of the leases granted since the page was opened), the states without a
+// service, Swedish.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { events, type ApiEvent } from "../../api/events";
 import { db } from "../../api/mock/db";
+import { DHCP_IDS } from "../../api/mock/dhcp-model";
 import { server } from "../../api/mock/node";
 import { dhcpLeaseState, docMac, grantMockLease } from "../../api/mock/routes-dhcp-leases";
 import { axeViolations } from "../../app/testing/axe";
@@ -36,6 +39,19 @@ const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0))
 /** The URLs of the reads of the lease list so far. */
 function leaseReads(spy: { mock: { calls: unknown[][] } }): URL[] {
   return spy.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter((url) => url.pathname === "/api/v1/dhcp/leases");
+}
+
+/** The handler the page registered for the `dhcp` topic, to feed it events as the stream would. */
+function stream(): { feed: (n: number, tables?: string[]) => void } {
+  const subscribe = vi.spyOn(events, "subscribe");
+  return {
+    feed: (n, tables = ["dhcp.leases"]) => {
+      const handler = subscribe.mock.calls.find(([topic]) => topic === "dhcp")?.[1];
+      if (!handler) throw new Error("the page did not subscribe to the dhcp topic");
+      const event: ApiEvent = { topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision: db.revision + 100_000 + n, data: { tables, revision: db.revision + 100_000 + n } };
+      handler(event);
+    },
+  };
 }
 
 function problem(status: number, code: string): Response {
@@ -196,19 +212,6 @@ describe("the leases", () => {
   });
 
   describe("the live view", () => {
-    /** The handler the page registered for the `dhcp` topic, to feed it events as the stream would. */
-    function stream(): { feed: (n: number, tables?: string[]) => void } {
-      const subscribe = vi.spyOn(events, "subscribe");
-      return {
-        feed: (n, tables = ["dhcp.leases"]) => {
-          const handler = subscribe.mock.calls.find(([topic]) => topic === "dhcp")?.[1];
-          if (!handler) throw new Error("the page did not subscribe to the dhcp topic");
-          const event: ApiEvent = { topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision: db.revision + 100_000 + n, data: { tables, revision: db.revision + 100_000 + n } };
-          handler(event);
-        },
-      };
-    }
-
     it("shows a lease that appears without a reload", async () => {
       const { feed } = stream();
       open();
@@ -304,6 +307,365 @@ describe("the leases", () => {
       expect(screen.queryByTestId("dhcp-strip")).toBeNull();
       expect(screen.queryByTestId("dhcp-strip-not-dhcp")).toBeNull();
       expect(rows(GRID).length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("the live strip", () => {
+    const LAN_ID = DHCP_IDS.lan;
+    const IOT_ID = DHCP_IDS.iot;
+
+    /** The reads of `path` so far, as URLs. */
+    function reads(spy: { mock: { calls: unknown[][] } }, match: (url: URL) => boolean): URL[] {
+      return spy.mock.calls.map(([url]) => new URL(String(url), "http://localhost")).filter(match);
+    }
+    const utilReads = (spy: { mock: { calls: unknown[][] } }) => reads(spy, (url) => url.pathname.endsWith("/utilization"));
+    const grantReads = (spy: { mock: { calls: unknown[][] } }) => reads(spy, (url) => url.pathname === "/api/v1/dhcp/history" && url.searchParams.get("kind") === "granted");
+    const count = () => screen.getByTestId("leases-new").dataset.count;
+    const text = () => screen.getByTestId("leases-new").textContent;
+    const ready = () => waitFor(() => expect(screen.getByTestId("leases-new").textContent).not.toBe("…"));
+
+    /** Eight scopes in the documentation range, the second, fourth and eighth fullest. */
+    const used = [10, 80, 30, 95, 50, 20, 60, 70];
+    function manyScopes(): void {
+      const scopes = used.map((_, i) => ({ prefix: `0190d1c2-0000-7000-8000-00000000f50${i}`, cidr: `192.0.2.${i * 32}/27`, pools: 1, leases: 0, enabled: true, revision: 1 }));
+      server.use(
+        http.get("/api/v1/dhcp/scopes", () => HttpResponse.json({ items: scopes, next_cursor: null, revision: 1 })),
+        http.get("/api/v1/dhcp/scopes/:prefix/utilization", ({ params }) => {
+          const i = scopes.findIndex((s) => s.prefix === params.prefix);
+          const leased = used[i] ?? 0;
+          return HttpResponse.json({ prefix: params.prefix, pool_size: 100, leased, reserved: 0, abandoned: 0, free: 100 - leased, utilization: leased / 100, at: new Date().toISOString() });
+        }),
+      );
+    }
+
+    /** A grant of another scope at once, which the mock has no client for. */
+    function grantElsewhere(n: number, scope = IOT_ID): void {
+      const template = dhcpLeaseState().events[0]!;
+      const at = new Date(Date.now() + 1000).toISOString();
+      for (let i = 0; i < n; i += 1) dhcpLeaseState().events.push({ ...template, addr: `198.51.100.${(i % 200) + 10}`, at, kind: "granted", scope });
+    }
+
+    describe("the scope", () => {
+      it("names no scope and offers a bar for each scope that sets the filter", async () => {
+        open();
+        await loaded();
+        const strip = screen.getByTestId("leases-live-strip");
+        expect(strip.dataset.scope).toBe("");
+        expect(within(strip).getByTestId("leases-scope-name").textContent).toBe("All scopes");
+        expect(within(strip).queryByTestId("leases-scope-link")).toBeNull();
+        expect(within(strip).queryByTestId("leases-utilization")).toBeNull();
+        const bar = await within(strip).findByTestId("leases-scope-bar");
+        expect(bar.dataset.key).toBe(LAN);
+        // 12 of the 90 addresses of the pool.
+        expect((await within(bar).findByTestId("scope-util")).dataset.key).toBe("13");
+        expect(within(strip).queryByTestId("leases-scope-more")).toBeNull();
+
+        fireEvent.click(bar);
+        await waitFor(() => expect(screen.getByTestId("leases-live-strip").dataset.scope).toBe(LAN_ID));
+        expect((screen.getByTestId("filter-scope") as HTMLSelectElement).value).toBe(LAN_ID);
+        expect(screen.queryByTestId("leases-scope-bars")).toBeNull();
+        expect(screen.getByTestId("leases-scope-name").textContent).toBe(LAN);
+        expect(screen.getByTestId("leases-scope-link").getAttribute("href")).toBe(`/dhcp/scopes/${LAN_ID}`);
+      });
+
+      it("shows the bar of the chosen scope with its figures and the time it was read", async () => {
+        const view = open(`/dhcp/leases?scope=${LAN_ID}`);
+        await loaded();
+        const bar = await screen.findByTestId("leases-utilization");
+        await waitFor(() => expect(bar.dataset.value).toBe("13"));
+        const facts = Object.fromEntries(within(bar).getAllByTestId("util-fact").map((el) => [el.dataset.key, el.querySelector("b")?.textContent]));
+        expect(facts).toEqual({ leased: "12", reserved: "0", abandoned: "0", free: "78", pool_size: "90" });
+        expect(within(bar).getByTestId("util-at").textContent).toMatch(/^Read at \d/);
+        expect(within(bar).getByTestId("scope-util").querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("13 percent used");
+        expect(screen.queryByTestId("leases-scope-bars")).toBeNull();
+        expect(await axeViolations(view.container)).toEqual([]);
+      });
+
+      it("shows the first six scopes by network, the fullest first, and links to the list for the rest", async () => {
+        manyScopes();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        const bars = await screen.findByTestId("leases-scope-bars");
+        await waitFor(() => expect(within(bars).getAllByTestId("scope-util")).toHaveLength(6));
+        // The first six by network hold 10, 80, 30, 95, 50 and 20 percent.
+        await waitFor(() => expect(within(bars).getAllByTestId("leases-scope-bar").map((b) => b.dataset.key)).toEqual(["192.0.2.96/27", "192.0.2.32/27", "192.0.2.128/27", "192.0.2.64/27", "192.0.2.160/27", "192.0.2.0/27"]));
+        const more = within(bars).getByTestId("leases-scope-more");
+        expect(more.textContent).toBe("and 2 more scopes");
+        expect(more.dataset.count).toBe("2");
+        expect(more.getAttribute("href")).toBe("/dhcp");
+        // Only the scopes with a bar are read.
+        expect(new Set(utilReads(spy).map((url) => url.pathname)).size).toBe(6);
+      });
+
+      it("takes the scope of a bar as the filter of the list", async () => {
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        fireEvent.click(await screen.findByTestId("leases-scope-bar"));
+        await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("scope")).toBe(LAN_ID));
+        fireEvent.change(screen.getByTestId("filter-scope"), { target: { value: "" } });
+        await waitFor(() => expect(screen.getByTestId("leases-live-strip").dataset.scope).toBe(""));
+        expect(await screen.findByTestId("leases-scope-bar")).toBeTruthy();
+      });
+    });
+
+    describe("the bars follow the refreshes of the list", () => {
+      it("reads the bar of the chosen scope again with a refresh of the list, once for a burst", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open(`/dhcp/leases?scope=${LAN_ID}`);
+        await loaded();
+        await waitFor(() => expect((screen.getByTestId("leases-utilization") as HTMLElement).dataset.value).toBe("13"));
+        const before = utilReads(spy).length;
+        const listBefore = leaseReads(spy).length;
+        expect(before).toBe(1);
+        for (let i = 0; i < 300; i += 1) feed(i);
+        await waitFor(() => expect(utilReads(spy).length).toBe(before + 1));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(utilReads(spy).length).toBe(before + 1);
+        expect(leaseReads(spy).length).toBe(listBefore + 1);
+      });
+
+      it("shows a changed figure after the refresh", async () => {
+        const { feed } = stream();
+        open(`/dhcp/leases?scope=${LAN_ID}`);
+        await loaded();
+        await waitFor(() => expect(screen.getByTestId("leases-utilization").dataset.value).toBe("13"));
+        server.use(
+          http.get("/api/v1/dhcp/scopes/:prefix/utilization", ({ params }) =>
+            HttpResponse.json({ prefix: params.prefix, pool_size: 90, leased: 72, reserved: 0, abandoned: 0, free: 18, utilization: 0.8, at: new Date().toISOString() }),
+          ),
+        );
+        feed(1);
+        await waitFor(() => expect(screen.getByTestId("leases-utilization").dataset.value).toBe("80"));
+        expect(within(screen.getByTestId("leases-utilization")).getAllByTestId("util-fact")[0]?.querySelector("b")?.textContent).toBe("72");
+      });
+
+      it("reads the bars of the scopes again, and orders them anew", async () => {
+        manyScopes();
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        const bars = await screen.findByTestId("leases-scope-bars");
+        await waitFor(() => expect(within(bars).getAllByTestId("scope-util")).toHaveLength(6));
+        const before = utilReads(spy).length;
+        used.splice(0, 1, 99);
+        feed(1);
+        await waitFor(() => expect(utilReads(spy).length).toBe(before + 6));
+        await waitFor(() => expect(within(bars).getAllByTestId("leases-scope-bar")[0]?.dataset.key).toBe("192.0.2.0/27"));
+        used.splice(0, 1, 10);
+      });
+
+      it("does not read the bars while the view is paused", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open(`/dhcp/leases?scope=${LAN_ID}`);
+        await loaded();
+        await waitFor(() => expect(utilReads(spy).length).toBe(1));
+        fireEvent.click(screen.getByTestId("leases-live"));
+        feed(1);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(utilReads(spy).length).toBe(1);
+        fireEvent.click(screen.getByTestId("leases-live"));
+        await waitFor(() => expect(utilReads(spy).length).toBe(2));
+      });
+    });
+
+    describe("new since you opened the page", () => {
+      it("counts the grants since the page was opened and not those before", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        const before = Date.now();
+        open();
+        await loaded();
+        await ready();
+        // The seed holds twelve grants, all of them hours old.
+        expect(count()).toBe("0");
+        expect(text()).toBe("0 new leases since you opened this page");
+        expect(screen.getByTestId("leases-new").dataset.state).toBe("live");
+        const first = grantReads(spy).at(-1)!.searchParams;
+        expect(first.get("limit")).toBe("1000");
+        expect(first.get("scope")).toBeNull();
+        expect(Date.parse(first.get("from")!)).toBeGreaterThanOrEqual(before);
+
+        grantMockLease({ mac: docMac(0x50), hostname: "new-1" });
+        feed(1);
+        await waitFor(() => expect(count()).toBe("1"));
+        expect(text()).toBe("1 new lease since you opened this page");
+        grantMockLease({ mac: docMac(0x51), hostname: "new-2" });
+        feed(2);
+        await waitFor(() => expect(count()).toBe("2"));
+        expect(text()).toBe("2 new leases since you opened this page");
+        // A renewal is no grant.
+        const template = dhcpLeaseState().events[0]!;
+        dhcpLeaseState().events.push({ ...template, at: new Date().toISOString(), kind: "renewed" });
+        feed(3);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(count()).toBe("2");
+      });
+
+      it("links to the history of the same grants", async () => {
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        await ready();
+        const from = grantReads(spy).at(-1)!.searchParams.get("from")!;
+        const link = screen.getByTestId("leases-new-link");
+        const url = new URL(link.getAttribute("href")!, "http://localhost");
+        expect(url.pathname).toBe("/dhcp/history");
+        expect(url.searchParams.get("kind")).toBe("granted");
+        expect(url.searchParams.get("from")).toBe(from);
+        expect(url.searchParams.get("scope")).toBeNull();
+        expect(link.textContent).toBe("Show in history");
+      });
+
+      it("counts the grants of the chosen scope, keeps its start when the filters change, and links with the scope", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        await ready();
+        const from = grantReads(spy).at(-1)!.searchParams.get("from")!;
+        grantMockLease({ mac: docMac(0x52), hostname: "lan-1" });
+        grantElsewhere(2);
+        feed(1);
+        await waitFor(() => expect(count()).toBe("3"));
+
+        fireEvent.change(screen.getByTestId("filter-scope"), { target: { value: LAN_ID } });
+        await waitFor(() => expect(grantReads(spy).at(-1)!.searchParams.get("scope")).toBe(LAN_ID));
+        await waitFor(() => expect(count()).toBe("1"));
+        expect(grantReads(spy).at(-1)!.searchParams.get("from")).toBe(from);
+        const link = new URL(screen.getByTestId("leases-new-link").getAttribute("href")!, "http://localhost");
+        expect(link.searchParams.get("scope")).toBe(LAN_ID);
+        expect(link.searchParams.get("from")).toBe(from);
+
+        fireEvent.change(screen.getByTestId("filter-addr"), { target: { value: "192.0.2.1" } });
+        await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("addr")).toBe("192.0.2.1"));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(grantReads(spy).at(-1)!.searchParams.get("from")).toBe(from);
+        expect(count()).toBe("1");
+      });
+
+      it("says 1,000+ when there are more grants than one page holds", async () => {
+        const { feed } = stream();
+        open();
+        await loaded();
+        await ready();
+        grantElsewhere(1000);
+        feed(1);
+        await waitFor(() => expect(count()).toBe("1000"));
+        expect(screen.getByTestId("leases-new").dataset.state).toBe("live");
+        grantElsewhere(5);
+        feed(2);
+        await waitFor(() => expect(screen.getByTestId("leases-new").dataset.state).toBe("capped"));
+        expect(text()).toBe("1,000+ new leases since you opened this page");
+        expect(count()).toBe("1000");
+      });
+
+      it("counts from now on when it is reset", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        await ready();
+        const first = grantReads(spy).at(-1)!.searchParams.get("from")!;
+        grantMockLease({ mac: docMac(0x53), hostname: "before-reset" });
+        feed(1);
+        await waitFor(() => expect(count()).toBe("1"));
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        fireEvent.click(screen.getByTestId("leases-new-reset"));
+        await waitFor(() => expect(grantReads(spy).at(-1)!.searchParams.get("from")).not.toBe(first));
+        expect(Date.parse(grantReads(spy).at(-1)!.searchParams.get("from")!)).toBeGreaterThan(Date.parse(first));
+        await waitFor(() => expect(count()).toBe("0"));
+        expect(new URL(screen.getByTestId("leases-new-link").getAttribute("href")!, "http://localhost").searchParams.get("from")).toBe(grantReads(spy).at(-1)!.searchParams.get("from"));
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        grantMockLease({ mac: docMac(0x54), hostname: "after-reset" });
+        feed(2);
+        await waitFor(() => expect(count()).toBe("1"));
+      });
+
+      it("says it is paused while Live is off and reads nothing, then reads when Live is on again", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        await ready();
+        fireEvent.click(screen.getByTestId("leases-live"));
+        expect(screen.getByTestId("leases-new").dataset.state).toBe("paused");
+        expect(text()).toBe("New leases are not counted while Live is off");
+        const reads0 = grantReads(spy).length;
+        grantMockLease({ mac: docMac(0x55), hostname: "while-paused" });
+        feed(1);
+        fireEvent.click(screen.getByTestId("leases-refresh"));
+        fireEvent.click(screen.getByTestId("leases-new-reset"));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(grantReads(spy).length).toBe(reads0);
+        expect(screen.getByTestId("leases-new").dataset.state).toBe("paused");
+        expect(screen.getByTestId("leases-new-link")).toBeTruthy();
+
+        grantMockLease({ mac: docMac(0x56), hostname: "after-pause" });
+        fireEvent.click(screen.getByTestId("leases-live"));
+        await waitFor(() => expect(screen.getByTestId("leases-new").dataset.state).toBe("live"));
+        await waitFor(() => expect(count()).toBe("1"));
+        expect(grantReads(spy).length).toBeGreaterThan(reads0);
+      });
+
+      it("reads the count once for a burst of events", async () => {
+        const { feed } = stream();
+        const spy = vi.spyOn(globalThis, "fetch");
+        open();
+        await loaded();
+        await ready();
+        const before = grantReads(spy).length;
+        for (let i = 0; i < 300; i += 1) feed(i);
+        await waitFor(() => expect(grantReads(spy).length).toBe(before + 1));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(grantReads(spy).length).toBe(before + 1);
+      });
+
+      it.each([403, 501, 409])("is hidden when the history answers %i, and the rest of the strip stays", async (status) => {
+        server.use(http.get("/api/v1/dhcp/history", () => problem(status, "dhcp.history.x")));
+        open(`/dhcp/leases?scope=${LAN_ID}`);
+        await loaded();
+        await screen.findByTestId("leases-utilization");
+        await waitFor(() => expect(screen.queryByTestId("leases-new")).toBeNull());
+        expect(screen.queryByTestId("leases-new-link")).toBeNull();
+        expect(screen.queryByTestId("leases-new-reset")).toBeNull();
+        expect(screen.getByTestId("leases-live-strip")).toBeTruthy();
+      });
+
+      it("keeps the count and the page working when a read fails for another reason", async () => {
+        const { feed } = stream();
+        open();
+        await loaded();
+        await ready();
+        server.use(http.get("/api/v1/dhcp/history", () => problem(503, "dhcp.store_refused")));
+        grantMockLease({ mac: docMac(0x57), hostname: "unseen" });
+        feed(1);
+        await waitFor(() => expect(row(GRID, "192.0.2.112")).toBeTruthy());
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(screen.getByTestId("leases-new")).toBeTruthy();
+        expect(count()).toBe("0");
+      });
+    });
+
+    it("speaks Swedish", async () => {
+      await setLocale("sv");
+      const { feed } = stream();
+      open(`/dhcp/leases?scope=${LAN_ID}`);
+      await loaded();
+      await screen.findByTestId("leases-utilization");
+      await waitFor(() => expect(screen.getByTestId("leases-new").textContent).toBe("0 nya lån sedan du öppnade sidan"));
+      grantMockLease({ mac: docMac(0x58), hostname: "sv-1" });
+      feed(1);
+      await waitFor(() => expect(screen.getByTestId("leases-new").textContent).toBe("1 nytt lån sedan du öppnade sidan"));
+      expect(screen.getByTestId("leases-new-link").textContent).toBe("Visa i historiken");
+      expect(screen.getByTestId("leases-new-reset").textContent).toBe("Nollställ");
+      expect(screen.getByTestId("leases-scope-link").textContent).toBe("Öppna omfånget");
+      fireEvent.click(screen.getByTestId("leases-live"));
+      expect(screen.getByTestId("leases-new").textContent).toBe("Nya lån räknas inte medan Live är av");
     });
   });
 
