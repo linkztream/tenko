@@ -2751,7 +2751,7 @@ export interface paths {
         };
         /**
          * Get the reconciliation view of the four truths
-         * @description Scope: read access to observations (IAM-01). IPAM-21.
+         * @description Scope: read access to observations (IAM-01). IPAM-21, IPAM-23. One row per difference between intent, the DHCP leases, the DNS records and the scans: ghosts, rogues, orphans, PTR mismatches and conflicts, each with the truth that wins by its rule. With `host`, the answer also carries the host's truths: the OS field by precedence (an inventory's OS, then an active scan's guess, then the DHCP fingerprint's), every OS guess and the vendors.
          */
         get: operations["get_ipam_reconcile"];
         put?: never;
@@ -7429,6 +7429,15 @@ export interface components {
          * @enum {string}
          */
         DnsReverse: "managed" | "off";
+        /** @description What the zones say about the address. */
+        DnsTruth: {
+            /** @description The owner names of the A and AAAA records with the address. */
+            forward?: string[];
+            /** @description The targets of the PTR records of the address. */
+            ptr?: string[];
+            /** @description The zones the records are in. */
+            zones?: string[];
+        };
         /**
          * @description Who may change a zone by dynamic update (DNS-11, TGL-09). Named `DnsUpdatePolicy` in
          *     the OpenAPI document, apart from the software-update policy of the system settings.
@@ -8290,6 +8299,27 @@ export interface components {
             /** @description Name. */
             name: components["schemas"]["HostName"];
         };
+        /**
+         * @description The four truths of one host, for the host page: the OS field by precedence, every OS
+         *     guess, the vendors, and the MAC and IP addresses the view matched.
+         */
+        HostTruths: {
+            /** @description The host. */
+            host: components["schemas"]["HostId"];
+            /** @description Its addresses. */
+            ips?: string[];
+            /** @description The MAC addresses of its interfaces. */
+            macs?: components["schemas"]["MacAddr"][];
+            /** @description Its assignment mode. */
+            mode: components["schemas"]["AssignmentMode"];
+            /** @description Its name. */
+            name: string;
+            os?: components["schemas"]["OsField"] | null;
+            /** @description Every current OS guess, in order of precedence. */
+            os_guesses?: components["schemas"]["OsField"][];
+            /** @description The vendors of its MAC addresses. */
+            vendors?: string[];
+        };
         /** @description `[scan.icmp]`. */
         IcmpMethod: {
             /**
@@ -8610,6 +8640,19 @@ export interface components {
             observation: components["schemas"]["ObservationId"];
             /** @description The source of that sighting. */
             source: string;
+        };
+        /** @description What intent says about the address. */
+        IntentTruth: {
+            address?: components["schemas"]["AddressId"] | null;
+            /** @description The intended DNS name. */
+            dns_name?: string | null;
+            host?: components["schemas"]["HostId"] | null;
+            /** @description The host's name. */
+            host_name?: string | null;
+            /** @description The MAC address of the interface the address is on. */
+            macs?: components["schemas"]["MacAddr"][];
+            mode?: components["schemas"]["AssignmentMode"] | null;
+            status?: components["schemas"]["Status"] | null;
         };
         /** @description A network interface of a host. */
         Interface: {
@@ -11407,6 +11450,15 @@ export interface components {
             /** @enum {string} */
             type: "lease_in_prefix";
         };
+        /** @description What the leases or the sightings say about the address. */
+        ObservedTruth: {
+            expires_at?: components["schemas"]["Timestamp"] | null;
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description The MAC addresses seen at the address. */
+            macs?: components["schemas"]["MacAddr"][];
+            /** @description The sources (`dhcp:1`, `probe:2:arp`, `inventory:<connector>`). */
+            sources?: string[];
+        };
         /**
          * @description A change of an operator secret. Absent members stay; `null` clears `username` and
          *     `notes`.
@@ -11705,6 +11757,22 @@ export interface components {
          * @enum {string}
          */
         OrphanRule: "remove" | "propose";
+        /** @description The OS guess that wins by precedence, and where it comes from. */
+        OsField: {
+            /**
+             * Format: int32
+             * @description The confidence in percent (100 for an inventory's own statement).
+             */
+            confidence: number;
+            /** @description The guess, such as `Windows 10 or 11`. */
+            guess: string;
+            /** @description When the source last reported it. */
+            last_seen: components["schemas"]["Timestamp"];
+            /** @description The source key (`dhcp:1`, `probe:2:os_fingerprint`, `inventory:<connector>`). */
+            source: string;
+            /** @description The truth the source speaks for. */
+            truth: components["schemas"]["Truth"];
+        };
         /** @description A language and its packs, for administrators (`GET /i18n/packs`). */
         PackInfo: {
             active?: components["schemas"]["PackVersion"] | null;
@@ -13043,39 +13111,6 @@ export interface components {
                 role: components["schemas"]["RangeRole"];
                 /** @description Lifecycle status. */
                 status: components["schemas"]["Status"];
-            }[];
-            /** @description Cursor of the next page; `null` on the last page. */
-            next_cursor?: string | null;
-            /** @description Store revision the page was read at. */
-            revision: components["schemas"]["Revision"];
-        };
-        /**
-         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
-         *     the store revision the page was read at.
-         *
-         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
-         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
-         *     bound to the query that produced it.
-         */
-        Page_ReconcileRow: {
-            /** @description The items of this page, at most `limit` of them. */
-            items: {
-                /** @description The address. */
-                address: string;
-                /** @description What DNS says. */
-                dns?: string | null;
-                host?: components["schemas"]["HostId"] | null;
-                /** @description What intent says (the host and its MAC), when it says anything. */
-                intent?: string | null;
-                /** @description The finding. */
-                kind: components["schemas"]["ReconcileKind"];
-                /** @description What the lease says. */
-                lease?: string | null;
-                /** @description The rule, in English. */
-                rule: string;
-                /** @description What scans say. */
-                scan?: string | null;
-                winner?: components["schemas"]["Truth"] | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -14673,10 +14708,23 @@ export interface components {
             status: string;
         };
         /**
-         * @description The kinds of findings of the view.
+         * @description The kinds of rows of the view.
          * @enum {string}
          */
         ReconcileKind: "ghost" | "rogue" | "orphan" | "ptr_mismatch" | "conflict";
+        /** @description A page of the reconciliation view. */
+        ReconcilePage: {
+            host?: components["schemas"]["HostTruths"] | null;
+            /** @description The rows of this page, ordered by address, then kind. */
+            items: components["schemas"]["ReconcileRow"][];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description Store revision the page was read at.
+             */
+            revision: number;
+        };
         /** @description What one run did. */
         ReconcileReport: {
             /**
@@ -14742,19 +14790,28 @@ export interface components {
         ReconcileRow: {
             /** @description The address. */
             address: string;
-            /** @description What DNS says. */
-            dns?: string | null;
+            dns?: components["schemas"]["DnsTruth"] | null;
             host?: components["schemas"]["HostId"] | null;
-            /** @description What intent says (the host and its MAC), when it says anything. */
-            intent?: string | null;
+            intent?: components["schemas"]["IntentTruth"] | null;
+            /** @description The row's identity and sort position. */
+            key: string;
             /** @description The finding. */
             kind: components["schemas"]["ReconcileKind"];
-            /** @description What the lease says. */
-            lease?: string | null;
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            lease?: components["schemas"]["ObservedTruth"] | null;
+            /** @description The MAC addresses the row is about (intent's and the observed ones). */
+            macs?: components["schemas"]["MacAddr"][];
+            os?: components["schemas"]["OsField"] | null;
+            prefix?: components["schemas"]["PrefixId"] | null;
+            proposal?: components["schemas"]["ProposalId"] | null;
             /** @description The rule, in English. */
             rule: string;
-            /** @description What scans say. */
-            scan?: string | null;
+            /** @description The rule. */
+            rule_id: components["schemas"]["WinRule"];
+            scan?: components["schemas"]["ObservedTruth"] | null;
+            /** @description The vendors of the MAC addresses. */
+            vendors?: string[];
+            vrf?: components["schemas"]["VrfId"] | null;
             winner?: components["schemas"]["Truth"] | null;
         };
         /** @description The settings of the reconciler, the same on every controller. */
@@ -18891,6 +18948,11 @@ export interface components {
             /** @description Whether to show the notes now: the user saw an older version's notes. */
             show: boolean;
         };
+        /**
+         * @description The rule that decides a row.
+         * @enum {string}
+         */
+        WinRule: "intent_managed" | "lease_dynamic" | "newest_sighting" | "never_automatic" | "orphan_rule" | "manual_record" | "forward_record";
         /** @description The answer of a write. */
         WriteResponse_Address: {
             /** @description Whether this is a dry run. */
@@ -33059,9 +33121,12 @@ export interface operations {
     get_ipam_reconcile: {
         parameters: {
             query?: {
-                /** @description Only this prefix. */
+                /** @description Only rows of addresses inside this prefix, in its VRF. */
                 prefix?: components["schemas"]["PrefixId"];
-                /** @description Only this host. */
+                /**
+                 * @description Only rows of this host (its addresses, its MAC addresses and the rows it is named
+                 *     in); the answer then carries the host's truths (`host`).
+                 */
                 host?: components["schemas"]["HostId"];
                 /** @description Only this kind. */
                 kind?: components["schemas"]["ReconcileKind"];
@@ -33069,6 +33134,8 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 1000; 100 by default. */
                 limit?: number;
+                /** @description Read at least this store revision (read your writes). */
+                at_least?: number;
             };
             header?: never;
             path?: never;
@@ -33076,16 +33143,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of rows, one per difference between the truths */
+            /** @description A page of rows, ordered by address, then kind */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_ReconcileRow"];
+                    "application/json": components["schemas"]["ReconcilePage"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_cursor`), or the limit is out of range (`ipam.invalid_filter`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -33112,8 +33179,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The prefix or the host does not exist (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

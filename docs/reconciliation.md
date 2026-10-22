@@ -15,6 +15,8 @@ Contents:
 7. [Moves](#7-moves)
 8. [What later sources add](#8-what-later-sources-add)
 9. [Tables, endpoints and events](#9-tables-endpoints-and-events)
+10. [The DNS actuator](#10-the-dns-actuator)
+11. [The reconciliation view](#11-the-reconciliation-view)
 
 ## 1. Intent and observation
 
@@ -439,3 +441,50 @@ With the DNS module, the reconciler drives the DNS actuator of IPAM (IPAM-13, pl
 - **The writes.** After the proposals and the adoptions, while `dns_actuator` is on, the actuator plans again from a fresh view and writes: reverse zones to create and to adopt first, then one batch per zone, audited as `dns.record.actuate` by `system:reconciler`. A hand-deleted `ipam` record comes back in the next run (a change to `dns.rrsets` schedules one). Its changes are the `dns` part of the run's report.
 - **The dry run.** The same planner, without writing, gives the move preview its DNS change ([moves.md](moves.md) section 2): the records the move removes and writes.
 - **Moves in flight.** While a move job runs, its old address stays active and its new one is `planned`. Once the job's automatic DNS step has started, the planner publishes the new address instead of the old one, so a run in between keeps what the step wrote; when the job rolls back, the step's compensation and the planner both return to the old address.
+
+## 11. The reconciliation view
+
+The reconciliation view (IPAM-21, IPAM-23) puts the four truths of an address side by side and lists where they disagree, with the rule that says which truth wins. It is computed when read from one read view (`tenko_ipam::reconcile::view`) and writes nothing: it reads intent, the facts, the DHCP lease rows and the open proposals; a person acts through the proposals, the zones and the intent.
+
+### 11.1 The four truths
+
+| Truth | What it is | Where it comes from |
+|---|---|---|
+| Intent | the live address of intent, its host, the host's mode, the interface's MAC address, the DNS name | the IPAM tables |
+| Lease | the current facts of the sources `dhcp:<node>`: MAC addresses, sources, the latest sighting, the lease's end | the lease facts ([dhcp.md](dhcp.md) sections 12.3 and 15.3) |
+| DNS | the owner names of A and AAAA records with the address, the targets of its PTR records, the zones | the `name` facts of the sources `dns:<zone>` (section 10); a source whose zone ends in `.arpa` gives PTR names |
+| Scan | the current facts of the probes and the connectors: MAC addresses, sources, the latest sighting | the observation layer (section 2) |
+
+An address's VRF comes from the fact when the source reports one (DHCP, probe addresses), else from the networks of intent that contain it; an address whose VRF cannot be told, and an address IPAM does not track (loopback, link-local, multicast), is left out.
+
+### 11.2 The lists and who wins
+
+| Kind | A row when | Who wins (`rule_id`) |
+|---|---|---|
+| `ghost` | an active address on an interface of a `reserved`, `static` or `dynamic` host that no current fact shows (neither the address nor the interface's MAC address anywhere), and that nothing has shown for longer than the default lease time of the enabled Tenko scope of its network (the server's when the scope sets none), or than the reconciler's orphan age (`orphan_after_secs`) where no Tenko scope serves it; only where DHCP or a probe could see it (a Tenko scope, or a probe scope that covers it, or no probe scope known) | `intent_managed` (intent, IPAM-16) for `reserved` and `static` hosts; `lease_dynamic` (the lease) for `dynamic` hosts |
+| `rogue` | a current lease or sighting inside a network of intent, at an address without intent, of a device whose MAC address no interface carries | `newest_sighting`: the newer of the lease and the scan; the row links the open discovered-host proposal (IPAM-15, `discovered_host/mac:<mac>` or `discovered_host/ip:<vrf>/<ip>`) |
+| `orphan` | a DNS record of an address that no host holds | `orphan_rule` (intent) for a record IPAM wrote, linking Phase 2's `dns_orphaned_record` proposal; `manual_record` (DNS) for a record written by hand, which stays as written |
+| `ptr_mismatch` | a PTR name that is not the address's DNS name of intent or, without one, not a name of its forward records | `intent_managed` when a managed host holds the DNS name; `forward_record` (DNS) otherwise |
+| `conflict` | two or more MAC addresses on one address across the leases and the sightings, unless they all belong to one host's interfaces, or an address the `dhcp` role abandoned on a conflict (WP8.5) | `never_automatic`: no winner, never resolved automatically (IPAM-23) |
+
+A conflict is not also listed as a rogue. An `unmanaged` host is never a ghost, and its leases and sightings agree with intent as long as they carry its MAC address. A row carries `rule` (the rule in English) beside `rule_id`; the web UI shows its own text of the rule.
+
+The same address can have a row of several kinds (an orphaned record and a PTR mismatch at once). Rows are ordered by address, then kind (conflict, ghost, rogue, orphan, PTR mismatch).
+
+### 11.3 The OS field and the vendors
+
+Every row and the host summary carry the OS guess that wins by precedence, with its source, truth and confidence: an inventory's own statement (`Observed::Host.os`, confidence 100), then a probe's guess (`Observed::Os` of a probe source, the active scan), then the DHCP fingerprint's guess (`Observed::Os` of `dhcp:<node>`, [dhcp.md](dhcp.md) section 15); within a rank the higher confidence, then the newer sighting, then the source. For a host, the guesses of its own addresses count and those of every address where a current fact sees one of its MAC addresses (a pool lease of a host whose intent names another address). The vendors are the current vendor facts of the MAC addresses: the probes' OUI names and the DHCP vendor class.
+
+### 11.4 Reading it
+
+| Endpoint | Operation | Notes |
+|---|---|---|
+| `GET /api/v1/ipam/reconcile` | `get_ipam_reconcile` | read of observations; filters `prefix` (rows of addresses inside it, in its VRF), `host` (the host's addresses, its MAC addresses and the rows it is named in; the answer then carries `host`, the host's truths with the OS field, every guess and the vendors) and `kind`; paging with `limit` (1 to 1,000, 100 by default) and `cursor`; a scoped reader gets the rows whose address lies in its scope |
+
+`tenko ipam reconcile [--prefix ID_OR_CIDR] [--host ID_OR_NAME] [--kind ghost|rogue|orphan|ptr_mismatch|conflict] [--all] [--json]` prints the rows as a table (address, kind, intent, lease, DNS, scan, winner, rule and the proposal) and, with `--host`, the host's OS field and vendors first. The web UI has the page IPAM → Reconciliation (`/ipam/reconcile`) with one list per kind, the filters, the four truths per row with the winner marked, and the link to the discovered-host proposal; the host page shows the OS field and the vendors in its observations section.
+
+The system status (`GET /api/v1/system/status`) carries the warning `ipam.lease_conflict` while the view has conflict rows, with their count and up to five addresses and their MAC addresses (`params.count`, `params.addresses`).
+
+### 11.5 Tests
+
+`crates/tenko-ipam/tests/reconcile_view.rs` seeds one case of every kind beside quiet hosts and checks that the view lists exactly those, with their rules, the proposal link, the filters, the paging and the refusals, and the OS precedence (the DHCP guess, then a probe's, then an inventory's). E28 (`crates/tenko/tests/acceptance_reconcile.rs`) does the same through the binary: intent through the API, leases through the `dhcp` role in relay mode on loopback with Windows's and Android's options 55 and 60, records written by hand, and the sample connector's inventory sighting for the scans (a probe's own sighting of a non-loopback address needs a network the test does not have); the unmanaged TV's OS field comes from its lease, the health view names the conflict, and `tenko ipam reconcile` prints the same rows.

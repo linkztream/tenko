@@ -9,8 +9,11 @@
 //! | `address:<vrf>/<ip>` | `Observed::Address` with the lease's address and the client's MAC | the lease binds |
 //! | `name:<ip>` | `Observed::Name` with the client's FQDN (option 81), else its host name (option 12) | the lease binds and the client sent a name |
 //! | `address:<vrf>/<ip>` | `Observed::Address` with the MAC address that answered the conflict probe (an ARP answer), else none (ICMP, a DECLINE) | the row is `abandoned` (a conflict, WP8.5), until its hold ends |
+//! | `os:<ip>` | `Observed::Os` with the guess of the lease's fingerprint (options 55, 60, 77, 81, 93) and its confidence | the lease binds and the [`LeaseClassifier`] knows the fingerprint (WP8.2) |
+//! | `vendor:<mac>` | `Observed::Vendor` with the vendor class of option 60 | the lease binds, the client has a MAC address and sent a vendor class (WP8.2) |
 //!
-//! `Observed::Os` and `Observed::Vendor` (the fingerprint and option 60) are WP8.2's. A
+//! The guess comes from the classifier the role hands the index ([`LeaseFacts::set_classifier`],
+//! the rule table of `tenko_dhcp::fingerprint`); without one no OS fact is written. A
 //! fact's `last_seen` is the lease's client transaction time, its `expires_at` the end of
 //! the binding as it was when the fact was written, so a binding that runs out takes its
 //! facts with it without a write.
@@ -44,13 +47,13 @@
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, PoisonError, RwLock},
+    sync::{Arc, OnceLock, PoisonError, RwLock},
 };
 
 use tenko_core::{
     MacAddr, NodeId, ObservationId, Revision, Timestamp,
     codec::encode_key,
-    dhcp::{BindingState, Lease},
+    dhcp::{BindingState, Fingerprint, Lease},
     observe::{ObservationSource, Observed},
 };
 use tenko_store::{
@@ -116,6 +119,10 @@ pub struct LeaseObservation {
     pub address: FactOutcome,
     /// The name fact.
     pub name: FactOutcome,
+    /// The OS fact (the fingerprint's guess, WP8.2).
+    pub os: FactOutcome,
+    /// The vendor fact (option 60, WP8.2).
+    pub vendor: FactOutcome,
     /// The time to record as the lease row's `observed_at` when a fact was written.
     pub observed_at: Option<Timestamp>,
 }
@@ -123,8 +130,36 @@ pub struct LeaseObservation {
 impl LeaseObservation {
     /// Whether the change wrote a fact.
     pub const fn wrote(&self) -> bool {
-        self.address.wrote() || self.name.wrote()
+        self.address.wrote() || self.name.wrote() || self.os.wrote() || self.vendor.wrote()
     }
+}
+
+/// An OS guess for a lease's fingerprint (DHCP-14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OsReading {
+    /// The guess as a person reads it, such as `Windows 10 or 11`.
+    pub guess: String,
+    /// How strong the match is, 0 to 100.
+    pub confidence: u8,
+}
+
+/// Maps a lease's fingerprint to an OS guess: the rule table of `tenko_dhcp::fingerprint`
+/// (P3-Q15), handed to [`LeaseFacts::set_classifier`] by the role. Runs on the commit side.
+pub trait LeaseClassifier: Send + Sync {
+    /// The guess, or `None` when no rule knows the fingerprint.
+    fn os(&self, fingerprint: &Fingerprint) -> Option<OsReading>;
+}
+
+/// The vendor class a lease reports (option 60), without surrounding blanks; `None` when
+/// the client sent none or only blanks.
+pub fn lease_vendor(lease: &Lease) -> Option<String> {
+    lease
+        .fingerprint
+        .as_ref()
+        .and_then(|fingerprint| fingerprint.vendor_class.as_deref())
+        .map(str::trim)
+        .filter(|vendor| !vendor.is_empty())
+        .map(str::to_owned)
 }
 
 /// The client's MAC address, when its hardware type is Ethernet.
@@ -166,6 +201,7 @@ pub struct LeaseFacts {
     source_key: String,
     config: ObserveConfig,
     image: RwLock<Image>,
+    classifier: OnceLock<Arc<dyn LeaseClassifier>>,
 }
 
 impl std::fmt::Debug for LeaseFacts {
@@ -196,7 +232,14 @@ impl LeaseFacts {
                 revision: Revision::ZERO,
                 facts: HashMap::new(),
             }),
+            classifier: OnceLock::new(),
         })
+    }
+
+    /// Sets the classifier of the fingerprints, once (later calls change nothing); `true`
+    /// when this call set it.
+    pub fn set_classifier(&self, classifier: Arc<dyn LeaseClassifier>) -> bool {
+        self.classifier.set(classifier).is_ok()
     }
 
     /// Registers the index with `store`, which builds it from the stored facts.
@@ -267,11 +310,33 @@ impl LeaseFacts {
             seen: lease.cltt.min(now),
             expires: lease.ends,
         };
+        // WP8.2: the fingerprint's guess and the vendor class, while the lease binds.
+        let os = self
+            .classifier
+            .get()
+            .zip(lease.fingerprint.as_ref())
+            .and_then(|(classifier, fingerprint)| classifier.os(fingerprint))
+            .filter(|reading| !reading.guess.trim().is_empty())
+            .map(|reading| Observed::Os {
+                ip,
+                guess: reading.guess,
+                confidence: reading.confidence.min(100),
+            });
+        let mac = lease_mac(lease);
+        let vendor = mac
+            .zip(lease_vendor(lease))
+            .map(|(mac, vendor)| Observed::Vendor { mac, vendor });
         let address_subject = FactSubject::of(&address);
         let name_subject = FactSubject::Name { ip };
+        let os_subject = FactSubject::Os { ip };
+        let vendor_subject = mac.map(|mac| FactSubject::Vendor { mac });
         let image = self.image.read().unwrap_or_else(PoisonError::into_inner);
         let stored_address = image.facts.get(&address_subject.key()).cloned();
         let stored_name = image.facts.get(&name_subject.key()).cloned();
+        let stored_os = image.facts.get(&os_subject.key()).cloned();
+        let stored_vendor = vendor_subject
+            .as_ref()
+            .and_then(|subject| image.facts.get(&subject.key()).cloned());
         drop(image);
         let address = self.apply(
             &address_subject,
@@ -287,8 +352,25 @@ impl LeaseFacts {
             now,
             batch,
         )?;
+        let os = self.apply(
+            &os_subject,
+            stored_os.as_ref(),
+            os.filter(|_| bound).map(wanted),
+            now,
+            batch,
+        )?;
+        let vendor = match &vendor_subject {
+            Some(subject) => self.apply(
+                subject,
+                stored_vendor.as_ref(),
+                vendor.filter(|_| bound).map(wanted),
+                now,
+                batch,
+            )?,
+            None => FactOutcome::None,
+        };
         // The row records when its facts were last written.
-        let wrote = address.wrote() || name.wrote();
+        let wrote = address.wrote() || name.wrote() || os.wrote() || vendor.wrote();
         let observed_at = wrote.then_some(if bound || conflict {
             lease.cltt.min(now)
         } else {
@@ -297,6 +379,8 @@ impl LeaseFacts {
         Ok(LeaseObservation {
             address,
             name,
+            os,
+            vendor,
             observed_at,
         })
     }

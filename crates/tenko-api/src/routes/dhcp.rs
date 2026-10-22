@@ -113,6 +113,8 @@ mod settings;
 // WP7.5: the leases, the history and the node routes.
 mod leases;
 pub use leases::DhcpNodeSlot;
+// WP8.2: `GET /ipam/reconcile`, the reconciliation view.
+mod reconcile;
 
 #[cfg(test)]
 mod tests;
@@ -306,7 +308,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 
 /// The routes of the area that belong to the IPAM module: `/ipam/reconcile` (IPAM-21).
 pub(crate) fn reconcile_routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_ipam_reconcile))
+    OpenApiRouter::new().routes(routes!(reconcile::get_ipam_reconcile))
 }
 
 // The registration is split into small functions that are never inlined: the server builds
@@ -507,32 +509,4 @@ async fn get_dhcp_reservation(
 async fn export_dhcp(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Read, &server_object())?;
     Err(not_implemented("GET", "/dhcp/export"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/ipam/reconcile",
-    tag = "observations",
-    operation_id = "get_ipam_reconcile",
-    summary = "Get the reconciliation view of the four truths",
-    description = "Scope: read access to observations (IAM-01). IPAM-21.",
-    params(ReconcileFilters),
-    responses(
-        (status = 200, description = "A page of rows, one per difference between the truths", body = Page<ReconcileRow>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal may not read observations", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_ipam_reconcile(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::Observation),
-    )?;
-    Err(not_implemented("GET", "/ipam/reconcile"))
 }

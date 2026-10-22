@@ -308,3 +308,116 @@ fn the_name_is_the_fqdn_else_the_host_name() {
     row.hostname = None;
     assert_eq!(lease_name(&row), None);
 }
+
+// WP8.2: the OS and vendor facts of a lease's fingerprint.
+
+/// A classifier that knows one fingerprint: Windows's vendor class.
+struct Windows;
+
+impl super::LeaseClassifier for Windows {
+    fn os(&self, fingerprint: &tenko_core::dhcp::Fingerprint) -> Option<super::OsReading> {
+        (fingerprint.vendor_class.as_deref() == Some("MSFT 5.0")).then(|| super::OsReading {
+            guess: "Windows 10 or 11".to_owned(),
+            confidence: 85,
+        })
+    }
+}
+
+fn fingerprinted(vrf: VrfId, cltt: Timestamp, vendor: &str) -> Lease {
+    let mut row = lease(vrf, 0x20, cltt, BindingState::Active);
+    row.fingerprint = Some(tenko_core::dhcp::Fingerprint {
+        parameters: HexBytes(vec![
+            1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252,
+        ]),
+        vendor_class: Some(vendor.to_owned()),
+        ..tenko_core::dhcp::Fingerprint::default()
+    });
+    row
+}
+
+#[tokio::test]
+async fn a_fingerprint_gives_an_os_fact_and_option_60_a_vendor_fact() {
+    let world = World::new();
+    let vrf = VrfId::generate();
+    let ip = Ipv4Addr::new(198, 51, 100, 15).into();
+    let mac = "00:00:5e:00:53:20".parse().expect("mac");
+
+    // Without a classifier the vendor class is still a fact; no OS guess is made.
+    let first = world
+        .observe(&fingerprinted(vrf, at(0), "MSFT 5.0"), at(0))
+        .await;
+    assert_eq!(
+        (first.os, first.vendor),
+        (FactOutcome::None, FactOutcome::New)
+    );
+    assert!(world.facts.fact(&FactSubject::Os { ip }).is_none());
+
+    // With one, the next refresh writes the guess with the source dhcp:<node>.
+    assert!(world.facts.set_classifier(Arc::new(Windows)));
+    assert!(!world.facts.set_classifier(Arc::new(Windows)), "set once");
+    let due = world
+        .observe(&fingerprinted(vrf, at(30), "MSFT 5.0"), at(30))
+        .await;
+    assert_eq!(due.os, FactOutcome::New);
+    assert_eq!(due.vendor, FactOutcome::Refreshed);
+    let os = world
+        .facts
+        .fact(&FactSubject::Os { ip })
+        .expect("the OS fact");
+    assert_eq!(os.source_key, "dhcp:7");
+    assert_eq!(
+        os.observed,
+        Observed::Os {
+            ip,
+            guess: "Windows 10 or 11".to_owned(),
+            confidence: 85
+        }
+    );
+    let vendor = world
+        .facts
+        .fact(&FactSubject::Vendor { mac })
+        .expect("the vendor fact");
+    assert_eq!(
+        vendor.observed,
+        Observed::Vendor {
+            mac,
+            vendor: "MSFT 5.0".to_owned()
+        }
+    );
+    // A renewal within the refresh interval writes neither.
+    let quiet = world
+        .observe(&fingerprinted(vrf, at(35), "MSFT 5.0"), at(35))
+        .await;
+    assert_eq!(
+        (quiet.os, quiet.vendor),
+        (FactOutcome::Unchanged, FactOutcome::Unchanged)
+    );
+
+    // A vendor class the classifier does not know: the guess ends, the vendor changes.
+    let other = world
+        .observe(&fingerprinted(vrf, at(40), "udhcp 1.35.0"), at(40))
+        .await;
+    assert_eq!(
+        (other.os, other.vendor),
+        (FactOutcome::Expired, FactOutcome::Changed)
+    );
+    assert!(
+        !world
+            .facts
+            .fact(&FactSubject::Os { ip })
+            .expect("kept")
+            .is_current(at(40))
+    );
+
+    // A release expires the vendor fact with the others.
+    let mut released = fingerprinted(vrf, at(45), "udhcp 1.35.0");
+    released.state = BindingState::Released;
+    released.ends = at(45);
+    let gone = world.observe(&released, at(45)).await;
+    assert_eq!(gone.vendor, FactOutcome::Expired);
+    assert_eq!(gone.os, FactOutcome::None);
+    assert_eq!(
+        super::lease_vendor(&released).as_deref(),
+        Some("udhcp 1.35.0")
+    );
+}

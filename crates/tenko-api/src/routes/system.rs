@@ -290,6 +290,66 @@ pub fn dhcp_role_warnings(role: &tenko_dhcp::role::DhcpStatus) -> Vec<StatusWarn
     warnings
 }
 
+// WP8.2: the health row of the lease conflicts (IPAM-23).
+/// Warning code of addresses that two MAC addresses hold across leases and sightings.
+pub const IPAM_LEASE_CONFLICT: &str = "ipam.lease_conflict";
+
+/// The addresses a lease-conflict warning names; the rest are counted.
+const CONFLICTS_NAMED: usize = 5;
+
+/// The warning of the lease conflicts of the reconciliation view, none when there is none.
+pub fn lease_conflict_warning(
+    conflicts: &[tenko_ipam::reconcile::view::ReconcileRow],
+) -> Option<StatusWarning> {
+    if conflicts.is_empty() {
+        return None;
+    }
+    let named: Vec<String> = conflicts
+        .iter()
+        .take(CONFLICTS_NAMED)
+        .map(|row| {
+            let macs = row
+                .macs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" and ");
+            if macs.is_empty() {
+                row.address.to_string()
+            } else {
+                format!("{} ({macs})", row.address)
+            }
+        })
+        .collect();
+    let more = conflicts.len().saturating_sub(CONFLICTS_NAMED);
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("count".to_owned(), conflicts.len().to_string());
+    params.insert(
+        "addresses".to_owned(),
+        conflicts
+            .iter()
+            .take(CONFLICTS_NAMED)
+            .map(|row| row.address.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    Some(StatusWarning {
+        code: IPAM_LEASE_CONFLICT.to_owned(),
+        detail: format!(
+            "{} address(es) held by more than one MAC address across leases and sightings, \
+             never resolved automatically (IPAM-23): {}{}; see the reconciliation view",
+            conflicts.len(),
+            named.join(", "),
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
+        ),
+        params,
+    })
+}
+
 /// The warning of a pending migration that voters block, naming them.
 pub fn data_format_warnings(format: &DataFormatStatus) -> Vec<StatusWarning> {
     let Some(pending) = &format.pending else {
@@ -464,6 +524,8 @@ async fn system_status(
     zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
     // WP7.5: the dhcp role's health rows.
     dhcp: Option<Extension<super::dhcp::DhcpNodeSlot>>,
+    // WP8.2: the lease conflicts of IPAM-23.
+    ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
@@ -492,6 +554,15 @@ async fn system_status(
     {
         status.warnings.extend(dhcp_role_warnings(&role));
     }
+    // WP8.2: two MAC addresses on one address across leases and sightings (IPAM-23), the
+    // conflict rows of the reconciliation view; never resolved automatically.
+    if let Some(Extension(ipam)) = ipam
+        && let Ok(view) = ipam.view(None).await
+        && let Ok(conflicts) = tenko_ipam::reconcile::view::lease_conflicts(view.as_ref(), ctx.now)
+    {
+        status.warnings.extend(lease_conflict_warning(&conflicts));
+    }
+    // End of the WP8.2 block.
     // WP6.3: the clock and expiry findings of signed zones (OPS-09), each naming its zone.
     if let Some(Extension(zones)) = zones
         && let Ok(view) = zones.view(None).await

@@ -4,6 +4,7 @@ import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
 import { paths } from "../app/paths";
 import { t, type MessageKey } from "../i18n";
+import { reconcilePath } from "./reconcile/links";
 
 interface Tab {
   id: string;
@@ -23,6 +24,8 @@ const TABS: readonly Tab[] = [
   { id: "tags", href: paths.tags(), label: "ipam.nav.tags", match: (p) => p.startsWith("/ipam/tags") },
   { id: "fields", href: paths.customFields(), label: "ipam.nav.custom_fields", match: (p) => p.startsWith("/ipam/custom-fields") },
   { id: "import", href: paths.imports(), label: "ipam.nav.import", match: (p) => p.startsWith("/ipam/import") },
+  // WP8.2: the reconciliation view.
+  { id: "reconcile", href: reconcilePath(), label: "ipam.nav.reconcile", match: (p) => p.startsWith("/ipam/reconcile") },
 ];
 
 export function IpamNav() {

@@ -1,0 +1,44 @@
+/*
+ * The reconciliation view and the OS block of the host page. Token roles only (tokens.css); the
+ * winning truth is marked by a tag and a stripe, never by color alone.
+ */
+.reconcile-page .filterbar { gap: var(--sp-4); }
+.reconcile-host-form { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.reconcile-host-form .input { inline-size: 180px; }
+.reconcile-kinds { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); }
+.reconcile-page .chip.applied { padding-inline-end: var(--sp-2); gap: var(--sp-3); }
+.reconcile-page .chip-x {
+  display: inline-grid; place-items: center;
+  inline-size: 18px; block-size: 18px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: inherit;
+}
+.reconcile-page .chip-x:hover { background: var(--surface-3); color: var(--ink); }
+.reconcile-note { padding: var(--sp-3) var(--sp-5); }
+
+.reconcile-body { padding: var(--sp-6); display: grid; gap: var(--sp-8); align-content: start; }
+.reconcile-list h2 .count { font-weight: var(--fw-regular); font-size: var(--fs-12); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.reconcile-list .kind-help { color: var(--ink-3); font-size: var(--fs-12); }
+
+/* The rows wrap: a truth has several lines, so the fixed row height of the plain table gives way. */
+table.reconcile-table td, table.reconcile-table th[scope="row"] {
+  height: auto; padding-block: var(--sp-3); vertical-align: top; white-space: normal; overflow-wrap: anywhere;
+}
+table.reconcile-table th[scope="row"] { text-align: start; font-weight: var(--fw-medium); background: transparent; border-bottom: 1px solid var(--line); color: var(--ink); }
+table.reconcile-table td.truth { min-inline-size: 150px; }
+table.reconcile-table td.truth.winner { background: var(--ok-wash); box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--ok-ink); }
+table.reconcile-table tr:hover td.truth.winner { background: var(--ok-wash); }
+table.reconcile-table td.truth .wins { margin-block-end: var(--sp-2); }
+table.reconcile-table td.decision { min-inline-size: 220px; }
+table.reconcile-table td.decision .rule { display: block; color: var(--ink-2); line-height: var(--lh-text); margin-block-start: var(--sp-2); }
+.truth-body { display: grid; gap: var(--sp-2); justify-items: start; }
+.truth-badges { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); }
+.reconcile-macs { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); font-family: var(--font-data); }
+.truth-dns { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); margin: 0; }
+.truth-dns dt { color: var(--ink-3); font-size: var(--fs-12); }
+.truth-dns dd { margin: 0; min-inline-size: 0; }
+.reconcile-os { overflow-wrap: anywhere; }
+
+/* The block on the host page. */
+.host-os { display: grid; gap: var(--sp-3); }
+.host-os .kv { grid-template-columns: 140px minmax(0, 1fr); }

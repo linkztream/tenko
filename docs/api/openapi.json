@@ -18232,13 +18232,13 @@
           "observations"
         ],
         "summary": "Get the reconciliation view of the four truths",
-        "description": "Scope: read access to observations (IAM-01). IPAM-21.",
+        "description": "Scope: read access to observations (IAM-01). IPAM-21, IPAM-23. One row per difference between intent, the DHCP leases, the DNS records and the scans: ghosts, rogues, orphans, PTR mismatches and conflicts, each with the truth that wins by its rule. With `host`, the answer also carries the host's truths: the OS field by precedence (an inventory's OS, then an active scan's guess, then the DHCP fingerprint's), every OS guess and the vendors.",
         "operationId": "get_ipam_reconcile",
         "parameters": [
           {
             "name": "prefix",
             "in": "query",
-            "description": "Only this prefix.",
+            "description": "Only rows of addresses inside this prefix, in its VRF.",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/PrefixId"
@@ -18247,7 +18247,7 @@
           {
             "name": "host",
             "in": "query",
-            "description": "Only this host.",
+            "description": "Only rows of this host (its addresses, its MAC addresses and the rows it is named\nin); the answer then carries the host's truths (`host`).",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/HostId"
@@ -18281,21 +18281,32 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read your writes).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "A page of rows, one per difference between the truths",
+            "description": "A page of rows, ordered by address, then kind",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_ReconcileRow"
+                  "$ref": "#/components/schemas/ReconcilePage"
                 }
               }
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_cursor`), or the limit is out of range (`ipam.invalid_filter`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18324,8 +18335,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "404": {
+            "description": "The prefix or the host does not exist (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39776,6 +39797,33 @@
           "off"
         ]
       },
+      "DnsTruth": {
+        "type": "object",
+        "description": "What the zones say about the address.",
+        "properties": {
+          "forward": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The owner names of the A and AAAA records with the address."
+          },
+          "ptr": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The targets of the PTR records of the address."
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The zones the records are in."
+          }
+        }
+      },
       "DnsUpdatePolicy": {
         "type": "object",
         "description": "Who may change a zone by dynamic update (DNS-11, TGL-09). Named `DnsUpdatePolicy` in\nthe OpenAPI document, apart from the software-update policy of the system settings.",
@@ -42109,6 +42157,68 @@
           }
         }
       },
+      "HostTruths": {
+        "type": "object",
+        "description": "The four truths of one host, for the host page: the OS field by precedence, every OS\nguess, the vendors, and the MAC and IP addresses the view matched.",
+        "required": [
+          "host",
+          "name",
+          "mode"
+        ],
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "ips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its addresses."
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "The MAC addresses of its interfaces."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AssignmentMode",
+            "description": "Its assignment mode."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "os": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OsField",
+                "description": "The OS guess that wins by precedence."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "os_guesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OsField"
+            },
+            "description": "Every current OS guess, in order of precedence."
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The vendors of its MAC addresses."
+          }
+        }
+      },
       "IcmpMethod": {
         "type": "object",
         "description": "`[scan.icmp]`.",
@@ -42864,6 +42974,77 @@
           "source": {
             "type": "string",
             "description": "The source of that sighting."
+          }
+        }
+      },
+      "IntentTruth": {
+        "type": "object",
+        "description": "What intent says about the address.",
+        "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AddressId",
+                "description": "The address of intent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dns_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The intended DNS name."
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host it is assigned to."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The host's name."
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "The MAC address of the interface the address is on."
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentMode",
+                "description": "The host's assignment mode."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Status",
+                "description": "Its status."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -50356,6 +50537,48 @@
         ],
         "description": "One acceptable observation.\n\nAdjacently tagged because variants carry IP addresses."
       },
+      "ObservedTruth": {
+        "type": "object",
+        "description": "What the leases or the sightings say about the address.",
+        "properties": {
+          "expires_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the latest current fact runs out without a refresh (a lease's end)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The latest sighting."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "The MAC addresses seen at the address."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The sources (`dhcp:1`, `probe:2:arp`, `inventory:<connector>`)."
+          }
+        }
+      },
       "OperatorSecretPatch": {
         "type": "object",
         "description": "A change of an operator secret. Absent members stay; `null` clears `username` and\n`notes`.",
@@ -51249,6 +51472,41 @@
           "remove",
           "propose"
         ]
+      },
+      "OsField": {
+        "type": "object",
+        "description": "The OS guess that wins by precedence, and where it comes from.",
+        "required": [
+          "guess",
+          "confidence",
+          "source",
+          "truth",
+          "last_seen"
+        ],
+        "properties": {
+          "confidence": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The confidence in percent (100 for an inventory's own statement).",
+            "minimum": 0
+          },
+          "guess": {
+            "type": "string",
+            "description": "The guess, such as `Windows 10 or 11`."
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the source last reported it."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source key (`dhcp:1`, `probe:2:os_fingerprint`, `inventory:<connector>`)."
+          },
+          "truth": {
+            "$ref": "#/components/schemas/Truth",
+            "description": "The truth the source speaks for."
+          }
+        }
       },
       "PackInfo": {
         "type": "object",
@@ -54505,104 +54763,6 @@
                 "status": {
                   "$ref": "#/components/schemas/Status",
                   "description": "Lifecycle status."
-                }
-              }
-            },
-            "description": "The items of this page, at most `limit` of them."
-          },
-          "next_cursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Cursor of the next page; `null` on the last page."
-          },
-          "revision": {
-            "$ref": "#/components/schemas/Revision",
-            "description": "Store revision the page was read at."
-          }
-        }
-      },
-      "Page_ReconcileRow": {
-        "type": "object",
-        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
-        "required": [
-          "items",
-          "revision"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "One row of the view: what each truth says about an address, the finding and who wins.",
-              "required": [
-                "address",
-                "kind",
-                "rule"
-              ],
-              "properties": {
-                "address": {
-                  "type": "string",
-                  "description": "The address."
-                },
-                "dns": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "What DNS says."
-                },
-                "host": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/HostId",
-                      "description": "The host, when intent or an observation names one."
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "intent": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "What intent says (the host and its MAC), when it says anything."
-                },
-                "kind": {
-                  "$ref": "#/components/schemas/ReconcileKind",
-                  "description": "The finding."
-                },
-                "lease": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "What the lease says."
-                },
-                "rule": {
-                  "type": "string",
-                  "description": "The rule, in English."
-                },
-                "scan": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "What scans say."
-                },
-                "winner": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Truth",
-                      "description": "The truth that wins by the rule of the kind; none for a conflict."
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
                 }
               }
             },
@@ -58950,7 +59110,7 @@
       },
       "ReconcileKind": {
         "type": "string",
-        "description": "The kinds of findings of the view.",
+        "description": "The kinds of rows of the view.",
         "enum": [
           "ghost",
           "rogue",
@@ -58958,6 +59118,47 @@
           "ptr_mismatch",
           "conflict"
         ]
+      },
+      "ReconcilePage": {
+        "type": "object",
+        "description": "A page of the reconciliation view.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostTruths",
+                "description": "With the `host` filter: the host's truths (the OS field by precedence, every OS\nguess, the vendors)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReconcileRow"
+            },
+            "description": "The rows of this page, ordered by address, then kind."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision the page was read at.",
+            "minimum": 0
+          }
+        }
       },
       "ReconcileReport": {
         "type": "object",
@@ -59066,8 +59267,10 @@
         "type": "object",
         "description": "One row of the view: what each truth says about an address, the finding and who wins.",
         "required": [
-          "address",
+          "key",
           "kind",
+          "address",
+          "rule_id",
           "rule"
         ],
         "properties": {
@@ -59076,17 +59279,21 @@
             "description": "The address."
           },
           "dns": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What DNS says."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DnsTruth",
+                "description": "What the zones say."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "host": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/HostId",
-                "description": "The host, when intent or an observation names one."
+                "description": "The host of intent, when one holds the address."
               },
               {
                 "type": "null"
@@ -59094,39 +59301,128 @@
             ]
           },
           "intent": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What intent says (the host and its MAC), when it says anything."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntentTruth",
+                "description": "What intent says, when it says anything."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "The row's identity and sort position."
           },
           "kind": {
             "$ref": "#/components/schemas/ReconcileKind",
             "description": "The finding."
           },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The latest sighting of the address (for a ghost the last before it went unseen;\nnone when it was never seen)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lease": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What the lease says."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObservedTruth",
+                "description": "What the leases say."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "macs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MacAddr"
+            },
+            "description": "The MAC addresses the row is about (intent's and the observed ones)."
+          },
+          "os": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OsField",
+                "description": "The OS guess that wins by precedence."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The network prefix of intent that holds the address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProposalId",
+                "description": "The open proposal of the row: the discovered host of a rogue (IPAM-15), the\norphaned record of an orphan."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "rule": {
             "type": "string",
             "description": "The rule, in English."
           },
+          "rule_id": {
+            "$ref": "#/components/schemas/WinRule",
+            "description": "The rule."
+          },
           "scan": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What scans say."
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObservedTruth",
+                "description": "What the scans say."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The vendors of the MAC addresses."
+          },
+          "vrf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "The VRF."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "winner": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Truth",
-                "description": "The truth that wins by the rule of the kind; none for a conflict."
+                "description": "The truth that wins by the rule of the row; none for a conflict."
               },
               {
                 "type": "null"
@@ -68935,6 +69231,19 @@
             "description": "Whether to show the notes now: the user saw an older version's notes."
           }
         }
+      },
+      "WinRule": {
+        "type": "string",
+        "description": "The rule that decides a row.",
+        "enum": [
+          "intent_managed",
+          "lease_dynamic",
+          "newest_sighting",
+          "never_automatic",
+          "orphan_rule",
+          "manual_record",
+          "forward_record"
+        ]
       },
       "WriteResponse_Address": {
         "type": "object",

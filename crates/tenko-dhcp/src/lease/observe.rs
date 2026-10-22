@@ -101,6 +101,9 @@ impl IpamObservations {
         config: ObserveConfig,
     ) -> Result<Arc<Self>, StoreError> {
         let facts = LeaseFacts::new(node, config);
+        // WP8.2: the facts classify each lease's fingerprint by the project's rule table
+        // (DHCP-14, P3-Q15): the guess is the fact `os:<ip>` of the source `dhcp:<node>`.
+        crate::fingerprint::classify_leases(&facts);
         facts.register(store)?;
         Ok(Arc::new(Self {
             facts,

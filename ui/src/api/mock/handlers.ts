@@ -18,6 +18,7 @@ import { jobRoutes } from "./routes-jobs";
 import { kekRoutes } from "./routes-kek";
 import { moveRoutes } from "./routes-move";
 import { reconcileRoutes } from "./routes-reconcile";
+import { ipamReconcileRoutes } from "./routes-ipam-reconcile"; // WP8.2
 import { revealPolicyRoutes } from "./routes-reveal-policy";
 import { scansRoutes } from "./routes-scans";
 import { secretsRoutes } from "./routes-secrets";
@@ -60,6 +61,7 @@ export const happyPaths: HttpHandler[] = [
   ...systemRoutes,
   ...eventRoutes,
   ...reconcileRoutes,
+  ...ipamReconcileRoutes, // WP8.2
   // Cluster nodes and enrolment tokens (WP2.2 routes, WP2.9 mock).
   ...nodeRoutes,
   ...connectorRoutes,

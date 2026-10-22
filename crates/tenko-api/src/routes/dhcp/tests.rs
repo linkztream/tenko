@@ -121,12 +121,13 @@ fn kinds(policy: &Policy) -> Vec<(Action, ObjectKind)> {
 /// route for a node this server does not know) or 501 (a route of a later package).
 async fn expect_after_check(router: &Router, requests: &[(&str, String)]) {
     for (method, path) in requests {
-        let later = path.contains("/reservations")
-            || path.contains("/export")
-            || path.starts_with("/ipam/");
+        let later = path.contains("/reservations") || path.contains("/export");
         let reply = send(router, method, path).await;
         if later {
             reply.assert_problem(501, STUB);
+        } else if path.starts_with("/ipam/") {
+            // WP8.2: the view is built; this router has no IPAM service.
+            reply.assert_problem(503, "ipam.unavailable");
         } else if path.starts_with("/nodes/") {
             reply.assert_problem(404, "cluster.node.not_found");
         } else if path.contains("/leases") || path.contains("/history") {
@@ -184,9 +185,10 @@ async fn a_reader_reads_and_is_refused_writes() {
     send(&router, "PUT", &format!("/dhcp/pools/{PREFIX}"))
         .await
         .assert_problem(403, "auth.forbidden");
+    // WP8.2: the view is built; this router has no IPAM service.
     send(&router, "GET", "/ipam/reconcile")
         .await
-        .assert_problem(501, STUB);
+        .assert_problem(503, "ipam.unavailable");
     assert_eq!(
         kinds(&policy),
         [

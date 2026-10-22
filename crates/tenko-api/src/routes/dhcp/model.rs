@@ -853,49 +853,18 @@ pub struct DhcpCommandAccepted {
 }
 
 // ---------------------------------------------------------------------------------------
-// The reconciliation view (IPAM-21, WP8.2)
+// The reconciliation view (IPAM-21, WP8.2): the rows are `tenko_ipam`'s.
 
-/// The kinds of findings of the view.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ReconcileKind {
-    /// Intent with no observation for longer than the scope's lease time.
-    Ghost,
-    /// A lease or sighting without intent.
-    Rogue,
-    /// A DNS record without a host.
-    Orphan,
-    /// A PTR record whose name disagrees with the address's DNS name.
-    PtrMismatch,
-    /// Two MAC addresses on one address (IPAM-23), never resolved automatically.
-    Conflict,
-}
-
-/// The four truths (IPAM-21).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Truth {
-    /// IPAM intent.
-    Intent,
-    /// DHCP leases.
-    Lease,
-    /// DNS records.
-    Dns,
-    /// Scans.
-    Scan,
-}
+pub use tenko_ipam::reconcile::view::{HostTruths, ReconcileKind, ReconcileRow, Truth};
 
 /// The filters of `GET /ipam/reconcile`.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ReconcileFilters {
-    /// Only this prefix.
+    /// Only rows of addresses inside this prefix, in its VRF.
     pub prefix: Option<PrefixId>,
-    /// Only this host.
+    /// Only rows of this host (its addresses, its MAC addresses and the rows it is named
+    /// in); the answer then carries the host's truths (`host`).
     pub host: Option<HostId>,
     /// Only this kind.
     pub kind: Option<ReconcileKind>,
@@ -903,34 +872,22 @@ pub struct ReconcileFilters {
     pub cursor: Option<String>,
     /// Items per page, 1 to 1000; 100 by default.
     pub limit: Option<u32>,
+    /// Read at least this store revision (read your writes).
+    pub at_least: Option<u64>,
 }
 
-/// One row of the view: what each truth says about an address, the finding and who wins.
+/// A page of the reconciliation view.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ReconcileRow {
-    /// The address.
-    #[schema(value_type = String)]
-    pub address: IpAddr,
-    /// The host, when intent or an observation names one.
+pub struct ReconcilePage {
+    /// The rows of this page, ordered by address, then kind.
+    pub items: Vec<ReconcileRow>,
+    /// Cursor of the next page; `null` on the last page.
+    pub next_cursor: Option<String>,
+    /// Store revision the page was read at.
+    #[schema(value_type = u64)]
+    pub revision: Revision,
+    /// With the `host` filter: the host's truths (the OS field by precedence, every OS
+    /// guess, the vendors).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<HostId>,
-    /// The finding.
-    pub kind: ReconcileKind,
-    /// What intent says (the host and its MAC), when it says anything.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intent: Option<String>,
-    /// What the lease says.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lease: Option<String>,
-    /// What DNS says.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dns: Option<String>,
-    /// What scans say.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scan: Option<String>,
-    /// The truth that wins by the rule of the kind; none for a conflict.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub winner: Option<Truth>,
-    /// The rule, in English.
-    pub rule: String,
+    pub host: Option<HostTruths>,
 }

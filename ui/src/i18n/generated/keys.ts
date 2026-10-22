@@ -3673,6 +3673,7 @@ export type MessageKey =
   | "ipam.nav.import"
   | "ipam.nav.label"
   | "ipam.nav.networks"
+  | "ipam.nav.reconcile"
   | "ipam.nav.sites"
   | "ipam.nav.tags"
   | "ipam.nav.tenancy"
@@ -3745,6 +3746,60 @@ export type MessageKey =
   | "ipam.range_role.dhcp_pool"
   | "ipam.range_role.infrastructure"
   | "ipam.range_role.reserved"
+  | "ipam.reconcile.col.address"
+  | "ipam.reconcile.col.details"
+  | "ipam.reconcile.col.winner"
+  | "ipam.reconcile.count"
+  | "ipam.reconcile.dns_forward"
+  | "ipam.reconcile.dns_ptr"
+  | "ipam.reconcile.empty"
+  | "ipam.reconcile.filter.all_kinds"
+  | "ipam.reconcile.filter.all_prefixes"
+  | "ipam.reconcile.filter.host"
+  | "ipam.reconcile.filter.host_apply"
+  | "ipam.reconcile.filter.host_chip"
+  | "ipam.reconcile.filter.host_placeholder"
+  | "ipam.reconcile.filter.host_unknown"
+  | "ipam.reconcile.filter.kind"
+  | "ipam.reconcile.filter.label"
+  | "ipam.reconcile.filter.prefix"
+  | "ipam.reconcile.filter.remove_host"
+  | "ipam.reconcile.host_open"
+  | "ipam.reconcile.host_unavailable"
+  | "ipam.reconcile.kind.conflict"
+  | "ipam.reconcile.kind.ghost"
+  | "ipam.reconcile.kind.orphan"
+  | "ipam.reconcile.kind.ptr_mismatch"
+  | "ipam.reconcile.kind.rogue"
+  | "ipam.reconcile.kind_help.conflict"
+  | "ipam.reconcile.kind_help.ghost"
+  | "ipam.reconcile.kind_help.orphan"
+  | "ipam.reconcile.kind_help.ptr_mismatch"
+  | "ipam.reconcile.kind_help.rogue"
+  | "ipam.reconcile.last_seen"
+  | "ipam.reconcile.more"
+  | "ipam.reconcile.no_winner"
+  | "ipam.reconcile.os"
+  | "ipam.reconcile.os_guess"
+  | "ipam.reconcile.os_source"
+  | "ipam.reconcile.proposal"
+  | "ipam.reconcile.retry"
+  | "ipam.reconcile.rule.forward_record"
+  | "ipam.reconcile.rule.intent_managed"
+  | "ipam.reconcile.rule.lease_dynamic"
+  | "ipam.reconcile.rule.manual_record"
+  | "ipam.reconcile.rule.never_automatic"
+  | "ipam.reconcile.rule.newest_sighting"
+  | "ipam.reconcile.rule.orphan_rule"
+  | "ipam.reconcile.sub"
+  | "ipam.reconcile.title"
+  | "ipam.reconcile.truth.dns"
+  | "ipam.reconcile.truth.intent"
+  | "ipam.reconcile.truth.lease"
+  | "ipam.reconcile.truth.scan"
+  | "ipam.reconcile.vendors"
+  | "ipam.reconcile.winner"
+  | "ipam.reconcile.wins"
   | "ipam.restore.done"
   | "ipam.restore.title"
   | "ipam.scope.label"
@@ -6698,6 +6753,12 @@ export interface MessageArgs {
   "ipam.prefix.not_found": { cidr: string | number };
   "ipam.prefix.ranges_grid": { cidr: string | number };
   "ipam.prefix.usage": { capacity: string | number; used: string | number };
+  "ipam.reconcile.count": { count: number; more: string };
+  "ipam.reconcile.filter.host_chip": { host: string | number };
+  "ipam.reconcile.filter.host_unknown": { name: string | number };
+  "ipam.reconcile.os_guess": { confidence: string | number; guess: string | number };
+  "ipam.reconcile.os_source": { source: string | number; truth: string | number };
+  "ipam.reconcile.winner": { truth: string | number };
   "ipam.restore.done": { kind: string | number; label: string | number };
   "ipam.restore.title": { kind: string | number; label: string | number };
   "ipam.scope.option": { tenant: string | number; vrf: string | number };
@@ -10815,6 +10876,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.nav.import",
   "ipam.nav.label",
   "ipam.nav.networks",
+  "ipam.nav.reconcile",
   "ipam.nav.sites",
   "ipam.nav.tags",
   "ipam.nav.tenancy",
@@ -10887,6 +10949,60 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.range_role.dhcp_pool",
   "ipam.range_role.infrastructure",
   "ipam.range_role.reserved",
+  "ipam.reconcile.col.address",
+  "ipam.reconcile.col.details",
+  "ipam.reconcile.col.winner",
+  "ipam.reconcile.count",
+  "ipam.reconcile.dns_forward",
+  "ipam.reconcile.dns_ptr",
+  "ipam.reconcile.empty",
+  "ipam.reconcile.filter.all_kinds",
+  "ipam.reconcile.filter.all_prefixes",
+  "ipam.reconcile.filter.host",
+  "ipam.reconcile.filter.host_apply",
+  "ipam.reconcile.filter.host_chip",
+  "ipam.reconcile.filter.host_placeholder",
+  "ipam.reconcile.filter.host_unknown",
+  "ipam.reconcile.filter.kind",
+  "ipam.reconcile.filter.label",
+  "ipam.reconcile.filter.prefix",
+  "ipam.reconcile.filter.remove_host",
+  "ipam.reconcile.host_open",
+  "ipam.reconcile.host_unavailable",
+  "ipam.reconcile.kind.conflict",
+  "ipam.reconcile.kind.ghost",
+  "ipam.reconcile.kind.orphan",
+  "ipam.reconcile.kind.ptr_mismatch",
+  "ipam.reconcile.kind.rogue",
+  "ipam.reconcile.kind_help.conflict",
+  "ipam.reconcile.kind_help.ghost",
+  "ipam.reconcile.kind_help.orphan",
+  "ipam.reconcile.kind_help.ptr_mismatch",
+  "ipam.reconcile.kind_help.rogue",
+  "ipam.reconcile.last_seen",
+  "ipam.reconcile.more",
+  "ipam.reconcile.no_winner",
+  "ipam.reconcile.os",
+  "ipam.reconcile.os_guess",
+  "ipam.reconcile.os_source",
+  "ipam.reconcile.proposal",
+  "ipam.reconcile.retry",
+  "ipam.reconcile.rule.forward_record",
+  "ipam.reconcile.rule.intent_managed",
+  "ipam.reconcile.rule.lease_dynamic",
+  "ipam.reconcile.rule.manual_record",
+  "ipam.reconcile.rule.never_automatic",
+  "ipam.reconcile.rule.newest_sighting",
+  "ipam.reconcile.rule.orphan_rule",
+  "ipam.reconcile.sub",
+  "ipam.reconcile.title",
+  "ipam.reconcile.truth.dns",
+  "ipam.reconcile.truth.intent",
+  "ipam.reconcile.truth.lease",
+  "ipam.reconcile.truth.scan",
+  "ipam.reconcile.vendors",
+  "ipam.reconcile.winner",
+  "ipam.reconcile.wins",
   "ipam.restore.done",
   "ipam.restore.title",
   "ipam.scope.label",

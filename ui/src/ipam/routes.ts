@@ -18,5 +18,7 @@ export const routes: AppRoute[] = [
   { path: "/ipam/tenants", component: lazy(withPacks(PACKS, () => import("./tenancy/TenancyView"))), title: "ipam.nav.tenancy" },
   { path: "/ipam/tags", component: lazy(withPacks(PACKS, () => import("./tenancy/TagsView"))), title: "ipam.nav.tags" },
   { path: "/ipam/custom-fields", component: lazy(withPacks(PACKS, () => import("./tenancy/CustomFieldsView"))), title: "ipam.nav.custom_fields" },
+  // WP8.2: the reconciliation view.
+  { path: "/ipam/reconcile", component: lazy(withPacks(PACKS, () => import("./reconcile/ReconcileView"))), title: "ipam.reconcile.title" },
   { path: "/ipam/move", component: lazy(withPacks([...PACKS, "jobs"], () => import("./move/MovePreview"))), title: "move.title" },
 ];

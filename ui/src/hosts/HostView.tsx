@@ -34,6 +34,8 @@ import { useScope } from "../ipam/scope";
 import { useTree } from "../ipam/tree/PrefixTree";
 import { modeHint, modeWord } from "../ipam/words";
 import { HostObservations } from "../discovery/HostObservations";
+// WP8.2: the OS block of the reconciliation view.
+import { HostOsBlock } from "../ipam/reconcile/HostOsBlock";
 import { JobStateChip } from "../jobs/StateChip";
 import { cancelRolledBack, jobTitle } from "../jobs/words";
 import { isTyping } from "../shell/keyboard";
@@ -417,6 +419,8 @@ export default function HostView() {
                 <Show when={data()} fallback={<p class="muted">{t("common.loading")}</p>}>
                   {(d) => <HostObservations host={h()} interfaces={d().interfaces} addresses={d().addresses} />}
                 </Show>
+                {/* WP8.2: the OS field and the vendors of the reconciliation view. */}
+                <HostOsBlock host={h().id} />
               </section>
 
               <section class="page-section" aria-labelledby="host-jobs-title">

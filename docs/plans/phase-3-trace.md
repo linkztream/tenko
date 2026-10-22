@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-23 Phase 3 requirements; 5 named by at least one test, 18 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 6 named by at least one test, 17 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-11 | Should | - | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>and 1 more |
 | DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 9 more |
-| DHCP-14 | Should | - | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/fingerprint.rs`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-14 | Should | `crates/tenko/tests/acceptance_reconcile.rs` | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/fingerprint.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-15 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-16 | Must | `crates/tenko-ipam/tests/move_dhcp.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/dhcp.md`<br>`docs/moves.md`<br>and 2 more |
 | DHCP-17 | Should | - | - | `docs/plans/phase-3-plan.md` |
@@ -34,7 +34,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DNS-03 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0007-delivery-order.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 4 more |
 | DNS-13 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0007-delivery-order.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 3 more |
 | DNS-34 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>`docs/plans/dns-recursion-plan.md`<br>and 2 more |
-| IPAM-21 | Must | `ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 3 more |
+| IPAM-21 | Must | `crates/tenko-ipam/tests/reconcile_view.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/reconcile.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`crates/tenko/src/client/ipam.rs`<br>`docs/ARCHITECTURE.md`<br>and 6 more |
 | MIG-16 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko/src/client/dhcp.rs`<br>`docs/MIGRATION.md`<br>and 3 more |
 
 ## Exit criteria
@@ -47,7 +47,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | E25 | The five-device move lab of Phase 1 (E8) runs with the DHCP step automatic for the `reserved` devices: the reservation in the target scope from IPAM intent, the observation from the new lease without polling, the old reservation and lease removed in the cleanup, the `static` device stopping at its manual step, the rollback on a blocked step | IPAM-19, DHCP-16, IPAM-18, CON-10 | `crates/tenko-ipam/tests/move_dhcp.rs`<br>`crates/tenko/tests/acceptance_move.rs`<br>`crates/tenko/tests/acceptance_move.rs::e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_move` |
 | E26 | A client with option 81 and a legacy client that sends only option 12 get their A and PTR records and a DHCID in Tenko zones on ACK, the records go on release and on expiry, and a second client that claims the first one's name is refused by name protection (RFC 4703); the profile defaults of P3-Q6 hold | DHCP-13 | `crates/tenko/tests/acceptance_dhcp_ddns.rs` |
 | E27 | The relay and options lab: four networks in compose behind a relay; giaddr and link selection (RFC 3527) choose the scope, option 82 is echoed, a shared network with two subnets fills both, options inherit from server to scope to class to reservation, vendor class, user class and MAC wildcard classes select policies, a MAC deny list and an allow list on a restricted scope hold, a squatter is detected before the offer, a DECLINE quarantines the address, and a BIOS, a UEFI and a UEFI HTTP client boot over PXE (iPXE in QEMU) | DHCP-01 to DHCP-06, DHCP-08, TGL-16, TGL-17 | `crates/tenko-dhcp/tests/conflict.rs::lab_m35_squatters_are_skipped` |
-| E28 | The reconciliation view shows the four truths (intent, leases, DNS records, scans) for the lab data with the ghost, rogue, orphan and PTR-mismatch lists and the "who wins" rule of each, and a lease's options 55 and 60 set the OS field of an unmanaged host | IPAM-21, DHCP-14, IPAM-23 | - |
+| E28 | The reconciliation view shows the four truths (intent, leases, DNS records, scans) for the lab data with the ghost, rogue, orphan and PTR-mismatch lists and the "who wins" rule of each, and a lease's options 55 and 60 set the OS field of an unmanaged host | IPAM-21, DHCP-14, IPAM-23 | `crates/tenko/tests/acceptance_reconcile.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs::e28_the_view_lists_every_seeded_case_and_a_lease_sets_the_os_of_an_unmanaged_host` |
 | E29 | DHCPv6 through a relay in the lab: IA_NA from a pool, IA_PD from a delegation pool, a DUID reservation from IPAM intent, RFC 6939 correlation with the DHCPv4 lease of the same MAC, the names of RFC 4704, and the M and O flag check of DHCP-10 in the health view | DHCP-09, DHCP-10, DHCP-11, DHCP-13 | - |
 | E30 | The Kea JSON export of the lab configuration and its leases is accepted by `kea-dhcp4 -t` and `kea-dhcp6 -t`, and a Kea server started from it hands the exported reservations to their clients | MIG-16 | - |
 | E31 | Fuzz targets for the DHCPv4 and DHCPv6 wire formats, the option parsers and the relay information run in the weekly fuzz smoke | API-14, API-15 | - |
@@ -67,7 +67,6 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - DHCP-11 (Should)
 - DHCP-12 (Must)
 - DHCP-13 (Must)
-- DHCP-14 (Should)
 - DHCP-15 (Must)
 - DHCP-17 (Should)
 - DHCP-18 (Must)

@@ -121,6 +121,14 @@ pub enum Command {
         action: client::prefix::PrefixCommand,
     },
 
+    // WP8.2
+    /// IPAM views: the reconciliation of intent, leases, DNS records and scans.
+    Ipam {
+        /// The `ipam` subcommand to run.
+        #[command(subcommand)]
+        action: client::ipam::IpamCommand,
+    },
+
     /// Import a spreadsheet or CSV file: upload, mapping, preview, apply.
     Import(client::import::ImportArgs),
 
@@ -256,6 +264,7 @@ impl Command {
             Command::Login(_) => "login",
             Command::Logout(_) => "logout",
             Command::Prefix { action } => action.name(),
+            Command::Ipam { action } => action.name(), // WP8.2
             Command::CaRoot(_) => "ca-root",
             Command::Health(_) => "health",
             Command::Import(_) => "import",
@@ -352,6 +361,12 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             let json = action.client().json;
             client::block_on(name, json, out, err, client::prefix::run(action))
+        }
+        // WP8.2
+        Command::Ipam { action } => {
+            logging::init_client();
+            let json = action.client().json;
+            client::block_on(name, json, out, err, client::ipam::run(action))
         }
         Command::Dns { action } => {
             logging::init_client();
@@ -610,7 +625,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 39] = [
+        let cases: [(&[&str], &str); 40] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -653,6 +668,10 @@ mod tests {
             (&["logout"], "logout"),
             (&["prefix", "list"], "prefix list"),
             (&["prefix", "create", "192.0.2.0/24"], "prefix create"),
+            (
+                &["ipam", "reconcile", "--kind", "ptr_mismatch"],
+                "ipam reconcile",
+            ), // WP8.2
             (&["import", "file.csv"], "import"),
             (&["export", "prefixes"], "export"),
             (&["dns", "zone", "list"], "dns zone list"),

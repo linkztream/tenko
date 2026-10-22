@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="reconcile-view">
+      <unit id="ipam.nav.reconcile">
+        <notes><note category="description">Tab of the IPAM navigation for the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.title">
+        <notes><note category="description">Title of the reconciliation view and its entry in the browser tab.</note></notes>
+        <segment><source>Reconciliation</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.sub">
+        <segment><source>What intent, leases, DNS and scans say about each address</source><target>Vad avsikt, adresslån, DNS och skanningar säger om varje adress</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.label">
+        <segment><source>Filter the reconciliation view</source><target>Filtrera avstämningen</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.prefix">
+        <notes><note category="description">Label of the network drop-down.</note></notes>
+        <segment><source>Network</source><target>Nät</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.all_prefixes">
+        <segment><source>All networks</source><target>Alla nät</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host">
+        <notes><note category="description">Label of the host name field.</note></notes>
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_placeholder">
+        <segment><source>Host name</source><target>Värdnamn</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_apply">
+        <segment><source>Show host</source><target>Visa värd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_unknown">
+        <segment><source>No host is named {name}.</source><target>Ingen värd heter {name}.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_chip">
+        <notes><note category="description">The applied host filter; {host} is the host name.</note></notes>
+        <segment><source>Host {host}</source><target>Värd {host}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.remove_host">
+        <segment><source>Remove the host filter</source><target>Ta bort värdfiltret</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.kind">
+        <notes><note category="description">Accessible name of the group of kind buttons.</note></notes>
+        <segment><source>Kind of finding</source><target>Typ av fynd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.all_kinds">
+        <segment><source>All findings</source><target>Alla fynd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.conflict">
+        <notes><note category="description">Section title: addresses with two MAC addresses.</note></notes>
+        <segment><source>Conflicts</source><target>Konflikter</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.ghost">
+        <notes><note category="description">Section title: addresses of intent that nothing shows any more.</note></notes>
+        <segment><source>Ghost addresses</source><target>Spökadresser</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.rogue">
+        <notes><note category="description">Section title: leases or sightings without intent.</note></notes>
+        <segment><source>Unknown devices</source><target>Okända enheter</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.orphan">
+        <notes><note category="description">Section title: DNS records for addresses no host holds.</note></notes>
+        <segment><source>Orphaned records</source><target>Föräldralösa poster</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.ptr_mismatch">
+        <notes><note category="description">Section title: PTR records that disagree with the address's name.</note></notes>
+        <segment><source>PTR mismatches</source><target>PTR stämmer inte</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.conflict">
+        <segment><source>Two MAC addresses on one address, across leases and sightings. Never resolved automatically.</source><target>Två MAC-adresser på samma adress, bland adresslån och observationer. Löses aldrig automatiskt.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.ghost">
+        <segment><source>An address of intent that nothing has shown for longer than the lease time of its DHCP scope.</source><target>En adress i avsikten som inget har visat sig på längre än lånetiden i dess DHCP-omfång.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.rogue">
+        <segment><source>A lease or a sighting without intent.</source><target>Ett adresslån eller en observation utan avsikt.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.orphan">
+        <segment><source>A DNS record for an address that no host holds.</source><target>En DNS-post för en adress som ingen värd har.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.ptr_mismatch">
+        <segment><source>A PTR record whose name disagrees with the DNS name of the address.</source><target>En PTR-post vars namn skiljer sig från adressens DNS-namn.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.count">
+        <notes><note category="description">Number of rows of a list; a plus sign when more rows can be loaded.</note></notes>
+        <segment><source>{count, number}{more, select, yes {+} other {}}</source><target>{count, number}{more, select, yes {+} other {}}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.empty">
+        <segment><source>Nothing found.</source><target>Inget hittades.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.more">
+        <segment><source>Show more</source><target>Visa fler</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.retry">
+        <segment><source>Try again</source><target>Försök igen</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.address">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.winner">
+        <notes><note category="description">Column: which truth wins and why.</note></notes>
+        <segment><source>Who wins</source><target>Vem gäller</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.details">
+        <segment><source>Details</source><target>Detaljer</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.intent">
+        <notes><note category="description">One of the four truths: what intent (the IPAM data) says.</note></notes>
+        <segment><source>Intent</source><target>Avsikt</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.lease">
+        <notes><note category="description">One of the four truths: what the DHCP leases say.</note></notes>
+        <segment><source>Lease</source><target>Adresslån</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.dns">
+        <notes><note category="description">One of the four truths: what the DNS zones say.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.scan">
+        <notes><note category="description">One of the four truths: what scans and inventories saw.</note></notes>
+        <segment><source>Scan</source><target>Skanning</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.wins">
+        <notes><note category="description">Mark on the winning truth of a row.</note></notes>
+        <segment><source>Wins</source><target>Gäller</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.winner">
+        <notes><note category="description">The winning truth of a row; {truth} is one of the truth words.</note></notes>
+        <segment><source>{truth} wins</source><target>{truth} gäller</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.no_winner">
+        <notes><note category="description">Shown for a conflict, which has no winner.</note></notes>
+        <segment><source>No winner</source><target>Ingen vinnare</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.intent_managed">
+        <segment><source>Intent wins: the host is managed, so what intent says stands.</source><target>Avsikten gäller: värden är hanterad, så det som avsikten anger står fast.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.lease_dynamic">
+        <segment><source>The lease wins: the host is dynamic, so its address is the one DHCP gave it.</source><target>Adresslånet gäller: värden är dynamisk, så dess adress är den som DHCP har tilldelat.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.newest_sighting">
+        <segment><source>Without intent the newest sighting wins. Adopt it with the discovered-host proposal.</source><target>Utan avsikt gäller den senaste observationen. Lägg till den med förslaget om upptäckt värd.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.never_automatic">
+        <segment><source>Never resolved automatically: two devices on one address need a person to decide.</source><target>Löses aldrig automatiskt: två enheter på samma adress kräver att en person avgör.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.orphan_rule">
+        <segment><source>IPAM wrote this record, so the orphan rule removes it or proposes removing it.</source><target>IPAM skrev posten, så regeln för föräldralösa poster tar bort den eller föreslår att den tas bort.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.manual_record">
+        <segment><source>Written by hand, so it stays as written.</source><target>Skriven för hand, så den står kvar som den är.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.forward_record">
+        <segment><source>The forward record wins: the PTR record should follow it.</source><target>Den framåtriktade posten gäller: PTR-posten bör följa den.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.dns_forward">
+        <notes><note category="description">Label of the names in forward records (A and AAAA) of an address.</note></notes>
+        <segment><source>Forward</source><target>Framåt</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.dns_ptr">
+        <notes><note category="description">Label of the names in PTR records of an address.</note></notes>
+        <segment><source>PTR</source><target>PTR</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.proposal">
+        <segment><source>Open the proposal</source><target>Öppna förslaget</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.os">
+        <segment><source>Operating system</source><target>Operativsystem</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.os_guess">
+        <notes><note category="description">An operating system guess with its confidence in percent.</note></notes>
+        <segment><source>{guess} ({confidence} %)</source><target>{guess} ({confidence} %)</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.os_source">
+        <notes><note category="description">Where an operating system guess comes from: the source key and the truth it speaks for.</note></notes>
+        <segment><source>from {source} ({truth})</source><target>från {source} ({truth})</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.vendors">
+        <segment><source>Vendors</source><target>Tillverkare</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.last_seen">
+        <segment><source>Last seen</source><target>Senast sedd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.host_open">
+        <notes><note category="description">Link on the host page to the reconciliation view of the host.</note></notes>
+        <segment><source>Open in the reconciliation view</source><target>Öppna i avstämningen</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.host_unavailable">
+        <notes><note category="description">Quiet note on the host page when the reconciliation view cannot be read.</note></notes>
+        <segment><source>The operating system and vendors are not available right now.</source><target>Operativsystem och tillverkare är inte tillgängliga just nu.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

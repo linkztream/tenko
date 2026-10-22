@@ -44,6 +44,8 @@ pub(crate) mod rules;
 pub mod scopes;
 pub mod settings;
 pub(crate) mod snapshot;
+// WP8.2: the reconciliation view of the four truths (IPAM-21, IPAM-23).
+pub mod view;
 
 use std::{
     collections::BTreeMap,

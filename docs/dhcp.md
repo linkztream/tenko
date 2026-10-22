@@ -18,6 +18,7 @@ Contents:
 7. [The API and the command line](#7-the-api-and-the-command-line)
 14. [Conflict detection and DECLINE](#14-conflict-detection-and-decline)
 16. [Classes, policies, PXE and UEFI](#16-classes-policies-pxe-and-uefi)
+15. [Fingerprinting and the reconciliation view](#15-fingerprinting-and-the-reconciliation-view)
 
 ## 1. The wire format
 
@@ -531,7 +532,7 @@ The committer adds the IPAM facts of the source `dhcp:<node>` to the batch of ev
 | `Observed::Name` with the FQDN of option 81, else the host name of option 12 | `name:<ip>` | The lease binds and the client sent a name |
 | `Observed::Address` with the MAC address that answered the conflict probe (an ARP answer), else none (ICMP, a DECLINE) | `address:<vrf>/<ip>` | The row is `abandoned` (a conflict of WP8.5), until its hold ends |
 
-`Observed::Os` and `Observed::Vendor` from the fingerprint and option 60 are WP8.2's. A fact's `last_seen` is the lease's client transaction time and its `expires_at` the end of the binding when the fact was written, so a binding that runs out takes its facts with it and expiry writes nothing.
+`Observed::Os` and `Observed::Vendor` from the fingerprint and option 60 are section 15.3. A fact's `last_seen` is the lease's client transaction time and its `expires_at` the end of the binding when the fact was written, so a binding that runs out takes its facts with it and expiry writes nothing.
 
 The rules of `observe::ingest` apply to each fact: a new subject is a new fact; a known fact is written again only when its attributes changed (another MAC address, another name; another device on the address starts its fact again), when it had expired, or when its refresh is due, that is 15 minutes since its last sighting or less than half of the fresh lifetime left. A renewal or a repeated request within the refresh interval writes nothing. A client renews at half its lease time, so a renewal at that point usually finds the refresh due once the lease is longer than half an hour, and writes the fact with the new sighting into the batch it writes anyway. A release, a decline or an operator's release expires the current facts of the address at once. Every outcome is counted in `tenko_dhcp_lease_facts_total{outcome}` (`new`, `changed`, `refreshed`, `unchanged`, `expired`; the address fact and the name fact count separately).
 
@@ -708,6 +709,68 @@ A client may decline at most `[dhcp.decline] limit` addresses per `window_secs` 
 
 M35 (plan section 6) is in `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md`: the offer delay for new addresses stays at most the cap and renewals are not delayed, and a squatter on the node's link is found in 20 of 20 tries, by ARP and by ICMP.
 What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).
+
+## 15. Fingerprinting and the reconciliation view
+
+WP8.2 reads what a client's request says about its system (DHCP-14) and joins the leases to the reconciliation view of IPAM-21, where they meet intent, the DNS records and the scans (decisions P3-Q8 and P3-Q15).
+
+### 15.1 The fingerprint
+
+A fingerprint is what a request shows of the client's DHCP stack (`tenko_core::dhcp::Fingerprint`): the parameter request list of option 55 in the client's order, the vendor class of option 60, and whether the client sent options 77 (user class), 81 (client FQDN) and 93 (client architecture, its first value). The DORA path copies these into the fixed-capacity change (`PendingFingerprint`) without allocating; the committer builds the owned fingerprint of the lease row (`fingerprint` on `Lease`). A row the feed copies without a fingerprint keeps the one it had. `tenko_dhcp::fingerprint::fingerprint_of` reads the same from a parsed message.
+
+### 15.2 The rule table
+
+The rule table (`crates/tenko-dhcp/src/fingerprint/table.rs`, `table::ENTRIES`) is written in the project, offline, from captured requests and published descriptions of client behaviour (P3-Q15; p0f's signatures describe TCP/IP stacks, not DHCP requests, and were set aside). An entry says what a fingerprint must show and what it means:
+
+| Field | Meaning |
+|---|---|
+| `list` | `Exact` (the list in the client's order), `Prefix` (the list starts with these codes), `Any` |
+| `vendor` | `Exact`, `Prefix`, `Contains`, `Absent` (no option 60), `Any` |
+| `user_class`, `client_fqdn`, `architecture` | the presence of option 77, 81 or 93 required or excluded, or not looked at |
+| `family`, `version` | the guess; a version can take the rest of the vendor class after its prefix (`android-dhcp-13` gives Android 13, `udhcp 1.35.0` gives BusyBox udhcpc 1.35.0) |
+| `confidence` | 0 to 100; below 50 a family guess, not a version |
+| `provenance` | `Captured` in the lab, `Modelled` in the WP7.3 corpus, `Published` |
+
+`RuleTable::builtin` tries the entries with an exact list first, then those with a list prefix, then those without a list, each group in the order of the table, and the first that matches wins: a known release is named exactly, a later release of a known stack falls to its family, and a vendor class alone gives the weakest guess.
+
+The table has 38 entries:
+
+| Family | Entries | Source |
+|---|---|---|
+| Windows | 10 and 11 (and Server 2016 and later), 7 and 8 (and Server 2008 R2 to 2012 R2), XP (and Server 2003), a list prefix for later releases, `MSFT 5.0` alone | the WP7.3 corpus (modelled) and published lists |
+| macOS, iOS and iPadOS | macOS 13 and later, 11 and 12, 10.x; iOS 15 and later, 14, 10 to 13; a list prefix for Apple | the corpus (macOS 14) and published lists |
+| Android | Android 13, 11 and 12, 9 and 10 by their lists, a list prefix, the vendor class `android-dhcp-` alone, each with the release from the vendor class | the corpus (Android 13) and published lists |
+| Linux | ISC dhclient (Debian and Ubuntu), systemd-networkd, NetworkManager (Fedora and RHEL), BusyBox udhcpc with and without its vendor class, dhcpcd, a dhcpcd host with a Proxmox VE kernel, a list prefix for dhclient | dhclient and udhcpc captured in the lab, networkd modelled, NetworkManager from its source |
+| ChromeOS, PlayStation, Xbox | one entry each, with low confidence for the PlayStation's short list | published |
+| Printers | HP JetDirect by its vendor class | published |
+| Embedded | lwIP (ESP8266, ESP-IDF, Tasmota, ESPHome) with and without DNS and SNTP | lwIP's `dhcp.c` |
+| Boot firmware | iPXE (QEMU and Proxmox VMs boot through it), UEFI HTTP boot, UEFI PXE x64, BIOS PXE, by option 60 with option 93 | the corpus (both PXE requests) and published |
+
+The captured requests are fixtures in `crates/tenko-dhcp/src/fingerprint/captured/`: the first DHCPDISCOVER of Debian 12's ISC dhclient 4.4.3-P1 with the package's configuration and with the lab's own `dhclient.conf`, and of BusyBox 1.35.0's udhcpc, received by a UDP listener in containers of the lab's tools image on a throwaway bridge. A request list a configuration file sets (the lab's `dhclient.conf`) matches no entry, as it should.
+
+What the table cannot tell it does not claim. Windows Server sends the request of the desktop release it shares a kernel with, iPadOS that of iOS, and a Proxmox or VMware guest that of the system inside it; only the guest's boot firmware (iPXE, PXE) and a dhcpcd host whose kernel release ends in `-pve` show more. The MAC address's vendor (OUI), which the probes report, is the better hint for virtual machines, and the reconciliation view shows it beside the guess.
+
+### 15.3 The OS and vendor facts
+
+The lease facts of section 12.3 gain two subjects, written by the same rules (a renewal within the refresh interval writes nothing; a release or a decline expires them; a binding that runs out takes them along):
+
+| Fact | Subject | When |
+|---|---|---|
+| `Observed::Os` with the guess as text (`Windows 10 or 11 (or Server 2016 and later)`) and the confidence | `os:<ip>` | the lease binds and the rule table knows the fingerprint |
+| `Observed::Vendor` with the vendor class | `vendor:<mac>` | the lease binds, the client has a MAC address and sent option 60 |
+
+The hook `IpamObservations` hands its `LeaseFacts` the rule table at registration (`tenko_dhcp::fingerprint::classify_leases`, through `tenko_ipam::observe::dhcp::LeaseClassifier`); matching runs on the committer, never on a worker.
+
+### 15.4 The OS field
+
+The reconciliation view picks the OS of a device by precedence ([reconciliation.md](reconciliation.md) section 11): an inventory's own statement first (a hypervisor or Home Assistant says what it runs), then an active scan's guess (a probe's OS fingerprint), then the DHCP fingerprint's guess; within a rank the higher confidence, then the newer sighting. So a lease's options 55 and 60 fill the OS field of a host nothing else describes, an unmanaged one included, and an active scan outranks it as soon as it reports.
+
+### 15.5 Tests
+
+- `crates/tenko-dhcp/src/fingerprint/tests.rs`: the lab's captures and the corpus's modelled requests (Windows, macOS, Android, dhclient, networkd, PXE) classified, requests made up for other purposes not classified, an exact list before a prefix before the vendor class, every entry reachable (none shadowed by an earlier one), the families the plan names present.
+- `crates/tenko-dhcp/tests/contracts.rs`: the contract's first-match rule, also as a property test.
+- `crates/tenko-ipam/src/observe/dhcp/tests.rs`: the OS and vendor facts written, left alone on a renewal, changed, expired.
+- `crates/tenko-ipam/tests/reconcile_view.rs` and E28 in `crates/tenko/tests/acceptance_reconcile.rs`: the view and the OS field (section 11 of reconciliation.md).
 
 ## 16. Classes, policies, PXE and UEFI
 

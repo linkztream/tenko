@@ -33,6 +33,7 @@ pub mod export;
 pub mod health;
 pub mod hibp;
 pub mod import;
+pub mod ipam; // WP8.2
 pub mod login;
 pub mod prefix;
 

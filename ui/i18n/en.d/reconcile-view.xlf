@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="reconcile-view">
+      <unit id="ipam.nav.reconcile">
+        <notes><note category="description">Tab of the IPAM navigation for the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.title">
+        <notes><note category="description">Title of the reconciliation view and its entry in the browser tab.</note></notes>
+        <segment><source>Reconciliation</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.sub">
+        <segment><source>What intent, leases, DNS and scans say about each address</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.label">
+        <segment><source>Filter the reconciliation view</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.prefix">
+        <notes><note category="description">Label of the network drop-down.</note></notes>
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.all_prefixes">
+        <segment><source>All networks</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host">
+        <notes><note category="description">Label of the host name field.</note></notes>
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_placeholder">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_apply">
+        <segment><source>Show host</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_unknown">
+        <segment><source>No host is named {name}.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.host_chip">
+        <notes><note category="description">The applied host filter; {host} is the host name.</note></notes>
+        <segment><source>Host {host}</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.remove_host">
+        <segment><source>Remove the host filter</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.kind">
+        <notes><note category="description">Accessible name of the group of kind buttons.</note></notes>
+        <segment><source>Kind of finding</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.filter.all_kinds">
+        <segment><source>All findings</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.conflict">
+        <notes><note category="description">Section title: addresses with two MAC addresses.</note></notes>
+        <segment><source>Conflicts</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.ghost">
+        <notes><note category="description">Section title: addresses of intent that nothing shows any more.</note></notes>
+        <segment><source>Ghost addresses</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.rogue">
+        <notes><note category="description">Section title: leases or sightings without intent.</note></notes>
+        <segment><source>Unknown devices</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.orphan">
+        <notes><note category="description">Section title: DNS records for addresses no host holds.</note></notes>
+        <segment><source>Orphaned records</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind.ptr_mismatch">
+        <notes><note category="description">Section title: PTR records that disagree with the address's name.</note></notes>
+        <segment><source>PTR mismatches</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.conflict">
+        <segment><source>Two MAC addresses on one address, across leases and sightings. Never resolved automatically.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.ghost">
+        <segment><source>An address of intent that nothing has shown for longer than the lease time of its DHCP scope.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.rogue">
+        <segment><source>A lease or a sighting without intent.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.orphan">
+        <segment><source>A DNS record for an address that no host holds.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.kind_help.ptr_mismatch">
+        <segment><source>A PTR record whose name disagrees with the DNS name of the address.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.count">
+        <notes><note category="description">Number of rows of a list; a plus sign when more rows can be loaded.</note></notes>
+        <segment><source>{count, number}{more, select, yes {+} other {}}</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.empty">
+        <segment><source>Nothing found.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.more">
+        <segment><source>Show more</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.retry">
+        <segment><source>Try again</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.winner">
+        <notes><note category="description">Column: which truth wins and why.</note></notes>
+        <segment><source>Who wins</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.details">
+        <segment><source>Details</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.intent">
+        <notes><note category="description">One of the four truths: what intent (the IPAM data) says.</note></notes>
+        <segment><source>Intent</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.lease">
+        <notes><note category="description">One of the four truths: what the DHCP leases say.</note></notes>
+        <segment><source>Lease</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.dns">
+        <notes><note category="description">One of the four truths: what the DNS zones say.</note></notes>
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.truth.scan">
+        <notes><note category="description">One of the four truths: what scans and inventories saw.</note></notes>
+        <segment><source>Scan</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.wins">
+        <notes><note category="description">Mark on the winning truth of a row.</note></notes>
+        <segment><source>Wins</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.winner">
+        <notes><note category="description">The winning truth of a row; {truth} is one of the truth words.</note></notes>
+        <segment><source>{truth} wins</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.no_winner">
+        <notes><note category="description">Shown for a conflict, which has no winner.</note></notes>
+        <segment><source>No winner</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.intent_managed">
+        <segment><source>Intent wins: the host is managed, so what intent says stands.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.lease_dynamic">
+        <segment><source>The lease wins: the host is dynamic, so its address is the one DHCP gave it.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.newest_sighting">
+        <segment><source>Without intent the newest sighting wins. Adopt it with the discovered-host proposal.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.never_automatic">
+        <segment><source>Never resolved automatically: two devices on one address need a person to decide.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.orphan_rule">
+        <segment><source>IPAM wrote this record, so the orphan rule removes it or proposes removing it.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.manual_record">
+        <segment><source>Written by hand, so it stays as written.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.rule.forward_record">
+        <segment><source>The forward record wins: the PTR record should follow it.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.dns_forward">
+        <notes><note category="description">Label of the names in forward records (A and AAAA) of an address.</note></notes>
+        <segment><source>Forward</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.dns_ptr">
+        <notes><note category="description">Label of the names in PTR records of an address.</note></notes>
+        <segment><source>PTR</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.proposal">
+        <segment><source>Open the proposal</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.os">
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.os_guess">
+        <notes><note category="description">An operating system guess with its confidence in percent.</note></notes>
+        <segment><source>{guess} ({confidence} %)</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.os_source">
+        <notes><note category="description">Where an operating system guess comes from: the source key and the truth it speaks for.</note></notes>
+        <segment><source>from {source} ({truth})</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.vendors">
+        <segment><source>Vendors</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.last_seen">
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.host_open">
+        <notes><note category="description">Link on the host page to the reconciliation view of the host.</note></notes>
+        <segment><source>Open in the reconciliation view</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.host_unavailable">
+        <notes><note category="description">Quiet note on the host page when the reconciliation view cannot be read.</note></notes>
+        <segment><source>The operating system and vendors are not available right now.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>
