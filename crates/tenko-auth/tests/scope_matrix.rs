@@ -60,7 +60,9 @@ const P2: PrefixId = PrefixId::from_uuid(Uuid::from_u128(0x22));
 const P3: PrefixId = PrefixId::from_uuid(Uuid::from_u128(0x23));
 
 /// Every kind that scoped grants reach.
-const SCOPED_KINDS: [ObjectKind; 13] = [
+// WP7.0: a DHCP scope follows its prefix's grants (IAM-01).
+const SCOPED_KINDS: [ObjectKind; 14] = [
+    ObjectKind::DhcpScope,
     ObjectKind::Tenant,
     ObjectKind::Vrf,
     ObjectKind::Site,
@@ -78,7 +80,12 @@ const SCOPED_KINDS: [ObjectKind; 13] = [
 
 /// Kinds no scope reaches, whatever role the grant carries. The DNS kinds are global-only in
 /// Phase 2 (ADR 0017); zones become a scope kind with the DNS grants of a later package.
-const GLOBAL_ONLY_KINDS: [ObjectKind; 15] = [
+// WP7.0: the DHCP kinds other than scopes are global-only (plan section 3.4).
+const GLOBAL_ONLY_KINDS: [ObjectKind; 19] = [
+    ObjectKind::DhcpClass,
+    ObjectKind::DhcpPolicy,
+    ObjectKind::DhcpOptionDef,
+    ObjectKind::DhcpFilter,
     ObjectKind::Import,
     ObjectKind::Connector,
     ObjectKind::Node,
@@ -318,7 +325,9 @@ fn role_allows(role: RoleName, action: Action, kind: ObjectKind) -> bool {
             | ObjectKind::Vlan
             | ObjectKind::Range
             | ObjectKind::Interface => "RCUD",
-            ObjectKind::Prefix | ObjectKind::Address | ObjectKind::Host => "RCUDX",
+            ObjectKind::Prefix | ObjectKind::Address | ObjectKind::Host | ObjectKind::DhcpScope => {
+                "RCUDX"
+            }
             ObjectKind::CustomField | ObjectKind::Observation => "R",
             ObjectKind::Job => "RX",
             ObjectKind::Proposal => "RA",
@@ -675,8 +684,8 @@ async fn run_matrix(rig: &Rig) {
         rig.label,
         failures.len()
     );
-    // Seven scopes, two roles, thirteen kinds, eight actions, six objects.
-    assert_eq!(checks, 7 * 2 * 13 * 8 * 6);
+    // Seven scopes, two roles, fourteen kinds, eight actions, six objects.
+    assert_eq!(checks, 7 * 2 * 14 * 8 * 6);
 }
 
 /// Imports, connectors, nodes, secrets, settings, users, the system, sessions and tokens

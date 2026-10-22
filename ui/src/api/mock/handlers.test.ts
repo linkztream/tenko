@@ -1648,8 +1648,8 @@ describe("events", () => {
   it("needs a session and a known topic", async () => {
     expectProblem(await get("/api/v1/events"), 401, "auth.unauthenticated");
     resetMockDb("signed-in");
-    const problem = expectProblem(await get("/api/v1/events?topics=ipam,dhcp"), 400, "sys.events.unknown_topic");
-    expect(problem.params).toEqual({ topic: "dhcp" });
+    const problem = expectProblem(await get("/api/v1/events?topics=ipam,ntp"), 400, "sys.events.unknown_topic");
+    expect(problem.params).toEqual({ topic: "ntp" });
     expectProblem(await get("/api/v1/events?from=abc"), 400, "sys.invalid_query");
   });
 

@@ -49,9 +49,13 @@ beforeEach(() => {
 });
 
 describe("the node operations of the document", () => {
-  // The scan and DNS operations of a node belong to their modules and are tested there.
+  // The scan, DNS and DHCP (WP7.0) operations of a node belong to their modules and are tested there.
   const OPERATIONS = apiOperations.filter(
-    (o) => /^\/api\/v1\/nodes(\/|$)/.test(o.path) && !/\/scan(-config)?(\/|$)/.test(o.path) && !/\/dns(\/|$)/.test(o.path),
+    (o) =>
+      /^\/api\/v1\/nodes(\/|$)/.test(o.path) &&
+      !/\/scan(-config)?(\/|$)/.test(o.path) &&
+      !/\/dns(\/|$)/.test(o.path) &&
+      !/\/dhcp(\/|$)/.test(o.path),
   );
 
   it("are all answered, each after the session check except the public enrolment", async () => {

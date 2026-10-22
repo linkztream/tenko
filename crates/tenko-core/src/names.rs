@@ -27,6 +27,7 @@ use crate::{
 /// | `backup` | backups: settings, schedule and history (WP3.4b) |
 /// | `cluster` | enrolment, mTLS, internal CA (WP1.3, WP2.2); controller membership (WP3.1a) |
 /// | `connect` | connectors (WP2.5, WP2.6) |
+/// | `dhcp` | the DHCP module: scopes, pools, options, classes, policies, filters, leases (Phase 3, WP7.0) |
 /// | `dns` | the DNS module: zones, records, views, forwarders, keys, lists (Phase 2, WP4.0) |
 /// | `i18n` | language packs held in the store (WP3.7) |
 /// | `import` | import and export (WP1.5) |
@@ -35,9 +36,10 @@ use crate::{
 /// | `scan` | discovery probes (WP2.3) |
 /// | `sys` | store, API platform and shared codes (WP1.0, WP1.1, WP1.7) |
 /// | `vault` | the vault (WP1.3) |
-pub const NAMESPACES: [&str; 12] = [
-    "auth", "backup", "cluster", "connect", "dns", "i18n", "import", "ipam", "jobs", "scan", "sys",
-    "vault",
+// WP7.0: `dhcp` added for Phase 3.
+pub const NAMESPACES: [&str; 13] = [
+    "auth", "backup", "cluster", "connect", "dhcp", "dns", "i18n", "import", "ipam", "jobs",
+    "scan", "sys", "vault",
 ];
 
 /// Maximum length of a namespaced name in bytes.
@@ -422,6 +424,7 @@ mod tests {
             "jobs.step-1",
             "dns.zones",
             "dns.keys.meta",
+            "dhcp.leases.by_client",
         ] {
             assert!(is_valid_name(name), "{name}");
         }

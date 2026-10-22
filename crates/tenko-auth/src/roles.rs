@@ -9,7 +9,7 @@
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
-use tenko_core::{Action, AuthStrength, ObjectKind, dns::DnsScope};
+use tenko_core::{Action, AuthStrength, ObjectKind, dhcp::DhcpScope, dns::DnsScope};
 use utoipa::ToSchema;
 
 use crate::{
@@ -73,11 +73,26 @@ impl RoleName {
         }
     }
 
-    /// Whether the role grants `action` on objects of `kind`. An action on a DNS kind is
-    /// granted by the DNS scope it needs ([`DnsScope::required`]).
+    // WP7.0
+    /// The scopes of the DHCP module the role carries (ADR 0019 point 10): the viewer
+    /// reads, the operator and the administrator read and write; the auditor has none.
+    pub const fn dhcp_scopes(self) -> &'static [DhcpScope] {
+        match self {
+            Self::Admin | Self::Operator => &DhcpScope::ALL,
+            Self::Viewer => &[DhcpScope::Read],
+            Self::Auditor => &[],
+        }
+    }
+
+    /// Whether the role grants `action` on objects of `kind`. An action on a DNS or DHCP
+    /// kind is granted by the scope it needs ([`DnsScope::required`],
+    /// [`DhcpScope::required`]).
     pub fn allows(self, action: Action, kind: ObjectKind) -> bool {
         if let Some(scope) = DnsScope::required(action, kind) {
             return self.dns_scopes().contains(&scope);
+        }
+        if let Some(scope) = DhcpScope::required(action, kind) {
+            return self.dhcp_scopes().contains(&scope);
         }
         match self {
             Self::Admin => true,
@@ -367,6 +382,37 @@ mod tests {
         assert!(interactive_only(Action::Create, ObjectKind::DnsKey));
         assert!(!interactive_only(Action::Read, ObjectKind::DnsKey));
         assert!(!interactive_only(Action::Update, ObjectKind::Zone));
+    }
+
+    // WP7.0
+    #[test]
+    fn dhcp_scopes_follow_the_roles() {
+        use tenko_core::dhcp::OBJECT_KINDS;
+        for kind in OBJECT_KINDS {
+            for action in [
+                Action::Read,
+                Action::Create,
+                Action::Update,
+                Action::Delete,
+                Action::Execute,
+            ] {
+                assert!(RoleName::Admin.allows(action, kind), "{kind}");
+                assert!(RoleName::Operator.allows(action, kind), "{kind}");
+                assert_eq!(
+                    RoleName::Viewer.allows(action, kind),
+                    action == Action::Read,
+                    "{kind}"
+                );
+                assert!(!RoleName::Auditor.allows(action, kind), "{kind}");
+            }
+            assert!(
+                !RoleName::Operator.allows(Action::Administer, kind),
+                "{kind}"
+            );
+        }
+        assert_eq!(RoleName::Viewer.dhcp_scopes(), [DhcpScope::Read]);
+        assert_eq!(RoleName::Operator.dhcp_scopes(), DhcpScope::ALL);
+        assert_eq!(RoleName::Auditor.dhcp_scopes(), []);
     }
 
     #[test]

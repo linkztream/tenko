@@ -247,6 +247,13 @@ impl Default for EventRoutes {
                 Some(ObjectKind::Zone),
             )
             .namespace("dns", Topic::Dns)
+            // WP7.0
+            .table(
+                TableName::from_static("dhcp.scopes"),
+                Topic::Dhcp,
+                Some(ObjectKind::DhcpScope),
+            )
+            .namespace("dhcp", Topic::Dhcp)
             .namespace("cluster", Topic::Cluster)
             .namespace("scan", Topic::Discovery)
             .table_prefix("vault.kek", Topic::System)

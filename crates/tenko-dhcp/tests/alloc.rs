@@ -4,9 +4,17 @@
 //! split options and building a reply must not allocate. The first section proves that
 //! the counter sees an allocation, so a pass means something.
 //!
+//! WP7.0 wires the same counter to the DORA path up to its commit hand-off: parse, scope
+//! selection, the client identity, the filters, the reservation and lease lookups, the
+//! allocator, the lease change and its hand-off to the `LeaseStore`, and the reply. The
+//! engine of WP7.3 replaces the skeleton (`dora::dora`) and must keep the section at
+//! zero. A deliberate allocation in a `LeaseStore::submit` makes the section fail, which
+//! the test checks too, so the guard is known to bite.
+//!
 //! The allocator counts every thread of the process, so the file has one test that runs
 //! the measured sections one after another.
 
+mod dora;
 mod support;
 
 use std::{alloc::System, hint::black_box, net::Ipv4Addr};
@@ -172,6 +180,13 @@ fn build_overload_and_split(request: &[u8], routes: &[Route], out: &mut [u8]) ->
 }
 
 #[test]
+fn the_codec_and_the_dora_path_do_not_allocate() {
+    the_codec_does_not_allocate();
+    let requests: Vec<Vec<u8>> = WELL_FORMED.iter().map(|name| fixture(name)).collect();
+    dora::section(&requests, GLOBAL);
+}
+
+/// The codec's sections (WP7.1a).
 fn the_codec_does_not_allocate() {
     // The counter sees an allocation.
     let (allocations, _, bytes) = measure(10, || {

@@ -555,7 +555,10 @@ fn anchors_with(facts: &dyn Facts, object: ObjectRef) -> Anchors {
                 .unwrap_or_default(),
             ..Anchors::of(object)
         },
-        ObjectKind::Prefix => prefix_anchors(facts, object, PrefixId::from_uuid(id)),
+        // WP7.0: a DHCP scope's id is its prefix's, and it follows the prefix's grants.
+        ObjectKind::Prefix | ObjectKind::DhcpScope => {
+            prefix_anchors(facts, object, PrefixId::from_uuid(id))
+        }
         ObjectKind::Range => facts.range_prefix(RangeId::from_uuid(id)).map_or_else(
             || Anchors::of(object),
             |prefix| prefix_anchors(facts, object, prefix),

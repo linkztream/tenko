@@ -134,6 +134,15 @@ pub enum Command {
         action: client::dns::DnsCommand,
     },
 
+    // WP7.0
+    /// DHCP settings, scopes, pools, options, classes, policies, filters, reservations,
+    /// leases and the Kea export.
+    Dhcp {
+        /// The `dhcp` subcommand to run.
+        #[command(subcommand)]
+        action: client::dhcp::DhcpCommand,
+    },
+
     /// Audit log commands.
     Audit {
         /// The `audit` subcommand to run.
@@ -252,6 +261,7 @@ impl Command {
             Command::Import(_) => "import",
             Command::Export(_) => "export",
             Command::Dns { action } => action.name(),
+            Command::Dhcp { action } => action.name(), // WP7.0
             Command::Audit {
                 action: client::audit::AuditCommand::Verify(_),
             } => "audit verify",
@@ -347,6 +357,12 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             let json = action.client().json;
             client::block_on(name, json, out, err, client::dns::run(action))
+        }
+        // WP7.0
+        Command::Dhcp { action } => {
+            logging::init_client();
+            let json = action.client().json;
+            client::block_on(name, json, out, err, client::dhcp::run(action))
         }
         Command::CaRoot(args) => {
             logging::init_client();

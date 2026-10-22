@@ -92,6 +92,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   metrics: ["metrics."],
   // The DNS area (Phase 2): the page of WP4.0, then the zone and record views of WP4.5.
   dns: ["dns.", "errors.dns."],
+  // The DHCP area (Phase 3): the page of WP7.0, then the views of the later packages.
+  dhcp: ["dhcp."],
 };
 
 export default defineConfig(({ command, mode }) => {

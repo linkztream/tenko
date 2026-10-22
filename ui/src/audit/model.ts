@@ -34,6 +34,12 @@ const KINDS: Record<ObjectKind, true> = {
   dns_acl: true,
   dns_key: true,
   dns_list: true,
+  // WP7.0
+  dhcp_scope: true,
+  dhcp_class: true,
+  dhcp_policy: true,
+  dhcp_option_def: true,
+  dhcp_filter: true,
 };
 
 export const OBJECT_KINDS = Object.keys(KINDS) as ObjectKind[];
@@ -62,6 +68,7 @@ const COMPONENTS: Record<SystemComponent, true> = {
   languages: true,
   leader: true,
   dns: true,
+  dhcp: true,
 };
 
 export const SYSTEM_COMPONENTS = Object.keys(COMPONENTS) as SystemComponent[];

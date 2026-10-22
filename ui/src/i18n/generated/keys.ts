@@ -357,6 +357,11 @@ export type MessageKey =
   | "audit.kind.api_token"
   | "audit.kind.connector"
   | "audit.kind.custom_field"
+  | "audit.kind.dhcp_class"
+  | "audit.kind.dhcp_filter"
+  | "audit.kind.dhcp_option_def"
+  | "audit.kind.dhcp_policy"
+  | "audit.kind.dhcp_scope"
   | "audit.kind.dns_acl"
   | "audit.kind.dns_forwarder"
   | "audit.kind.dns_key"
@@ -1074,6 +1079,19 @@ export type MessageKey =
   | "dashboard.waiting.none"
   | "dashboard.waiting.step"
   | "dashboard.waiting.title"
+  | "dhcp.classes.title"
+  | "dhcp.coming.body"
+  | "dhcp.coming.scopes"
+  | "dhcp.coming.title"
+  | "dhcp.filters.title"
+  | "dhcp.history.title"
+  | "dhcp.leases.title"
+  | "dhcp.options.title"
+  | "dhcp.policies.title"
+  | "dhcp.scope.title"
+  | "dhcp.scopes.title"
+  | "dhcp.shared_networks.title"
+  | "dhcp.title"
   | "discovery.action.approve"
   | "discovery.action.dismiss"
   | "discovery.action.open"
@@ -6715,6 +6733,11 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.kind.api_token",
   "audit.kind.connector",
   "audit.kind.custom_field",
+  "audit.kind.dhcp_class",
+  "audit.kind.dhcp_filter",
+  "audit.kind.dhcp_option_def",
+  "audit.kind.dhcp_policy",
+  "audit.kind.dhcp_scope",
   "audit.kind.dns_acl",
   "audit.kind.dns_forwarder",
   "audit.kind.dns_key",
@@ -7432,6 +7455,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.waiting.none",
   "dashboard.waiting.step",
   "dashboard.waiting.title",
+  "dhcp.classes.title",
+  "dhcp.coming.body",
+  "dhcp.coming.scopes",
+  "dhcp.coming.title",
+  "dhcp.filters.title",
+  "dhcp.history.title",
+  "dhcp.leases.title",
+  "dhcp.options.title",
+  "dhcp.policies.title",
+  "dhcp.scope.title",
+  "dhcp.scopes.title",
+  "dhcp.shared_networks.title",
+  "dhcp.title",
   "discovery.action.approve",
   "discovery.action.dismiss",
   "discovery.action.open",

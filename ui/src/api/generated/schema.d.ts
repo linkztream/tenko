@@ -909,6 +909,682 @@ export interface paths {
         patch: operations["update_custom_field"];
         trace?: never;
     };
+    "/api/v1/dhcp/classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP classes
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_classes"];
+        put?: never;
+        /**
+         * Create a DHCP class
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_class"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/classes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP class
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_class"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DHCP class
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_class"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DHCP class
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_class"];
+        trace?: never;
+    };
+    "/api/v1/dhcp/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the DHCP configuration and leases (Kea JSON)
+         * @description Scope: `dhcp.read`. The export is audited (`dhcp.export`).
+         */
+        get: operations["export_dhcp"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/filters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP MAC filters
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_filters"];
+        put?: never;
+        /**
+         * Add a DHCP MAC filter
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_filter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/filters/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP MAC filter
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_filter"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DHCP MAC filter
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_filter"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DHCP MAC filter
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_filter"];
+        trace?: never;
+    };
+    "/api/v1/dhcp/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the DHCP lease history
+         * @description Scope: `dhcp.read`. Reading the history is audited (`dhcp.lease.read`).
+         */
+        get: operations["list_dhcp_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/leases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP leases
+         * @description Scope: `dhcp.read`. Reading leases is audited (`dhcp.lease.read`).
+         */
+        get: operations["list_dhcp_leases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/leases/{addr}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DHCP lease of an address
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_lease"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/leases/{addr}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a DHCP lease (the address returns to the pool)
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["release_dhcp_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/option-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the built-in DHCP options
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_option_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/option-defs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List custom DHCP option definitions
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_option_defs"];
+        put?: never;
+        /**
+         * Define a custom DHCP option
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_option_def"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/option-defs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a custom DHCP option definition
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_option_def"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a custom DHCP option definition
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_option_def"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a custom DHCP option definition
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_option_def"];
+        trace?: never;
+    };
+    "/api/v1/dhcp/option-sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP option sets
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_option_sets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/option-sets/{owner}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DHCP options of a level
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_option_set"];
+        /**
+         * Replace the DHCP options of a level
+         * @description Scope: `dhcp.write`.
+         */
+        put: operations["set_dhcp_option_set"];
+        post?: never;
+        /**
+         * Clear the DHCP options of a level
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_option_set"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP policies
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_policies"];
+        put?: never;
+        /**
+         * Create a DHCP policy
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/policies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP policy
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_policy"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DHCP policy
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_policy"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DHCP policy
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_policy"];
+        trace?: never;
+    };
+    "/api/v1/dhcp/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP pools
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_pools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/pools/{range}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP pool
+         * @description Scope: `dhcp.read`. The implementation checks the scope of the pool.
+         */
+        get: operations["get_dhcp_pool"];
+        /**
+         * Set the DHCP settings of a pool
+         * @description Scope: `dhcp.write`. The implementation checks the scope of the pool.
+         */
+        put: operations["set_dhcp_pool"];
+        post?: never;
+        /**
+         * Remove the DHCP settings of a pool (the range stays)
+         * @description Scope: `dhcp.write`. The implementation checks the scope of the pool.
+         */
+        delete: operations["delete_dhcp_pool"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP reservations (IPAM hosts of mode reserved)
+         * @description Scope: `dhcp.read`. Writes go to the IPAM host routes and `PUT /dhcp/option-sets/host:{interface}`.
+         */
+        get: operations["list_dhcp_reservations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/reservations/{interface}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DHCP reservation of an interface
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_reservation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP scopes
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_scopes"];
+        put?: never;
+        /**
+         * Create a DHCP scope for an IPAM network
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_scope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes/{prefix}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP scope
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_scope"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DHCP scope (the prefix stays)
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_scope"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DHCP scope
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_scope"];
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes/{prefix}/effective-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the options a client gets in a DHCP scope
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_effective_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes/{prefix}/exclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the exclusion ranges of a DHCP scope
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_exclusions"];
+        put?: never;
+        /**
+         * Exclude a range of a DHCP scope
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_exclusion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes/{prefix}/exclusions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an exclusion range
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_exclusion"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/scopes/{prefix}/utilization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get how full a DHCP scope is
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_scope_utilization"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DHCP server settings
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_settings"];
+        /**
+         * Change the DHCP server settings
+         * @description Scope: `dhcp.write`.
+         */
+        put: operations["update_dhcp_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/shared-networks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List DHCP shared networks
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["list_dhcp_shared_networks"];
+        put?: never;
+        /**
+         * Create a DHCP shared network
+         * @description Scope: `dhcp.write`.
+         */
+        post: operations["create_dhcp_shared_network"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dhcp/shared-networks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a DHCP shared network
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_dhcp_shared_network"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DHCP shared network
+         * @description Scope: `dhcp.write`.
+         */
+        delete: operations["delete_dhcp_shared_network"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DHCP shared network
+         * @description Scope: `dhcp.write`.
+         */
+        patch: operations["update_dhcp_shared_network"];
+        trace?: never;
+    };
     "/api/v1/dns/acls": {
         parameters: {
             query?: never;
@@ -2002,6 +2678,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ipam/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the reconciliation view of the four truths
+         * @description Scope: read access to observations (IAM-01). IPAM-21.
+         */
+        get: operations["get_ipam_reconcile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -2205,6 +2901,86 @@ export interface paths {
         post?: never;
         /** Revoke a cluster node */
         delete: operations["revoke_node"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dhcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the DHCP role of a node
+         * @description Scope: `dhcp.read`.
+         */
+        get: operations["get_node_dhcp_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dhcp/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the lease history through a node's DHCP role
+         * @description Scope: `dhcp.read`. The node command `dhcp.history.read`, audited.
+         */
+        get: operations["read_node_dhcp_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dhcp/leases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the leases a node's DHCP role holds
+         * @description Scope: `dhcp.read`. The node command `dhcp.leases.list`, audited.
+         */
+        get: operations["list_node_dhcp_leases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dhcp/leases/{addr}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a lease on a node's DHCP role
+         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release`.
+         */
+        post: operations["release_node_dhcp_lease"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4226,6 +5002,19 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description An address range inside a scope, inclusive. */
+        AddressRange: {
+            /**
+             * @description The first address.
+             * @example 192.0.2.100
+             */
+            first: string;
+            /**
+             * @description The last address.
+             * @example 192.0.2.149
+             */
+            last: string;
+        };
         /**
          * @description An address in a list: the address object, and with `expand=host` the interface it is
          *     bound to and that interface's host, so an address grid needs no read per row. Both
@@ -4802,6 +5591,11 @@ export interface components {
             weaker_than_home: boolean;
         };
         /**
+         * @description The state of a binding (the failover draft's binding states).
+         * @enum {string}
+         */
+        BindingState: "free" | "active" | "expired" | "released" | "abandoned" | "reset" | "backup";
+        /**
          * @description What a blocked name answers (DNS-15); every blocked answer carries the extended error of
          *     RFC 8914.
          */
@@ -4971,6 +5765,37 @@ export interface components {
             /** @description The chain position the checkpoint names: the last record sent before it. */
             head: components["schemas"]["ChainHead"];
         };
+        /**
+         * @description A named match on requests (`dhcp.classes`, DHCP-03): it matches when any of its
+         *     matches holds.
+         */
+        Class: {
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["ClassId"];
+            /** @description The matches, joined by OR. */
+            matches: components["schemas"]["Match"][];
+            /** @description The name, unique: 1 to 64 characters of `a-z`, `0-9` and `-`. */
+            name: string;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** Format: uuid */
+        ClassId: string;
+        /** @description How a DHCPv4 client is known (RFC 4361, RFC 6842). */
+        ClientKey: {
+            /** @description The hardware address, `hlen` octets of `chaddr`. */
+            chaddr: components["schemas"]["HexBytes"];
+            client_id?: components["schemas"]["HexBytes"] | null;
+            /**
+             * Format: int32
+             * @description The hardware type (1 for Ethernet).
+             */
+            htype: number;
+        };
         /** @description The node transport of a controller, for `GET /system/status`. */
         ClusterStatus: {
             /**
@@ -5098,6 +5923,13 @@ export interface components {
              *     4,096 bytes.
              */
             note?: string | null;
+        };
+        /** @description The condition of a policy: terms joined by AND or OR. */
+        Condition: {
+            /** @description How the terms are joined. */
+            join: components["schemas"]["Join"];
+            /** @description The terms, 1 to [`MAX_TERMS`]. */
+            terms: components["schemas"]["Term"][];
         };
         /**
          * @description Where the configuration a node applies came from.
@@ -5583,6 +6415,53 @@ export interface components {
              */
             stored: number;
         };
+        /**
+         * @description What happens when the name a client asks for is held by another client (RFC 4703).
+         * @enum {string}
+         */
+        DdnsConflict: "protect" | "replace";
+        /** @description The DDNS settings of a scope (ADR 0020). */
+        DdnsPolicy: {
+            /**
+             * @description Whether a client that asks to write its A record itself (option 81 flag S clear)
+             *     may do so; Tenko writes it otherwise (ADR 0020, point 4).
+             */
+            client_may_update_a?: boolean;
+            /** @description Name protection. */
+            conflict?: components["schemas"]["DdnsConflict"];
+            /** @description Whether the server writes names for the scope's clients. */
+            enabled?: boolean;
+            forward_zone?: components["schemas"]["ZoneId"] | null;
+            /**
+             * @description Whether clients without option 81 get their option 12 name ("update for legacy
+             *     clients", DHCP-13).
+             */
+            legacy_clients?: boolean;
+            /**
+             * @description Whether a name outside the forward zone is refused rather than cut to its first
+             *     label under the zone.
+             */
+            refuse_foreign?: boolean;
+            /** @description Whether PTR records are written in the reverse zone Tenko keeps for the address. */
+            reverse?: boolean;
+            /**
+             * Format: int32
+             * @description The TTL of the records; none: a third of the lease time.
+             */
+            ttl?: number | null;
+        };
+        /**
+         * @description The outcome of DDNS for a lease (ADR 0020, point 5): what was written and the last
+         *     error. Empty until the DDNS worker of WP8.3 has run.
+         */
+        DdnsState: {
+            dhcid?: components["schemas"]["HexBytes"] | null;
+            forward?: components["schemas"]["DnsName"] | null;
+            /** @description The last failure, in English (a refused name, a store that refused). */
+            last_error?: string | null;
+            reverse?: components["schemas"]["DnsName"] | null;
+            updated?: components["schemas"]["Timestamp"] | null;
+        };
         /** @description The answer of a decision. */
         Decision: {
             /** @description Whether this is a dry run. */
@@ -5641,6 +6520,402 @@ export interface components {
         };
         /** @description A device as the controller identifies it (for UniFi the device MAC or `_id`). */
         DeviceRef: string;
+        /** @description `POST /dhcp/classes`. */
+        DhcpClassCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The matches, joined by OR. */
+            matches: components["schemas"]["Match"][];
+            /** @description The name. */
+            name: string;
+        };
+        /** @description A class as the API reads it. */
+        DhcpClassItem: components["schemas"]["Class"] & {
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int32
+             * @description The scopes, pools and policies that name it.
+             */
+            used_by: number;
+        };
+        /** @description `PATCH /dhcp/classes/{id}`. */
+        DhcpClassPatch: {
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            /** @description The matches. */
+            matches?: components["schemas"]["Match"][] | null;
+            /** @description The name. */
+            name?: string | null;
+        };
+        /** @description A node command was accepted; its outcome follows on the node command's record. */
+        DhcpCommandAccepted: {
+            /**
+             * Format: uuid
+             * @description The command.
+             */
+            command_id: string;
+        };
+        /** @description The Kea export (P3-Q17): the configurations, the leases and what did not map. */
+        DhcpExport: {
+            /** @description The `Dhcp4` configuration. */
+            dhcp4: Record<string, never>;
+            /** @description The `Dhcp6` configuration (Slice 9). */
+            dhcp6?: Record<string, never> | null;
+            /** @description The DHCPv4 leases as Kea memfile CSV. */
+            leases4_csv?: string | null;
+            /** @description What did not map. */
+            losses?: components["schemas"]["LossEntry"][];
+        };
+        /** @description `POST /dhcp/filters`. */
+        DhcpFilterCreate: {
+            /** @description Allow or deny. */
+            kind: components["schemas"]["FilterKind"];
+            /** @description The addresses. */
+            mac: components["schemas"]["MacPattern"];
+            /** @description Why. */
+            note?: string | null;
+        };
+        /** @description A MAC filter entry as the API reads it. */
+        DhcpFilterItem: components["schemas"]["Filter"] & {
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `PATCH /dhcp/filters/{id}`. */
+        DhcpFilterPatch: {
+            kind?: components["schemas"]["FilterKind"] | null;
+            mac?: components["schemas"]["MacPattern"] | null;
+            /** @description Why; an empty string clears it. */
+            note?: string | null;
+        };
+        /** @description One row of the lease history. */
+        DhcpHistoryItem: components["schemas"]["LeaseEvent"];
+        /** @description The number of leases in one state. */
+        DhcpLeaseCount: {
+            /**
+             * Format: int64
+             * @description The leases.
+             */
+            count: number;
+            /** @description The state. */
+            state: components["schemas"]["BindingState"];
+        };
+        /** @description A lease as the API reads it. */
+        DhcpLeaseItem: components["schemas"]["Lease"] & {
+            host?: components["schemas"]["HostId"] | null;
+            /** @description Whether the address is the client's reservation. */
+            reserved: boolean;
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `POST /dhcp/leases/{addr}/release`. */
+        DhcpLeaseRelease: {
+            /** @description Why, for the audit record. */
+            reason?: string | null;
+            vrf?: components["schemas"]["VrfId"] | null;
+        };
+        /**
+         * @description How a listener receives traffic (plan section 2.5).
+         * @enum {string}
+         */
+        DhcpListenMode: "relay" | "direct";
+        /** @description One listener of the role. */
+        DhcpListenerItem: {
+            /**
+             * @description The address.
+             * @example 198.51.100.10
+             */
+            address: string;
+            /** @description The interface of a direct listener. */
+            interface?: string | null;
+            /** @description The mode. */
+            mode: components["schemas"]["DhcpListenMode"];
+            /**
+             * Format: int32
+             * @description The port (67, or 547 for DHCPv6).
+             */
+            port: number;
+            /**
+             * Format: int32
+             * @description The worker threads.
+             */
+            workers: number;
+        };
+        /** @description `GET /nodes/{id}/dhcp`: the state of a node's `dhcp` role. */
+        DhcpNodeStatus: {
+            /** @description Whether the store accepts lease writes (P3-Q14). */
+            accepting: boolean;
+            /**
+             * Format: double
+             * @description The last commit's duration in milliseconds.
+             */
+            last_commit_ms?: number | null;
+            /** @description The leases by state. */
+            leases: components["schemas"]["DhcpLeaseCount"][];
+            /** @description The listeners. */
+            listeners: components["schemas"]["DhcpListenerItem"][];
+            /** @description The node. */
+            node: components["schemas"]["NodeId"];
+            /** @description Whether conflict detection runs (a `probe` role in the process). */
+            probe: boolean;
+            /** @description The revision of the configuration image served. */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int32
+             * @description The scopes served.
+             */
+            scopes: number;
+            /** @description Whether the role serves. */
+            serving: boolean;
+        };
+        /** @description `POST /dhcp/policies`. */
+        DhcpPolicyCreate: {
+            /** @description What it does. */
+            action?: components["schemas"]["PolicyAction"];
+            /** @description When it applies. */
+            condition: components["schemas"]["Condition"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether it applies; true when absent. */
+            enabled?: boolean | null;
+            /** @description The name. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The order; after the last one when absent.
+             */
+            order?: number | null;
+            scope?: components["schemas"]["PrefixId"] | null;
+        };
+        /** @description A policy as the API reads it. */
+        DhcpPolicyItem: components["schemas"]["Policy"] & {
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `PATCH /dhcp/policies/{id}`. */
+        DhcpPolicyPatch: {
+            action?: components["schemas"]["PolicyAction"] | null;
+            condition?: components["schemas"]["Condition"] | null;
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            /** @description Whether it applies. */
+            enabled?: boolean | null;
+            /** @description The name. */
+            name?: string | null;
+            /**
+             * Format: int32
+             * @description The order.
+             */
+            order?: number | null;
+        };
+        /** @description A pool: an IPAM range of role `dhcp_pool` with its DHCP settings. */
+        DhcpPoolItem: {
+            /** @description The first address. */
+            first: string;
+            /** @description The last address. */
+            last: string;
+            /**
+             * Format: int32
+             * @description The range's lease time.
+             */
+            lease_secs?: number | null;
+            /**
+             * Format: int64
+             * @description Addresses with an active lease.
+             */
+            leased: number;
+            /** @description The scope. */
+            prefix: components["schemas"]["PrefixId"];
+            /** @description The range. */
+            range: components["schemas"]["RangeId"];
+            settings?: components["schemas"]["PoolSettings"] | null;
+            /**
+             * Format: int64
+             * @description Addresses in the pool, exclusions taken out.
+             */
+            size: number;
+        };
+        /** @description `PUT /dhcp/pools/{range}`: the pool's DHCP settings. */
+        DhcpPoolSet: {
+            /** @description The classes the pool admits. */
+            classes?: components["schemas"]["ClassId"][];
+            lease?: components["schemas"]["LeaseTimes"] | null;
+        };
+        /**
+         * @description A reservation: an IPAM host of mode `reserved` with an interface and an address in a
+         *     served prefix (a read view; writes go to the IPAM host routes and the host's option
+         *     set).
+         */
+        DhcpReservationItem: {
+            /** @description The address. */
+            address: string;
+            client_id?: components["schemas"]["HexBytes"] | null;
+            /** @description The host. */
+            host: components["schemas"]["HostId"];
+            /** @description The host's name. */
+            host_name: components["schemas"]["HostName"];
+            /** @description Whether the address lies in a pool (allowed; the reservation wins). */
+            in_pool: boolean;
+            /** @description The interface. */
+            interface: components["schemas"]["InterfaceId"];
+            lease?: components["schemas"]["Lease"] | null;
+            mac?: components["schemas"]["MacAddr"] | null;
+            /** @description The reservation's options (the interface's option set). */
+            options?: components["schemas"]["OptionValueItem"][];
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
+            /** @description What the reservation check found (IPAM-18, IPAM-23). */
+            warnings?: components["schemas"]["ReservationWarning"][];
+        };
+        /** @description `POST /dhcp/scopes`: a scope for an IPAM network. */
+        DhcpScopeCreate: {
+            /** @description Authoritative; the server's setting when absent. */
+            authoritative?: boolean | null;
+            /** @description The classes the scope admits. */
+            classes?: components["schemas"]["ClassId"][];
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether the scope serves clients; true when absent. */
+            enabled?: boolean | null;
+            lease?: components["schemas"]["LeaseTimes"] | null;
+            /** @description The prefix to serve (a network without a scope). */
+            prefix: components["schemas"]["PrefixId"];
+            /** @description Only allowed clients are served. */
+            restricted?: boolean | null;
+            /** @description The server identifier. */
+            server_id?: string | null;
+            shared_network?: components["schemas"]["SharedNetworkId"] | null;
+        };
+        /** @description A scope as the API reads it. */
+        DhcpScopeItem: components["schemas"]["Scope"] & {
+            /**
+             * @description The prefix's network.
+             * @example 192.0.2.0/24
+             */
+            cidr: string;
+            /**
+             * Format: int64
+             * @description The active leases on the node.
+             */
+            leases: number;
+            /**
+             * Format: int32
+             * @description The number of pools (IPAM ranges of role `dhcp_pool`).
+             */
+            pools: number;
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /** @description The prefix's VRF. */
+            vrf: components["schemas"]["VrfId"];
+        };
+        /** @description `PATCH /dhcp/scopes/{prefix}`: the fields to change; the prefix does not change. */
+        DhcpScopePatch: {
+            /** @description Authoritative. */
+            authoritative?: boolean | null;
+            /** @description The classes the scope admits. */
+            classes?: components["schemas"]["ClassId"][] | null;
+            /** @description Drop the scope's lease times and use the server's. */
+            clear_lease?: boolean;
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            /** @description Whether the scope serves clients. */
+            enabled?: boolean | null;
+            lease?: components["schemas"]["LeaseTimes"] | null;
+            /** @description Only allowed clients are served. */
+            restricted?: boolean | null;
+            /** @description The server identifier. */
+            server_id?: string | null;
+            shared_network?: components["schemas"]["SharedNetworkId"] | null;
+        };
+        /** @description How full a scope is (`GET /dhcp/scopes/{prefix}/utilization`, IPAM-10). */
+        DhcpScopeUtilization: {
+            /**
+             * Format: int64
+             * @description Pool addresses abandoned after a DECLINE or a conflict.
+             */
+            abandoned: number;
+            /** @description When the role's table was read. */
+            at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description Pool addresses free now.
+             */
+            free: number;
+            /**
+             * Format: int64
+             * @description Pool addresses with an active lease.
+             */
+            leased: number;
+            /**
+             * Format: int64
+             * @description Addresses in the pools, exclusions taken out.
+             */
+            pool_size: number;
+            /** @description The scope. */
+            prefix: components["schemas"]["PrefixId"];
+            /**
+             * Format: int64
+             * @description Pool addresses held by a reservation.
+             */
+            reserved: number;
+            /**
+             * Format: double
+             * @description `(leased + reserved + abandoned) / pool_size`, 0 to 1.
+             */
+            utilization: number;
+        };
+        /**
+         * @description The server-level settings (`dhcp.settings`, one row). Server-level options are the
+         *     option set of [`OptionOwner::Server`]; node-local settings (listeners, workers, the
+         *     offer lifetime, the probe and decline timers) are `[dhcp]` in `tenko.toml` (WP7.5).
+         */
+        DhcpSettings: {
+            /**
+             * @description Whether scopes are authoritative unless they say otherwise (NAK for addresses of
+             *     other networks, RFC 2131).
+             */
+            authoritative?: boolean;
+            /** @description Conflict detection (TGL-16): none follows the security profile. */
+            conflict_detection?: boolean | null;
+            /** @description DDNS settings new scopes start from. */
+            ddns?: components["schemas"]["DdnsPolicy"];
+            /**
+             * Format: int32
+             * @description Lease history retention in days (P3-Q13): none follows the security profile.
+             */
+            history_days?: number | null;
+            /** @description Lease times of scopes that set none. */
+            lease?: components["schemas"]["LeaseTimes"];
+            updated?: components["schemas"]["Stamp"] | null;
+        };
+        /** @description The server settings as the API reads them. */
+        DhcpSettingsItem: components["schemas"]["DhcpSettings"] & {
+            /** @description What the security profile makes of the unset values: conflict detection (TGL-16). */
+            effective_conflict_detection: boolean;
+            /**
+             * Format: int32
+             * @description The same for the lease history retention in days (P3-Q13).
+             */
+            effective_history_days: number;
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+        };
+        /** @description `PUT /dhcp/settings`: the whole server settings. */
+        DhcpSettingsUpdate: {
+            /** @description Whether scopes are authoritative unless they say otherwise. */
+            authoritative?: boolean | null;
+            /** @description Conflict detection; none follows the profile. */
+            conflict_detection?: boolean | null;
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            /**
+             * Format: int32
+             * @description History retention in days; none follows the profile.
+             */
+            history_days?: number | null;
+            lease?: components["schemas"]["LeaseTimes"] | null;
+        };
         /** @description The counts of one fact type. */
         DiffCounts: {
             /**
@@ -6003,6 +7278,30 @@ export interface components {
          * @enum {string}
          */
         EdgeKind: "wired" | "wireless" | "lldp" | "uplink" | "vm_host";
+        /** @description One option of a client's effective set, with where it came from. */
+        EffectiveOption: {
+            /** @description The level that set it. */
+            level: components["schemas"]["OptionLevel"];
+            /** @description The option's name in the catalog or its definition. */
+            name?: string | null;
+            /** @description The owner of the set that set it. */
+            owner: components["schemas"]["OptionOwner"];
+            typed?: components["schemas"]["OptionData"] | null;
+            /** @description The value. */
+            value: components["schemas"]["OptionValue"];
+        };
+        /** @description The options a client gets in a scope and why (plan section 2.4). */
+        EffectiveOptions: {
+            /** @description The classes the client is in. */
+            classes?: components["schemas"]["ClassId"][];
+            /** @description The effective options, in reply order. */
+            options: components["schemas"]["EffectiveOption"][];
+            /** @description The policies that matched, in order. */
+            policies?: components["schemas"]["PolicyId"][];
+            /** @description The scope. */
+            prefix: components["schemas"]["PrefixId"];
+            reservation?: components["schemas"]["InterfaceId"] | null;
+        };
         /** @description One end of a link. */
         Endpoint: {
             /** @description The device, as the source names it. */
@@ -6146,6 +7445,54 @@ export interface components {
             tables?: string[];
             /** @description The topic. */
             topic: components["schemas"]["Topic"];
+        };
+        /** @description `POST /dhcp/scopes/{prefix}/exclusions`. */
+        ExclusionCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /**
+             * @description The first address excluded.
+             * @example 192.0.2.10
+             */
+            first: string;
+            /**
+             * @description The last address excluded.
+             * @example 192.0.2.19
+             */
+            last: string;
+        };
+        /** Format: uuid */
+        ExclusionId: string;
+        /** @description An exclusion range as the API reads it. */
+        ExclusionItem: components["schemas"]["ExclusionRange"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description An explicit exclusion range of a scope (`dhcp.exclusions`, key: scope and id). The
+         *     other exclusions are implicit: the prefix's ranges of role `reserved` and
+         *     `infrastructure`, and every address IPAM holds for a host that is not `dynamic`
+         *     (plan section 2.3).
+         */
+        ExclusionRange: {
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /**
+             * @description The first address excluded.
+             * @example 192.0.2.10
+             */
+            first: string;
+            /** @description Identifier. */
+            id: components["schemas"]["ExclusionId"];
+            /**
+             * @description The last address excluded.
+             * @example 192.0.2.19
+             */
+            last: string;
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
         };
         /**
          * @description How an exported record is written (S3-Q6).
@@ -6338,6 +7685,48 @@ export interface components {
              */
             size: number;
             text?: components["schemas"]["TextInfo"] | null;
+        };
+        /** @description A server-wide MAC filter entry (`dhcp.filters`, DHCP-08). */
+        Filter: {
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Identifier. */
+            id: components["schemas"]["FilterId"];
+            /** @description Allow or deny. */
+            kind: components["schemas"]["FilterKind"];
+            /** @description The addresses. */
+            mac: components["schemas"]["MacPattern"];
+            /** @description Why the entry exists. */
+            note?: string | null;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** Format: uuid */
+        FilterId: string;
+        /**
+         * @description Whether a filter entry allows or denies.
+         * @enum {string}
+         */
+        FilterKind: "allow" | "deny";
+        /**
+         * @description What a request says about the client's system (DHCP-14, plan section 2.8): the parameter
+         *     request list in the client's order, the vendor class and which identifying options it
+         *     sent. WP8.2 maps it to an OS guess.
+         */
+        Fingerprint: {
+            /**
+             * Format: int32
+             * @description The first architecture of option 93.
+             */
+            architecture?: number | null;
+            /** @description Whether the client sent option 81. */
+            client_fqdn?: boolean;
+            /** @description Option 55, in order. */
+            parameters?: components["schemas"]["HexBytes"];
+            /** @description Whether the client sent option 77. */
+            user_class?: boolean;
+            /** @description Option 60. */
+            vendor_class?: string | null;
         };
         /** @description A voter that keeps a migration from running. */
         FormatBlocker: {
@@ -7428,6 +8817,11 @@ export interface components {
             /** @description Translatable title. */
             title: components["schemas"]["MessageKey"];
         };
+        /**
+         * @description How the terms of a condition are joined.
+         * @enum {string}
+         */
+        Join: "and" | "or";
         /** @description One serial step of a zone scope. */
         JournalItem: {
             /**
@@ -7762,6 +9156,106 @@ export interface components {
             services: components["schemas"]["LeaderServiceStatus"][];
             since?: components["schemas"]["Timestamp"] | null;
         };
+        /** @description A DHCPv4 lease (`dhcp.leases`, key VRF and address). */
+        Lease: {
+            /**
+             * @description The address.
+             * @example 192.0.2.50
+             */
+            addr: string;
+            atsfp?: components["schemas"]["Timestamp"] | null;
+            /** @description The client. */
+            client: components["schemas"]["ClientKey"];
+            /** @description The client's last transaction time. */
+            cltt: components["schemas"]["Timestamp"];
+            /** @description The DDNS outcome. */
+            ddns?: components["schemas"]["DdnsState"];
+            /**
+             * @description When the state ends: the lease end of an active binding, the end of the hold of an
+             *     abandoned one, the end of the grace of an expired or released one.
+             */
+            ends: components["schemas"]["Timestamp"];
+            fingerprint?: components["schemas"]["Fingerprint"] | null;
+            /** @description The name the client sent in option 81, as text. */
+            fqdn?: string | null;
+            /** @description The host name the client sent (option 12), as text. */
+            hostname?: string | null;
+            /** @description The node that wrote the row. */
+            node: components["schemas"]["NodeId"];
+            observed_at?: components["schemas"]["Timestamp"] | null;
+            relay?: components["schemas"]["RelayInfo"] | null;
+            /** @description The scope, by its prefix. */
+            scope: components["schemas"]["PrefixId"];
+            share?: components["schemas"]["PoolShare"] | null;
+            /** @description The binding state. */
+            state: components["schemas"]["BindingState"];
+            tsfp?: components["schemas"]["Timestamp"] | null;
+            tstp?: components["schemas"]["Timestamp"] | null;
+            /** @description The VRF of the scope's prefix. */
+            vrf: components["schemas"]["VrfId"];
+        };
+        /**
+         * @description One row of `dhcp.history` (key: time, VRF, address), written in the batch of the lease
+         *     change; bounded by the retention of P3-Q13.
+         */
+        LeaseEvent: {
+            /** @description The address. */
+            addr: string;
+            /** @description When. */
+            at: components["schemas"]["Timestamp"];
+            /** @description The client. */
+            client: components["schemas"]["ClientKey"];
+            /** @description The end of that state. */
+            ends: components["schemas"]["Timestamp"];
+            /** @description The host name the client sent. */
+            hostname?: string | null;
+            /** @description What. */
+            kind: components["schemas"]["LeaseEventKind"];
+            /** @description The node that wrote it. */
+            node: components["schemas"]["NodeId"];
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
+            /** @description The state after the event. */
+            state: components["schemas"]["BindingState"];
+            /** @description The VRF. */
+            vrf: components["schemas"]["VrfId"];
+        };
+        /**
+         * @description What happened to a lease (`dhcp.history`).
+         * @enum {string}
+         */
+        LeaseEventKind: "granted" | "renewed" | "rebound" | "released" | "declined" | "expired" | "reclaimed" | "conflict";
+        /**
+         * @description Lease times in seconds (plan section 3.1). T1 and T2 default to half and seven eighths
+         *     of the granted time (RFC 2131, section 4.4.5).
+         */
+        LeaseTimes: {
+            /**
+             * Format: int32
+             * @description The time granted when the client asks for none.
+             */
+            default_secs: number;
+            /**
+             * Format: int32
+             * @description The longest time granted.
+             */
+            max_secs: number;
+            /**
+             * Format: int32
+             * @description The shortest time granted.
+             */
+            min_secs: number;
+            /**
+             * Format: int32
+             * @description The renewal time (option 58); none for half the granted time.
+             */
+            t1_secs?: number | null;
+            /**
+             * Format: int32
+             * @description The rebinding time (option 59); none for seven eighths of the granted time.
+             */
+            t2_secs?: number | null;
+        };
         /**
          * @description How a link was learned.
          * @enum {string}
@@ -8011,6 +9505,15 @@ export interface components {
             /** @description Warnings. */
             warning: number;
         };
+        /** @description One lost or transformed item. */
+        LossEntry: {
+            /** @description Stable code, for example `import.cell.invalid_ip`. */
+            code: string;
+            /** @description English explanation with the offending value. */
+            detail: string;
+            /** @description Where in the source. */
+            location: components["schemas"]["SourceLocation"];
+        };
         /** @description One loss report entry. */
         LossItem: {
             /** @description Stable code (`import.address.unparsable`). */
@@ -8029,6 +9532,8 @@ export interface components {
         };
         /** @description MAC address, lowercase and colon-separated (00:00:5e:00:53:01) */
         MacAddr: string;
+        /** @description MAC address pattern, `*` for any octet (`00:00:5e:00:53:*`) */
+        MacPattern: string;
         /** @description A plugin manifest. */
         Manifest: {
             /** @description The interfaces the plugin implements. */
@@ -8123,6 +9628,69 @@ export interface components {
          * @enum {string}
          */
         MaskSource: "index" | "name" | "row_count" | "addresses" | "user";
+        /** @description One test on a request (plan section 2.4). */
+        Match: {
+            /**
+             * @description The vendor class identifier (option 60), exactly or as a prefix (`MSFT`,
+             *     `PXEClient:Arch:00007`).
+             */
+            vendor_class: {
+                /** @description Whether `value` is a prefix of the client's option 60. */
+                prefix?: boolean;
+                /** @description The text. */
+                value: string;
+            };
+        } | {
+            /** @description One of the user classes of option 77 (RFC 3004). */
+            user_class: {
+                /** @description The class data as text. */
+                value: string;
+            };
+        } | {
+            /** @description The client's hardware address. */
+            mac: {
+                /** @description The pattern. */
+                pattern: components["schemas"]["MacPattern"];
+            };
+        } | {
+            /** @description The client identifier (option 61). */
+            client_id: {
+                /** @description The identifier octets. */
+                value: components["schemas"]["HexBytes"];
+            };
+        } | {
+            /** @description The relay agent's circuit-id (option 82, sub-option 1). */
+            circuit_id: {
+                /** @description The octets. */
+                value: components["schemas"]["HexBytes"];
+            };
+        } | {
+            /** @description The relay agent's remote-id (option 82, sub-option 2). */
+            remote_id: {
+                /** @description The octets. */
+                value: components["schemas"]["HexBytes"];
+            };
+        } | {
+            /**
+             * @description The client system architecture (option 93, RFC 4578): 0 BIOS, 7 and 9 UEFI x64,
+             *     16 UEFI HTTP boot x64.
+             */
+            architecture: {
+                /**
+                 * Format: int32
+                 * @description The architecture type.
+                 */
+                code: number;
+            };
+        } | {
+            /** @description The host name the client sent (option 12), exactly or as a prefix, ignoring case. */
+            host_name: {
+                /** @description Whether `value` is a prefix. */
+                prefix?: boolean;
+                /** @description The name. */
+                value: string;
+            };
+        };
         /** @description One test of a view (DNS-20). A view matches a query when all its rules match. */
         MatchRule: {
             /**
@@ -9314,7 +10882,7 @@ export interface components {
          *     follows the name, so it matches the key encoding.
          * @enum {string}
          */
-        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system" | "zone" | "dns_view" | "dns_forwarder" | "dns_acl" | "dns_key" | "dns_list";
+        ObjectKind: "tenant" | "vrf" | "site" | "vlan" | "prefix" | "range" | "address" | "host" | "interface" | "custom_field" | "user" | "session" | "api_token" | "job" | "observation" | "proposal" | "import" | "connector" | "secret" | "node" | "settings" | "system" | "zone" | "dns_view" | "dns_forwarder" | "dns_acl" | "dns_key" | "dns_list" | "dhcp_scope" | "dhcp_class" | "dhcp_policy" | "dhcp_option_def" | "dhcp_filter";
         /** @description A typed reference to one object. */
         ObjectRef: {
             /**
@@ -9609,6 +11177,238 @@ export interface components {
             username?: string | null;
             /** @description When its value was last written (creation, replacement, key rotation). */
             value_updated_at: components["schemas"]["Timestamp"];
+        };
+        /** @description One entry of the built-in catalog (`GET /dhcp/option-catalog`). */
+        OptionCatalogItem: {
+            /** @description Whether it holds a list. */
+            array: boolean;
+            /**
+             * Format: int32
+             * @description The code.
+             */
+            code: number;
+            /** @description The type. */
+            kind: components["schemas"]["OptionKind"];
+            /** @description The name. */
+            name: string;
+            /** @description Whether the server sets it itself (never in an option set). */
+            server_managed: boolean;
+            /** @description The space. */
+            space: components["schemas"]["OptionSpace"];
+        };
+        /**
+         * @description The typed view of option data (as [`crate::dns::RecordData`] is of record data), for the
+         *     API and the UI. Every variant holds a list; a single-valued option holds one element.
+         */
+        OptionData: {
+            /** @description IPv4 addresses. */
+            ipv4: {
+                /** @description The addresses. */
+                values: string[];
+            };
+        } | {
+            /** @description IPv6 addresses. */
+            ipv6: {
+                /** @description The addresses. */
+                values: string[];
+            };
+        } | {
+            /** @description IPv6 prefixes. */
+            ipv6_prefix: {
+                /** @description The prefixes. */
+                values: string[];
+            };
+        } | {
+            /** @description Unsigned integers (`u8`, `u16`, `u32`). */
+            unsigned: number[];
+        } | {
+            /**
+             * Format: int32
+             * @description A signed integer.
+             */
+            signed: number;
+        } | {
+            /** @description Booleans. */
+            bool: boolean[];
+        } | {
+            /** @description Text. */
+            text: string;
+        } | {
+            /** @description Domain names. */
+            names: components["schemas"]["DnsName"][];
+        } | {
+            /** @description Classless static routes. */
+            routes: components["schemas"]["StaticRoute"][];
+        } | {
+            /** @description Octets. */
+            binary: components["schemas"]["HexBytes"];
+        } | "empty";
+        /**
+         * @description A custom option definition (`dhcp.option_defs`, DHCP-02): a code in a space with a name
+         *     and a type. A definition for a code the built-in catalog knows is refused
+         *     (`dhcp.option.code_reserved`); codes 224 to 254 of `dhcp4` are the site-specific range
+         *     (RFC 3942).
+         */
+        OptionDef: {
+            /** @description Whether the option holds a list of values of the kind. */
+            array?: boolean;
+            /**
+             * Format: int32
+             * @description The code: 1 to 254, or 1 to 65,535 in `dhcp6`.
+             */
+            code: number;
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["OptionDefId"];
+            /** @description The type. */
+            kind: components["schemas"]["OptionKind"];
+            /**
+             * @description The name: 1 to 64 characters of `a-z`, `0-9` and `-` (the Kea convention, so the
+             *     Kea export of WP9.3 keeps it).
+             */
+            name: string;
+            /** @description The space. */
+            space: components["schemas"]["OptionSpace"];
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+            /**
+             * @description For a vendor space: the vendor class (option 60) whose clients receive its options
+             *     in option 43.
+             */
+            vendor_class?: string | null;
+        };
+        /** @description `POST /dhcp/option-defs`. */
+        OptionDefCreate: {
+            /** @description Whether the option holds a list. */
+            array?: boolean;
+            /**
+             * Format: int32
+             * @description The code.
+             */
+            code: number;
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The type. */
+            kind: components["schemas"]["OptionKind"];
+            /** @description The name. */
+            name: string;
+            space?: components["schemas"]["OptionSpace"] | null;
+            /** @description The vendor class of a vendor space. */
+            vendor_class?: string | null;
+        };
+        /** Format: uuid */
+        OptionDefId: string;
+        /** @description A custom option definition as the API reads it. */
+        OptionDefItem: components["schemas"]["OptionDef"] & {
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /**
+             * Format: int32
+             * @description The option sets that use it.
+             */
+            used_by: number;
+        };
+        /**
+         * @description `PATCH /dhcp/option-defs/{id}`: the name, the vendor class and the description; the
+         *     space, the code and the type do not change while option sets use them.
+         */
+        OptionDefPatch: {
+            /** @description Whether the option holds a list (refused while used). */
+            array?: boolean | null;
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            kind?: components["schemas"]["OptionKind"] | null;
+            /** @description The name. */
+            name?: string | null;
+            /** @description The vendor class; an empty string clears it. */
+            vendor_class?: string | null;
+        };
+        /**
+         * @description The data type of an option (plan section 2.4). With [`OptionDef::array`] a scalar kind
+         *     repeats: an address list is `ipv4_address` with `array`.
+         * @enum {string}
+         */
+        OptionKind: "ipv4_address" | "ipv6_address" | "ipv6_prefix" | "u8" | "u16" | "u32" | "i32" | "bool" | "string" | "fqdn" | "classless_routes" | "binary" | "empty";
+        /**
+         * @description The level an option set belongs to (plan section 2.4): the effective set for a client is
+         *     merged in this order, the more specific level winning per code.
+         * @enum {string}
+         */
+        OptionLevel: "server" | "shared_network" | "scope" | "pool" | "policy" | "host";
+        /**
+         * @description The owner of an option set: the key of `dhcp.option_sets`. One set per owner; the set
+         *     of a scope is the scope's options (`Scope` has no options field of its own), the set of
+         *     an IPAM interface is the reservation's options (the plan's `HostOptions`).
+         */
+        OptionOwner: "server" | {
+            /** @description A shared network. */
+            shared_network: components["schemas"]["SharedNetworkId"];
+        } | {
+            /** @description A scope, by its prefix. */
+            scope: components["schemas"]["PrefixId"];
+        } | {
+            /** @description A pool, by its range. */
+            pool: components["schemas"]["RangeId"];
+        } | {
+            /** @description A policy. */
+            policy: components["schemas"]["PolicyId"];
+        } | {
+            /** @description A reservation, by the IPAM interface. */
+            host: components["schemas"]["InterfaceId"];
+        };
+        /** @description An option set as the API reads it. */
+        OptionSetItem: {
+            /** @description The level. */
+            level: components["schemas"]["OptionLevel"];
+            /** @description The owner. */
+            owner: components["schemas"]["OptionOwner"];
+            /** @description The owner in the path form (`server`, `scope:<prefix>`, `host:<interface>`). */
+            path: string;
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+            /** @description The values. */
+            values: components["schemas"]["OptionValueItem"][];
+        };
+        /** @description `PUT /dhcp/option-sets/{owner}`: the whole set. */
+        OptionSetPut: {
+            /** @description The values, at most one per space and code. */
+            values?: components["schemas"]["OptionValueInput"][];
+        };
+        /** @description Option space: `dhcp4`, `dhcp6` or a vendor space name */
+        OptionSpace: string;
+        /** @description One option with its data in wire form (plan section 3.1). */
+        OptionValue: {
+            /**
+             * Format: int32
+             * @description The code.
+             */
+            code: number;
+            /** @description The data in wire form, without code and length. */
+            data: components["schemas"]["HexBytes"];
+            /** @description The space. */
+            space: components["schemas"]["OptionSpace"];
+        };
+        /** @description One option to set: in wire form (`data`) or typed (`typed`), exactly one of them. */
+        OptionValueInput: {
+            /**
+             * Format: int32
+             * @description The code.
+             */
+            code: number;
+            data?: components["schemas"]["HexBytes"] | null;
+            space?: components["schemas"]["OptionSpace"] | null;
+            typed?: components["schemas"]["OptionData"] | null;
+        };
+        /** @description One option of a set as the API reads it. */
+        OptionValueItem: components["schemas"]["OptionValue"] & {
+            /** @description The option's name. */
+            name?: string | null;
+            typed?: components["schemas"]["OptionData"] | null;
         };
         /**
          * @description Who owns an RRset (plan section 2.5, P2-Q12).
@@ -9926,6 +11726,219 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_DhcpClassItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Class"] & {
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /**
+                 * Format: int32
+                 * @description The scopes, pools and policies that name it.
+                 */
+                used_by: number;
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpFilterItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Filter"] & {
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpHistoryItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: components["schemas"]["LeaseEvent"][];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpLeaseItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Lease"] & {
+                host?: components["schemas"]["HostId"] | null;
+                /** @description Whether the address is the client's reservation. */
+                reserved: boolean;
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpPolicyItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Policy"] & {
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpPoolItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The first address. */
+                first: string;
+                /** @description The last address. */
+                last: string;
+                /**
+                 * Format: int32
+                 * @description The range's lease time.
+                 */
+                lease_secs?: number | null;
+                /**
+                 * Format: int64
+                 * @description Addresses with an active lease.
+                 */
+                leased: number;
+                /** @description The scope. */
+                prefix: components["schemas"]["PrefixId"];
+                /** @description The range. */
+                range: components["schemas"]["RangeId"];
+                settings?: components["schemas"]["PoolSettings"] | null;
+                /**
+                 * Format: int64
+                 * @description Addresses in the pool, exclusions taken out.
+                 */
+                size: number;
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpReservationItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The address. */
+                address: string;
+                client_id?: components["schemas"]["HexBytes"] | null;
+                /** @description The host. */
+                host: components["schemas"]["HostId"];
+                /** @description The host's name. */
+                host_name: components["schemas"]["HostName"];
+                /** @description Whether the address lies in a pool (allowed; the reservation wins). */
+                in_pool: boolean;
+                /** @description The interface. */
+                interface: components["schemas"]["InterfaceId"];
+                lease?: components["schemas"]["Lease"] | null;
+                mac?: components["schemas"]["MacAddr"] | null;
+                /** @description The reservation's options (the interface's option set). */
+                options?: components["schemas"]["OptionValueItem"][];
+                /** @description The scope. */
+                scope: components["schemas"]["PrefixId"];
+                /** @description What the reservation check found (IPAM-18, IPAM-23). */
+                warnings?: components["schemas"]["ReservationWarning"][];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_DhcpScopeItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["Scope"] & {
+                /**
+                 * @description The prefix's network.
+                 * @example 192.0.2.0/24
+                 */
+                cidr: string;
+                /**
+                 * Format: int64
+                 * @description The active leases on the node.
+                 */
+                leases: number;
+                /**
+                 * Format: int32
+                 * @description The number of pools (IPAM ranges of role `dhcp_pool`).
+                 */
+                pools: number;
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /** @description The prefix's VRF. */
+                vrf: components["schemas"]["VrfId"];
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_DnsCacheEntry: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -9964,6 +11977,25 @@ export interface components {
                 type: components["schemas"]["Rtype"];
                 view?: components["schemas"]["ViewId"] | null;
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ExclusionItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["ExclusionRange"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -10531,6 +12563,59 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_OptionDefItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["OptionDef"] & {
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /**
+                 * Format: int32
+                 * @description The option sets that use it.
+                 */
+                used_by: number;
+            })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_OptionSetItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The level. */
+                level: components["schemas"]["OptionLevel"];
+                /** @description The owner. */
+                owner: components["schemas"]["OptionOwner"];
+                /** @description The owner in the path form (`server`, `scope:<prefix>`, `host:<interface>`). */
+                path: string;
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /** @description Last change. */
+                updated: components["schemas"]["Stamp"];
+                /** @description The values. */
+                values: components["schemas"]["OptionValueItem"][];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_Prefix: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -10676,6 +12761,39 @@ export interface components {
                 role: components["schemas"]["RangeRole"];
                 /** @description Lifecycle status. */
                 status: components["schemas"]["Status"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_ReconcileRow: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The address. */
+                address: string;
+                /** @description What DNS says. */
+                dns?: string | null;
+                host?: components["schemas"]["HostId"] | null;
+                /** @description What intent says (the host and its MAC), when it says anything. */
+                intent?: string | null;
+                /** @description The finding. */
+                kind: components["schemas"]["ReconcileKind"];
+                /** @description What the lease says. */
+                lease?: string | null;
+                /** @description The rule, in English. */
+                rule: string;
+                /** @description What scans say. */
+                scan?: string | null;
+                winner?: components["schemas"]["Truth"] | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -10850,6 +12968,27 @@ export interface components {
                 /** @description The client's user agent at login. */
                 user_agent?: string | null;
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_SharedNetworkItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["SharedNetwork"] & {
+                /** @description The store revision of the row (the `ETag`). */
+                revision: components["schemas"]["Revision"];
+                /** @description Its scopes. */
+                scopes: components["schemas"]["PrefixId"][];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -11290,6 +13429,42 @@ export interface components {
          * @enum {string}
          */
         PluginSource: "bundled" | "installed";
+        /** @description An ordered rule of a scope or of the server (`dhcp.policies`). */
+        Policy: {
+            /** @description What it does. */
+            action?: components["schemas"]["PolicyAction"];
+            /** @description When the policy applies. */
+            condition: components["schemas"]["Condition"];
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether the policy applies. */
+            enabled?: boolean;
+            /** @description Identifier. */
+            id: components["schemas"]["PolicyId"];
+            /** @description The name, unique in its scope. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The processing order within the scope, lowest first.
+             */
+            order: number;
+            scope?: components["schemas"]["PrefixId"] | null;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /**
+         * @description What a matching policy does (plan section 3.1). Each part is applied by the first
+         *     matching policy that sets it; the policy's options are its option set.
+         */
+        PolicyAction: {
+            ddns?: components["schemas"]["DdnsPolicy"] | null;
+            lease?: components["schemas"]["LeaseTimes"] | null;
+            range?: components["schemas"]["AddressRange"] | null;
+        };
+        /** Format: uuid */
+        PolicyId: string;
         /** @description The adoption policy of one prefix as the API shows it. */
         PolicyView: {
             /** @description The policy in force: its own, an inherited one, or the default (`manual`). */
@@ -11342,6 +13517,27 @@ export interface components {
             /** @enum {string} */
             kind: "invalid_characters";
         };
+        /**
+         * @description What DHCP adds to an IPAM range of role `dhcp_pool` (`dhcp.pools`, key: the range):
+         *     classes and a lease time. The pool's options are the option set of
+         *     [`OptionOwner::Pool`]. A pool without a row serves with the scope's settings and the
+         *     range's `lease_secs`.
+         */
+        PoolSettings: {
+            /** @description The classes the pool admits; empty: every client the scope admits. */
+            classes?: components["schemas"]["ClassId"][];
+            lease?: components["schemas"]["LeaseTimes"] | null;
+            /** @description The range, which is also the key. */
+            range: components["schemas"]["RangeId"];
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /**
+         * @description The half of a pool an address belongs to when two nodes share it (Phase 5: the RFC 3074
+         *     buckets in load balance, the backup share in hot standby). None on one node.
+         * @enum {string}
+         */
+        PoolShare: "primary" | "secondary";
         /** @description A prefix: a supernet (container) or a network (IPAM-02). */
         Prefix: {
             alarm?: components["schemas"]["UtilizationAlarm"] | null;
@@ -12192,6 +14388,11 @@ export interface components {
             /** @description Always `ready`. */
             status: string;
         };
+        /**
+         * @description The kinds of findings of the view.
+         * @enum {string}
+         */
+        ReconcileKind: "ghost" | "rogue" | "orphan" | "ptr_mismatch" | "conflict";
         /** @description What one run did. */
         ReconcileReport: {
             /**
@@ -12252,6 +14453,25 @@ export interface components {
              * @description Open proposals left as they were.
              */
             unchanged: number;
+        };
+        /** @description One row of the view: what each truth says about an address, the finding and who wins. */
+        ReconcileRow: {
+            /** @description The address. */
+            address: string;
+            /** @description What DNS says. */
+            dns?: string | null;
+            host?: components["schemas"]["HostId"] | null;
+            /** @description What intent says (the host and its MAC), when it says anything. */
+            intent?: string | null;
+            /** @description The finding. */
+            kind: components["schemas"]["ReconcileKind"];
+            /** @description What the lease says. */
+            lease?: string | null;
+            /** @description The rule, in English. */
+            rule: string;
+            /** @description What scans say. */
+            scan?: string | null;
+            winner?: components["schemas"]["Truth"] | null;
         };
         /** @description The settings of the reconciler, the same on every controller. */
         ReconcilerSettings: {
@@ -12720,6 +14940,25 @@ export interface components {
              */
             reason?: string | null;
         };
+        /**
+         * @description What a relay agent said about the client (RFC 3046, RFC 3527, RFC 5107), kept on the
+         *     lease and echoed in replies.
+         */
+        RelayInfo: {
+            circuit_id?: components["schemas"]["HexBytes"] | null;
+            /**
+             * @description The relay's address (`giaddr`).
+             * @example 192.0.2.1
+             */
+            giaddr: string;
+            /** @description The link selection sub-option (RFC 3527). */
+            link_selection?: string | null;
+            /** @description The whole option 82 as received, for the echo. */
+            raw?: components["schemas"]["HexBytes"];
+            remote_id?: components["schemas"]["HexBytes"] | null;
+            /** @description The server identifier override sub-option (RFC 5107). */
+            server_id_override?: string | null;
+        };
         /** @description One release. Also the body of the release endpoints. */
         Release: {
             /** @description Markdown: what the operator must do; present when `requires_action` is set. */
@@ -12813,6 +15052,36 @@ export interface components {
             timeout: number;
             /** @description `required`, `preferred` or `discouraged`. */
             userVerification: string;
+        };
+        /**
+         * @description What the reservation check finds (IPAM-18, IPAM-23). A reservation inside a pool is
+         *     allowed: it wins over the pool.
+         */
+        ReservationWarning: {
+            /**
+             * @description A `reserved` host without a MAC address, client identifier or DUID: no reservation
+             *     exists until it has one (`dhcp.reservation.no_identity`).
+             */
+            no_identity: {
+                /** @description The host. */
+                host: components["schemas"]["HostId"];
+            };
+        } | {
+            /** @description Two hosts reserve one address (`dhcp.reservation.conflict`). */
+            address_collision: {
+                /** @description The address. */
+                address: string;
+                /** @description The hosts, sorted. */
+                hosts: components["schemas"]["HostId"][];
+            };
+        } | {
+            /** @description Two hosts present one client identity in a scope (`dhcp.reservation.conflict`). */
+            client_collision: {
+                /** @description The hosts, sorted. */
+                hosts: components["schemas"]["HostId"][];
+                /** @description The scope. */
+                scope: components["schemas"]["PrefixId"];
+            };
         };
         /** @description The `data` of a `reset` event. Its SSE id is `revision`. */
         ResetData: {
@@ -13687,6 +15956,38 @@ export interface components {
              */
             vrf?: string | null;
         };
+        /**
+         * @description A scope (`dhcp.scopes`, key: the prefix): an IPAM network with a DHCP policy (P3-Q4).
+         *     Its options are the option set of [`OptionOwner::Scope`].
+         */
+        Scope: {
+            /** @description Whether the scope is authoritative; none: the server's setting. */
+            authoritative?: boolean | null;
+            /** @description The classes the scope admits; empty: every client. */
+            classes?: components["schemas"]["ClassId"][];
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description DDNS. */
+            ddns?: components["schemas"]["DdnsPolicy"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Whether the scope serves clients. */
+            enabled?: boolean;
+            lease?: components["schemas"]["LeaseTimes"] | null;
+            /** @description The prefix served, which is also the key. */
+            prefix: components["schemas"]["PrefixId"];
+            /** @description Only clients that match an allow filter are served (DHCP-08, TGL-17). */
+            restricted?: boolean;
+            /**
+             * @description The server identifier (option 54) for the scope's clients; none: the address of the
+             *     listener that received the request.
+             * @example 198.51.100.10
+             */
+            server_id?: string | null;
+            shared_network?: components["schemas"]["SharedNetworkId"] | null;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
         /** @description Zone scope name ([a-z0-9][a-z0-9_-]{0,62}); `default` for the default scope */
         ScopeName: string;
         /**
@@ -14053,6 +16354,53 @@ export interface components {
             /** @description Text. */
             text: number;
         };
+        /**
+         * @description Several scopes on one link (`dhcp.shared_networks`; Windows superscopes, Kea shared
+         *     networks, DHCP-01 and DHCP-04): a request selected to one scope of the group may be
+         *     served from any of them. Its options are the option set of
+         *     [`OptionOwner::SharedNetwork`].
+         */
+        SharedNetwork: {
+            /** @description Creation. */
+            created: components["schemas"]["Stamp"];
+            /** @description Free text. */
+            description?: string | null;
+            /** @description Identifier. */
+            id: components["schemas"]["SharedNetworkId"];
+            /** @description The listener interface of a directly attached link; none for a relayed one. */
+            interface?: string | null;
+            /** @description The name, unique: 1 to 64 characters of `a-z`, `0-9` and `-`. */
+            name: string;
+            /** @description Last change. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** @description `POST /dhcp/shared-networks`. */
+        SharedNetworkCreate: {
+            /** @description Free text. */
+            description?: string | null;
+            /** @description The listener interface of a directly attached link. */
+            interface?: string | null;
+            /** @description The name. */
+            name: string;
+        };
+        /** Format: uuid */
+        SharedNetworkId: string;
+        /** @description A shared network as the API reads it. */
+        SharedNetworkItem: components["schemas"]["SharedNetwork"] & {
+            /** @description The store revision of the row (the `ETag`). */
+            revision: components["schemas"]["Revision"];
+            /** @description Its scopes. */
+            scopes: components["schemas"]["PrefixId"][];
+        };
+        /** @description `PATCH /dhcp/shared-networks/{id}`. */
+        SharedNetworkPatch: {
+            /** @description Free text; an empty string clears it. */
+            description?: string | null;
+            /** @description The interface; an empty string clears it. */
+            interface?: string | null;
+            /** @description The name. */
+            name?: string | null;
+        };
         /** @description What the analysis found in one sheet. */
         SheetAnalysis: {
             /** @description Columns. */
@@ -14410,6 +16758,19 @@ export interface components {
             /** @description The principal. */
             by: components["schemas"]["Principal"];
         };
+        /** @description One classless static route (RFC 3442). */
+        StaticRoute: {
+            /**
+             * @description The destination.
+             * @example 203.0.113.0/24
+             */
+            destination: string;
+            /**
+             * @description The router.
+             * @example 192.0.2.1
+             */
+            router: string;
+        };
         /**
          * @description Lifecycle status (IPAM-05).
          * @enum {string}
@@ -14725,7 +17086,7 @@ export interface components {
          * @description Components that act as [`Principal::System`].
          * @enum {string}
          */
-        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader" | "dns";
+        SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader" | "dns" | "dhcp";
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
             backup?: components["schemas"]["BackupSummaryView"] | null;
@@ -14902,6 +17263,20 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description One term of a policy's condition. */
+        Term: {
+            /** @description The request is in the class. */
+            class: components["schemas"]["ClassId"];
+        } | {
+            /** @description The request is not in the class. */
+            not_class: components["schemas"]["ClassId"];
+        } | {
+            /** @description A field matches. */
+            match: components["schemas"]["Match"];
+        } | {
+            /** @description A field does not match. */
+            not_match: components["schemas"]["Match"];
+        };
         /** @description How a text file was decoded. */
         TextInfo: {
             /** @description Whether the file started with a byte order mark (always the case for UTF-16). */
@@ -15040,7 +17415,7 @@ export interface components {
          *     parameter subscribes to all of them except `metrics`, which a client names to receive it.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics" | "dns";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics" | "dns" | "dhcp";
         /** @description An edge of the graph. */
         TopologyEdge: {
             /** @description One end: the switch, access point or hypervisor for client edges. */
@@ -15382,6 +17757,11 @@ export interface components {
             revision: number;
             vrf?: components["schemas"]["VrfId"] | null;
         };
+        /**
+         * @description The four truths (IPAM-21).
+         * @enum {string}
+         */
+        Truth: "intent" | "lease" | "dns" | "scan";
         /**
          * @description A TSIG algorithm (RFC 8945). HMAC-SHA256 is the default; HMAC-SHA1 is accepted for
          *     Windows DNS (risk R51).
@@ -20743,6 +23123,3713 @@ export interface operations {
             };
         };
     };
+    list_dhcp_classes: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of classes by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpClassItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpClassCreate"];
+            };
+        };
+        responses: {
+            /** @description The class */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpClassItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Class identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The class, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpClassItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Class identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The class is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The class is still named by a scope, a pool or a policy (`dhcp.class.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_class: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Class identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpClassPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed class */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpClassItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The class changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    export_dhcp: {
+        parameters: {
+            query?: {
+                /** @description The format; `kea` (MIG-16) is the only one. */
+                format?: string;
+                /** @description Whether the leases are included as memfile CSV; true when absent. */
+                leases?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpExport"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the export format is not known (`dhcp.export.format`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_filters: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of filter entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpFilterItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_filter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpFilterCreate"];
+            };
+        };
+        responses: {
+            /** @description The filter entry */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpFilterItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An entry for this pattern exists (`dhcp.filter.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_filter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Filter entry identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The filter entry, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpFilterItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such filter entry (`dhcp.filter.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_filter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Filter entry identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The filter entry is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such filter entry (`dhcp.filter.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_filter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Filter entry identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpFilterPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed filter entry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpFilterItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such filter entry (`dhcp.filter.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An entry for this pattern exists (`dhcp.filter.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The filter entry changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_history: {
+        parameters: {
+            query?: {
+                /** @description Only this address. */
+                addr?: string;
+                /** @description Only this MAC address. */
+                mac?: string;
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+                /** @description Only this kind of event. */
+                kind?: components["schemas"]["LeaseEventKind"];
+                /** @description From this time, RFC 3339. */
+                from?: string;
+                /** @description Until this time, RFC 3339. */
+                to?: string;
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of lease events, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpHistoryItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_leases: {
+        parameters: {
+            query?: {
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+                /** @description Addresses starting with this text (`192.0.2.`). */
+                addr?: string;
+                /** @description The client's MAC address. */
+                mac?: string;
+                /** @description Host names or FQDNs containing this text. */
+                name?: string;
+                /** @description One binding state. */
+                state?: components["schemas"]["BindingState"];
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of leases by address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpLeaseItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_lease: {
+        parameters: {
+            query?: {
+                /** @description The VRF. */
+                vrf?: components["schemas"]["VrfId"];
+            };
+            header?: never;
+            path: {
+                /** @description IPv4 address of the lease */
+                addr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpLeaseItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No lease holds the address (`dhcp.lease.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    release_dhcp_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description IPv4 address of the lease */
+                addr: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpLeaseRelease"];
+            };
+        };
+        responses: {
+            /** @description The released lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpLeaseItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No lease holds the address (`dhcp.lease.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The lease is not in a state the operation accepts (`dhcp.lease.state`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store refused the lease write (`dhcp.store_refused`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_option_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The built-in options in code order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionCatalogItem"][];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_option_defs: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of definitions by space and code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_OptionDefItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_option_def: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionDefCreate"];
+            };
+        };
+        responses: {
+            /** @description The definition */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionDefItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) or a definition for this space and code exists (`dhcp.option_def.exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_option_def: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option definition identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definition, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionDefItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_option_def: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option definition identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definition is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The definition is still used by an option set (`dhcp.option_def.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_option_def: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option definition identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionDefPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed definition */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionDefItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The definition is still used by an option set (`dhcp.option_def.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The option definition changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_option_sets: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only sets of this level. */
+                level?: components["schemas"]["OptionLevel"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of option sets by level and owner */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_OptionSetItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_option_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>` */
+                owner: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The option set, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionSetItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such pool (`dhcp.pool.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_dhcp_option_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>` */
+                owner: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionSetPut"];
+            };
+        };
+        responses: {
+            /** @description The option set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionSetItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) or an option code has no definition in its space (`dhcp.option.unknown`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The option set changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_option_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>` */
+                owner: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The option set is empty */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_policies: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only the policies of this scope. */
+                scope?: components["schemas"]["PrefixId"];
+                /** @description Only the server-level policies. */
+                server?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of policies in evaluation order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpPolicyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpPolicyCreate"];
+            };
+        };
+        responses: {
+            /** @description The policy */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpPolicyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Policy identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpPolicyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such policy (`dhcp.policy.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Policy identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such policy (`dhcp.policy.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Policy identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpPolicyPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpPolicyItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such policy (`dhcp.policy.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The policy changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_pools: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of pools by start address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpPoolItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_pool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Range identifier (UUID) of the pool */
+                range: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pool */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpPoolItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such pool (`dhcp.pool.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_dhcp_pool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Range identifier (UUID) of the pool */
+                range: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpPoolSet"];
+            };
+        };
+        responses: {
+            /** @description The pool with its settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpPoolItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such pool (`dhcp.pool.not_found`) or no such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range is not a DHCP pool (`dhcp.pool.not_pool`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_pool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Range identifier (UUID) of the pool */
+                range: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings are gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such pool (`dhcp.pool.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_reservations: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of reservations by address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpReservationItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_reservation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Interface identifier (UUID) of the reservation */
+                interface: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reservation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpReservationItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such interface (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_scopes: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of scopes by prefix */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpScopeItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpScopeCreate"];
+            };
+        };
+        responses: {
+            /** @description The scope */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpScopeItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such prefix (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix has a scope already (`dhcp.scope.exists`) or the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scope, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpScopeItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scope is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpScopePatch"];
+            };
+        };
+        responses: {
+            /** @description The changed scope */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpScopeItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such shared network (`dhcp.shared_network.not_found`) or no such class (`dhcp.class.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The scope changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_effective_options: {
+        parameters: {
+            query?: {
+                /**
+                 * @description The client's MAC address.
+                 * @example 00:00:5e:00:53:01
+                 */
+                mac?: string;
+                /** @description The client identifier (option 61) in hexadecimal. */
+                client_id?: string;
+                /** @description The vendor class the client sends (option 60). */
+                vendor_class?: string;
+                /** @description The user class the client sends (option 77). */
+                user_class?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The options with the level each came from */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectiveOptions"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_exclusions: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of exclusion ranges by start address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ExclusionItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_exclusion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExclusionCreate"];
+            };
+        };
+        responses: {
+            /** @description The exclusion range */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the exclusion range is unordered or outside the scope (`dhcp.exclusion.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_exclusion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+                /** @description Exclusion identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The exclusion range is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such exclusion range (`dhcp.exclusion.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_scope_utilization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Prefix identifier (UUID) of the scope */
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The figures of the scope */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpScopeUtilization"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings, with their `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpSettingsItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description The changed settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpSettingsItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dhcp_shared_networks: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of shared networks by name */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_SharedNetworkItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dhcp_shared_network: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedNetworkCreate"];
+            };
+        };
+        responses: {
+            /** @description The shared network */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedNetworkItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dhcp_shared_network: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Shared network identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shared network, with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedNetworkItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such shared network (`dhcp.shared_network.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dhcp_shared_network: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Shared network identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shared network is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such shared network (`dhcp.shared_network.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The shared network still has scopes (`dhcp.shared_network.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    update_dhcp_shared_network: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Shared network identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedNetworkPatch"];
+            };
+        };
+        responses: {
+            /** @description The changed shared network */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedNetworkItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such shared network (`dhcp.shared_network.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The shared network changed since it was read (`If-Match`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_dns_acls: {
         parameters: {
             query?: {
@@ -23329,8 +29416,8 @@ export interface operations {
             query?: {
                 /**
                  * @description Comma-separated topics: `ipam`, `jobs`, `audit`, `import`, `system`, `admin`,
-                 *     `connectors`, `discovery`, `secrets`, `cluster`, `metrics`, `dns`; all except `metrics`
-                 *     when absent.
+                 *     `connectors`, `discovery`, `secrets`, `cluster`, `metrics`, `dns`, `dhcp`; all except
+                 *     `metrics` when absent.
                  */
                 topics?: string;
                 /**
@@ -26288,6 +32375,73 @@ export interface operations {
             };
         };
     };
+    get_ipam_reconcile: {
+        parameters: {
+            query?: {
+                /** @description Only this prefix. */
+                prefix?: components["schemas"]["PrefixId"];
+                /** @description Only this host. */
+                host?: components["schemas"]["HostId"];
+                /** @description Only this kind. */
+                kind?: components["schemas"]["ReconcileKind"];
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of rows, one per difference between the truths */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ReconcileRow"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_jobs: {
         parameters: {
             query?: {
@@ -27091,6 +33245,352 @@ export interface operations {
             };
             /** @description The node changed at the same time (`cluster.node.conflict`) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_node_dhcp_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report of the DHCP role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpNodeStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    read_node_dhcp_history: {
+        parameters: {
+            query?: {
+                /** @description Only this address. */
+                addr?: string;
+                /** @description Only this MAC address. */
+                mac?: string;
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+                /** @description Only this kind of event. */
+                kind?: components["schemas"]["LeaseEventKind"];
+                /** @description From this time, RFC 3339. */
+                from?: string;
+                /** @description Until this time, RFC 3339. */
+                to?: string;
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of lease events, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpHistoryItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_node_dhcp_leases: {
+        parameters: {
+            query?: {
+                /** @description Only this scope. */
+                scope?: components["schemas"]["PrefixId"];
+                /** @description Addresses starting with this text (`192.0.2.`). */
+                addr?: string;
+                /** @description The client's MAC address. */
+                mac?: string;
+                /** @description Host names or FQDNs containing this text. */
+                name?: string;
+                /** @description One binding state. */
+                state?: components["schemas"]["BindingState"];
+                /** @description The cursor of the next page. */
+                cursor?: string;
+                /** @description Items per page, 1 to 1000; 100 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of leases by address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_DhcpLeaseItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    release_node_dhcp_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+                /** @description IPv4 address of the lease */
+                addr: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DhcpLeaseRelease"];
+            };
+        };
+        responses: {
+            /** @description The command is recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DhcpCommandAccepted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dhcp.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dhcp role (`dhcp.node.not_dhcp`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

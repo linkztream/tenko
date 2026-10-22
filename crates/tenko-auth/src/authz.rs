@@ -83,11 +83,14 @@ pub const fn anywhere(kind: ObjectKind) -> ObjectRef {
 }
 
 /// Whether scoped grants reach objects of `kind`. Imports, connectors, nodes, secrets,
-/// settings, users, sessions, tokens and the system are global-only in Phase 1.
+/// settings, users, sessions, tokens and the system are global-only in Phase 1; the DNS
+/// kinds and the DHCP kinds other than `dhcp_scope` are global-only too. A DHCP scope
+/// follows its prefix's grants (IAM-01; WP7.0): its anchors are the prefix's.
 pub const fn is_scoped_kind(kind: ObjectKind) -> bool {
     matches!(
         kind,
-        ObjectKind::Tenant
+        ObjectKind::DhcpScope
+            | ObjectKind::Tenant
             | ObjectKind::Vrf
             | ObjectKind::Site
             | ObjectKind::Vlan

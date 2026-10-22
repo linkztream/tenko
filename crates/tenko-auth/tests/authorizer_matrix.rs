@@ -56,7 +56,7 @@ const fn row(kind: ObjectKind, viewer_reads: bool, operator: &'static str) -> Ro
     }
 }
 
-const TABLE: [Row; 28] = [
+const TABLE: [Row; 33] = [
     row(ObjectKind::Tenant, true, "RCUD"),
     row(ObjectKind::Vrf, true, "RCUD"),
     row(ObjectKind::Site, true, "RCUD"),
@@ -88,6 +88,13 @@ const TABLE: [Row; 28] = [
     row(ObjectKind::DnsAcl, true, "RCUDX"),
     row(ObjectKind::DnsKey, false, ""),
     row(ObjectKind::DnsList, true, "RCUDX"),
+    // WP7.0: the DHCP module (ADR 0019): dhcp.read for viewers, dhcp.read and dhcp.write for
+    // operators.
+    row(ObjectKind::DhcpScope, true, "RCUDX"),
+    row(ObjectKind::DhcpClass, true, "RCUDX"),
+    row(ObjectKind::DhcpPolicy, true, "RCUDX"),
+    row(ObjectKind::DhcpOptionDef, true, "RCUDX"),
+    row(ObjectKind::DhcpFilter, true, "RCUDX"),
 ];
 
 /// The table letter of an action; administration belongs to administrators only.

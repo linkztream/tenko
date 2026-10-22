@@ -5,11 +5,13 @@
 //   node scripts/requirement-trace.mjs --check         exit 1 when the committed file is stale
 //   node scripts/requirement-trace.mjs --stdout        print the file instead of writing it
 //   node scripts/requirement-trace.mjs --phase 2 ...   the same for Phase 2 (phase-2-trace.md)
+//   node scripts/requirement-trace.mjs --phase 3 ...   the same for Phase 3 (phase-3-trace.md)
 //
 // Input: the rows of docs/REQUIREMENTS.md (`| PREFIX-NN | text | phase | priority |`) whose
 // phase cell names the phase (isInPhase), and the exit criteria table of the phase's plan:
 // E1 to E12 in section 1.2 of docs/plans/phase-1-execution.md for Phase 1, E13 to E21 in
-// section 1.2 of docs/plans/phase-2-plan.md for Phase 2 (PHASES). Without --phase the script
+// section 1.2 of docs/plans/phase-2-plan.md for Phase 2, E22 to E32 in section 1.2 of
+// docs/plans/phase-3-plan.md for Phase 3 (PHASES). Without --phase the script
 // traces Phase 1. scripts/README.md lists the scan rules.
 // Node's standard library only. The output is deterministic: sorted, no timestamps,
 // `/`-separated repository-relative paths, LF line endings.
@@ -40,6 +42,8 @@ export const EXECUTION_PATH = "docs/plans/phase-1-execution.md";
 export const PHASES = Object.freeze({
   1: { trace: TRACE_PATH, plan: EXECUTION_PATH, exits: "E1 to E12" },
   2: { trace: "docs/plans/phase-2-trace.md", plan: "docs/plans/phase-2-plan.md", exits: "E13 to E21" },
+  // WP7.0
+  3: { trace: "docs/plans/phase-3-trace.md", plan: "docs/plans/phase-3-plan.md", exits: "E22 to E32" },
 });
 
 /** Generated trace files, never scanned as documents: a trace names the IDs of its phase. */

@@ -45,11 +45,15 @@ pub enum Topic {
     /// The DNS module (Phase 2): zones and their records, views, forwarders, access lists,
     /// keys and block lists, and the serial, transfer and signing events of zones.
     Dns,
+    // WP7.0
+    /// The DHCP module (Phase 3): the configuration, and lease events for the live lease
+    /// view (sampled to at most 50 a second per subscriber, with counts when sampled).
+    Dhcp,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 12] = [
+    pub const ALL: [Topic; 13] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
@@ -62,6 +66,7 @@ impl Topic {
         Topic::Cluster,
         Topic::Metrics,
         Topic::Dns,
+        Topic::Dhcp,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -79,6 +84,7 @@ impl Topic {
             Topic::Cluster => "cluster",
             Topic::Metrics => "metrics",
             Topic::Dns => "dns",
+            Topic::Dhcp => "dhcp",
         }
     }
 
@@ -111,7 +117,7 @@ pub struct TopicSet(u16);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b1111_1111_1111);
+    pub const ALL: TopicSet = TopicSet(0b1_1111_1111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
     /// The topics of a subscription that names none: every topic except `metrics`, whose
@@ -528,7 +534,7 @@ mod tests {
                 serde_json::Value::String(topic.as_str().to_owned())
             );
         }
-        assert!("dhcp".parse::<Topic>().is_err());
+        assert!("ntp".parse::<Topic>().is_err());
     }
 
     #[test]
@@ -550,7 +556,7 @@ mod tests {
         assert!(!set.contains(Topic::Audit));
         assert_eq!(set.topics().count(), 2);
         assert_eq!(TopicSet::ALL.topics().count(), Topic::ALL.len());
-        assert!(TopicSet::parse("ipam,dhcp").is_err());
+        assert!(TopicSet::parse("ipam,ntp").is_err());
         let mut both = TopicSet::parse("metrics,jobs").expect("set");
         both.remove(Topic::Metrics);
         assert_eq!(both, TopicSet::parse("jobs").expect("jobs"));

@@ -8,7 +8,7 @@ root.
 |---|---|
 | `changelog.mjs` | Validates `CHANGELOG.md`, prints the notes of one release, and checks that a change to the product comes with an entry. |
 | `release-manifest.mjs` | Builds `releases.json` (the manifest running installations read) and `SHA256SUMS` from the changelog and the release binaries. |
-| `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` `docs/plans/phase-2-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
+| `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` or `--phase 3` `docs/plans/phase-2-trace.md` or `docs/plans/phase-3-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh
@@ -96,6 +96,7 @@ node scripts/requirement-trace.mjs                      # write docs/plans/phase
 node scripts/requirement-trace.mjs --check              # exit 1 when the committed file is stale
 node scripts/requirement-trace.mjs --stdout             # print instead of writing
 node scripts/requirement-trace.mjs --phase 2 [--check]  # the same for docs/plans/phase-2-trace.md
+node scripts/requirement-trace.mjs --phase 3 [--check]  # the same for docs/plans/phase-3-trace.md
 ```
 
 `--root <dir>` runs it against another tree (the tests use it). Exit codes: 0 success, 1 the
@@ -107,7 +108,8 @@ whose phase cell names the phase: the cell, or a part of it after a `;`, starts 
 (Phase 1: `1`, `1 (Slice 2)`, `1 (ACME: 3)`, not `2`, `10` or `2 and 3`; Phase 2: `2`,
 `2 and 3 (DNS and DHCP modules)`, `1 (delta sync, Slice 3); 2 (IXFR)`, not `1 (write: 2)`), and
 the exit criteria of the table under "Exit criteria" of the phase's plan: E1 to E12 of
-`docs/plans/phase-1-execution.md`, E13 to E21 of `docs/plans/phase-2-plan.md`. `--phase`
+`docs/plans/phase-1-execution.md`, E13 to E21 of `docs/plans/phase-2-plan.md`, E22 to E32 of
+`docs/plans/phase-3-plan.md`. `--phase`
 defaults to 1, so the Phase 1 command and its output are unchanged. The generated trace files
 are never scanned as documents. The `CON-NN` design constraints are headings, not rows, and
 are not traced.

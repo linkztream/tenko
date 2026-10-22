@@ -62,6 +62,12 @@ export const OBJECT_KINDS: readonly ObjectKind[] = [
   "dns_acl",
   "dns_key",
   "dns_list",
+  // WP7.0
+  "dhcp_scope",
+  "dhcp_class",
+  "dhcp_policy",
+  "dhcp_option_def",
+  "dhcp_filter",
 ];
 
 /** The records, oldest first; `seq` starts at 1 and has no gaps. */

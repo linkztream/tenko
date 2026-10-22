@@ -27,6 +27,7 @@
 
 pub mod audit;
 pub mod ca_root;
+pub mod dhcp; // WP7.0
 pub mod dns;
 pub mod export;
 pub mod health;

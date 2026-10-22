@@ -5,12 +5,18 @@
 //! validated value types of the model, so anything that does not parse becomes a loss
 //! entry instead of silently wrong data. References between IR items are by natural key
 //! (CIDR, VLAN id, host name), because the source has no Tenko identifiers.
+//!
+//! The DHCP part (Phase 3, WP7.0) is [`dhcp::DhcpIr`], produced beside the [`Ir`] by DHCP
+//! sources.
 
 use std::{borrow::Cow, collections::BTreeMap, fmt, net::IpAddr};
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+// WP7.0: the DHCP part of the IR.
+pub mod dhcp;
 
 use crate::{
     ipam::{AssignmentMode, Status},

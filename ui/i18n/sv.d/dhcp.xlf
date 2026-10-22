@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp">
+      <unit id="dhcp.title">
+        <notes><note category="description">Title of the DHCP area and its entry in the browser tab.</note></notes>
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="dhcp.scopes.title">
+        <notes><note category="description">Title of the list of DHCP scopes, the first page of the DHCP area.</note></notes>
+        <segment><source>DHCP scopes</source><target>DHCP-omfång</target></segment>
+      </unit>
+      <unit id="dhcp.scope.title">
+        <notes><note category="description">Title of the page of one DHCP scope (an address range that is leased out).</note></notes>
+        <segment><source>DHCP scope</source><target>DHCP-omfång</target></segment>
+      </unit>
+      <unit id="dhcp.shared_networks.title">
+        <notes><note category="description">Title of the page of shared networks, scopes that share one physical network.</note></notes>
+        <segment><source>Shared networks</source><target>Delade nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.options.title">
+        <notes><note category="description">Title of the page of DHCP options, the settings that clients receive with a lease.</note></notes>
+        <segment><source>DHCP options</source><target>DHCP-alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.classes.title">
+        <notes><note category="description">Title of the page of client classes, groups of clients that are recognised by what they send.</note></notes>
+        <segment><source>Client classes</source><target>Klientklasser</target></segment>
+      </unit>
+      <unit id="dhcp.policies.title">
+        <notes><note category="description">Title of the page of DHCP policies, the rules that decide how clients are served.</note></notes>
+        <segment><source>DHCP policies</source><target>DHCP-principer</target></segment>
+      </unit>
+      <unit id="dhcp.filters.title">
+        <notes><note category="description">Title of the page of MAC filters, the lists of hardware addresses that are allowed or refused.</note></notes>
+        <segment><source>MAC filters</source><target>MAC-filter</target></segment>
+      </unit>
+      <unit id="dhcp.leases.title">
+        <notes><note category="description">Title of the page of leases, the addresses clients hold at the moment.</note></notes>
+        <segment><source>Leases</source><target>Lån</target></segment>
+      </unit>
+      <unit id="dhcp.history.title">
+        <notes><note category="description">Title of the page of the lease history, which shows past leases.</note></notes>
+        <segment><source>Lease history</source><target>Lånehistorik</target></segment>
+      </unit>
+      <unit id="dhcp.coming.title">
+        <notes><note category="description">Heading of a DHCP page whose view is not built yet.</note></notes>
+        <segment><source>Coming with a later package</source><target>Kommer med ett senare paket</target></segment>
+      </unit>
+      <unit id="dhcp.coming.body">
+        <notes><note category="description">Explains on a DHCP page that this part of the DHCP module is not built yet.</note></notes>
+        <segment><source>This part of the DHCP module is not built yet and comes with a later package. Until then the rest of Tenko DDI works as usual.</source><target>Den här delen av DHCP-modulen är inte byggd ännu och kommer med ett senare paket. Till dess fungerar resten av Tenko DDI som vanligt.</target></segment>
+      </unit>
+      <unit id="dhcp.coming.scopes">
+        <notes><note category="description">Link on an unbuilt DHCP page that leads back to the list of DHCP scopes.</note></notes>
+        <segment><source>Go to the DHCP scopes</source><target>Gå till DHCP-omfången</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

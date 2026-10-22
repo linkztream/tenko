@@ -138,6 +138,10 @@ pub enum SystemComponent {
     Leader,
     /// The DNS module (Phase 2): the zone service, the DNS actuator, dynamic updates.
     Dns,
+    // WP7.0
+    /// The DHCP module (Phase 3): lease commits, expiry, DDNS change sets, the
+    /// configuration service.
+    Dhcp,
 }
 
 impl SystemComponent {
@@ -161,6 +165,7 @@ impl SystemComponent {
             SystemComponent::Languages => "languages",
             SystemComponent::Leader => "leader",
             SystemComponent::Dns => "dns",
+            SystemComponent::Dhcp => "dhcp",
         }
     }
 }

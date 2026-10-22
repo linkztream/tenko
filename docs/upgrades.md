@@ -670,10 +670,13 @@ The rules for fixtures:
   missing.
 - Fixtures use documentation data only: addresses from RFC 5737 and RFC 3849, MAC addresses
   from RFC 7042, host names under `example.com`, `example.net`, `example.org` or `.test`.
-- Fixtures stay small. The test fails when all fixtures together exceed 4 MiB, and each
-  fixture should stay under 1 MiB. The limit is a total over all formats and earlier
+- Fixtures stay small. The test fails when all fixtures together exceed 8 MiB, and each
+  fixture should stay under 1.5 MiB. The limit is a total over all formats and earlier
   fixtures cannot be regenerated, so a new fixture should hold only as much data as it
-  needs.
+  needs. The limit was 4 MiB until format 4 (WP7.0): the fixtures of formats 1 to 3 held
+  3.42 MiB, most of it the space each redb file sets aside, so the limit was raised once
+  rather than the fixtures compressed, which would need a decompressing step in the test
+  and change the committed fixtures of earlier formats.
 
 ### 4.6 Migrations larger than one batch
 

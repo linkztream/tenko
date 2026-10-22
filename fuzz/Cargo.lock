@@ -3205,7 +3205,10 @@ dependencies = [
 name = "tenko-dhcp"
 version = "0.0.2"
 dependencies = [
+ "ipnet",
+ "tenko-core",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

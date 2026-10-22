@@ -216,7 +216,9 @@ fn every_earlier_format_opens_with_its_objects() {
         .iter()
         .map(|format| dir_size(&fixtures().join(format!("v{format}"))))
         .sum();
-    assert!(size < 4 * 1024 * 1024, "the fixtures grew to {size} bytes");
+    // WP7.0: 8 MiB since format 4; formats 1 to 3 held 3.42 MiB, each redb store
+    // pre-allocating most of its megabyte (docs/upgrades.md section 4.5).
+    assert!(size < 8 * 1024 * 1024, "the fixtures grew to {size} bytes");
     let migrated: Vec<u64> = formats
         .into_iter()
         .filter(|format| opens(*format, current))

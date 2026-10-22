@@ -111,6 +111,17 @@ object_kinds! {
     DnsKey => "dns_key",
     /// A DNS block list.
     DnsList => "dns_list",
+    // WP7.0: the DHCP kinds (Phase 3).
+    /// A DHCP scope; the id is its prefix's, so it follows the prefix's grants (IAM-01).
+    DhcpScope => "dhcp_scope",
+    /// A DHCP class.
+    DhcpClass => "dhcp_class",
+    /// A DHCP policy.
+    DhcpPolicy => "dhcp_policy",
+    /// A custom DHCP option definition.
+    DhcpOptionDef => "dhcp_option_def",
+    /// A DHCP MAC filter entry.
+    DhcpFilter => "dhcp_filter",
 }
 
 impl PartialOrd for ObjectKind {

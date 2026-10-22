@@ -441,7 +441,11 @@ mod tests {
         assert!(tables.contains(&"dns.zones") && tables.contains(&"dns.rrsets"));
         assert!(tables.contains(&"dns.journal") && tables.contains(&"dns.keys.meta"));
         assert!(!tables.contains(&"dns.sign_state"));
-        assert_eq!(Subset::new(NodeId(1001), &[Role::Dhcp]).role_tables(), []);
+        // WP7.0: a dhcp node's tables are declared for Phase 5 as well.
+        let dhcp = Subset::new(NodeId(1001), &[Role::Dhcp]);
+        let tables: Vec<&str> = dhcp.role_tables().iter().map(TableName::as_str).collect();
+        assert!(tables.contains(&"dhcp.scopes") && tables.contains(&"dhcp.leases"));
+        assert!(!tables.contains(&"dhcp.history") && !tables.contains(&"dns.zones"));
         let first = put(&store, 1001, Some(1)).await;
         put(&store, 1002, Some(9)).await;
         // From scratch: a snapshot with the one row.

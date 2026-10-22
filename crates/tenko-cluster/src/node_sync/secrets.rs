@@ -31,10 +31,13 @@ pub const SECRETS_ACTION: AuditAction = AuditAction::from_static("cluster.node.s
 /// keys) and `dnssec` (DNSSEC keys, public parts only), are declared for Phase 5: in Phase 2
 /// the `dns` role runs in the controller's process and no node asks for them (plan section
 /// 2.10).
-pub const PURPOSES: [(&str, Role); 3] = [
+/// WP7.0: the `dhcp` role's purpose `dhcp.failover` (the failover shared secret, IAM-16) is
+/// declared the same way for Phase 5.
+pub const PURPOSES: [(&str, Role); 4] = [
     ("snmp", Role::Probe),
     (tenko_core::dns::TSIG_PURPOSE, Role::Dns),
     (tenko_core::dns::DNSSEC_PURPOSE, Role::Dns),
+    (tenko_core::dhcp::FAILOVER_PURPOSE, Role::Dhcp),
 ];
 
 /// A vault secret a node configuration names for one purpose.
@@ -308,6 +311,9 @@ mod tests {
         assert!(purpose_allowed("dnssec", &[Role::Dns, Role::Controller]));
         assert!(!purpose_allowed("dnssec", &[Role::Probe, Role::Dhcp]));
         assert!(!purpose_allowed("snmp", &[Role::Dns]));
+        // WP7.0
+        assert!(purpose_allowed("dhcp.failover", &[Role::Dhcp]));
+        assert!(!purpose_allowed("dhcp.failover", &[Role::Dns, Role::Probe]));
     }
 
     #[test]

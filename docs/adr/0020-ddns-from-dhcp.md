@@ -19,6 +19,10 @@ ADR 0017 made the DNS engine serve from an index and never write, routed every c
 6. **Who may update which zone.** A scope names its forward zone and whether PTR records are written; the zone carries a new field of its update policy, `dhcp`, that allows DHCP updates. Its default follows the profile: Home and Lab allow (Home always writes into the scope's zones), Standard and Hardened do not until the operator allows it per zone. Name protection (point 2) cannot be switched off under Hardened. The plan proposes a toggle row in SECURITY-PROFILES.md so the profile values are visible; TGL-09 stays the toggle for external clients.
 7. **Observability and audit.** `tenko_dhcp_ddns_total{outcome}` and `tenko_dhcp_ddns_queue` count and size the work; each change set is audited by the zone service with the principal `system:dhcp` and the lease's address, and lands in the zone's journal, so IXFR to secondaries carries it.
 
+## Refinements from the contracts (WP7.0)
+
+The status stays Proposed; WP8.3 refines the rest. WP7.0 wrote the scope's settings as `tenko_core::dhcp::DdnsPolicy` (enabled, the forward zone, `reverse` for PTR records, the TTL, `conflict` as `protect` or `replace`, `client_may_update_a` off by default, `legacy_clients` on by default, `refuse_foreign` for names outside the zone), the outcome on the lease as `DdnsState` (the forward and reverse names written, the DHCID, the last error), and the queue between the commit and the DDNS worker as `tenko_dhcp::ddns::DdnsQueue` with the bounded reference `MemDdnsQueue`. The change sets carry the principal of the system component `dhcp`. The new `UpdatePolicy` field `dhcp` of point 6 is left to WP8.3, because it changes the DNS zone row. `Replace` under Hardened is refused by the configuration service, not by the model, because the model does not know the profile.
+
 ## Consequences
 
 - One write path and one audit trail for every change to a zone: API, actuator, RFC 2136, transfers in, signing, and now DHCP.

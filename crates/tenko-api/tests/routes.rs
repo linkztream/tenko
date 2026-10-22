@@ -446,6 +446,113 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/nodes/{id}/dns/log", "read_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/stop", "stop_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/start", "start_node_dns_log"),
+    // dhcp (WP7.0 contracts; the DHCP module)
+    ("GET", "/dhcp/settings", "get_dhcp_settings"),
+    ("PUT", "/dhcp/settings", "update_dhcp_settings"),
+    ("GET", "/dhcp/scopes", "list_dhcp_scopes"),
+    ("POST", "/dhcp/scopes", "create_dhcp_scope"),
+    ("GET", "/dhcp/scopes/{prefix}", "get_dhcp_scope"),
+    ("PATCH", "/dhcp/scopes/{prefix}", "update_dhcp_scope"),
+    ("DELETE", "/dhcp/scopes/{prefix}", "delete_dhcp_scope"),
+    (
+        "GET",
+        "/dhcp/scopes/{prefix}/utilization",
+        "get_dhcp_scope_utilization",
+    ),
+    (
+        "GET",
+        "/dhcp/scopes/{prefix}/effective-options",
+        "get_dhcp_effective_options",
+    ),
+    (
+        "GET",
+        "/dhcp/scopes/{prefix}/exclusions",
+        "list_dhcp_exclusions",
+    ),
+    (
+        "POST",
+        "/dhcp/scopes/{prefix}/exclusions",
+        "create_dhcp_exclusion",
+    ),
+    (
+        "DELETE",
+        "/dhcp/scopes/{prefix}/exclusions/{id}",
+        "delete_dhcp_exclusion",
+    ),
+    ("GET", "/dhcp/shared-networks", "list_dhcp_shared_networks"),
+    (
+        "POST",
+        "/dhcp/shared-networks",
+        "create_dhcp_shared_network",
+    ),
+    (
+        "GET",
+        "/dhcp/shared-networks/{id}",
+        "get_dhcp_shared_network",
+    ),
+    (
+        "PATCH",
+        "/dhcp/shared-networks/{id}",
+        "update_dhcp_shared_network",
+    ),
+    (
+        "DELETE",
+        "/dhcp/shared-networks/{id}",
+        "delete_dhcp_shared_network",
+    ),
+    ("GET", "/dhcp/pools", "list_dhcp_pools"),
+    ("GET", "/dhcp/pools/{range}", "get_dhcp_pool"),
+    ("PUT", "/dhcp/pools/{range}", "set_dhcp_pool"),
+    ("DELETE", "/dhcp/pools/{range}", "delete_dhcp_pool"),
+    ("GET", "/dhcp/option-catalog", "list_dhcp_option_catalog"),
+    ("GET", "/dhcp/option-defs", "list_dhcp_option_defs"),
+    ("POST", "/dhcp/option-defs", "create_dhcp_option_def"),
+    ("GET", "/dhcp/option-defs/{id}", "get_dhcp_option_def"),
+    ("PATCH", "/dhcp/option-defs/{id}", "update_dhcp_option_def"),
+    ("DELETE", "/dhcp/option-defs/{id}", "delete_dhcp_option_def"),
+    ("GET", "/dhcp/option-sets", "list_dhcp_option_sets"),
+    ("GET", "/dhcp/option-sets/{owner}", "get_dhcp_option_set"),
+    ("PUT", "/dhcp/option-sets/{owner}", "set_dhcp_option_set"),
+    (
+        "DELETE",
+        "/dhcp/option-sets/{owner}",
+        "delete_dhcp_option_set",
+    ),
+    ("GET", "/dhcp/classes", "list_dhcp_classes"),
+    ("POST", "/dhcp/classes", "create_dhcp_class"),
+    ("GET", "/dhcp/classes/{id}", "get_dhcp_class"),
+    ("PATCH", "/dhcp/classes/{id}", "update_dhcp_class"),
+    ("DELETE", "/dhcp/classes/{id}", "delete_dhcp_class"),
+    ("GET", "/dhcp/policies", "list_dhcp_policies"),
+    ("POST", "/dhcp/policies", "create_dhcp_policy"),
+    ("GET", "/dhcp/policies/{id}", "get_dhcp_policy"),
+    ("PATCH", "/dhcp/policies/{id}", "update_dhcp_policy"),
+    ("DELETE", "/dhcp/policies/{id}", "delete_dhcp_policy"),
+    ("GET", "/dhcp/filters", "list_dhcp_filters"),
+    ("POST", "/dhcp/filters", "create_dhcp_filter"),
+    ("GET", "/dhcp/filters/{id}", "get_dhcp_filter"),
+    ("PATCH", "/dhcp/filters/{id}", "update_dhcp_filter"),
+    ("DELETE", "/dhcp/filters/{id}", "delete_dhcp_filter"),
+    ("GET", "/dhcp/reservations", "list_dhcp_reservations"),
+    (
+        "GET",
+        "/dhcp/reservations/{interface}",
+        "get_dhcp_reservation",
+    ),
+    ("GET", "/dhcp/leases", "list_dhcp_leases"),
+    ("GET", "/dhcp/leases/{addr}", "get_dhcp_lease"),
+    ("POST", "/dhcp/leases/{addr}/release", "release_dhcp_lease"),
+    ("GET", "/dhcp/history", "list_dhcp_history"),
+    ("GET", "/dhcp/export", "export_dhcp"),
+    ("GET", "/nodes/{id}/dhcp", "get_node_dhcp_status"),
+    ("GET", "/nodes/{id}/dhcp/leases", "list_node_dhcp_leases"),
+    (
+        "POST",
+        "/nodes/{id}/dhcp/leases/{addr}/release",
+        "release_node_dhcp_lease",
+    ),
+    ("GET", "/nodes/{id}/dhcp/history", "read_node_dhcp_history"),
+    ("GET", "/ipam/reconcile", "get_ipam_reconcile"),
 ];
 
 /// The only endpoint that is not a stub.
@@ -461,6 +568,12 @@ fn concrete(template: &str) -> String {
         .replace("{token}", ID)
         .replace("{role}", "viewer")
         .replace("{subject}", "00-00-5E-00-53-01")
+        // WP7.0: the DHCP path parameters.
+        .replace("{prefix}", ID)
+        .replace("{range}", ID)
+        .replace("{interface}", ID)
+        .replace("{owner}", "server")
+        .replace("{addr}", "192.0.2.50")
 }
 
 fn request(method: &str, uri: &str) -> Request<Body> {
@@ -650,7 +763,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
     // kek, scans, audit_export, backup and queue with their operations; two that start
     // empty: access, i18n), reconciler and guardrails (WP3.12a).
     // dns (WP4.0).
-    assert_eq!(tags.len(), 34, "one tag per area");
+    // dhcp (WP7.0).
+    assert_eq!(tags.len(), 35, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

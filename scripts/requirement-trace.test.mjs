@@ -577,7 +577,11 @@ describe("phases", () => {
     assert.equal(PHASES[1]?.trace, TRACE_PATH);
     assert.equal(PHASES[2]?.trace, "docs/plans/phase-2-trace.md");
     assert.equal(PHASES[2]?.plan, "docs/plans/phase-2-plan.md");
-    assert.throws(() => phaseConfig(3), /phase 3 is not traced/);
+    // WP7.0: Phase 3.
+    assert.equal(PHASES[3]?.trace, "docs/plans/phase-3-trace.md");
+    assert.equal(PHASES[3]?.plan, "docs/plans/phase-3-plan.md");
+    assert.equal(PHASES[3]?.exits, "E22 to E32");
+    assert.throws(() => phaseConfig(4), /phase 4 is not traced/);
   });
 
   test("the Phase 2 trace lists the Phase 2 rows and E13 to E21 of the Phase 2 plan", () => {
@@ -595,6 +599,39 @@ describe("phases", () => {
     assert.match(text, /\| E13 \| Numbers documented \| IAM-11, OPS-30 \| `crates\/tenko-dns\/tests\/serve\.rs::e13_loopback_numbers` \|/);
     assert.match(text, /\| OPS-30 \| Must \| `crates\/tenko-dns\/tests\/serve\.rs::the_module_switch` \|/);
     assert.match(text, /\| IAM-11 \| Must \| - \| - \| `crates\/tenko-dns\/src\/lib\.rs`<br>`docs\/plans\/phase-2-plan\.md` \|/);
+  });
+
+  // WP7.0
+  test("the Phase 3 trace lists the Phase 3 rows and E22 to E32 of the Phase 3 plan", () => {
+    const root = makeTree({
+      ...TREE,
+      "docs/REQUIREMENTS.md": REQUIREMENTS.replace(
+        "| MIG-14 | Re-import. | 1 | Must |",
+        "| MIG-14 | Re-import. | 1 | Must |\n| DHCP-07 | Leases. | 3 | Must |\n| DHCP-12 | Failover. | 3 | Must |",
+      ),
+      "docs/plans/phase-3-plan.md": [
+        "# Phase 3 plan",
+        "",
+        "### 1.2 Exit criteria",
+        "",
+        "| # | Check | Requirements | Slice |",
+        "|---|---|---|---|",
+        "| E22 | perfdhcp numbers | DHCP-07 | 7 (loopback), 9 (real link) |",
+        "| E24 | Leases survive the node | DHCP-07 | 7 |",
+        "",
+      ].join("\n"),
+      "crates/tenko-dhcp/tests/crash.rs":
+        "#[test]\nfn e24_no_lease_lost() {}\n\n/// DHCP-07.\n#[test]\nfn rows_are_committed() {}\n",
+    });
+    const trace = buildTrace(root, 3);
+    assert.equal(trace.phase, 3);
+    assert.deepEqual(trace.requirements.map((r) => r.id), ["DHCP-07", "DHCP-12"]);
+    assert.deepEqual(trace.exits.map((e) => e.id), ["E22", "E24"]);
+    const text = renderTrace(trace);
+    assert.match(text, /^# Phase 3 requirement trace\n/);
+    assert.match(text, /the exit criteria E22 to E32 of `docs\/plans\/phase-3-plan\.md`/);
+    assert.match(text, /\| E24 \| Leases survive the node \| DHCP-07 \| `crates\/tenko-dhcp\/tests\/crash\.rs::e24_no_lease_lost` \|/);
+    assert.match(text, /\| DHCP-07 \| Must \| `crates\/tenko-dhcp\/tests\/crash\.rs::rows_are_committed` \|/);
   });
 
   test("a generated trace is never a document of another phase", () => {
@@ -628,7 +665,7 @@ describe("phases", () => {
 
   test("an unknown or malformed phase exits 2", () => {
     const root = makeTree(PHASE_2_TREE);
-    for (const phase of ["3", "0", "x", "2.5", ""]) {
+    for (const phase of ["4", "0", "x", "2.5", ""]) {
       const r = run("--phase", phase, "--root", root);
       assert.equal(r.code, 2, phase);
       assert.match(r.err, /is not a traced phase/);

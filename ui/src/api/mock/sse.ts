@@ -28,7 +28,7 @@ import { route } from "./route";
 
 // `metrics` carries a snapshot per second while the sampler runs (the browser mock, see
 // `startMetricsSampler`); in the unit tests it carries nothing.
-const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns"];
+const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns", "dhcp"];
 /** The topics of a stream that names none: all but `metrics`, as on the server. */
 const DEFAULT_TOPICS: readonly Topic[] = TOPICS.filter((topic) => topic !== "metrics");
 

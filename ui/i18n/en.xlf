@@ -5677,6 +5677,21 @@
       <unit id="audit.kind.dns_list">
         <segment><source>Block list</source></segment>
       </unit>
+      <unit id="audit.kind.dhcp_scope">
+        <segment><source>DHCP scope</source></segment>
+      </unit>
+      <unit id="audit.kind.dhcp_class">
+        <segment><source>DHCP class</source></segment>
+      </unit>
+      <unit id="audit.kind.dhcp_policy">
+        <segment><source>DHCP policy</source></segment>
+      </unit>
+      <unit id="audit.kind.dhcp_option_def">
+        <segment><source>DHCP option definition</source></segment>
+      </unit>
+      <unit id="audit.kind.dhcp_filter">
+        <segment><source>DHCP MAC filter</source></segment>
+      </unit>
       <unit id="audit.principal.kind.user">
         <segment><source>User</source></segment>
       </unit>

@@ -8,11 +8,19 @@ license.workspace = true
 publish = false
 
 [dependencies]
+# WP7.0: the model, the IPAM rows the image derives from, and the feed's channel.
+ipnet = { workspace = true }
+tenko-core = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 # The counting allocator of tests/alloc.rs (the DNS codec's allocation test).
 stats_alloc = { workspace = true }
+# WP7.0: the differential test of the DHCPv4 codec (ADR 0019 point 7); never shipped.
+dhcproto = { workspace = true }
+proptest = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

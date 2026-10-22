@@ -42,7 +42,7 @@ describe("access", () => {
 });
 
 describe("shell", () => {
-  it("shows the rail in the approved order with labels, and the placeholder for unbuilt areas", async () => {
+  it("shows the rail in the approved order with labels, and the DHCP page on a deep link into its area", async () => {
     const app = await renderApp("/dhcp/scopes/192.0.2.0", "signed-in");
     const rail = await screen.findByRole("navigation", { name: "Main" });
     const labels = within(rail)
@@ -50,7 +50,7 @@ describe("shell", () => {
       .map((a) => a.textContent?.trim());
     expect(labels).toEqual(["Dashboard", "IPAM", "DNS", "DHCP", "Discovery", "Topology", "Jobs", "Audit", "Connectors", "Nodes", "Cluster", "Settings"]);
     expect(within(rail).getByRole("link", { name: /DHCP/ }).classList.contains("active")).toBe(true);
-    expect(await screen.findByText("DHCP arrives in a later build")).toBeTruthy();
+    expect(await screen.findByTestId("page-dhcp")).toBeTruthy();
     expect(app.location()).toBe("/dhcp/scopes/192.0.2.0");
   });
 

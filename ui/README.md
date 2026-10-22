@@ -84,6 +84,9 @@ ui/
                         node panel, revocation, the token dialog; the requests are api/nodes.ts
     cluster/, scans/    the cluster area on the rail and the scans of the discovery module, which has
                         no rail entry (WP3.0 placeholders; WP3.11a builds them)
+    dhcp/               the DHCP area (Phase 3): one page for every DHCP path that says the part comes
+                        with a later package (WP7.0); the later packages build the scopes, leases and
+                        policies route by route
     dns/                the DNS area (Phase 2, WP4.5): the zone list, a zone with its record grid,
                         settings and history tabs, the zone file import and export, access lists
                         and TSIG keys; api.ts is its only API module (types.ts holds the types
@@ -228,6 +231,7 @@ other key stays in the core table that the first load carries.
 | `guardrails` | `guardrails.` (likewise `connect.guardrails.invalid` is `guardrails.error.invalid`, because `errors.connect.` belongs to `connectors`) |
 | `languages` | `languages.` |
 | `metrics` | `metrics.` (the live metrics of the start page, loaded with their lazy part for administrators) |
+| `dhcp` | `dhcp.` (the DHCP area, Phase 3) |
 | `dns` | `dns.`, `errors.dns.` (the DNS area, Phase 2; the DNS block of the host and address pages uses `hosts.dns.` in `ipam`, the import job `jobs.title.dns_import` and `jobs.step.dns_import_*` in `jobs`) |
 
 The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
@@ -328,6 +332,7 @@ Page roots in this version:
 | `/dns/forwarders`, `/dns/lists` | `page-dns-forwarders`, `page-dns-lists` |
 | `/dns/views` | `page-dns-views` |
 | Every other path under `/dns` | `page-dns-later` with `dns-coming` |
+| `/dhcp` and every path under it (WP7.0: this part comes with a later package, `dhcp-coming` with the link `dhcp-coming-scopes`) | `page-dhcp` |
 | `/discovery`, `/discovery/:id` | `page-discovery` (with `proposal-panel`) |
 | `/discovery/observations`, `/discovery/observations/:subject` | `page-discovery-observations`, `page-discovery-subject` |
 | `/connectors`, `/connectors/:id` | `page-connectors`, `page-connector` |

@@ -76,6 +76,11 @@ domain = { version = "=0.12.3", default-features = false, features = ["std"] }
 hickory-proto = "0.26.3"
 # The counting global allocator of the DNS allocation test.
 stats_alloc = "0.1.10"
+# WP7.0: the differential tests of the DHCPv4 codec (ADR 0019 point 7); a dev-dependency
+# only, never shipped. MIT; its owned decoder allocates per message, which is why it is not
+# the production codec. Pinned exactly as `domain` is (risk R67); brings hickory-proto 0.26
+# and rand 0.10, both already in the graph.
+dhcproto = { version = "=0.15.0", default-features = false }
 
 # Domain types.
 ipnet = { version = "2.12.2", features = ["serde"] }

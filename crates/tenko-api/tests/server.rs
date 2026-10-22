@@ -743,7 +743,7 @@ async fn events_replay_across_a_server_restart() {
     read_until(&mut garbage, &mut garbage_buf, b"event: reset\n").await;
 
     // Unknown topics are refused.
-    let unknown = get(addr, "/api/v1/events?topics=dhcp", &[]).await;
+    let unknown = get(addr, "/api/v1/events?topics=ntp", &[]).await;
     assert_eq!(unknown.status, 400);
     assert_eq!(unknown.json()["code"], "sys.events.unknown_topic");
 

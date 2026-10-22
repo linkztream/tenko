@@ -142,6 +142,8 @@ impl ScopedEvents {
             Topic::Secrets => global(ObjectRef::singleton(ObjectKind::Secret)),
             Topic::Cluster => global(ObjectRef::singleton(ObjectKind::Node)),
             Topic::Dns => global(ObjectRef::singleton(ObjectKind::Zone)),
+            // WP7.0: lease events are personal data; global DHCP readers only.
+            Topic::Dhcp => global(tenko_core::dhcp::server_object()),
         }
     }
 }

@@ -25,6 +25,18 @@ The owner decided on 2026-10-21 (plan section 7): a lease is a row in the replic
 10. **Authorization and personal data.** `dhcp.read` reads the configuration and the leases, `dhcp.write` changes the configuration and releases leases; the viewer holds `dhcp.read`, the operator both, the auditor none (ADR 0015). Scope objects follow their prefix's grants (IAM-01); the other DHCP object kinds are global-only for grants. Reading leases or history is audited as `dhcp.lease.read`, because a lease holds a MAC address, a client identifier and often a host name; history has a retention per profile.
 11. **The data format moves to 4 once for the phase.** The `dhcp` namespace and its object kinds are values a format 3 binary cannot decode, so format 4 is an empty migration; the tables later Phase 3 packages add are additive.
 
+## Refinements from the contracts (WP7.0)
+
+The contracts package wrote the decision into code and settled what it left open (`docs/dhcp-contracts.md`, section 14, has the full list); the status stays Proposed until the owner accepts the plan.
+
+- **Option sets by owner.** `dhcp.option_sets` is keyed by the owner of a set (`OptionOwner`: the server, a shared network, a scope, a pool, a policy or an IPAM interface), one set per owner. Scopes, shared networks, pools and policies carry no options field, and the plan's `dhcp.host_options` is the set of `OptionOwner::Host`; there is no separate table. The image merges the sets per code from the least to the most specific level.
+- **The commit hand-off.** The DORA path builds a `PendingChange` whose every field is fixed-capacity and hands it to `LeaseStore::submit`, which copies it into a bounded queue and returns at once; the committer builds the batch (the lease row, the client index row, the history row, from WP8.1 the observation fact) and reports each ticket committed or refused. The counting-allocator test covers the path up to that hand-off and checks that a deliberate allocation in `submit` fails it.
+- **The client index** (`dhcp.leases.by_client`, key scope and client identity of RFC 4361 and RFC 6842) points at a client's latest row in a scope, and the in-memory table keeps the row with the later client transaction time, so the role's own commits and the feed's copies of them give one state whatever their order.
+- **Authorization objects.** A scope authorizes as `dhcp_scope` with its prefix's identifier and is a scoped kind whose anchors are the prefix's; classes, policies, option definitions and filters are global-only; the server-wide configuration authorizes on the `dhcp_scope` singleton.
+- **The values of Slice 9 now.** The option kinds include the IPv6 kinds and the model has `Lease6`, so that DHCPv6 adds tables and no enum values, and format 4 stays the one format of the phase.
+- **The fixtures.** The size limit of the compatibility fixtures is raised to 8 MiB rather than compressing them, which would change the committed fixtures of earlier formats.
+- **The differential crate** is `dhcproto` 0.15.0, MIT, pinned and a dev-dependency only; `cargo deny` accepts it.
+
 ## Consequences
 
 - One durability story: leases are in the backup with the configuration and the keys (OPS-07), and in the change stream the reconciler, the DDNS worker and, in Phase 5, a second node read. There is no second recovery format to test.

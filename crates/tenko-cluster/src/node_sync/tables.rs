@@ -66,12 +66,19 @@ pub fn tables_for(roles: &[Role]) -> Vec<TableName> {
 ///
 /// Declared for Phase 5 (plan section 2.10): in Phase 2 the `dns` role runs in the
 /// controller's process and reads the store directly, so the configuration stream does not
-/// carry these tables and no node consumes them yet. A DHCP node adds its tables here in
-/// Phase 3.
+/// carry these tables and no node consumes them yet. The `dhcp` role declares its tables the
+/// same way (WP7.0, Phase 3).
 pub fn role_tables_for(roles: &[Role]) -> Vec<TableName> {
+    let mut tables = Vec::new();
     if roles.contains(&Role::Dns) {
-        tenko_core::dns::tables::NODE_TABLES.to_vec()
-    } else {
-        Vec::new()
+        tables.extend_from_slice(&tenko_core::dns::tables::NODE_TABLES);
     }
+    // WP7.0: the `dhcp` role receives every `dhcp.*` table except `dhcp.history`
+    // (`tenko_core::dhcp::tables::NODE_TABLES`), declared for Phase 5 like the `dns` tables
+    // and consumed by no node; the IPAM rows its reservations derive from
+    // (`tenko_core::dhcp::tables::NODE_IPAM_TABLES`) need a row filter and follow with it.
+    if roles.contains(&Role::Dhcp) {
+        tables.extend_from_slice(&tenko_core::dhcp::tables::NODE_TABLES);
+    }
+    tables
 }
