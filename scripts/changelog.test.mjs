@@ -631,8 +631,7 @@ describe("the repository changelog", () => {
     assert.ok(total >= 20, `the changelog has ${total} entries`);
     const withEntries = sections.find((section) => section.entries > 0);
     assert.ok(withEntries, "a section with entries");
-    assert.match(/** @type {import("./changelog.mjs").Section} */ (withEntries).body, /^### Added
-/);
+    assert.match(/** @type {import("./changelog.mjs").Section} */ (withEntries).body, /^### Added\n/);
     for (const needle of ["tenko upgrade check", "releases.json", "TGL-23", "modules"]) {
       assert.ok(text.includes(needle), `the changelog mentions ${needle}`);
     }
