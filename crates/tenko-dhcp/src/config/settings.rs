@@ -92,6 +92,8 @@ impl ConfigService {
                 after.authoritative = authoritative;
             }
             if let Some(ddns) = &change.ddns {
+                // Slice 8 follow-ups: no `replace` under Hardened.
+                self.refuse_replace(view, Some(ddns), "ddns")?;
                 after.ddns.clone_from(ddns);
             }
             after.conflict_detection = change.conflict_detection;

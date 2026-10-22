@@ -109,6 +109,7 @@ fn option_case() -> impl Strategy<Value = (OptionKind, bool, OptionData)> {
             array,
             OptionData::Ipv6 { values }
         )),
+        // A prefix is its network address (the model refuses bits beyond the length).
         list(
             (ipv6(), 0u8..=128)
                 .prop_map(|(addr, len)| { Ipv6Net::new(addr, len).expect("length").trunc() })
@@ -245,6 +246,88 @@ fn fqdn_check_is_ok_exactly_when_decode_is_ok() {
                 "{data:?} array {array}"
             );
         }
+    }
+}
+
+/// A classless route's destination bits after its width are cleared when it is decoded, as
+/// the encoding clears them (found by `checking_and_decoding_never_panic` on 2026-10-22:
+/// `0.0.0.1/25` decoded with the bit, encoded again without it).
+#[test]
+fn a_route_reads_with_the_bits_after_its_width_cleared() {
+    let data = [9u8, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 1, 0, 0, 0, 0];
+    assert!(OptionKind::ClasslessRoutes.check(false, &data).is_ok());
+    let typed = OptionData::decode(OptionKind::ClasslessRoutes, false, &data).expect("decodes");
+    let OptionData::Routes(routes) = &typed else {
+        panic!("routes, not {typed:?}");
+    };
+    assert_eq!(routes[1].destination, "0.0.0.0/25".parse().expect("a net"));
+    let wire = typed
+        .encode(OptionKind::ClasslessRoutes, false)
+        .expect("encodes");
+    assert_eq!(
+        OptionData::decode(OptionKind::ClasslessRoutes, false, &wire).expect("again"),
+        typed
+    );
+}
+
+/// An IPv6 prefix is its network address and its length: one with bits set beyond its
+/// length is refused by the check, the decoding and the encoding alike, so that what is
+/// stored reads back as written (found by `checking_and_decoding_never_panic`: the list
+/// `[::/0, ::/0, ::1/0]` decoded, encoded again as `[::/0, ::/0, ::/0]`).
+#[test]
+fn an_ipv6_prefix_with_bits_beyond_its_length_is_refused() {
+    let mut found = vec![0u8; 51];
+    found[50] = 1;
+    let host_bits = |len: u8, last: u8| {
+        let mut data = vec![len];
+        data.extend_from_slice(&[0x20, 0x01, 0x0d, 0xb8]);
+        data.extend_from_slice(&[0; 11]);
+        data.push(last);
+        data
+    };
+    for (data, array) in [
+        (found, true),
+        (host_bits(64, 1), false),
+        (host_bits(127, 1), false),
+        (host_bits(0, 0), false),
+    ] {
+        assert!(
+            OptionKind::Ipv6Prefix.check(array, &data).is_err(),
+            "{data:?}"
+        );
+        assert!(
+            OptionData::decode(OptionKind::Ipv6Prefix, array, &data).is_err(),
+            "{data:?}"
+        );
+    }
+    let typed = |text: &str| OptionData::Ipv6Prefix {
+        values: vec![text.parse().expect("a prefix")],
+    };
+    assert!(
+        typed("::1/0")
+            .encode(OptionKind::Ipv6Prefix, false)
+            .is_err()
+    );
+    assert!(
+        typed("2001:db8::1/64")
+            .encode(OptionKind::Ipv6Prefix, false)
+            .is_err()
+    );
+    // The network address of every length passes and reads back as it was.
+    for (text, last) in [
+        ("2001:db8::/32", 0),
+        ("2001:db8::1/128", 1),
+        ("2001:db8::/64", 0),
+    ] {
+        let data = typed(text)
+            .encode(OptionKind::Ipv6Prefix, false)
+            .expect("encodes");
+        assert_eq!(data.last(), Some(&last));
+        assert!(OptionKind::Ipv6Prefix.check(false, &data).is_ok());
+        assert_eq!(
+            OptionData::decode(OptionKind::Ipv6Prefix, false, &data).expect("decodes"),
+            typed(text)
+        );
     }
 }
 
@@ -913,6 +996,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 hostname,
                 fqdn,
                 fqdn_flags: None,
+                ddns_policy: None,
                 ddns,
                 fingerprint,
                 relay,

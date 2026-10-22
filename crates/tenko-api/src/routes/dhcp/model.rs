@@ -800,6 +800,10 @@ pub enum DhcpListenMode {
     Relay,
     /// The interface: broadcasts from the link as well.
     Direct,
+    // Slice 8 follow-ups: the proxy DHCP listeners of WP8.4.
+    /// A proxy DHCP listener (`[dhcp] proxy`, port 4011): boot information for PXE clients,
+    /// no address.
+    Proxy,
 }
 
 /// One listener of the role.
@@ -808,7 +812,7 @@ pub struct DhcpListenerItem {
     /// The address.
     #[schema(value_type = String, example = "198.51.100.10")]
     pub address: IpAddr,
-    /// The port (67, or 547 for DHCPv6).
+    /// The port (67, 547 for DHCPv6, 4011 for a proxy DHCP listener).
     pub port: u16,
     /// The mode.
     pub mode: DhcpListenMode,

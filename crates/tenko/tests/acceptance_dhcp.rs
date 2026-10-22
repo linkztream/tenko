@@ -7,8 +7,8 @@
 //! - The IPAM network, its pool and the scope are made through the API; the role serves
 //!   the scope once the feed brings it, and a DORA exchange is answered with an address
 //!   of the pool.
-//! - `GET /nodes/{id}/dhcp` reports the role (serving, the listener, one scope, the lease,
-//!   the last commit); `GET /dhcp/leases`, `GET /dhcp/leases/{addr}` and `GET /dhcp/history`
+//! - `GET /nodes/{id}/dhcp` reports the role (serving, the listener and the proxy DHCP
+//!   listener, one scope, the lease, the last commit); `GET /dhcp/leases`, `GET /dhcp/leases/{addr}` and `GET /dhcp/history`
 //!   answer from the role's table and the history; `GET /system/status` lists the role
 //!   and raises none of its health rows.
 //! - More clients than the store's snapshot interval get leases, so the store snapshots
@@ -201,12 +201,14 @@ fn active(report: &Value) -> u64 {
 fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
     let port = udp_port();
     let relay_port = udp_port();
+    let proxy_port = udp_port();
     let relay = Relay::new(relay_port, port);
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dhcp"])
         .with_config(&format!(
             "[dhcp]\nlisten = [{{ address = \"127.0.0.1\", mode = \"relay\" }}]\nport = {port}\n\
              relay_port = {relay_port}\nworkers = 2\n\
+             proxy = [\"127.0.0.1\"]\nproxy_port = {proxy_port}\n\
              [store]\nsnapshot_every_entries = 40\nsnapshot_keep_entries = 5\n"
         ));
     let mut server = node.start();
@@ -266,6 +268,17 @@ fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
     assert_eq!(listener["port"], port, "{report}");
     assert_eq!(listener["mode"], "relay", "{report}");
     assert_eq!(listener["workers"], 2, "{report}");
+    // The proxy DHCP listener of `[dhcp] proxy`, one worker.
+    let proxy = &report["listeners"][1];
+    assert_eq!(proxy["address"], "127.0.0.1", "{report}");
+    assert_eq!(proxy["port"], proxy_port, "{report}");
+    assert_eq!(proxy["mode"], "proxy", "{report}");
+    assert_eq!(proxy["workers"], 1, "{report}");
+    assert_eq!(
+        report["listeners"].as_array().map(Vec::len),
+        Some(2),
+        "{report}"
+    );
     let leases = api.get("/dhcp/leases").expect(200);
     let items = leases["items"].as_array().expect("items");
     assert_eq!(items.len(), 1, "{leases}");

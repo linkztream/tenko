@@ -292,6 +292,9 @@ pub struct PendingChange {
     // WP8.3: the flags of option 81, for the DDNS worker.
     /// The flags of option 81 as the client sent them.
     pub fqdn_flags: Option<u8>,
+    // Slice 8 follow-ups: the matcher's DDNS decision, for the DDNS worker.
+    /// The DDNS settings of the first matching policy that sets them; none: the scope's.
+    pub ddns_policy: Option<tenko_core::dhcp::DdnsPolicy>,
     /// The relay.
     pub relay: Option<PendingRelay>,
     /// The fingerprint.
@@ -331,6 +334,8 @@ impl PendingChange {
             fqdn: TextBytes::default(),
             // WP8.3: no option 81 flags until the engine sets them.
             fqdn_flags: None,
+            // Slice 8 follow-ups: the scope's DDNS settings until the engine decides.
+            ddns_policy: None,
             relay: None,
             fingerprint: None,
         }
@@ -415,6 +420,15 @@ impl PendingChange {
                     .filter(|_| same_client)
                     .and_then(|held| held.fqdn_flags)
             }),
+            // Slice 8 follow-ups: the decision of this request; a change without one (a
+            // release, an expiry, a decline) keeps the held row's for the same client.
+            ddns_policy: if self.state == BindingState::Active {
+                self.ddns_policy.clone()
+            } else {
+                previous
+                    .filter(|_| same_client)
+                    .and_then(|held| held.ddns_policy.clone())
+            },
             ddns: previous
                 .filter(|_| same_client)
                 .map(|held| held.ddns.clone())

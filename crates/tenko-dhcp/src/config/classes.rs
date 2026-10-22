@@ -536,6 +536,8 @@ impl ConfigService {
             };
             let mut batch = WriteBatch::for_request(cx);
             check_policy(view, &mut batch, &policy)?;
+            // Slice 8 follow-ups: no `replace` under Hardened.
+            self.refuse_replace(view, policy.action.ddns.as_ref(), "action.ddns")?;
             batch.expect_typed(&POLICIES, &id, None);
             batch.put_typed(&POLICIES, &id, &policy)?;
             batch.audit(
@@ -585,6 +587,8 @@ impl ConfigService {
                 after.condition.clone_from(condition);
             }
             if let Some(action) = &change.action {
+                // Slice 8 follow-ups: no `replace` under Hardened.
+                self.refuse_replace(view, action.ddns.as_ref(), "action.ddns")?;
                 after.action.clone_from(action);
             }
             if let Some(description) = &change.description {

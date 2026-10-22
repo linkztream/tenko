@@ -17,6 +17,9 @@
 //!    `printers.example.test`;
 //! 6. `iot` (MAC `00:00:5e:*:*:45`, a wildcard pattern): lease times of 600 s.
 //!
+//! Scope L has DDNS on; the `printers` policy turns it off, the `iot` policy sets its own
+//! settings (a TTL of 60 s).
+//!
 //! Reservations: 192.0.2.20 for the MAC :20 (keyed by MAC), 192.0.2.30 for the client
 //! identifier `ff 00 00 00 01 00 01 ...` (keyed by a DUID-style client identifier), and for
 //! client :31 both: 192.0.2.31 by MAC and 192.0.2.32 by its client identifier of type 1.
@@ -213,18 +216,24 @@ impl World {
             }],
         );
         let mut builder = ImageBuilder::new(Revision(1));
-        builder.scope(scope(
-            l,
-            vrf,
-            "192.0.2.0/24",
-            vec![(100, 199, Vec::new()), (200, 209, vec![pxe.id])],
-            Vec::new(),
-            vec![
-                OptionValue::v4(code::ROUTERS, RELAY_L.octets().to_vec()),
-                text(code::DOMAIN_NAME, "example.test"),
-                OptionValue::v4(150, BOOT_SERVER.octets().to_vec()),
-            ],
-        ));
+        builder.scope(ScopeImage {
+            ddns: DdnsPolicy {
+                enabled: true,
+                ..DdnsPolicy::default()
+            },
+            ..scope(
+                l,
+                vrf,
+                "192.0.2.0/24",
+                vec![(100, 199, Vec::new()), (200, 209, vec![pxe.id])],
+                Vec::new(),
+                vec![
+                    OptionValue::v4(code::ROUTERS, RELAY_L.octets().to_vec()),
+                    text(code::DOMAIN_NAME, "example.test"),
+                    OptionValue::v4(150, BOOT_SERVER.octets().to_vec()),
+                ],
+            )
+        });
         builder.scope(scope(
             k,
             vrf,
@@ -251,6 +260,12 @@ impl World {
             last: ip("192.0.2.159").into(),
         });
         policies[5].action.lease = Some(LeaseTimes::fixed(600));
+        policies[4].action.ddns = Some(DdnsPolicy::default());
+        policies[5].action.ddns = Some(DdnsPolicy {
+            enabled: true,
+            ttl: Some(60),
+            ..DdnsPolicy::default()
+        });
         let sets = [
             vec![text(code::BOOTFILE_NAME, "http://192.0.2.5/boot.ipxe")],
             vec![text(code::BOOTFILE_NAME, "http://192.0.2.5/ipxe.efi")],

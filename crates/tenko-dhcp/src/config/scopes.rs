@@ -340,6 +340,8 @@ impl ConfigService {
                 updated: now,
             };
             scope.validate(&prefix)?;
+            // Slice 8 follow-ups: no `replace` under Hardened, the server's default included.
+            self.refuse_replace(view, Some(&scope.ddns), "ddns")?;
             let mut batch = WriteBatch::for_request(cx);
             batch.expect_typed(&PREFIXES, &new.prefix, Some(prefix_revision));
             batch.expect_typed(&SCOPES, &new.prefix, None);
@@ -397,6 +399,8 @@ impl ConfigService {
                 after.server_id = Some(server_id);
             }
             if let Some(ddns) = &change.ddns {
+                // Slice 8 follow-ups: no `replace` under Hardened.
+                self.refuse_replace(view, Some(ddns), "ddns")?;
                 after.ddns.clone_from(ddns);
             }
             if let Some(network) = change.shared_network {

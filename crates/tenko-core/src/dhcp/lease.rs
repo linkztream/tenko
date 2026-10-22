@@ -249,6 +249,12 @@ pub struct Lease {
     /// The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fqdn_flags: Option<u8>,
+    // Slice 8 follow-ups: the DDNS settings the class and policy matcher decided.
+    /// The DDNS settings of the first matching policy that sets them, as the matcher
+    /// decided them for the client's last REQUEST (the settings its reply's option 81
+    /// used); none: the scope's apply. The DDNS worker writes the names by them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ddns_policy: Option<super::DdnsPolicy>,
     /// The DDNS outcome.
     #[serde(default)]
     pub ddns: DdnsState,

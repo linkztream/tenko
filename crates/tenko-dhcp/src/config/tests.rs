@@ -133,6 +133,7 @@ fn lease(
         hostname: None,
         fqdn: None,
         fqdn_flags: None,
+        ddns_policy: None,
         ddns: DdnsState::default(),
         fingerprint: None,
         relay: None,
@@ -784,4 +785,151 @@ async fn the_effective_view_shows_the_policies_a_client_matches() {
     .expect("effective");
     assert!(bios.classes.is_empty() && bios.policies.is_empty());
     assert_eq!(bios.options[0].owner, OptionOwner::Scope(world.prefix));
+}
+
+/// The Slice 8 follow-ups: under the Hardened profile a DDNS setting of `replace` is refused
+/// at the write (scope, server settings, policy) with `dhcp.ddns.invalid` naming the
+/// field; `protect` passes, and Home takes `replace`.
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one write of each kind, read top to bottom"
+)]
+async fn hardened_refuses_replace_at_the_write() {
+    use tenko_core::dhcp::{DdnsConflict, DdnsPolicy};
+
+    use crate::ddns::DdnsProfile;
+
+    let replace = DdnsPolicy {
+        enabled: true,
+        conflict: DdnsConflict::Replace,
+        ..DdnsPolicy::default()
+    };
+    let protect = DdnsPolicy {
+        enabled: true,
+        ..DdnsPolicy::default()
+    };
+    let refused = |error: &super::ConfigError, field: &str| {
+        assert!(error.is(codes::DDNS_INVALID), "{error:?}");
+        assert_eq!(
+            error.coded().params.get("field").map(String::as_str),
+            Some(field),
+            "{error:?}"
+        );
+    };
+    let policy = |ddns: DdnsPolicy| NewPolicy {
+        name: "tv".to_owned(),
+        scope: None,
+        order: None,
+        enabled: None,
+        condition: Condition {
+            join: Join::Or,
+            terms: vec![Term::Match(Match::Architecture { code: 0 })],
+        },
+        action: PolicyAction {
+            ddns: Some(ddns),
+            ..PolicyAction::default()
+        },
+        description: None,
+    };
+
+    let world = world().await;
+    world
+        .service
+        .set_profile(Arc::new(|_: &dyn tenko_store::ReadView| {
+            DdnsProfile::HARDENED
+        }));
+    let error = world
+        .service
+        .create_scope(
+            &cx(),
+            NewScope {
+                ddns: Some(replace.clone()),
+                ..new_scope(world.prefix)
+            },
+        )
+        .await
+        .expect_err("replace under Hardened");
+    refused(&error, "ddns.conflict");
+    world
+        .service
+        .create_scope(
+            &cx(),
+            NewScope {
+                ddns: Some(protect.clone()),
+                ..new_scope(world.prefix)
+            },
+        )
+        .await
+        .expect("protect");
+    let error = world
+        .service
+        .update_scope(
+            &cx(),
+            world.prefix,
+            ScopeChange {
+                ddns: Some(replace.clone()),
+                ..ScopeChange::default()
+            },
+            None,
+        )
+        .await
+        .expect_err("replace under Hardened");
+    refused(&error, "ddns.conflict");
+    let error = world
+        .service
+        .update_settings(
+            &cx(),
+            super::settings::SettingsChange {
+                ddns: Some(replace.clone()),
+                ..super::settings::SettingsChange::default()
+            },
+            None,
+        )
+        .await
+        .expect_err("replace under Hardened");
+    refused(&error, "ddns.conflict");
+    let error = world
+        .service
+        .create_policy(&cx(), policy(replace.clone()))
+        .await
+        .expect_err("replace under Hardened");
+    refused(&error, "action.ddns.conflict");
+    let (created, _) = world
+        .service
+        .create_policy(&cx(), policy(protect))
+        .await
+        .expect("protect");
+    let error = world
+        .service
+        .update_policy(
+            &cx(),
+            created.id,
+            super::classes::PolicyChange {
+                action: Some(PolicyAction {
+                    ddns: Some(replace.clone()),
+                    ..PolicyAction::default()
+                }),
+                ..super::classes::PolicyChange::default()
+            },
+            None,
+        )
+        .await
+        .expect_err("replace under Hardened");
+    refused(&error, "action.ddns.conflict");
+
+    // Under Home the same write passes.
+    let home = self::world().await;
+    home.service
+        .set_profile(Arc::new(|_: &dyn tenko_store::ReadView| DdnsProfile::HOME));
+    home.service
+        .create_scope(
+            &cx(),
+            NewScope {
+                ddns: Some(replace),
+                ..new_scope(home.prefix)
+            },
+        )
+        .await
+        .expect("replace under Home");
 }

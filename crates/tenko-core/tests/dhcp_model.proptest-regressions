@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b2ec328a0238f80b8b38965390537f6b87866382c7ac5a218d8c3034b4089d4c # shrinks to kind = Ipv6Prefix, array = true, data = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+cc 2bcf26f3d4722e48c40c23f3d1fe3bc91ba46827d9d7c6890431f9087ecda815 # shrinks to kind = ClasslessRoutes, array = false, data = [9, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 1, 0, 0, 0, 0]

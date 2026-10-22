@@ -11,6 +11,8 @@
 //! - Under Standard a zone takes DHCP updates only when its policy allows them.
 //! - A client that asks to write its A record itself, where the scope allows that, gets
 //!   only its PTR.
+//! - The DDNS settings a policy decided for the client (the row's `ddns_policy`) win over
+//!   the scope's, both ways.
 
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -244,6 +246,7 @@ impl Lab {
             hostname: hostname.map(str::to_owned),
             fqdn: fqdn.map(|(name, _)| name.to_owned()),
             fqdn_flags: fqdn.map(|(_, flags)| flags),
+            ddns_policy: None,
             ddns: DdnsState::default(),
             fingerprint: None,
             relay: None,
@@ -652,4 +655,65 @@ async fn replace_moves_a_name_and_a_client_may_write_its_own_a_record() {
     .await;
     assert!(forced.load(Ordering::Relaxed));
     assert_eq!(lab.a("tv.lan.example.test").await, vec![a_of(71)]);
+}
+
+/// The DDNS settings the class and policy matcher decided at the commit (the row's
+/// `ddns_policy`) win over the scope's: a policy turns DDNS off for a vendor class while
+/// the scope has it on, and on while the scope has it off.
+#[tokio::test]
+async fn the_policys_ddns_settings_decide_over_the_scopes() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let off = DdnsPolicy::default();
+    let on = DdnsPolicy {
+        enabled: true,
+        forward_zone: Some(lab.forward),
+        ..DdnsPolicy::default()
+    };
+    // The scope has DDNS on; the printer's policy turns it off.
+    let mut printer = lab.lease(80, 1, Some(("printer", ClientFqdn::FLAG_S)), None);
+    printer.ddns_policy = Some(off.clone());
+    lab.commit(printer).await;
+    lab.commit(lab.lease(81, 2, Some(("laptop", ClientFqdn::FLAG_S)), None))
+        .await;
+    until("the scope's client's name", || async {
+        lab.a("laptop.lan.example.test").await == vec![a_of(81)] && lab.ptr(81).await.is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        lab.a("printer.lan.example.test").await,
+        Vec::<RecordData>::new()
+    );
+    assert!(lab.ptr(80).await.is_none());
+    assert_eq!(lab.ddns(80).await.forward, None);
+
+    // The scope turns DDNS off; a policy that has it on still gets its client a name.
+    lab.config
+        .update_scope(
+            &cx(),
+            lab.scope,
+            ScopeChange {
+                ddns: Some(off),
+                ..ScopeChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("scope");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    lab.commit(lab.lease(82, 3, Some(("tablet", ClientFqdn::FLAG_S)), None))
+        .await;
+    let mut sensor = lab.lease(83, 4, Some(("sensor", ClientFqdn::FLAG_S)), None);
+    sensor.ddns_policy = Some(on);
+    lab.commit(sensor).await;
+    until("the policy's client's name", || async {
+        lab.a("sensor.lan.example.test").await == vec![a_of(83)] && lab.ptr(83).await.is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        lab.a("tablet.lan.example.test").await,
+        Vec::<RecordData>::new()
+    );
+    assert!(lab.ptr(82).await.is_none());
 }

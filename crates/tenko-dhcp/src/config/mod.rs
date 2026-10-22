@@ -90,6 +90,8 @@ pub struct ConfigService {
     store: Arc<dyn Store>,
     jobs: Arc<dyn JobSink>,
     limits: ConfigLimits,
+    // Slice 8 follow-ups: the profile's DDNS rules, for the refusal of `replace`.
+    profile: std::sync::OnceLock<crate::ddns::ProfileSource>,
 }
 
 impl std::fmt::Debug for ConfigService {
@@ -113,7 +115,44 @@ impl ConfigService {
             store,
             jobs,
             limits,
+            profile: std::sync::OnceLock::new(),
         })
+    }
+
+    // Slice 8 follow-ups: the Hardened profile refuses `replace` at the write.
+    /// Gives the service the profile's DDNS rules (the server does; the system settings
+    /// live outside this crate). Under a profile that keeps name protection (Hardened) a
+    /// scope, policy or server DDNS setting of `replace` is refused with
+    /// `dhcp.ddns.invalid` (field `ddns.conflict`). Without a source nothing is refused. A
+    /// second call changes nothing.
+    pub fn set_profile(&self, source: crate::ddns::ProfileSource) {
+        let _ = self.profile.set(source);
+    }
+
+    /// Refuses DDNS settings of `replace` that a write carries while the profile keeps name
+    /// protection; `field` names the settings in the request.
+    pub(crate) fn refuse_replace(
+        &self,
+        view: &dyn ReadView,
+        ddns: Option<&tenko_core::dhcp::DdnsPolicy>,
+        field: &str,
+    ) -> ConfigResult<()> {
+        let replace =
+            ddns.is_some_and(|ddns| ddns.conflict == tenko_core::dhcp::DdnsConflict::Replace);
+        if replace
+            && self
+                .profile
+                .get()
+                .is_some_and(|source| source(view).always_protect)
+        {
+            return Err(tenko_core::dhcp::DhcpError::invalid(
+                tenko_core::dhcp::codes::DDNS_INVALID,
+                &format!("{field}.conflict"),
+                "the Hardened profile keeps name protection: replace is not allowed",
+            )
+            .into());
+        }
+        Ok(())
     }
 
     /// A service that runs its jobs in place, for tests and tools.

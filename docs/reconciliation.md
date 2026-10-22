@@ -115,10 +115,22 @@ The server hands the batches to the reconciler through a function sink (`sink_fn
 The loop and the purge are the leader service `ipam.reconcile`: they run on the controller that leads and nowhere else (on a single controller, at once). A run starts:
 
 - right after the controller takes office, and then on an interval (every 5 minutes by default);
-- 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table;
-- 2 seconds after a change to the intent tables or to an adoption policy, including a change a person just made by approving a proposal;
-- 2 seconds after a change to the DNS zones or records (`dns.zones`, `dns.rrsets`), so that a hand-deleted `ipam` record comes back (section 10);
+- 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table (the lease facts of the `dhcp` role make a light run, below);
+- 2 seconds after a change to the intent tables, to a reverse template or to an adoption policy, including a change a person just made by approving a proposal;
+- 2 seconds after a change to the DNS zones or records (`dns.zones`, `dns.rrsets`), so that a hand-deleted `ipam` record comes back (section 10), except a change of DHCP's names alone (below);
 - on demand with `POST /api/v1/proposals/reconcile` (section 5.3), on the controller that answers.
+
+**DHCP's changes.** Which change sets schedule a run, and what the run does, follows from what changed (`tenko_ipam::reconcile::signal`):
+
+| A change set of | Schedules | The rules (step 3) | The DNS steps read the zones again |
+|---|---|---|---|
+| RRsets of the origin `dhcp` only (the DDNS worker's A, AAAA, DHCID and PTR sets with the zone's SOA serial step; a deletion counts as DHCP's when the `dhcp` role, `system:dhcp`, wrote the change set) | nothing | | |
+| facts of the sources `dhcp:<node>` only (the lease facts the `dhcp` role writes with a lease change) | a light run | no: the waiting moves are confirmed (section 7), the rest waits for the periodic run | no |
+| other facts (an ingest of a probe, a connector, the zones' records) | a run | yes | no |
+| the intent, a reverse template, an adoption policy | a run | yes | the plan only (not for a policy) |
+| an RRset of any other origin (a hand-written or an `ipam` set, also beside DHCP's in the same change set), a zone | a run | yes | yes |
+
+The zones' facts take `ipam` and `manual` records only (section 10), the lease facts come with the lease change itself ([dhcp.md](dhcp.md) section 12.3) and the DNS actuator writes `ipam` sets only, so DHCP's names give a run nothing to do: a DHCP record is no DNS fact, and the name of a lease shows in the reconciliation view as the lease's own `name` fact. A busy DHCP server writes lease facts with up to a thousand commits a second; each of them used to start a run of the rules over every fact within the debounce, so the proposals for its clients (a discovered host per unknown device) wait for the periodic run instead, while a move that waits for a lease is still confirmed within the debounce. A run of the rules records the change epoch it ran at whether its write succeeded or not, so a failed pass is tried again by the next change of another kind or the periodic run, not by every lease. A run whose DNS inputs did not move since the last run that read them takes over that run's facts of the zones and its DNS findings, and skips the actuator when its last run wrote everything it planned (the report then shows the actuator with nothing written). The SOA set and the signer's rows are read by no step. The periodic run, the first run after taking office and the run on demand always do everything, so what this leaves out (a DHCP name that took over a record of another origin under `replace`) is seen within the interval. M31's stand-in measured the difference (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`).
 
 The service also purges old facts on its own timer (every hour by default). Its writes carry the leader epoch as a precondition, so a controller that lost the leadership commits nothing more; it stops when the leadership moves, and the new leader runs at once. Ingest stays on every controller.
 

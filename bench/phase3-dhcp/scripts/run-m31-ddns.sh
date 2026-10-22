@@ -320,6 +320,9 @@ fi
 
 # 5. After the runs.
 note "rss after the runs: $(rss_mib) MiB"
+# The whole metrics page beside the results (the commit histograms of the store and the
+# lease path, the reconciler's counters), for the attribution of the tail.
+curl -sS "http://$LOOPBACK:$METRICS_PORT/metrics" > "${OUT%.jsonl}.metrics.txt" 2>/dev/null
 curl -sS "http://$LOOPBACK:$METRICS_PORT/metrics" 2>/dev/null |
   grep -E '^(tenko_dhcp_ddns|tenko_dhcp_exchange_duration_seconds_count)' | while read -r line; do note "metric: $line"; done
 note "metric sum: tenko_dhcp_exchange_duration_seconds_count $(metric_sum tenko_dhcp_exchange_duration_seconds_count)"

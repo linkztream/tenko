@@ -49,6 +49,7 @@ fn lease(vrf: VrfId, mac: u8, cltt: Timestamp, state: BindingState) -> Lease {
         hostname: Some("printer".to_owned()),
         fqdn: None,
         fqdn_flags: None,
+        ddns_policy: None,
         ddns: DdnsState::default(),
         fingerprint: None,
         relay: None,

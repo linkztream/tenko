@@ -276,9 +276,35 @@ impl OptionKind {
                 if fixed == Self::Ipv6Prefix && data.chunks(17).any(|chunk| chunk[0] > 128) {
                     return Err("an IPv6 prefix length is at most 128");
                 }
+                // Slice 8 follow-ups: a prefix is its network address and its length.
+                if fixed == Self::Ipv6Prefix
+                    && data.chunks(17).any(|chunk| {
+                        let mut octets = [0u8; 16];
+                        octets.copy_from_slice(&chunk[1..]);
+                        !is_network(Ipv6Addr::from(octets), chunk[0])
+                    })
+                {
+                    return Err(HOST_BITS);
+                }
                 Ok(())
             }
         }
+    }
+}
+
+// Slice 8 follow-ups: the rule for IPv6 prefixes (`docs/dhcp.md` section 4).
+/// The refusal of an IPv6 prefix with bits set beyond its length.
+const HOST_BITS: &str = "an IPv6 prefix has no bits set beyond its length";
+
+/// Whether `address` is the network address of a prefix of `len` bits (`len` at most
+/// 128): every bit after the first `len` is clear. The check, the decoding and the encoding
+/// refuse anything else, so a prefix reads back as it was written.
+fn is_network(address: Ipv6Addr, len: u8) -> bool {
+    let bits = u128::from(address);
+    match u32::from(len) {
+        0 => bits == 0,
+        len if len >= 128 => true,
+        len => bits & (u128::MAX >> len) == 0,
     }
 }
 
@@ -710,8 +736,15 @@ impl OptionData {
                     .map(|c| {
                         let mut octets = [0u8; 16];
                         octets.copy_from_slice(&c[1..]);
-                        Ipv6Net::new(Ipv6Addr::from(octets), c[0])
-                            .map_err(|_| "an IPv6 prefix length is at most 128")
+                        let address = Ipv6Addr::from(octets);
+                        let net = Ipv6Net::new(address, c[0])
+                            .map_err(|_| "an IPv6 prefix length is at most 128")?;
+                        // Slice 8 follow-ups: no host bits, as the check says.
+                        if is_network(address, c[0]) {
+                            Ok(net)
+                        } else {
+                            Err(HOST_BITS)
+                        }
                     })
                     .collect::<Result<_, _>>()?,
             },
@@ -756,8 +789,12 @@ impl OptionData {
                     octets[..significant].copy_from_slice(&tail[..significant]);
                     let r = &tail[significant..significant + 4];
                     routes.push(StaticRoute {
+                        // Slice 8 follow-ups: the bits after the width cleared, as the
+                        // encoding and the message reader clear them (RFC 3442), so that the
+                        // view encodes to data that decodes to the same view.
                         destination: Ipv4Net::new(Ipv4Addr::from(octets), width)
-                            .map_err(|_| "a route's width is at most 32")?,
+                            .map_err(|_| "a route's width is at most 32")?
+                            .trunc(),
                         router: Ipv4Addr::new(r[0], r[1], r[2], r[3]),
                     });
                     rest = &tail[significant + 4..];
@@ -791,8 +828,12 @@ impl OptionData {
             }
             (Self::Ipv6Prefix { values: list }, OptionKind::Ipv6Prefix) => {
                 for net in list {
+                    // Slice 8 follow-ups: refused, not cut, so that it decodes as given.
+                    if !is_network(net.addr(), net.prefix_len()) {
+                        return Err(HOST_BITS);
+                    }
                     out.push(net.prefix_len());
-                    out.extend_from_slice(&net.network().octets());
+                    out.extend_from_slice(&net.addr().octets());
                 }
             }
             (Self::Unsigned(list), OptionKind::U8 | OptionKind::U16 | OptionKind::U32) => {

@@ -203,7 +203,7 @@ Shared networks group scopes on one link (Windows superscopes, Kea shared networ
 
 A custom definition (`/dhcp/option-defs`) gives a code a name and a type: `ipv4_address`, `ipv6_address`, `ipv6_prefix`, `u8`, `u16`, `u32`, `i32`, `bool`, `string`, `fqdn`, `classless_routes`, `binary` or `empty`, with `array` for a list of a repeating type. In `dhcp4` a catalog code is refused; codes 224 to 254 are the site-specific range (RFC 3942). A vendor space (`space` other than `dhcp4` and `dhcp6`) holds the option 43 sub-options of its `vendor_class`. A space and code are defined once (`dhcp.option_def.exists`), a name once per space. The type of a definition an option set uses does not change, and a used definition is not deleted (`dhcp.option_def.in_use`).
 
-Options are set per owner: `server`, `shared_network:<id>`, `scope:<prefix>`, `pool:<range>`, `policy:<id>` and `host:<interface>` (a reservation's options, on the IPAM interface). `PUT /dhcp/option-sets/{owner}` replaces the whole set; each value is given in wire form (`data`, hexadecimal) or typed (`typed`, for example `{"ipv4": {"values": ["192.0.2.53"]}}`, `{"text": "example.test"}`, `{"unsigned": [1500]}`, `{"names": ["example.test"]}`) and stored in wire form after it has been checked against the type of its code: `dhcp.option.unknown` for a code without a type, `dhcp.option.invalid` for data that does not fit or a code given twice. An owner without options reads as an empty set at revision 0. Every value reads back with its name and its typed view.
+Options are set per owner: `server`, `shared_network:<id>`, `scope:<prefix>`, `pool:<range>`, `policy:<id>` and `host:<interface>` (a reservation's options, on the IPAM interface). `PUT /dhcp/option-sets/{owner}` replaces the whole set; each value is given in wire form (`data`, hexadecimal) or typed (`typed`, for example `{"ipv4": {"values": ["192.0.2.53"]}}`, `{"text": "example.test"}`, `{"unsigned": [1500]}`, `{"names": ["example.test"]}`) and stored in wire form after it has been checked against the type of its code: `dhcp.option.unknown` for a code without a type, `dhcp.option.invalid` for data that does not fit or a code given twice. An `ipv6_prefix` value is a prefix length and the prefix's network address (the form of RFC 3633's prefix option): a prefix with a bit set beyond its length is refused, in wire form and typed alike, rather than cut, so that every value reads back as it was given. A `classless_routes` value reads with the destination bits after each route's width cleared, as RFC 3442's reader and the encoding clear them. An owner without options reads as an empty set at revision 0. Every value reads back with its name and its typed view.
 
 The options a client gets merge the levels from the least to the most specific, the later level winning per code in the order the codes first appear: the server, the scope's shared network, the scope, the policies that match the client (the first in order wins per code), and the client's reservation. `GET /dhcp/scopes/{prefix}/effective-options?mac=&client_id=&vendor_class=&user_class=&architecture=&host_name=` (the client's MAC, option 61 in hexadecimal, options 60, 77, 93 and 12) shows the result, each option with its level and owner, and the reservation the client has. Pool options depend on the address the allocator picks and are shown on the pool. Which classes and policies match a client is the compiled matcher the engine uses (section 16), so the route shows the classes and policies the client is in and the options they give it.
 
@@ -444,7 +444,13 @@ UDP 547 (DHCPv6) joins in Slice 9. The installer (`deploy/install.sh`) offers `c
 
 ### 10.5 The status route and the node commands
 
-`GET /nodes/{id}/dhcp` is the role's report `dhcp.status`: whether it answers (`serving`: it runs and has a listener), whether the store takes its lease writes (`accepting`, P3-Q14), whether a probe role runs (`probe`), the listeners with their address, port, mode, interface and workers, the scopes the image serves, the leases by binding state, the last commit's time from the hand-off to the durable commit (`last_commit_ms`) and the revision of the image. The report also carries, for the health view, the refusal finding, the probe expectation, the lag behind the store and the number of images installed since the start.
+`GET /nodes/{id}/dhcp` is the role's report `dhcp.status`: whether it answers (`serving`: it runs and has a listener of `[dhcp] listen`), whether the store takes its lease writes (`accepting`, P3-Q14), whether a probe role runs (`probe`), the listeners with their address, port, mode, interface and workers (the table below), the scopes the image serves, the leases by binding state, the last commit's time from the hand-off to the durable commit (`last_commit_ms`) and the revision of the image. The report also carries, for the health view, the refusal finding, the probe expectation, the lag behind the store and the number of images installed since the start.
+
+| `mode` | Listener | Port | Workers |
+|---|---|---|---|
+| `relay` | `[dhcp] listen` in relay mode: the unicast address, relayed traffic only | `[dhcp] port` (67) | `[dhcp] workers` |
+| `direct` | `[dhcp] listen` in direct mode: the interface, its broadcasts as well | `[dhcp] port` (67) | `[dhcp] workers` |
+| `proxy` | `[dhcp] proxy`: a proxy DHCP listener answering PXE clients with boot information and no address (section 16.2) | `[dhcp] proxy_port` (4011) | 1 |
 
 The leases, the release and the history go through the node-command interface (`tenko_dhcp::role::DhcpNode`): local on the one node of Phase 3, the same kinds over the command stream to a remote `dhcp` node in Phase 5. The API executes a command in place and records it as a row of `cluster.node_commands` in the state it reached, through an inline job, with the audit record in the same write.
 
@@ -553,7 +559,7 @@ Tenko DHCP writes the names of its clients into the zones Tenko serves (DHCP-13,
 
 ### 13.1 Turning it on
 
-DDNS needs the DNS module next to the DHCP module. Per scope, the DDNS settings (`ddns` of the scope, defaulting to the server's `dhcp.settings.ddns`):
+DDNS needs the DNS module next to the DHCP module. Per scope, the DDNS settings (`ddns` of the scope, defaulting to the server's `dhcp.settings.ddns`); a policy can set its own for the clients it matches (section 16), and those win:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -561,7 +567,7 @@ DDNS needs the DNS module next to the DHCP module. Per scope, the DDNS settings 
 | `forward_zone` | none | The zone the names go under; none: the zone whose apex is the scope's domain name (option 15), if Tenko serves it as a primary zone |
 | `reverse` | on | Whether PTR records are written, in the most specific primary zone Tenko serves that is a reverse zone of the address (plain or RFC 2317) |
 | `ttl` | none | The TTL of the records; none: a third of the lease time |
-| `conflict` | `protect` | `protect`: a name that belongs to another client is refused (RFC 4703); `replace`: the last client wins. Hardened always protects |
+| `conflict` | `protect` | `protect`: a name that belongs to another client is refused (RFC 4703); `replace`: the last client wins. Hardened always protects, and refuses `replace` at the write |
 | `client_may_update_a` | off | A client that asks to write its A record itself (option 81 with S clear, or N set) does so; the server writes the PTR only |
 | `legacy_clients` | on | Clients without option 81 get their option 12 host name ("update for legacy clients") |
 | `refuse_foreign` | off | A name outside the forward zone is refused instead of cut to its first label under the zone |
@@ -572,7 +578,7 @@ Each zone decides whether it takes DHCP updates: the zone's update policy has `d
 |---|---|---|
 | Home | takes DHCP updates | per scope |
 | Standard | does not; set `dhcp: true` on the zone | per scope |
-| Hardened | does not; set `dhcp: true` on the zone | always (`replace` is treated as `protect`) |
+| Hardened | does not; set `dhcp: true` on the zone | always: the configuration service refuses `replace` in a scope's, a policy's or the server's DDNS settings (`dhcp.ddns.invalid`, field `ddns.conflict` or `action.ddns.conflict`), and the worker treats a `replace` stored before the profile changed as `protect` |
 | Lab | takes DHCP updates | per scope |
 
 The rule applies to the forward zone and to the reverse zone alike. A refused zone shows on the lease as the reason and in `tenko_dhcp_ddns_total{outcome="refused"}`.
@@ -598,6 +604,8 @@ For a lease with a name, as soon as its commit is durable:
 | PTR | the reverse name of the address | the forward name |
 
 The A and DHCID sets are one change set in the forward zone; the PTR is a change set of the reverse zone, written at the same time. A forward name that is refused gets no PTR. Where the client writes its A record itself (`client_may_update_a`), only the PTR is written. The lease row keeps the option 81 flags the client sent (`fqdn_flags`) for this decision.
+
+The DDNS settings a lease is written by are those its reply's option 81 used: the first matching policy's that sets them (WP8.4's matcher at the REQUEST), else the scope's. The engine records the policy's settings on the lease row at the commit (`ddns_policy`; absent when the scope's apply, and kept on a release or an expiry for the same client), and the worker takes them from the row, so a policy that turns DDNS off for a vendor class keeps its clients out of the zones while the scope has it on, and one that turns it on writes names where the scope has it off. A policy edited later applies from the client's next REQUEST.
 
 The reply's option 81 says what the server does (RFC 4702 section 4): S when the server writes the A record (and O when that overrides the client's wish), none of S, O and N when the client writes it, N when DDNS is off for the scope. The reply leaves before the update runs, so a name refused later shows on the lease, not in the reply.
 
@@ -625,7 +633,7 @@ The outcome is written to the lease row (`ddns` in `GET /dhcp/leases/{addr}`): `
 ### 13.6 Tests and measurements
 
 - `crates/tenko-dhcp/src/ddns/`: the RFC 4701 examples of section 3.6 for the three identifier types, the name rules, the reply flags.
-- `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, `replace` and the client that writes its own A record, Hardened's forced protection.
+- `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, `replace` and the client that writes its own A record, Hardened's forced protection, and a policy's DDNS settings winning over the scope's both ways. `tests/classes.rs` checks that the engine records the policy's settings on the lease row; the configuration service's tests (`src/config/tests.rs`) the refusal of `replace` under Hardened.
 - `crates/tenko/tests/acceptance_dhcp_ddns.rs` (E26 through the binary): a client with option 81 and a legacy client get their A, DHCID and PTR records served by the DNS role on ACK, a second client claiming the first one's name is refused, and the records go on DHCPRELEASE and on expiry. The lab rows of E26 (dhclient, Playwright) wait for WP7.6's lab.
 - M31 (the DDNS rate end to end): `bench/phase3-dhcp/scripts/run-m31-ddns.sh` with the load client `crates/tenko-dhcp/examples/ddns_load.rs`; results in `bench/phase3-dhcp/results/`.
 

@@ -153,12 +153,16 @@ fn is_empty(written: &Written) -> bool {
 }
 
 /// The request a lease row asks for: add for a binding that holds its address now,
-/// remove otherwise.
+/// remove otherwise. The DDNS settings are those the class and policy matcher decided at
+/// the commit (the row's `ddns_policy`, the settings the reply's option 81 used), else the
+/// scope's.
 pub fn request_of(lease: &Lease, image: &ConfigImage, now: Timestamp) -> DdnsRequest {
     let active = lease.state == BindingState::Active && lease.ends > now;
-    let policy = image
-        .scope(lease.scope)
-        .map(|scope| scope.ddns.clone())
+    // Slice 8 follow-ups: the policy's settings first.
+    let policy = lease
+        .ddns_policy
+        .clone()
+        .or_else(|| image.scope(lease.scope).map(|scope| scope.ddns.clone()))
         .unwrap_or_default();
     let lease_secs =
         u32::try_from(lease.ends.saturating_since(lease.cltt).as_secs()).unwrap_or(u32::MAX);

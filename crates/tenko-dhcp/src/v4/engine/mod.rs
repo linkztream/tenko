@@ -702,6 +702,9 @@ fn request(
         later(ctx.now, granted),
     );
     describe(client, &mut scratch.change);
+    // Slice 8 follow-ups: the DDNS settings the reply's option 81 uses go to the row, so
+    // that the DDNS worker writes the names by the same decision.
+    scratch.change.ddns_policy = client.decision.ddns().cloned();
     let grant = assemble::LeaseGrant {
         granted,
         times: times.renewal_times(granted),

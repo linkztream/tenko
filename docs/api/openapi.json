@@ -39809,7 +39809,8 @@
         "description": "How a listener receives traffic (plan section 2.5).",
         "enum": [
           "relay",
-          "direct"
+          "direct",
+          "proxy"
         ]
       },
       "DhcpListenerItem": {
@@ -39841,7 +39842,7 @@
           "port": {
             "type": "integer",
             "format": "int32",
-            "description": "The port (67, or 547 for DHCPv6).",
+            "description": "The port (67, 547 for DHCPv6, 4011 for a proxy DHCP listener).",
             "minimum": 0
           },
           "workers": {
@@ -47212,6 +47213,17 @@
           "ddns": {
             "$ref": "#/components/schemas/DdnsState",
             "description": "The DDNS outcome."
+          },
+          "ddns_policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DdnsPolicy",
+                "description": "The DDNS settings of the first matching policy that sets them, as the matcher\ndecided them for the client's last REQUEST (the settings its reply's option 81\nused); none: the scope's apply. The DDNS worker writes the names by them."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "ends": {
             "$ref": "#/components/schemas/Timestamp",

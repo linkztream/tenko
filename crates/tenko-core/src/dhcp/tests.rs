@@ -77,6 +77,7 @@ fn lease() -> Lease {
         hostname: Some("printer01".to_owned()),
         fqdn: None,
         fqdn_flags: None,
+        ddns_policy: None,
         ddns: DdnsState::default(),
         fingerprint: Some(Fingerprint {
             parameters: HexBytes(vec![1, 3, 6, 15, 119, 252]),

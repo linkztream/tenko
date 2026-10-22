@@ -127,6 +127,9 @@ pub struct DhcpStatus {
     pub started: Timestamp,
     /// Images installed whole since the start: snapshot installs and the feed's recoveries.
     pub installs: u64,
+    // Slice 8 follow-ups: the proxy DHCP listeners of WP8.4 in the report.
+    /// The proxy DHCP listeners bound (`[dhcp] proxy`), one worker each.
+    pub proxies: Vec<std::net::SocketAddrV4>,
 }
 
 /// A node's DHCP role as the API reaches it: locally in Phase 3.
@@ -474,6 +477,11 @@ impl DhcpNode for LocalNode {
             lag: self.progress.lag(held),
             started: self.started,
             installs: self.installs.load(Ordering::Relaxed),
+            // Slice 8 follow-ups: the proxy DHCP listeners.
+            proxies: server
+                .as_ref()
+                .map(|server| server.proxies().to_vec())
+                .unwrap_or_default(),
             listeners,
         }
     }

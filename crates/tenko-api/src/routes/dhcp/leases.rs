@@ -519,6 +519,14 @@ fn status_dto(status: DhcpStatus) -> DhcpNodeStatus {
                 interface: listener.interface,
                 workers: u16::try_from(listener.workers).unwrap_or(u16::MAX),
             })
+            // Slice 8 follow-ups: the proxy DHCP listeners, one worker each.
+            .chain(status.proxies.iter().map(|proxy| DhcpListenerItem {
+                address: std::net::IpAddr::V4(*proxy.ip()),
+                port: proxy.port(),
+                mode: DhcpListenMode::Proxy,
+                interface: None,
+                workers: 1,
+            }))
             .collect(),
         scopes: u32::try_from(status.scopes).unwrap_or(u32::MAX),
         leases: status

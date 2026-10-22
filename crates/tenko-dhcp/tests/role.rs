@@ -262,6 +262,7 @@ fn foreign_lease(vrf: VrfId, scope: PrefixId, addr: Ipv4Addr) -> Lease {
         hostname: Some("other".to_owned()),
         fqdn: None,
         fqdn_flags: None,
+        ddns_policy: None,
         ddns: DdnsState::default(),
         fingerprint: None,
         relay: None,

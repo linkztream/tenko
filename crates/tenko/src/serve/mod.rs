@@ -1353,11 +1353,14 @@ async fn start(
     // before it starts. Without the module nothing is built and no DHCP route exists.
     let dhcp_config = modules.contains(crate::modules::Module::Dhcp).then(|| {
         tenko_dhcp::config::register_steps(&mut engine);
-        tenko_dhcp::config::ConfigService::new(
+        let service = tenko_dhcp::config::ConfigService::new(
             Arc::clone(&store_dyn),
             Arc::new(engine.clone()),
             tenko_dhcp::config::ConfigLimits::default(),
-        )
+        );
+        // Slice 8 follow-ups: `replace` is refused at the write under Hardened.
+        service.set_profile(dhcp::ddns_profile(resolved.config.profile.name));
+        service
     });
     // The fetches of the URL block lists on their intervals (`dns.lists`, P2-Q6).
     if let Some(zones) = &zones {

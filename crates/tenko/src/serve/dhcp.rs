@@ -92,16 +92,13 @@ fn probe_expected(profile: Profile) -> bool {
     profile == Profile::Hardened
 }
 
-// WP8.3: the DDNS worker with the profile's defaults of P3-Q6, read from the system
-// settings at every batch, and the retries of `[dhcp.ddns]`.
-fn ddns_service(
-    store: &Arc<dyn Store>,
-    zones: Arc<tenko_dns::zone::ZoneService>,
-    bootstrap: Profile,
-    section: &DhcpSection,
-) -> Arc<tenko_dhcp::ddns::DdnsService> {
+// Slice 8 follow-ups: the profile's DDNS rules for the worker and the configuration
+// service (which refuses `replace` under Hardened).
+/// The DDNS rules of the profile in force, read from the system settings of a view (the
+/// bootstrap profile before setup).
+pub(crate) fn ddns_profile(bootstrap: Profile) -> tenko_dhcp::ddns::ProfileSource {
     use tenko_dhcp::ddns::DdnsProfile;
-    let profile: tenko_dhcp::ddns::ProfileSource = Arc::new(move |view| {
+    Arc::new(move |view| {
         let profile = view
             .get_typed(&SETTINGS, &())
             .ok()
@@ -113,7 +110,18 @@ fn ddns_service(
             Profile::Hardened => DdnsProfile::HARDENED,
             Profile::Lab => DdnsProfile::LAB,
         }
-    });
+    })
+}
+
+// WP8.3: the DDNS worker with the profile's defaults of P3-Q6, read from the system
+// settings at every batch, and the retries of `[dhcp.ddns]`.
+fn ddns_service(
+    store: &Arc<dyn Store>,
+    zones: Arc<tenko_dns::zone::ZoneService>,
+    bootstrap: Profile,
+    section: &DhcpSection,
+) -> Arc<tenko_dhcp::ddns::DdnsService> {
+    let profile = ddns_profile(bootstrap);
     Arc::new(tenko_dhcp::ddns::DdnsService::new(
         Arc::clone(store),
         zones,

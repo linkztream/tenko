@@ -7127,7 +7127,7 @@ export interface components {
          * @description How a listener receives traffic (plan section 2.5).
          * @enum {string}
          */
-        DhcpListenMode: "relay" | "direct";
+        DhcpListenMode: "relay" | "direct" | "proxy";
         /** @description One listener of the role. */
         DhcpListenerItem: {
             /**
@@ -7141,7 +7141,7 @@ export interface components {
             mode: components["schemas"]["DhcpListenMode"];
             /**
              * Format: int32
-             * @description The port (67, or 547 for DHCPv6).
+             * @description The port (67, 547 for DHCPv6, 4011 for a proxy DHCP listener).
              */
             port: number;
             /**
@@ -9839,6 +9839,7 @@ export interface components {
             cltt: components["schemas"]["Timestamp"];
             /** @description The DDNS outcome. */
             ddns?: components["schemas"]["DdnsState"];
+            ddns_policy?: components["schemas"]["DdnsPolicy"] | null;
             /**
              * @description When the state ends: the lease end of an active binding, the end of the hold of an
              *     abandoned one, the end of the grace of an expired or released one.

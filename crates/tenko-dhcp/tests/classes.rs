@@ -77,6 +77,42 @@ fn a_vendor_class_policy_selects_its_range_and_options() {
     }
 }
 
+/// The DDNS settings the matcher decides go to the lease row's change (the Slice 8
+/// follow-ups): a policy's, else none for the scope's.
+#[test]
+fn the_policys_ddns_settings_go_to_the_lease_row() {
+    let world = World::new();
+    let mut scratch = Scratch::new();
+    let mut acked = |ask: Ask| {
+        let addr = offer(&world, &ask, &mut scratch);
+        let request = Ask {
+            kind: MessageType::Request,
+            requested: Some(addr),
+            server_id: Some(SERVER),
+            ..ask
+        };
+        let answer = world.run(&request.bytes(), &mut scratch);
+        assert!(
+            matches!(answer.action, Action::CommitThenReply { .. }),
+            "{:?}",
+            answer.action
+        );
+        scratch.change.ddns_policy.clone()
+    };
+    // The printers' policy turns DDNS off while scope L has it on.
+    let printer = acked(Ask {
+        vendor_class: Some(b"Printer-Laser-2".to_vec()),
+        ..Ask::discover(0x70)
+    });
+    assert_eq!(printer.map(|ddns| ddns.enabled), Some(false));
+    // The iot policy's own settings.
+    let sensor = acked(Ask::discover(0x45)).expect("the policy's settings");
+    assert!(sensor.enabled);
+    assert_eq!(sensor.ttl, Some(60));
+    // No policy with DDNS settings: the scope's apply (none recorded).
+    assert_eq!(acked(Ask::discover(0x46)), None);
+}
+
 #[test]
 fn a_mac_wildcard_policy_sets_the_lease_time() {
     let world = World::new();

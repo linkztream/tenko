@@ -25,7 +25,8 @@
 //! old facts on its own timer (hourly by default). Its writes are fenced with the leader
 //! epoch, so a deposed leader's late run commits nothing. [`Reconciler::reconcile`] runs
 //! once on demand (`POST /proposals/reconcile`) on any controller. Runs never overlap on
-//! one controller.
+//! one controller. A change set of DHCP's names alone schedules no run, and a run after
+//! facts alone reads no zone ([`signal`]); the periodic run always reads everything.
 //!
 //! # Settings
 //!
@@ -43,6 +44,9 @@ pub mod moves;
 pub(crate) mod rules;
 pub mod scopes;
 pub mod settings;
+// The follow-ups of Slice 8: which change sets schedule a run and which change the DNS
+// steps' inputs (M31).
+pub(crate) mod signal;
 pub(crate) mod snapshot;
 // WP8.2: the reconciliation view of the four truths (IPAM-21, IPAM-23).
 pub mod view;
@@ -59,7 +63,7 @@ use tenko_core::{
     cluster::{LEADER_EPOCH, LeaderService},
     observe::{Observation, Observed},
 };
-use tenko_store::{ReadConsistency, StoreError, WatchFilter, WriteBatch, fence};
+use tenko_store::{ReadConsistency, StoreError, WriteBatch, fence};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -68,6 +72,7 @@ pub use self::rules::{DISCOVERED_TAG, rule};
 use self::{
     moves::WaitingMove,
     rules::RuleConfig,
+    signal::{ChangeSignal, Epochs},
     snapshot::{Intent, Placement, Snapshot},
 };
 use crate::{
@@ -75,7 +80,7 @@ use crate::{
     observe::{
         self, IngestBatch, IngestReport, ObserveConfig,
         model::{IntentSighting, observed_ips, observed_macs},
-        tables::{FACTS, LAST_SEEN},
+        tables::LAST_SEEN,
     },
     plan::PlanOptions,
     proposals::{
@@ -85,7 +90,6 @@ use crate::{
         sync::{self, SyncConfig},
     },
     service::IpamService,
-    tables,
 };
 
 /// The name of the leader service that runs the reconciler.
@@ -213,57 +217,37 @@ pub struct Reconciler {
     run_lock: tokio::sync::Mutex<()>,
     last: Mutex<Option<ReconcileReport>>,
     dns: std::sync::OnceLock<Arc<crate::dns::DnsActuator>>,
+    epochs: Arc<Epochs>,
+    memo: Mutex<DnsMemo>,
 }
 
-/// A derived index that only signals: the store calls it on its apply path for every
-/// change set touching the intent tables, the adoption policies or the facts (an ingest on
-/// any controller), on every controller.
-struct ChangeSignal {
-    notify: Arc<Notify>,
+/// What the last runs read and decided, with the change epochs they saw ([`signal`]): a
+/// run whose rules epoch did not move confirms waiting moves only, and one whose DNS epochs
+/// did not move takes over the DNS steps' results instead of reading every zone again.
+#[derive(Debug, Default)]
+struct DnsMemo {
+    /// The rules epoch of the last run of the rules (successful or not: a failed pass is
+    /// tried again by the next change of another kind or the periodic run, not by every
+    /// lease).
+    ruled: Option<u64>,
+    /// Runs of the rules.
+    rule_passes: u64,
+    /// The records epoch of the last complete ingest of the zones.
+    ingested: Option<u64>,
+    /// The key of the last plan, with its findings.
+    planned: Option<(PlanKey, Vec<crate::dns::DnsFinding>)>,
+    /// The key of the last actuation that wrote everything it planned (no failures).
+    actuated: Option<PlanKey>,
+    /// Runs whose DNS steps read the zones (an ingest or a plan).
+    passes: u64,
 }
 
-/// The image of [`ChangeSignal`]: nothing but the revision.
-struct NoImage(Revision);
-
-impl tenko_store::IndexImage for NoImage {
-    fn revision(&self) -> Revision {
-        self.0
-    }
-}
-
-impl tenko_store::DerivedIndex for ChangeSignal {
-    fn filter(&self) -> WatchFilter {
-        WatchFilter::tables(
-            [
-                tables::TENANTS.name(),
-                tables::VRFS.name(),
-                tables::PREFIXES.name(),
-                tables::RANGES.name(),
-                tables::ADDRESSES.name(),
-                tables::HOSTS.name(),
-                tables::INTERFACES.name(),
-                ADOPTION.name(),
-                FACTS.name(),
-                tenko_core::dns::tables::ZONES.name(),
-                tenko_core::dns::tables::RRSETS.name(),
-            ]
-            .into_iter()
-            .cloned(),
-        )
-    }
-
-    fn build(
-        &self,
-        view: &dyn tenko_store::ReadView,
-    ) -> Result<Box<dyn tenko_store::IndexImage>, StoreError> {
-        Ok(Box::new(NoImage(view.revision())))
-    }
-
-    fn install(&self, _image: Box<dyn tenko_store::IndexImage>) {}
-
-    fn apply(&self, _changes: &tenko_store::ChangeSet, _view: &dyn tenko_store::ReadView) {
-        self.notify.notify_one();
-    }
+/// What a DNS plan depends on besides the rows the epochs follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanKey {
+    epoch: u64,
+    moves: Vec<crate::dns::MoveOverride>,
+    orphans: crate::dns::OrphanRule,
 }
 
 impl std::fmt::Debug for Reconciler {
@@ -289,8 +273,10 @@ impl Reconciler {
     /// The store's error if the signal cannot be registered.
     pub fn new(ipam: Arc<IpamService>, config: ReconcilerConfig) -> IpamResult<Arc<Self>> {
         let changed = Arc::new(Notify::new());
+        let epochs = Arc::new(Epochs::default());
         ipam.store().register_index(Arc::new(ChangeSignal {
             notify: Arc::clone(&changed),
+            epochs: Arc::clone(&epochs),
         }) as Arc<dyn tenko_store::DerivedIndex>)?;
         Ok(Arc::new(Self {
             ipam,
@@ -300,6 +286,8 @@ impl Reconciler {
             run_lock: tokio::sync::Mutex::new(()),
             last: Mutex::new(None),
             dns: std::sync::OnceLock::new(),
+            epochs,
+            memo: Mutex::new(DnsMemo::default()),
         }))
     }
 
@@ -346,6 +334,19 @@ impl Reconciler {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// The runs on this controller whose DNS steps read the zones again (an ingest of the
+    /// zones' records or a DNS plan); a run after facts or DHCP's names alone reads
+    /// nothing (`docs/reconciliation.md` section 3.1).
+    pub fn dns_passes(&self) -> u64 {
+        self.memo().passes
+    }
+
+    /// The runs on this controller that evaluated the rules; a run after lease facts alone
+    /// only confirms waiting moves (`docs/reconciliation.md` section 3.1).
+    pub fn rule_passes(&self) -> u64 {
+        self.memo().rule_passes
     }
 
     /// Asks the loop for a run soon.
@@ -470,11 +471,25 @@ impl Reconciler {
     /// Store errors, or `ipam.contended` when concurrent writers kept invalidating the
     /// proposal write. Failed adoptions are recorded on their proposals, not returned.
     pub async fn reconcile(&self, now: Timestamp) -> IpamResult<ReconcileReport> {
-        self.reconcile_fenced(now, None).await
+        self.reconcile_fenced(now, None, true).await
+    }
+
+    /// A run after a change, as the loop starts one: the DNS steps read the zones again
+    /// only when a change set since the last run that read them touched the zones, a
+    /// record of another origin than `dhcp`, the intent or a reverse template
+    /// (`docs/reconciliation.md` section 3.1).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`reconcile`](Self::reconcile).
+    pub async fn reconcile_changed(&self, now: Timestamp) -> IpamResult<ReconcileReport> {
+        self.reconcile_fenced(now, None, false).await
     }
 
     /// [`reconcile`](Self::reconcile), with the proposal write fenced with the leader
     /// `epoch` when given; a deposed leader's run ends with `ipam.reconcile.deposed`.
+    /// `full` makes the DNS steps read the zones whatever the epochs say (the periodic
+    /// run, the run on demand).
     #[allow(
         clippy::too_many_lines,
         reason = "the steps of one run read best in order"
@@ -483,16 +498,40 @@ impl Reconciler {
         &self,
         now: Timestamp,
         epoch: Option<u64>,
+        full: bool,
     ) -> IpamResult<ReconcileReport> {
         let _guard = self.run_lock.lock().await;
         let config = self.effective().await;
         let mut report = ReconcileReport::empty(now);
+        // Read before the views, so that a change landing in between makes the next run
+        // read again rather than be missed.
+        let (rules_epoch, records_epoch, plan_epoch) = self.epochs.now();
+        if !full && self.memo().ruled == Some(rules_epoch) {
+            // Lease facts alone since the last run of the rules: the waiting moves only.
+            report.moves_confirmed = self.confirm_moves(now).await?;
+            *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(report.clone());
+            return Ok(report);
+        }
+        {
+            let mut memo = self.memo();
+            memo.ruled = Some(rules_epoch);
+            memo.rule_passes += 1;
+        }
+        let mut read_zones = false;
         if self.dns.get().is_some() {
-            match observe::dns::ingest_zones(self.ipam.store(), &config.observe, now).await {
-                Ok(0) => {}
-                Ok(count) => tracing::debug!(count, "DNS records ingested as observations"),
-                Err(error) => {
-                    tracing::warn!(error = %error.code_str(), "the zones' records were not ingested");
+            let ingested = self.memo().ingested;
+            if full || ingested != Some(records_epoch) {
+                read_zones = true;
+                match observe::dns::ingest_zones(self.ipam.store(), &config.observe, now).await {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::debug!(count, "DNS records ingested as observations");
+                        }
+                        self.memo().ingested = Some(records_epoch);
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error.code_str(), "the zones' records were not ingested");
+                    }
                 }
             }
         }
@@ -516,7 +555,12 @@ impl Reconciler {
             }
             let snapshot = Snapshot::load(view.as_ref(), now)?;
             let dns_findings = match self.dns.get() {
-                Some(_) => crate::dns::plan::plan(view.as_ref(), &dns_options)?.findings,
+                Some(_) => {
+                    let (findings, planned) =
+                        self.findings(view.as_ref(), &dns_options, plan_epoch, full)?;
+                    read_zones |= planned;
+                    findings
+                }
                 None => Vec::new(),
             };
             drop(view);
@@ -584,11 +628,75 @@ impl Reconciler {
             && config.dns_actuator
             && !deposed
         {
-            report.dns = Some(actuator.run(&reconciler_cx(now), &dns_options).await?);
+            report.dns = Some(self.actuate(actuator, now, &dns_options, full).await?);
+        }
+        if read_zones {
+            self.memo().passes += 1;
         }
         report.moves_confirmed = self.confirm_moves(now).await?;
         *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Some(report.clone());
         Ok(report)
+    }
+
+    fn memo(&self) -> std::sync::MutexGuard<'_, DnsMemo> {
+        self.memo.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The DNS findings of `view`: those of the last plan when nothing it depends on moved
+    /// since (and the run is not `full`), else a new plan. The flag says whether it
+    /// planned.
+    fn findings(
+        &self,
+        view: &dyn tenko_store::ReadView,
+        options: &crate::dns::PlanOptions,
+        epoch: u64,
+        full: bool,
+    ) -> IpamResult<(Vec<crate::dns::DnsFinding>, bool)> {
+        let mut moves = crate::dns::plan::moves_in_flight(view, &options.ignore_jobs)?;
+        moves.extend(options.moves.iter().copied());
+        let key = PlanKey {
+            epoch,
+            moves,
+            orphans: options.orphans,
+        };
+        if !full
+            && let Some((planned, findings)) = &self.memo().planned
+            && *planned == key
+        {
+            return Ok((findings.clone(), false));
+        }
+        let world = crate::dns::plan::World::load(view)?;
+        let findings =
+            crate::dns::plan::plan_world(view, &world, &key.moves, options.orphans)?.findings;
+        self.memo().planned = Some((key, findings.clone()));
+        Ok((findings, true))
+    }
+
+    /// The DNS actuator's step: skipped (nothing written) when its last run wrote all it
+    /// planned and nothing it plans from moved since, unless the run is `full`.
+    async fn actuate(
+        &self,
+        actuator: &crate::dns::DnsActuator,
+        now: Timestamp,
+        options: &crate::dns::PlanOptions,
+        full: bool,
+    ) -> IpamResult<crate::dns::DnsActuation> {
+        // The plan epoch now: the adoptions of this run may have changed the intent.
+        let (_, _, epoch) = self.epochs.now();
+        let key = self.memo().planned.as_ref().map(|(key, _)| PlanKey {
+            epoch,
+            ..key.clone()
+        });
+        if !full && key.is_some() && self.memo().actuated == key {
+            return Ok(crate::dns::DnsActuation::default());
+        }
+        let actuation = actuator.run(&reconciler_cx(now), options).await?;
+        self.memo().actuated = if actuation.failures.is_empty() {
+            key
+        } else {
+            None
+        };
+        Ok(actuation)
     }
 
     /// Brings the last sightings of addresses and interfaces up to date in `batch` and
@@ -774,19 +882,21 @@ impl Reconciler {
             let config = self.effective().await;
             let next_run = last_run.map_or_else(Instant::now, |at| at + config.interval);
             let next_purge = last_purge + config.purge_interval;
-            tokio::select! {
+            // The periodic run (and the first) does the full pass; a run after a change
+            // reads the zones only when the change touched what the DNS steps read.
+            let full = tokio::select! {
                 () = stop.cancelled() => return Ok(()),
-                () = sleep_until(next_run) => {}
+                () = sleep_until(next_run) => true,
                 () = self.wake.notified() => {
                     tokio::select! {
                         () = stop.cancelled() => return Ok(()),
-                        () = sleep(config.debounce) => {}
+                        () = sleep(config.debounce) => false,
                     }
                 }
                 () = self.changed.notified() => {
                     tokio::select! {
                         () = stop.cancelled() => return Ok(()),
-                        () = sleep(config.debounce) => {}
+                        () = sleep(config.debounce) => false,
                     }
                 }
                 () = sleep_until(next_purge) => {
@@ -798,9 +908,12 @@ impl Reconciler {
                     }
                     continue;
                 }
-            }
+            };
             last_run = Some(Instant::now());
-            match self.reconcile_fenced(Timestamp::now(), Some(epoch)).await {
+            match self
+                .reconcile_fenced(Timestamp::now(), Some(epoch), full)
+                .await
+            {
                 Ok(report) => tracing::debug!(?report, "reconcile run"),
                 Err(error) if error.code_str() == DEPOSED => {
                     return Err("this controller no longer leads".to_owned());
