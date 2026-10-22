@@ -16,6 +16,7 @@
 //! | [`ddns`] | [`DdnsQueue`](ddns::DdnsQueue) | [`MemDdnsQueue`](ddns::MemDdnsQueue) |
 //! | [`fingerprint`] | [`Fingerprinter`](fingerprint::Fingerprinter) | [`RuleTable`](fingerprint::RuleTable) |
 //! | [`metrics`] | the `tenko_dhcp_*` families | |
+//! | [`v4::engine`], [`server`] | the DHCPv4 engine and its listeners (WP7.3) | |
 //!
 //! The DORA path (WP7.3) is a pure function of the configuration image, the lease table,
 //! the request and the clock; it hands its lease change to the [`LeaseStore`](store::LeaseStore)
@@ -31,6 +32,8 @@ pub mod image;
 pub mod lease;
 pub mod metrics;
 pub mod probe;
+// WP7.3: the listeners, the workers and the committer around the engine.
+pub mod server;
 pub mod store;
 pub mod v4;
 

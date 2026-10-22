@@ -3440,6 +3440,7 @@ dependencies = [
  "futures",
  "ipnet",
  "proptest",
+ "socket2",
  "stats_alloc",
  "tempfile",
  "tenko-core",

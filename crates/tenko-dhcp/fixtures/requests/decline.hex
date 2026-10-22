@@ -1,0 +1,36 @@
+# A relayed DHCPDECLINE (RFC 2131 section 4.4.4): requested address 192.0.2.110 and server
+# identifier; not padded. Modelled by hand on the option order and parameter request list
+# this client sends; documentation addresses (RFC 5737) and MACs (RFC 7042).
+#
+# op 1, htype 1, hlen 6, hops 1
+01 01 06 01
+# xid
+a1 01 10 10
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 192.0.2.1
+c0 00 02 01
+# chaddr
+00 00 5e 00 53 10 00*10
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDECLINE
+35 01 04
+# option 61: client identifier, type 1 and the MAC
+3d 07 01 00 00 5e 00 53 10
+# option 50: requested address 192.0.2.110
+32 04 c0 00 02 6e
+# option 54: server identifier 198.51.100.10
+36 04 c6 33 64 0a
+# end
+ff

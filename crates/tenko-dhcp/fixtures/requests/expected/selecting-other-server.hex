@@ -1,0 +1,3 @@
+# The engine's answer to requests/selecting-other-server.hex in the world of tests/engine_world.
+# Written by tests/engine_corpus.rs with TENKO_BLESS=1; checked octet for octet.
+# action: ignore (OtherServer)

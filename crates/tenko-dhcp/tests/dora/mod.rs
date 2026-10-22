@@ -1,11 +1,12 @@
-//! The DORA path up to the commit hand-off (WP7.0), for the counting-allocator test of
-//! `tests/alloc.rs`: a skeleton of the engine over the contracts of the crate, the image it
-//! reads, and the measured section with its deliberate failure.
+//! The DORA path up to the commit hand-off, for the counting-allocator test of
+//! `tests/alloc.rs`: the engine of WP7.3 over the contracts of the crate (it replaces the
+//! skeleton of WP7.0), the image it reads, and the measured section with its deliberate
+//! failure.
 
 use std::{
     alloc::System,
     hint::black_box,
-    net::Ipv4Addr,
+    net::{Ipv4Addr, SocketAddrV4},
     panic::{AssertUnwindSafe, catch_unwind},
     time::Duration,
 };
@@ -14,17 +15,20 @@ use ipnet::Ipv4Net;
 use stats_alloc::{Region, StatsAlloc};
 use tenko_core::{
     NodeId, PrefixId, RangeId, Revision, Timestamp, VrfId,
-    dhcp::{
-        BindingState, DdnsPolicy, FilterVerdict, LeaseEventKind, LeaseTimes, OptionValue,
-        lease::MAX_IDENTITY, write_identity,
-    },
+    dhcp::{BindingState, DdnsPolicy, LeaseEventKind, LeaseTimes, OptionValue},
 };
 use tenko_dhcp::{
-    allocator::{Allocator, NoOffers, ReferenceAllocator, Request, SingleNode, grant_time},
+    allocator::SingleNode,
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
-    lease::{LeaseTable, MemLeaseTable, PendingChange, PendingFingerprint, PendingRelay},
+    lease::{LeaseTable, MemLeaseTable, PendingChange},
     store::{Completion, LeaseStore, MemLeaseStore, SubmitError, Ticket},
-    v4::{Message, MessageBuilder, MessageType},
+    v4::{
+        Message,
+        engine::{
+            self, Action, Context, EngineSettings, HashedAllocator, ListenMode, OfferTable,
+            Received, Scratch,
+        },
+    },
 };
 
 /// What the path reads: the image, the lease table, the store, the clock.
@@ -33,6 +37,8 @@ pub struct Path<'a> {
     pub image: &'a ConfigImage,
     /// The lease table.
     pub leases: &'a MemLeaseTable,
+    /// The offers held.
+    pub offers: &'a OfferTable,
     /// The lease store.
     pub store: &'a dyn LeaseStore,
     /// Now.
@@ -41,141 +47,42 @@ pub struct Path<'a> {
     pub interface: Ipv4Addr,
 }
 
-/// The skeleton of the DORA path (WP7.3 replaces it with the engine): a DISCOVER is
-/// answered with an OFFER and writes nothing; a REQUEST becomes a lease change handed to
-/// the store, and the ACK is built for the worker to send when the commit returns. Returns
-/// the reply's length, 0 when the request is not answered.
-#[allow(
-    clippy::too_many_lines,
-    reason = "one straight path, read top to bottom as the engine will run it"
-)]
-pub fn dora(path: &Path<'_>, bytes: &[u8], ticket: u64, out: &mut [u8]) -> usize {
-    let Ok(message) = Message::parse(bytes) else {
-        return 0;
-    };
-    let Ok(Some(kind)) = message.message_type() else {
-        return 0;
-    };
-    let reply_kind = match kind {
-        MessageType::Discover => MessageType::Offer,
-        MessageType::Request => MessageType::Ack,
-        _ => return 0,
-    };
-    let relay = message.relay_agent_info().ok().flatten();
-    let giaddr = message.giaddr();
-    let selector = relay
-        .and_then(|info| info.link_selection())
-        .or_else(|| message.subnet_selection().ok().flatten())
-        .or_else(|| (!giaddr.is_unspecified()).then_some(giaddr))
-        .unwrap_or(path.interface);
-    let Some(scope) = path.image.select(selector) else {
-        return 0;
-    };
-    let Ok(chaddr) = message.chaddr() else {
-        return 0;
-    };
-    let client_id = message.client_identifier().ok().flatten();
-    let mut identity = [0u8; MAX_IDENTITY];
-    let len = write_identity(
-        message.htype(),
-        chaddr,
-        client_id.map(|id| id.as_bytes()),
-        &mut identity,
-    );
-    let identity = &identity[..len];
-    if let Ok(mac) = message.mac()
-        && path.image.verdict(&mac) == FilterVerdict::Denied
-    {
-        return 0;
-    }
-    let client_addr = message.ciaddr();
-    let request = Request {
+// WP7.3: the DORA path is the engine (`tenko_dhcp::v4::engine::handle`) and the hand-off of
+// its lease change to the store, as a worker of `tenko_dhcp::server` runs them.
+/// The DORA path up to the commit hand-off: the engine answers, and a lease change goes
+/// to the store. Returns the reply's length, 0 when nothing is sent.
+pub fn dora(path: &Path<'_>, bytes: &[u8], ticket: u64, scratch: &mut Scratch) -> usize {
+    let settings = EngineSettings::default();
+    let ctx = Context {
         image: path.image,
-        scope,
-        identity,
-        requested: message
-            .requested_address()
-            .ok()
-            .flatten()
-            .or((!client_addr.is_unspecified()).then_some(client_addr)),
         leases: path.leases,
-        offers: &NoOffers,
+        offers: path.offers,
         ownership: &SingleNode,
+        allocator: &HashedAllocator,
+        settings: &settings,
+        accepting: path.store.accepting(),
         now: path.now,
     };
-    let Some(choice) = ReferenceAllocator.pick(&request) else {
-        return 0;
+    let received = Received {
+        bytes,
+        source: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 67),
+        local: path.interface,
+        mode: ListenMode::Relay,
     };
-    let addr = choice.addr();
-    let granted = grant_time(&scope.lease, message.lease_time().ok().flatten(), None);
-    let (t1, t2) = scope.lease.renewal_times(granted);
-    if reply_kind == MessageType::Ack {
-        let Some(ends) = path
-            .now
-            .checked_add(Duration::from_secs(u64::from(granted)))
-        else {
-            return 0;
-        };
-        let mut change = PendingChange::new(
-            LeaseEventKind::Granted,
-            scope.vrf,
-            scope.prefix,
-            addr,
-            message.htype(),
-            chaddr,
-            client_id.map(|id| id.as_bytes()),
-            BindingState::Active,
-            path.now,
-            ends,
-        );
-        if let Ok(Some(name)) = message.host_name() {
-            change.hostname.set(name);
+    match engine::handle(&ctx, &received, scratch).action {
+        Action::Reply { len, .. } => len,
+        Action::CommitThenReply { len, .. } => {
+            if path.store.submit(&scratch.change, Ticket(ticket)).is_err() {
+                return 0;
+            }
+            len
         }
-        if let Some(info) = relay {
-            let mut pending = PendingRelay {
-                giaddr,
-                raw: tenko_dhcp::lease::InlineBytes::default(),
-            };
-            pending.raw.set(info.as_bytes());
-            change.relay = Some(pending);
+        Action::Commit => {
+            let _ = path.store.submit(&scratch.change, Ticket(ticket));
+            0
         }
-        let mut fingerprint = PendingFingerprint::default();
-        if let Ok(Some(list)) = message.parameter_request_list() {
-            fingerprint.parameters.set(list);
-        }
-        if let Ok(Some(class)) = message.vendor_class_identifier() {
-            fingerprint.vendor_class.set(class);
-        }
-        change.fingerprint = Some(fingerprint);
-        if path.store.submit(&change, Ticket(ticket)).is_err() {
-            return 0;
-        }
+        Action::Drop(_) | Action::Ignore(_) => 0,
     }
-    let Ok(mut reply) = MessageBuilder::reply(out, &message, reply_kind) else {
-        return 0;
-    };
-    reply.yiaddr(addr);
-    let built = reply
-        .server_identifier(scope.server_id.unwrap_or(path.interface))
-        .and_then(|b| b.lease_time(granted))
-        .and_then(|b| b.renewal_time(t1))
-        .and_then(|b| b.rebinding_time(t2));
-    if built.is_err() {
-        return 0;
-    }
-    for value in &scope.options {
-        if let Ok(code) = u8::try_from(value.code)
-            && reply.option(code, &value.data.0).is_err()
-        {
-            return 0;
-        }
-    }
-    if let Some(info) = relay
-        && reply.relay_agent_info(info.as_bytes()).is_err()
-    {
-        return 0;
-    }
-    reply.finish().unwrap_or(0)
 }
 
 fn net(addr: Ipv4Addr) -> Ipv4Net {
@@ -268,7 +175,8 @@ fn assert_no_alloc(
 /// The measured section: the fixture requests through the path, the commits checked, and
 /// the deliberate allocation caught.
 pub fn section(requests: &[Vec<u8>], global: &'static StatsAlloc<System>) {
-    let interface = Ipv4Addr::new(192, 0, 2, 1);
+    // WP7.3: the listener's address is the server identifier the corpus requests name.
+    let interface = Ipv4Addr::new(198, 51, 100, 10);
     let mut links = vec![interface];
     for bytes in requests {
         if let Ok(message) = Message::parse(bytes) {
@@ -305,25 +213,27 @@ pub fn section(requests: &[Vec<u8>], global: &'static StatsAlloc<System>) {
     }
     let rounds = 50;
     let store = MemLeaseStore::with_capacity(NodeId(1), requests.len() * (rounds + 1));
+    let offers = OfferTable::with_capacity(1_024);
     let path = Path {
         image: &image,
         leases: &leases,
+        offers: &offers,
         store: &store,
         now,
         interface,
     };
-    let mut out = [0u8; 1500];
+    let mut scratch = Scratch::new();
     let mut answered = 0;
     let mut ticket = 0;
     assert_no_alloc(global, "the DORA path up to the hand-off", rounds, || {
         for bytes in requests {
             ticket += 1;
-            let len = dora(&path, black_box(bytes), ticket, &mut out);
+            let len = dora(&path, black_box(bytes), ticket, &mut scratch);
             answered += usize::from(len > 0);
-            black_box(&out[..len]);
+            black_box(&scratch.reply[..len]);
         }
     });
-    assert!(answered > 0, "the skeleton answers the fixture requests");
+    assert!(answered > 0, "the engine answers the fixture requests");
 
     // The hand-off reached the store: the committed leases lie in the pools, outside the
     // exclusions and the other client's address.
@@ -351,7 +261,7 @@ pub fn section(requests: &[Vec<u8>], global: &'static StatsAlloc<System>) {
     let failed = catch_unwind(AssertUnwindSafe(|| {
         assert_no_alloc(global, "a deliberate allocation", 5, || {
             for bytes in requests {
-                black_box(dora(&path, black_box(bytes), 0, &mut out));
+                black_box(dora(&path, black_box(bytes), 0, &mut scratch));
             }
         });
     }));

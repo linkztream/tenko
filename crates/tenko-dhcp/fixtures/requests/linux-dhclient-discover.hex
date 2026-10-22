@@ -1,0 +1,37 @@
+# A relayed DHCPDISCOVER of ISC dhclient (Debian 12): no client identifier, a requested
+# address hint, host name and the dhclient parameter request list; not padded. Modelled by
+# hand on the option order and parameter request list this client sends; documentation
+# addresses (RFC 5737) and MACs (RFC 7042).
+#
+# op 1, htype 1, hlen 6, hops 1
+01 01 06 01
+# xid
+a1 01 12 03
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 192.0.2.1
+c0 00 02 01
+# chaddr
+00 00 5e 00 53 12 00*10
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDISCOVER
+35 01 01
+# option 50: requested address 192.0.2.160
+32 04 c0 00 02 a0
+# option 12: host name "deb-12"
+0c 06 64 65 62 2d 31 32
+# option 55: parameter request list
+37 0d 01 1c 02 03 0f 06 77 0c 2c 2f 1a 79 2a
+# end
+ff

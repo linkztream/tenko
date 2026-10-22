@@ -6,6 +6,7 @@ Contents:
 
 1. [The wire format](#1-the-wire-format)
 7. [Leases](#7-leases)
+8. [The engine](#8-the-engine)
 
 ## 1. The wire format
 
@@ -194,3 +195,70 @@ After a refusal the role tries the store again after one second: the next change
 The tests are in `crates/tenko-dhcp/tests/`: `lease_table.rs` (the table against the reference table on random sequences, the index moves, the feed, own commits against older copies), `lease_store.rs` (the batches against the reference lease store, a burst of concurrent changes, another client's binding, the queue, a slow commit, a refusing store), `lease_services.rs` (expiry, its fence and its race with a renewal, the offer hold, the retention and the purge), `lease_refusal.rs` (the refusal path on the Raft store with the hook, in a child process), `lease_alloc.rs` (no allocation on the hand-off, the lookups, the offer hold and the refusal gate), `lease_rebuild.rs` (the rebuild of a large table and the commit latency) and `lease_crash.rs`.
 
 The crash test (E24, M32) kills a node under load and restarts it, again and again. The node is a child process of the test: it opens the Raft store, rebuilds its table and runs 200 clients that request, renew and release through the allocator, the offer hold and the lease store, and it prints a line for an ACK only after its ticket completed. The test kills it at a random moment (SIGKILL on Unix, TerminateProcess on Windows), opens the data directory and checks that every ACK received is in the rows at its revision or later, that its history row is there, that the rebuilt table equals the rows and the client index, and that the history never gives an address to a second client while the first one's binding had not ended. `bench/phase3-dhcp/scripts/crash-test.sh` runs it 20 times with the rebuild and the latency measurement; the results, and the procedure of the power-off runs on the lab VM, are in `bench/phase3-dhcp/results/`. Until the `dhcp` role exists in the binary (WP7.5), the crash test drives the lease path through this test entry point rather than through `tenko serve`.
+## 8. The engine
+
+The DHCPv4 engine (`tenko_dhcp::v4::engine`, WP7.3) is a pure function: `engine::handle` takes the configuration image, the lease table, the offers held, the request with the listener it arrived on, and the clock, and returns what to do, with the reply and the lease change written into the worker's buffers. It reads no store and does no I/O; the listeners and workers (`tenko_dhcp::server`) wrap it in sockets and the commit. From the parse of the request to the hand-off of the lease change to the `LeaseStore` it allocates nothing (`crates/tenko-dhcp/tests/alloc.rs` runs it over the fixtures and the request corpus and fails on one allocation).
+
+### 8.1 The client and the scope
+
+The client is its client identifier (option 61) when it sends one, else its hardware type and `chaddr` (RFC 4361, RFC 6842); option 61 is echoed in every reply. A MAC address the deny list matches is dropped (`filtered`, DHCP-08). A scope marked restricted serves only clients the allow list matches and clients with a reservation in it (TGL-17); everyone else is dropped as `filtered`.
+
+The scope is selected by the first of: the link selection sub-option of option 82 (RFC 3527), option 118 (RFC 3011), `giaddr`, `ciaddr` of a REQUEST, INFORM or RELEASE that is not relayed (a renewal unicast straight to the server, which in relay mode is how every renewal arrives), and the address of the listener the request came in on. The most specific network that holds the address wins, and a scope of a shared network brings its siblings into the choice of address. The server identifier (option 54) is the relay's override (RFC 5107, sub-option 11), else the scope's, else the listener's address; a client's option 54 names this server when it is any of these.
+
+### 8.2 The messages
+
+| Request | State (RFC 2131 4.3.2) | Answer | Written |
+|---|---|---|---|
+| DISCOVER | | OFFER with the allocator's address; dropped as `pool_full` without one | Nothing; the address is held in memory for `offer_secs` (10 s) |
+| REQUEST with option 54 and 50 | SELECTING | Option 54 of another server: ignored. The requested address, when the allocator gives it to this client: ACK after the commit. Otherwise NAK | The lease (`granted`, or `renewed` for the client's own bound lease) |
+| REQUEST with option 50, no 54, no `ciaddr` | INIT-REBOOT | An address outside the network: NAK on an authoritative scope, else ignored. No reservation and no lease of the client: ignored (RFC 2131 says the server stays silent). The client's address: ACK after the commit; another address: NAK (authoritative) | The lease |
+| REQUEST with `ciaddr`, not relayed | RENEWING | The client's address, or a free pool address it holds without a record (a lost lease is taken back): ACK to `ciaddr` after the commit. Another client's address: NAK (authoritative), else ignored | `renewed`, or `granted` |
+| REQUEST with `ciaddr`, relayed | REBINDING | As RENEWING, to the relay | `rebound`, or `granted` |
+| DECLINE | | The client's address: no reply. Another client's address or another server's: ignored | The address `abandoned` for `[dhcp.decline] hold_secs` (86,400) with no client, so that it is offered to nobody, the decliner included, until the hold ends |
+| RELEASE | | The client's active lease: no reply. Otherwise ignored | The lease `released`, ending now |
+| INFORM | | ACK with the options and no lease times, `yiaddr` 0, to `ciaddr` | Nothing |
+| Any other type, a BOOTREPLY, BOOTP without option 53 | | Ignored | Nothing |
+
+A NAK carries option 53, 54, a message (option 56), option 61 and option 82 and nothing else; through a relay it has the broadcast bit set so that the relay broadcasts it (RFC 2131 section 4.3.2). In SELECTING a NAK is sent on every scope, since the client chose this server; in the other states only on an authoritative scope.
+
+While the store refuses lease writes (P3-Q14), a REQUEST for a bound lease of the client is answered with an ACK for the time the lease still has and nothing is written, a DISCOVER is answered only for a client with a bound lease, and everything else is dropped as `store_refused`; a commit that fails after the hand-off drops its ACK the same way.
+
+### 8.3 Where replies go
+
+RFC 2131 section 4.1: to the relay at `giaddr` on port 67 when the request was relayed; else a NAK is broadcast; else to `ciaddr` on port 68; else broadcast when the client set the broadcast flag; else to the client's hardware address with `yiaddr` as the destination. That last case needs a link-layer socket (`AF_PACKET` with `CAP_NET_RAW` on Linux), which the role adds in WP7.5; until then, and always on Windows, such a reply is broadcast on the listener's link, which every client accepts. The relay port and the client port are settings of the engine so that tests and benches can use others.
+
+### 8.4 The allocator and the offers
+
+The order is the plan's (section 2.3): the client's reservation, its bound lease, the address it asks for when that one is free, then a free pool address. The engine's allocator (`HashedAllocator`) walks a pool from a start that the hash of the client's identity gives and wraps at its end, instead of from the lowest address: two nodes of a Phase 5 pair do not reach for the same address, and a client whose lease ended finds its old address first when nobody took it. Free means in a pool, not excluded (the network and broadcast addresses always are), not reserved for another client, no other client's binding (active or abandoned), no other client's unexpired offer, and owned by this node (`PoolOwnership`, `SingleNode` on one node). The tests check it against the reference allocator over random scopes, leases, reservations and offers (`tests/engine_allocator.rs`).
+
+The offers held (`OfferTable`) are a fixed table of stripes with a mutex each and a bounded probe, made when the role starts: holding and looking up an offer never allocates, and a full table forgets the offers that end first. A worker claims the address it offers, and a claim fails when another worker holds it for another client, so that one address is never offered to two clients at once; an ACK claims its address the same way while its commit is in flight. An offer is not withdrawn when the client chooses another server; it ends after `offer_secs`.
+
+The lease time is `grant_time` of the times of the address's pool (else the scope's) for the time the client asks for in option 51, with T1 and T2 from the same times.
+
+### 8.5 The options
+
+The value of a code is the most specific level's: the reservation's (host), the pool's, then the scope's, which the image holds already merged with the shared network's and the server's; policies add a level between pool and host in WP8.4. The reply carries option 53, 54 and the lease times first, then the subnet mask (configured, else the scope's prefix length; RFC 2132 wants it before the routers), then every option the client lists in option 55 in the client's order (a split option 55 is joined first), then the routers, the DNS servers and the domain name when they are set and were not asked for (as Kea sends them), then option 61, option 81 and option 82 unchanged and last (RFC 3046). Codes the server manages (`SERVER_MANAGED_V4`) never come from an option set. Room for the closing options is kept; an option that does not fit within the client's size (option 57, else 548 octets) is left out whole. A value above 255 octets goes out as consecutive instances (RFC 3396). Overload into `file` and `sname` stays off until the scope has a switch for it.
+
+Option 81 is answered as a server that performs no DNS update (RFC 4702 section 4): N set, S clear, O set when the client asked for S, E as the client sent it, the client's name echoed. DDNS (WP8.3) changes the flags when it writes the records.
+
+### 8.6 The listeners and workers
+
+`DhcpServer::start` binds every `[dhcp] listen` entry through `socket2`, the safe socket API of the DNS role, and starts the workers of ADR 0009: one `SO_REUSEPORT` socket per worker on Linux, one shared socket on Windows. `socket2` 0.6 has no safe way to ask for `IP_PKTINFO`, so the receiving interface and address come from the binding instead:
+
+| Mode | Linux | Windows |
+|---|---|---|
+| `relay` | Binds the unicast address on port 67; only relayed and unicast traffic arrives. Needs `CAP_NET_BIND_SERVICE` only | The same |
+| `direct` | Binds `0.0.0.0` on port 67 with `SO_BINDTODEVICE` to the entry's interface and `SO_REUSEADDR`, so that each interface has its socket and its broadcasts; without an interface name one socket hears every link. Replies to a hardware address go out as broadcasts until the link-layer socket of WP7.5 | Binds the interface's address, on which Windows delivers that interface's broadcasts; replies to a hardware address are always broadcast |
+
+A worker runs the engine and sends an OFFER, a NAK or an INFORM's ACK at once. For an ACK it copies the lease change and the reply into a slot of a fixed table under a ticket and hands the change to the `LeaseStore`; it never waits for the disk. The committer thread takes the store's completions: a committed change is applied to the lease table at once (the feed's copy of the row changes nothing later, `LeaseTable::apply`) and its ACK is sent; a refused one is dropped and counted. A full slot table or store queue drops the request as `queue`.
+
+The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type and outcome, `tenko_dhcp_dropped_total` by reason, the NAKs, the DECLINEs, the refused commits, and the histograms of DISCOVER to OFFER, REQUEST to ACK and the commit; `DhcpServer::metrics` sums them, and the role registers them in WP7.5.
+
+### 8.7 Tests and measurements
+
+- `tests/engine.rs`: a table of RFC 2131 cases (every message type and REQUEST state, the NAK rules, the server identifier, the broadcast flag, every destination) and the cases around it (lease times and the commit, DECLINE's hold, RELEASE, the NAK's options, the order of option 55 and the split routes, reservation options, option 81, link selection with the server identifier override and option 118, the store refusal, restricted scopes, a full pool).
+- `tests/engine_corpus.rs`: the corpus `fixtures/requests/*.hex` (requests of Windows, ISC dhclient, systemd-networkd, Android, macOS and PXE firmware modelled by hand on the option order and the parameter request lists these clients send, relays with option 82, renewals, INIT-REBOOT, DECLINE, RELEASE, INFORM; documentation addresses and MACs) answered octet for octet as recorded in `fixtures/requests/expected/`, every reply decoded by `dhcproto` and checked for option 53 first, option 61 and option 82 echoed, option 82 last, the size limit and the order of option 55. `TENKO_BLESS=1` rewrites the recorded answers after a deliberate change. WP7.6 adds requests captured in the lab.
+- `tests/engine_allocator.rs` and `tests/engine_server.rs`: the allocator against the reference, and a relay listener on loopback running DORA, a renewal, a release and a refused commit through `MemLeaseStore`.
+- `crates/tenko-dhcp/examples/dhcp_server.rs` serves the engine on a port for perfdhcp and carries a load client; `bench/phase3-dhcp` runs M26 to M28 with it on loopback.
+
+What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).

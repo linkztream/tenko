@@ -28,6 +28,8 @@
 //! ([`Message::validate`] walks every option for a server that wants to refuse it).
 
 mod builder;
+// WP7.3: the engine over the codec, the image, the leases and the allocator.
+pub mod engine;
 mod message;
 mod name;
 mod option;

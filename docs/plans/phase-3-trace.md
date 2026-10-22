@@ -20,7 +20,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-06 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 3 more |
-| DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>`docs/ROADMAP.md`<br>and 4 more |
+| DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>`crates/tenko-dhcp/src/v4/engine/mod.rs`<br>and 5 more |
 | DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-11 | Should | - | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-3-plan.md` |

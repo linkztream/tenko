@@ -3208,6 +3208,7 @@ dependencies = [
  "async-trait",
  "futures",
  "ipnet",
+ "socket2",
  "tenko-core",
  "tenko-store",
  "thiserror 2.0.21",

@@ -1,0 +1,36 @@
+# A relayed DHCPDISCOVER whose option 82 carries a circuit ID, a link selection sub-option
+# (RFC 3527, 203.0.113.0) and a server identifier override sub-option (RFC 5107,
+# 203.0.113.1); not padded. Modelled by hand on the option order and parameter request
+# list this client sends; documentation addresses (RFC 5737) and MACs (RFC 7042).
+#
+# op 1, htype 1, hlen 6, hops 1
+01 01 06 01
+# xid
+a1 01 18 09
+# secs, flags
+00 00 00 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 192.0.2.1
+c0 00 02 01
+# chaddr
+00 00 5e 00 53 18 00*10
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDISCOVER
+35 01 01
+# option 55: parameter request list
+37 03 01 03 06
+# option 82: relay agent information: circuit ID 0007, link selection 203.0.113.0, server identifier override 203.0.113.1
+52 10 01 02 00 07 05 04 cb 00 71 00 0b 04 cb 00
+71 01
+# end
+ff

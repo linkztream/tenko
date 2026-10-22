@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 # WP7.0: the model, the IPAM rows the image derives from, and the feed's channel.
 ipnet = { workspace = true }
+# WP7.3: the listeners' sockets (SO_REUSEPORT per worker on Linux, SO_BINDTODEVICE in direct
+# mode, SO_BROADCAST), the safe socket API the DNS role uses; already in the graph.
+socket2 = { workspace = true }
 tenko-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

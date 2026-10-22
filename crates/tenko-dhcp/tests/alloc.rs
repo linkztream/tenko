@@ -182,8 +182,27 @@ fn build_overload_and_split(request: &[u8], routes: &[Route], out: &mut [u8]) ->
 #[test]
 fn the_codec_and_the_dora_path_do_not_allocate() {
     the_codec_does_not_allocate();
-    let requests: Vec<Vec<u8>> = WELL_FORMED.iter().map(|name| fixture(name)).collect();
+    // WP7.3: the engine runs the fixtures and the request corpus (`fixtures/requests`).
+    let mut requests: Vec<Vec<u8>> = WELL_FORMED.iter().map(|name| fixture(name)).collect();
+    requests.extend(corpus());
     dora::section(&requests, GLOBAL);
+}
+
+/// The requests of `fixtures/requests/*.hex` (WP7.3), in name order.
+fn corpus() -> Vec<Vec<u8>> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/requests");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("the corpus")
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().into_string().ok()?;
+            name.strip_suffix(".hex").map(str::to_owned)
+        })
+        .collect();
+    names.sort();
+    names
+        .iter()
+        .map(|name| fixture(&format!("requests/{name}")))
+        .collect()
 }
 
 /// The codec's sections (WP7.1a).

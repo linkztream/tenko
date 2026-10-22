@@ -1,0 +1,48 @@
+# A relayed DHCPDISCOVER of BIOS PXE firmware (RFC 4578): broadcast flag, maximum message
+# size 1260, client architecture 0 (Intel x86PC), UNDI 2.1, machine identifier type 0 with
+# a GUID, vendor class PXEClient:Arch:00000:UNDI:002001; not padded. Modelled by hand on
+# the option order and parameter request list this client sends; documentation addresses
+# (RFC 5737) and MACs (RFC 7042).
+#
+# op 1, htype 1, hlen 6, hops 1
+01 01 06 01
+# xid
+a1 01 16 07
+# secs, flags
+00 04 80 00
+# ciaddr 0.0.0.0
+00 00 00 00
+# yiaddr 0.0.0.0
+00 00 00 00
+# siaddr 0.0.0.0
+00 00 00 00
+# giaddr 192.0.2.1
+c0 00 02 01
+# chaddr
+00 00 5e 00 53 16 00*10
+# sname: empty
+00*64
+# file: empty
+00*128
+# magic cookie
+63 82 53 63
+# option 53: DHCPDISCOVER
+35 01 01
+# option 57: maximum message size 1260
+39 02 04 ec
+# option 93: client system architecture 0
+5d 02 00 00
+# option 94: client network interface identifier, UNDI 2.1
+5e 03 01 02 01
+# option 97: client machine identifier, type 0 and a GUID
+61 11 00 4c 4c 45 44 00 52 10 80 80 53 b3 c0 4f
+50 47 16
+# option 60: vendor class identifier "PXEClient:Arch:00000:UNDI:002001"
+3c 20 50 58 45 43 6c 69 65 6e 74 3a 41 72 63 68
+3a 30 30 30 30 30 3a 55 4e 44 49 3a 30 30 32 30
+30 31
+# option 55: parameter request list
+37 18 01 02 03 05 06 0b 0c 0d 0f 10 11 12 2b 36
+3c 43 80 81 82 83 84 85 86 87
+# end
+ff
