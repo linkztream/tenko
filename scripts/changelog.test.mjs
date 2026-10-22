@@ -624,10 +624,17 @@ describe("the repository changelog", () => {
     assert.ok(sections.length >= 1);
     const first = /** @type {import("./changelog.mjs").Section} */ (sections[0]);
     assert.equal(first.version, null);
-    assert.ok(first.entries >= 20, `Unreleased has ${first.entries} entries`);
-    assert.match(first.body, /^### Added\n/);
+    // Since the first release was cut, the delivered entries live in the released sections
+    // and Unreleased holds only what came after; the count and the needles are checked
+    // over every section.
+    const total = sections.reduce((count, section) => count + section.entries, 0);
+    assert.ok(total >= 20, `the changelog has ${total} entries`);
+    const withEntries = sections.find((section) => section.entries > 0);
+    assert.ok(withEntries, "a section with entries");
+    assert.match(/** @type {import("./changelog.mjs").Section} */ (withEntries).body, /^### Added
+/);
     for (const needle of ["tenko upgrade check", "releases.json", "TGL-23", "modules"]) {
-      assert.ok(first.body.includes(needle), `Unreleased mentions ${needle}`);
+      assert.ok(text.includes(needle), `the changelog mentions ${needle}`);
     }
   });
 
