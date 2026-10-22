@@ -32,7 +32,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use tenko_core::dns::{ForwardRuleId, QueryTransport, ViewId};
+use tenko_core::dns::{BlockListId, ForwardRuleId, QueryTransport, ViewId};
 
 use crate::{
     authoritative::rcode,
@@ -505,7 +505,18 @@ impl<R: Resolver> Responder<R> {
                 if !wire::write_formerr(message, out) {
                     return Reply::Drop;
                 }
-                self.finish(batch, conn, None, None, rcode::FORMERR, false, clock, now);
+                // dns-visibility: no list blocked it.
+                self.finish(
+                    batch,
+                    conn,
+                    None,
+                    None,
+                    rcode::FORMERR,
+                    None,
+                    false,
+                    clock,
+                    now,
+                );
                 return Reply::Send;
             }
         };
@@ -580,7 +591,18 @@ impl<R: Resolver> Responder<R> {
                     match sink.intake(&intake, out) {
                         Intake::Forward => return Reply::Forward { view, rule },
                         Intake::Answered { rcode } => {
-                            self.finish(batch, conn, Some(request), view, rcode, true, clock, now);
+                            // dns-visibility: the cache answered; no list blocked it.
+                            self.finish(
+                                batch,
+                                conn,
+                                Some(request),
+                                view,
+                                rcode,
+                                None,
+                                true,
+                                clock,
+                                now,
+                            );
                             return Reply::Send;
                         }
                         Intake::Refuse { ede } => {
@@ -648,12 +670,14 @@ impl<R: Resolver> Responder<R> {
                 return Reply::Drop;
             }
         }
+        // dns-visibility: the list that blocked the query, for the query log.
         self.finish(
             batch,
             conn,
             Some(request),
             view,
             answer.rcode,
+            answer.blocked,
             false,
             clock,
             now,
@@ -717,6 +741,8 @@ impl<R: Resolver> Responder<R> {
         request: Option<&Request>,
         view: Option<ViewId>,
         rcode: u16,
+        // dns-visibility: the list that blocked the query.
+        blocked: Option<BlockListId>,
         cached: bool,
         clock: &Clock,
         now: Instant,
@@ -748,7 +774,8 @@ impl<R: Resolver> Responder<R> {
                 qtype: request.map_or(0, |request| request.qtype),
                 rcode,
                 view,
-                blocked: None,
+                // dns-visibility: the list that blocked the query.
+                blocked,
                 cached,
                 duration_micros: u32::try_from(micros).unwrap_or(u32::MAX),
             });

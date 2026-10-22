@@ -112,6 +112,10 @@ The object kinds of authorization and audit are `zone` (records authorize as the
 | `POST /api/v1/nodes/{id}/dns/cache/flush` | `flush_node_dns_cache` | `dns.write` | Flush a node's DNS cache |
 | `GET /api/v1/nodes/{id}/dns/cache` | `list_node_dns_cache` | `dns.read` | List what a node's DNS cache holds (a page in canonical name order, audited as `dns.cache.read`) |
 | `GET /api/v1/nodes/{id}/dns/log` | `read_node_dns_log` | `dns.read` | Read a node's DNS query log |
+| `GET /api/v1/dns/blocking/stats` | `get_dns_blocking_stats` | `dns.read` | The figures of the blocking view from the query log of the node that answers (audited as `dns.blocking.stats`) |
+| `POST /api/v1/dns/blocking/pause` | `pause_dns_blocking` | `dns.write` | Pause the block lists for some minutes or until resumed |
+| `DELETE /api/v1/dns/blocking/pause` | `resume_dns_blocking` | `dns.write` | End the pause of the block lists |
+| `POST /api/v1/dns/blocking/allow` | `allow_dns_name` | `dns.write` | Add a name to an uploaded allow list and compile its next version |
 
 The node routes sit beside the node's other routes, as the scan configuration of the Discovery module does, and also need the action on the node.
 
@@ -149,6 +153,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.dnssec.rollover_running` | 409 | A key rollover of the zone runs (`zone`, `job`) (WP6.3) |
 | `dns.dnssec.signing_failed` | 500 | A key is missing from the vault or does not load; the signer's error (`zone`, `reason`) (WP6.3) |
 | `dns.default_zone.invalid` | 409 | The default zone of a tenant (`dns.default_zone`) is missing, not primary, a reverse zone or another tenant's (`zone`, `reason`) ([dns.md](dns.md) section 7) |
+| `dns.blocking.log_off` | 409 | The node's query log is off, so the blocking view has nothing to count (`node`) |
 
 ## 6. Audit actions
 
@@ -167,6 +172,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.transfer.trigger`, `dns.cache.flush` | A transfer started by hand; a node's cache flushed |
 | `dns.cache.read` | A page of a node's cache read (the names clients asked, personal data like the query log) |
 | `dns.log.read`, `dns.log.stop`, `dns.log.start` | A page of a node's query log read (personal data); the log stopped or started again (the kill switch) |
+| `dns.blocking.stats`, `dns.blocking.pause`, `dns.blocking.resume`, `dns.blocking.allow` | The figures of the blocking view read (personal data like the log); the block lists paused (with the minutes) or resumed; a name added to an allow list from the blocking view (the name and the list) |
 | `dns.zone.transfer_out`, `dns.zone.transfer_in` | A zone transferred out to a client (the client, the key, the kind, the serials; refusals at most once a minute per client); a transfer in written, a catalog zone's members written, an expired copy removed (WP6.1) |
 | `dns.dnssec.enable`, `dns.dnssec.disable`, `dns.dnssec.key_create`, `dns.dnssec.key_state`, `dns.dnssec.rollover` | The signer started to sign a zone or removed its rows; a DNSSEC key generated; a key's state changed; a step of a rollover (WP6.3). The request of a rollover is `dns.key.rollover` |
 
@@ -184,7 +190,8 @@ The system component of the DNS services' own writes is `dns`.
 | `tenko_dns_cache_stale_total` | counter | |
 | `tenko_dns_cache_entries` | gauge | |
 | `tenko_dns_upstream_queries_total` | counter | `rule`, `upstream`, `transport`, `outcome` |
-| `tenko_dns_upstream_rtt_seconds` | histogram | `upstream` |
+| `tenko_dns_upstream_rtt_seconds` | histogram | `rule`, `upstream` |
+| `tenko_dns_upstream_health` | gauge (computed at the scrape: 1 up, 0.5 failing, 0 in back-off) | `rule`, `upstream` |
 | `tenko_dns_rrl_dropped` | counter | `kind` |
 | `tenko_dns_rrl_slipped` | counter | |
 | `tenko_dns_client_limited` | counter | |

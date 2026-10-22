@@ -57,6 +57,8 @@ impl DnsNode for CacheNode {
             layout: None,
             log: None,
             blocked: Vec::new(),
+            upstreams: Vec::new(),
+            blocking_paused: None,
         }
     }
 

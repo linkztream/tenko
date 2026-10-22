@@ -291,6 +291,8 @@ pub struct AnswerBuf {
     /// The UDP payload size the OPT record advertises: the server's EDNS size (1232 unless
     /// configured). A setting of the buffer: [`AnswerBuf::clear`] keeps it.
     pub udp_payload: u16,
+    /// The block list that blocked the query, for the query log (set by the policy).
+    pub blocked: Option<tenko_core::dns::BlockListId>,
     records: Vec<RecordSpan>,
     required_additional: usize,
     arena: Vec<u8>,
@@ -308,6 +310,7 @@ impl AnswerBuf {
             authenticated: false,
             truncated: false,
             udp_payload: SERVER_UDP_PAYLOAD,
+            blocked: None,
             records: Vec::with_capacity(records),
             required_additional: 0,
             arena: Vec::with_capacity(arena),
@@ -323,6 +326,7 @@ impl AnswerBuf {
         self.recursion_available = false;
         self.authenticated = false;
         self.truncated = false;
+        self.blocked = None;
         self.records.clear();
         self.required_additional = 0;
         self.arena.clear();

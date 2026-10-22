@@ -243,6 +243,23 @@ struct ForwardCounters {
     prefetched: AtomicU64,
 }
 
+// dns-visibility: the upstreams of one rule for the status.
+/// The upstreams of one rule, the default forwarder or a stub zone, with their figures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamGroup {
+    /// The forwarding rule; `None` for the default forwarder of the configuration and for
+    /// a stub zone.
+    pub rule: Option<ForwardRuleId>,
+    /// The stub zone, for the name servers of a stub zone.
+    pub stub: Option<ZoneId>,
+    /// The `rule` label of the metrics: the rule's suffix, `default`, or `stub:` and the
+    /// zone.
+    pub label: String,
+    /// The upstreams in the rule's order.
+    pub upstreams: Vec<MemberHealth>,
+}
+// dns-visibility: end.
+
 /// A copy of the counters.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ForwardStats {
@@ -501,17 +518,49 @@ impl Forwarder {
         problems
     }
 
-    /// The upstream sets built so far, by rule label, with each upstream's state.
-    pub fn upstream_health(&self) -> Vec<(String, Vec<MemberHealth>)> {
+    // dns-visibility: the upstreams of every rule with their figures.
+    /// The upstreams of the default forwarder, of every forwarding rule (by suffix) and of
+    /// the stub zones whose name servers were learnt, each with its state and times; an
+    /// upstream not asked yet is `unknown`.
+    pub fn upstream_health(&self) -> Vec<UpstreamGroup> {
         let catalog = self.shared.catalog.load();
-        let mut keys = vec![PoolKey::Default];
-        keys.extend(catalog.forward_rules().map(|rule| PoolKey::Rule(rule.id)));
-        keys.extend(catalog.stub_zones().map(|zone| PoolKey::Stub(zone.id)));
-        keys.into_iter()
-            .filter_map(|key| self.shared.pools.held(key))
-            .map(|set| (set.rule().to_owned(), set.health()))
-            .collect()
+        let pools = &self.shared.pools;
+        let measured = |key: PoolKey, specs: &[UpstreamSpec]| match pools.held(key) {
+            Some(set) => set.health(),
+            None => specs.iter().map(MemberHealth::unmeasured).collect(),
+        };
+        let mut groups = Vec::new();
+        if !self.shared.settings.upstreams.is_empty() {
+            groups.push(UpstreamGroup {
+                rule: None,
+                stub: None,
+                label: "default".to_owned(),
+                upstreams: measured(PoolKey::Default, &self.shared.settings.upstreams),
+            });
+        }
+        let mut rules: Vec<&ForwardRule> = catalog.forward_rules().collect();
+        rules.sort_by(|left, right| left.suffix.as_str().cmp(right.suffix.as_str()));
+        for rule in rules {
+            groups.push(UpstreamGroup {
+                rule: Some(rule.id),
+                stub: None,
+                label: rule.suffix.as_str().to_owned(),
+                upstreams: measured(PoolKey::Rule(rule.id), &UpstreamSpec::of_rule(rule)),
+            });
+        }
+        for zone in catalog.stub_zones() {
+            if let Some(set) = pools.held(PoolKey::Stub(zone.id)) {
+                groups.push(UpstreamGroup {
+                    rule: None,
+                    stub: Some(zone.id),
+                    label: set.rule().to_owned(),
+                    upstreams: set.health(),
+                });
+            }
+        }
+        groups
     }
+    // dns-visibility: end.
 
     /// The recursion policy the check reads.
     pub fn recursion(&self) -> &RecursionPolicy {

@@ -25,10 +25,15 @@
 //! list, an RPZ zone's local data, nothing (DROP), or over UDP an empty truncated answer
 //! (TCP-only); each with the extended error `Blocked` and counted per list and zone
 //! ([`counters`]). [`NoPolicy`] passes every query.
+//!
+//! While the block lists are paused ([`pause`]) no block list blocks a name; the allow
+//! lists, the exemptions and the RPZ zones apply as before.
 
 pub mod answer;
 pub mod counters;
 pub mod data;
+// dns-visibility: the pause of the block lists.
+pub mod pause;
 pub mod rpz;
 
 use std::net::IpAddr;
@@ -274,8 +279,11 @@ fn allowed(catalog: &Catalog, wire: &[u8]) -> bool {
         .any(|list| list.matcher.matches(wire))
 }
 
-/// The block list that blocks a name for `client`.
+/// The block list that blocks a name for `client`; none while the lists are paused.
 fn blocked<'a>(catalog: &'a Catalog, client: IpAddr, wire: &[u8]) -> Option<Verdict<'a>> {
+    if pause::active() {
+        return None;
+    }
     catalog
         .policy()
         .blocks()

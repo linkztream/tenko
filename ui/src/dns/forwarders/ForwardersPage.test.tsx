@@ -59,6 +59,21 @@ describe("the forwarding rules", () => {
     expect(await axeViolations(view.container)).toEqual([]);
   });
 
+  // dns-visibility: the upstreams' figures on the node that answers.
+  it("shows each upstream's state and time on the node, the chosen one marked", async () => {
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    const corp = row("dns-forwarders", "corp.example.test");
+    const figures = within(corp).getAllByTestId("upstream-figures");
+    expect(figures.map((f) => f.dataset.state)).toEqual(["up", "up"]);
+    expect(figures.map((f) => within(f).getByTestId("upstream-rtt").textContent)).toEqual(["12 ms", "28 ms"]);
+    expect(figures[0]?.dataset.chosen).toBe("true");
+    expect(figures[1]?.dataset.chosen).toBeUndefined();
+    expect(within(corp).getAllByTestId("upstream-chosen")).toHaveLength(1);
+    expect(figures[0]?.getAttribute("title")).toContain("99th percentile 31 ms");
+    expect(figures[0]?.textContent).toContain("Answering");
+  });
+
   it("says where the other names go while no default forwarder exists, and stops when one is created", async () => {
     open();
     const note = await screen.findByTestId("fwd-no-default");

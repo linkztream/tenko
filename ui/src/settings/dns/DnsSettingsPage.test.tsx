@@ -227,6 +227,28 @@ describe("the DNS settings page", () => {
     expect(screen.queryByTestId("dns-settings-off")).toBeNull();
   });
 
+  // dns-visibility: the upstreams with their times and states.
+  it("lists the upstreams per rule with their times, states and the chosen one", async () => {
+    open();
+    await loaded();
+    const section = screen.getByTestId("dns-settings-upstreams");
+    const upstreams = within(section).getAllByTestId("dns-settings-upstream");
+    expect(upstreams.map((u) => [u.dataset.rule, u.dataset.key, u.dataset.state])).toEqual([
+      ["corp.example.test", "192.0.2.10:53", "up"],
+      ["corp.example.test", "192.0.2.11:53", "up"],
+    ]);
+    expect(upstreams[0]?.dataset.chosen).toBe("true");
+    expect(within(upstreams[0] as HTMLElement).getByTestId("dns-settings-upstream-p50").textContent).toBe("12 ms");
+    expect(within(section).getAllByTestId("upstream-chosen")).toHaveLength(1);
+  });
+
+  it("says when the node forwards nothing", async () => {
+    server.use(http.get("/api/v1/nodes/:id/dns", () => tlsStatus()));
+    open();
+    await loaded();
+    expect(screen.getByTestId("dns-settings-upstreams-empty")).toBeTruthy();
+  });
+
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();

@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns-blocking">
+      <unit id="dns.nav.blocking">
+        <notes><note category="description">Tab of the DNS sub-navigation that leads to the blocking view.</note></notes>
+        <segment><source>Blocking</source><target>Blockering</target></segment>
+      </unit>
+      <unit id="dns.blocking.title">
+        <notes><note category="description">Title of the blocking page and its entry in the browser tab.</note></notes>
+        <segment><source>Blocking</source><target>Blockering</target></segment>
+      </unit>
+      <unit id="dns.blocking.sub">
+        <segment><source>The home view of the query log and the block lists: what was asked, what was blocked and by whom</source><target>Startvyn för frågeloggen och blocklistorna: vad som frågades, vad som blockerades och av vem</target></segment>
+      </unit>
+      <unit id="dns.blocking.refresh">
+        <segment><source>Refresh</source><target>Uppdatera</target></segment>
+      </unit>
+      <unit id="dns.blocking.loading">
+        <segment><source>Reading the query log...</source><target>Läser frågeloggen...</target></segment>
+      </unit>
+      <unit id="dns.blocking.window.label">
+        <notes><note category="description">Accessible name of the choice between 24 hours and 7 days.</note></notes>
+        <segment><source>Time window</source><target>Tidsfönster</target></segment>
+      </unit>
+      <unit id="dns.blocking.window.24h">
+        <segment><source>24 hours</source><target>24 timmar</target></segment>
+      </unit>
+      <unit id="dns.blocking.window.7d">
+        <segment><source>7 days</source><target>7 dagar</target></segment>
+      </unit>
+      <unit id="dns.blocking.period">
+        <notes><note category="description">Line under the window choice; {from} and {until} are date and time.</note></notes>
+        <segment><source>Figures from {from} to {until}</source><target>Siffror från {from} till {until}</target></segment>
+      </unit>
+      <unit id="dns.blocking.short_log">
+        <notes><note category="description">Shown for the 7 days window when the log keeps fewer days.</note></notes>
+        <segment><source>{days, plural, =0 {The log keeps no full day, so this window covers less than it says.} one {The log keeps # day, so this window covers only that day.} other {The log keeps # days, so this window covers only those days.}}</source><target>{days, plural, =0 {Loggen sparar inget helt dygn, så det här fönstret täcker mindre än det säger.} one {Loggen sparar # dag, så det här fönstret täcker bara den dagen.} other {Loggen sparar # dagar, så det här fönstret täcker bara de dagarna.}}</target></segment>
+      </unit>
+      <unit id="dns.blocking.truncated">
+        <segment><source>The log holds more queries in this window than one read looks at, so the figures cover the newest part of the log.</source><target>Loggen innehåller fler frågor i det här fönstret än en läsning tittar på, så siffrorna gäller den senaste delen av loggen.</target></segment>
+      </unit>
+      <unit id="dns.blocking.sample">
+        <segment><source>One query in {sample} is logged, so the figures count the logged queries.</source><target>En fråga av {sample} loggas, så siffrorna räknar de loggade frågorna.</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.title">
+        <notes><note category="description">Heading, read by screen readers, of the card with the pause.</note></notes>
+        <segment><source>Pause of the block lists</source><target>Paus för blocklistorna</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.on">
+        <segment><source>Blocking is on</source><target>Blockering är på</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.until">
+        <notes><note category="description">{time} is a time, or a date and time when the pause ends on another day.</note></notes>
+        <segment><source>Paused until {time}</source><target>Pausad till {time}</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.open">
+        <segment><source>Paused until resumed</source><target>Pausad tills den återupptas</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.left">
+        <notes><note category="description">Remaining time of a timed pause; {left} is a duration such as 4 min.</note></notes>
+        <segment><source>{left} left</source><target>{left} kvar</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.hint">
+        <segment><source>While paused no block list blocks a name. Allow lists, exemptions and RPZ zones apply as before, and a restart of the node ends the pause.</source><target>Medan pausen gäller blockerar ingen blocklista något namn. Tillåtlistor, undantag och RPZ-zoner gäller som förut, och en omstart av noden avslutar pausen.</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.for">
+        <notes><note category="description">Label in front of the pause buttons.</note></notes>
+        <segment><source>Pause for</source><target>Pausa i</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.label">
+        <notes><note category="description">Accessible name of the group of pause buttons.</note></notes>
+        <segment><source>Pause blocking</source><target>Pausa blockeringen</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.5">
+        <segment><source>5 minutes</source><target>5 minuter</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.15">
+        <segment><source>15 minutes</source><target>15 minuter</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.60">
+        <segment><source>1 hour</source><target>1 timme</target></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.open">
+        <segment><source>Until resumed</source><target>Tills den återupptas</target></segment>
+      </unit>
+      <unit id="dns.blocking.resume">
+        <notes><note category="description">Button that ends the pause of the block lists.</note></notes>
+        <segment><source>Resume</source><target>Återuppta</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.queries">
+        <segment><source>Queries</source><target>Frågor</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.blocked">
+        <segment><source>Blocked</source><target>Blockerade</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.cached">
+        <segment><source>From the cache</source><target>Från cachen</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.clients">
+        <segment><source>Clients</source><target>Klienter</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.queries_hint">
+        <segment><source>{window, select, 7d {In the last 7 days} other {In the last 24 hours}}</source><target>{window, select, 7d {Senaste 7 dagarna} other {Senaste 24 timmarna}}</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.blocked_hint">
+        <segment><source>By the block lists</source><target>Av blocklistorna</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.cached_hint">
+        <notes><note category="description">{share} is a percentage.</note></notes>
+        <segment><source>{share} of the queries</source><target>{share} av frågorna</target></segment>
+      </unit>
+      <unit id="dns.blocking.tile.clients_hint">
+        <segment><source>{mode, select, address {Distinct addresses} hidden {The log keeps no client} other {A pseudonym counts once per day}}</source><target>{mode, select, address {Skilda adresser} hidden {Loggen sparar ingen klient} other {En pseudonym räknas en gång per dygn}}</target></segment>
+      </unit>
+      <unit id="dns.blocking.hours.title">
+        <segment><source>Queries per hour</source><target>Frågor per timme</target></segment>
+      </unit>
+      <unit id="dns.blocking.hours.label">
+        <notes><note category="description">Accessible name of the bar chart.</note></notes>
+        <segment><source>Queries per hour, the blocked part marked</source><target>Frågor per timme, den blockerade delen markerad</target></segment>
+      </unit>
+      <unit id="dns.blocking.hours.queries">
+        <notes><note category="description">Legend of the bar chart.</note></notes>
+        <segment><source>Queries</source><target>Frågor</target></segment>
+      </unit>
+      <unit id="dns.blocking.hours.blocked">
+        <notes><note category="description">Legend of the bar chart.</note></notes>
+        <segment><source>Blocked</source><target>Blockerade</target></segment>
+      </unit>
+      <unit id="dns.blocking.hours.bar">
+        <notes><note category="description">Accessible name and tooltip of one bar; {time} is the start of the hour.</note></notes>
+        <segment><source>{time}: {queries, plural, one {# query} other {# queries}}, {blocked} blocked</source><target>{time}: {queries, plural, one {# fråga} other {# frågor}}, {blocked} blockerade</target></segment>
+      </unit>
+      <unit id="dns.blocking.lists.title">
+        <segment><source>Blocked per list</source><target>Blockerat per lista</target></segment>
+      </unit>
+      <unit id="dns.blocking.lists.manage">
+        <notes><note category="description">Link to the block lists page.</note></notes>
+        <segment><source>Block lists</source><target>Blocklistor</target></segment>
+      </unit>
+      <unit id="dns.blocking.lists.empty">
+        <segment><source>No list blocked a query in this window.</source><target>Ingen lista blockerade någon fråga i det här fönstret.</target></segment>
+      </unit>
+      <unit id="dns.blocking.lists.table">
+        <segment><source>Queries blocked per block list</source><target>Blockerade frågor per blocklista</target></segment>
+      </unit>
+      <unit id="dns.blocking.list_deleted">
+        <notes><note category="description">Next to the identifier of a block list that no longer exists.</note></notes>
+        <segment><source>(deleted list)</source><target>(borttagen lista)</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.list">
+        <segment><source>List</source><target>Lista</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.blocked">
+        <segment><source>Blocked</source><target>Blockerade</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.queries">
+        <segment><source>Queries</source><target>Frågor</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.share">
+        <segment><source>Share of the busiest list</source><target>Andel av den mest aktiva listan</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.client">
+        <segment><source>Client</source><target>Klient</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.ipam">
+        <notes><note category="description">Column with the DNS name IPAM records for the client address.</note></notes>
+        <segment><source>Name in IPAM</source><target>Namn i IPAM</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.time">
+        <segment><source>Time</source><target>Tid</target></segment>
+      </unit>
+      <unit id="dns.blocking.col.action">
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="dns.blocking.top_blocked.title">
+        <segment><source>Top blocked names</source><target>Mest blockerade namn</target></segment>
+      </unit>
+      <unit id="dns.blocking.top_blocked.table">
+        <segment><source>The names blocked most often</source><target>De namn som blockerats oftast</target></segment>
+      </unit>
+      <unit id="dns.blocking.top_names.title">
+        <segment><source>Top names</source><target>Mest frågade namn</target></segment>
+      </unit>
+      <unit id="dns.blocking.top_names.table">
+        <segment><source>The names asked most often</source><target>De namn som frågats oftast</target></segment>
+      </unit>
+      <unit id="dns.blocking.top.empty">
+        <segment><source>Nothing in this window.</source><target>Inget i det här fönstret.</target></segment>
+      </unit>
+      <unit id="dns.blocking.clients.title">
+        <segment><source>Top clients</source><target>Mest aktiva klienter</target></segment>
+      </unit>
+      <unit id="dns.blocking.clients.table">
+        <segment><source>The clients that asked most often</source><target>De klienter som frågat oftast</target></segment>
+      </unit>
+      <unit id="dns.blocking.clients.note_pseudonym">
+        <segment><source>The log keeps a pseudonym instead of the address, one per client and day, so a client that asks on several days counts once per day.</source><target>Loggen sparar en pseudonym i stället för adressen, en per klient och dygn, så en klient som frågar flera dagar räknas en gång per dygn.</target></segment>
+      </unit>
+      <unit id="dns.blocking.clients.note_hidden">
+        <segment><source>The log keeps no client, so no client can be named.</source><target>Loggen sparar ingen klient, så ingen klient kan namnges.</target></segment>
+      </unit>
+      <unit id="dns.blocking.clients.empty">
+        <segment><source>No client in this window.</source><target>Ingen klient i det här fönstret.</target></segment>
+      </unit>
+      <unit id="dns.blocking.client.withheld">
+        <notes><note category="description">Shown in place of a client the log does not show to the person.</note></notes>
+        <segment><source>Withheld</source><target>Undanhållen</target></segment>
+      </unit>
+      <unit id="dns.blocking.client.withheld_hint">
+        <segment><source>The log keeps no client, or the address is shown only to those who may update the node.</source><target>Loggen sparar ingen klient, eller så visas adressen bara för dem som får uppdatera noden.</target></segment>
+      </unit>
+      <unit id="dns.blocking.recent.title">
+        <segment><source>Newest blocked queries</source><target>Senaste blockerade frågor</target></segment>
+      </unit>
+      <unit id="dns.blocking.recent.table">
+        <segment><source>The newest queries a block list blocked</source><target>De senaste frågor som en blocklista blockerade</target></segment>
+      </unit>
+      <unit id="dns.blocking.recent.empty">
+        <segment><source>No query was blocked in this window.</source><target>Ingen fråga blockerades i det här fönstret.</target></segment>
+      </unit>
+      <unit id="dns.blocking.allow">
+        <notes><note category="description">Button that adds the name of a blocked query to an allow list.</note></notes>
+        <segment><source>Allow</source><target>Tillåt</target></segment>
+      </unit>
+      <unit id="dns.blocking.allow_label">
+        <notes><note category="description">Accessible name of the Allow button of one row.</note></notes>
+        <segment><source>Allow {name} and the names under it</source><target>Tillåt {name} och namnen under det</target></segment>
+      </unit>
+      <unit id="dns.blocking.allow.added">
+        <notes><note category="description">{list} is the name of the allow list.</note></notes>
+        <segment><source>Added to the list {list}; the list is compiled now</source><target>Tillagd i listan {list}; listan kompileras nu</target></segment>
+      </unit>
+      <unit id="dns.blocking.allow.already">
+        <segment><source>Already allowed</source><target>Redan tillåtet</target></segment>
+      </unit>
+      <unit id="dns.blocking.allow.job">
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.title">
+        <segment><source>The query log is off</source><target>Frågeloggen är av</target></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.body">
+        <segment><source>These figures are counted from the node's query log, which is off. Set enabled = true in the section [dns.log] of tenko.toml and restart the node to turn it on; the DNS settings show what the node uses now.</source><target>De här siffrorna räknas fram ur nodens frågelogg, som är av. Sätt enabled = true i avsnittet [dns.log] i tenko.toml och starta om noden för att slå på den; DNS-inställningarna visar vad noden använder nu.</target></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.link">
+        <segment><source>Open the DNS settings</source><target>Öppna DNS-inställningarna</target></segment>
+      </unit>
+      <unit id="dns.blocking.next">
+        <segment><source>Client groups with their own lists, and the ABP and regular expression rule syntax, are the next step. They are not built yet.</source><target>Klientgrupper med egna listor samt regelsyntaxen ABP och reguljära uttryck är nästa steg. De är inte byggda än.</target></segment>
+      </unit>
+      <unit id="errors.dns.blocking.log_off">
+        <segment><source>The node's query log is off, so there are no figures. Set enabled = true in [dns.log] in tenko.toml.</source><target>Nodens frågelogg är av, så det finns inga siffror. Sätt enabled = true i [dns.log] i tenko.toml.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

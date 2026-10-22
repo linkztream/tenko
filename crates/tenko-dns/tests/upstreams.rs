@@ -853,3 +853,88 @@ async fn pools_reject_a_ca_without_certificates_for_tls_upstreams() {
     };
     assert!(pools.get(PoolKey::Default, "test-bad-ca", &[spec]).is_err());
 }
+
+// dns-visibility: the figures of the upstreams.
+#[tokio::test]
+async fn pool_reports_the_times_the_state_and_the_chosen_upstream() {
+    use tenko_core::metrics::{Registry, encode};
+    use tenko_dns::pool::{UPSTREAM_HEALTH_FAMILY, UPSTREAM_RTT_FAMILY, UpstreamState};
+
+    let (_, slow) = udp_upstream(Mode::Delay(Duration::from_millis(30))).await;
+    let (_, fast) = udp_upstream(Mode::Good).await;
+    let (_, silent) = udp_upstream(Mode::Silent).await;
+    let set = UpstreamSet::new("test-figures", vec![slow, fast, silent]);
+    let before = set.health();
+    assert!(
+        before
+            .iter()
+            .all(|member| member.state == UpstreamState::Unknown && member.p50.is_none()),
+        "{before:?}"
+    );
+    assert_eq!(
+        before.iter().filter(|member| member.chosen).count(),
+        1,
+        "one upstream is chosen"
+    );
+    for _ in 0..40 {
+        ask(&set, budget(150, 2)).await.expect("an answer");
+    }
+    let health = set.health();
+    let (slow, fast, silent) = (&health[0], &health[1], &health[2]);
+    assert_eq!(fast.state, UpstreamState::Up, "{fast:?}");
+    assert!(fast.chosen, "{health:?}");
+    assert!(!slow.chosen && !silent.chosen);
+    assert!(fast.last_rtt.is_some() && fast.srtt.is_some());
+    let (p50, p99) = (fast.p50.expect("p50"), fast.p99.expect("p99"));
+    assert!(p50 <= p99, "{fast:?}");
+    assert!(fast.window_answers >= 30, "{fast:?}");
+    assert!(fast.outcomes[0] >= 30);
+    assert_eq!(slow.state, UpstreamState::Up);
+    assert!(
+        slow.p50.expect("the slow one was measured") >= Duration::from_millis(25),
+        "{slow:?}"
+    );
+    assert!(
+        matches!(silent.state, UpstreamState::Degraded | UpstreamState::Down),
+        "{silent:?}"
+    );
+    assert!(silent.failures >= 1);
+    assert!(
+        silent
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("did not answer in time")),
+        "{silent:?}"
+    );
+    assert!(silent.last_error_at.is_some());
+    assert!(silent.p50.is_none());
+
+    let registry = Registry::new();
+    registry.register(&UPSTREAM_HEALTH_FAMILY);
+    registry.register(&UPSTREAM_RTT_FAMILY);
+    let mut text = String::new();
+    encode(&registry.snapshot(), &mut text);
+    let up = format!(
+        "tenko_dns_upstream_health{{rule=\"test-figures\",upstream=\"{}\"}} 1\n",
+        fast.upstream
+    );
+    assert!(text.contains(&up), "{text}");
+    let failing = format!(
+        "tenko_dns_upstream_health{{rule=\"test-figures\",upstream=\"{}\"}} 0",
+        silent.upstream
+    );
+    assert!(text.contains(&failing), "{text}");
+    let count = format!(
+        "tenko_dns_upstream_rtt_seconds_count{{rule=\"test-figures\",upstream=\"{}\"}}",
+        fast.upstream
+    );
+    assert!(text.contains(&count), "{text}");
+    // A set no one holds leaves the health gauge.
+    drop(set);
+    let mut after = String::new();
+    encode(&registry.snapshot(), &mut after);
+    assert!(
+        !after.contains("tenko_dns_upstream_health{rule=\"test-figures\""),
+        "{after}"
+    );
+}

@@ -158,10 +158,43 @@ function textOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-/** The rules by suffix with the root first, as the server lists them. */
+// dns-visibility: the upstreams' figures on the node that answers.
+/** The figures of a rule's upstreams, fixed per position: the first answers fastest and is
+ * chosen, the second answers slower, any further one fails. */
+export function upstreamFigures(rule: MockForwarder): S["UpstreamFigures"][] {
+  const transport = rule.transport ?? "plain";
+  const port = transport === "dot" ? 853 : transport === "doh" ? 443 : 53;
+  return rule.upstreams.map((u, index) => {
+    const host = u.address.includes(":") ? `[${u.address}]` : u.address;
+    const upstream = `${host}:${u.port ?? port}`;
+    if (index === 0) {
+      return { upstream, transport, state: "up", chosen: true, last_rtt_ms: 11.8, ewma_ms: 12.4, p50_ms: 12.1, p99_ms: 31, window_answers: 214, failures: 0, answered: 5120, failed: 3 };
+    }
+    if (index === 1) {
+      return { upstream, transport, state: "up", chosen: false, last_rtt_ms: 27.9, ewma_ms: 28.6, p50_ms: 28.2, p99_ms: 44.5, window_answers: 14, failures: 0, answered: 330, failed: 0 };
+    }
+    return {
+      upstream,
+      transport,
+      state: "degraded",
+      chosen: false,
+      ewma_ms: 400,
+      window_answers: 0,
+      failures: 2,
+      answered: 0,
+      failed: 2,
+      last_error: "the upstream did not answer in time",
+      last_error_at: "2026-10-18T09:12:00Z",
+    };
+  });
+}
+
+/** The rules by suffix with the root first, as the server lists them, with their upstreams' figures. */
 export function listForwarders(state: ResolverState): MockForwarder[] {
   const rank = (r: MockForwarder) => (r.suffix === "." ? "" : r.suffix.split(".").reverse().join("."));
-  return [...state.forwarders].sort((a, b) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0));
+  return [...state.forwarders]
+    .sort((a, b) => (rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0))
+    .map((rule) => ({ ...rule, upstream_status: upstreamFigures(rule) }));
 }
 
 export function findForwarder(state: ResolverState, id: string): MockForwarder {
@@ -368,5 +401,7 @@ export function resolverStatus(state: ResolverState): Partial<S["DnsNodeStatus"]
     cache_stale: c.stale,
     ...(asked > 0 ? { cache_hit_ratio: c.hits / asked } : {}),
     problems: [...state.problems],
+    // dns-visibility: the upstreams per rule.
+    upstreams: listForwarders(state).map((rule) => ({ rule: rule.id, label: rule.suffix, upstreams: rule.upstream_status ?? [] })),
   };
 }

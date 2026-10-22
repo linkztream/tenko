@@ -43,7 +43,7 @@ use crate::{
     codec::{AnswerBuf, Owner, Section},
     index::{Chain, Index, Lookup, MAX_CHAIN, RrSetView, ZoneView},
     name::{self, MAX_NAME_LEN, NameBuf},
-    policy::{Action, EDE_BLOCKED, Hit, NoPolicy, PolicyEngine, PolicyQuery, Verdict},
+    policy::{Action, EDE_BLOCKED, Hit, NoPolicy, PolicyEngine, PolicyQuery, Source, Verdict},
     rate::{RateDecision, RateLimiter, ResponseKey, ResponseKind, Unlimited},
     resolver::{QueryContext, Resolution, Resolver},
     tree::ZoneIndex,
@@ -242,6 +242,9 @@ impl Authoritative {
                 return Some(Resolution::Drop);
             }
             self.blocked(&hit, qtype, answer);
+            if let Source::List(list) = hit.source {
+                answer.blocked = Some(list);
+            }
             return None;
         }
         if request.rd {

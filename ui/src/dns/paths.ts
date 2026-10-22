@@ -15,6 +15,8 @@ export const dnsPaths = {
   log: () => "/dns/log",
   forwarders: () => "/dns/forwarders",
   lists: () => "/dns/lists",
+  /** The home view of the query log and the lists: the figures of 24 hours or 7 days, the pause and allow from the log. */
+  blocking: () => "/dns/blocking",
   // WP6.4
   views: () => "/dns/views",
   /** The DNS settings of a node (read-only, administrators): settings/dns. */

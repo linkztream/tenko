@@ -29,7 +29,9 @@
 pub mod dnstap;
 pub mod keys;
 mod read;
+// dns-visibility: the figures of the blocking view.
 mod ring;
+pub mod stats;
 pub mod writer;
 
 use std::{

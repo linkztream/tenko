@@ -42,6 +42,9 @@ use tenko_core::{
     dns::{audit, codes as dns_codes},
 };
 use tenko_dns::{
+    // dns-visibility: the upstreams' figures and the pause.
+    policy::pause::Paused,
+    pool::{MemberHealth, UpstreamState},
     querylog::{LogFigures, LogLine, keys::is_pseudonym},
     status::{
         self, CacheFlushArgs, CacheListArgs, CommandResult, DnsNode, DnsStatus, LogReadArgs,
@@ -56,6 +59,8 @@ use super::{
     QueryLogLine, QueryLogParams, QueryLogState, QueryLogStatus, UdpWorkerItem, Zones, parse_node,
 };
 use super::{DnsCacheEntry, DnsCacheParams};
+// dns-visibility: the upstreams' figures and the pause.
+use super::{BlockingPause, UpstreamFigures, UpstreamGroupItem, UpstreamStateItem};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -93,12 +98,12 @@ impl DnsNodeSlot {
     }
 }
 
-type Slot = Option<Extension<DnsNodeSlot>>;
-type Registry = Option<Extension<Arc<NodeRegistry>>>;
+pub(super) type Slot = Option<Extension<DnsNodeSlot>>;
+pub(super) type Registry = Option<Extension<Arc<NodeRegistry>>>;
 
 /// The role of `node` when this process runs it; else 409 `dns.node.not_dns` for a node
 /// that exists and 404 `cluster.node.not_found` for one that does not.
-async fn local_role(
+pub(super) async fn local_role(
     app: &AppState,
     slot: Slot,
     registry: Registry,
@@ -133,7 +138,11 @@ async fn local_role(
 }
 
 /// Executes a command on the role off the async threads.
-async fn execute(role: Arc<dyn DnsNode>, kind: &'static str, args: Vec<u8>) -> CommandResult {
+pub(super) async fn execute(
+    role: Arc<dyn DnsNode>,
+    kind: &'static str,
+    args: Vec<u8>,
+) -> CommandResult {
     tokio::task::spawn_blocking(move || role.execute(kind, &args))
         .await
         .unwrap_or_else(|join| CommandResult {
@@ -145,7 +154,7 @@ async fn execute(role: Arc<dyn DnsNode>, kind: &'static str, args: Vec<u8>) -> C
 
 /// Records a command executed in place as a row of `cluster.node_commands` in its final
 /// state, with `audit` in the same write, through an inline job.
-async fn record(
+pub(super) async fn record(
     zones: Zones,
     cx: &RequestCtx,
     node: NodeId,
@@ -183,7 +192,7 @@ async fn record(
     Ok(record)
 }
 
-fn command_failed(kind: &str, result: &CommandResult) -> ApiError {
+pub(super) fn command_failed(kind: &str, result: &CommandResult) -> ApiError {
     let (code, status) = match result.outcome {
         Outcome::Rejected => (dns_codes::NODE_NOT_DNS, 409),
         _ => ("node.command.failed", 500),
@@ -262,8 +271,62 @@ fn status_dto(status: DnsStatus) -> DnsNodeStatus {
                 count: blocked.count,
             })
             .collect(),
+        // dns-visibility: the upstreams' figures and the pause.
+        upstreams: status
+            .upstreams
+            .into_iter()
+            .map(|group| UpstreamGroupItem {
+                rule: group.rule,
+                stub: group.stub,
+                label: group.label,
+                upstreams: group.upstreams.into_iter().map(upstream_figures).collect(),
+            })
+            .collect(),
+        blocking_paused: status.blocking_paused.map(pause_dto),
     }
 }
+
+// dns-visibility: the upstreams' figures and the pause.
+/// Milliseconds of a duration, to the microsecond.
+#[allow(clippy::cast_precision_loss, reason = "a time for people")]
+fn millis(duration: std::time::Duration) -> f64 {
+    duration.as_micros() as f64 / 1_000.0
+}
+
+/// The DTO of one upstream's state.
+pub(super) fn upstream_figures(member: MemberHealth) -> UpstreamFigures {
+    let [ok, servfail, timeout, unreachable, malformed] = member.outcomes;
+    UpstreamFigures {
+        upstream: member.upstream,
+        transport: member.transport,
+        state: match member.state {
+            UpstreamState::Unknown => UpstreamStateItem::Unknown,
+            UpstreamState::Up => UpstreamStateItem::Up,
+            UpstreamState::Degraded => UpstreamStateItem::Degraded,
+            UpstreamState::Down => UpstreamStateItem::Down,
+        },
+        chosen: member.chosen,
+        last_rtt_ms: member.last_rtt.map(millis),
+        ewma_ms: member.srtt.map(millis),
+        p50_ms: member.p50.map(millis),
+        p99_ms: member.p99.map(millis),
+        window_answers: member.window_answers,
+        failures: member.failures,
+        answered: ok + servfail,
+        failed: timeout + unreachable + malformed,
+        last_error: member.last_error,
+        last_error_at: member.last_error_at,
+    }
+}
+
+/// The DTO of a pause in force.
+pub(super) fn pause_dto(paused: Paused) -> BlockingPause {
+    BlockingPause {
+        since: paused.since,
+        until: paused.until,
+    }
+}
+// dns-visibility: end.
 
 fn log_status_dto(log: LogFigures) -> QueryLogStatus {
     QueryLogStatus {
@@ -285,7 +348,7 @@ fn log_status_dto(log: LogFigures) -> QueryLogStatus {
 
 /// The DTO of a line; an address is kept only when `addresses` (the principal may update
 /// the node).
-fn line_dto(line: LogLine, addresses: bool) -> QueryLogLine {
+pub(super) fn line_dto(line: LogLine, addresses: bool) -> QueryLogLine {
     QueryLogLine {
         at: line.at,
         client: line

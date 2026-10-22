@@ -10880,6 +10880,304 @@
         }
       }
     },
+    "/api/v1/dns/blocking/allow": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Allow a blocked name",
+        "description": "Scope: `dns.write`. Adds `name` (and the names under it) to the uploaded allow list `list`, or to the allow list `allowed`, created the first time, and starts the compile job `dns.list.compile` of its next version (202 with the job). A name the list covers already changes nothing (200, `already`). Audited as `dns.blocking.allow` with the name and the list.",
+        "operationId": "allow_dns_name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockingAllowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The list covers the name already",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingAllowed"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The compile job; follow it at the `Location`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingAllowed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such list (`dns.list.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The list is not an uploaded allow list (`dns.list.invalid`), or the list jobs do not run on this server (`dns.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/blocking/pause": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Pause the block lists",
+        "description": "Scope: `dns.write`. Issues the node command `dns.blocking.pause` on the node that answers: no block list blocks a name for `minutes` (1 to 1440), or until the pause is resumed when `minutes` is absent; allow lists, exemptions and RPZ zones apply as before. A pause in force is replaced; a restart of the node ends it. Recorded in the node's commands and audited as `dns.blocking.pause`.",
+        "operationId": "pause_dns_blocking",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockingPauseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The pause in force",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingPauseState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server does not run the dns role (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "End the pause of the block lists",
+        "description": "Scope: `dns.write`. Issues the node command `dns.blocking.resume` on the node that answers: the block lists block again. Recorded in the node's commands and audited as `dns.blocking.resume`.",
+        "operationId": "resume_dns_blocking",
+        "responses": {
+          "200": {
+            "description": "No pause is in force",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingPauseState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server does not run the dns role (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/blocking/stats": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Get the figures of the blocking view",
+        "description": "Scope: `dns.read`. Issues the node command `dns.blocking.stats` on the node that answers: the queries of the last 24 hours or 7 days counted from its query log, in total, blocked by a block list and from the cache, per hour, per block list, the names blocked and asked most often, the clients that asked most often and the newest blocked queries, with the pause of the block lists. A client is shown as the log keeps it; an address only to a principal that may update the node, with the DNS name IPAM records for it. Recorded in the node's commands and audited as `dns.blocking.stats`. 409 `dns.blocking.log_off` while the node's query log is off.",
+        "operationId": "get_dns_blocking_stats",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "description": "`24h` (the default) or `7d`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "top",
+            "in": "query",
+            "description": "The length of each top list, 1 to 100; 10 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The figures of the window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockingStats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server does not run the dns role (`dns.node.not_dns`), or its query log is off (`dns.blocking.log_off`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/dns/forwarders": {
       "get": {
         "tags": [
@@ -10923,7 +11221,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of rules by suffix",
+            "description": "A page of rules by suffix, each with its upstreams' round-trip times and state on the node that answers (`upstream_status`, when it runs the DNS role)",
             "content": {
               "application/json": {
                 "schema": {
@@ -11031,7 +11329,7 @@
           "dns"
         ],
         "summary": "Get a forwarding rule",
-        "description": "Scope: `dns.read`.",
+        "description": "Scope: `dns.read`. The rule carries its upstreams' round-trip times and state on the node that answers (`upstream_status`), when it runs the DNS role.",
         "operationId": "get_dns_forwarder",
         "parameters": [
           {
@@ -35198,6 +35496,410 @@
           }
         }
       },
+      "BlockingAllowRequest": {
+        "type": "object",
+        "description": "`POST /dns/blocking/allow`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "list": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockListId",
+                "description": "The allow list to add it to: an uploaded allow list. Absent: the list `allowed`,\ncreated the first time."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The name to allow (and the names under it)."
+          }
+        }
+      },
+      "BlockingAllowed": {
+        "type": "object",
+        "description": "The answer of `POST /dns/blocking/allow`.",
+        "required": [
+          "list",
+          "list_name",
+          "created",
+          "already"
+        ],
+        "properties": {
+          "already": {
+            "type": "boolean",
+            "description": "The list covered the name already: nothing changed."
+          },
+          "created": {
+            "type": "boolean",
+            "description": "The list was created for this name."
+          },
+          "job": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The compile job that writes the list's next version; absent when nothing changed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "list": {
+            "$ref": "#/components/schemas/BlockListId",
+            "description": "The allow list."
+          },
+          "list_name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        }
+      },
+      "BlockingClientCount": {
+        "type": "object",
+        "description": "A client with its counts in the window.",
+        "required": [
+          "queries",
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of them blocked.",
+            "minimum": 0
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client as the log keeps it: a pseudonym (`p:` and hexadecimal digits, one per\nclient and day), or its address when the log keeps addresses and the principal may\nupdate the node; absent when withheld."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The DNS name IPAM records for the address, when the address is shown and known."
+          },
+          "queries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries.",
+            "minimum": 0
+          }
+        }
+      },
+      "BlockingHour": {
+        "type": "object",
+        "description": "The queries of one hour.",
+        "required": [
+          "start",
+          "queries",
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of them blocked by a block list.",
+            "minimum": 0
+          },
+          "queries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries.",
+            "minimum": 0
+          },
+          "start": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The start of the hour."
+          }
+        }
+      },
+      "BlockingListCount": {
+        "type": "object",
+        "description": "The queries one block list blocked in the window.",
+        "required": [
+          "list",
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries blocked.",
+            "minimum": 0
+          },
+          "list": {
+            "$ref": "#/components/schemas/BlockListId",
+            "description": "The list."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its name; absent for a list deleted since."
+          }
+        }
+      },
+      "BlockingNameCount": {
+        "type": "object",
+        "description": "A query name with its counts in the window.",
+        "required": [
+          "name",
+          "queries",
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of them blocked.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The query name."
+          },
+          "queries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries.",
+            "minimum": 0
+          }
+        }
+      },
+      "BlockingPause": {
+        "type": "object",
+        "description": "A pause of the block lists in force.",
+        "required": [
+          "since"
+        ],
+        "properties": {
+          "since": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it started."
+          },
+          "until": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it ends; absent while it lasts until resumed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "BlockingPauseRequest": {
+        "type": "object",
+        "description": "`POST /dns/blocking/pause`.",
+        "properties": {
+          "minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minutes the pause lasts, 1 to 1440 (the UI offers 5, 15 and 60); absent until\nresumed.",
+            "minimum": 0
+          }
+        }
+      },
+      "BlockingPauseState": {
+        "type": "object",
+        "description": "The answer of `POST /dns/blocking/pause` and `DELETE /dns/blocking/pause`.",
+        "required": [
+          "node",
+          "command_id"
+        ],
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node command that did it."
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node whose block lists were paused or resumed."
+          },
+          "paused": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockingPause",
+                "description": "The pause in force; absent after a resume."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "BlockingStats": {
+        "type": "object",
+        "description": "`GET /dns/blocking/stats`: the queries of a window of the node's query log, blocked and\nanswered.",
+        "required": [
+          "node",
+          "window",
+          "from",
+          "until",
+          "log_days",
+          "log_client",
+          "log_sample",
+          "queries",
+          "blocked",
+          "cached",
+          "clients",
+          "hours",
+          "lists",
+          "top_blocked",
+          "top_names",
+          "top_clients",
+          "recent_blocked",
+          "truncated"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of them blocked by a block list.",
+            "minimum": 0
+          },
+          "blocked_share": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share blocked, 0 to 1; absent without a query."
+          },
+          "cached": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of them answered from the cache.",
+            "minimum": 0
+          },
+          "clients": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Distinct clients (a pseudonym counts once per day).",
+            "minimum": 0
+          },
+          "from": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Its start."
+          },
+          "hours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingHour"
+            },
+            "description": "The queries per hour, oldest first."
+          },
+          "lists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingListCount"
+            },
+            "description": "The blocked queries per block list, the busiest first."
+          },
+          "log_client": {
+            "type": "string",
+            "description": "What the log keeps of the client: `pseudonym`, `address` or `hidden`."
+          },
+          "log_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days the log keeps (`[dns.log] days`): a 7-day window of a log that keeps fewer\ncovers that many.",
+            "minimum": 0
+          },
+          "log_sample": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One query in `log_sample` is logged; the counts are of the logged queries.",
+            "minimum": 0
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node whose log was read."
+          },
+          "paused": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockingPause",
+                "description": "The pause of the block lists in force, if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries logged in the window.",
+            "minimum": 0
+          },
+          "recent_blocked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueryLogLine"
+            },
+            "description": "The newest blocked queries, newest first (at most 50), for allow from the log."
+          },
+          "top_blocked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingNameCount"
+            },
+            "description": "The names blocked most often."
+          },
+          "top_clients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingClientCount"
+            },
+            "description": "The clients that asked most often."
+          },
+          "top_names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingNameCount"
+            },
+            "description": "The names asked most often."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The log held more in the window than one read looks at (512 MiB): the figures\ncover the newest part."
+          },
+          "until": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Its end (now)."
+          },
+          "window": {
+            "$ref": "#/components/schemas/BlockingWindow",
+            "description": "The window."
+          }
+        }
+      },
+      "BlockingWindow": {
+        "type": "string",
+        "description": "The window of `GET /dns/blocking/stats`.",
+        "enum": [
+          "24h",
+          "7d"
+        ]
+      },
       "BreachMode": {
         "type": "string",
         "description": "Where the breached-password check looks (TGL-06).",
@@ -38910,6 +39612,17 @@
             },
             "description": "Queries blocked since the role started, per enabled block list and RPZ zone, by\nname."
           },
+          "blocking_paused": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlockingPause",
+                "description": "The pause of the block lists in force, if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cache_bytes": {
             "type": "integer",
             "format": "int64",
@@ -39039,6 +39752,13 @@
               "$ref": "#/components/schemas/UdpWorkerItem"
             },
             "description": "The UDP workers with their counters since the start (ADR 0009): uneven `received`\ncounts across `reuseport` workers are the flow-hash effect."
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamGroupItem"
+            },
+            "description": "The upstreams of the default forwarder, of every forwarding rule and of the stub\nzones, with their round-trip times and states."
           },
           "zones": {
             "type": "integer",
@@ -40658,6 +41378,16 @@
               "revision": {
                 "$ref": "#/components/schemas/Revision",
                 "description": "The store revision of the row."
+              },
+              "upstream_status": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/UpstreamFigures"
+                },
+                "description": "The rule's upstreams with their round-trip times and state on the node that\nanswers (in the list and on a read), when it runs the DNS role."
               }
             }
           }
@@ -51909,6 +52639,16 @@
                     "revision": {
                       "$ref": "#/components/schemas/Revision",
                       "description": "The store revision of the row."
+                    },
+                    "upstream_status": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/UpstreamFigures"
+                      },
+                      "description": "The rule's upstreams with their round-trip times and state on the node that\nanswers (in the list and on a read), when it runs the DNS role."
                     }
                   }
                 }
@@ -66623,6 +67363,165 @@
             "minimum": 0
           }
         }
+      },
+      "UpstreamFigures": {
+        "type": "object",
+        "description": "One upstream with its round-trip times and state on the node that answers (since its\nDNS role started).",
+        "required": [
+          "upstream",
+          "transport",
+          "state",
+          "chosen",
+          "window_answers",
+          "failures",
+          "answered",
+          "failed"
+        ],
+        "properties": {
+          "answered": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answered exchanges since the role started.",
+            "minimum": 0
+          },
+          "chosen": {
+            "type": "boolean",
+            "description": "The upstream the next query of the rule goes to (one query in 16 probes another)."
+          },
+          "ewma_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The smoothed round-trip time (an EWMA with weight 1/8, the one the choice uses), in\nmilliseconds; it doubles with each failure."
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Exchanges that timed out, could not reach the upstream or got a malformed answer.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failures in a row.",
+            "minimum": 0
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The last failure, in English."
+          },
+          "last_error_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the last failure happened."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_rtt_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The round-trip time of the last answer, in milliseconds."
+          },
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The median round-trip time of the answers of the last minute, in milliseconds."
+          },
+          "p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile of the round-trip times of the answers of the last minute, in\nmilliseconds."
+          },
+          "state": {
+            "$ref": "#/components/schemas/UpstreamStateItem",
+            "description": "The state."
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ForwardTransport",
+            "description": "The transport."
+          },
+          "upstream": {
+            "type": "string",
+            "description": "`address:port`."
+          },
+          "window_answers": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The answers the quantiles look at (at most the last 512 of the minute).",
+            "minimum": 0
+          }
+        }
+      },
+      "UpstreamGroupItem": {
+        "type": "object",
+        "description": "The upstreams of one forwarding rule, of the default forwarder of the configuration or of\na stub zone.",
+        "required": [
+          "label",
+          "upstreams"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The `rule` label of the metrics: the rule's suffix, `default`, or `stub:` and the\nzone."
+          },
+          "rule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ForwardRuleId",
+                "description": "The forwarding rule; absent for the default forwarder (`[dns] forwarders`) and stub\nzones."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stub": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ZoneId",
+                "description": "The stub zone whose name servers these are."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamFigures"
+            },
+            "description": "The upstreams in the rule's order."
+          }
+        }
+      },
+      "UpstreamStateItem": {
+        "type": "string",
+        "description": "The state of an upstream on the node that answers.",
+        "enum": [
+          "unknown",
+          "up",
+          "degraded",
+          "down"
+        ]
       },
       "UserCreate": {
         "type": "object",

@@ -1827,6 +1827,81 @@ export type MessageKey =
   | "dns.batch.mode"
   | "dns.batch.pending_tag"
   | "dns.batch.review"
+  | "dns.blocking.allow"
+  | "dns.blocking.allow.added"
+  | "dns.blocking.allow.already"
+  | "dns.blocking.allow.job"
+  | "dns.blocking.allow_label"
+  | "dns.blocking.client.withheld"
+  | "dns.blocking.client.withheld_hint"
+  | "dns.blocking.clients.empty"
+  | "dns.blocking.clients.note_hidden"
+  | "dns.blocking.clients.note_pseudonym"
+  | "dns.blocking.clients.table"
+  | "dns.blocking.clients.title"
+  | "dns.blocking.col.action"
+  | "dns.blocking.col.blocked"
+  | "dns.blocking.col.client"
+  | "dns.blocking.col.ipam"
+  | "dns.blocking.col.list"
+  | "dns.blocking.col.name"
+  | "dns.blocking.col.queries"
+  | "dns.blocking.col.share"
+  | "dns.blocking.col.time"
+  | "dns.blocking.hours.bar"
+  | "dns.blocking.hours.blocked"
+  | "dns.blocking.hours.label"
+  | "dns.blocking.hours.queries"
+  | "dns.blocking.hours.title"
+  | "dns.blocking.list_deleted"
+  | "dns.blocking.lists.empty"
+  | "dns.blocking.lists.manage"
+  | "dns.blocking.lists.table"
+  | "dns.blocking.lists.title"
+  | "dns.blocking.loading"
+  | "dns.blocking.log_off.body"
+  | "dns.blocking.log_off.link"
+  | "dns.blocking.log_off.title"
+  | "dns.blocking.next"
+  | "dns.blocking.pause.btn.15"
+  | "dns.blocking.pause.btn.5"
+  | "dns.blocking.pause.btn.60"
+  | "dns.blocking.pause.btn.open"
+  | "dns.blocking.pause.for"
+  | "dns.blocking.pause.hint"
+  | "dns.blocking.pause.label"
+  | "dns.blocking.pause.left"
+  | "dns.blocking.pause.on"
+  | "dns.blocking.pause.open"
+  | "dns.blocking.pause.title"
+  | "dns.blocking.pause.until"
+  | "dns.blocking.period"
+  | "dns.blocking.recent.empty"
+  | "dns.blocking.recent.table"
+  | "dns.blocking.recent.title"
+  | "dns.blocking.refresh"
+  | "dns.blocking.resume"
+  | "dns.blocking.sample"
+  | "dns.blocking.short_log"
+  | "dns.blocking.sub"
+  | "dns.blocking.tile.blocked"
+  | "dns.blocking.tile.blocked_hint"
+  | "dns.blocking.tile.cached"
+  | "dns.blocking.tile.cached_hint"
+  | "dns.blocking.tile.clients"
+  | "dns.blocking.tile.clients_hint"
+  | "dns.blocking.tile.queries"
+  | "dns.blocking.tile.queries_hint"
+  | "dns.blocking.title"
+  | "dns.blocking.top.empty"
+  | "dns.blocking.top_blocked.table"
+  | "dns.blocking.top_blocked.title"
+  | "dns.blocking.top_names.table"
+  | "dns.blocking.top_names.title"
+  | "dns.blocking.truncated"
+  | "dns.blocking.window.24h"
+  | "dns.blocking.window.7d"
+  | "dns.blocking.window.label"
   | "dns.cache.col.data"
   | "dns.cache.col.hits"
   | "dns.cache.col.name"
@@ -2227,6 +2302,7 @@ export type MessageKey =
   | "dns.loss.soa"
   | "dns.loss.unsupported_type"
   | "dns.nav.acls"
+  | "dns.nav.blocking"
   | "dns.nav.forwarders"
   | "dns.nav.keys"
   | "dns.nav.label"
@@ -2423,6 +2499,32 @@ export type MessageKey =
   | "dns.update.require_tsig_help"
   | "dns.update.require_tsig_lab"
   | "dns.update.title"
+  | "dns.upstream.chosen"
+  | "dns.upstream.chosen_long"
+  | "dns.upstream.col.answered"
+  | "dns.upstream.col.error"
+  | "dns.upstream.col.ewma"
+  | "dns.upstream.col.failed"
+  | "dns.upstream.col.last"
+  | "dns.upstream.col.p50"
+  | "dns.upstream.col.p99"
+  | "dns.upstream.col.rule"
+  | "dns.upstream.col.state"
+  | "dns.upstream.col.upstream"
+  | "dns.upstream.counts"
+  | "dns.upstream.last_error"
+  | "dns.upstream.ms"
+  | "dns.upstream.rule.default"
+  | "dns.upstream.rule.stub"
+  | "dns.upstream.section.doc"
+  | "dns.upstream.section.empty"
+  | "dns.upstream.section.link"
+  | "dns.upstream.section.title"
+  | "dns.upstream.state.degraded"
+  | "dns.upstream.state.down"
+  | "dns.upstream.state.unknown"
+  | "dns.upstream.state.up"
+  | "dns.upstream.times"
   | "dns.view.action.down"
   | "dns.view.action.up"
   | "dns.view.check.address"
@@ -2697,6 +2799,7 @@ export type MessageKey =
   | "errors.dhcp.store_refused"
   | "errors.dns.acl.in_use"
   | "errors.dns.acl.not_found"
+  | "errors.dns.blocking.log_off"
   | "errors.dns.default_zone.invalid"
   | "errors.dns.forwarder.invalid"
   | "errors.dns.forwarder.not_found"
@@ -6234,6 +6337,17 @@ export interface MessageArgs {
   "dns.batch.count": { changes: string | number; count: number };
   "dns.batch.diff_summary": { count: number };
   "dns.batch.drop": { name: string | number; type: string | number };
+  "dns.blocking.allow.added": { list: string | number };
+  "dns.blocking.allow_label": { name: string | number };
+  "dns.blocking.hours.bar": { blocked: string | number; queries: number; time: string | number };
+  "dns.blocking.pause.left": { left: string | number };
+  "dns.blocking.pause.until": { time: string | number };
+  "dns.blocking.period": { from: string | number; until: string | number };
+  "dns.blocking.sample": { sample: string | number };
+  "dns.blocking.short_log": { days: number };
+  "dns.blocking.tile.cached_hint": { share: string | number };
+  "dns.blocking.tile.clients_hint": { mode: string };
+  "dns.blocking.tile.queries_hint": { window: string };
   "dns.cache.empty_suffix": { suffix: string | number };
   "dns.cache.flush": { suffix: string | number };
   "dns.cache.flush_body": { suffix: string | number };
@@ -6313,6 +6427,11 @@ export interface MessageArgs {
   "dns.update.default_standard": { profile: string | number };
   "dns.update.require_tsig_hardened": { profile: string | number };
   "dns.update.require_tsig_lab": { profile: string | number };
+  "dns.upstream.counts": { answered: string | number; failed: string | number };
+  "dns.upstream.last_error": { error: string | number; time: string | number };
+  "dns.upstream.ms": { ms: string | number };
+  "dns.upstream.rule.stub": { zone: string | number };
+  "dns.upstream.times": { answers: string | number; ewma: string | number; last: string | number; p50: string | number; p99: string | number };
   "dns.view.check.address": { entry: string | number; n: string | number };
   "dns.view.check.name": { entry: string | number; n: string | number };
   "dns.view.check.no_scope": { scope: string | number; zone: string | number };
@@ -8850,6 +8969,81 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.batch.mode",
   "dns.batch.pending_tag",
   "dns.batch.review",
+  "dns.blocking.allow",
+  "dns.blocking.allow.added",
+  "dns.blocking.allow.already",
+  "dns.blocking.allow.job",
+  "dns.blocking.allow_label",
+  "dns.blocking.client.withheld",
+  "dns.blocking.client.withheld_hint",
+  "dns.blocking.clients.empty",
+  "dns.blocking.clients.note_hidden",
+  "dns.blocking.clients.note_pseudonym",
+  "dns.blocking.clients.table",
+  "dns.blocking.clients.title",
+  "dns.blocking.col.action",
+  "dns.blocking.col.blocked",
+  "dns.blocking.col.client",
+  "dns.blocking.col.ipam",
+  "dns.blocking.col.list",
+  "dns.blocking.col.name",
+  "dns.blocking.col.queries",
+  "dns.blocking.col.share",
+  "dns.blocking.col.time",
+  "dns.blocking.hours.bar",
+  "dns.blocking.hours.blocked",
+  "dns.blocking.hours.label",
+  "dns.blocking.hours.queries",
+  "dns.blocking.hours.title",
+  "dns.blocking.list_deleted",
+  "dns.blocking.lists.empty",
+  "dns.blocking.lists.manage",
+  "dns.blocking.lists.table",
+  "dns.blocking.lists.title",
+  "dns.blocking.loading",
+  "dns.blocking.log_off.body",
+  "dns.blocking.log_off.link",
+  "dns.blocking.log_off.title",
+  "dns.blocking.next",
+  "dns.blocking.pause.btn.15",
+  "dns.blocking.pause.btn.5",
+  "dns.blocking.pause.btn.60",
+  "dns.blocking.pause.btn.open",
+  "dns.blocking.pause.for",
+  "dns.blocking.pause.hint",
+  "dns.blocking.pause.label",
+  "dns.blocking.pause.left",
+  "dns.blocking.pause.on",
+  "dns.blocking.pause.open",
+  "dns.blocking.pause.title",
+  "dns.blocking.pause.until",
+  "dns.blocking.period",
+  "dns.blocking.recent.empty",
+  "dns.blocking.recent.table",
+  "dns.blocking.recent.title",
+  "dns.blocking.refresh",
+  "dns.blocking.resume",
+  "dns.blocking.sample",
+  "dns.blocking.short_log",
+  "dns.blocking.sub",
+  "dns.blocking.tile.blocked",
+  "dns.blocking.tile.blocked_hint",
+  "dns.blocking.tile.cached",
+  "dns.blocking.tile.cached_hint",
+  "dns.blocking.tile.clients",
+  "dns.blocking.tile.clients_hint",
+  "dns.blocking.tile.queries",
+  "dns.blocking.tile.queries_hint",
+  "dns.blocking.title",
+  "dns.blocking.top.empty",
+  "dns.blocking.top_blocked.table",
+  "dns.blocking.top_blocked.title",
+  "dns.blocking.top_names.table",
+  "dns.blocking.top_names.title",
+  "dns.blocking.truncated",
+  "dns.blocking.window.24h",
+  "dns.blocking.window.7d",
+  "dns.blocking.window.label",
   "dns.cache.col.data",
   "dns.cache.col.hits",
   "dns.cache.col.name",
@@ -9250,6 +9444,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.loss.soa",
   "dns.loss.unsupported_type",
   "dns.nav.acls",
+  "dns.nav.blocking",
   "dns.nav.forwarders",
   "dns.nav.keys",
   "dns.nav.label",
@@ -9446,6 +9641,32 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.update.require_tsig_help",
   "dns.update.require_tsig_lab",
   "dns.update.title",
+  "dns.upstream.chosen",
+  "dns.upstream.chosen_long",
+  "dns.upstream.col.answered",
+  "dns.upstream.col.error",
+  "dns.upstream.col.ewma",
+  "dns.upstream.col.failed",
+  "dns.upstream.col.last",
+  "dns.upstream.col.p50",
+  "dns.upstream.col.p99",
+  "dns.upstream.col.rule",
+  "dns.upstream.col.state",
+  "dns.upstream.col.upstream",
+  "dns.upstream.counts",
+  "dns.upstream.last_error",
+  "dns.upstream.ms",
+  "dns.upstream.rule.default",
+  "dns.upstream.rule.stub",
+  "dns.upstream.section.doc",
+  "dns.upstream.section.empty",
+  "dns.upstream.section.link",
+  "dns.upstream.section.title",
+  "dns.upstream.state.degraded",
+  "dns.upstream.state.down",
+  "dns.upstream.state.unknown",
+  "dns.upstream.state.up",
+  "dns.upstream.times",
   "dns.view.action.down",
   "dns.view.action.up",
   "dns.view.check.address",
@@ -9720,6 +9941,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dhcp.store_refused",
   "errors.dns.acl.in_use",
   "errors.dns.acl.not_found",
+  "errors.dns.blocking.log_off",
   "errors.dns.default_zone.invalid",
   "errors.dns.forwarder.invalid",
   "errors.dns.forwarder.not_found",

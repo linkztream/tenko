@@ -66,14 +66,22 @@ pub const UPSTREAM_QUERIES: Desc = Desc::counter(
 )
 .labels(&["rule", "upstream", "transport", "outcome"]);
 
-/// Round-trip time of answered exchanges, by upstream.
+/// Round-trip time of answered exchanges, by rule and upstream.
 pub const UPSTREAM_RTT: Desc = Desc::histogram(
     "tenko_dns_upstream_rtt_seconds",
     "Round-trip time of DNS queries to upstream resolvers",
     LATENCY_BUCKETS_US,
     1_000_000,
 )
-.labels(&["upstream"]);
+.labels(&["rule", "upstream"]);
+
+/// The health of an upstream, by rule and upstream: 1 answering, 0.5 failing, 0 in
+/// back-off; computed at the scrape ([`crate::pool::UpstreamHealthGauge`]).
+pub const UPSTREAM_HEALTH: Desc = Desc::gauge(
+    "tenko_dns_upstream_health",
+    "Health of upstream resolvers (1 up, 0.5 failing, 0 in back-off)",
+)
+.labels(&["rule", "upstream"]);
 
 /// Responses dropped by response rate limiting, by response kind (`answer`, `nodata`,
 /// `nxdomain`, `referral`, `error`); read from the limiter ([`crate::rate::limiter`]).
@@ -121,7 +129,7 @@ pub const LOG_DROPPED: Desc =
     Desc::counter("tenko_dns_log_dropped", "DNS query log entries dropped");
 
 /// Every family of the engine, for registration and the contracts document.
-pub const ALL: [&Desc; 16] = [
+pub const ALL: [&Desc; 17] = [
     &QUERIES,
     &QUERY_DURATION,
     &CACHE_HITS,
@@ -130,6 +138,7 @@ pub const ALL: [&Desc; 16] = [
     &CACHE_ENTRIES,
     &UPSTREAM_QUERIES,
     &UPSTREAM_RTT,
+    &UPSTREAM_HEALTH,
     &RRL_DROPPED,
     &RRL_SLIPPED,
     &CLIENT_LIMITED,
@@ -262,6 +271,7 @@ pub fn register(registry: &Registry) {
     registry.register(&CACHE_ENTRY_GAUGE);
     registry.register(&crate::pool::UPSTREAM_QUERY_FAMILY);
     registry.register(&crate::pool::UPSTREAM_RTT_FAMILY);
+    registry.register(&crate::pool::UPSTREAM_HEALTH_FAMILY);
 }
 
 #[cfg(test)]

@@ -18,6 +18,8 @@
 //! The catalog follows the versions through the feed and builds one matcher per enabled
 //! list from the newest version; nodes receive the versions through node sync in Phase 5.
 
+// dns-visibility: allow from the blocking view.
+pub mod allow;
 pub mod compile;
 pub mod job;
 pub mod service;

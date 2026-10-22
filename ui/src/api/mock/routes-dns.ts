@@ -447,6 +447,8 @@ const node = [
         udp_workers: [0, 1].map((index) => ({ index, listen: "192.0.2.53:53", socket: 0, received: 0, sent: 0, dropped: 0, forwarded: 0, recv_errors: 0, send_errors: 0 })),
         ...resolverStatus(resolver),
       };
+      const pause = pausedNow(blockingState, Date.now());
+      if (pause) status.blocking_paused = pause;
       const log = logStatus(logState);
       if (log) status.query_log = log;
       return ok(status as never);
@@ -861,7 +863,77 @@ const viewRoutes = [
   ),
 ];
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec];
+// dns-visibility: the blocking view.
+import { allowName, blockingStats, BLOCKING_IDS, pauseBlocking, pausedNow, resumeBlocking, seedBlocking, type BlockingState } from "./dns-blocking-model";
+// The figures of the node's query log for 24 hours or 7 days, the pause of the block lists and
+// "allow" from the log (docs: the node commands dns.blocking.stats, .pause, .resume). The state
+// is dns-blocking-model.ts; the page and the tests arrange it through `dnsBlockingState()`.
+let blockingState: BlockingState = seedBlocking();
+onMockReset(() => {
+  blockingState = seedBlocking();
+});
+
+/** The blocking view of the mock's DNS node, for tests that arrange or inspect it. */
+export function dnsBlockingState(): BlockingState {
+  return blockingState;
+}
+
+const blocking = [
+  route("get", "/api/v1/dns/blocking/stats", (ctx) =>
+    guard("dns.read", () => {
+      const window = ctx.query("window") ?? "24h";
+      if (window !== "24h" && window !== "7d") {
+        throw new Problem("sys.invalid_value", { status: 400, detail: `window: \`${window}\` is not 24h or 7d`, params: { field: "window" } });
+      }
+      const top = ctx.query("top") === null ? 10 : Number(ctx.query("top"));
+      if (!Number.isInteger(top) || top < 1 || top > 100) {
+        throw new Problem("sys.invalid_value", { status: 400, detail: "top: 1 to 100", params: { field: "top" } });
+      }
+      const stats = blockingStats(blockingState, window, top, isAdmin(requireSession().user), Date.now());
+      appendAudit({ action: "dns.blocking.stats", objects: [nodeRef("1")], context: { window } });
+      return ok(stats as never);
+    }),
+  ),
+  route("post", "/api/v1/dns/blocking/pause", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const paused = pauseBlocking(blockingState, body.minutes, Date.now());
+      appendAudit({ action: "dns.blocking.pause", objects: [nodeRef("1")], context: { minutes: paused.until ? String(body.minutes) : "until resumed" } });
+      return ok({ node: 1, paused, command_id: randomId() } as never);
+    });
+  }),
+  route("delete", "/api/v1/dns/blocking/pause", () =>
+    guard("dns.write", () => {
+      resumeBlocking(blockingState);
+      appendAudit({ action: "dns.blocking.resume", objects: [nodeRef("1")] });
+      return ok({ node: 1, command_id: randomId() } as never);
+    }),
+  ),
+  route("post", "/api/v1/dns/blocking/allow", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.write", () => {
+      const outcome = allowName(blockingState, body, () =>
+        createJob({
+          kind: "dns.list.compile",
+          title: "jobs.title.dns_list_upload",
+          targets: [listRef(BLOCKING_IDS.allowed)],
+          timeoutSecs: 600,
+          preview: false,
+          steps: [{ kind: "dns.list.compile", automatic: true }],
+        }),
+      );
+      appendAudit({
+        action: "dns.blocking.allow",
+        objects: [listRef(BLOCKING_IDS.allowed)],
+        context: { name: String(body.name), list: outcome.allowed.list_name },
+      });
+      return outcome.allowed.already ? ok(outcome.allowed as never) : (new Reply(202, outcome.allowed) as never);
+    });
+  }),
+];
+// dns-visibility: end.
+
+export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

@@ -1,7 +1,7 @@
 //! The report `dns.status` and the local command handlers of the `dns` role (plan sections
 //! 2.9 and 2.10, `docs/node-sync.md` section 5).
 //!
-//! A node's DNS role answers six commands and one report:
+//! A node's DNS role answers nine commands and one report:
 //!
 //! | Kind | Arguments (CBOR) | What the role does |
 //! |---|---|---|
@@ -10,7 +10,10 @@
 //! | `dns.stats` | none | Answers `done` with the counters of the workers, the forwarder, the policy (blocked queries per list and RPZ zone), rate limiting and the query log in its detail |
 //! | `dns.log.read` | [`LogReadArgs`] | Answers `done` with a page of the local query log, newest first, filtered, and the cursor of the next page; `rejected` when the log is off or a filter cannot be applied |
 //! | `dns.log.stop`, `dns.log.start` | none | The kill switch: the log takes no entry until it is started again (kept across a restart); `rejected` when the log is off |
-//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the queries blocked per list and RPZ zone, the problems of stub zones and recursion lists, the start |
+//! | `dns.blocking.stats` | [`StatsArgs`] | Answers `done` with the figures of the blocking view over a window of the local query log (`crate::querylog::stats`); `rejected` when the log is off or the window is not valid |
+//! | `dns.blocking.pause` | [`BlockingPauseArgs`] | Pauses the block lists for some minutes or until resumed ([`crate::policy::pause`]) |
+//! | `dns.blocking.resume` | none | Ends the pause |
+//! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the queries blocked per list and RPZ zone, the problems of stub zones and recursion lists, the start, the upstreams with their times and states, the pause of the block lists |
 //!
 //! In Phase 2 the role runs in the controller's own process, so [`LocalNode`] executes a
 //! command in place and the API records it as a row of `cluster.node_commands` in the state
@@ -32,8 +35,11 @@ use tenko_store::WriteBatch;
 
 use crate::{
     catalog::CatalogHandle,
-    forward::{ForwardStats, Forwarder},
-    querylog::{self, FileLog, LogFigures, LogFilter, LogPage},
+    forward::{ForwardStats, Forwarder, UpstreamGroup},
+    querylog::{
+        self, FileLog, LogFigures, LogFilter, LogPage,
+        stats::{BlockingStats, StatsArgs},
+    },
     server::Server,
     store_feed::FeedProgress,
     transport::WorkerLayout,
@@ -55,6 +61,21 @@ pub const STATUS: &str = "dns.status";
 // cache-browse: the listing of the cache.
 /// Read a page of what the node's cache holds.
 pub const CACHE_LIST: &str = "dns.cache.list";
+// dns-visibility: the blocking view.
+/// Count the queries of a window of the node's query log for the blocking view.
+pub const BLOCKING_STATS: &str = "dns.blocking.stats";
+/// Pause the node's block lists.
+pub const BLOCKING_PAUSE: &str = "dns.blocking.pause";
+/// End the pause of the node's block lists.
+pub const BLOCKING_RESUME: &str = "dns.blocking.resume";
+
+/// The arguments of `dns.blocking.pause`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockingPauseArgs {
+    /// Minutes the pause lasts (1 to 1,440); `None` until it is resumed.
+    pub minutes: Option<u32>,
+}
+// dns-visibility: end.
 
 /// The arguments of `dns.cache.list`; empty arguments list the first page of every entry.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,6 +248,13 @@ pub struct DnsStatus {
     pub log: Option<LogFigures>,
     /// Queries blocked per enabled block list and RPZ zone, by name.
     pub blocked: Vec<BlockedCount>,
+    // dns-visibility: the upstreams and the pause of the block lists.
+    /// The upstreams of the default forwarder, the forwarding rules and the stub zones,
+    /// with their times and states; empty without a forwarder.
+    pub upstreams: Vec<UpstreamGroup>,
+    /// While the block lists are paused: until when (`None`: until resumed).
+    pub blocking_paused: Option<crate::policy::pause::Paused>,
+    // dns-visibility: end.
 }
 
 /// The counters `dns.stats` reports.
@@ -327,6 +355,11 @@ pub enum Output {
     // cache-browse: a page of the cache (`dns.cache.list`).
     /// A page of what the cache holds (`dns.cache.list`).
     Cache(Box<crate::cache::CachePage>),
+    // dns-visibility: the blocking view.
+    /// The figures of a window (`dns.blocking.stats`).
+    Blocking(Box<BlockingStats>),
+    /// The pause in force after `dns.blocking.pause` or `dns.blocking.resume`.
+    Paused(Option<crate::policy::pause::Paused>),
 }
 
 /// The result of one command.
@@ -548,6 +581,84 @@ impl LocalNode {
     }
 }
 
+// dns-visibility: the blocking view.
+impl LocalNode {
+    fn blocking_stats(&self, args: &[u8]) -> CommandResult {
+        let Some((_, dir)) = &self.log else {
+            return CommandResult::rejected("the query log is off on this node");
+        };
+        let args: StatsArgs = match tenko_core::codec::from_cbor(args) {
+            Ok(args) => args,
+            Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+        };
+        match querylog::stats::compute(dir, &args) {
+            Ok(stats) => CommandResult::done(
+                format!(
+                    "{} quer(ies), {} blocked, {} octet(s) of the log read{}",
+                    stats.queries,
+                    stats.blocked,
+                    stats.scanned_bytes,
+                    if stats.truncated { " (cut short)" } else { "" }
+                ),
+                Output::Blocking(Box::new(stats)),
+            ),
+            Err(error @ querylog::ReadError::Filter(_)) => {
+                CommandResult::rejected(error.to_string())
+            }
+            Err(error) => CommandResult {
+                outcome: Outcome::Failed,
+                detail: error.to_string(),
+                output: Output::None,
+            },
+        }
+    }
+}
+
+/// Runs `dns.blocking.pause` with the CBOR `args`.
+pub fn pause_blocking(args: &[u8]) -> CommandResult {
+    let args: BlockingPauseArgs = if args.is_empty() {
+        BlockingPauseArgs::default()
+    } else {
+        match tenko_core::codec::from_cbor(args) {
+            Ok(args) => args,
+            Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+        }
+    };
+    if args
+        .minutes
+        .is_some_and(|minutes| !(1..=1_440).contains(&minutes))
+    {
+        return CommandResult::rejected("a pause lasts 1 to 1440 minutes");
+    }
+    let paused = crate::policy::pause::pause(
+        args.minutes
+            .map(|minutes| std::time::Duration::from_secs(u64::from(minutes) * 60)),
+    );
+    let detail = match paused.until {
+        Some(until) => format!("the block lists are paused until {}", until.to_rfc3339()),
+        None => "the block lists are paused until they are resumed".to_owned(),
+    };
+    tracing::info!("{detail}");
+    CommandResult::done(detail, Output::Paused(Some(paused)))
+}
+
+/// Runs `dns.blocking.resume`.
+pub fn resume_blocking() -> CommandResult {
+    let was = crate::policy::pause::resume();
+    if was {
+        tracing::info!("the block lists block again");
+    }
+    CommandResult::done(
+        if was {
+            "the block lists block again"
+        } else {
+            "the block lists were not paused"
+        },
+        Output::Paused(None),
+    )
+}
+// dns-visibility: end.
+
 // cache-browse: the listing of the cache.
 /// Runs `dns.cache.list` on `cache` (`None`: the node keeps none) with the CBOR `args`.
 pub fn list_cache(cache: Option<&crate::cache::Cache>, args: &[u8]) -> CommandResult {
@@ -684,6 +795,14 @@ impl DnsNode for LocalNode {
             layout,
             log: self.log.as_ref().map(|(log, _)| log.figures()),
             blocked: blocked_counts(&self.catalog),
+            // dns-visibility: the upstreams and the pause.
+            upstreams: self
+                .forwarder
+                .as_ref()
+                .map(|forwarder| forwarder.upstream_health())
+                .unwrap_or_default(),
+            blocking_paused: crate::policy::pause::state(),
+            // dns-visibility: end.
         }
     }
 
@@ -699,6 +818,10 @@ impl DnsNode for LocalNode {
             CACHE_LIST => self.list_cache(args),
             LOG_STOP => self.switch_log(true),
             LOG_START => self.switch_log(false),
+            // dns-visibility: the blocking view.
+            BLOCKING_STATS => self.blocking_stats(args),
+            BLOCKING_PAUSE => pause_blocking(args),
+            BLOCKING_RESUME => resume_blocking(),
             other => CommandResult::rejected(format!("`{other}` is not a command of the dns role")),
         }
     }

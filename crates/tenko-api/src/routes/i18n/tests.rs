@@ -702,7 +702,8 @@ async fn unusable_packs_are_refused_with_every_problem_and_audited() {
     upload_parts(&h, admin(&h), &[])
         .await
         .assert_problem(400, "i18n.upload.empty");
-    let two = pack("fr", "Français", 10);
+    // Two small files: two whole packs no longer fit in one request's body limit.
+    let two = "<xliff/>";
     upload_parts(
         &h,
         admin(&h),

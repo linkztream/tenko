@@ -359,6 +359,9 @@ pub enum Trigger {
     Fetch,
     /// `PUT /dns/lists/{id}/file`: audited as `dns.list.upload`.
     Upload,
+    // dns-visibility: allow from the blocking view.
+    /// `POST /dns/blocking/allow`: audited by its caller as `dns.blocking.allow`.
+    Allow,
 }
 
 impl ZoneService {
@@ -416,7 +419,7 @@ impl ZoneService {
         // The request is audited before its job runs, so the record of the fetch or the
         // upload comes before the version's `dns.list.compile`.
         let action: Option<&AuditAction> = match trigger {
-            Trigger::Schedule => None,
+            Trigger::Schedule | Trigger::Allow => None,
             Trigger::Fetch => Some(&tenko_core::dns::audit::LIST_FETCH),
             Trigger::Upload => Some(&tenko_core::dns::audit::LIST_UPLOAD),
         };

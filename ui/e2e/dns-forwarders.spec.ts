@@ -71,6 +71,30 @@ test("creates the default forwarder with a DoT upstream, edits it and deletes a 
   expect(fake.rule("corp.example.test")).toBeUndefined();
 });
 
+// dns-visibility: each upstream's state and time, and the one the next query goes to, on the
+// forwarders page and in the node's DNS settings.
+test("shows the upstreams' times and states with the chosen one marked", async ({ page, signedIn }) => {
+  void signedIn;
+  await FakeResolver.install(page);
+  await page.goto("/dns/forwarders");
+  const corp = rule(page, "corp.example.test");
+  const figures = corp.getByTestId("upstream-figures");
+  await expect(figures).toHaveCount(2);
+  await expect(figures.first()).toHaveAttribute("data-state", "up");
+  await expect(figures.first()).toHaveAttribute("data-chosen", "true");
+  await expect(figures.first().getByTestId("upstream-rtt")).toHaveText("12 ms");
+  await expect(figures.nth(1).getByTestId("upstream-rtt")).toHaveText("28 ms");
+  await expect(corp.getByTestId("upstream-chosen")).toHaveCount(1);
+
+  await page.goto("/settings/dns");
+  const upstreams = page.getByTestId("dns-settings-upstream");
+  await expect(upstreams).toHaveCount(2);
+  await expect(upstreams.first()).toHaveAttribute("data-chosen", "true");
+  await expect(upstreams.first().getByTestId("dns-settings-upstream-p50")).toHaveText("12 ms");
+  await page.getByTestId("dns-settings-upstreams-link").click();
+  await expect(page.getByTestId("page-dns-forwarders")).toBeVisible();
+});
+
 test("checks the rule before it is sent and shows a refusal under its field", async ({ page, signedIn }) => {
   void signedIn;
   const fake = await FakeResolver.install(page);

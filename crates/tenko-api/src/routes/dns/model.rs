@@ -495,6 +495,11 @@ pub struct ForwarderItem {
     pub rule: ForwardRule,
     /// The store revision of the row.
     pub revision: Revision,
+    // dns-visibility: the upstreams' figures.
+    /// The rule's upstreams with their round-trip times and state on the node that
+    /// answers (in the list and on a read), when it runs the DNS role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_status: Option<Vec<UpstreamFigures>>,
 }
 
 /// `POST /dns/forwarders`.
@@ -805,6 +810,14 @@ pub struct DnsNodeStatus {
     /// name.
     #[serde(default)]
     pub blocked: Vec<BlockedCountItem>,
+    // dns-visibility: the upstreams' figures and the pause of the block lists.
+    /// The upstreams of the default forwarder, of every forwarding rule and of the stub
+    /// zones, with their round-trip times and states.
+    #[serde(default)]
+    pub upstreams: Vec<UpstreamGroupItem>,
+    /// The pause of the block lists in force, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocking_paused: Option<BlockingPause>,
 }
 
 /// The queries one block list or RPZ zone blocked since the node's role started.
@@ -986,3 +999,261 @@ pub struct QueryLogParams {
     /// Queries that arrived at or before this time (RFC 3339).
     pub until: Option<Timestamp>,
 }
+
+// dns-visibility: the upstreams' figures and the blocking view.
+/// The state of an upstream on the node that answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamStateItem {
+    /// Not asked yet.
+    Unknown,
+    /// The last exchange was answered.
+    Up,
+    /// Failing, not yet in back-off.
+    Degraded,
+    /// In back-off after three failures in a row: asked only when every other upstream is.
+    Down,
+}
+
+/// One upstream with its round-trip times and state on the node that answers (since its
+/// DNS role started).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpstreamFigures {
+    /// `address:port`.
+    pub upstream: String,
+    /// The transport.
+    pub transport: ForwardTransport,
+    /// The state.
+    pub state: UpstreamStateItem,
+    /// The upstream the next query of the rule goes to (one query in 16 probes another).
+    pub chosen: bool,
+    /// The round-trip time of the last answer, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rtt_ms: Option<f64>,
+    /// The smoothed round-trip time (an EWMA with weight 1/8, the one the choice uses), in
+    /// milliseconds; it doubles with each failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ewma_ms: Option<f64>,
+    /// The median round-trip time of the answers of the last minute, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<f64>,
+    /// The 99th percentile of the round-trip times of the answers of the last minute, in
+    /// milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p99_ms: Option<f64>,
+    /// The answers the quantiles look at (at most the last 512 of the minute).
+    pub window_answers: u32,
+    /// Failures in a row.
+    pub failures: u32,
+    /// Answered exchanges since the role started.
+    pub answered: u64,
+    /// Exchanges that timed out, could not reach the upstream or got a malformed answer.
+    pub failed: u64,
+    /// The last failure, in English.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// When the last failure happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_at: Option<Timestamp>,
+}
+
+/// The upstreams of one forwarding rule, of the default forwarder of the configuration or of
+/// a stub zone.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpstreamGroupItem {
+    /// The forwarding rule; absent for the default forwarder (`[dns] forwarders`) and stub
+    /// zones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<tenko_core::dns::ForwardRuleId>,
+    /// The stub zone whose name servers these are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stub: Option<ZoneId>,
+    /// The `rule` label of the metrics: the rule's suffix, `default`, or `stub:` and the
+    /// zone.
+    pub label: String,
+    /// The upstreams in the rule's order.
+    pub upstreams: Vec<UpstreamFigures>,
+}
+
+/// A pause of the block lists in force.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingPause {
+    /// When it started.
+    pub since: Timestamp,
+    /// When it ends; absent while it lasts until resumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<Timestamp>,
+}
+
+/// The window of `GET /dns/blocking/stats`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum BlockingWindow {
+    /// The last 24 hours.
+    #[default]
+    #[serde(rename = "24h")]
+    Day,
+    /// The last 7 days (as far as the query log keeps them).
+    #[serde(rename = "7d")]
+    Week,
+}
+
+/// The query of `GET /dns/blocking/stats`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct BlockingStatsParams {
+    /// `24h` (the default) or `7d`.
+    #[param(value_type = Option<String>)]
+    pub window: Option<BlockingWindow>,
+    /// The length of each top list, 1 to 100; 10 by default.
+    pub top: Option<u32>,
+}
+
+/// The queries of one hour.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingHour {
+    /// The start of the hour.
+    pub start: Timestamp,
+    /// Queries.
+    pub queries: u64,
+    /// Of them blocked by a block list.
+    pub blocked: u64,
+}
+
+/// The queries one block list blocked in the window.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingListCount {
+    /// The list.
+    pub list: tenko_core::dns::BlockListId,
+    /// Its name; absent for a list deleted since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Queries blocked.
+    pub blocked: u64,
+}
+
+/// A query name with its counts in the window.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingNameCount {
+    /// The query name.
+    pub name: String,
+    /// Queries.
+    pub queries: u64,
+    /// Of them blocked.
+    pub blocked: u64,
+}
+
+/// A client with its counts in the window.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingClientCount {
+    /// The client as the log keeps it: a pseudonym (`p:` and hexadecimal digits, one per
+    /// client and day), or its address when the log keeps addresses and the principal may
+    /// update the node; absent when withheld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
+    /// The DNS name IPAM records for the address, when the address is shown and known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Queries.
+    pub queries: u64,
+    /// Of them blocked.
+    pub blocked: u64,
+}
+
+/// `GET /dns/blocking/stats`: the queries of a window of the node's query log, blocked and
+/// answered.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingStats {
+    /// The node whose log was read.
+    pub node: NodeId,
+    /// The window.
+    pub window: BlockingWindow,
+    /// Its start.
+    pub from: Timestamp,
+    /// Its end (now).
+    pub until: Timestamp,
+    /// Days the log keeps (`[dns.log] days`): a 7-day window of a log that keeps fewer
+    /// covers that many.
+    pub log_days: u32,
+    /// What the log keeps of the client: `pseudonym`, `address` or `hidden`.
+    pub log_client: String,
+    /// One query in `log_sample` is logged; the counts are of the logged queries.
+    pub log_sample: u32,
+    /// Queries logged in the window.
+    pub queries: u64,
+    /// Of them blocked by a block list.
+    pub blocked: u64,
+    /// Of them answered from the cache.
+    pub cached: u64,
+    /// The share blocked, 0 to 1; absent without a query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_share: Option<f64>,
+    /// Distinct clients (a pseudonym counts once per day).
+    pub clients: u64,
+    /// The queries per hour, oldest first.
+    pub hours: Vec<BlockingHour>,
+    /// The blocked queries per block list, the busiest first.
+    pub lists: Vec<BlockingListCount>,
+    /// The names blocked most often.
+    pub top_blocked: Vec<BlockingNameCount>,
+    /// The names asked most often.
+    pub top_names: Vec<BlockingNameCount>,
+    /// The clients that asked most often.
+    pub top_clients: Vec<BlockingClientCount>,
+    /// The newest blocked queries, newest first (at most 50), for allow from the log.
+    pub recent_blocked: Vec<QueryLogLine>,
+    /// The pause of the block lists in force, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<BlockingPause>,
+    /// The log held more in the window than one read looks at (512 MiB): the figures
+    /// cover the newest part.
+    pub truncated: bool,
+}
+
+/// `POST /dns/blocking/pause`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct BlockingPauseRequest {
+    /// Minutes the pause lasts, 1 to 1440 (the UI offers 5, 15 and 60); absent until
+    /// resumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
+}
+
+/// The answer of `POST /dns/blocking/pause` and `DELETE /dns/blocking/pause`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingPauseState {
+    /// The node whose block lists were paused or resumed.
+    pub node: NodeId,
+    /// The pause in force; absent after a resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<BlockingPause>,
+    /// The node command that did it.
+    pub command_id: Uuid,
+}
+
+/// `POST /dns/blocking/allow`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingAllowRequest {
+    /// The name to allow (and the names under it).
+    pub name: DnsName,
+    /// The allow list to add it to: an uploaded allow list. Absent: the list `allowed`,
+    /// created the first time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<tenko_core::dns::BlockListId>,
+}
+
+/// The answer of `POST /dns/blocking/allow`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockingAllowed {
+    /// The allow list.
+    pub list: tenko_core::dns::BlockListId,
+    /// Its name.
+    pub list_name: String,
+    /// The list was created for this name.
+    pub created: bool,
+    /// The list covered the name already: nothing changed.
+    pub already: bool,
+    /// The compile job that writes the list's next version; absent when nothing changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobId>,
+}
+// dns-visibility: end.

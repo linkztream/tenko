@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dns-blocking">
+      <unit id="dns.nav.blocking">
+        <notes><note category="description">Tab of the DNS sub-navigation that leads to the blocking view.</note></notes>
+        <segment><source>Blocking</source></segment>
+      </unit>
+      <unit id="dns.blocking.title">
+        <notes><note category="description">Title of the blocking page and its entry in the browser tab.</note></notes>
+        <segment><source>Blocking</source></segment>
+      </unit>
+      <unit id="dns.blocking.sub">
+        <segment><source>The home view of the query log and the block lists: what was asked, what was blocked and by whom</source></segment>
+      </unit>
+      <unit id="dns.blocking.refresh">
+        <segment><source>Refresh</source></segment>
+      </unit>
+      <unit id="dns.blocking.loading">
+        <segment><source>Reading the query log...</source></segment>
+      </unit>
+      <unit id="dns.blocking.window.label">
+        <notes><note category="description">Accessible name of the choice between 24 hours and 7 days.</note></notes>
+        <segment><source>Time window</source></segment>
+      </unit>
+      <unit id="dns.blocking.window.24h">
+        <segment><source>24 hours</source></segment>
+      </unit>
+      <unit id="dns.blocking.window.7d">
+        <segment><source>7 days</source></segment>
+      </unit>
+      <unit id="dns.blocking.period">
+        <notes><note category="description">Line under the window choice; {from} and {until} are date and time.</note></notes>
+        <segment><source>Figures from {from} to {until}</source></segment>
+      </unit>
+      <unit id="dns.blocking.short_log">
+        <notes><note category="description">Shown for the 7 days window when the log keeps fewer days.</note></notes>
+        <segment><source>{days, plural, =0 {The log keeps no full day, so this window covers less than it says.} one {The log keeps # day, so this window covers only that day.} other {The log keeps # days, so this window covers only those days.}}</source></segment>
+      </unit>
+      <unit id="dns.blocking.truncated">
+        <segment><source>The log holds more queries in this window than one read looks at, so the figures cover the newest part of the log.</source></segment>
+      </unit>
+      <unit id="dns.blocking.sample">
+        <segment><source>One query in {sample} is logged, so the figures count the logged queries.</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.title">
+        <notes><note category="description">Heading, read by screen readers, of the card with the pause.</note></notes>
+        <segment><source>Pause of the block lists</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.on">
+        <segment><source>Blocking is on</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.until">
+        <notes><note category="description">{time} is a time, or a date and time when the pause ends on another day.</note></notes>
+        <segment><source>Paused until {time}</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.open">
+        <segment><source>Paused until resumed</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.left">
+        <notes><note category="description">Remaining time of a timed pause; {left} is a duration such as 4 min.</note></notes>
+        <segment><source>{left} left</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.hint">
+        <segment><source>While paused no block list blocks a name. Allow lists, exemptions and RPZ zones apply as before, and a restart of the node ends the pause.</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.for">
+        <notes><note category="description">Label in front of the pause buttons.</note></notes>
+        <segment><source>Pause for</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.label">
+        <notes><note category="description">Accessible name of the group of pause buttons.</note></notes>
+        <segment><source>Pause blocking</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.5">
+        <segment><source>5 minutes</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.15">
+        <segment><source>15 minutes</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.60">
+        <segment><source>1 hour</source></segment>
+      </unit>
+      <unit id="dns.blocking.pause.btn.open">
+        <segment><source>Until resumed</source></segment>
+      </unit>
+      <unit id="dns.blocking.resume">
+        <notes><note category="description">Button that ends the pause of the block lists.</note></notes>
+        <segment><source>Resume</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.queries">
+        <segment><source>Queries</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.blocked">
+        <segment><source>Blocked</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.cached">
+        <segment><source>From the cache</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.clients">
+        <segment><source>Clients</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.queries_hint">
+        <segment><source>{window, select, 7d {In the last 7 days} other {In the last 24 hours}}</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.blocked_hint">
+        <segment><source>By the block lists</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.cached_hint">
+        <notes><note category="description">{share} is a percentage.</note></notes>
+        <segment><source>{share} of the queries</source></segment>
+      </unit>
+      <unit id="dns.blocking.tile.clients_hint">
+        <segment><source>{mode, select, address {Distinct addresses} hidden {The log keeps no client} other {A pseudonym counts once per day}}</source></segment>
+      </unit>
+      <unit id="dns.blocking.hours.title">
+        <segment><source>Queries per hour</source></segment>
+      </unit>
+      <unit id="dns.blocking.hours.label">
+        <notes><note category="description">Accessible name of the bar chart.</note></notes>
+        <segment><source>Queries per hour, the blocked part marked</source></segment>
+      </unit>
+      <unit id="dns.blocking.hours.queries">
+        <notes><note category="description">Legend of the bar chart.</note></notes>
+        <segment><source>Queries</source></segment>
+      </unit>
+      <unit id="dns.blocking.hours.blocked">
+        <notes><note category="description">Legend of the bar chart.</note></notes>
+        <segment><source>Blocked</source></segment>
+      </unit>
+      <unit id="dns.blocking.hours.bar">
+        <notes><note category="description">Accessible name and tooltip of one bar; {time} is the start of the hour.</note></notes>
+        <segment><source>{time}: {queries, plural, one {# query} other {# queries}}, {blocked} blocked</source></segment>
+      </unit>
+      <unit id="dns.blocking.lists.title">
+        <segment><source>Blocked per list</source></segment>
+      </unit>
+      <unit id="dns.blocking.lists.manage">
+        <notes><note category="description">Link to the block lists page.</note></notes>
+        <segment><source>Block lists</source></segment>
+      </unit>
+      <unit id="dns.blocking.lists.empty">
+        <segment><source>No list blocked a query in this window.</source></segment>
+      </unit>
+      <unit id="dns.blocking.lists.table">
+        <segment><source>Queries blocked per block list</source></segment>
+      </unit>
+      <unit id="dns.blocking.list_deleted">
+        <notes><note category="description">Next to the identifier of a block list that no longer exists.</note></notes>
+        <segment><source>(deleted list)</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.list">
+        <segment><source>List</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.blocked">
+        <segment><source>Blocked</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.queries">
+        <segment><source>Queries</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.share">
+        <segment><source>Share of the busiest list</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.ipam">
+        <notes><note category="description">Column with the DNS name IPAM records for the client address.</note></notes>
+        <segment><source>Name in IPAM</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.time">
+        <segment><source>Time</source></segment>
+      </unit>
+      <unit id="dns.blocking.col.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="dns.blocking.top_blocked.title">
+        <segment><source>Top blocked names</source></segment>
+      </unit>
+      <unit id="dns.blocking.top_blocked.table">
+        <segment><source>The names blocked most often</source></segment>
+      </unit>
+      <unit id="dns.blocking.top_names.title">
+        <segment><source>Top names</source></segment>
+      </unit>
+      <unit id="dns.blocking.top_names.table">
+        <segment><source>The names asked most often</source></segment>
+      </unit>
+      <unit id="dns.blocking.top.empty">
+        <segment><source>Nothing in this window.</source></segment>
+      </unit>
+      <unit id="dns.blocking.clients.title">
+        <segment><source>Top clients</source></segment>
+      </unit>
+      <unit id="dns.blocking.clients.table">
+        <segment><source>The clients that asked most often</source></segment>
+      </unit>
+      <unit id="dns.blocking.clients.note_pseudonym">
+        <segment><source>The log keeps a pseudonym instead of the address, one per client and day, so a client that asks on several days counts once per day.</source></segment>
+      </unit>
+      <unit id="dns.blocking.clients.note_hidden">
+        <segment><source>The log keeps no client, so no client can be named.</source></segment>
+      </unit>
+      <unit id="dns.blocking.clients.empty">
+        <segment><source>No client in this window.</source></segment>
+      </unit>
+      <unit id="dns.blocking.client.withheld">
+        <notes><note category="description">Shown in place of a client the log does not show to the person.</note></notes>
+        <segment><source>Withheld</source></segment>
+      </unit>
+      <unit id="dns.blocking.client.withheld_hint">
+        <segment><source>The log keeps no client, or the address is shown only to those who may update the node.</source></segment>
+      </unit>
+      <unit id="dns.blocking.recent.title">
+        <segment><source>Newest blocked queries</source></segment>
+      </unit>
+      <unit id="dns.blocking.recent.table">
+        <segment><source>The newest queries a block list blocked</source></segment>
+      </unit>
+      <unit id="dns.blocking.recent.empty">
+        <segment><source>No query was blocked in this window.</source></segment>
+      </unit>
+      <unit id="dns.blocking.allow">
+        <notes><note category="description">Button that adds the name of a blocked query to an allow list.</note></notes>
+        <segment><source>Allow</source></segment>
+      </unit>
+      <unit id="dns.blocking.allow_label">
+        <notes><note category="description">Accessible name of the Allow button of one row.</note></notes>
+        <segment><source>Allow {name} and the names under it</source></segment>
+      </unit>
+      <unit id="dns.blocking.allow.added">
+        <notes><note category="description">{list} is the name of the allow list.</note></notes>
+        <segment><source>Added to the list {list}; the list is compiled now</source></segment>
+      </unit>
+      <unit id="dns.blocking.allow.already">
+        <segment><source>Already allowed</source></segment>
+      </unit>
+      <unit id="dns.blocking.allow.job">
+        <segment><source>Open the job</source></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.title">
+        <segment><source>The query log is off</source></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.body">
+        <segment><source>These figures are counted from the node's query log, which is off. Set enabled = true in the section [dns.log] of tenko.toml and restart the node to turn it on; the DNS settings show what the node uses now.</source></segment>
+      </unit>
+      <unit id="dns.blocking.log_off.link">
+        <segment><source>Open the DNS settings</source></segment>
+      </unit>
+      <unit id="dns.blocking.next">
+        <segment><source>Client groups with their own lists, and the ABP and regular expression rule syntax, are the next step. They are not built yet.</source></segment>
+      </unit>
+      <unit id="errors.dns.blocking.log_off">
+        <segment><source>The node's query log is off, so there are no figures. Set enabled = true in [dns.log] in tenko.toml.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

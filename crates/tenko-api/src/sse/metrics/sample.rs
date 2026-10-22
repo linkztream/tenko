@@ -58,7 +58,7 @@ pub(crate) const DNS_CACHE_STALE: &str = "tenko_dns_cache_stale";
 pub(crate) const DNS_CACHE_ENTRIES: &str = "tenko_dns_cache_entries";
 /// `tenko_dns_upstream_queries_total{rule,upstream,transport,outcome}`.
 pub(crate) const DNS_UPSTREAM_QUERIES: &str = "tenko_dns_upstream_queries";
-/// `tenko_dns_upstream_rtt_seconds{upstream}`.
+/// `tenko_dns_upstream_rtt_seconds{rule,upstream}`.
 pub(crate) const DNS_UPSTREAM_RTT: &str = "tenko_dns_upstream_rtt_seconds";
 /// `tenko_dns_blocked_total{list}`.
 pub(crate) const DNS_BLOCKED: &str = "tenko_dns_blocked";
@@ -921,8 +921,9 @@ mod tests {
         ],
     );
     static DNS_RTT: HistogramVec = HistogramVec::fixed(
-        Desc::histogram(DNS_UPSTREAM_RTT, "Round trips.", &BOUNDS, 1_000_000).labels(&["upstream"]),
-        &[&["192.0.2.1:53"]],
+        Desc::histogram(DNS_UPSTREAM_RTT, "Round trips.", &BOUNDS, 1_000_000)
+            .labels(&["rule", "upstream"]),
+        &[&["default", "192.0.2.1:53"]],
     );
     static DNS_BLOCKS: CounterVec = CounterVec::fixed(
         Desc::counter(DNS_BLOCKED, "Blocked.").labels(&["list"]),

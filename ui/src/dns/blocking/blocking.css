@@ -1,0 +1,51 @@
+/* The blocking view (BlockingPage.tsx): the window switch, the pause card, four tiles, the
+   bars of the hours (boxes, no chart library), the tables. Token colors and logical properties
+   only. */
+.blocking-body { display: flex; flex-direction: column; gap: var(--sp-6); }
+.blocking-body[data-loading="true"] { opacity: 0.7; }
+.blocking-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); }
+.blocking-controls .seg button { cursor: pointer; }
+.blocking-body > p { margin: 0; font-size: var(--fs-12); }
+
+.blocking-section { display: grid; gap: var(--sp-4); align-content: start; min-inline-size: 0; }
+.blocking-section > h2, .blocking-heading > h2 { font-size: var(--fs-14); }
+.blocking-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.blocking-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--sp-6); align-items: start; }
+.blocking-section .nowrap { white-space: nowrap; }
+.blocking-name { overflow-wrap: anywhere; }
+
+.blocking-pause { padding: var(--sp-5) var(--sp-6); display: grid; gap: var(--sp-4); }
+.blocking-pause[data-state="timed"], .blocking-pause[data-state="open"] { border-color: color-mix(in srgb, var(--discrepancy-mark) 60%, var(--line)); background: var(--warn-wash); }
+.blocking-pause-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4); }
+.blocking-pause-status { margin: 0; display: inline-flex; align-items: center; gap: var(--sp-3); font-weight: var(--fw-medium); }
+.blocking-pause-status[data-state="on"] > svg.i { color: var(--ok-ink); }
+.blocking-pause-status:not([data-state="on"]) > svg.i { color: var(--warn-ink); }
+.blocking-pause-hint { margin: 0; font-size: var(--fs-12); }
+.blocking-pause-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); font-size: var(--fs-12); }
+.blocking-pause-group { display: inline-flex; flex-wrap: wrap; gap: var(--sp-3); }
+
+.blocking-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-5); }
+.blocking-tile { min-inline-size: 0; }
+.blocking-tile-title { margin: 0; font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
+.blocking-tile .tile-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.blocking-share { margin-inline-start: var(--sp-3); font-size: var(--fs-14); font-weight: var(--fw-regular); color: var(--ink-3); }
+
+.blocking-legend { display: flex; flex-wrap: wrap; gap: var(--sp-5); font-size: var(--fs-12); }
+.blocking-key { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.blocking-key::before { content: ""; inline-size: 10px; block-size: 10px; border-radius: 2px; background: var(--key, var(--accent)); }
+.blocking-key[data-series="queries"] { --key: color-mix(in srgb, var(--accent) 38%, var(--surface)); }
+.blocking-key[data-series="blocked"] { --key: var(--danger); }
+.blocking-hours { display: flex; align-items: flex-end; gap: 2px; block-size: 140px; padding-block: var(--sp-2) 0; border-block-end: 1px solid var(--line); }
+.blocking-hours[data-dense="true"] { gap: 1px; }
+.blocking-hour { flex: 1 1 0; min-inline-size: 0; block-size: 100%; display: flex; align-items: flex-end; }
+.blocking-hour:hover { background: var(--surface-2); }
+.blocking-hour-queries { display: flex; align-items: flex-end; inline-size: 100%; min-block-size: 1px; background: color-mix(in srgb, var(--accent) 38%, var(--surface)); border-start-start-radius: 2px; border-start-end-radius: 2px; }
+.blocking-hour-blocked { display: block; inline-size: 100%; background: var(--danger); }
+.blocking-axis { display: flex; justify-content: space-between; gap: var(--sp-4); font-size: var(--fs-12); }
+
+.blocking-meter-col { inline-size: 40%; }
+.blocking-meter { display: block; block-size: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.blocking-meter > span { display: block; block-size: 100%; background: var(--danger); }
+
+.blocking-outcome { font-size: var(--fs-12); color: var(--ok-ink); }
+.blocking-outcome[data-state="already"] { color: var(--ink-2); }

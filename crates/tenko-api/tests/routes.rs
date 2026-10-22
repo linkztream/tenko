@@ -446,6 +446,11 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/nodes/{id}/dns/log", "read_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/stop", "stop_node_dns_log"),
     ("POST", "/nodes/{id}/dns/log/start", "start_node_dns_log"),
+    // dns-visibility: the blocking view.
+    ("GET", "/dns/blocking/stats", "get_dns_blocking_stats"),
+    ("POST", "/dns/blocking/pause", "pause_dns_blocking"),
+    ("DELETE", "/dns/blocking/pause", "resume_dns_blocking"),
+    ("POST", "/dns/blocking/allow", "allow_dns_name"),
     // dhcp (WP7.0 contracts; the DHCP module)
     ("GET", "/dhcp/settings", "get_dhcp_settings"),
     ("PUT", "/dhcp/settings", "update_dhcp_settings"),

@@ -1,6 +1,7 @@
 // The DNS settings of a node (/settings/dns, administrators): read-only, what the node's DNS role
 // runs with and its figures (`GET /nodes/{id}/dns`): the listeners with UDP, TCP, DoT and DoH,
-// the workers, the cache with its entries, octets and hit ratio, the TCP connections, the query
+// the workers, the upstreams with their round-trip times and states, the cache with its
+// entries, octets and hit ratio, the TCP connections, the query
 // log, and the problems the node reports. Each figure names the `tenko.toml` key that sets it
 // and the section of the documentation; the settings are read at start, so they change in the
 // file and with a restart. A node without the `dns` role, a switched-off module and a server
@@ -20,6 +21,8 @@ import { dnsPaths } from "../../dns/paths";
 import { SettingsNav } from "../SettingsNav";
 // cache-browse: what the cache holds.
 import { CacheSection } from "./CacheSection";
+// dns-visibility: the upstreams with their times and states.
+import { UpstreamsSection } from "./UpstreamsSection";
 import { listenerDoc, listenerKey, serves, settingGroups, type DnsNodeStatus, type SettingRow } from "./model";
 import "./dns-settings.css";
 
@@ -121,6 +124,8 @@ function Status(props: { status: DnsNodeStatus }) {
           {t("dns.node.tls", { dot: servedWord(serves(props.status, "dot")), doh: servedWord(serves(props.status, "doh")) })}
         </p>
       </Group>
+      {/* dns-visibility: the upstreams with their times and states. */}
+      <UpstreamsSection groups={props.status.upstreams ?? []} />
       <For each={groups()}>
         {(group) => (
           <Group title={t(`dns.node.group.${group.id}`)} section={group.section} doc={group.doc} testid={`dns-settings-${group.id}`}>

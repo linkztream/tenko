@@ -1,0 +1,4 @@
+/* dns-visibility: an upstream's state, time and choice (the forwarders page, the node's DNS settings). */
+.fwd-up { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.up-badge { display: inline-flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-12); color: var(--ink-3); white-space: nowrap; }
+.up-badge .tag { font-size: var(--fs-12); }

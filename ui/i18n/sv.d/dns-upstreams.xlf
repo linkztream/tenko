@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns-upstreams">
+      <unit id="dns.upstream.ms">
+        <notes><note category="description">A round-trip time in milliseconds; {ms} is the formatted number.</note></notes>
+        <segment><source>{ms} ms</source><target>{ms} ms</target></segment>
+      </unit>
+      <unit id="dns.upstream.state.unknown">
+        <notes><note category="description">State of an upstream resolver the node has not asked yet.</note></notes>
+        <segment><source>Not asked yet</source><target>Inte tillfrågad än</target></segment>
+      </unit>
+      <unit id="dns.upstream.state.up">
+        <notes><note category="description">State of an upstream resolver whose last exchange was answered.</note></notes>
+        <segment><source>Answering</source><target>Svarar</target></segment>
+      </unit>
+      <unit id="dns.upstream.state.degraded">
+        <notes><note category="description">State of an upstream resolver that failed, fewer than three times in a row.</note></notes>
+        <segment><source>Failing</source><target>Fallerar</target></segment>
+      </unit>
+      <unit id="dns.upstream.state.down">
+        <notes><note category="description">State of an upstream resolver in back-off after three failures in a row: asked only when every other one is.</note></notes>
+        <segment><source>In back-off</source><target>Pausad efter fel</target></segment>
+      </unit>
+      <unit id="dns.upstream.times">
+        <notes><note category="description">The round-trip times of an upstream in its tooltip: the last, the smoothed (EWMA), the median and the 99th percentile of the last minute, and how many answers those two cover.</note></notes>
+        <segment><source>Last {last}, smoothed {ewma}; over the last minute median {p50}, 99th percentile {p99} ({answers} answers).</source><target>Senast {last}, utjämnad {ewma}; senaste minuten median {p50}, 99:e percentil {p99} ({answers} svar).</target></segment>
+      </unit>
+      <unit id="dns.upstream.counts">
+        <notes><note category="description">The answered and failed exchanges with an upstream since the node's DNS role started, in its tooltip.</note></notes>
+        <segment><source>{answered} answered, {failed} failed since the start.</source><target>{answered} besvarade, {failed} misslyckade sedan start.</target></segment>
+      </unit>
+      <unit id="dns.upstream.chosen">
+        <notes><note category="description">Short tag on the upstream resolver the next query of a rule goes to (the fastest healthy one).</note></notes>
+        <segment><source>Next</source><target>Nästa</target></segment>
+      </unit>
+      <unit id="dns.upstream.chosen_long">
+        <notes><note category="description">Tooltip sentence on the upstream the next query goes to; one query in 16 probes another one.</note></notes>
+        <segment><source>The next query goes here (one in 16 probes another upstream).</source><target>Nästa fråga går hit (en av 16 provar en annan uppströmsserver).</target></segment>
+      </unit>
+      <unit id="dns.upstream.last_error">
+        <notes><note category="description">The last failure of an upstream in its tooltip; {time} is when, {error} the server's English detail.</note></notes>
+        <segment><source>Last error {time}: {error}.</source><target>Senaste fel {time}: {error}.</target></segment>
+      </unit>
+      <unit id="dns.upstream.rule.default">
+        <notes><note category="description">The rule column of the default forwarder from the configuration file ([dns] forwarders).</note></notes>
+        <segment><source>Default forwarder</source><target>Standardvidarebefordrare</target></segment>
+      </unit>
+      <unit id="dns.upstream.rule.stub">
+        <notes><note category="description">The rule column for the name servers of a stub zone; {zone} is the zone's name.</note></notes>
+        <segment><source>Stub zone {zone}</source><target>Stubbzon {zone}</target></segment>
+      </unit>
+      <unit id="dns.upstream.section.title">
+        <notes><note category="description">Heading of the section of a node's DNS settings that lists the upstream resolvers with their response times.</note></notes>
+        <segment><source>Upstreams</source><target>Uppströmsservrar</target></segment>
+      </unit>
+      <unit id="dns.upstream.section.doc">
+        <notes><note category="description">Explanation under the heading of the upstreams section.</note></notes>
+        <segment><source>Round-trip times and states on this node since its DNS role started; the median and the 99th percentile cover the last minute. Each rule sends a query to its fastest healthy upstream, marked Next; one query in 16 probes another so that their times stay current.</source><target>Svarstider och tillstånd på den här noden sedan dess DNS-roll startade; medianen och 99:e percentilen gäller senaste minuten. Varje regel skickar en fråga till sin snabbaste friska uppströmsserver, märkt Nästa; en fråga av 16 provar en annan så att deras tider hålls aktuella.</target></segment>
+      </unit>
+      <unit id="dns.upstream.section.link">
+        <notes><note category="description">Link from the upstreams section to the forwarding rules page.</note></notes>
+        <segment><source>Forwarding rules</source><target>Vidarebefordringsregler</target></segment>
+      </unit>
+      <unit id="dns.upstream.section.empty">
+        <notes><note category="description">Shown in the upstreams section when the node forwards nothing.</note></notes>
+        <segment><source>No upstream: this node forwards no query.</source><target>Ingen uppströmsserver: noden vidarebefordrar inga frågor.</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.rule">
+        <notes><note category="description">Column of the upstreams table: the forwarding rule (its suffix).</note></notes>
+        <segment><source>Rule</source><target>Regel</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.upstream">
+        <notes><note category="description">Column of the upstreams table: the upstream's address and port.</note></notes>
+        <segment><source>Upstream</source><target>Uppströmsserver</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.state">
+        <notes><note category="description">Column of the upstreams table: the upstream's state.</note></notes>
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.last">
+        <notes><note category="description">Column of the upstreams table: the round-trip time of the last answer.</note></notes>
+        <segment><source>Last</source><target>Senast</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.ewma">
+        <notes><note category="description">Column of the upstreams table: the smoothed round-trip time (EWMA), the one the choice uses.</note></notes>
+        <segment><source>Smoothed</source><target>Utjämnad</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.p50">
+        <notes><note category="description">Column of the upstreams table: the median round-trip time of the last minute.</note></notes>
+        <segment><source>Median</source><target>Median</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.p99">
+        <notes><note category="description">Column of the upstreams table: the 99th percentile of the round-trip times of the last minute.</note></notes>
+        <segment><source>99th pct.</source><target>99:e perc.</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.answered">
+        <notes><note category="description">Column of the upstreams table: answered exchanges since the start.</note></notes>
+        <segment><source>Answered</source><target>Besvarade</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.failed">
+        <notes><note category="description">Column of the upstreams table: failed exchanges since the start (timeouts, unreachable, malformed answers).</note></notes>
+        <segment><source>Failed</source><target>Misslyckade</target></segment>
+      </unit>
+      <unit id="dns.upstream.col.error">
+        <notes><note category="description">Column of the upstreams table: the last error with its time.</note></notes>
+        <segment><source>Last error</source><target>Senaste fel</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

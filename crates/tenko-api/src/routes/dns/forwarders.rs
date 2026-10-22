@@ -1,9 +1,14 @@
 //! `GET|POST /dns/forwarders`, `GET|PATCH|DELETE /dns/forwarders/{id}`: forwarding rules
 //! (DNS-02). The role's catalog follows the rows through the feed; the forwarder routes a
 //! query by the longest suffix of its view, then of all views.
+//!
+//! The list and a read carry each rule's upstreams with their round-trip times and state on
+//! the node that answers, when it runs the DNS role (`upstream_status`).
+
+use std::collections::HashMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -16,6 +21,11 @@ use tenko_dns::{
 };
 
 use super::{ForwarderCreate, ForwarderItem, ForwarderPatch, Zones, parse_id, with_etag};
+// dns-visibility: the upstreams' figures.
+use super::{
+    UpstreamFigures,
+    nodes::{Slot, upstream_figures},
+};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -29,8 +39,33 @@ fn item(row: RuleRow) -> ForwarderItem {
     ForwarderItem {
         rule: row.rule,
         revision: row.revision,
+        upstream_status: None,
     }
 }
+
+// dns-visibility: the upstreams' figures.
+/// The upstreams' figures per rule from the DNS role of this process, when it runs one.
+fn figures(slot: Option<&Slot>) -> HashMap<ForwardRuleId, Vec<UpstreamFigures>> {
+    let Some(Some(Extension(slot))) = slot else {
+        return HashMap::new();
+    };
+    let Some(status) = slot.status() else {
+        return HashMap::new();
+    };
+    status
+        .upstreams
+        .into_iter()
+        .filter_map(|group| {
+            group.rule.map(|rule| {
+                (
+                    rule,
+                    group.upstreams.into_iter().map(upstream_figures).collect(),
+                )
+            })
+        })
+        .collect()
+}
+// dns-visibility: end.
 
 /// The position of a rule in the list: its suffix, then its id.
 fn position(item: &ForwarderItem) -> (String, ForwardRuleId) {
@@ -47,7 +82,7 @@ fn position(item: &ForwarderItem) -> (String, ForwardRuleId) {
                    default forwarder, first).",
     params(PageParams),
     responses(
-        (status = 200, description = "A page of rules by suffix", body = Page<ForwarderItem>),
+        (status = 200, description = "A page of rules by suffix, each with its upstreams' round-trip times and state on the node that answers (`upstream_status`, when it runs the DNS role)", body = Page<ForwarderItem>),
         (status = 400, description = "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json")
@@ -57,6 +92,7 @@ pub(super) async fn list_dns_forwarders(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    slot: Slot,
     Query(page): Query<PageParams>,
 ) -> Result<Response, ApiError> {
     app.authorize(
@@ -69,9 +105,14 @@ pub(super) async fn list_dns_forwarders(
     let scope = CursorScope::new("dns.forwarders");
     let after: Option<(String, ForwardRuleId)> = page.cursor(scope)?;
     let view = page.read(service.store().as_ref()).await?;
+    let mut figures = figures(Some(&slot));
     let mut rows: Vec<ForwarderItem> = ZoneService::forward_rules(view.as_ref())?
         .into_iter()
-        .map(item)
+        .map(|row| {
+            let mut item = item(row);
+            item.upstream_status = figures.remove(&item.rule.id);
+            item
+        })
         .collect();
     rows.sort_by_key(position);
     let mut items = Vec::new();
@@ -144,7 +185,9 @@ pub(super) async fn create_dns_forwarder(
     tag = "dns",
     operation_id = "get_dns_forwarder",
     summary = "Get a forwarding rule",
-    description = "Scope: `dns.read`.",
+    description = "Scope: `dns.read`. The rule carries its upstreams' round-trip times and \
+                   state on the node that answers (`upstream_status`), when it runs the DNS \
+                   role.",
     params(("id" = String, Path, description = "Forwarding rule identifier (UUID)")),
     responses(
         (status = 200, description = "The rule with its `ETag`", body = ForwarderItem),
@@ -158,6 +201,7 @@ pub(super) async fn get_dns_forwarder(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
     zones: Zones,
+    slot: Slot,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ForwardRuleId>(&id)?;
@@ -166,7 +210,9 @@ pub(super) async fn get_dns_forwarder(
     let view = service.view(None).await?;
     let row = ZoneService::forward_rule(view.as_ref(), id)?;
     let revision = row.revision;
-    Ok(with_etag(StatusCode::OK, &item(row), revision))
+    let mut item = item(row);
+    item.upstream_status = figures(Some(&slot)).remove(&id);
+    Ok(with_etag(StatusCode::OK, &item, revision))
 }
 
 #[utoipa::path(

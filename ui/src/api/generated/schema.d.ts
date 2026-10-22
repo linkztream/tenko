@@ -1637,6 +1637,70 @@ export interface paths {
         patch: operations["update_dns_acl"];
         trace?: never;
     };
+    "/api/v1/dns/blocking/allow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Allow a blocked name
+         * @description Scope: `dns.write`. Adds `name` (and the names under it) to the uploaded allow list `list`, or to the allow list `allowed`, created the first time, and starts the compile job `dns.list.compile` of its next version (202 with the job). A name the list covers already changes nothing (200, `already`). Audited as `dns.blocking.allow` with the name and the list.
+         */
+        post: operations["allow_dns_name"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/blocking/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause the block lists
+         * @description Scope: `dns.write`. Issues the node command `dns.blocking.pause` on the node that answers: no block list blocks a name for `minutes` (1 to 1440), or until the pause is resumed when `minutes` is absent; allow lists, exemptions and RPZ zones apply as before. A pause in force is replaced; a restart of the node ends it. Recorded in the node's commands and audited as `dns.blocking.pause`.
+         */
+        post: operations["pause_dns_blocking"];
+        /**
+         * End the pause of the block lists
+         * @description Scope: `dns.write`. Issues the node command `dns.blocking.resume` on the node that answers: the block lists block again. Recorded in the node's commands and audited as `dns.blocking.resume`.
+         */
+        delete: operations["resume_dns_blocking"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/blocking/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the figures of the blocking view
+         * @description Scope: `dns.read`. Issues the node command `dns.blocking.stats` on the node that answers: the queries of the last 24 hours or 7 days counted from its query log, in total, blocked by a block list and from the cache, per hour, per block list, the names blocked and asked most often, the clients that asked most often and the newest blocked queries, with the pause of the block lists. A client is shown as the log keeps it; an address only to a principal that may update the node, with the DNS name IPAM records for it. Recorded in the node's commands and audited as `dns.blocking.stats`. 409 `dns.blocking.log_off` while the node's query log is off.
+         */
+        get: operations["get_dns_blocking_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dns/forwarders": {
         parameters: {
             query?: never;
@@ -1670,7 +1734,7 @@ export interface paths {
         };
         /**
          * Get a forwarding rule
-         * @description Scope: `dns.read`.
+         * @description Scope: `dns.read`. The rule carries its upstreams' round-trip times and state on the node that answers (`upstream_status`), when it runs the DNS role.
          */
         get: operations["get_dns_forwarder"];
         put?: never;
@@ -5658,6 +5722,188 @@ export interface components {
             /** @description The list's name, or the RPZ zone's name. */
             list: string;
         };
+        /** @description `POST /dns/blocking/allow`. */
+        BlockingAllowRequest: {
+            list?: components["schemas"]["BlockListId"] | null;
+            /** @description The name to allow (and the names under it). */
+            name: components["schemas"]["DnsName"];
+        };
+        /** @description The answer of `POST /dns/blocking/allow`. */
+        BlockingAllowed: {
+            /** @description The list covered the name already: nothing changed. */
+            already: boolean;
+            /** @description The list was created for this name. */
+            created: boolean;
+            job?: components["schemas"]["JobId"] | null;
+            /** @description The allow list. */
+            list: components["schemas"]["BlockListId"];
+            /** @description Its name. */
+            list_name: string;
+        };
+        /** @description A client with its counts in the window. */
+        BlockingClientCount: {
+            /**
+             * Format: int64
+             * @description Of them blocked.
+             */
+            blocked: number;
+            /**
+             * @description The client as the log keeps it: a pseudonym (`p:` and hexadecimal digits, one per
+             *     client and day), or its address when the log keeps addresses and the principal may
+             *     update the node; absent when withheld.
+             */
+            client?: string | null;
+            /** @description The DNS name IPAM records for the address, when the address is shown and known. */
+            name?: string | null;
+            /**
+             * Format: int64
+             * @description Queries.
+             */
+            queries: number;
+        };
+        /** @description The queries of one hour. */
+        BlockingHour: {
+            /**
+             * Format: int64
+             * @description Of them blocked by a block list.
+             */
+            blocked: number;
+            /**
+             * Format: int64
+             * @description Queries.
+             */
+            queries: number;
+            /** @description The start of the hour. */
+            start: components["schemas"]["Timestamp"];
+        };
+        /** @description The queries one block list blocked in the window. */
+        BlockingListCount: {
+            /**
+             * Format: int64
+             * @description Queries blocked.
+             */
+            blocked: number;
+            /** @description The list. */
+            list: components["schemas"]["BlockListId"];
+            /** @description Its name; absent for a list deleted since. */
+            name?: string | null;
+        };
+        /** @description A query name with its counts in the window. */
+        BlockingNameCount: {
+            /**
+             * Format: int64
+             * @description Of them blocked.
+             */
+            blocked: number;
+            /** @description The query name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Queries.
+             */
+            queries: number;
+        };
+        /** @description A pause of the block lists in force. */
+        BlockingPause: {
+            /** @description When it started. */
+            since: components["schemas"]["Timestamp"];
+            until?: components["schemas"]["Timestamp"] | null;
+        };
+        /** @description `POST /dns/blocking/pause`. */
+        BlockingPauseRequest: {
+            /**
+             * Format: int32
+             * @description Minutes the pause lasts, 1 to 1440 (the UI offers 5, 15 and 60); absent until
+             *     resumed.
+             */
+            minutes?: number | null;
+        };
+        /** @description The answer of `POST /dns/blocking/pause` and `DELETE /dns/blocking/pause`. */
+        BlockingPauseState: {
+            /**
+             * Format: uuid
+             * @description The node command that did it.
+             */
+            command_id: string;
+            /** @description The node whose block lists were paused or resumed. */
+            node: components["schemas"]["NodeId"];
+            paused?: components["schemas"]["BlockingPause"] | null;
+        };
+        /**
+         * @description `GET /dns/blocking/stats`: the queries of a window of the node's query log, blocked and
+         *     answered.
+         */
+        BlockingStats: {
+            /**
+             * Format: int64
+             * @description Of them blocked by a block list.
+             */
+            blocked: number;
+            /**
+             * Format: double
+             * @description The share blocked, 0 to 1; absent without a query.
+             */
+            blocked_share?: number | null;
+            /**
+             * Format: int64
+             * @description Of them answered from the cache.
+             */
+            cached: number;
+            /**
+             * Format: int64
+             * @description Distinct clients (a pseudonym counts once per day).
+             */
+            clients: number;
+            /** @description Its start. */
+            from: components["schemas"]["Timestamp"];
+            /** @description The queries per hour, oldest first. */
+            hours: components["schemas"]["BlockingHour"][];
+            /** @description The blocked queries per block list, the busiest first. */
+            lists: components["schemas"]["BlockingListCount"][];
+            /** @description What the log keeps of the client: `pseudonym`, `address` or `hidden`. */
+            log_client: string;
+            /**
+             * Format: int32
+             * @description Days the log keeps (`[dns.log] days`): a 7-day window of a log that keeps fewer
+             *     covers that many.
+             */
+            log_days: number;
+            /**
+             * Format: int32
+             * @description One query in `log_sample` is logged; the counts are of the logged queries.
+             */
+            log_sample: number;
+            /** @description The node whose log was read. */
+            node: components["schemas"]["NodeId"];
+            paused?: components["schemas"]["BlockingPause"] | null;
+            /**
+             * Format: int64
+             * @description Queries logged in the window.
+             */
+            queries: number;
+            /** @description The newest blocked queries, newest first (at most 50), for allow from the log. */
+            recent_blocked: components["schemas"]["QueryLogLine"][];
+            /** @description The names blocked most often. */
+            top_blocked: components["schemas"]["BlockingNameCount"][];
+            /** @description The clients that asked most often. */
+            top_clients: components["schemas"]["BlockingClientCount"][];
+            /** @description The names asked most often. */
+            top_names: components["schemas"]["BlockingNameCount"][];
+            /**
+             * @description The log held more in the window than one read looks at (512 MiB): the figures
+             *     cover the newest part.
+             */
+            truncated: boolean;
+            /** @description Its end (now). */
+            until: components["schemas"]["Timestamp"];
+            /** @description The window. */
+            window: components["schemas"]["BlockingWindow"];
+        };
+        /**
+         * @description The window of `GET /dns/blocking/stats`.
+         * @enum {string}
+         */
+        BlockingWindow: "24h" | "7d";
         /**
          * @description Where the breached-password check looks (TGL-06).
          * @enum {string}
@@ -7086,6 +7332,7 @@ export interface components {
              *     name.
              */
             blocked?: components["schemas"]["BlockedCountItem"][];
+            blocking_paused?: components["schemas"]["BlockingPause"] | null;
             /**
              * Format: int64
              * @description Octets the cache accounts for (keys, answers, bookkeeping), a lower bound of its
@@ -7165,6 +7412,11 @@ export interface components {
              *     counts across `reuseport` workers are the flow-hash effect.
              */
             udp_workers?: components["schemas"]["UdpWorkerItem"][];
+            /**
+             * @description The upstreams of the default forwarder, of every forwarding rule and of the stub
+             *     zones, with their round-trip times and states.
+             */
+            upstreams?: components["schemas"]["UpstreamGroupItem"][];
             /**
              * Format: int32
              * @description Zones served.
@@ -7794,6 +8046,11 @@ export interface components {
         ForwarderItem: components["schemas"]["ForwardRule"] & {
             /** @description The store revision of the row. */
             revision: components["schemas"]["Revision"];
+            /**
+             * @description The rule's upstreams with their round-trip times and state on the node that
+             *     answers (in the list and on a read), when it runs the DNS role.
+             */
+            upstream_status?: components["schemas"]["UpstreamFigures"][] | null;
         };
         /** @description `PATCH /dns/forwarders/{id}`. */
         ForwarderPatch: {
@@ -12023,6 +12280,11 @@ export interface components {
             items: (components["schemas"]["ForwardRule"] & {
                 /** @description The store revision of the row. */
                 revision: components["schemas"]["Revision"];
+                /**
+                 * @description The rule's upstreams with their round-trip times and state on the node that
+                 *     answers (in the list and on a read), when it runs the DNS role.
+                 */
+                upstream_status?: components["schemas"]["UpstreamFigures"][] | null;
             })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -18054,6 +18316,85 @@ export interface components {
              */
             port?: number | null;
         };
+        /**
+         * @description One upstream with its round-trip times and state on the node that answers (since its
+         *     DNS role started).
+         */
+        UpstreamFigures: {
+            /**
+             * Format: int64
+             * @description Answered exchanges since the role started.
+             */
+            answered: number;
+            /** @description The upstream the next query of the rule goes to (one query in 16 probes another). */
+            chosen: boolean;
+            /**
+             * Format: double
+             * @description The smoothed round-trip time (an EWMA with weight 1/8, the one the choice uses), in
+             *     milliseconds; it doubles with each failure.
+             */
+            ewma_ms?: number | null;
+            /**
+             * Format: int64
+             * @description Exchanges that timed out, could not reach the upstream or got a malformed answer.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Failures in a row.
+             */
+            failures: number;
+            /** @description The last failure, in English. */
+            last_error?: string | null;
+            last_error_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: double
+             * @description The round-trip time of the last answer, in milliseconds.
+             */
+            last_rtt_ms?: number | null;
+            /**
+             * Format: double
+             * @description The median round-trip time of the answers of the last minute, in milliseconds.
+             */
+            p50_ms?: number | null;
+            /**
+             * Format: double
+             * @description The 99th percentile of the round-trip times of the answers of the last minute, in
+             *     milliseconds.
+             */
+            p99_ms?: number | null;
+            /** @description The state. */
+            state: components["schemas"]["UpstreamStateItem"];
+            /** @description The transport. */
+            transport: components["schemas"]["ForwardTransport"];
+            /** @description `address:port`. */
+            upstream: string;
+            /**
+             * Format: int32
+             * @description The answers the quantiles look at (at most the last 512 of the minute).
+             */
+            window_answers: number;
+        };
+        /**
+         * @description The upstreams of one forwarding rule, of the default forwarder of the configuration or of
+         *     a stub zone.
+         */
+        UpstreamGroupItem: {
+            /**
+             * @description The `rule` label of the metrics: the rule's suffix, `default`, or `stub:` and the
+             *     zone.
+             */
+            label: string;
+            rule?: components["schemas"]["ForwardRuleId"] | null;
+            stub?: components["schemas"]["ZoneId"] | null;
+            /** @description The upstreams in the rule's order. */
+            upstreams: components["schemas"]["UpstreamFigures"][];
+        };
+        /**
+         * @description The state of an upstream on the node that answers.
+         * @enum {string}
+         */
+        UpstreamStateItem: "unknown" | "up" | "degraded" | "down";
         /** @description `POST /users`. */
         UserCreate: {
             /** @description The display name; defaults to the login name. */
@@ -27230,6 +27571,252 @@ export interface operations {
             };
         };
     };
+    allow_dns_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockingAllowRequest"];
+            };
+        };
+        responses: {
+            /** @description The list covers the name already */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockingAllowed"];
+                };
+            };
+            /** @description The compile job; follow it at the `Location` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockingAllowed"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such list (`dns.list.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The list is not an uploaded allow list (`dns.list.invalid`), or the list jobs do not run on this server (`dns.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    pause_dns_blocking: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlockingPauseRequest"];
+            };
+        };
+        responses: {
+            /** @description The pause in force */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockingPauseState"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    resume_dns_blocking: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No pause is in force */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockingPauseState"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_blocking_stats: {
+        parameters: {
+            query?: {
+                /** @description `24h` (the default) or `7d`. */
+                window?: string;
+                /** @description The length of each top list, 1 to 100; 10 by default. */
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The figures of the window */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BlockingStats"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server does not run the dns role (`dns.node.not_dns`), or its query log is off (`dns.blocking.log_off`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_dns_forwarders: {
         parameters: {
             query?: {
@@ -27246,7 +27833,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of rules by suffix */
+            /** @description A page of rules by suffix, each with its upstreams' round-trip times and state on the node that answers (`upstream_status`, when it runs the DNS role) */
             200: {
                 headers: {
                     [name: string]: unknown;

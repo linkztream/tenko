@@ -183,9 +183,13 @@ pub mod codes {
     /// exist, is not a primary zone, is a reverse zone, or belongs to another tenant.
     /// Params: `zone`, `reason` (`missing`, `not_primary`, `reverse`, `other_tenant`).
     pub const DEFAULT_ZONE_INVALID: &str = "dns.default_zone.invalid";
+    // dns-visibility: the blocking view.
+    /// The node's query log is off, so the blocking view has nothing to count (409).
+    /// Params: `node`.
+    pub const BLOCKING_LOG_OFF: &str = "dns.blocking.log_off";
 
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 29] = [
+    pub const ALL: [&str; 30] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -217,6 +221,8 @@ pub mod codes {
         DNSSEC_SIGNING_FAILED,
         // Backlog
         DEFAULT_ZONE_INVALID,
+        // dns-visibility
+        BLOCKING_LOG_OFF,
     ];
 }
 
@@ -1971,8 +1977,19 @@ pub mod audit {
     /// A step of a key rollover ran (started, waiting, finished).
     pub const DNSSEC_ROLLOVER: AuditAction = AuditAction::from_static("dns.dnssec.rollover");
 
+    // dns-visibility: the blocking view.
+    /// The figures of the blocking view were read from a node's query log (the names and
+    /// the clients, personal data like the log).
+    pub const BLOCKING_STATS: AuditAction = AuditAction::from_static("dns.blocking.stats");
+    /// A node's block lists were paused (for some minutes or until resumed).
+    pub const BLOCKING_PAUSE: AuditAction = AuditAction::from_static("dns.blocking.pause");
+    /// The pause of a node's block lists was ended.
+    pub const BLOCKING_RESUME: AuditAction = AuditAction::from_static("dns.blocking.resume");
+    /// A name was added to an allow list from the blocking view.
+    pub const BLOCKING_ALLOW: AuditAction = AuditAction::from_static("dns.blocking.allow");
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 40] = [
+    pub const ALL: [&AuditAction; 44] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -2014,6 +2031,11 @@ pub mod audit {
         &DNSSEC_KEY_CREATE,
         &DNSSEC_KEY_STATE,
         &DNSSEC_ROLLOVER,
+        // dns-visibility
+        &BLOCKING_STATS,
+        &BLOCKING_PAUSE,
+        &BLOCKING_RESUME,
+        &BLOCKING_ALLOW,
     ];
 }
 

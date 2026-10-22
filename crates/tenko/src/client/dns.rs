@@ -66,6 +66,9 @@ mod cache;
 // WP6.3: `tenko dns dnssec`.
 #[path = "dns_dnssec.rs"]
 pub mod dnssec;
+// dns-visibility: `tenko dns blocking`.
+#[path = "dns_blocking.rs"]
+pub mod blocking;
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -136,6 +139,13 @@ pub enum DnsCommand {
         /// The `dnssec` subcommand to run.
         #[command(subcommand)]
         action: dnssec::DnssecCommand,
+    },
+    // dns-visibility: `tenko dns blocking`.
+    /// The blocking view: the figures of the query log, the pause of the block lists.
+    Blocking {
+        /// The `blocking` subcommand to run.
+        #[command(subcommand)]
+        action: blocking::BlockingCommand,
     },
 }
 
@@ -562,6 +572,8 @@ impl DnsCommand {
             // cache-browse: `tenko dns cache`.
             Self::Cache { action } => action.client(),
             Self::Dnssec { action } => action.client(),
+            // dns-visibility
+            Self::Blocking { action } => action.client(),
         }
     }
 
@@ -622,6 +634,8 @@ impl DnsCommand {
             // cache-browse: `tenko dns cache`.
             Self::Cache { action } => action.name(),
             Self::Dnssec { action } => action.name(),
+            // dns-visibility
+            Self::Blocking { action } => action.name(),
         }
     }
 }
@@ -1038,6 +1052,8 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         // cache-browse: `tenko dns cache`.
         DnsCommand::Cache { action } => cache::run(&target, action).await,
         DnsCommand::Dnssec { action } => dnssec::run(&target, action).await,
+        // dns-visibility
+        DnsCommand::Blocking { action } => blocking::run(&target, action).await,
     }
 }
 
@@ -2320,28 +2336,88 @@ async fn forwarder_list(target: &Target) -> Result<Output, Failure> {
     if target.json {
         return Ok(Output::json(&json!({ "items": items })));
     }
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|rule| {
-            let view = text(rule, &["view"]);
-            vec![
-                text(rule, &["suffix"]).to_owned(),
-                text(rule, &["transport"]).to_owned(),
-                upstreams_of(rule).join(" "),
-                if view.is_empty() {
-                    "all".to_owned()
-                } else {
-                    view.to_owned()
-                },
-                text(rule, &["id"]).to_owned(),
-            ]
-        })
-        .collect();
+    // dns-visibility: a row per upstream with its times and state on the node that
+    // answers; the rule's columns on its first row.
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for rule in &items {
+        let view = text(rule, &["view"]);
+        let view = if view.is_empty() { "all" } else { view };
+        let status = rule
+            .get("upstream_status")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for (index, upstream) in upstreams_of(rule).iter().enumerate() {
+            // The figures come in the rule's order of upstreams.
+            let figures = status.get(index);
+            let mut row = if index == 0 {
+                vec![
+                    text(rule, &["suffix"]).to_owned(),
+                    text(rule, &["transport"]).to_owned(),
+                ]
+            } else {
+                vec![String::new(), String::new()]
+            };
+            row.push(upstream.clone());
+            row.extend(upstream_columns(figures));
+            if index == 0 {
+                row.push(view.to_owned());
+                row.push(text(rule, &["id"]).to_owned());
+            }
+            rows.push(row);
+        }
+    }
     Ok(Output::text(table(
-        &["SUFFIX", "TRANSPORT", "UPSTREAMS", "VIEW", "ID"],
+        &[
+            "SUFFIX",
+            "TRANSPORT",
+            "UPSTREAM",
+            "STATE",
+            "RTT",
+            "EWMA",
+            "P50",
+            "P99",
+            "VIEW",
+            "ID",
+        ],
         &rows,
     )))
 }
+
+// dns-visibility: the figures of one upstream for the table.
+/// The state (with `*` on the upstream the next query goes to) and the last, smoothed,
+/// median and 99th percentile round-trip times in milliseconds; `-` without figures (the
+/// node runs no DNS role, or has not asked the upstream yet).
+fn upstream_columns(figures: Option<&Value>) -> [String; 5] {
+    let Some(figures) = figures else {
+        return [
+            "-".to_owned(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ];
+    };
+    let millis = |key: &str| {
+        figures
+            .get(key)
+            .and_then(Value::as_f64)
+            .map_or_else(|| "-".to_owned(), |value| format!("{value:.1}"))
+    };
+    let chosen = figures.get("chosen").and_then(Value::as_bool) == Some(true);
+    [
+        format!(
+            "{}{}",
+            text(figures, &["state"]),
+            if chosen { " *" } else { "" }
+        ),
+        millis("last_rtt_ms"),
+        millis("ewma_ms"),
+        millis("p50_ms"),
+        millis("p99_ms"),
+    ]
+}
+// dns-visibility: end.
 
 async fn forwarder_create(target: &Target, args: &ForwarderCreateArgs) -> Result<Output, Failure> {
     let upstreams = parse_upstreams(&args.upstreams)?;

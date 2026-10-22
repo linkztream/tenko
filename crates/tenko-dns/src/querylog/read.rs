@@ -111,7 +111,7 @@ fn parse_cursor(cursor: &str) -> Option<(String, u64)> {
     Some((name.to_owned(), offset.parse().ok()?))
 }
 
-fn micros_of(time: Timestamp) -> u64 {
+pub(super) fn micros_of(time: Timestamp) -> u64 {
     u64::try_from(time.unix_nanos() / 1_000).unwrap_or(0)
 }
 
@@ -201,7 +201,7 @@ impl<'a> Matcher<'a> {
 
 /// The records of a segment with their offsets, oldest first: whole JSON lines, or the
 /// data frames of a dnstap segment that starts with the dnstap content type.
-fn records(format: LogFormat, bytes: &[u8]) -> Vec<(usize, &[u8])> {
+pub(super) fn records(format: LogFormat, bytes: &[u8]) -> Vec<(usize, &[u8])> {
     match format {
         LogFormat::Jsonl => {
             let mut out = Vec::new();
@@ -236,7 +236,7 @@ fn records(format: LogFormat, bytes: &[u8]) -> Vec<(usize, &[u8])> {
     }
 }
 
-fn decode(format: LogFormat, record: &[u8]) -> Option<LogLine> {
+pub(super) fn decode(format: LogFormat, record: &[u8]) -> Option<LogLine> {
     match format {
         LogFormat::Jsonl => serde_json::from_slice(record).ok(),
         LogFormat::Dnstap => dnstap::line_of(&dnstap::Dnstap::decode(record).ok()?),

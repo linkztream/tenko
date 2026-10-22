@@ -7,6 +7,9 @@
 // row and so has nothing to edit (WP6.4: each view names its own recursion access list on the
 // views page, linked here), and the problems the node reports for stub zones and recursion
 // lists.
+//
+// dns-visibility: each upstream shows its state, its round-trip time on the node that answers
+// (the median of the last minute) and the upstream the next query goes to (`upstream_status`).
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Show } from "solid-js";
 import { createLiveQuery, latest } from "../../api/live";
@@ -25,6 +28,8 @@ import { dnsPaths } from "../paths";
 import { listForwarders, type ForwarderItem } from "./api";
 import { DeleteForwarderDialog, ForwarderDialog } from "./ForwarderDialog";
 import { isRoot, ruleOrder, upstreamEndpoint } from "./model";
+// dns-visibility: the upstreams' figures.
+import { UpstreamBadge } from "./figures";
 import "../dns.css";
 
 /** The problems the node reports for the resolver side; none while it cannot be read. */
@@ -117,10 +122,14 @@ export default function ForwardersPage() {
       render: (r) => (
         <span class="dns-chips">
           <For each={r.upstreams}>
-            {(u) => (
-              <span class="tag mono" data-testid="fwd-upstream" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>
-                {upstreamEndpoint(u, r.transport ?? "plain")}
-                {u.path ?? ""}
+            {(u, i) => (
+              <span class="fwd-up" data-testid="fwd-upstream-cell" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>
+                <span class="tag mono" data-testid="fwd-upstream" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>
+                  {upstreamEndpoint(u, r.transport ?? "plain")}
+                  {u.path ?? ""}
+                </span>
+                {/* The figures come in the rule's order of upstreams. */}
+                <Show when={r.upstream_status?.[i()]}>{(figures) => <UpstreamBadge figures={figures()} />}</Show>
               </span>
             )}
           </For>

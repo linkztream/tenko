@@ -79,6 +79,8 @@
 //! well. The DNS kinds are global-only for grants in Phase 2.
 
 mod acls;
+// dns-visibility: the blocking view.
+mod blocking;
 // WP6.3: the DNSSEC routes.
 mod dnssec;
 mod forwarders;
@@ -118,6 +120,12 @@ pub use nodes::DnsNodeSlot;
 pub use zones::{JournalItem, JournalParams};
 // cache-browse: the listing of a node's cache.
 pub use model::{DnsCacheEntry, DnsCacheParams};
+// dns-visibility: the upstreams' figures and the blocking view.
+pub use model::{
+    BlockingAllowRequest, BlockingAllowed, BlockingClientCount, BlockingHour, BlockingListCount,
+    BlockingNameCount, BlockingPause, BlockingPauseRequest, BlockingPauseState, BlockingStats,
+    BlockingStatsParams, BlockingWindow, UpstreamFigures, UpstreamGroupItem, UpstreamStateItem,
+};
 
 pub use model::{
     AclCreate, AclItem, AclPatch, BlockedCountItem, CacheFlushParams, DnsCommandAccepted,
@@ -304,4 +312,11 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(nodes::list_node_dns_cache))
         .routes(routes!(nodes::stop_node_dns_log))
         .routes(routes!(nodes::start_node_dns_log))
+        // dns-visibility: the blocking view.
+        .routes(routes!(blocking::get_dns_blocking_stats))
+        .routes(routes!(
+            blocking::pause_dns_blocking,
+            blocking::resume_dns_blocking
+        ))
+        .routes(routes!(blocking::allow_dns_name))
 }

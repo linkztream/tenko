@@ -180,7 +180,7 @@ The upstreams of one route (a rule, a stub zone, the default forwarder) form a s
 - **Choice.** Each attempt of a query goes to an upstream it has not tried: the healthy one with the lowest smoothed round-trip time (an upstream never measured counts as the fastest, so it is measured first), except one attempt in 16 that goes to another healthy upstream at random, so the times of the others stay current. When every upstream left is in back-off, the one whose back-off ends first is asked.
 - **Health.** Three failures in a row (timeouts, refused connections, malformed answers) put an upstream in back-off for one second, doubling with each further failure up to a minute; an answer ends it. A failure also doubles its smoothed time, so a failing upstream is asked mostly by the probes.
 - **Budget.** A query has `forward_retries + 1` attempts (3) of `forward_timeout_ms` each (2,000 ms). An answer with SERVFAIL or REFUSED moves on to the next upstream while attempts remain and is relayed when nothing better comes; a set of one upstream asks it again.
-- **Status.** The counters per rule and upstream are the metrics of section 4.6.
+- **Status.** The counters per rule and upstream are the metrics of section 4.6; the times and states the choice works with are the figures of section 4.7.
 
 ### 4.2 The transports
 
@@ -227,9 +227,32 @@ The `[dns]` keys of the resolver side ([`deploy/tenko.example.toml`](../deploy/t
 | Family | Labels | What |
 |---|---|---|
 | `tenko_dns_upstream_queries_total` | `rule` (the suffix, `default`, `stub:<zone>` or `stub-source:<zone>`), `upstream` (`address:port`), `transport` (`plain`, `dot`, `doh`), `outcome` (`ok`, `servfail`, `timeout`, `unreachable`, `malformed`) | Every exchange with an upstream; `servfail` is an answer with SERVFAIL or REFUSED that moved on to the next upstream, `malformed` includes the answers that broke the 0x20 case |
-| `tenko_dns_upstream_rtt_seconds` | `upstream` | The round-trip time of the answered exchanges (50 µs to 2 s), summed over the rules that share an upstream |
+| `tenko_dns_upstream_rtt_seconds` | `rule`, `upstream` | The round-trip time of the answered exchanges (50 µs to 2 s) per rule and upstream (until the visibility package: by upstream alone) |
+| `tenko_dns_upstream_health` | `rule`, `upstream` | A gauge computed at the scrape: 1 while the upstream answers, 0.5 while it fails without being in back-off, 0 in back-off |
 
-The series of an upstream appear with its first exchange and stay for the life of the process.
+The series of an upstream appear with its first exchange; the counters and the histogram stay for the life of the process, the health gauge leaves with the last set that holds the upstream (a rule deleted or its upstreams changed).
+
+### 4.7 Response times and health
+
+The pool keeps per upstream of every set what its choice works with, and the node shows it (the owner's test-drive backlog of 2026-10-18):
+
+| Figure | What |
+|---|---|
+| `last_rtt_ms` | The round-trip time of the last answer |
+| `ewma_ms` | The smoothed round-trip time the choice uses: an exponentially weighted mean with weight 1/8 per answer, doubled by each failure (at least 1 ms, at most the attempt's timeout) |
+| `p50_ms`, `p99_ms` | The median and the 99th percentile of the answers of the last minute (at most the last 512, so above about 8 answers a second the window is shorter than a minute), with `window_answers` |
+| `state` | `unknown` (not asked yet), `up` (the last exchange was answered), `degraded` (failing, fewer than three times in a row), `down` (in back-off) |
+| `chosen` | The upstream the next query of the route goes to outside the probes: the healthy one with the lowest smoothed time, else the one whose back-off ends first |
+| `failures`, `answered`, `failed` | Failures in a row; answered and failed exchanges since the role started |
+| `last_error`, `last_error_at` | The last failure in English (a timeout, an unreachable upstream, a malformed answer or one that broke the 0x20 case) and when |
+
+They are kept on the reply path, under the locks the pool already takes there (a ring of 512 times per upstream, no allocation per answer), and computed when they are read; the query path does not see them. They are figures of the node that answers and start empty when its role starts.
+
+- **Node status.** `GET /api/v1/nodes/{id}/dns` lists `upstreams: [{ rule, stub, label, upstreams: [...] }]`: the default forwarder of `[dns] forwarders` (no `rule`), every forwarding rule by suffix (with its id; an upstream not asked yet is `unknown`), and the stub zones whose name servers were learnt.
+- **Forwarding rules.** `GET /api/v1/dns/forwarders` and `GET /api/v1/dns/forwarders/{id}` carry `upstream_status` per rule, in the order of its `upstreams`, when the server runs the DNS role. The forwarders page shows each upstream with a dot for its state, its median time and the tag Next on the chosen one; the title holds every figure and the last error.
+- **The node's DNS settings page** (`/settings/dns`) has the section Upstreams: a row per upstream with the rule, the state, the four times, the counts and the last error.
+- **The command line.** `tenko dns forwarder list` prints a row per upstream: `STATE` (with `*` on the chosen one), `RTT` (the last), `EWMA`, `P50` and `P99` in milliseconds; `-` where the server runs no DNS role or has not asked the upstream yet.
+- **Metrics.** `tenko_dns_upstream_rtt_seconds{rule,upstream}` and `tenko_dns_upstream_health{rule,upstream}` (section 4.6).
 
 ## 5. Response policy zones and block lists
 
@@ -307,6 +330,17 @@ The node status (`GET /api/v1/nodes/{id}/dns`) lists `blocked: [{ "list": "<name
 ### 5.7 M25
 
 `bench/phase2-dns/scripts/run-m25-lists.sh` runs the example `lists_bench` (the compiler and matcher the binary links) on a generated list of a million names: compile and matcher together in 1.0 s on Windows and 1.6 s with the static musl build on Linux (threshold 2 s), and a lookup in about 100 ns for a name of 2 labels, 160 ns for 4 and 250 ns for 8, so the cost per label does not grow with the labels or the list. The figures and the machine are in `bench/phase2-dns/results/2026-10-18-m25-lists.md`.
+
+### 5.8 Blocking view
+
+A page for the home use of the lists, available in every profile (the DNS area's tab Blocking, `/dns/blocking`): what the lists blocked, per list, client and hour, allow from the log, and a pause switch. It reads the node's query log (section 8 of this document and `docs/dns.md` section 8), so the log must be on (`[dns.log] enabled = true`; off by default under Home); the figures are those of the logged queries, so `[dns.log] sample` thins them as well.
+
+- **The figures.** `GET /api/v1/dns/blocking/stats?window=24h|7d&top=N` issues the node command `dns.blocking.stats` on the node that answers: the queries of the last 24 hours or 7 days (as far as `[dns.log] days` keeps them), how many a block list blocked and how many the cache answered, the distinct clients, the queries and the blocked ones per hour, the blocked per list, the names blocked and asked most often, the clients that asked most often, and the newest 50 blocked queries. The log's `blocked` field names the list that blocked a query on the query path (the visibility package filled it; before, it stayed empty). A read looks at 512 MiB of log segments at most, newest first; a log that holds more in the window answers the newest part with `truncated`. The read is recorded as a node command and audited as `dns.blocking.stats` with the window, since the figures name the clients and what they asked. A client is shown as the log keeps it: its pseudonym of the day (`p:...`, so one client counts once per day), its address only to a principal that may update the node (with the DNS name IPAM records for the address, for a principal that may read addresses), or not at all with `client = "hidden"`. 409 `dns.blocking.log_off` while the log is off.
+- **Allow from the log.** `POST /api/v1/dns/blocking/allow` with `{ "name", "list"? }` adds the name (and the names under it) to an uploaded allow list: the one named, or the list `allowed`, created the first time (an enabled allow list of domains). The names of the list's newest version are read back from its compiled form, the name is added, and the text goes to the compile job `dns.list.compile` as an upload would (202 with the job); a name the list covers already changes nothing (200, `already`). Audited as `dns.blocking.allow` with the name and the list, before the job's `dns.list.compile`. A URL list or a block list is refused with 409 `dns.list.invalid`.
+- **The pause.** `POST /api/v1/dns/blocking/pause` with `{ "minutes" }` (1 to 1,440; the page offers 5, 15 and 60) or without them (until resumed) issues `dns.blocking.pause`; `DELETE /api/v1/dns/blocking/pause` issues `dns.blocking.resume`. While a pause lasts no block list blocks a name, in the query or in the answer; the allow lists, the exemptions and the RPZ zones apply as before. The pause ends by itself at its end: the query path reads one atomic while no pause is set and the clock only during one, so a pause costs nothing outside it. Each is recorded as a node command and audited as `dns.blocking.pause` (with the minutes) or `dns.blocking.resume`; the node status and the figures carry `blocking_paused: { since, until }`. The pause is a state of the node's process, not a job of the store: a restart ends it and the lists block again (registering a job step for it would need the start-up of `tenko serve`, which this package does not change).
+- **The command line.** `tenko dns blocking stats [--window 24h|7d] [--top N]`, `tenko dns blocking pause [--minutes N]`, `tenko dns blocking resume`.
+- **Limits.** A block found in an answer (a CNAME target on a list) is counted per list in `tenko_dns_blocked_total` but logged without the list, since the forwarder logs a forwarded answer before the policy looks at it (section 5.5). The figures are those of the node that answers; in Phase 5 a cluster reads them per node.
+- **Next step.** Client groups with different lists, and the AdBlock Plus and regular-expression rule syntax, are not built: today a list applies to every client except the prefixes it exempts, and a list holds names in hosts-file or domain-list form only.
 
 ## 6. Rate limiting
 
