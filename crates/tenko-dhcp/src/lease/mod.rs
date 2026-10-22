@@ -23,6 +23,7 @@
 //! | [`batch`] | the lease change as one batch: row, client index, history, observation hook |
 //! | [`commit`] | [`StoreLeases`], the [`LeaseStore`](crate::store::LeaseStore) on the replicated store, and its [`Committer`] |
 //! | [`follow`] | the table from the feed ([`LeaseFollower`]) and from a store view ([`rebuild_from_view`]) |
+//! | [`observe`] | the IPAM facts of the lease batch ([`observe::IpamObservations`], WP8.1) |
 //! | [`offer`] | [`OfferTable`], the offer hold |
 //! | [`expiry`] | [`ExpiryService`], expiry as a leader service |
 //! | [`history`] | [`PurgeService`], history retention per profile (P3-Q13) |
@@ -35,6 +36,8 @@ pub mod expiry;
 pub mod follow;
 pub mod history;
 pub mod metrics;
+// WP8.1: the observation hook over the lease facts of IPAM.
+pub mod observe;
 pub mod offer;
 pub mod refusal;
 pub mod table;

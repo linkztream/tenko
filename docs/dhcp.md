@@ -8,6 +8,7 @@ Contents:
 8. [Leases](#8-leases)
 9. [The engine](#9-the-engine)
 10. [The role](#10-the-role)
+12. [Reservations, the move step and observations](#12-reservations-the-move-step-and-observations)
 2. [The model](#2-the-model)
 3. [Scopes and pools](#3-scopes-and-pools)
 4. [Options and the catalog](#4-options-and-the-catalog)
@@ -468,3 +469,51 @@ The families of `docs/dhcp-contracts.md` section 8 are registered under their na
 - `crates/tenko-dhcp/src/server/link.rs`: the framing of the link-layer reply against a header checksum worked out by hand.
 
 The relay listeners with a socket per worker, the role test, the acceptance test and the direct-mode test were run on Linux on the lab node VM (Ubuntu 24.04, kernel 6.8) from binaries built in WSL; WSL itself (`networkingMode=VirtioProxy`) drops the first datagram a socket sends to a port bound after it, also outside Tenko, so tests that send a request once fail there and pass on the VM.
+
+## 12. Reservations, the move step and observations
+
+WP8.1 joins the `dhcp` role to the IPAM side of plan sections 2.3 and 2.8: reservations come from intent, a move of a `reserved` host gets its DHCP step done by Tenko, and every lease change is an observation in the same commit (decision P3-Q8, DHCP-16, IPAM-18, IPAM-19).
+
+### 12.1 Reservations from intent
+
+A reservation is not a row of its own. The configuration image (section 3, `tenko_dhcp::config::image`) derives it from a host of mode `reserved`: each live interface with a MAC address or a client identifier and each of its live IPv4 addresses of status `active` or `planned` inside a served scope give the reservation of that address for that client. A `reserved` host without a MAC address or client identifier gets the warning of IPAM-18 and no reservation. Changing the host, the interface or the address in IPAM is changing the reservation; the role's image follows the store a moment later (section 10), and the status route reports the revision of the image it serves.
+
+### 12.2 The move step
+
+A move (see [moves.md](moves.md)) writes the new address as `planned` on the interface in its first step and keeps the old one until its cleanup, so during the move the interface holds both addresses and both scopes hold a reservation, as IPAM-19 asks.
+
+| Situation | Step `ipam.move.dhcp` | Preview kind |
+|---|---|---|
+| `reserved` host, the target prefix has an enabled Tenko scope (IPv4), the interface has a MAC address or client identifier | Automatic: waits until the role's image is at the revision of the new address, then done; at most 60 seconds, else 503 `ipam.move.dhcp_not_served` and the job rolls back | `dhcp.reservation` |
+| `reserved` host otherwise | A task for a person, as in Phase 1 | `dhcp.manual` |
+| Other modes | No DHCP step | |
+
+The step reaches the role through `tenko_ipam::moves::dhcp::DhcpRolePort` (the role's report `dhcp.status` and the node command `dhcp.lease.release`), which `tenko serve` fills once the role runs. A server without the role in its process has nothing to wait for: the step records that the reservation is intent (`image_revision` empty in its output). The step's output (`MoveDhcpOutput`) keeps the revision of the new address and the image revision that held it.
+
+- **Rollback.** The intent step's compensation removes the new address, and with it the new reservation; the DHCP step's compensation releases a lease the device already took at the new address. The old address and its reservation were never touched, so a cancelled move leaves both scopes as they were.
+- **Cleanup.** The cleanup removes the old address, which removes the old reservation, and releases the old lease when the moved interface's MAC address still holds it bound, through `dhcp.lease.release` with its version precondition (history kind `reclaimed`). A release that fails is logged and left to the lease's expiry; the cleanup never rolls a confirmed move back. Its output records `released_old_lease`.
+- **Timeout.** The observation timeout keeps IPAM-19's rule, half the target's lease time and at least 300 seconds. With a Tenko scope the lease time is the longest default time a pool's client gets: the pool's settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day by default); a scope without a pool counts its own.
+
+### 12.3 Leases as observations
+
+The committer adds the IPAM facts of the source `dhcp:<node>` to the batch of every lease change it builds, and the operator's release (`dhcp.lease.release`) to its own batch: the lease row, the client index, the history row and the facts commit together, so there is no second write and no polling. The rules live in `tenko_ipam::observe::dhcp` (`LeaseFacts`); the hook is `tenko_dhcp::lease::observe::IpamObservations`.
+
+| Fact | Subject | When |
+|---|---|---|
+| `Observed::Address` with the address and the client's MAC address | `address:<vrf>/<ip>` | The lease binds |
+| `Observed::Name` with the FQDN of option 81, else the host name of option 12 | `name:<ip>` | The lease binds and the client sent a name |
+| `Observed::Address` with the MAC address that answered the conflict probe (an ARP answer), else none (ICMP, a DECLINE) | `address:<vrf>/<ip>` | The row is `abandoned` (a conflict of WP8.5), until its hold ends |
+
+`Observed::Os` and `Observed::Vendor` from the fingerprint and option 60 are WP8.2's. A fact's `last_seen` is the lease's client transaction time and its `expires_at` the end of the binding when the fact was written, so a binding that runs out takes its facts with it and expiry writes nothing.
+
+The rules of `observe::ingest` apply to each fact: a new subject is a new fact; a known fact is written again only when its attributes changed (another MAC address, another name; another device on the address starts its fact again), when it had expired, or when its refresh is due, that is 15 minutes since its last sighting or less than half of the fresh lifetime left. A renewal or a repeated request within the refresh interval writes nothing. A client renews at half its lease time, so a renewal at that point usually finds the refresh due once the lease is longer than half an hour, and writes the fact with the new sighting into the batch it writes anyway. A release, a decline or an operator's release expires the current facts of the address at once. Every outcome is counted in `tenko_dhcp_lease_facts_total{outcome}` (`new`, `changed`, `refreshed`, `unchanged`, `expired`; the address fact and the name fact count separately).
+
+The rules need the stored facts, and the committer builds a batch without waiting on a store read. `LeaseFacts` is therefore a derived index of the store over `ipam.obs.facts`: it holds the facts of its own source in memory, built at registration and on a snapshot install, and follows every change of the table. The role is the only writer of its source, so its fact writes carry no version precondition and a lease change never fails on its observation. Each fact costs a few hundred bytes of memory in the index.
+
+A new fact wakes the reconciler like any write to the facts table; its run confirms a move waiting at its observation step when a current lease fact comes from the moved interface's MAC address at any address of the target network ([reconciliation.md](reconciliation.md) section 7).
+
+### 12.4 Tests
+
+- `crates/tenko-ipam/src/observe/dhcp/tests.rs`: a renewal within the refresh interval writes nothing and is counted, the refresh at the renewal point adds a sighting, another client starts the fact again, a release expires both facts, a conflict names the answering MAC address, and the index is built from the stored facts of its own node only.
+- `crates/tenko-ipam/tests/move_dhcp.rs`: the preview kind and the timeout from the scope, the step that waits for the image (and the rollback when the image stays behind), the cleanup that releases the device's old lease and no other, the compensation that releases a new lease, and the lease of a dynamic device in the target's pool that confirms its move.
+- `crates/tenko/tests/acceptance_move.rs`, E25: the five-device lab through the binary with the role in relay mode on loopback.

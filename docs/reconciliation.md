@@ -38,7 +38,7 @@ An observation names its source. Tenko turns the source into a canonical text, t
 | Network controller connector | `network_controller:<connector id>` | The connector host (Phase 1) |
 | Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the declared raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Probes (WP2.3, see [scanning.md](scanning.md)) |
 | DNS zone | `dns:<zone>` (the parent zone for an RFC 2317 zone) | The reconciler, from the zones in the store (Phase 2, section 10) |
-| DHCP node | `dhcp:<node>` | Tenko DHCP (Phase 3) |
+| DHCP node | `dhcp:<node>` | The `dhcp` role, in the batch of every lease change (Phase 3, [dhcp.md](dhcp.md) section 12.3) |
 
 A probe method is part of the key, so the ARP and the ICMP sightings of one probe are different sources with separate facts.
 
@@ -49,15 +49,17 @@ A fact is stored once per source and subject, under the key (source key, subject
 | Subject type | Subject key | Reported by | What the fact names |
 |---|---|---|---|
 | `host` | `host:<external id>` | Inventory connectors | Name, MAC addresses, IP addresses, OS, platform, parent host, tags |
-| `address` | `address:<vrf>/<ip>` | Probes, later DHCP leases | The address, the MAC address behind it when known, and the VRF of the source |
+| `address` | `address:<vrf>/<ip>` | Probes, DHCP leases | The address, the MAC address behind it when known, and the VRF of the source; for a lease the client's MAC address, `last_seen` the client's last transaction and `expires_at` the end of the binding (for a conflict, the MAC address that answered the probe, if any, until the hold ends) |
 | `attachment` | `attachment:<mac>` | Network controllers, SNMP probes | The client's switch or access point, port, SSID and VLAN |
 | `services` | `services:<ip>` | Probes | Open TCP ports, and the ones that answered a TLS handshake (SCAN-08) |
 | `os` | `os:<ip>` | Probes | An OS guess and its confidence (SCAN-08) |
-| `name` | `name:<ip>` | Probes, network controllers | A name found for an address (reverse DNS, mDNS, LLMNR, the `sysName` of a polled device, or the name of a client on a network controller). It is not a sighting of the address |
+| `name` | `name:<ip>` | Probes, network controllers, DHCP leases | A name found for an address (reverse DNS, mDNS, LLMNR, the `sysName` of a polled device, the name of a client on a network controller, or the FQDN of option 81, else the host name of option 12, of a lease). It is not a sighting of the address |
 | `vendor` | `vendor:<mac>` | Probes, network controllers, inventory connectors | The vendor of a MAC address: the organization its OUI is registered to, the vendor a network controller reports for a client, or the manufacturer an inventory source reports for a device |
 | `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
+
+**Lease facts.** The facts of `dhcp:<node>` do not come through ingest (section 2.3): the `dhcp` role writes them in the batch of the lease change itself, with ingest's rules (a fact is written when it is new, when an attribute changed, when it had expired or when its refresh is due; a renewal within the refresh interval writes nothing), and a release, a decline or an operator's release expires them in that batch. A binding that runs out needs no write: its facts expire with it. The role keeps the facts of its source in a derived index so that it never reads the store while it builds a batch; [dhcp.md](dhcp.md) section 12.3 has the details.
 
 ### 2.3 Ingest
 
@@ -368,7 +370,7 @@ When the planner refuses, the proposal stays open. Its `adoption_error` holds th
 The device move job (IPAM-19) waits for the device to show up at its new address. Its observation step, `ipam.move.observe`, is a manual task, so a person can still confirm it. The reconciler confirms it as `system:reconciler`, with a note such as "198.51.100.10 seen at 2026-10-10T08:00:00Z by inventory:<connector id>", when an observation meets all of these conditions:
 
 - The job is waiting at its observation step. A sighting that arrives while the job still waits for an earlier manual task, such as the layer 2 change, cannot confirm anything yet; the next run confirms it from the facts that are still current.
-- It names the move's new address in the target VRF. The VRF is the source's own, or is placed as in section 3.3.
+- It names the move's new address in the target VRF. The VRF is the source's own, or is placed as in section 3.3. A DHCP lease fact (`dhcp:<node>`) counts at any address of the target network, because a dynamic device gets an address of the pool rather than the planned one; it must come from the interface's MAC address.
 - It comes from the MAC address of the moved interface, when the interface has one. A sighting of another device at that address does not count.
 - It was reported at or after the start of the job. A sighting from before the move does not count.
 
@@ -382,7 +384,7 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 |---|---|---|
 | Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
 | DNS records | 2 | Delivered (section 10): `name` facts of the `ipam` and `manual` A, AAAA and PTR records of the zones, and the DNS findings of the actuator, among them the orphaned `ipam` record |
-| DHCP leases | 3 | `dhcp:<node>` lease facts without polling (DHCP-16), `LeaseInPrefix` wake-ups for move steps, and reservations as intent |
+| DHCP leases | 3 | Delivered (WP8.1): `dhcp:<node>` `address` and `name` facts in the batch of every lease change, without polling (DHCP-16), which confirm waiting moves in the reconciler's next run (a lease fact starts it like any new fact); reservations are intent ([dhcp.md](dhcp.md) section 12). The `LeaseInPrefix` wake-up of the job engine is not used by moves, whose observation step is a manual task the reconciler completes |
 
 Phase 3 also adds the reconciliation views across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch views with "who wins" rules, built on the same facts and proposals.
 

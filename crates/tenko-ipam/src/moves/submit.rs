@@ -276,6 +276,7 @@ fn job_spec(
         task: None,
         l2: None,
         dns: None,
+        dhcp: None,
     };
     let mut steps = Vec::with_capacity(plans.len());
     for plan in plans {
@@ -283,6 +284,7 @@ fn job_spec(
             task: plan.task.clone(),
             l2: plan.l2.clone(),
             dns: plan.dns.clone(),
+            dhcp: plan.dhcp.clone(),
             ..base.clone()
         };
         steps.push(StepSpec {

@@ -1249,6 +1249,9 @@ async fn start(
     // The network controllers of the VLAN provision job and the topology (WP2.7): filled
     // once the connector service runs; the job steps read it when they run.
     let vlan_controllers = tenko_ipam::vlan::Controllers::new();
+    // WP8.1: the dhcp role as the move job's DHCP step and cleanup reach it; filled once
+    // the role runs (step `dhcp`).
+    let dhcp_moves = tenko_ipam::moves::dhcp::DhcpMoves::new();
     // The anchors of IPAM objects for scoped authorization (IAM-01, WP3.2): registered on
     // the store and given to the authorizer while the IPAM module runs. Without the module
     // it stays empty, so the event filter below passes nothing of IPAM to a scoped
@@ -1280,6 +1283,8 @@ async fn start(
             tenko_ipam::jobs::register_steps(&mut engine);
             tenko_ipam::vlan::register_steps(&mut engine, &vlan_controllers);
             tenko_ipam::moves::register_steps(&mut engine, &vlan_controllers);
+            // WP8.1: the automatic DHCP step and the cleanup that releases the old lease.
+            tenko_ipam::moves::dhcp::register_steps(&mut engine, &dhcp_moves);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),
@@ -1887,6 +1892,8 @@ async fn start(
     let dhcp_line = dhcp_role.as_ref().map(|role| role.announce().to_owned());
     if let Some(role) = dhcp_role {
         dhcp_slot.set(role.node());
+        // WP8.1: the move job reaches the role from now on.
+        dhcp_moves.set(tenko_dhcp::role::moves::MovePort::new(role.node()));
         running.dhcp = Some(role);
     }
     leaders.register(leader::clock::beat_service(

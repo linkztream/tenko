@@ -228,7 +228,17 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         probe: resolved.roles.contains(Role::Probe),
         probe_expected: probe_expected(profile),
     };
-    let role = dhcp_role::Role::start(Arc::clone(&store), resolved.node_id, settings)
+    // WP8.1: the lease batch carries the IPAM facts of the source `dhcp:<node>` (plan
+    // section 2.8), from the hook over the stored facts; its outcomes are counted.
+    metrics.register(&tenko_dhcp::lease::observe::LEASE_FACTS);
+    let hook = tenko_dhcp::lease::observe::IpamObservations::register(
+        store.as_ref(),
+        resolved.node_id,
+        tenko_ipam::observe::ObserveConfig::default(),
+    )
+    .map_err(|problem| error("start.dhcp.feed", problem.to_string()))?;
+    let node_id = resolved.node_id;
+    let role = dhcp_role::Role::start_observed(Arc::clone(&store), node_id, settings, hook)
         .await
         .map_err(|problem| match problem {
             dhcp_role::StartError::Feed(detail) => error("start.dhcp.feed", detail),

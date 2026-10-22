@@ -3958,6 +3958,10 @@
       <unit id="ipam.move.step.intent">
         <segment><source>Add {new_ip} to IPAM as planned; keep {old_ip} until cleanup.</source></segment>
       </unit>
+      <unit id="ipam.move.step.dhcp">
+        <notes><note category="description">Automatic step of a move when Tenko DHCP serves the target network. The reservation comes from the planned address.</note></notes>
+        <segment><source>Reserve {new_ip} in the DHCP scope of {cidr} and wait until the DHCP server serves it; keep the old reservation until cleanup.</source></segment>
+      </unit>
       <unit id="ipam.move.step.cleanup">
         <segment><source>Remove {old_ip} and make {new_ip} active.</source></segment>
       </unit>

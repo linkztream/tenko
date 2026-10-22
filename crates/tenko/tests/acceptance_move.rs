@@ -21,13 +21,28 @@
 //!   engine compensates in reverse (the DNS records point to the old address again, the new
 //!   address is removed, the old one stays) and ends the job `cancelled`, and the host
 //!   carries the tag `move-failed`.
+//! - E25 (Phase 3, WP8.1): the five-device lab with the `dhcp` role serving both networks
+//!   in relay mode on loopback (the test is the relay agent and selects the scope with
+//!   option 118). The reserved devices get their reservations from intent; the preview
+//!   shows the DHCP step automatic (`dhcp.reservation`) with the timeout from the scope's
+//!   lease time; while the move waits for the L2 change both scopes offer the device its
+//!   reservation; the lease the device then takes in the target network confirms the
+//!   observation step without anyone ticking it, and the cleanup releases the old lease
+//!   while the old reservation goes with the old address. The dynamic device's pool lease
+//!   confirms its move, the static device stops at its manual step, and a cancel of a
+//!   waiting move restores both reservations (the new one removed, the old one kept). A
+//!   renewal right after a grant writes no fact and is counted.
 
 mod serve_support;
 
-use std::time::Duration;
+use std::{
+    net::{Ipv4Addr, SocketAddrV4, UdpSocket},
+    time::{Duration, Instant},
+};
 
 use serde_json::{Value, json};
 use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
+use tenko_dhcp::v4::{Message, MessageType};
 
 const SOURCE: &str = "192.0.2.0/24";
 const TARGET: &str = "198.51.100.0/24";
@@ -626,5 +641,522 @@ fn a_cancelled_move_rolls_back_and_marks_the_host() {
     assert_eq!(detail["job"]["state"], "succeeded", "{detail}");
     assert!(!world.host_tags().iter().any(|tag| tag == "move-failed"));
     assert_eq!(world.a_records(DNS_NAME), [NEW_IP]);
+    world.stop();
+}
+
+// E25 (WP8.1): the five-device lab with Tenko DHCP serving both networks.
+
+/// The network part of the source and the target, for option 118.
+const SOURCE_NET: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 0);
+const TARGET_NET: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 0);
+
+/// A UDP port that was free a moment ago.
+fn udp_port() -> u16 {
+    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .expect("bind")
+        .local_addr()
+        .expect("address")
+        .port()
+}
+
+/// One request the test relays for a device: `client` is the last octet of its MAC address
+/// (`00:00:5e:00:53:xx`), `link` the network of option 118 (RFC 3011) that selects the
+/// scope, as the gateway's relay would.
+#[derive(Debug, Clone, Copy)]
+struct Ask {
+    kind: MessageType,
+    client: u8,
+    link: Ipv4Addr,
+    ciaddr: Option<Ipv4Addr>,
+    requested: Option<Ipv4Addr>,
+    server_id: Option<Ipv4Addr>,
+}
+
+impl Ask {
+    fn new(kind: MessageType, client: u8, link: Ipv4Addr) -> Self {
+        Self {
+            kind,
+            client,
+            link,
+            ciaddr: None,
+            requested: None,
+            server_id: None,
+        }
+    }
+
+    fn code(&self) -> u8 {
+        match self.kind {
+            MessageType::Discover => 1,
+            MessageType::Request => 3,
+            other => panic!("{other:?} is not sent here"),
+        }
+    }
+
+    fn xid(&self) -> u32 {
+        u32::from_be_bytes([0x7e, self.link.octets()[0], self.code(), self.client])
+    }
+
+    fn mac(&self) -> [u8; 6] {
+        [0x00, 0x00, 0x5e, 0x00, 0x53, self.client]
+    }
+
+    /// The BOOTREQUEST as a relay agent at 127.0.0.1 forwards it.
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = vec![0u8; 240];
+        out[0] = 1;
+        out[1] = 1;
+        out[2] = 6;
+        out[3] = 1;
+        out[4..8].copy_from_slice(&self.xid().to_be_bytes());
+        if let Some(ciaddr) = self.ciaddr {
+            out[12..16].copy_from_slice(&ciaddr.octets());
+        }
+        out[24..28].copy_from_slice(&Ipv4Addr::LOCALHOST.octets());
+        out[28..34].copy_from_slice(&self.mac());
+        out[236..240].copy_from_slice(&[99, 130, 83, 99]);
+        // No client identifier (option 61): the devices are known by their hardware
+        // address, as the reservations of their interfaces are.
+        out.extend_from_slice(&[53, 1, self.code()]);
+        out.extend_from_slice(&[118, 4]);
+        out.extend_from_slice(&self.link.octets());
+        out.extend_from_slice(&[12, 8]);
+        out.extend_from_slice(format!("device{:02x}", self.client).as_bytes());
+        if let Some(requested) = self.requested {
+            out.extend_from_slice(&[50, 4]);
+            out.extend_from_slice(&requested.octets());
+        }
+        if let Some(server) = self.server_id {
+            out.extend_from_slice(&[54, 4]);
+            out.extend_from_slice(&server.octets());
+        }
+        out.push(255);
+        out
+    }
+}
+
+/// The relay agent of the test, in front of the node's relay-mode listener.
+struct Relay {
+    socket: UdpSocket,
+    server: SocketAddrV4,
+}
+
+impl Relay {
+    fn new(port: u16, server: u16) -> Self {
+        let socket =
+            UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).expect("bind the relay");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .expect("timeout");
+        Self {
+            socket,
+            server: SocketAddrV4::new(Ipv4Addr::LOCALHOST, server),
+        }
+    }
+
+    /// Sends `ask` until an answer of the expected type comes, at most `within`.
+    fn exchange(&self, ask: &Ask, expect: MessageType, within: Duration) -> Option<Vec<u8>> {
+        let start = Instant::now();
+        let mut buf = [0u8; 1500];
+        while start.elapsed() < within {
+            self.socket
+                .send_to(&ask.bytes(), self.server)
+                .expect("send");
+            let deadline = Instant::now() + Duration::from_millis(300);
+            while Instant::now() < deadline {
+                let Ok((len, _)) = self.socket.recv_from(&mut buf) else {
+                    break;
+                };
+                let Ok(message) = Message::parse(&buf[..len]) else {
+                    continue;
+                };
+                if message.xid() == ask.xid()
+                    && message.message_type().ok().flatten() == Some(expect)
+                {
+                    return Some(buf[..len].to_vec());
+                }
+            }
+        }
+        None
+    }
+
+    /// The address the device is offered on `link`.
+    fn offer(&self, client: u8, link: Ipv4Addr) -> Ipv4Addr {
+        let offer = self
+            .exchange(
+                &Ask::new(MessageType::Discover, client, link),
+                MessageType::Offer,
+                Duration::from_secs(10),
+            )
+            .unwrap_or_else(|| panic!("no OFFER for device {client:02x} on {link}"));
+        Message::parse(&offer).expect("parse").yiaddr()
+    }
+
+    /// Asks until the offer on `link` satisfies `wanted` (the role follows the store a
+    /// moment behind, and an offer is held for ten seconds); the last offer.
+    fn offer_until(
+        &self,
+        client: u8,
+        link: Ipv4Addr,
+        wanted: impl Fn(Ipv4Addr) -> bool,
+    ) -> Ipv4Addr {
+        let start = Instant::now();
+        loop {
+            let offered = self.offer(client, link);
+            if wanted(offered) || start.elapsed() > Duration::from_secs(20) {
+                return offered;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+
+    /// A DORA exchange on `link`; the address of the ACK.
+    fn dora(&self, client: u8, link: Ipv4Addr) -> Ipv4Addr {
+        let offer = self
+            .exchange(
+                &Ask::new(MessageType::Discover, client, link),
+                MessageType::Offer,
+                Duration::from_secs(10),
+            )
+            .unwrap_or_else(|| panic!("no OFFER for device {client:02x} on {link}"));
+        let offer = Message::parse(&offer).expect("parse");
+        let mut request = Ask::new(MessageType::Request, client, link);
+        request.requested = Some(offer.yiaddr());
+        request.server_id = offer.server_identifier().expect("54");
+        let ack = self
+            .exchange(&request, MessageType::Ack, Duration::from_secs(5))
+            .unwrap_or_else(|| panic!("no ACK for device {client:02x} on {link}"));
+        let ack = Message::parse(&ack).expect("parse");
+        assert_eq!(ack.yiaddr(), offer.yiaddr());
+        ack.yiaddr()
+    }
+
+    /// A renewal (RENEWING, `ciaddr` set) of `addr` on `link`.
+    fn renew(&self, client: u8, link: Ipv4Addr, addr: Ipv4Addr) -> Ipv4Addr {
+        let mut renew = Ask::new(MessageType::Request, client, link);
+        renew.ciaddr = Some(addr);
+        let ack = self
+            .exchange(&renew, MessageType::Ack, Duration::from_secs(5))
+            .unwrap_or_else(|| panic!("no ACK for the renewal of {addr}"));
+        Message::parse(&ack).expect("parse").yiaddr()
+    }
+}
+
+/// The five devices of E25: (name, mode, last MAC octet, address, DNS name).
+const LAB: [(&str, &str, u8, &str, Option<&str>); 5] = [
+    ("printer", "reserved", 0x20, "192.0.2.15", Some(DNS_NAME)),
+    ("cam1", "reserved", 0x21, "192.0.2.21", None),
+    ("cam2", "reserved", 0x22, "192.0.2.22", None),
+    ("sensor", "static", 0x23, "192.0.2.23", None),
+    ("plug", "dynamic", 0x24, "192.0.2.24", None),
+];
+
+/// The E25 lab: one node with the `dhcp` role in relay mode on loopback, both networks
+/// with a pool and a Tenko scope, the zone `example.test`, and the five devices.
+struct DhcpLab {
+    world: World,
+    relay: Relay,
+    hosts: Vec<String>,
+}
+
+impl DhcpLab {
+    fn new() -> Self {
+        let port = udp_port();
+        let relay_port = udp_port();
+        let relay = Relay::new(relay_port, port);
+        let mut node = Node::new()
+            .with_args(&["--roles", "controller,dhcp"])
+            .with_config(&format!(
+                "[dhcp]\nlisten = [{{ address = \"127.0.0.1\", mode = \"relay\" }}]\n\
+                 port = {port}\nrelay_port = {relay_port}\nworkers = 2\n"
+            ));
+        let server = node.start();
+        let line = format!("dhcp role answering on 127.0.0.1:{port} (relay)");
+        server
+            .wait_stdout_line(Duration::from_secs(10), |text| text.starts_with(&line))
+            .unwrap_or_else(|| panic!("no dhcp line\n{}", server.diagnostics()));
+        let token = wait_for_setup_token(&server);
+        let mut api = Api::new(&node);
+        api.setup(&token);
+        // Runs on demand do the DNS work; a new fact (a lease) starts a run a second
+        // later, which is how the observation step learns of a lease without polling.
+        let mut settings = quiet_settings();
+        settings["debounce_secs"] = json!(1);
+        api.put("/settings/reconciler", &settings).expect(200);
+        api.post(
+            "/dns/zones",
+            &json!({
+                "name": ZONE,
+                "kind": "primary",
+                "soa": { "mname": "ns1.example.test", "rname": "hostmaster.example.test" },
+                "name_servers": ["ns1.example.test"],
+            }),
+        )
+        .expect(201);
+        let mut target = String::new();
+        for (cidr, pool) in [
+            (SOURCE, ("192.0.2.100", "192.0.2.199")),
+            (TARGET, ("198.51.100.100", "198.51.100.199")),
+        ] {
+            let prefix = api.post("/prefixes", &json!({ "cidr": cidr })).expect(201)["item"]["id"]
+                .as_str()
+                .expect("a prefix id")
+                .to_owned();
+            api.post(
+                &format!("/prefixes/{prefix}/ranges"),
+                &json!({ "first": pool.0, "last": pool.1, "role": "dhcp_pool" }),
+            )
+            .expect(201);
+            api.post("/dhcp/scopes", &json!({ "prefix": prefix }))
+                .expect(201);
+            target = prefix;
+        }
+        let mut hosts = Vec::new();
+        let mut first_interface = String::new();
+        for (name, mode, client, ip, dns) in LAB {
+            let host = api
+                .post(
+                    "/hosts",
+                    &json!({
+                        "name": name,
+                        "mode": mode,
+                        "interfaces": [{ "name": "eth0", "mac": format!("00-00-5E-00-53-{client:02X}") }],
+                    }),
+                )
+                .expect(201)["item"]["id"]
+                .as_str()
+                .expect("a host id")
+                .to_owned();
+            let interfaces = api.get(&format!("/hosts/{host}/interfaces")).expect(200);
+            let interface = interfaces["items"][0]["id"]
+                .as_str()
+                .expect("the interface")
+                .to_owned();
+            let mut address = json!({ "ip": ip, "interface": interface });
+            if let Some(dns) = dns {
+                address["dns_name"] = json!(dns);
+            }
+            api.post("/addresses", &address).expect(201);
+            if first_interface.is_empty() {
+                first_interface.clone_from(&interface);
+            }
+            hosts.push(host);
+        }
+        let world = World {
+            node,
+            server,
+            api,
+            target,
+            host: hosts[0].clone(),
+            interface: first_interface,
+        };
+        Self {
+            world,
+            relay,
+            hosts,
+        }
+    }
+
+    fn api(&self) -> &Api {
+        &self.world.api
+    }
+
+    /// The move of the hosts at `devices` (indexes of [`LAB`]); its jobs in order.
+    fn submit(&self, devices: &[usize]) -> Vec<String> {
+        let objects: Vec<Value> = devices
+            .iter()
+            .map(|index| json!({ "kind": "host", "id": self.hosts[*index] }))
+            .collect();
+        let submitted = self
+            .api()
+            .post(
+                "/moves",
+                &json!({ "objects": objects, "target": self.world.target }),
+            )
+            .expect(202);
+        submitted["jobs"]
+            .as_array()
+            .expect("jobs")
+            .iter()
+            .map(|job| job["job_id"].as_str().expect("a job id").to_owned())
+            .collect()
+    }
+
+    /// The kind of the step the job waits at for a person.
+    fn waiting_kind(&self, job: &str) -> (u64, String) {
+        let index = self.world.waiting_step(job);
+        let detail = self.api().get(&format!("/jobs/{job}")).expect(200);
+        let kind = detail["job"]["steps"][usize::try_from(index).expect("index")]["kind"]
+            .as_str()
+            .expect("a kind")
+            .to_owned();
+        (index, kind)
+    }
+
+    /// The state of a lease row through the lease routes.
+    fn lease_state(&self, addr: &str) -> String {
+        self.api().get(&format!("/dhcp/leases/{addr}")).expect(200)["state"]
+            .as_str()
+            .expect("a state")
+            .to_owned()
+    }
+
+    /// The value of `tenko_dhcp_lease_facts_total{outcome}`.
+    fn facts_counted(&self, outcome: &str) -> u64 {
+        let text = self.api().get("/metrics").text;
+        let prefix = format!("tenko_dhcp_lease_facts_total{{outcome=\"{outcome}\"}} ");
+        text.lines()
+            .find_map(|line| line.strip_prefix(&prefix))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no {prefix} in the metrics"))
+    }
+}
+
+fn addr(text: &str) -> Ipv4Addr {
+    text.parse().expect("an address")
+}
+
+fn in_pool(addr: Ipv4Addr, net: Ipv4Addr) -> bool {
+    addr.octets()[..3] == net.octets()[..3] && (100..=199).contains(&addr.octets()[3])
+}
+
+#[test]
+#[allow(clippy::too_many_lines, reason = "one scenario, read top to bottom")]
+fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_move() {
+    let lab = DhcpLab::new();
+    let world = &lab.world;
+    let relay = &lab.relay;
+    world.reconcile();
+    assert_eq!(world.a_records(DNS_NAME), [OLD_IP]);
+
+    // Before the move: the reserved devices get their reservations from intent in the
+    // source scope, the dynamic plug an address of the pool.
+    assert_eq!(relay.dora(0x20, SOURCE_NET), addr(OLD_IP));
+    assert_eq!(relay.dora(0x21, SOURCE_NET), addr("192.0.2.21"));
+    assert_eq!(relay.dora(0x22, SOURCE_NET), addr("192.0.2.22"));
+    assert!(in_pool(relay.dora(0x24, SOURCE_NET), SOURCE_NET));
+    // A renewal right after the grant writes no fact: it is counted as unchanged.
+    let unchanged = lab.facts_counted("unchanged");
+    assert_eq!(relay.renew(0x20, SOURCE_NET, addr(OLD_IP)), addr(OLD_IP));
+    assert!(lab.facts_counted("unchanged") > unchanged);
+
+    // The preview of the printer and cam2: the DHCP step automatic for both, the DNS step
+    // automatic for the printer, the timeout half the scope's lease (one day by default).
+    let preview = lab
+        .api()
+        .post(
+            "/moves?dry_run=true",
+            &json!({
+                "objects": [
+                    { "kind": "host", "id": lab.hosts[0] },
+                    { "kind": "host", "id": lab.hosts[2] },
+                ],
+                "target": world.target,
+            }),
+        )
+        .expect(200);
+    assert_eq!(preview["timeout_source"], "lease", "{preview}");
+    assert_eq!(preview["timeout_secs"], 43_200, "{preview}");
+    let printer = &preview["items"][0];
+    assert_eq!(
+        step_kinds(printer),
+        [
+            "ipam.intent",
+            "dhcp.reservation",
+            "dns.records",
+            "l2.move",
+            "observe",
+            "cleanup"
+        ]
+    );
+    assert_eq!(automatic(printer), [true, true, true, false, false, true]);
+    assert_eq!(
+        step_kinds(&preview["items"][1]),
+        [
+            "ipam.intent",
+            "dhcp.reservation",
+            "l2.move",
+            "observe",
+            "cleanup"
+        ]
+    );
+
+    // The bulk move: each job plans its new address, waits until the role serves the new
+    // reservation, moves the printer's records and waits for the L2 change. Both scopes
+    // hold a reservation now.
+    let jobs = lab.submit(&[0, 2]);
+    for (job, client, old, new) in [
+        (&jobs[0], 0x20, OLD_IP, NEW_IP),
+        (&jobs[1], 0x22, "192.0.2.22", "198.51.100.22"),
+    ] {
+        let (index, kind) = lab.waiting_kind(job);
+        assert_eq!(kind, "ipam.move.l2", "{job}");
+        assert_eq!(relay.offer(client, TARGET_NET), addr(new));
+        assert_eq!(relay.offer(client, SOURCE_NET), addr(old));
+        world.complete(job, index);
+        let (_, kind) = lab.waiting_kind(job);
+        assert_eq!(kind, "ipam.move.observe", "{job}");
+    }
+    assert_eq!(world.a_records(DNS_NAME), [NEW_IP]);
+
+    // The devices come up in the target network and take their new leases: the facts of
+    // the leases confirm the observation steps, nobody ticks them.
+    assert_eq!(relay.dora(0x20, TARGET_NET), addr(NEW_IP));
+    assert_eq!(relay.dora(0x22, TARGET_NET), addr("198.51.100.22"));
+    for (job, old, client) in [(&jobs[0], OLD_IP, 0x20), (&jobs[1], "192.0.2.22", 0x22)] {
+        let detail = world.api.wait_for_job(job, JOB_TIMEOUT);
+        assert_eq!(detail["job"]["state"], "succeeded", "{detail}");
+        let observe = detail["job"]["steps"]
+            .as_array()
+            .expect("steps")
+            .iter()
+            .find(|step| step["kind"] == "ipam.move.observe")
+            .expect("the observation step")
+            .clone();
+        assert_eq!(observe["state"]["state"], "done", "{observe}");
+        // The cleanup released the old lease, and the old reservation went with the old
+        // address: the source scope offers the device an address of its pool.
+        assert_eq!(lab.lease_state(old), "released");
+        assert!(world.address(old).is_none());
+        let offered = relay.offer_until(client, SOURCE_NET, |offered| offered != addr(old));
+        assert!(in_pool(offered, SOURCE_NET), "{offered}");
+    }
+    let new = world.address(NEW_IP).expect("the new address");
+    assert_eq!(new["status"], "active");
+
+    // The dynamic plug: no DHCP step, and its lease from the target's pool confirms the
+    // move although it is not the planned address.
+    let plug = lab.submit(&[4]).remove(0);
+    let (index, kind) = lab.waiting_kind(&plug);
+    assert_eq!(kind, "ipam.move.l2");
+    world.complete(&plug, index);
+    assert!(in_pool(relay.dora(0x24, TARGET_NET), TARGET_NET));
+    let detail = world.api.wait_for_job(&plug, JOB_TIMEOUT);
+    assert_eq!(detail["job"]["state"], "succeeded", "{detail}");
+
+    // The static sensor stops at its manual step: nothing reconfigures it.
+    let sensor = lab.submit(&[3]).remove(0);
+    let (_, kind) = lab.waiting_kind(&sensor);
+    assert_eq!(kind, "ipam.move.device");
+
+    // cam1 is moved and cancelled while it waits for the L2 change: the rollback removes
+    // the new reservation and keeps the old one.
+    let cam1 = lab.submit(&[1]).remove(0);
+    let (_, kind) = lab.waiting_kind(&cam1);
+    assert_eq!(kind, "ipam.move.l2");
+    assert_eq!(relay.offer(0x21, TARGET_NET), addr("198.51.100.21"));
+    lab.api()
+        .post_unkeyed(&format!("/jobs/{cam1}/cancel"), &json!({}))
+        .expect(202);
+    let detail = world.api.wait_for_job(&cam1, JOB_TIMEOUT);
+    assert_eq!(detail["job"]["state"], "cancelled", "{detail}");
+    assert!(world.address("198.51.100.21").is_none());
+    let offered = relay.offer_until(0x21, TARGET_NET, |offered| offered != addr("198.51.100.21"));
+    assert!(in_pool(offered, TARGET_NET), "{offered}");
+    assert_eq!(relay.offer(0x21, SOURCE_NET), addr("192.0.2.21"));
+    assert_eq!(lab.lease_state("192.0.2.21"), "active");
+
+    let report = lab.api().get("/audit/verify").expect(200);
+    assert_eq!(report["intact"], true, "{report}");
+    let DhcpLab { world, .. } = lab;
     world.stop();
 }

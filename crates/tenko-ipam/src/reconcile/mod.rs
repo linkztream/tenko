@@ -398,7 +398,13 @@ impl Reconciler {
                 self.ipam.jobs().on_observation(&address).await;
                 for waiting_move in &waiting {
                     if !confirmed.contains(&waiting_move.job)
-                        && waiting_move.confirmed_by(Some(vrf), ip, mac, observation.observed_at)
+                        && waiting_move.confirmed_by_source(
+                            &observation.source,
+                            Some(vrf),
+                            ip,
+                            mac,
+                            observation.observed_at,
+                        )
                     {
                         confirmed.push(waiting_move.job);
                         self.confirm_move(
@@ -714,12 +720,14 @@ impl Reconciler {
         let mut confirmed = 0;
         for waiting_move in &waiting {
             let hit = snapshot.seen.iter().find(|pair| {
+                let fact = &snapshot.facts[pair.fact];
                 pair.ip.is_some_and(|ip| {
-                    waiting_move.confirmed_by(
+                    waiting_move.confirmed_by_source(
+                        &fact.source,
                         pair.placement.and_then(Placement::vrf),
                         ip,
                         pair.mac,
-                        snapshot.facts[pair.fact].last_seen,
+                        fact.last_seen,
                     )
                 })
             });

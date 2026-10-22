@@ -3,12 +3,16 @@
 //! is a manual task, so a person can still confirm it; the reconciler confirms it as
 //! `system:reconciler` as soon as a current observation shows the new address in the
 //! target VRF, from the interface's MAC address when the interface has one, reported
-//! after the job started.
+//! after the job started. A DHCP lease (the source `dhcp:<node>`, WP8.1) confirms it
+//! anywhere in the target network when it comes from the interface's MAC address: a
+//! reserved device gets the new address itself, a dynamic one an address of the pool.
 
 use std::net::IpAddr;
 
+use ipnet::IpNet;
 use tenko_core::{
     InterfaceId, JobId, MacAddr, Timestamp, VrfId, codec::from_cbor, ipam::Interface,
+    observe::ObservationSource,
 };
 use tenko_jobs::{
     Job, JobState, StepState,
@@ -32,6 +36,8 @@ pub(crate) struct WaitingMove {
     pub step: u16,
     pub vrf: VrfId,
     pub ip: IpAddr,
+    /// The target network, where a lease of the MAC address confirms the move.
+    pub cidr: IpNet,
     /// The MAC address of the moved interface; the sighting must come from it.
     pub mac: Option<MacAddr>,
     /// Sightings before this time do not count.
@@ -50,6 +56,27 @@ impl WaitingMove {
         self.ip == ip
             && vrf == Some(self.vrf)
             && self.mac.is_none_or(|needed| mac == Some(needed))
+            && seen_at >= self.since
+    }
+
+    /// Whether a report of `source` confirms the move: a sighting as
+    /// [`confirmed_by`](Self::confirmed_by) says, or a DHCP lease of the interface's MAC
+    /// address at any address of the target network.
+    pub(crate) fn confirmed_by_source(
+        &self,
+        source: &ObservationSource,
+        vrf: Option<VrfId>,
+        ip: IpAddr,
+        mac: Option<MacAddr>,
+        seen_at: Timestamp,
+    ) -> bool {
+        if self.confirmed_by(vrf, ip, mac, seen_at) {
+            return true;
+        }
+        matches!(source, ObservationSource::DhcpLease { .. })
+            && self.mac.is_some_and(|needed| mac == Some(needed))
+            && vrf == Some(self.vrf)
+            && self.cidr.contains(&ip)
             && seen_at >= self.since
     }
 }
@@ -95,6 +122,7 @@ pub(crate) fn waiting_moves(view: &dyn ReadView) -> IpamResult<Vec<WaitingMove>>
             step,
             vrf: params.vrf,
             ip: params.new_ip,
+            cidr: params.cidr,
             mac,
             since: job.started.unwrap_or(job.created.at),
         });

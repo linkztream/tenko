@@ -3547,6 +3547,7 @@ export type MessageKey =
   | "ipam.move.step.cleanup"
   | "ipam.move.step.controller_client"
   | "ipam.move.step.controller_port"
+  | "ipam.move.step.dhcp"
   | "ipam.move.step.intent"
   | "ipam.move.task.device"
   | "ipam.move.task.dhcp"
@@ -6545,6 +6546,7 @@ export interface MessageArgs {
   "ipam.move.step.cleanup": { new_ip: string | number; old_ip: string | number };
   "ipam.move.step.controller_client": { after: string | number; connector: string | number; mac: string | number };
   "ipam.move.step.controller_port": { after: string | number; connector: string | number; device: string | number; port: string | number };
+  "ipam.move.step.dhcp": { cidr: string | number; new_ip: string | number };
   "ipam.move.step.intent": { new_ip: string | number; old_ip: string | number };
   "ipam.move.task.device": { cidr: string | number; new_ip: string | number };
   "ipam.move.task.dhcp": { cidr: string | number; new_ip: string | number };
@@ -10568,6 +10570,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.move.step.cleanup",
   "ipam.move.step.controller_client",
   "ipam.move.step.controller_port",
+  "ipam.move.step.dhcp",
   "ipam.move.step.intent",
   "ipam.move.task.device",
   "ipam.move.task.dhcp",

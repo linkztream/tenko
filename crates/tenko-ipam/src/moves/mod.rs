@@ -30,13 +30,14 @@
 //! | Step kind | Preview kind | Automatic | When |
 //! |---|---|---|---|
 //! | `ipam.move.intent` | `ipam.intent` | yes: the new address as planned intent on the interface; the old one stays | always |
-//! | `ipam.move.dhcp` | `dhcp.manual` | no (Tenko DHCP from Phase 3): the reservation | `reserved` hosts |
+//! | `ipam.move.dhcp` | `dhcp.reservation` | yes when the target has a Tenko scope ([`dhcp`]): the reservation from intent, served once the role's image holds the new address | `reserved` hosts |
+//! | `ipam.move.dhcp` | `dhcp.manual` | no: a person creates the reservation | `reserved` hosts, the target without a Tenko scope |
 //! | `ipam.move.dns` | `dns.records` or `dns.manual` | yes when the name's zone is in Tenko ([`dns`]): the old A or AAAA and PTR removed, the new ones written; otherwise a task for a person | a DNS name |
 //! | `ipam.move.device` | `device.manual` | no: reconfigure the device | `static` hosts |
 //! | `ipam.move.controller` | `l2.controller` | yes: the port profile or the per-client VLAN through the network controller | the controller can make the change |
 //! | `ipam.move.l2` | `l2.move` | no: a person moves the device, with the exact action | the controller cannot (see below) |
-//! | `ipam.move.observe` | `observe` | completed by the reconciler on a sighting of the device at its new address (WP2.4), or by a person; the timeout runs from its start | always |
-//! | `ipam.move.cleanup` | `cleanup` | yes: remove the old address, activate the new one | always |
+//! | `ipam.move.observe` | `observe` | completed by the reconciler on a sighting of the device at its new address (WP2.4) or on a lease of its MAC address in the target network (WP8.1), or by a person; the timeout runs from its start | always |
+//! | `ipam.move.cleanup` | `cleanup` | yes: remove the old address, activate the new one, release the old lease | always |
 //!
 //! The manual tasks come before the L2 change: a device waits for its ticked tasks before
 //! it moves (IPAM-19, design decision 7). `dynamic` hosts get neither DHCP nor device tasks.
@@ -81,7 +82,9 @@
 //! # Timeout and rollback
 //!
 //! The observation timeout defaults to half the longest DHCP lease of the target's pools
-//! (the renewal point), else 3,600 s, never below 300 s; a request may set it from 300 s
+//! (the renewal point; with a Tenko scope the lease time a pool's client gets: the pool's
+//! setting, else the range's `lease_secs`, else the scope's, else the server's), else
+//! 3,600 s, never below 300 s; a request may set it from 300 s
 //! to 604,800 s. When the observe step passes its deadline, or any step fails, the engine
 //! compensates in reverse: the L2 step is undone with the undo steps of its receipt (a
 //! person is asked when that fails or the receipt has none), the intent step's
@@ -93,6 +96,8 @@
 //! that address only; a bulk move runs as one job group of at most `parallelism` jobs
 //! between "moved" and "confirmed" (CONN-09).
 
+// WP8.1: the automatic DHCP step with Tenko DHCP.
+pub mod dhcp;
 pub mod dns;
 mod l2;
 mod preview;
@@ -449,8 +454,8 @@ pub struct MoveDns {
 /// One step of an item, as previewed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct MoveStepPreview {
-    /// `ipam.intent`, `dhcp.manual`, `dns.manual`, `device.manual`, `l2.move`, `observe`
-    /// or `cleanup`.
+    /// `ipam.intent`, `dhcp.reservation`, `dhcp.manual`, `dns.records`, `dns.manual`,
+    /// `device.manual`, `l2.controller`, `l2.move`, `observe` or `cleanup`.
     pub kind: String,
     /// The engine's step kind (`ipam.move.intent`, ...).
     pub step_kind: String,

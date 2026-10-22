@@ -11,6 +11,7 @@ use sha2::{Digest as _, Sha256};
 use tenko_core::{
     AddressId, ObjectKind, ObjectRef, RequestCtx,
     codec::{canonical_sha256, encode_key},
+    dhcp::{DhcpSettings, LeaseTimes, Scope, tables as dhcp_tables},
     ipam::{
         Address, AssignmentMode, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Status,
         Tag, Vlan,
@@ -61,6 +62,8 @@ pub(super) struct StepPlan {
     pub l2: Option<L2StepPlan>,
     /// The zone of an automatic DNS step.
     pub dns: Option<super::dns::DnsStepPlan>,
+    /// The scope of an automatic DHCP step.
+    pub dhcp: Option<super::dhcp::DhcpStepPlan>,
 }
 
 impl StepPlan {
@@ -162,11 +165,8 @@ pub(super) fn compute(
         None => None,
     };
     let ranges = live_ranges(view, &target)?;
-    let lease = ranges
-        .iter()
-        .filter(|range| range.role == RangeRole::DhcpPool)
-        .filter_map(lease_of)
-        .max();
+    let scope = tenko_scope(view, &target)?;
+    let lease = target_lease(view, &ranges, scope.as_ref())?;
     let (timeout_secs, timeout_source) = timeout(request.timeout_secs, lease)?;
     let parallelism = request.parallelism.unwrap_or(config.move_parallelism);
     if !(1..=64).contains(&parallelism) {
@@ -269,9 +269,70 @@ pub(super) fn compute(
             .iter()
             .map(|c| c.host.as_ref().map(|h| ObjectRef::from(h.id)))
             .collect(),
+        dhcp: candidates
+            .iter()
+            .map(|c| dhcp_plan(scope.as_ref(), c))
+            .collect(),
         items,
         warnings,
     })
+}
+
+/// The Tenko scope of the target when it serves: enabled, on an IPv4 network (DHCPv6 is
+/// Slice 9).
+fn tenko_scope(view: &dyn ReadView, target: &Prefix) -> IpamResult<Option<Scope>> {
+    if !matches!(target.cidr, ipnet::IpNet::V4(_)) {
+        return Ok(None);
+    }
+    Ok(view
+        .get_typed(&dhcp_tables::SCOPES, &target.id)?
+        .map(|(scope, _)| scope)
+        .filter(|scope| scope.enabled))
+}
+
+/// The DHCP lease of the target's pools in seconds: the longest `lease_secs` of its pool
+/// ranges; with a Tenko scope, the longest default time a pool's client gets (the pool's
+/// setting, else the range's `lease_secs`, else the scope's, else the server's), and the
+/// scope's own when it has no pool.
+fn target_lease(
+    view: &dyn ReadView,
+    ranges: &[Range],
+    scope: Option<&Scope>,
+) -> IpamResult<Option<u32>> {
+    let pools = ranges
+        .iter()
+        .filter(|range| range.role == RangeRole::DhcpPool);
+    let Some(scope) = scope else {
+        return Ok(pools.filter_map(lease_of).max());
+    };
+    let settings: DhcpSettings = view
+        .get_typed(&dhcp_tables::SETTINGS, &())?
+        .map(|(settings, _)| settings)
+        .unwrap_or_default();
+    let scope_lease = scope.lease.unwrap_or(settings.lease);
+    let mut longest: Option<u32> = None;
+    for range in pools {
+        let pool = view
+            .get_typed(&dhcp_tables::POOLS, &range.id)?
+            .and_then(|(pool, _)| pool.lease);
+        let lease = pool
+            .or_else(|| range.lease_secs.map(LeaseTimes::fixed))
+            .unwrap_or(scope_lease);
+        longest = longest.max(Some(lease.default_secs));
+    }
+    Ok(Some(longest.unwrap_or(scope_lease.default_secs)))
+}
+
+/// The automatic DHCP step of a candidate: a Tenko scope on the target and an interface
+/// the role can reserve for (a MAC address or a client identifier, IPAM-18).
+fn dhcp_plan(scope: Option<&Scope>, candidate: &Candidate) -> Option<super::dhcp::DhcpStepPlan> {
+    let scope = scope?;
+    let interface = candidate.interface.as_ref()?;
+    (interface.mac.is_some() || interface.client_id.is_some()).then_some(
+        super::dhcp::DhcpStepPlan {
+            scope: scope.prefix,
+        },
+    )
 }
 
 /// The part of a move computed from the store, before the L2 steps.
@@ -286,6 +347,8 @@ pub(super) struct Base {
     pub items: Vec<MoveItem>,
     /// The host of each item.
     pub hosts: Vec<Option<ObjectRef>>,
+    /// The automatic DHCP step of each item, when the target has a Tenko scope.
+    pub dhcp: Vec<Option<super::dhcp::DhcpStepPlan>>,
     /// The warnings of the plan, the target and the DNS names.
     pub warnings: Vec<PlanWarning>,
 }
@@ -305,6 +368,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
         revision,
         mut items,
         hosts,
+        dhcp,
         mut warnings,
     } = base;
     warnings.extend(l2.warnings);
@@ -312,7 +376,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
         warning.acknowledged = warning.requires_ack && request.acknowledge.contains(&warning.code);
     }
     let mut all_steps = Vec::with_capacity(items.len());
-    for ((item, host_ref), l2) in items.iter_mut().zip(&hosts).zip(l2.items) {
+    for (((item, host_ref), l2), dhcp) in items.iter_mut().zip(&hosts).zip(l2.items).zip(&dhcp) {
         item.l2 = l2;
         item.warnings = warnings
             .iter()
@@ -323,7 +387,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
             })
             .cloned()
             .collect();
-        let steps = step_plans(item, &target, timeout_secs);
+        let steps = step_plans(item, &target, timeout_secs, dhcp.as_ref());
         item.steps = steps.iter().map(StepPlan::preview).collect();
         all_steps.push(steps);
     }
@@ -780,7 +844,12 @@ fn manual(instruction: &'static str, args: &BTreeMap<String, String>) -> ManualT
 
 /// The steps of one item's job, in order (see the module documentation).
 #[allow(clippy::too_many_lines)] // One entry per step kind, in job order.
-pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32) -> Vec<StepPlan> {
+pub(super) fn step_plans(
+    item: &MoveItem,
+    target: &MoveTarget,
+    timeout_secs: u32,
+    dhcp: Option<&super::dhcp::DhcpStepPlan>,
+) -> Vec<StepPlan> {
     let mut base = params(&[
         ("prefix", target.prefix.to_string()),
         ("cidr", target.cidr.to_string()),
@@ -824,8 +893,32 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         timeout: None,
         l2: None,
         dns: None,
+        dhcp: None,
     }];
-    if item.mode == Some(AssignmentMode::Reserved) {
+    if item.mode == Some(AssignmentMode::Reserved)
+        && let Some(plan) = dhcp
+    {
+        let mac = item.mac.map_or_else(
+            || "its client identifier".to_owned(),
+            |m| format!("MAC {m}"),
+        );
+        steps.push(StepPlan {
+            kind: super::dhcp::PREVIEW_KIND,
+            step_kind: super::steps::DHCP,
+            automatic: true,
+            text: format!(
+                "Reserve {} for {mac} in the Tenko scope {} from the planned address, and wait \
+                 until the dhcp role serves it; the old reservation stays until cleanup",
+                item.new_ip, target.cidr
+            ),
+            params: base.clone(),
+            task: None,
+            timeout: None,
+            l2: None,
+            dns: None,
+            dhcp: Some(plan.clone()),
+        });
+    } else if item.mode == Some(AssignmentMode::Reserved) {
         let mac = item.mac.map_or_else(
             || "its MAC address or DUID".to_owned(),
             |m| format!("MAC {m}"),
@@ -843,6 +936,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             timeout: None,
             l2: None,
             dns: None,
+            dhcp: None,
         });
     }
     if let Some(dns) = &item.dns
@@ -864,6 +958,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             timeout: None,
             l2: None,
             dns: Some(super::dns::DnsStepPlan { zone: zone.clone() }),
+            dhcp: None,
         });
     } else if let Some(dns) = &item.dns {
         let mut args = base.clone();
@@ -881,6 +976,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             timeout: None,
             l2: None,
             dns: None,
+            dhcp: None,
         });
     }
     if item.mode == Some(AssignmentMode::Static) {
@@ -898,6 +994,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
             timeout: None,
             l2: None,
             dns: None,
+            dhcp: None,
         });
     }
     if let Some(step) = l2_step(item, target, &base, &who) {
@@ -918,6 +1015,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         timeout: Some(Duration::from_secs(u64::from(timeout_secs))),
         l2: None,
         dns: None,
+        dhcp: None,
     });
     steps.push(StepPlan {
         kind: "cleanup",
@@ -929,6 +1027,7 @@ pub(super) fn step_plans(item: &MoveItem, target: &MoveTarget, timeout_secs: u32
         timeout: None,
         l2: None,
         dns: None,
+        dhcp: None,
     });
     steps
 }
@@ -971,6 +1070,7 @@ fn l2_step(
                 diff: l2.diff.clone(),
             }),
             dns: None,
+            dhcp: None,
         });
     }
     debug_assert_eq!(l2.action, MoveL2Action::Manual);
@@ -984,6 +1084,7 @@ fn l2_step(
         timeout: None,
         l2: None,
         dns: None,
+        dhcp: None,
     })
 }
 

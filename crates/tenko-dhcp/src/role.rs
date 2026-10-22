@@ -29,6 +29,8 @@
 
 pub mod commands;
 pub mod metrics;
+// WP8.1: the role as a move job reaches it.
+pub mod moves;
 
 use std::{
     io,
@@ -53,7 +55,9 @@ use crate::{
     config::image::build,
     feed::{Change, DhcpData, DhcpFeed, FeedError, FeedEvent},
     lease::{
-        CommitSettings, LeaseTable as _, SharedLeases, StoreLeases, follow::index_from_data,
+        CommitSettings, LeaseTable as _, SharedLeases, StoreLeases,
+        batch::{NoObservations, ObservationHook},
+        follow::index_from_data,
         refusal::Finding,
     },
     server::{DhcpServer, ListenerInfo, ServerConfig},
@@ -151,6 +155,8 @@ pub struct LocalNode {
     installs: Arc<AtomicU64>,
     probe: AtomicBool,
     probe_expected: AtomicBool,
+    // WP8.1: the observation hook, for the operator's release as for the committer.
+    observations: Arc<dyn ObservationHook>,
 }
 
 impl std::fmt::Debug for LocalNode {
@@ -246,11 +252,11 @@ impl LocalNode {
                 ),
             ));
         }
-        let row = Lease {
+        let mut row = Lease {
             state: BindingState::Released,
             ends: now,
             node: self.node,
-            ..lease
+            ..lease.clone()
         };
         let event = LeaseEvent::of(&row, LeaseEventKind::Reclaimed, now);
         let mut batch = WriteBatch::new(
@@ -258,6 +264,14 @@ impl LocalNode {
             now,
         );
         let encode = |error: StoreError| CommandResult::failed(error.to_string());
+        // WP8.1: the release expires the lease's IPAM facts in the same batch.
+        if let Some(observed) = self
+            .observations
+            .observe(&row, Some(&lease), &mut batch)
+            .map_err(encode)?
+        {
+            row.observed_at = Some(observed);
+        }
         batch.expect_typed(&tables::LEASES, &key, Some(revision));
         batch
             .put_typed(&tables::LEASES, &key, &row)
@@ -604,6 +618,23 @@ impl Role {
         node: NodeId,
         settings: RoleSettings,
     ) -> Result<Self, StartError> {
+        Self::start_observed(store, node, settings, Arc::new(NoObservations)).await
+    }
+
+    // WP8.1: the start with the observation hook of the lease batch.
+    /// [`Role::start`] with `observations`, the hook that adds the IPAM facts of every lease
+    /// change to its batch (plan section 2.8): the committer's changes and the operator's
+    /// releases.
+    ///
+    /// # Errors
+    ///
+    /// As [`Role::start`].
+    pub async fn start_observed(
+        store: Arc<dyn Store>,
+        node: NodeId,
+        settings: RoleSettings,
+        observations: Arc<dyn ObservationHook>,
+    ) -> Result<Self, StartError> {
         let feed_store = Arc::clone(&store);
         let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
             .await
@@ -624,8 +655,13 @@ impl Role {
         let leases = SharedLeases::new(index_from_data(&data));
         data.leases.clear();
         let held = data.revision;
-        let (lease_store, committer) =
-            StoreLeases::new(Arc::clone(&store), leases.clone(), node, settings.commit);
+        let (lease_store, committer) = StoreLeases::with_hook(
+            Arc::clone(&store),
+            leases.clone(),
+            node,
+            settings.commit,
+            Arc::clone(&observations),
+        );
         let stop = CancellationToken::new();
         let committer = tokio::spawn(committer.run(stop.child_token()));
         let mut config = settings.server.clone();
@@ -679,6 +715,7 @@ impl Role {
             installs,
             probe: AtomicBool::new(settings.probe),
             probe_expected: AtomicBool::new(settings.probe_expected),
+            observations,
         });
         Ok(Self {
             node,

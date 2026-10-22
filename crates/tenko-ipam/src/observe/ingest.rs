@@ -128,8 +128,8 @@ fn facts_of(view: &dyn ReadView, source: &str) -> IpamResult<BTreeMap<String, Ob
 }
 
 /// Whether a stored fact is due for a refresh write by a report at `observed_at` that
-/// would live until `expires_at`.
-fn refresh_due(
+/// would live until `expires_at`. The lease facts of [`super::dhcp`] follow the same rule.
+pub(crate) fn refresh_due(
     fact: &ObservedFact,
     observed_at: Timestamp,
     received_at: Timestamp,
@@ -152,14 +152,14 @@ fn refresh_due(
 
 /// Index rows a fact needs.
 #[derive(Debug, Default, PartialEq, Eq)]
-struct IndexRows {
+pub(crate) struct IndexRows {
     macs: BTreeSet<tenko_core::MacAddr>,
     ips: BTreeSet<std::net::IpAddr>,
     names: BTreeSet<String>,
 }
 
 impl IndexRows {
-    fn of(observed: &tenko_core::observe::Observed) -> Self {
+    pub(crate) fn of(observed: &tenko_core::observe::Observed) -> Self {
         Self {
             macs: observed_macs(observed).into_iter().collect(),
             ips: observed_ips(observed).into_iter().collect(),
@@ -171,7 +171,7 @@ impl IndexRows {
 
     /// Puts the rows of `self` missing from `before` and deletes the rows of `before`
     /// missing from `self`.
-    fn write(
+    pub(crate) fn write(
         &self,
         before: &IndexRows,
         source: &str,

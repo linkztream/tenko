@@ -31,7 +31,8 @@ use crate::{
 
 /// Step kind: the new address as planned intent.
 pub const INTENT: &str = "ipam.move.intent";
-/// Step kind: the DHCP reservation (manual until Tenko DHCP).
+/// Step kind: the DHCP reservation (automatic when the target has a Tenko scope, see
+/// [`super::dhcp`]; a task for a person otherwise).
 pub const DHCP: &str = "ipam.move.dhcp";
 /// Step kind: the DNS records (automatic when the name's zone is in Tenko, see
 /// [`super::dns`]).
@@ -94,6 +95,9 @@ pub struct MoveStepParams {
     /// The zone of an automatic DNS step; absent, the step is a task for a person.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<super::dns::DnsStepPlan>,
+    /// The Tenko scope of an automatic DHCP step; absent, the step is a task for a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp: Option<super::dhcp::DhcpStepPlan>,
 }
 
 /// What the controller step changes, as the submit planned it.
@@ -361,9 +365,77 @@ impl StepHandler for MoveIntentStep {
 }
 
 /// `ipam.move.cleanup`: removes the old address, makes the new one active and clears a
-/// `move-failed` tag of the requested object.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MoveCleanupStep;
+/// `move-failed` tag of the requested object. With the `dhcp` role in the process it also
+/// releases the old lease, when the moved interface's MAC address still holds it, through
+/// the node command `dhcp.lease.release` ([`super::dhcp::release_held`]); the old
+/// reservation goes with the old address. A release that fails is logged and left to the
+/// lease's expiry: the cleanup never rolls a confirmed move back.
+#[derive(Debug, Clone, Default)]
+pub struct MoveCleanupStep {
+    dhcp: Option<super::dhcp::DhcpMoves>,
+}
+
+/// What the cleanup did beyond IPAM, kept as JSON in the step's output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveCleanupOutput {
+    /// Whether the old lease was released.
+    #[serde(default)]
+    pub released_old_lease: bool,
+}
+
+impl MoveCleanupStep {
+    /// The cleanup that also releases the old lease through the role of `slot`.
+    pub fn with_dhcp(slot: super::dhcp::DhcpMoves) -> Self {
+        Self { dhcp: Some(slot) }
+    }
+
+    /// Releases the old lease when the role runs and the interface's MAC holds it.
+    async fn release_old(
+        &self,
+        view: &dyn ReadView,
+        params: &MoveStepParams,
+        cx: &StepContext,
+    ) -> bool {
+        let Some(role) = self.dhcp.as_ref().and_then(super::dhcp::DhcpMoves::get) else {
+            return false;
+        };
+        // The old address's VRF, from its row even once deleted (a step run again).
+        let old = view
+            .get_typed(&ADDRESSES, &params.address)
+            .map_err(StepError::from)
+            .and_then(|old| Ok((old, super::dhcp::interface_mac(view, params)?)));
+        let (vrf, mac) = match old {
+            Ok((Some((old, _)), mac)) => (old.vrf, mac),
+            Ok((None, _)) => return false,
+            Err(error) => {
+                tracing::warn!(job = %cx.job, %error, "the old lease of a move was not looked up");
+                return false;
+            }
+        };
+        match super::dhcp::release_held(
+            role.as_ref(),
+            view,
+            vrf,
+            params.old_ip,
+            mac,
+            Timestamp::now(),
+            "the move to another network is confirmed",
+        )
+        .await
+        {
+            Ok(released) => released == super::dhcp::Released::Released,
+            Err(error) => {
+                tracing::warn!(
+                    job = %cx.job,
+                    old_ip = %params.old_ip,
+                    %error,
+                    "the old lease of a move was not released; it expires on its own"
+                );
+                false
+            }
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl StepHandler for MoveCleanupStep {
@@ -407,8 +479,17 @@ impl StepHandler for MoveCleanupStep {
         if let Some(tag) = tag_command(view.as_ref(), params.requested, false)? {
             commands.push(tag);
         }
+        let released_old_lease = self.release_old(view.as_ref(), &params, cx).await;
         write(cx, view.as_ref(), &commands).await?;
-        Ok(StepOutcome::Done { output: None })
+        if self.dhcp.is_none() {
+            return Ok(StepOutcome::Done { output: None });
+        }
+        let output = MoveCleanupOutput { released_old_lease };
+        let bytes = serde_json::to_vec(&output)
+            .map_err(|error| StepError::InvalidParams(error.to_string()))?;
+        Ok(StepOutcome::Done {
+            output: Some(bytes.into()),
+        })
     }
 
     /// The last step: nothing runs after it, so nothing undoes it.
@@ -728,8 +809,8 @@ impl StepHandler for MoveControllerStep {
 pub fn move_step_handlers() -> Vec<Arc<dyn StepHandler>> {
     vec![
         Arc::new(MoveIntentStep),
-        Arc::new(MoveCleanupStep),
-        Arc::new(MoveManualStep::new(DHCP)),
+        Arc::new(MoveCleanupStep::default()),
+        Arc::new(super::dhcp::MoveDhcpStep::default()),
         Arc::new(super::dns::MoveDnsStep::manual()),
         Arc::new(MoveManualStep::new(DEVICE)),
         Arc::new(MoveManualStep::new(L2)),

@@ -10475,8 +10475,8 @@ export interface components {
             /** @description Whether Tenko does it; otherwise a person ticks it off. */
             automatic: boolean;
             /**
-             * @description `ipam.intent`, `dhcp.manual`, `dns.manual`, `device.manual`, `l2.move`, `observe`
-             *     or `cleanup`.
+             * @description `ipam.intent`, `dhcp.reservation`, `dhcp.manual`, `dns.records`, `dns.manual`,
+             *     `device.manual`, `l2.controller`, `l2.move`, `observe` or `cleanup`.
              */
             kind: string;
             /**

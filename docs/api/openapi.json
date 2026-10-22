@@ -47785,7 +47785,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`ipam.intent`, `dhcp.manual`, `dns.manual`, `device.manual`, `l2.move`, `observe`\nor `cleanup`."
+            "description": "`ipam.intent`, `dhcp.reservation`, `dhcp.manual`, `dns.records`, `dns.manual`,\n`device.manual`, `l2.controller`, `l2.move`, `observe` or `cleanup`."
           },
           "params": {
             "type": "object",

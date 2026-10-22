@@ -32,6 +32,8 @@
 //! and `ipam.obs.by_name`, and `ipam.obs.last_seen` for the last sighting of addresses and
 //! interfaces of intent.
 
+// WP8.1: the facts of the DHCP leases, written in the lease's batch.
+pub mod dhcp;
 pub mod dns;
 pub mod ingest;
 pub mod model;

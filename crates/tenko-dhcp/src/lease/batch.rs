@@ -25,9 +25,9 @@ use tenko_store::{StoreError, WriteBatch};
 
 use super::{PendingChange, table::IndexUpdate};
 
-/// Adds the IPAM observation fact of a lease change to its batch (plan section 2.8). WP8.1
-/// fills it with the helper of `tenko-ipam`; until then the batch carries no fact
-/// ([`NoObservations`]).
+/// Adds the IPAM observation fact of a lease change to its batch (plan section 2.8). The
+/// role's hook is [`IpamObservations`](super::observe::IpamObservations), over the helper
+/// of `tenko-ipam`; [`NoObservations`] adds none.
 pub trait ObservationHook: Send + Sync {
     /// Adds the fact for `lease` (the row after the change; `previous` the row before) to
     /// `batch` when the rules of `observe::ingest` say one is due, and returns the time to
@@ -44,7 +44,7 @@ pub trait ObservationHook: Send + Sync {
     ) -> Result<Option<Timestamp>, StoreError>;
 }
 
-/// No observation facts (until WP8.1).
+/// No observation facts (the lease tests, and a role started without the hook).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoObservations;
 
