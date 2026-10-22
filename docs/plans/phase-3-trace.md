@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-23 Phase 3 requirements; 2 named by at least one test, 21 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 3 named by at least one test, 20 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-03 | Must | - | - | `crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-04 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
-| DHCP-06 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/dhcp.md`<br>and 1 more |
+| DHCP-06 | Must | `crates/tenko-dhcp/tests/conflict.rs` | `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md` | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/conflict/mod.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 2 more |
 | DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 3 more |
 | DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>and 6 more |
 | DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/phase-3-plan.md` |
@@ -46,7 +46,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | E24 | Leases survive the node: the node is killed (SIGKILL, and a power-off of the lab VM) under perfdhcp load and restarted, no lease that was acknowledged is lost, no address is leased to two clients, and the role's lease table equals the store's rows; while the store refuses writes (the test hook of WP6.2) the role behaves as P3-Q14 decides | DHCP-07, OPS-02, OPS-26 | `crates/tenko-dhcp/tests/lease_crash.rs` |
 | E25 | The five-device move lab of Phase 1 (E8) runs with the DHCP step automatic for the `reserved` devices: the reservation in the target scope from IPAM intent, the observation from the new lease without polling, the old reservation and lease removed in the cleanup, the `static` device stopping at its manual step, the rollback on a blocked step | IPAM-19, DHCP-16, IPAM-18, CON-10 | `crates/tenko-ipam/tests/move_dhcp.rs`<br>`crates/tenko/tests/acceptance_move.rs`<br>`crates/tenko/tests/acceptance_move.rs::e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_move` |
 | E26 | A client with option 81 and a legacy client that sends only option 12 get their A and PTR records and a DHCID in Tenko zones on ACK, the records go on release and on expiry, and a second client that claims the first one's name is refused by name protection (RFC 4703); the profile defaults of P3-Q6 hold | DHCP-13 | - |
-| E27 | The relay and options lab: four networks in compose behind a relay; giaddr and link selection (RFC 3527) choose the scope, option 82 is echoed, a shared network with two subnets fills both, options inherit from server to scope to class to reservation, vendor class, user class and MAC wildcard classes select policies, a MAC deny list and an allow list on a restricted scope hold, a squatter is detected before the offer, a DECLINE quarantines the address, and a BIOS, a UEFI and a UEFI HTTP client boot over PXE (iPXE in QEMU) | DHCP-01 to DHCP-06, DHCP-08, TGL-16, TGL-17 | - |
+| E27 | The relay and options lab: four networks in compose behind a relay; giaddr and link selection (RFC 3527) choose the scope, option 82 is echoed, a shared network with two subnets fills both, options inherit from server to scope to class to reservation, vendor class, user class and MAC wildcard classes select policies, a MAC deny list and an allow list on a restricted scope hold, a squatter is detected before the offer, a DECLINE quarantines the address, and a BIOS, a UEFI and a UEFI HTTP client boot over PXE (iPXE in QEMU) | DHCP-01 to DHCP-06, DHCP-08, TGL-16, TGL-17 | `crates/tenko-dhcp/tests/conflict.rs::lab_m35_squatters_are_skipped` |
 | E28 | The reconciliation view shows the four truths (intent, leases, DNS records, scans) for the lab data with the ghost, rogue, orphan and PTR-mismatch lists and the "who wins" rule of each, and a lease's options 55 and 60 set the OS field of an unmanaged host | IPAM-21, DHCP-14, IPAM-23 | - |
 | E29 | DHCPv6 through a relay in the lab: IA_NA from a pool, IA_PD from a delegation pool, a DUID reservation from IPAM intent, RFC 6939 correlation with the DHCPv4 lease of the same MAC, the names of RFC 4704, and the M and O flag check of DHCP-10 in the health view | DHCP-09, DHCP-10, DHCP-11, DHCP-13 | - |
 | E30 | The Kea JSON export of the lab configuration and its leases is accepted by `kea-dhcp4 -t` and `kea-dhcp6 -t`, and a Kea server started from it hands the exported reservations to their clients | MIG-16 | - |
@@ -62,7 +62,6 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - DHCP-03 (Must)
 - DHCP-04 (Must)
 - DHCP-05 (Must)
-- DHCP-06 (Must)
 - DHCP-07 (Must)
 - DHCP-08 (Must)
 - DHCP-09 (Must)

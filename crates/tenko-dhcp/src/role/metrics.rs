@@ -229,8 +229,9 @@ impl Collect for Utilization {
 static LEASES: Leases = Leases;
 static UTILIZATION: Utilization = Utilization;
 
-static CONFLICTS: Counter = Counter::new(families::CONFLICTS);
-static PROBE_DURATION: Histogram = Histogram::new(families::PROBE_DURATION);
+// WP8.5: conflict detection counts these two (`crate::conflict::metrics`).
+pub(crate) static CONFLICTS: Counter = Counter::new(families::CONFLICTS);
+pub(crate) static PROBE_DURATION: Histogram = Histogram::new(families::PROBE_DURATION);
 static DDNS_QUEUE: Gauge = Gauge::new(families::DDNS_QUEUE);
 
 /// `tenko_dhcp_ddns{outcome}`, no series until WP8.3 counts.

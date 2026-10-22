@@ -89,6 +89,14 @@ pub fn held_by_other(change: &PendingChange, previous: Option<&Lease>, now: Time
     if change.kind == LeaseEventKind::Reclaimed || !previous.blocks(now) {
         return false;
     }
+    // WP8.5: a DECLINE's change belongs to no client (the engine checked that the decliner
+    // holds the binding), so it may end an active binding; it never replaces an abandoned
+    // row.
+    if change.kind == LeaseEventKind::Declined
+        && previous.state == tenko_core::dhcp::BindingState::Active
+    {
+        return false;
+    }
     let mut identity = [0u8; tenko_core::dhcp::lease::MAX_IDENTITY];
     let len = change.identity(&mut identity);
     previous.client.identity() != identity[..len]

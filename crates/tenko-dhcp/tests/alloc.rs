@@ -186,6 +186,159 @@ fn the_codec_and_the_dora_path_do_not_allocate() {
     let mut requests: Vec<Vec<u8>> = WELL_FORMED.iter().map(|name| fixture(name)).collect();
     requests.extend(corpus());
     dora::section(&requests, GLOBAL);
+    // WP8.5: the worker's step of conflict detection.
+    conflict_section(&requests);
+}
+
+// WP8.5: the worker's step of conflict detection does not allocate: the rules of when, the
+// park into the pending table, the DECLINE limit and its report (and the dispatcher's take
+// of a parked slot).
+#[allow(
+    clippy::too_many_lines,
+    reason = "the world, the step and the measure, read top to bottom"
+)]
+fn conflict_section(requests: &[Vec<u8>]) {
+    use std::{
+        net::SocketAddrV4,
+        time::{Duration, Instant},
+    };
+
+    use tenko_core::{
+        NodeId, Timestamp,
+        dhcp::{BindingState, LeaseEventKind, lease::MAX_IDENTITY},
+    };
+    use tenko_dhcp::{
+        allocator::SingleNode,
+        conflict::{
+            ConflictSettings, Conflicts, Parked, Report, ReportKind,
+            pending::Parking,
+            rules::{self, candidate},
+        },
+        lease::{LeaseTable as _, MemLeaseTable, PendingChange},
+        v4::engine::{
+            self, Action, Context, EngineSettings, HashedAllocator, ListenMode, OfferTable,
+            Received, Scratch,
+        },
+    };
+
+    let interface = Ipv4Addr::new(198, 51, 100, 10);
+    let mut links = vec![interface];
+    for bytes in requests {
+        if let Ok(message) = Message::parse(bytes)
+            && !message.giaddr().is_unspecified()
+        {
+            links.push(message.giaddr());
+        }
+    }
+    let image = dora::image(&links);
+    let now = Timestamp::now();
+    let mut leases = MemLeaseTable::default();
+    let scope = &image.scopes()[0];
+    let change = PendingChange::new(
+        LeaseEventKind::Granted,
+        scope.vrf,
+        scope.prefix,
+        Ipv4Addr::from(u32::from(scope.pools[0].first) + 5),
+        1,
+        &[0x00, 0x00, 0x5e, 0x00, 0x53, 0xee],
+        None,
+        BindingState::Active,
+        now,
+        now.checked_add(Duration::from_secs(3_600)).expect("time"),
+    );
+    leases.apply(change.to_lease(NodeId(1), None));
+    let conflicts = Conflicts::new(&ConflictSettings {
+        pending: 64,
+        ..ConflictSettings::default()
+    });
+    let offers = OfferTable::with_capacity(1_024);
+    let settings = EngineSettings::default();
+    let mut scratch = Scratch::new();
+    let mut taken = Parked::boxed();
+    let mut parked = 0usize;
+    let mut declines = 0usize;
+    let mut identity = [0u8; MAX_IDENTITY];
+    let mut step = || {
+        for bytes in requests {
+            let ctx = Context {
+                image: &image,
+                leases: &leases,
+                offers: &offers,
+                ownership: &SingleNode,
+                allocator: &HashedAllocator,
+                settings: &settings,
+                accepting: true,
+                now,
+            };
+            let received = Received {
+                bytes: black_box(bytes),
+                source: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 67),
+                local: interface,
+                mode: ListenMode::Relay,
+            };
+            let answer = engine::handle(&ctx, &received, &mut scratch);
+            if let Action::Reply { len, dest, .. } = answer.action
+                && let Some(found) = candidate(
+                    &conflicts,
+                    &image,
+                    &leases,
+                    &received,
+                    &scratch.reply[..len],
+                    now,
+                )
+                && conflicts.park(&Parking {
+                    request: bytes,
+                    source: received.source,
+                    local: interface,
+                    mode: ListenMode::Relay,
+                    listener: 0,
+                    worker: 0,
+                    reply: &scratch.reply[..len],
+                    dest,
+                    candidate: found,
+                    received: Instant::now(),
+                })
+            {
+                parked += 1;
+                let ready = conflicts.pending().next_ready().expect("a parked slot");
+                assert!(
+                    conflicts
+                        .pending()
+                        .take(ready.index, ready.generation, &mut taken)
+                );
+            }
+            if let Some(len) = rules::identity_of(bytes, &mut identity)
+                && conflicts.decline_allowed(&identity[..len], Instant::now())
+            {
+                declines += 1;
+                conflicts.declined(&Report {
+                    kind: ReportKind::Decline,
+                    vrf: scope.vrf,
+                    prefix: scope.prefix,
+                    addr: Ipv4Addr::new(192, 0, 2, 150),
+                    mac: None,
+                    at: now,
+                });
+            }
+        }
+    };
+    step();
+    let region = Region::new(GLOBAL);
+    for _ in 0..20 {
+        step();
+    }
+    let stats = region.change();
+    assert_eq!(
+        (
+            stats.allocations,
+            stats.reallocations,
+            stats.bytes_allocated
+        ),
+        (0, 0, 0),
+        "the worker's step of conflict detection"
+    );
+    assert!(parked > 0, "offers were parked");
+    assert!(declines > 0, "declines were counted");
 }
 
 /// The requests of `fixtures/requests/*.hex` (WP7.3), in name order.

@@ -564,14 +564,26 @@ relay_port = 67
 client_port = 68
 
 [dhcp.probe]
-# The conflict probe before an address is offered (WP8.5): the longest it waits for an
-# answer, in milliseconds (10 to 1000), and how long a result is remembered, in seconds.
+# The conflict probe before an address is offered (WP8.5, TGL-16; docs/dhcp.md section 14).
+# It runs when the probe role runs in this process: ARP on this node's links (Linux with
+# CAP_NET_RAW), ICMP echo elsewhere. An address never leased to the client waits for it:
+# the offer goes out when nobody answered, or at the latest timeout_ms after the DISCOVER
+# (10 to 1000); an address that answers is held for [dhcp.decline] hold_secs and the next
+# one is offered. A clean result is remembered for cache_secs (0 to 86400); pending offers
+# may wait at once (16 to 65536), beyond that an offer goes out unprobed. The setting
+# conflict_detection of the DHCP settings (or the profile: off under Lab) switches it.
 timeout_ms = 300
 cache_secs = 600
+pending = 1024
 
 [dhcp.decline]
-# How long an address a client declined stays abandoned, in seconds.
+# How long an address a client declined, or the probe found in use, stays abandoned, in
+# seconds (60 to 2592000). A client may decline at most limit addresses per window_secs
+# (0 to 100 per 60 to 86400 seconds); a DECLINE beyond is dropped and the client keeps its
+# lease, so a broken client cannot drain a pool.
 hold_secs = 86400
+limit = 3
+window_secs = 3600
 
 [dhcp.ddns]
 # The dynamic DNS updates of leases (WP8.3): attempts after the first, and the wait before

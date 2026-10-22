@@ -3217,6 +3217,7 @@ dependencies = [
  "tenko-core",
  "tenko-ipam",
  "tenko-jobs",
+ "tenko-scan",
  "tenko-store",
  "thiserror 2.0.21",
  "tokio",

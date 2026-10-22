@@ -95,6 +95,10 @@ pub struct DhcpProbeSection {
     pub timeout_ms: u64,
     /// How long a clean probe result is kept, 0 to 86,400 seconds (default 600).
     pub cache_secs: u64,
+    // WP8.5: the size of the pending table.
+    /// Offers that may wait for a probe at once, 16 to 65,536 (default 1,024); beyond, an
+    /// offer goes out unprobed.
+    pub pending: usize,
 }
 
 impl Default for DhcpProbeSection {
@@ -102,6 +106,7 @@ impl Default for DhcpProbeSection {
         Self {
             timeout_ms: 300,
             cache_secs: 600,
+            pending: 1_024,
         }
     }
 }
@@ -113,11 +118,21 @@ pub struct DhcpDeclineSection {
     /// How long a declined address stays abandoned, 60 to 2,592,000 seconds (default one
     /// day).
     pub hold_secs: u32,
+    // WP8.5: the per-client DECLINE limit.
+    /// DECLINEs one client may send per window before more are dropped, 0 to 100 (default
+    /// 3), so that a broken client cannot drain a pool.
+    pub limit: u32,
+    /// The window of the limit, 60 to 86,400 seconds (default 3,600).
+    pub window_secs: u64,
 }
 
 impl Default for DhcpDeclineSection {
     fn default() -> Self {
-        Self { hold_secs: 86_400 }
+        Self {
+            hold_secs: 86_400,
+            limit: 3,
+            window_secs: 3_600,
+        }
     }
 }
 
@@ -274,6 +289,19 @@ impl DhcpSection {
             (60..=2_592_000).contains(&self.decline.hold_secs),
             "dhcp.decline.hold_secs must be between 60 and 2592000",
         )?;
+        // WP8.5: the pending table and the DECLINE limit.
+        check(
+            (16..=65_536).contains(&self.probe.pending),
+            "dhcp.probe.pending must be between 16 and 65536",
+        )?;
+        check(
+            self.decline.limit <= 100,
+            "dhcp.decline.limit must be between 0 and 100",
+        )?;
+        check(
+            (60..=86_400).contains(&self.decline.window_secs),
+            "dhcp.decline.window_secs must be between 60 and 86400",
+        )?;
         check(
             self.ddns.retries <= 20,
             "dhcp.ddns.retries must be between 0 and 20",
@@ -335,6 +363,12 @@ mod tests {
         assert_eq!(section.probe.timeout_ms, 300);
         assert_eq!(section.probe.cache_secs, 600);
         assert_eq!(section.decline.hold_secs, 86_400);
+        // WP8.5: the pending table and the DECLINE limit.
+        assert_eq!(section.probe.pending, 1_024);
+        assert_eq!(
+            (section.decline.limit, section.decline.window_secs),
+            (3, 3_600)
+        );
         assert_eq!(section.history.days, None);
         assert!((1..=8).contains(&section.worker_count()));
     }
@@ -359,6 +393,10 @@ mod tests {
             ("port = 0", "dhcp.port"),
             ("[probe]\ntimeout_ms = 5", "dhcp.probe.timeout_ms"),
             ("[decline]\nhold_secs = 1", "dhcp.decline.hold_secs"),
+            // WP8.5: the pending table and the DECLINE limit.
+            ("[probe]\npending = 1", "dhcp.probe.pending"),
+            ("[decline]\nlimit = 101", "dhcp.decline.limit"),
+            ("[decline]\nwindow_secs = 1", "dhcp.decline.window_secs"),
             ("[ddns]\nretries = 99", "dhcp.ddns.retries"),
             ("[history]\ndays = 0", "dhcp.history.days"),
             ("unknown = 1", "unknown"),

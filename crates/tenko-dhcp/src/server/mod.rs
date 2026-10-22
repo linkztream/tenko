@@ -53,6 +53,14 @@ pub use link::LinkSender;
 pub use socket::STOP_POLL;
 use tenko_core::{NodeId, Timestamp};
 
+// WP8.5: conflict detection.
+use crate::conflict::{
+    self, ConflictSettings, Conflicts, Report, ReportKind,
+    dispatch::{Hooks, Rerun},
+    pending::{Parked, Parking},
+    rules,
+};
+use crate::v4::engine::OfferBook as _;
 use crate::{
     allocator::SingleNode,
     image::ConfigImage,
@@ -120,6 +128,9 @@ pub struct ServerConfig {
     pub send_buffer: usize,
     /// The node that writes the leases.
     pub node: NodeId,
+    // WP8.5: conflict detection before an offer and the DECLINE limit.
+    /// Conflict detection (`[dhcp.probe]`, `[dhcp.decline]`, TGL-16); without a probe none.
+    pub conflict: ConflictSettings,
 }
 
 impl Default for ServerConfig {
@@ -136,6 +147,7 @@ impl Default for ServerConfig {
             recv_buffer: 4 * 1024 * 1024,
             send_buffer: 4 * 1024 * 1024,
             node: NodeId(1),
+            conflict: ConflictSettings::default(),
         }
     }
 }
@@ -281,6 +293,8 @@ struct Shared<H> {
     committer: Mutex<Option<Thread>>,
     settings: EngineSettings,
     node: NodeId,
+    // WP8.5: the pending table, the probe cache and the DECLINE limit.
+    conflicts: Arc<Conflicts>,
 }
 
 impl<H> Shared<H> {
@@ -396,6 +410,7 @@ impl<H: TableHandle> DhcpServer<H> {
             committer: Mutex::new(None),
             settings: config.engine,
             node: config.node,
+            conflicts: Arc::new(Conflicts::new(&config.conflict)),
         });
         let mut threads = Vec::with_capacity(total + 1);
         let committer = {
@@ -409,6 +424,18 @@ impl<H: TableHandle> DhcpServer<H> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(committer.thread().clone());
         threads.push(committer);
+        // WP8.5: the dispatcher of the conflict probe, when a probe runs.
+        if let Some(probe) = shared.conflicts.probe().cloned() {
+            let mut hooks = ProbeHooks::new(Arc::clone(&shared));
+            threads.push(
+                std::thread::Builder::new()
+                    .name("dhcp-probe".to_owned())
+                    .spawn(move || {
+                        let conflicts = Arc::clone(&hooks.shared.conflicts);
+                        conflict::dispatch::run(&conflicts, &probe, &mut hooks);
+                    })?,
+            );
+        }
         let mut index = 0;
         for (listener, listen) in bound.iter().enumerate() {
             let mode = config.listen[listener].mode;
@@ -492,6 +519,12 @@ impl<H: TableHandle> DhcpServer<H> {
         f(&mut self.shared.table.write())
     }
 
+    // WP8.5: conflict detection, for the role and the tests.
+    /// Conflict detection: its switches, tables and counters.
+    pub fn conflicts(&self) -> &Arc<Conflicts> {
+        &self.shared.conflicts
+    }
+
     /// The counters summed over the workers.
     pub fn metrics(&self) -> MetricsSnapshot {
         WorkerMetrics::total(&self.shared.metrics)
@@ -523,6 +556,8 @@ impl<H: TableHandle> DhcpServer<H> {
     fn halt(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.shared.wake_committer();
+        // WP8.5: the dispatcher looks at the stop flag when woken.
+        self.shared.conflicts.wake();
         for thread in self.threads.drain(..) {
             let _ = thread.join();
         }
@@ -632,6 +667,26 @@ fn worker_loop<H: TableHandle>(
             )
         };
         metrics.count(&answer);
+        // WP8.5: an OFFER of an address never leased to the client waits for the probe; a
+        // DECLINE beyond the client's limit is dropped.
+        let request = Received {
+            bytes: &buf[..len],
+            source,
+            local,
+            mode,
+        };
+        if conflict_step(
+            shared,
+            &image,
+            &request,
+            &answer,
+            &scratch,
+            (listener, me),
+            received,
+        ) {
+            continue;
+        }
+        // End of the WP8.5 step.
         match answer.action {
             Action::Reply { kind, len, dest } => {
                 if send(socket, &shared.links[listener], dest, &scratch.reply[..len]).is_ok()
@@ -784,6 +839,229 @@ fn commit_loop<H: TableHandle>(shared: &Shared<H>) {
             {
                 shared.metrics[committer].exchange[1].record(micros(slot.received));
             }
+        }
+    }
+}
+
+// WP8.5: conflict detection on the worker's path and the dispatcher's hooks.
+/// The identity no client has (every client identity starts with 0 or 1): the offer
+/// table holds a conflict's address for it until the abandoned row has committed.
+const CONFLICT_HOLDER: &[u8] = b"\xffconflict";
+
+/// The ticket of a conflict's lease change: no reply waits for it, so the committer finds
+/// no slot under it and sends nothing.
+const CONFLICT_TICKET: Ticket = Ticket(u64::MAX);
+
+/// The worker's step of conflict detection after the engine answered: an OFFER that needs
+/// a probe is parked (true: the worker sends nothing now), a DECLINE beyond the client's
+/// limit is dropped (true), an accepted one reported. Nothing here allocates.
+fn conflict_step<H: TableHandle>(
+    shared: &Shared<H>,
+    image: &ConfigImage,
+    request: &Received<'_>,
+    answer: &engine::Answer,
+    scratch: &Scratch,
+    (listener, worker): (usize, usize),
+    received: Instant,
+) -> bool {
+    let conflicts = &shared.conflicts;
+    match answer.action {
+        Action::Reply {
+            kind: MessageType::Offer,
+            len,
+            dest,
+        } if conflicts.enabled() => {
+            let now = Timestamp::now();
+            let reply = &scratch.reply[..len];
+            let candidate = {
+                let table = shared.table.read();
+                rules::candidate(conflicts, image, &*table, request, reply, now)
+            };
+            candidate.is_some_and(|candidate| {
+                conflicts.park(&Parking {
+                    request: request.bytes,
+                    source: request.source,
+                    local: request.local,
+                    mode: request.mode,
+                    listener,
+                    worker,
+                    reply,
+                    dest,
+                    candidate,
+                    received,
+                })
+            })
+        }
+        Action::Commit if answer.request == Some(MessageType::Decline) => {
+            let mut identity = [0u8; tenko_core::dhcp::lease::MAX_IDENTITY];
+            let Some(len) = rules::identity_of(request.bytes, &mut identity) else {
+                return false;
+            };
+            if !conflicts.decline_allowed(&identity[..len], received) {
+                shared.metrics[worker].retract(answer.request, DropReason::RateLimited);
+                return true;
+            }
+            let mac = crate::v4::Message::parse(request.bytes)
+                .ok()
+                .and_then(|message| message.mac().ok());
+            conflicts.declined(&Report {
+                kind: ReportKind::Decline,
+                vrf: scratch.change.vrf,
+                prefix: scratch.change.scope,
+                addr: scratch.change.addr,
+                mac,
+                at: Timestamp::now(),
+            });
+            false
+        }
+        _ => false,
+    }
+}
+
+/// What the dispatcher of the conflict probe does through the server.
+struct ProbeHooks<H> {
+    shared: Arc<Shared<H>>,
+    scratch: Box<Scratch>,
+}
+
+impl<H> ProbeHooks<H> {
+    fn new(shared: Arc<Shared<H>>) -> Self {
+        Self {
+            shared,
+            scratch: Scratch::new(),
+        }
+    }
+}
+
+impl<H: TableHandle> Hooks for ProbeHooks<H> {
+    fn stopped(&self) -> bool {
+        self.shared.stop.load(Ordering::Relaxed)
+    }
+
+    fn send(&mut self, parked: &Parked) {
+        let shared = &self.shared;
+        let listener = parked.listener;
+        if send(
+            &shared.sockets[listener],
+            &shared.links[listener],
+            parked.dest,
+            parked.reply(),
+        )
+        .is_ok()
+        {
+            shared.metrics[parked.worker].exchange[0].record(micros(parked.received));
+        }
+    }
+
+    fn mark(&mut self, parked: &Parked, mac: Option<[u8; 6]>) {
+        let shared = &self.shared;
+        let candidate = parked.candidate;
+        let now = Timestamp::now();
+        let after = |secs: u32| {
+            now.checked_add(Duration::from_secs(u64::from(secs)))
+                .unwrap_or(now)
+        };
+        // The client's offer gives way, and a holder no client matches keeps the address
+        // from every client until the abandoned row is in the table.
+        shared.offers.hold(
+            candidate.prefix,
+            candidate.addr,
+            candidate.identity(),
+            now,
+            now,
+        );
+        shared.offers.hold(
+            candidate.prefix,
+            candidate.addr,
+            CONFLICT_HOLDER,
+            after(shared.settings.offer_secs),
+            now,
+        );
+        let (htype, chaddr): (u8, &[u8]) = match &mac {
+            Some(mac) => (1, mac),
+            None => (0, &[]),
+        };
+        let change = PendingChange::new(
+            tenko_core::dhcp::LeaseEventKind::Conflict,
+            candidate.vrf,
+            candidate.prefix,
+            candidate.addr,
+            htype,
+            chaddr,
+            None,
+            tenko_core::dhcp::BindingState::Abandoned,
+            now,
+            after(shared.settings.decline_hold_secs),
+        );
+        match shared.store.submit(&change, CONFLICT_TICKET) {
+            Ok(()) => {
+                if !shared.table.applies_commits() {
+                    // A table of the server's own (tests, benches): the row goes in now; the
+                    // production table takes it from the lease store at its commit.
+                    let mut table = shared.table.write();
+                    let previous = table.get(candidate.vrf, candidate.addr).cloned();
+                    table.apply(change.to_lease(shared.node, previous.as_ref()));
+                }
+                shared.wake_committer();
+            }
+            Err(error) => tracing::debug!(
+                addr = %candidate.addr,
+                ?error,
+                "the conflict's lease change was not taken; the offer table holds the address"
+            ),
+        }
+    }
+
+    fn rerun(&mut self, parked: &mut Parked) -> Rerun {
+        let shared = Arc::clone(&self.shared);
+        let table = shared.table.read();
+        let image = Arc::clone(&shared.image.read().unwrap_or_else(PoisonError::into_inner));
+        let now = Timestamp::now();
+        let ctx = Context {
+            image: &image,
+            leases: &*table,
+            offers: &shared.offers,
+            ownership: &SingleNode,
+            allocator: &HashedAllocator,
+            settings: &shared.settings,
+            accepting: shared.store.accepting(),
+            now,
+        };
+        let received = Received {
+            bytes: parked.request(),
+            source: parked.source,
+            local: parked.local,
+            mode: parked.mode,
+        };
+        let answer = engine::handle(&ctx, &received, &mut self.scratch);
+        match answer.action {
+            Action::Reply {
+                kind: MessageType::Offer,
+                len,
+                dest,
+            } => {
+                let candidate = rules::candidate(
+                    &shared.conflicts,
+                    &image,
+                    &*table,
+                    &received,
+                    &self.scratch.reply[..len],
+                    now,
+                );
+                drop(table);
+                parked.set_reply(&self.scratch.reply[..len], dest);
+                if let Some(candidate) = candidate {
+                    parked.candidate = candidate;
+                }
+                Rerun::Offer {
+                    probe: candidate.is_some(),
+                }
+            }
+            Action::Drop(reason) => {
+                shared.metrics[parked.worker].retract(answer.request, reason);
+                Rerun::Nothing
+            }
+            _ => Rerun::Nothing,
         }
     }
 }

@@ -222,8 +222,23 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
     dhcp_role::metrics::register(metrics);
     let bootstrap = resolved.config.profile.name;
     let profile = profile_of(store.as_ref(), bootstrap).await;
+    // WP8.5: conflict detection (plan section 2.7, TGL-16): the in-process probe when the
+    // probe role runs, else none, said once per start (the health row `dhcp.probe.missing`
+    // follows the profile below).
+    let mut server = server_config(section, resolved.node_id);
+    server.conflict = tenko_dhcp::conflict::ConflictSettings {
+        probe: tenko_dhcp::conflict::scan::choose(resolved.roles.contains(Role::Probe)),
+        profile_default: profile != Profile::Lab,
+        cap: Duration::from_millis(section.probe.timeout_ms),
+        cache: Duration::from_secs(section.probe.cache_secs),
+        pending: section.probe.pending,
+        decline_limit: section.decline.limit,
+        decline_window: Duration::from_secs(section.decline.window_secs),
+        ..tenko_dhcp::conflict::ConflictSettings::default()
+    };
+    // End of the WP8.5 block.
     let settings = RoleSettings {
-        server: server_config(section, resolved.node_id),
+        server,
         commit: CommitSettings::default(),
         probe: resolved.roles.contains(Role::Probe),
         probe_expected: probe_expected(profile),

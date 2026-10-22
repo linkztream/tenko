@@ -15,6 +15,7 @@ Contents:
 5. [Classes and policies](#5-classes-and-policies)
 6. [MAC filters](#6-mac-filters)
 7. [The API and the command line](#7-the-api-and-the-command-line)
+14. [Conflict detection and DECLINE](#14-conflict-detection-and-decline)
 
 ## 1. The wire format
 
@@ -517,3 +518,83 @@ A new fact wakes the reconciler like any write to the facts table; its run confi
 - `crates/tenko-ipam/src/observe/dhcp/tests.rs`: a renewal within the refresh interval writes nothing and is counted, the refresh at the renewal point adds a sighting, another client starts the fact again, a release expires both facts, a conflict names the answering MAC address, and the index is built from the stored facts of its own node only.
 - `crates/tenko-ipam/tests/move_dhcp.rs`: the preview kind and the timeout from the scope, the step that waits for the image (and the rollback when the image stays behind), the cleanup that releases the device's old lease and no other, the compensation that releases a new lease, and the lease of a dynamic device in the target's pool that confirms its move.
 - `crates/tenko/tests/acceptance_move.rs`, E25: the five-device lab through the binary with the role in relay mode on loopback.
+## 14. Conflict detection and DECLINE
+
+Before the role offers an address that no client has had from it, it asks whether a host already uses the address, and it holds back an address a client declines (DHCP-06, TGL-16, plan section 2.7, decision P3-Q7). The code is `tenko_dhcp::conflict`; the probe contract is `tenko_dhcp::probe::ConflictProbe` (`docs/dhcp-contracts.md` section 3).
+
+### 14.1 When an offer is probed
+
+Only a DISCOVER's OFFER is ever probed, and only when its address has no lease history for this client and no probe found it clean within the probe cache's time. The worker that built the OFFER looks at the lease table and the cache (`conflict::rules::candidate`) and sends the OFFER at once when:
+
+- the table holds a row of this client for the address, in any state: its own binding, an address it had and that expired or was released, its reservation once it uses it;
+- the client's latest row in the scope, or in a sibling of the scope's shared network, is the address (its previous address);
+- a probe found the address clean within `[dhcp.probe] cache_secs` (600 seconds).
+
+A renewal or rebind is a REQUEST and is never probed; neither is an INIT-REBOOT or the REQUEST that follows an OFFER. A reservation its owner has not used yet is probed, and offered even when a host answers (no other address is the client's); the answer is counted and logged, and IPAM-23 reports the squatter.
+
+### 14.2 The pending table and the cap
+
+A DISCOVER whose OFFER waits for a probe waits in the pending table, not in a worker: the worker copies the request, the OFFER it built and where the OFFER goes into a free slot and goes on with the next datagram. The table has `[dhcp.probe] pending` slots (1,024) made at start, with its free list and its queue reserved, so parking allocates nothing (`tests/alloc.rs` measures it). A full table, or a request longer than a slot (1,472 octets), sends its OFFER unprobed and counts it.
+
+One thread of the server, the dispatcher, with a single-threaded runtime of its own, starts a probe per parked request with the time left to the request's deadline: its arrival plus `[dhcp.probe] timeout_ms` (300 ms). The OFFER goes out:
+
+| The probe | What happens |
+|---|---|
+| answered nobody within its time, or the cap cut it | The address enters the probe cache; the OFFER goes out |
+| cannot run (`Unavailable`) | The OFFER goes out |
+| heard the client's own MAC address | No conflict; the OFFER goes out |
+| heard another host | The address is marked (14.3); the engine runs again on the same request and offers the next free address, which is probed with the time left; after three further answers the next OFFER goes out unprobed |
+
+The dispatcher takes one timer tick off the cap (`conflict::TIMER_TICK`: 16 ms on Windows, whose system timer ticks at 15.6 ms, and 5 ms elsewhere), so no OFFER leaves later than the cap after its DISCOVER arrived. A client that sends its DISCOVER again gets the same address from the offer hold, and the cache lets it through at once.
+
+### 14.3 A conflict
+
+An answer from another host marks the address at once: the offer table holds it for no client (so no other worker offers it in the meantime), and a lease change of kind `conflict` writes an `abandoned` row that ends after `[dhcp.decline] hold_secs` (86,400 seconds, Kea's default probation period) with the answering MAC address as the row's hardware address when ARP gave one. The allocator skips the address until the row ends, the history shows the event, and the counters `tenko_dhcp_conflicts_total` and the role's log line (`the conflict probe found an address in use before an offer`) say so.
+
+The abandoned row is the conflict observation of IPAM-23: `conflict::observation::conflict_observation` gives the fact of the source `dhcp:<node>`, `Observed::Address` with the address, its VRF and the answering MAC address when known, valid until the hold ends. It has the subject of the address's lease fact, so it replaces it; IPAM's reconciler compares it with the other sources and with intent and never resolves the conflict on its own. The observation hook of the lease batch (WP8.1) writes it with the lease row, so the fact is as durable as the row.
+
+### 14.4 The probe
+
+`conflict::scan::ScanProbe` uses the methods of the `probe` role in the same process, so the `dhcp` role needs no privilege of its own:
+
+- **ARP** where this node sits on the address's link, that is, an interface with an IPv4 network that holds the address: an ARP request through `tenko-scan`'s raw link (`AF_PACKET`, Linux with `CAP_NET_RAW`, `docs/scanning.md` section 9), sent again halfway to the deadline and at most 100 ms in. Any ARP frame whose sender is the address, from a usable MAC address other than this node's, is an answer. The link of an interface opens on the first probe and closes after ten idle seconds.
+- **ICMP echo** otherwise (relayed scopes, no `CAP_NET_RAW`, Windows): `tenko-scan`'s pinger, an unprivileged ICMP datagram socket on Linux when `net.ipv4.ping_group_range` admits the process, else the `ping` command; `ping.exe` on Windows. A reply is an answer without a MAC address; a host that drops ICMP is not seen.
+
+The role says once per start which it uses (`the dhcp role probes an address never leased to the client before it offers it`, with the method), or that conflict detection is off.
+
+### 14.5 When it runs (TGL-16)
+
+| Profile | Default | Without a probe role |
+|---|---|---|
+| Home | On | Off, one log line per start |
+| Standard | On | Off, one log line per start |
+| Hardened | On | Off, one log line per start and the health row `dhcp.probe.missing` |
+| Lab | Off | Off, one log line per start |
+
+"On" means on when a `probe` role runs in the process and can use ICMP or ARP; the setting `conflict_detection` of `PUT /dhcp/settings` overrides the profile's default and takes effect without a restart. The profile's default is read when the role starts.
+
+### 14.6 DECLINE
+
+A DECLINE from the client that holds the address abandons it for `[dhcp.decline] hold_secs` (the engine, section 9.2): the row belongs to no client, so the allocator offers it to nobody, the decliner included, and the client gets another address on its next DISCOVER. The probe cache forgets the address, the abandoned row is the conflict observation (14.3, without a MAC address: the client does not say who answered it), and the role writes the audit record `dhcp.decline` with the scope, the address, the client's MAC address and the hold time (principal `system:dhcp`).
+
+A client may decline at most `[dhcp.decline] limit` addresses per `window_secs` (3 per hour). A DECLINE beyond the limit is dropped (`tenko_dhcp_dropped_total{reason="rate_limited"}`) and the client keeps the lease it holds, so a broken client that declines every address it is offered cannot drain a pool. The limit is a fixed table of clients made at start; it allocates nothing.
+
+### 14.7 Metrics and settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[dhcp.probe] timeout_ms` | 300 | The cap from the DISCOVER to the OFFER, 10 to 1,000 ms |
+| `[dhcp.probe] cache_secs` | 600 | How long a clean result is kept, 0 to 86,400 s |
+| `[dhcp.probe] pending` | 1,024 | Offers that may wait for a probe at once, 16 to 65,536 |
+| `[dhcp.decline] hold_secs` | 86,400 | How long a declined or squatted address stays abandoned |
+| `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs per client and window |
+
+`tenko_dhcp_conflicts_total` counts the answers from other hosts, `tenko_dhcp_probe_duration_seconds` each probe from its start to its outcome, `tenko_dhcp_declines_total` the DECLINEs received and `tenko_dhcp_dropped_total{reason="rate_limited"}` those dropped by the limit. `DhcpServer::conflicts().stats()` has the finer counters (parked, unparked, clear, capped, unavailable, own MAC, reserved, cached, limited).
+
+### 14.8 Tests and measurements
+
+- `crates/tenko-dhcp/tests/conflict.rs`: over loopback with a fake probe that answers at once, late or never: the OFFER on the answer and at the cap, a late answer that marks nothing, an answer that abandons the address with the squatter's MAC and offers the next, every address answering, the client's own MAC, the rules of when (renewals, the client's lease, its previous address, a reservation in use), a reservation that answers, no probe and the setting off, a full pending table, the DECLINE hold, the audit report and the limit, forty DISCOVERs on one worker all answered at about the cap, M35's first half, and the production probe over ICMP on the host.
+- `crates/tenko-dhcp/tests/alloc.rs`: the worker's step (the rules, the park, the DECLINE limit and its report) allocates nothing.
+- The unit tests of the probe cache and the DECLINE limit in `src/conflict/`.
+
+M35 (plan section 6) is in `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md`: the offer delay for new addresses stays at most the cap and renewals are not delayed, and a squatter on the node's link is found in 20 of 20 tries, by ARP and by ICMP.

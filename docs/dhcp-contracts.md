@@ -212,7 +212,9 @@ Node-local settings of the role in `tenko.toml`, built and documented in `deploy
 | `[dhcp] workers` | the CPU count, at most 8 | Blocking UDP workers |
 | `[dhcp] offer_secs` | 10 | How long an offer holds its address in memory |
 | `[dhcp.probe] timeout_ms`, `cache_secs` | 300, 600 | The conflict probe's cap and its clean cache |
+| `[dhcp.probe] pending` | 1,024 | The pending table's size: offers waiting for a probe (WP8.5); a full table offers unprobed |
 | `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
+| `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs accepted per client per window; one beyond is dropped as `rate_limited` and the client keeps its lease (WP8.5) |
 | `[dhcp.ddns] retries`, `backoff_ms` | WP8.3 | The DDNS worker's retries while the store refuses |
 | `[dhcp.history] days` | per profile (P3-Q13) | A node-local override of the retention |
 | `[dhcp.v6]` | Slice 9 | DHCPv6 listeners |

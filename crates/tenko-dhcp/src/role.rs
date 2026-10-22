@@ -548,6 +548,8 @@ impl Follower {
         self.held = delta.to;
         if configured {
             self.server.set_image(build(&self.data).image);
+            // WP8.5: the stored conflict detection setting (TGL-16).
+            follow_conflict_setting(&self.server, &self.data);
         }
         Ok(())
     }
@@ -566,6 +568,8 @@ impl Follower {
             *held = table;
         });
         self.leases.changed();
+        // WP8.5: the stored conflict detection setting (TGL-16).
+        follow_conflict_setting(&self.server, &data);
         self.data = data;
         self.held = revision;
         self.installs.fetch_add(1, Ordering::Relaxed);
@@ -604,6 +608,17 @@ impl Follower {
             }
         }
     }
+}
+
+// WP8.5: the stored conflict detection setting (TGL-16).
+/// Follows `dhcp.settings.conflict_detection` of `data` into the server's conflict
+/// detection.
+fn follow_conflict_setting(server: &DhcpServer<SharedLeases>, data: &DhcpData) {
+    server.conflicts().set_setting(
+        data.settings
+            .as_ref()
+            .and_then(|settings| settings.conflict_detection),
+    );
 }
 
 impl Role {
@@ -695,6 +710,15 @@ impl Role {
                 }
             })
         };
+        // WP8.5: the stored conflict detection setting, and the reports of DECLINEs and
+        // conflicts (the audit records and the log lines).
+        follow_conflict_setting(&server, &data);
+        let reporter = tokio::spawn(crate::conflict::report::run(
+            Arc::clone(&store),
+            Arc::clone(server.conflicts()),
+            settings.server.engine.decline_hold_secs,
+            stop.child_token(),
+        ));
         let installs = Arc::new(AtomicU64::new(0));
         let follower = Follower {
             server: Arc::clone(&server),
@@ -720,7 +744,7 @@ impl Role {
         Ok(Self {
             node,
             stop,
-            tasks: vec![follow, wake, committer],
+            tasks: vec![follow, wake, reporter, committer],
         })
     }
 
