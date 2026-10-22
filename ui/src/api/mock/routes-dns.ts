@@ -69,6 +69,9 @@ import { checkZoneScopes, createView, deleteView, findView, listViews, seedViews
 import { LIST_FILE_PATH } from "../../dns/api";
 // cache-browse: the node's cache.
 import { DnsCacheFailure, flushCache, listCache, seedDnsCache, type DnsCacheState } from "./dns-cache-model";
+// WP10.1: the recursive resolver of the node.
+import { flushInfra, listInfra, primeNow, recursionStatus, RecursionFailure, seedRecursion, type RecursionState } from "./dns-recursion-model";
+// WP10.1: end.
 import { createJob } from "./job-store";
 import { created, noContent, notImplemented, ok, Problem, Reply } from "./reply";
 import { mswPath, paginate, route, wholePage } from "./route";
@@ -115,6 +118,16 @@ export function dnsCacheState(): DnsCacheState {
   return cacheState;
 }
 
+// WP10.1: the node's recursive resolver, for tests that arrange or inspect it.
+let recursionState: RecursionState = seedRecursion();
+onMockReset(() => {
+  recursionState = seedRecursion();
+});
+export function dnsRecursionState(): RecursionState {
+  return recursionState;
+}
+// WP10.1: end.
+
 /** The resolver side of the mock (forwarders, lists, node figures), for tests that arrange or inspect it. */
 export function dnsResolverState(): ResolverState {
   return resolver;
@@ -150,7 +163,7 @@ function guard<T>(scope: Scope, run: () => T): T {
   try {
     return run();
   } catch (err) {
-    if (err instanceof DnsFailure || err instanceof DnsLogFailure) {
+    if (err instanceof DnsFailure || err instanceof DnsLogFailure || err instanceof RecursionFailure) {
       throw new Problem(err.code, { status: err.status, params: err.params, detail: err.message });
     }
     throw err;
@@ -519,6 +532,44 @@ const node = [
     }),
   ),
   // cache-browse: end.
+  // WP10.1: the recursive resolver: its status, the priming, and the infrastructure cache.
+  route("get", "/api/v1/nodes/{id}/dns/recursion", (ctx) =>
+    guard("dns.read", () => {
+      dnsNode(ctx.params.id);
+      return ok(recursionStatus(recursionState) as never);
+    }),
+  ),
+  route("post", "/api/v1/nodes/{id}/dns/recursion/prime", (ctx) =>
+    guard("dns.write", () => {
+      dnsNode(ctx.params.id);
+      primeNow(recursionState, Date.now());
+      appendAudit({ action: "dns.recursion.prime", objects: [nodeRef(ctx.params.id)], context: { detail: "the priming of the root starts now" } });
+      return new Reply(202, { command_id: randomId() }) as never;
+    }),
+  ),
+  route("get", "/api/v1/nodes/{id}/dns/infra", (ctx) =>
+    guard("dns.read", () => {
+      dnsNode(ctx.params.id);
+      const page = listInfra(recursionState, { suffix: ctx.query("suffix"), limit: ctx.query("limit"), cursor: ctx.query("cursor") }, db.revision);
+      return ok(page as never);
+    }),
+  ),
+  route("post", "/api/v1/nodes/{id}/dns/infra/flush", (ctx) =>
+    guard("dns.write", () => {
+      dnsNode(ctx.params.id);
+      const suffix = ctx.query("suffix");
+      const entries = flushInfra(recursionState, suffix);
+      appendAudit({
+        action: "dns.infra.flush",
+        objects: [nodeRef(ctx.params.id)],
+        context: suffix
+          ? { suffix, detail: `${entries} infrastructure entr(ies) at or below ${suffix} removed` }
+          : { detail: `${entries} infrastructure entr(ies) removed; the root is primed again` },
+      });
+      return ok({ entries } as never);
+    }),
+  ),
+  // WP10.1: end.
   ...(["stop", "start"] as const).map((verb) =>
     route("post", `/api/v1/nodes/{id}/dns/log/${verb}`, (ctx) =>
       guard("dns.write", () => {

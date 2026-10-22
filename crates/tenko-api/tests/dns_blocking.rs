@@ -135,6 +135,9 @@ async fn lab(node_update: bool, log_on: bool) -> Lab {
             blocked: blocked.then(ads),
             cached: n == 5,
             duration_micros: 30,
+            // WP10.1: the resolution of the log line.
+            resolution: None,
+            subqueries: 0,
         });
     }
     writer.stop();

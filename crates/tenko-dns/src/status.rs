@@ -13,6 +13,9 @@
 //! | `dns.blocking.stats` | [`StatsArgs`] | Answers `done` with the figures of the blocking view over a window of the local query log (`crate::querylog::stats`); `rejected` when the log is off or the window is not valid |
 //! | `dns.blocking.pause` | [`BlockingPauseArgs`] | Pauses the block lists for some minutes or until resumed ([`crate::policy::pause`]) |
 //! | `dns.blocking.resume` | none | Ends the pause |
+//! | `dns.recursion.prime` | none | Primes the recursive resolver now (WP10.1): `done` once the priming started, `rejected` when recursion is off |
+//! | `dns.infra.list` | [`InfraListArgs`] | Answers `done` with a page of the infrastructure cache: the zone cuts in name order with their servers, addresses and figures |
+//! | `dns.infra.flush` | [`InfraFlushArgs`] (optional) | Drops the infrastructure cache, or the cuts and names at or below a suffix; the root comes back from the hints and is primed again |
 //! | `dns.status` (report) | | [`DnsStatus`]: serving, the revision held and the lag, zones, RRsets, listeners, the cache's entries and hits, the queries blocked per list and RPZ zone, the problems of stub zones and recursion lists, the start, the upstreams with their times and states, the pause of the block lists |
 //!
 //! In Phase 2 the role runs in the controller's own process, so [`LocalNode`] executes a
@@ -66,6 +69,48 @@ pub const CACHE_LIST: &str = "dns.cache.list";
 pub const BLOCKING_STATS: &str = "dns.blocking.stats";
 /// Pause the node's block lists.
 pub const BLOCKING_PAUSE: &str = "dns.blocking.pause";
+// WP10.1: the recursive resolver's commands.
+/// Prime the node's recursive resolver now.
+pub const RECURSION_PRIME: &str = "dns.recursion.prime";
+/// Read a page of the node's infrastructure cache.
+pub const INFRA_LIST: &str = "dns.infra.list";
+/// Flush the node's infrastructure cache.
+pub const INFRA_FLUSH: &str = "dns.infra.flush";
+
+/// The most zone cuts a page of the infrastructure cache holds.
+pub const MAX_INFRA_PAGE: u32 = 1_000;
+
+/// The arguments of `dns.infra.list`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfraListArgs {
+    /// Only the cuts at or below this suffix.
+    #[serde(default)]
+    pub suffix: Option<String>,
+    /// The zone of the last cut of the previous page.
+    #[serde(default)]
+    pub after: Option<String>,
+    /// Cuts, 1 to [`MAX_INFRA_PAGE`]; 200 when 0.
+    #[serde(default)]
+    pub limit: u32,
+}
+
+/// The arguments of `dns.infra.flush`; empty arguments flush everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfraFlushArgs {
+    /// Only the cuts and names at or below this suffix.
+    #[serde(default)]
+    pub suffix: Option<String>,
+}
+
+/// A page of the infrastructure cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InfraPage {
+    /// The cuts.
+    pub cuts: Vec<crate::recurse::InfraCutView>,
+    /// The zone to go on after, when there may be more.
+    pub next: Option<String>,
+}
+// WP10.1: end.
 /// End the pause of the node's block lists.
 pub const BLOCKING_RESUME: &str = "dns.blocking.resume";
 
@@ -255,6 +300,10 @@ pub struct DnsStatus {
     /// While the block lists are paused: until when (`None`: until resumed).
     pub blocking_paused: Option<crate::policy::pause::Paused>,
     // dns-visibility: end.
+    // WP10.1: the recursive resolver.
+    /// The recursive resolver, when it runs: priming, the root, the infrastructure cache,
+    /// the counters and the budget.
+    pub recursion: Option<crate::recurse::RecursionReport>,
 }
 
 /// The counters `dns.stats` reports.
@@ -360,6 +409,11 @@ pub enum Output {
     Blocking(Box<BlockingStats>),
     /// The pause in force after `dns.blocking.pause` or `dns.blocking.resume`.
     Paused(Option<crate::policy::pause::Paused>),
+    // WP10.1: the infrastructure cache.
+    /// A page of the infrastructure cache (`dns.infra.list`).
+    Infra(Box<InfraPage>),
+    /// The entries a flush removed (`dns.infra.flush`).
+    Flushed(u64),
 }
 
 /// The result of one command.
@@ -538,6 +592,115 @@ impl LocalNode {
             ),
         }
     }
+
+    // WP10.1: the recursive resolver's commands.
+    /// The engine's report, its problems added to `problems`.
+    fn recursion_report(
+        &self,
+        problems: &mut Vec<String>,
+    ) -> Option<crate::recurse::RecursionReport> {
+        let report = self.engine()?.report();
+        if report
+            .problems
+            .iter()
+            .any(|problem| problem == "priming_failed")
+        {
+            problems.push(
+                "recursion: no root server of the hints answers the priming query; every \
+                 recursed name is answered SERVFAIL (dns.recursion.priming_failed)"
+                    .to_owned(),
+            );
+        }
+        Some(report)
+    }
+
+    fn engine(&self) -> Option<&Arc<crate::recurse::Engine<crate::recurse::net::NetAuthority>>> {
+        self.forwarder
+            .as_ref()
+            .and_then(|forwarder| forwarder.engine())
+    }
+
+    fn prime(&self) -> CommandResult {
+        let Some(engine) = self.engine() else {
+            return CommandResult::rejected("recursion is off on this node");
+        };
+        if engine.prime_now_requested() {
+            CommandResult::done("the priming of the root starts now", Output::None)
+        } else {
+            CommandResult::done("a priming of the root is running already", Output::None)
+        }
+    }
+
+    fn list_infra(&self, args: &[u8]) -> CommandResult {
+        let Some(engine) = self.engine() else {
+            return CommandResult::rejected("recursion is off on this node");
+        };
+        let args: InfraListArgs = if args.is_empty() {
+            InfraListArgs::default()
+        } else {
+            match tenko_core::codec::from_cbor(args) {
+                Ok(args) => args,
+                Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+            }
+        };
+        let name = |text: &Option<String>, what: &str| -> Result<Option<DnsName>, CommandResult> {
+            match text.as_deref().map(DnsName::new) {
+                None => Ok(None),
+                Some(Ok(name)) => Ok(Some(name)),
+                Some(Err(error)) => Err(CommandResult::rejected(format!("the {what}: {error}"))),
+            }
+        };
+        let suffix = match name(&args.suffix, "suffix") {
+            Ok(suffix) => suffix,
+            Err(rejected) => return rejected,
+        };
+        let after = match name(&args.after, "cursor") {
+            Ok(after) => after,
+            Err(rejected) => return rejected,
+        };
+        let limit = match args.limit {
+            0 => 200,
+            limit => limit.min(MAX_INFRA_PAGE),
+        };
+        let limit = usize::try_from(limit).unwrap_or(200);
+        let cuts = engine.infra_page(suffix.as_ref(), after.as_ref(), limit);
+        let next = (cuts.len() == limit)
+            .then(|| cuts.last().map(|cut| cut.zone.as_str().to_owned()))
+            .flatten();
+        CommandResult::done(
+            format!("{} zone cut(s)", cuts.len()),
+            Output::Infra(Box::new(InfraPage { cuts, next })),
+        )
+    }
+
+    fn flush_infra(&self, args: &[u8]) -> CommandResult {
+        let Some(engine) = self.engine() else {
+            return CommandResult::rejected("recursion is off on this node");
+        };
+        let args: InfraFlushArgs = if args.is_empty() {
+            InfraFlushArgs::default()
+        } else {
+            match tenko_core::codec::from_cbor(args) {
+                Ok(args) => args,
+                Err(error) => return CommandResult::rejected(format!("the arguments: {error}")),
+            }
+        };
+        let suffix = match args.suffix.as_deref().map(DnsName::new) {
+            None => None,
+            Some(Ok(suffix)) => Some(suffix),
+            Some(Err(error)) => return CommandResult::rejected(format!("the suffix: {error}")),
+        };
+        let removed = engine.flush_infra(suffix.as_ref());
+        let removed = u64::try_from(removed).unwrap_or(u64::MAX);
+        let detail = match &suffix {
+            None => format!("{removed} infrastructure entr(ies) removed; the root is primed again"),
+            Some(suffix) => {
+                format!("{removed} infrastructure entr(ies) at or below {suffix} removed")
+            }
+        };
+        CommandResult::done(detail, Output::Flushed(removed))
+    }
+    // WP10.1: end.
 
     // cache-browse: the listing of the cache.
     fn list_cache(&self, args: &[u8]) -> CommandResult {
@@ -776,6 +939,8 @@ impl DnsNode for LocalNode {
             }
             problems.extend(forwarder.recursion_problems());
         }
+        // WP10.1: the recursive resolver and its problems.
+        let recursion = self.recursion_report(&mut problems);
         DnsStatus {
             node: self.node,
             serving,
@@ -803,6 +968,7 @@ impl DnsNode for LocalNode {
                 .unwrap_or_default(),
             blocking_paused: crate::policy::pause::state(),
             // dns-visibility: end.
+            recursion,
         }
     }
 
@@ -822,6 +988,10 @@ impl DnsNode for LocalNode {
             BLOCKING_STATS => self.blocking_stats(args),
             BLOCKING_PAUSE => pause_blocking(args),
             BLOCKING_RESUME => resume_blocking(),
+            // WP10.1: the recursive resolver.
+            RECURSION_PRIME => self.prime(),
+            INFRA_LIST => self.list_infra(args),
+            INFRA_FLUSH => self.flush_infra(args),
             other => CommandResult::rejected(format!("`{other}` is not a command of the dns role")),
         }
     }

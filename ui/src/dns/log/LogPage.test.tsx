@@ -247,3 +247,43 @@ describe("the query log page", () => {
     expect(within(screen.getByTestId("dns-log-filters")).getByTestId("form-submit").textContent).toBe("Visa");
   });
 });
+
+// WP10.1: how the answer was found and the queries the resolver sent for it.
+describe("the resolution columns", () => {
+  it("shows how each answer was found and its sub-queries, and nothing for a line that has neither", async () => {
+    open();
+    await loaded();
+    const [newest, recursed] = lines();
+    // The newest seeded query was forwarded; the one before was recursed with sub-queries.
+    expect(col(newest!, "resolution")).toBe("Forwarded");
+    expect(col(newest!, "subqueries")).toBe("");
+    expect(col(recursed!, "resolution")).toBe("Recursed");
+    expect(col(recursed!, "subqueries")).toBe("5");
+    expect(lines().some((row) => col(row, "resolution") === "Cache")).toBe(true);
+    expect(screen.getByRole("columnheader", { name: "Resolution" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Sub-queries" })).toBeTruthy();
+  });
+
+  it("shows a line written before the resolution was logged without a tag, and an unknown word as written", async () => {
+    const entries = dnsLogState().entries;
+    const oldest = entries[0]!;
+    delete oldest.resolution;
+    delete oldest.subqueries;
+    entries[entries.length - 1]!.resolution = "mystery";
+    open();
+    await loaded();
+    expect(col(lines()[0]!, "resolution")).toBe("mystery");
+    fireEvent.click(screen.getByTestId("dns-log-older"));
+    await loaded(10);
+    expect(col(lines().at(-1)!, "resolution")).toBe("");
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    open();
+    await loaded();
+    expect(col(lines()[1]!, "resolution")).toBe("Rekurserad");
+    expect(screen.getByRole("columnheader", { name: "Delfrågor" })).toBeTruthy();
+  });
+});
+// WP10.1: end.

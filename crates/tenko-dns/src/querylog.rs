@@ -209,6 +209,19 @@ pub struct LogLine {
     pub cached: bool,
     /// Microseconds from arrival to answer.
     pub duration_micros: u32,
+    // WP10.1: how the answer was found and the recursive resolver's queries for it.
+    /// How the answer was found; absent in lines written before it was logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<crate::log::Resolution>,
+    /// Queries the recursive resolver sent to authorities for the answer.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub subqueries: u16,
+}
+
+// WP10.1: the default of `subqueries` is left out of a line.
+#[allow(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+fn is_zero(value: &u16) -> bool {
+    *value == 0
 }
 
 /// The counters and the state of a log, for `dns.stats` and the node status.

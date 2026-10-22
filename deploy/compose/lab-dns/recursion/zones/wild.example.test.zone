@@ -1,0 +1,7 @@
+; The records of `wild.example.test` (a wildcard) on the lab's authority node (round `recursion` of smoke.sh,
+; README.md). The SOA and the apex NS set (a.root.test.) come from the zone's creation
+; through the API; this file is imported into the zone with POST .../records/import.
+$ORIGIN wild.example.test.
+$TTL 3600
+*                    300 A 192.0.2.20
+host                 300 A 192.0.2.21

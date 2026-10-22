@@ -44,6 +44,18 @@
 //! **Housekeeping** every 200 ms: the prefetch queue of the cache is asked again; every
 //! minute the entries past their stale window are purged and the upstream sets of rules
 //! and stub zones that are gone are dropped.
+//!
+//! **Recursion** (WP10.1, recursion plan section 2.7): with `recursion` in the settings the
+//! forwarder starts the iterative engine ([`crate::recurse`]) and its infrastructure cache.
+//! A rule of mode `recurse` is resolved by the engine, and so is a name no rule and no stub
+//! zone covers when the view's `resolution` says `recurse`, or says nothing (the default of
+//! every profile, REC-Q2); a view that says `forward` uses `[dns] forwarders`, one that
+//! says `refuse` is refused with the extended error "Prohibited". The engine's answers go
+//! into the same cache and through the same reply path; a failure is answered SERVFAIL with
+//! its extended error. The housekeeping primes the root (RFC 8109) when it is due, tells
+//! the engine whether answers must carry their delegation (an RPZ zone with NSDNAME or NSIP
+//! triggers, E41), flushes the answer cache on a flood of unwanted answers (audited as
+//! `dns.recursion.unwanted_flush`) and purges the infrastructure cache every minute.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -63,19 +75,28 @@ use tenko_core::dns::{
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
+// WP10.1: the recursive resolver.
+use tenko_core::dns::ResolutionMode;
+
 use crate::{
+    // WP10.1: end.
     authoritative::{EDE_NOT_AUTHORITATIVE, EDE_PROHIBITED, rcode},
     cache::{self, Cache, CacheKey, CacheSettings, Client, ClientEdns, Flushed, Hit},
     catalog::{Catalog, CatalogHandle},
     codec::{Codec, DomainCodec, Request},
+    // WP10.1: the engine and its caches.
+    infra::{Infra, ServerTable},
     log::{QueryLogEntry, QueryLogSink},
     metrics,
     name::{self, NameBuf},
     outbound::Question,
     pool::{Budget, MemberHealth, PoolKey, Pools, UpstreamSet, UpstreamSpec},
+    recurse::{Engine, EngineSettings, Resolved, hints::Hints, net::NetAuthority},
+    recursion::MemFailures,
     respond::{ForwardQuery, ForwardSink, Intake, IntakeQuery, ReplyPath},
     upstream::UpstreamError,
     wire::{self, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
+    xfr::TransferAudit,
 };
 
 /// The default time an upstream has to answer one attempt.
@@ -105,6 +126,9 @@ const HOUSEKEEPING: Duration = Duration::from_millis(200);
 
 /// The purge period.
 const PURGE: Duration = Duration::from_secs(60);
+
+// WP10.1: the most failures the recursive resolver keeps before it forgets them all.
+const FAILURE_BOUND: usize = 100_000;
 
 const TYPE_A: u16 = 1;
 const TYPE_NS: u16 = 2;
@@ -211,6 +235,10 @@ pub struct ForwardSettings {
     /// The CA (PEM) DoT and DoH certificates are checked against, instead of the system's
     /// roots.
     pub upstream_ca: Option<Vec<u8>>,
+    // WP10.1: the recursive resolver.
+    /// The recursive resolver; `None` runs none (every name then needs a rule, a stub zone
+    /// or `upstreams`).
+    pub recursion: Option<EngineSettings>,
 }
 
 impl Default for ForwardSettings {
@@ -224,6 +252,7 @@ impl Default for ForwardSettings {
             cache: Some(CacheSettings::default()),
             stale_budget: DEFAULT_STALE_BUDGET,
             upstream_ca: None,
+            recursion: None,
         }
     }
 }
@@ -328,6 +357,35 @@ struct Shared {
     recursion: Arc<RecursionPolicy>,
     stubs: tokio::sync::Mutex<HashMap<ZoneId, StubState>>,
     stub_reports: Mutex<BTreeMap<ZoneId, StubReport>>,
+    // WP10.1: the engine, its infrastructure cache and the audit of its flushes.
+    engine: Option<Arc<Engine<NetAuthority>>>,
+    infra: Option<Arc<Infra>>,
+    audit: std::sync::OnceLock<Arc<dyn TransferAudit>>,
+}
+
+/// The engine of `settings` and its infrastructure cache, with the hints of the file or
+/// the shipped ones (a file that cannot be read falls back to the shipped hints, loudly;
+/// the role checks the file before it starts).
+fn start_engine(settings: &EngineSettings) -> (Arc<Engine<NetAuthority>>, Arc<Infra>) {
+    let bounds = settings.recursion.infra;
+    let servers = Arc::new(ServerTable::new(bounds.servers, bounds.ttl));
+    let infra = Arc::new(Infra::new(bounds));
+    let hints = match &settings.hints {
+        None => Hints::shipped(),
+        Some(path) => Hints::from_file(path).unwrap_or_else(|error| {
+            tracing::error!(%error, "the root hints file cannot be read: the shipped hints are used");
+            Hints::shipped()
+        }),
+    };
+    let engine = Engine::new(
+        NetAuthority::new(Arc::clone(&servers)),
+        Arc::clone(&infra) as Arc<dyn crate::recursion::InfraCache>,
+        servers,
+        Arc::new(MemFailures::new(settings.recursion.failure_max)),
+        hints,
+        settings,
+    );
+    (Arc::new(engine), infra)
 }
 
 /// The forwarder; see the module documentation.
@@ -419,6 +477,14 @@ impl Forwarder {
             metrics::seal();
         }
         let (sender, receiver) = mpsc::channel(QUEUE);
+        // WP10.1: the engine when recursion is on.
+        let (engine, infra) = match &settings.recursion {
+            Some(recursion) => {
+                let (engine, infra) = start_engine(recursion);
+                (Some(engine), Some(infra))
+            }
+            None => (None, None),
+        };
         let shared = Arc::new(Shared {
             cache: settings.cache.map(Cache::new),
             pools: Pools::new(settings.upstream_ca.clone()),
@@ -429,6 +495,9 @@ impl Forwarder {
             recursion,
             stubs: tokio::sync::Mutex::new(HashMap::new()),
             stub_reports: Mutex::new(BTreeMap::new()),
+            engine,
+            infra,
+            audit: std::sync::OnceLock::new(),
         });
         let forwarder = Arc::new(Self {
             queue: sender,
@@ -461,6 +530,10 @@ impl Forwarder {
     /// Empties the cache, or the entries at or below `suffix`; `None` without a cache.
     pub fn flush(&self, suffix: Option<&DnsName>) -> Option<Flushed> {
         let suffix = suffix.map(DnsName::to_wire);
+        // WP10.1: the failures of the recursive resolver go with the cache (RFC 9520).
+        if let Some(engine) = &self.shared.engine {
+            engine.flush_failures(suffix.as_deref());
+        }
         self.shared
             .cache
             .as_ref()
@@ -574,9 +647,73 @@ impl Forwarder {
     pub fn recursion(&self) -> &RecursionPolicy {
         &self.shared.recursion
     }
+
+    // WP10.1: the engine for the status, the node commands and the role.
+    /// The recursive resolver, when recursion is on.
+    pub fn engine(&self) -> Option<&Arc<Engine<NetAuthority>>> {
+        self.shared.engine.as_ref()
+    }
+
+    /// Where the flush of the answer cache for unwanted answers is audited (the role's
+    /// store); the first call wins.
+    pub fn set_audit(&self, audit: Arc<dyn TransferAudit>) {
+        let _ = self.shared.audit.set(audit);
+    }
+    // WP10.1: end.
 }
 
 impl Shared {
+    // WP10.1: the view's resolution for a name no rule and no stub zone covers.
+    /// How a name no rule and no stub zone covers is resolved for `view`: the view's
+    /// `resolution`, else recursion when the engine runs (REC-Q2), else the default
+    /// forwarder. Allocates nothing.
+    fn default_resolution(&self, catalog: &Catalog, view: Option<ViewId>) -> ResolutionMode {
+        let mode = view
+            .and_then(|view| catalog.view(view))
+            .and_then(|view| view.resolution)
+            .unwrap_or(ResolutionMode::Recurse);
+        match mode {
+            ResolutionMode::Recurse if self.engine.is_none() => ResolutionMode::Forward,
+            other => other,
+        }
+    }
+
+    /// Whether `route` is resolved by the engine for `view`.
+    fn recurses(&self, catalog: &Catalog, route: &Route, view: Option<ViewId>) -> bool {
+        self.engine.is_some()
+            && match route {
+                Route::Recurse(_) => true,
+                Route::Default => self.default_resolution(catalog, view) == ResolutionMode::Recurse,
+                Route::Rule(_) | Route::Stub(_) => false,
+            }
+    }
+
+    /// Resolves `question` with the engine and puts the answer into the cache under `key`.
+    async fn recurse(
+        &self,
+        engine: &Engine<NetAuthority>,
+        question: &OwnedQuestion,
+        key: Option<&CacheKey>,
+        view: Option<ViewId>,
+    ) -> Arc<Resolved> {
+        let resolved = engine
+            .resolve(crate::recurse::Question {
+                qname: &question.qname,
+                qtype: question.qtype,
+                qclass: question.qclass,
+                view,
+            })
+            .await;
+        if resolved.cacheable()
+            && !question.cd
+            && let (Some(cache), Some(key)) = (&self.cache, key)
+        {
+            cache.insert(key, &resolved.message, Instant::now(), None);
+        }
+        resolved
+    }
+    // WP10.1: end.
+
     fn recursion_allowed(&self, catalog: &Catalog, view: Option<ViewId>, client: IpAddr) -> bool {
         let client = client.to_canonical();
         if let Some(list) = view
@@ -939,14 +1076,23 @@ impl ForwardSink for Forwarder {
         }
         let request = query.request;
         let qname = request.qname.as_wire();
-        if query.rule.is_none()
-            && shared.settings.upstreams.is_empty()
-            && stub_for(&catalog, qname).is_none()
-        {
-            shared.count(|counters| &counters.refused);
-            return Intake::Refuse {
-                ede: EDE_NOT_AUTHORITATIVE,
-            };
+        // WP10.1: a name no rule and no stub zone covers follows the view's resolution.
+        if query.rule.is_none() && stub_for(&catalog, qname).is_none() {
+            match shared.default_resolution(&catalog, query.view) {
+                ResolutionMode::Refuse => {
+                    shared.count(|counters| &counters.refused);
+                    return Intake::Refuse {
+                        ede: EDE_PROHIBITED,
+                    };
+                }
+                ResolutionMode::Forward if shared.settings.upstreams.is_empty() => {
+                    shared.count(|counters| &counters.refused);
+                    return Intake::Refuse {
+                        ede: EDE_NOT_AUTHORITATIVE,
+                    };
+                }
+                ResolutionMode::Recurse | ResolutionMode::Forward => {}
+            }
         }
         let Some(cache) = &shared.cache else {
             return Intake::Forward;
@@ -1020,10 +1166,21 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
     let mut tick = tokio::time::interval(HOUSEKEEPING);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut purge_at = Instant::now() + PURGE;
+    // WP10.1: the priming in flight.
+    let mut priming: Option<tokio::task::JoinHandle<()>> = None;
     loop {
         tokio::select! {
-            () = stop.cancelled() => return,
+            () = stop.cancelled() => {
+                if let Some(priming) = priming.take() {
+                    priming.abort();
+                }
+                return;
+            }
             _ = tick.tick() => {}
+        }
+        // WP10.1: the engine's housekeeping.
+        if let Some(engine) = &shared.engine {
+            recursion_housekeeping(&shared, engine, &mut priming);
         }
         if let Some(cache) = &shared.cache {
             for (key, rule) in cache.take_prefetch() {
@@ -1036,6 +1193,14 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             if let Some(cache) = &shared.cache {
                 cache.purge(now);
             }
+            // WP10.1: the infrastructure cache's expired entries and the failure cache's
+            // bound.
+            if let Some(infra) = &shared.infra {
+                infra.purge(now);
+            }
+            if let Some(engine) = &shared.engine {
+                engine.bound_failures(FAILURE_BOUND);
+            }
             let catalog = shared.catalog.load_full();
             shared.pools.retain(|key| match key {
                 // WP10.0: the delegations' sets belong to the engine (WP10.1).
@@ -1047,6 +1212,64 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
     }
 }
 
+// WP10.1: the engine's part of the housekeeping.
+/// Primes when due, sets whether answers carry their delegation, flushes the answer cache
+/// after a flood of unwanted answers, and sets the infrastructure cache's gauge.
+fn recursion_housekeeping(
+    shared: &Arc<Shared>,
+    engine: &Arc<Engine<NetAuthority>>,
+    priming: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    let now = Instant::now();
+    if priming
+        .as_ref()
+        .is_none_or(tokio::task::JoinHandle::is_finished)
+        && engine.priming_due(now)
+    {
+        let engine = Arc::clone(engine);
+        *priming = Some(tokio::spawn(async move {
+            let _ = engine.prime().await;
+        }));
+    }
+    let catalog = shared.catalog.load();
+    engine.carry_delegation(
+        catalog
+            .policy()
+            .zones()
+            .iter()
+            .any(|zone| zone.zone.has_ns_triggers()),
+    );
+    if engine.servers().take_flush() {
+        let flushed = shared
+            .cache
+            .as_ref()
+            .map_or(0, |cache| cache.flush(None).entries);
+        engine.count_unwanted_flush();
+        tracing::warn!(
+            entries = flushed,
+            "over 100,000 unwanted answers in an hour: the answer cache is flushed"
+        );
+        if let Some(audit) = shared.audit.get() {
+            audit.record(
+                tenko_core::audit::AuditDraft::success(
+                    tenko_core::dns::audit::RECURSION_UNWANTED_FLUSH,
+                    Vec::new(),
+                )
+                .with_context("entries", flushed.to_string()),
+            );
+        }
+    }
+    if shared.settings.metrics {
+        let sizes = engine.infra().sizes();
+        #[allow(clippy::cast_precision_loss, reason = "a gauge of entries")]
+        {
+            metrics::INFRA_ENTRY_GAUGE.set(0, sizes.cuts as f64);
+            metrics::INFRA_ENTRY_GAUGE.set(1, sizes.servers as f64);
+        }
+    }
+}
+// WP10.1: end.
+
 /// Asks the upstream again for an entry the cache queued before it expires.
 async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId>) {
     let Some(cache) = &shared.cache else {
@@ -1056,6 +1279,28 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
     let qname = key.qname().to_vec();
     let rule = catalog.forwarders().find(&qname, key.view()).or(rule);
     let route = route(&catalog, &qname, rule);
+    // WP10.1: an entry the engine made is fetched again by the engine.
+    if let Some(engine) = shared.engine.clone()
+        && shared.recurses(&catalog, &route, key.view())
+    {
+        let question = OwnedQuestion {
+            qname,
+            qtype: key.qtype(),
+            qclass: key.qclass(),
+            rd: true,
+            cd: false,
+            dnssec_ok: true,
+        };
+        let resolved = shared
+            .recurse(&engine, &question, Some(&key), key.view())
+            .await;
+        if resolved.cacheable() {
+            shared.count(|counters| &counters.prefetched);
+        } else {
+            cache.prefetch_failed(&key);
+        }
+        return;
+    }
     let Ok(set) = shared.set_for(&route).await else {
         cache.prefetch_failed(&key);
         return;
@@ -1085,6 +1330,8 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
 /// How a forwarded query was answered.
 enum Outcome {
     Upstream(Vec<u8>),
+    // WP10.1: the engine's answer, a failure with its extended error included.
+    Recursed(Arc<Resolved>),
     Stale,
     Failed,
 }
@@ -1125,43 +1372,60 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         (Some(cache), Some(key)) => cache.has_stale(key, now),
         _ => false,
     };
-    let outcome = match shared.set_for(&route).await {
-        Err(error) => {
-            tracing::debug!(%error, "a forwarded query has no usable upstream");
-            if has_stale(Instant::now()) {
-                Outcome::Stale
-            } else {
-                Outcome::Failed
-            }
+    // WP10.1: the engine resolves a recursing route; a failure answers a stale entry when
+    // there is one.
+    let engine = shared
+        .engine
+        .clone()
+        .filter(|_| shared.recurses(&catalog, &route, query.view));
+    let outcome = if let Some(engine) = engine {
+        let resolved = shared
+            .recurse(&engine, &question, key.as_ref(), query.view)
+            .await;
+        if u16::from(resolved.rcode) == rcode::SERVFAIL && has_stale(Instant::now()) {
+            Outcome::Stale
+        } else {
+            Outcome::Recursed(resolved)
         }
-        Ok(set) => {
-            let now = Instant::now();
-            let stale = has_stale(now);
-            if stale && set.all_down(now) {
-                Outcome::Stale
-            } else if stale {
-                let mut task =
-                    tokio::spawn(Arc::clone(shared).fetch(set, question, key.clone(), rule_id));
-                tokio::select! {
-                    joined = &mut task => match joined {
-                        Ok(Ok(answer)) => Outcome::Upstream(answer),
-                        _ => Outcome::Stale,
-                    },
-                    // The upstream query goes on and refreshes the entry when it answers.
-                    () = tokio::time::sleep(shared.settings.stale_budget) => Outcome::Stale,
-                }
-            } else if let Ok(answer) = Arc::clone(shared)
-                .fetch(set, question, key.clone(), rule_id)
-                .await
-            {
-                Outcome::Upstream(answer)
-            } else {
-                shared.count(|counters| &counters.timeouts);
-                // An entry may have come in from another query meanwhile.
+    } else {
+        match shared.set_for(&route).await {
+            Err(error) => {
+                tracing::debug!(%error, "a forwarded query has no usable upstream");
                 if has_stale(Instant::now()) {
                     Outcome::Stale
                 } else {
                     Outcome::Failed
+                }
+            }
+            Ok(set) => {
+                let now = Instant::now();
+                let stale = has_stale(now);
+                if stale && set.all_down(now) {
+                    Outcome::Stale
+                } else if stale {
+                    let mut task =
+                        tokio::spawn(Arc::clone(shared).fetch(set, question, key.clone(), rule_id));
+                    tokio::select! {
+                        joined = &mut task => match joined {
+                            Ok(Ok(answer)) => Outcome::Upstream(answer),
+                            _ => Outcome::Stale,
+                        },
+                        // The upstream query goes on and refreshes the entry when it answers.
+                        () = tokio::time::sleep(shared.settings.stale_budget) => Outcome::Stale,
+                    }
+                } else if let Ok(answer) = Arc::clone(shared)
+                    .fetch(set, question, key.clone(), rule_id)
+                    .await
+                {
+                    Outcome::Upstream(answer)
+                } else {
+                    shared.count(|counters| &counters.timeouts);
+                    // An entry may have come in from another query meanwhile.
+                    if has_stale(Instant::now()) {
+                        Outcome::Stale
+                    } else {
+                        Outcome::Failed
+                    }
                 }
             }
         }
@@ -1187,13 +1451,36 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
     };
     let mut out = Vec::with_capacity(512);
     let mut cached = false;
+    // WP10.1: how the answer was found, and the engine's queries for it.
+    let (mut resolution, subqueries) = match &outcome {
+        Outcome::Recursed(resolved) => (
+            if resolved.outcome == crate::recurse::Outcome::Local {
+                crate::log::Resolution::Local
+            } else {
+                crate::log::Resolution::Recurse
+            },
+            resolved.subqueries,
+        ),
+        _ => (crate::log::Resolution::Forward, 0),
+    };
     let written = match outcome {
         Outcome::Upstream(answer) => cache::relay(&answer, &client, &mut out),
+        // WP10.1: the engine's answer, with the extended error of a failure.
+        Outcome::Recursed(resolved) => {
+            let written = cache::relay(&resolved.message, &client, &mut out);
+            if written.is_some()
+                && let Some(ede) = resolved.ede()
+            {
+                crate::recurse::add_ede(&mut out, ede);
+            }
+            written
+        }
         Outcome::Stale => match (&shared.cache, &key) {
             (Some(cache), Some(key)) => {
                 let written = cache.answer_stale(key, Instant::now(), &client, &mut out);
                 if written.is_some() {
                     cached = true;
+                    resolution = crate::log::Resolution::Stale;
                     shared.count(|counters| &counters.stale);
                     if shared.settings.metrics {
                         metrics::CACHE_STALE_COUNTER.inc();
@@ -1252,6 +1539,9 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
             blocked: None,
             cached,
             duration_micros: u32::try_from(micros).unwrap_or(u32::MAX),
+            // WP10.1: the resolution and the engine's queries.
+            resolution: Some(resolution),
+            subqueries,
         });
     }
 }

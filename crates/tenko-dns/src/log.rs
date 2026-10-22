@@ -8,7 +8,51 @@
 
 use std::net::IpAddr;
 
+use serde::{Deserialize, Serialize};
 use tenko_core::dns::{BlockListId, QueryTransport, ViewId};
+
+// WP10.1: how an answer was found (recursion plan section 2.11).
+/// How the answer of a logged query was found: the query log's `resolution`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resolution {
+    /// A zone of the node.
+    Zone,
+    /// The answer cache.
+    Cache,
+    /// The denial cache (RFC 8198, WP10.3).
+    Denial,
+    /// A stale entry of the cache (RFC 8767).
+    Stale,
+    /// An upstream of a forwarding rule, a stub zone or the default forwarder.
+    Forward,
+    /// The recursive resolver.
+    Recurse,
+    /// A locally served zone of the recursive resolver (RFC 6761, RFC 6303).
+    Local,
+    /// The policy: a block list or an RPZ zone.
+    Policy,
+    /// Refused.
+    Refused,
+}
+
+impl Resolution {
+    /// The stable name (the JSON lines' `resolution`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Resolution::Zone => "zone",
+            Resolution::Cache => "cache",
+            Resolution::Denial => "denial",
+            Resolution::Stale => "stale",
+            Resolution::Forward => "forward",
+            Resolution::Recurse => "recurse",
+            Resolution::Local => "local",
+            Resolution::Policy => "policy",
+            Resolution::Refused => "refused",
+        }
+    }
+}
+// WP10.1: end.
 
 /// One logged query. Borrowed fields are copied by the sink if it keeps them.
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +77,11 @@ pub struct QueryLogEntry<'a> {
     pub cached: bool,
     /// Microseconds from arrival to the answer.
     pub duration_micros: u32,
+    // WP10.1: how the answer was found and what it cost.
+    /// How the answer was found; `None` when the logger does not know.
+    pub resolution: Option<Resolution>,
+    /// Queries the recursive resolver sent to authorities for it.
+    pub subqueries: u16,
 }
 
 /// Where the query path hands its log entries.

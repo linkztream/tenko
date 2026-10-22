@@ -182,7 +182,7 @@ fn views_split_one_zone_by_client_transport_interface_and_weight_without_a_cache
         .with_args(&["--roles", "controller,dns"])
         .with_config(&format!(
             "[dns]\nlisten = [\"{first}\", \"{second}\"]\nworkers = 1\nforwarders = \
-             [\"{upstream}\"]\nforward_timeout_ms = 1000\n"
+             [\"{upstream}\"]\nforward_timeout_ms = 1000\n[dns.recursion]\nenabled = false\n"
         ));
     let mut server = node.start();
     server

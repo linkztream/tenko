@@ -778,6 +778,17 @@ impl<R: Resolver> Responder<R> {
                 blocked,
                 cached,
                 duration_micros: u32::try_from(micros).unwrap_or(u32::MAX),
+                // WP10.1: how the worker found the answer.
+                resolution: Some(if blocked.is_some() {
+                    crate::log::Resolution::Policy
+                } else if cached {
+                    crate::log::Resolution::Cache
+                } else if rcode == crate::authoritative::rcode::REFUSED {
+                    crate::log::Resolution::Refused
+                } else {
+                    crate::log::Resolution::Zone
+                }),
+                subqueries: 0,
             });
         }
     }

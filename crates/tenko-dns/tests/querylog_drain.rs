@@ -43,6 +43,9 @@ fn every_entry_is_written_or_counted_and_recording_never_waits() {
                         blocked: None,
                         cached: false,
                         duration_micros: 10,
+                        // WP10.1: the resolution of the log line.
+                        resolution: None,
+                        subqueries: 0,
                     });
                     slowest = slowest.max(started.elapsed());
                 }

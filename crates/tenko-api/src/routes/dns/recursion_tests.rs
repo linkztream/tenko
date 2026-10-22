@@ -1,8 +1,11 @@
-//! Route tests of the recursive resolver's stubs (WP10.0): each operation checks the scope of
-//! its action on the right kind and answers 501 until its package builds it, a viewer is
-//! refused, and a malformed path answers 400 before anything else.
+//! Route tests of the recursive resolver's routes: each trust anchor operation (a stub of
+//! WP10.0 until WP10.2) checks the scope of its action on the right kind and answers 501, a
+//! viewer is refused, and a malformed path answers 400 before anything else. The node routes
+//! (WP10.1) check the node and then the zone kind before they look for the role; the
+//! mapping of the resolver's report is tested here, the routes over a role in
+//! `tests/dns_recursion.rs`.
 
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -10,11 +13,25 @@ use axum::{
     http::{Request, header},
 };
 use serde_json::Value;
-use tenko_core::{Action, Authorizer, ObjectKind};
+use tenko_core::{
+    Action, Authorizer, ObjectKind, Timestamp,
+    dns::{DnsName, QueryTransport, Rtype},
+};
+use tenko_dns::{
+    infra::ServerFigures,
+    log::Resolution,
+    querylog::LogLine,
+    recurse::{CounterValues, InfraAddressView, PrimingReport, RecursionReport, RootServer},
+    recursion::{AddressOrigin, InfraSizes, WorkBudget, infra::EdnsSupport},
+};
 use tower::ServiceExt;
 use utoipa_axum::router::OpenApiRouter;
 
-use super::routes;
+use super::{
+    nodes::line_dto,
+    recursion::{address_dto, recursion_dto},
+    routes,
+};
 use crate::{
     API_BASE,
     routes::tenancy::testkit::{Policy, Reply},
@@ -195,8 +212,11 @@ async fn a_viewer_is_refused_the_changes_and_may_read() {
 #[tokio::test]
 async fn the_node_routes_check_the_node_then_the_zone_kind() {
     let (router, policy) = with_policy(true, true);
+    // No role runs in this router: the node is not known.
     for (method, path, _, _) in node_operations() {
-        send(&router, method, path).await.assert_problem(501, STUB);
+        send(&router, method, path)
+            .await
+            .assert_problem(404, "cluster.node.not_found");
     }
     let asked = policy.asked();
     assert_eq!(asked.len(), 2 * node_operations().len());
@@ -218,7 +238,7 @@ async fn a_viewer_is_refused_the_node_commands() {
     for (method, path, on_node, _) in node_operations() {
         let reply = send(&router, method, path).await;
         if on_node == Action::Read {
-            reply.assert_problem(501, STUB);
+            reply.assert_problem(404, "cluster.node.not_found");
         } else {
             reply.assert_problem(403, "auth.forbidden");
         }
@@ -244,3 +264,129 @@ async fn a_malformed_path_is_refused_before_anything_else() {
     }
     assert_eq!(policy.asked(), []);
 }
+
+// WP10.1: the mapping of the resolver's report.
+fn root_server(last: u8, srtt: Option<Duration>) -> RootServer {
+    RootServer {
+        name: DnsName::new("a.root-servers.test").expect("name"),
+        address: IpAddr::from([192, 0, 2, last]),
+        srtt,
+    }
+}
+
+fn report() -> RecursionReport {
+    RecursionReport {
+        hints_source: "shipped".to_owned(),
+        hints_date: "2026-01-31".to_owned(),
+        priming: Some(PrimingReport {
+            at: Timestamp::UNIX_EPOCH,
+            ok: false,
+            duration: Duration::from_micros(1_500),
+        }),
+        root_expires_in: None,
+        root: vec![
+            root_server(1, Some(Duration::from_micros(2_250))),
+            root_server(2, None),
+        ],
+        infra: InfraSizes {
+            cuts: 2,
+            servers: 3,
+            names: 4,
+        },
+        infra_bounds: (20, 30),
+        counters: CounterValues {
+            failure_hits: 5,
+            bound_time: 6,
+            ..CounterValues::default()
+        },
+        budget: WorkBudget {
+            wall: Duration::from_millis(2_500),
+            ..WorkBudget::DEFAULT
+        },
+        problems: vec!["priming_failed".to_owned()],
+    }
+}
+
+#[test]
+fn a_resolver_that_is_off_reads_as_empty() {
+    let status = recursion_dto(None);
+    assert!(!status.enabled);
+    assert!(status.root_servers.is_empty() && status.problems.is_empty());
+    assert!(status.last_priming.is_none() && status.root_expires_secs.is_none());
+    assert_eq!(status.infra.max_zones, 0);
+    assert_eq!(status.budget.wall_ms, 0);
+    assert_eq!(status.counters.answered, 0);
+}
+
+#[test]
+fn the_report_maps_field_by_field() {
+    let status = recursion_dto(Some(report()));
+    assert!(status.enabled);
+    let priming = status.last_priming.expect("priming");
+    assert_eq!(priming.outcome, "failed");
+    assert!((priming.duration_ms - 1.5).abs() < 1e-9);
+    assert_eq!(status.root_expires_secs, None);
+    assert_eq!(status.root_servers[0].srtt_ms, Some(2.25));
+    assert_eq!(status.root_servers[1].srtt_ms, None);
+    assert_eq!(
+        (
+            status.infra.zones,
+            status.infra.max_zones,
+            status.infra.servers,
+            status.infra.max_servers,
+            status.infra.names
+        ),
+        (2, 20, 3, 30, 4)
+    );
+    assert_eq!(status.budget.queries, 32);
+    assert_eq!(status.budget.wall_ms, 2_500);
+    assert_eq!(status.counters.failure_cache_hits, 5);
+    assert_eq!(status.counters.budget_time, 6);
+    assert_eq!(status.problems, ["priming_failed"]);
+    assert!(status.trust_anchors.is_empty());
+}
+
+#[test]
+fn an_address_maps_its_figures_and_its_edns_support() {
+    let view = |edns| InfraAddressView {
+        address: IpAddr::from([192, 0, 2, 9]),
+        origin: AddressOrigin::SiblingGlue,
+        ttl: 60,
+        figures: ServerFigures::default(),
+        edns,
+        tcp_only: false,
+        lame: true,
+    };
+    let unknown = address_dto(&view(EdnsSupport::Unknown));
+    assert_eq!(unknown.origin, "sibling_glue");
+    assert_eq!(unknown.edns, None);
+    assert!(unknown.srtt_ms.is_none() && unknown.p50_ms.is_none() && unknown.lame);
+    assert_eq!(address_dto(&view(EdnsSupport::Yes)).edns, Some(true));
+    assert_eq!(address_dto(&view(EdnsSupport::No)).edns, Some(false));
+}
+
+#[test]
+fn a_log_line_carries_the_resolution_and_the_sub_queries() {
+    let line = |resolution, subqueries| LogLine {
+        at: Timestamp::UNIX_EPOCH,
+        client: None,
+        transport: QueryTransport::Udp,
+        qname: "www.example.test".to_owned(),
+        rtype: Rtype::A,
+        rcode: 0,
+        view: None,
+        blocked: None,
+        cached: false,
+        duration_micros: 30,
+        resolution,
+        subqueries,
+    };
+    let recursed =
+        serde_json::to_value(line_dto(line(Some(Resolution::Recurse), 5), false)).expect("JSON");
+    assert_eq!(recursed["resolution"], "recurse");
+    assert_eq!(recursed["subqueries"], 5);
+    // An old line and a line without sub-queries leave the fields out.
+    let old = serde_json::to_value(line_dto(line(None, 0), false)).expect("JSON");
+    assert!(old.get("resolution").is_none() && old.get("subqueries").is_none());
+}
+// WP10.1: end.

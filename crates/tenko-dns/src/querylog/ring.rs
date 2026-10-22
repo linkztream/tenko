@@ -20,6 +20,9 @@ pub(crate) struct Slot {
     pub(crate) blocked: Option<BlockListId>,
     pub(crate) cached: bool,
     pub(crate) duration_micros: u32,
+    // WP10.1: how the answer was found and the engine's queries.
+    pub(crate) resolution: Option<crate::log::Resolution>,
+    pub(crate) subqueries: u16,
 }
 
 impl Slot {
@@ -35,6 +38,8 @@ impl Slot {
         blocked: None,
         cached: false,
         duration_micros: 0,
+        resolution: None,
+        subqueries: 0,
     };
 
     fn fill(&mut self, entry: &QueryLogEntry<'_>) {
@@ -50,6 +55,8 @@ impl Slot {
         self.blocked = entry.blocked;
         self.cached = entry.cached;
         self.duration_micros = entry.duration_micros;
+        self.resolution = entry.resolution;
+        self.subqueries = entry.subqueries;
     }
 
     /// The query name in wire form.

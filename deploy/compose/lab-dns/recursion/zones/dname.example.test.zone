@@ -1,0 +1,7 @@
+; The records of `dname.example.test` (a DNAME below the apex) on the lab's authority node (round `recursion` of smoke.sh,
+; README.md). The SOA and the apex NS set (a.root.test.) come from the zone's creation
+; through the API; this file is imported into the zone with POST .../records/import.
+$ORIGIN dname.example.test.
+$TTL 3600
+old                  300 DNAME new.dname.example.test.
+www.new              300 A 192.0.2.31

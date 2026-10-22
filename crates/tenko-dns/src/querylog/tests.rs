@@ -30,6 +30,9 @@ fn entry(qname: &[u8], client: IpAddr, at_micros: u64) -> QueryLogEntry<'_> {
         blocked: None,
         cached: false,
         duration_micros: 42,
+        // WP10.1: the resolution of the log line.
+        resolution: None,
+        subqueries: 0,
     }
 }
 

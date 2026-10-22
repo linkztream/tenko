@@ -49,6 +49,26 @@ function Figures(props: { log: QueryLogStatus }) {
   );
 }
 
+// WP10.1: how the answer was found, as the node logged it; a line written before it was logged
+// shows nothing, and a word this version does not know is shown as the node wrote it.
+const RESOLUTIONS = ["zone", "cache", "denial", "stale", "forward", "recurse", "local", "policy", "refused"] as const;
+
+function Resolution(props: { line: QueryLogLine }) {
+  const word = () => RESOLUTIONS.find((known) => known === props.line.resolution);
+  return (
+    <Show when={props.line.resolution}>
+      {(raw) => (
+        <span class="tag" data-testid="dns-log-resolution" data-resolution={raw()}>
+          <Show when={word()} fallback={raw()}>
+            {(known) => t(`dns.log.resolution.${known()}`)}
+          </Show>
+        </span>
+      )}
+    </Show>
+  );
+}
+// WP10.1: end.
+
 function Client(props: { line: QueryLogLine }) {
   const kind = () => clientKind(props.line);
   return (
@@ -73,6 +93,12 @@ function Lines(props: { lines: QueryLogLine[] }) {
             <th scope="col">{t("dns.log.col.name")}</th>
             <th scope="col">{t("dns.log.col.type")}</th>
             <th scope="col">{t("dns.log.col.rcode")}</th>
+            {/* WP10.1: how the answer was found and what the resolver asked for it. */}
+            <th scope="col">{t("dns.log.col.resolution")}</th>
+            <th scope="col" class="r">
+              {t("dns.log.col.subqueries")}
+            </th>
+            {/* WP10.1: end. */}
             <th scope="col" class="r">
               {t("dns.log.col.latency")}
             </th>
@@ -99,6 +125,14 @@ function Lines(props: { lines: QueryLogLine[] }) {
                 <td data-col="rcode" class="mono">
                   <span class={line.rcode === 0 ? undefined : "dns-log-bad"}>{rcodeName(line.rcode)}</span>
                 </td>
+                {/* WP10.1: the resolution and the sub-queries. */}
+                <td data-col="resolution">
+                  <Resolution line={line} />
+                </td>
+                <td data-col="subqueries" class="r">
+                  <Show when={line.subqueries}>{(count) => formatNumber(count())}</Show>
+                </td>
+                {/* WP10.1: end. */}
                 <td data-col="latency" class="r nowrap">
                   {t("dns.log.latency", { ms: formatNumber(line.duration_micros / 1000, { maximumFractionDigits: 2 }) })}
                 </td>

@@ -523,11 +523,24 @@ pub fn address_octets(address: IpAddr) -> Vec<u8> {
     }
 }
 
-/// The `extra` field Tenko writes.
-pub fn extra(client: ClientField, cached: bool) -> Vec<u8> {
+/// The `extra` field Tenko writes: `tenko;client=...`, `;cached`, and (WP10.1)
+/// `;resolution=<how>` and `;subqueries=<n>` when the recursive resolver sent any.
+pub fn extra(
+    client: ClientField,
+    cached: bool,
+    resolution: Option<crate::log::Resolution>,
+    subqueries: u16,
+) -> Vec<u8> {
     let mut out = format!("tenko;client={}", client.as_str());
     if cached {
         out.push_str(";cached");
+    }
+    if let Some(resolution) = resolution {
+        out.push_str(";resolution=");
+        out.push_str(resolution.as_str());
+    }
+    if subqueries > 0 {
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!(";subqueries={subqueries}"));
     }
     out.into_bytes()
 }
@@ -594,5 +607,14 @@ pub fn line_of(dnstap: &Dnstap) -> Option<LogLine> {
         blocked: None,
         cached: field("cached"),
         duration_micros: u32::try_from(duration.as_micros()).unwrap_or(u32::MAX),
+        // WP10.1: the resolution and the engine's queries from the `extra` field.
+        resolution: extra.split(';').find_map(|part| {
+            let value = part.strip_prefix("resolution=")?;
+            serde_json::from_value(serde_json::Value::String(value.to_owned())).ok()
+        }),
+        subqueries: extra
+            .split(';')
+            .find_map(|part| part.strip_prefix("subqueries=")?.parse().ok())
+            .unwrap_or(0),
     })
 }

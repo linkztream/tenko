@@ -1,0 +1,5 @@
+; The root hints of the DNS lab's own root (deploy/compose/lab-dns, the round
+; `recursion`): one root server, the authority node at 203.0.113.10. The node under test
+; reads this file through `[dns.recursion] hints = "/lab/root.hints"` and primes from it.
+.                        3600000      NS    a.root.test.
+a.root.test.             3600000      A     203.0.113.10

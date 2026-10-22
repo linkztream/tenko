@@ -155,9 +155,12 @@ fn the_dns_role_serves_zones_forwards_and_survives_a_restart() {
     let dns: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
     let mut node = Node::new()
         .with_args(&["--roles", "controller,dns"])
+        // WP10.1: the default forwarder of `[dns] forwarders` is used where recursion is
+        // off (a recursing node uses it only where a view says `forward`).
         .with_config(&format!(
             "[dns]\nlisten = [\"{dns}\"]\nworkers = 2\nforwarders = [\"{upstream}\"]\n\
-             forward_timeout_ms = 1000\n[dns.log]\nenabled = true\npseudonymise = false\n"
+             forward_timeout_ms = 1000\n[dns.log]\nenabled = true\npseudonymise = false\n\
+             [dns.recursion]\nenabled = false\n"
         ));
     let mut server = node.start();
     server
@@ -416,7 +419,7 @@ fn the_forwarder_follows_rules_caches_flushes_and_refuses_strangers() {
         .with_args(&["--roles", "controller,dns"])
         .with_config(&format!(
             "[dns]\nlisten = [{}]\nworkers = 1\nforwarders = [\"{default_upstream}\"]\n\
-             forward_timeout_ms = 1000\n",
+             forward_timeout_ms = 1000\n[dns.recursion]\nenabled = false\n",
             listen.join(", ")
         ));
     let mut server = node.start();
@@ -609,7 +612,7 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
         .with_args(&["--roles", "controller,dns"])
         .with_config(&format!(
             "[dns]\nlisten = [\"{dns}\"]\nworkers = 1\nforwarders = [\"{upstream}\"]\n\
-             forward_timeout_ms = 1000\n"
+             forward_timeout_ms = 1000\n[dns.recursion]\nenabled = false\n"
         ));
     let mut server = node.start();
     server

@@ -177,6 +177,9 @@ fn write(dir: &Path, client: ClientField) -> Vec<u8> {
             blocked: None,
             cached: query.cached,
             duration_micros: 250,
+            // WP10.1: the resolution of the log line.
+            resolution: None,
+            subqueries: 0,
         });
     }
     writer.stop();

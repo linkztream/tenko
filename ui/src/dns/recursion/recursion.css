@@ -1,0 +1,10 @@
+/* The status block of the recursion page (WP10.1): the facts, the root servers, the sizes of
+   the infrastructure cache and the counters in a grid of cards that wraps. */
+.rec-status { display: grid; gap: var(--sp-5); }
+.rec-status-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.rec-status-head h2 { margin: 0; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--sp-5); align-items: start; }
+.rec-grid .kv { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); }
+.rec-grid h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-14); }
+.rec-problems { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-5); }
+.rec-table .nowrap { white-space: nowrap; }

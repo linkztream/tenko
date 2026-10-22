@@ -20,6 +20,10 @@ export interface LogEntry {
   rcode: number;
   cached: boolean;
   duration_micros: number;
+  // WP10.1: how the answer was found and what the resolver asked for it.
+  resolution?: string;
+  subqueries?: number;
+  // WP10.1: end.
 }
 
 export interface DnsLogState {
@@ -54,6 +58,14 @@ const CLIENTS: Array<[string, string]> = [
 ];
 const TRANSPORTS: Array<QueryLogLine["transport"]> = ["udp", "udp", "tcp", "dot", "doh"];
 
+// WP10.1: the resolution of the seeded query `n`.
+function resolutionOf(n: number): Pick<LogEntry, "resolution" | "subqueries"> {
+  if (n % 4 === 1) return { resolution: "cache" };
+  const how = ["zone", "recurse", "forward"][n % 3] ?? "zone";
+  return how === "recurse" ? { resolution: how, subqueries: 2 + (n % 5) } : { resolution: how };
+}
+// WP10.1: end.
+
 /** 60 queries, one a second, the newest at 2026-10-17T12:00:59Z. */
 export function seedDnsLog(): DnsLogState {
   const start = Date.parse("2026-10-17T12:00:00Z");
@@ -70,6 +82,8 @@ export function seedDnsLog(): DnsLogState {
       rcode: RCODES[n % RCODES.length] ?? 0,
       cached: n % 4 === 1,
       duration_micros: 40 + ((n * 37) % 900),
+      // WP10.1: a cached answer says so; the rest cycle through zone, recursion and forwarding.
+      ...resolutionOf(n),
     });
   }
   return { mode: "on", client: "pseudonym", entries, written: entries.length, dropped: 0 };
@@ -173,6 +187,10 @@ function lineOf(state: DnsLogState, entry: LogEntry, addresses: boolean): QueryL
     cached: entry.cached,
     duration_micros: entry.duration_micros,
   };
+  // WP10.1: both fields are left out when the node did not log them.
+  if (entry.resolution !== undefined) line.resolution = entry.resolution;
+  if (entry.subqueries) line.subqueries = entry.subqueries;
+  // WP10.1: end.
   if (state.client === "pseudonym") line.client = entry.pseudonym;
   else if (state.client === "address" && addresses) line.client = entry.address;
   return line;

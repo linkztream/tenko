@@ -67,6 +67,9 @@ pub mod dnssec;
 pub mod update;
 // WP10.0: the recursive resolver's contracts (recursion plan section 3.3).
 pub mod recursion;
+// WP10.1: the iterative engine and the infrastructure cache.
+pub mod infra;
+pub mod recurse;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

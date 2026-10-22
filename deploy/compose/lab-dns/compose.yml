@@ -86,6 +86,8 @@ services:
       # The certificate of DoT and XoT in the transfer round (tenko.example.test).
       - "${LAB_DIR:?set LAB_DIR}/tls/tenko.pem:/lab/tenko.pem:ro"
       - "${LAB_DIR:?set LAB_DIR}/tls/tenko.key:/lab/tenko.key:ro"
+      # WP10.1: the lab root's hints for the round `recursion` (written for every round).
+      - "${LAB_DIR:?set LAB_DIR}/root.hints:/lab/root.hints:ro"
     read_only: true
     tmpfs:
       - /tmp
@@ -160,17 +162,18 @@ services:
       lab:
         ipv4_address: 203.0.113.10
 
-  # quirk: the engine's example authoritative server (crates/tenko-dns/examples/authoritative.rs,
-  # built for musl like the binary) with the misbehaviours of E36 as flags: no EDNS (FORMERR
-  # on OPT), 0x20 broken (answers in lower case), TC on everything, delayed answers, answers
-  # from the wrong source address. It is authoritative for quirk.example.test, delegated
-  # from example.test with glue at this address. WP10.1 builds it into the image named by
-  # QUIRK_IMAGE and gives it its entrypoint; the entrypoint below is the placeholder it
-  # replaces, so this service does not start before then.
-  quirk:
-    image: ${QUIRK_IMAGE:-tenko:lab}
+  # WP10.1: the quirk responders, the engine's example authoritative server
+  # (crates/tenko-dns/examples/authoritative.rs in its quirk mode, built for musl into
+  # QUIRK_IMAGE by deploy/compose/lab-dns/quirk.Dockerfile), one misbehaviour of E36 each,
+  # each authoritative for its zone under quirk.example.test and delegated from
+  # example.test with glue at its address: no EDNS (FORMERR on OPT), 0x20 broken (answers in
+  # lower case), TC on every UDP answer, answers delayed by 2.5 s, answers from the wrong
+  # source port, and a referral with out-of-bailiwick glue (to ns.elsewhere.test, whose
+  # real address is quirk-sub's; the glue points at 203.0.113.66, where nothing answers).
+  quirk-noedns: &quirk
+    image: ${QUIRK_IMAGE:-tenko-quirk:lab}
     profiles: ["recursion"]
-    entrypoint: ["/usr/local/bin/quirk"]
+    command: ["--quirk-zone", "noedns.quirk.example.test", "--quirk-address", "203.0.113.11", "--no-edns"]
     restart: "no"
     stop_grace_period: 1s
     expose:
@@ -186,6 +189,51 @@ services:
     networks:
       lab:
         ipv4_address: 203.0.113.11
+
+  quirk-case:
+    <<: *quirk
+    command: ["--quirk-zone", "case.quirk.example.test", "--quirk-address", "203.0.113.13", "--lower-case"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.13
+
+  quirk-tc:
+    <<: *quirk
+    command: ["--quirk-zone", "tc.quirk.example.test", "--quirk-address", "203.0.113.14", "--truncate"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.14
+
+  quirk-slow:
+    <<: *quirk
+    command: ["--quirk-zone", "slow.quirk.example.test", "--quirk-address", "203.0.113.15", "--delay-ms", "2500"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.15
+
+  quirk-spoof:
+    <<: *quirk
+    command: ["--quirk-zone", "spoof.quirk.example.test", "--quirk-address", "203.0.113.16", "--wrong-source"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.16
+
+  quirk-oob:
+    <<: *quirk
+    command: ["--quirk-zone", "oob.quirk.example.test", "--quirk-address", "203.0.113.17",
+              "--referral", "sub.oob.quirk.example.test=ns.elsewhere.test",
+              "--glue", "ns.elsewhere.test=203.0.113.66"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.17
+
+  quirk-sub:
+    <<: *quirk
+    command: ["--quirk-zone", "sub.oob.quirk.example.test", "--quirk-address", "203.0.113.18"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.18
+  # WP10.1: end.
 
   # delv: the client side's second validator. The BIND image idles as the `client` does;
   # `docker compose exec delv delv @203.0.113.3 ...` (or against the authority) validates

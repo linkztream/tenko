@@ -123,6 +123,9 @@ async fn lab(node_update: bool, client: ClientField, log_on: bool) -> Lab {
             blocked: None,
             cached: false,
             duration_micros: 30,
+            // WP10.1: the resolution of the log line.
+            resolution: None,
+            subqueries: 0,
         });
     }
     writer.stop();

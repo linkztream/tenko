@@ -261,3 +261,19 @@ test = false
 doc = false
 bench = false
 # End WP7.6.
+
+# WP10.1: the recursive resolver's targets (marked block).
+[[bin]]
+name = "dns_referral"
+path = "fuzz_targets/dns_referral.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_cookie_client"
+path = "fuzz_targets/dns_cookie_client.rs"
+test = false
+doc = false
+bench = false
+# WP10.1: end.

@@ -1,0 +1,10 @@
+; The records of the root zone `.` on the lab's authority node (round `recursion` of smoke.sh,
+; README.md). The SOA and the apex NS set (a.root.test.) come from the zone's creation
+; through the API; this file is imported into the zone with POST .../records/import.
+$ORIGIN .
+$TTL 86400
+; The TLD test, served by the same node; the TLD unreachable, where nothing answers.
+test.                86400 NS a.root.test.
+a.root.test.         86400 A  203.0.113.10
+unreachable.         86400 NS ns.unreachable.
+ns.unreachable.      86400 A  203.0.113.250

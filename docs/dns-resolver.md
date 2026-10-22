@@ -1,7 +1,7 @@
 # DNS: the resolver side
 
-- Scope: how a node answers names outside the zones it serves: the forwarder, its rules and stub zones, the recursion access lists, the cache with serve-stale and prefetch, the upstreams over plain DNS, DNS over TLS and DNS over HTTPS, RPZ zones and block lists, and rate limiting (Phase 2, plan section 2.8; DNS-02, DNS-08, DNS-15, DNS-17, DNS-21, DNS-23, TGL-11, TGL-14, TGL-22). For operators who make a node the resolver of their clients, and for the builders of the later Phase 2 packages.
-- The authoritative side (zones, records, the `dns` role, the engine) is [dns.md](dns.md); the contracts are [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns` (`forward`, `cache`, `pool`, `upstream`, `outbound`, `forwarders`; the policy and the limits in `policy`, `lists`, `rate`).
+- Scope: how a node answers names outside the zones it serves: the forwarder, its rules and stub zones, the recursion access lists, the cache with serve-stale and prefetch, the upstreams over plain DNS, DNS over TLS and DNS over HTTPS, RPZ zones and block lists, and rate limiting (Phase 2, plan section 2.8; DNS-02, DNS-08, DNS-15, DNS-17, DNS-21, DNS-23, TGL-11, TGL-14, TGL-22), and, since Slice 10, Tenko's own recursive resolver that asks the root servers and the authorities itself (section 10; DNS-03, DNS-08, DNS-21). For operators who make a node the resolver of their clients, and for the builders of the later Phase 2 packages.
+- The authoritative side (zones, records, the `dns` role, the engine) is [dns.md](dns.md); the contracts are [dns-contracts.md](dns-contracts.md). The code is `crates/tenko-dns` (`forward`, `cache`, `pool`, `upstream`, `outbound`, `forwarders`; the policy and the limits in `policy`, `lists`, `rate`; the recursive resolver in `recurse` and `infra`).
 
 Contents:
 
@@ -13,7 +13,8 @@ Contents:
 6. [Rate limiting](#6-rate-limiting) (WP5.2)
 7. [DoT and DoH served to clients](#7-dot-and-doh-served-to-clients) (WP5.3)
 8. [The query log and dnstap](#8-the-query-log-and-dnstap) (WP5.4)
-9. [The home cut-over](#9-the-home-cut-over) (WP5.6)
+9. [The home cut-over](#9-the-home-cut-over) (WP5.6), with the recursion variant in 9.7
+10. [Recursion](#10-recursion) (Slice 10, WP10.1)
 
 ## 1. The resolver side and the lookup order
 
@@ -32,9 +33,11 @@ A node with the `dns` role answers from its zones first and forwards the rest: T
 
 Steps 1 to 7 run on the worker that received the query and allocate nothing (ADR 0009; `crates/tenko-dns/tests/alloc.rs` runs cache hits in a view with a recursion access list, refused queries, and blocked names, rewritten cache hits and a rate-limited flood with the policy and the limiter installed, through the counting allocator). Step 8 runs on the tokio runtime, up to 1,024 queries at once, from a queue of 4,096; a full queue drops the query and the client retries.
 
+Since Slice 10 a node can also resolve names itself: the forwarder starts the recursive resolver, steps 6 and 8 gain a route to it, and a name that no rule and no stub zone covers is recursed by default (section 10.1). The rest of this section describes the forwarder, which that route sits beside.
+
 Every name outside the zones reaches the forwarder, which decides; so a node sets RA in every answer. The forwarded answers are counted in `tenko_dns_queries_total` with the RCODE relayed and timed from the hand-over to the answer; cache hits are counted and timed as any answer of the query path.
 
-What is not in Phase 2: DNSSEC validation (the DO and CD bits go upstream and the signatures come back to a client that asked with DO, but AD is always clear), a recursive resolver of Tenko's own, aggressive use of NSEC (RFC 8198), and the client-subnet option (RFC 7871).
+What is not in Phase 2: DNSSEC validation (the DO and CD bits go upstream and the signatures come back to a client that asked with DO, but AD is always clear), a recursive resolver of Tenko's own, aggressive use of NSEC (RFC 8198), and the client-subnet option (RFC 7871). Slice 10 adds the recursive resolver (section 10); validation and aggressive use of NSEC follow in later packages of that slice (section 10.16).
 
 ## 2. Forwarding rules, stub zones and the recursion access list
 
@@ -209,7 +212,7 @@ The `[dns]` keys of the resolver side ([`deploy/tenko.example.toml`](../deploy/t
 
 | Key | Default | Meaning |
 |---|---|---|
-| `forwarders` | none | The default forwarder: addresses, or tables `{ address, port, transport, tls_name, path }` with `transport` `udp`, `tcp`, `dot` or `doh` (section 2.1) |
+| `forwarders` | none | The default forwarder: addresses, or tables `{ address, port, transport, tls_name, path }` with `transport` `udp`, `tcp`, `dot` or `doh` (section 2.1). With the recursive resolver on, it serves only where a view says `forward` (section 10.1); to forward everything, add a root rule or switch the resolver off |
 | `forward_timeout_ms` | 2000 | Milliseconds one attempt has, 100 to 30,000 |
 | `forward_retries` | 2 | Attempts after the first, 0 to 5 |
 | `upstream_ca` | none | A PEM file of CA certificates for DoT and DoH upstreams, instead of the system's roots |
@@ -291,7 +294,7 @@ An RPZ zone is a zone of kind `rpz` ([dns.md](dns.md) section 1). In Phase 2 its
 | `CNAME rpz-tcp-only.` | Over UDP an empty answer with TC, so the client asks again over TCP; over TCP the real answer |
 | any other records | Local data: the records of the type asked (or a CNAME, for any type) instead of the real answer; NODATA when none fits |
 
-An owner that is no valid trigger (an address label out of range, an unknown prefix length) is skipped and logged when the zone is compiled. What a forwarding resolver cannot see is not matched: the NSDNAME and NSIP triggers look only at the NS records and addresses that the upstream's answer carries (most recursive resolvers send none with a positive answer), and Tenko does not resolve the name servers of a name to find them.
+An owner that is no valid trigger (an address label out of range, an unknown prefix length) is skipped and logged when the zone is compiled. What a forwarding resolver cannot see is not matched: the NSDNAME and NSIP triggers look only at the NS records and addresses that the upstream's answer carries (most recursive resolvers send none with a positive answer), and a forwarder does not resolve the name servers of a name to find them. The recursive resolver of section 10 knows the delegation it followed and puts it into its answers while an RPZ zone has such triggers, so that they match (section 10.11).
 
 ### 5.3 Block lists and allow lists
 
@@ -552,7 +555,7 @@ One object per line:
 {"at":"2026-10-17T12:00:00.123456Z","client":"p:3f2a9c0d81b7e645","transport":"udp","qname":"www.example.test","type":"A","rcode":0,"cached":false,"duration_micros":38}
 ```
 
-`client` is absent when the log keeps no client; `view` and `blocked` appear when they are set.
+`client` is absent when the log keeps no client; `view` and `blocked` appear when they are set; `resolution` says how the answer was found and `subqueries` how many queries the recursive resolver sent for it (section 10.13).
 
 #### dnstap (`format = "dnstap"`)
 
@@ -760,3 +763,304 @@ E14 is met when every row holds on a client that got the node's address by DHCP:
 | The home zones | `dig nas.home.example.test A`; `dig -x 192.0.2.20` | Answers with `aa` from the node |
 
 Record the date, the lease time used and the findings in the Phase 2 status (`docs/plans/phase-2-status.md`).
+
+### 9.7 The recursion variant (Slice 10)
+
+A node can resolve outside names itself instead of sending them to a DoT upstream (section 10). The cut-over of this section stays as it is, except for the one row of section 9.1 that names the root rule: with recursion there is no root rule, the clients' queries are resolved from the root servers down, and the AD zones still go to the domain controllers through their own rules, because a rule with a longer suffix wins. The home zones, the block list, the recursion access list, the DHCP change and the rollback do not change. The node does not check DNSSEC signatures yet (section 10.16) and never sets AD.
+
+| Subject | With the DoT upstream (9.1 to 9.6) | With recursion |
+|---|---|---|
+| The rule for everything else | A root rule over DoT; it wins over `[dns] forwarders` | None. A node with the `dns` role recurses for names no rule or stub zone covers, in every profile (section 10.1). A root rule in the store still wins over recursion |
+| What the node must reach | The upstream's addresses on port 853 | Every authority server of the Internet on UDP and TCP port 53, over IPv4 and, where the node has a route, IPv6. A firewall that lets only the old resolver out has to open port 53 for the node |
+| Queries to the Internet | One exchange per name, encrypted | Several exchanges per name from a cold cache (three or more, section 10.15), in plain text: nothing protects the path to an authority (section 10.16). The answer cache and the infrastructure cache make the later ones cheaper |
+| The E14 row for DNS-15 and TGL-14 (section 9.6) | DoT to the upstream | Does not apply. A household that wants one operator it trusts to see its queries keeps the DoT root rule |
+
+The resolver is on by default, so a node that has `[dns] forwarders` in `tenko.toml` and no root rule in the store recurses as soon as it runs a version with the resolver: it no longer sends everything to those forwarders. To keep forwarding, add a root rule (below) or set `[dns.recursion] enabled = false` and restart the node.
+
+**Checking that the resolver works.** Each check is made on the node, from a client of a home network:
+
+| Check | How | Healthy |
+|---|---|---|
+| The resolver runs and has primed | `GET /api/v1/nodes/{id}/dns/recursion`, or the Recursion page of the DNS area (`/dns/recursion`) | `enabled` is true, `last_priming` has the outcome `ok` and a duration of tens of milliseconds, `root_servers` lists the root servers with round-trip times, `problems` is empty |
+| An outside name | `dig @192.0.2.53 www.example.com A`, twice | NOERROR with the flag `ra`; the first answer takes the walk from the root (`counters.subqueries` grows by three or more), the second comes from the cache with a lower TTL. With the query log on (section 8), the lines say `resolution: recurse` with `subqueries`, then `resolution: cache` |
+| The root servers answer | `problems` of the status | No `priming_failed`. When it is there, no root server of the hints answered the last priming: check that the node may send UDP and TCP to port 53 outward, and that `hints_source` is the file or the shipped hints you expect. `POST /api/v1/nodes/{id}/dns/recursion/prime` tries again at once, and the node tries again by itself after 1 second, then 2, up to 5 minutes |
+| A name that fails | `dig @192.0.2.53 broken.example.com A` | SERVFAIL with `EDE: 22 (No Reachable Authority)` when the authorities of the name do not answer or a bound of the work budget was hit, `EDE: 23 (Network Error)` when the node could not send to any of them. Asking again within 5 seconds sends no query to an authority (section 10.3); `counters.failure_cache_hits` counts it |
+| What the node knows about a zone | `GET /api/v1/nodes/{id}/dns/infra?suffix=example.com` | The zone cut with its name servers, their addresses and where each came from, their smoothed round-trip times and flags: `lame` for a server that is not an authority of the zone, `edns` false for one that does not take EDNS, `tcp_only` |
+| A stale picture of an authority | `POST /api/v1/nodes/{id}/dns/infra/flush`, with `?suffix=example.com` for one zone and what is below it | The zone cuts and name servers at or below the suffix are dropped. Without a suffix everything goes, the figures and capabilities of every server too, the root's servers come back from the hints and the root is primed again. The answer cache and the failure cache keep what they hold; `POST /api/v1/nodes/{id}/dns/cache/flush` (section 3.5) empties the first |
+
+**The fallback in one command.** If recursion misbehaves for the household, a root forwarding rule over DoT takes the names back at once, with no restart, from the next revision the node applies:
+
+```sh
+tenko dns forwarder create . --transport dot --tls-name dns.example.net \
+  --upstream 198.51.100.53 --upstream 198.51.100.54
+```
+
+The rules for the AD zones and for any other suffix stay as they are. Answers already in the cache keep their TTLs. To return to recursion, delete the rule with `tenko dns forwarder delete .`. To switch the resolver off for the whole node, set `[dns.recursion] enabled = false` and restart it; `[dns] forwarders` then serves as it did before Slice 10.
+
+## 10. Recursion
+
+This section describes the recursive resolver of a node with the `dns` role: Tenko's own iterative engine, which answers a name outside the node's zones by asking the root servers, then the servers of each delegation down to the authority of the name, with no upstream resolver in between (DNS-03, DNS-08, DNS-21, WP10.1 of the recursion plan, [dns-recursion-plan.md](plans/dns-recursion-plan.md) sections 2.1, 2.2, 2.7 and 2.10 to 2.12; the decision is [ADR 0021](adr/0021-recursive-resolution-and-validation.md)). The code is `crates/tenko-dns/src/recurse.rs` and its modules (`message`, `net`, `hints`, `local`, `join`) and `crates/tenko-dns/src/infra.rs` (the infrastructure cache and the figures of the servers); the contracts they implement are `crates/tenko-dns/src/recursion`. The engine runs on the forwarder's task pool and allocates freely; steps 1 to 7 of section 1 stay allocation-free (ADR 0009). The conformance rows are in [CONFORMANCE.md](CONFORMANCE.md).
+
+What this slice delivers is resolution. Validation of DNSSEC signatures, QNAME minimisation and the denial cache are later packages of the same slice; section 10.16 lists what is not built.
+
+### 10.1 What the resolver does, and in which order
+
+The lookup order of section 1 has one more route and one more default. A query passes steps 1 to 5 as before (the header, the rate limiter, the view, the zones, the policy, RD, and the view's recursion access list of section 2.3, which is checked before any route). Then:
+
+| Step | What |
+|---|---|
+| 6. A route | The longest suffix among the forwarding rules and the stub zones decides, as in section 2. A rule has a **mode**: `forward` (its upstreams, as in section 2.1) or `recurse` (no upstreams: the names under its suffix are resolved by the engine, so a root rule that forwards can have a `recurse` rule for one suffix, and the other way round). When no rule and no stub zone covers the name, the **view's resolution** decides: `recurse`, `forward` (the default forwarder of `[dns] forwarders`) or `refuse`. A view without a resolution recurses, in every profile (REC-Q2). A node whose resolver is off (`[dns.recursion] enabled = false`) forwards instead |
+| 7. The cache | The answer cache, as in section 3 |
+| 8. The runtime | The forwarder for a `forward` route, the engine for a `recurse` route. Both fill the same cache and answer through the same reply path |
+
+A `forward` resolution with no default forwarder is answered REFUSED with the extended error "Not Authoritative" (20); `refuse` is REFUSED with "Prohibited" (18). `[dns] forwarders` is therefore used only where a view says `forward`, or on a node whose resolver is off; it is never a silent default beside the resolver.
+
+A rule's `mode` and a view's `resolution` are rows of the store and the engine follows them, but the API of this slice still answers 501 to a request that sets `mode` to `recurse` or sets a view's `resolution`; they are built with the API and the command line (WP10.4, section 10.16). Until then the rules of the store are all forwarding rules, the views have no resolution, and a node recurses for every name its rules and stub zones do not cover.
+
+The engine's answers go into the cache that forwarded answers go into, and are served from it as any other: positive answers for the smallest TTL of their records, NXDOMAIN and NODATA with the SOA for the negative TTL (section 3.1). A query with CD set is resolved but its answer is not cached, so that data one client asked for with CD never reaches the entry other clients share. A resolution that fails with SERVFAIL answers a stale entry when the cache holds one (section 3.3). The prefetch of section 3.4 asks the engine for an entry the engine made. The answers carry the authority's records as they came, RRSIG records included for a client that asked with DO; AA and AD are clear, and RA is set.
+
+### 10.2 The algorithm
+
+**Priming (RFC 8109).** At start, when the root's NS set is nearly expired, after the hints file changed, after a flush of the infrastructure cache and on request (section 10.12), the resolver asks a root server for `./NS`, without RD, with EDNS and DO. It tries at most six addresses of the families in force one after another, the fastest it has measured first and the others in a random order. The NS set of the answer and the addresses in its additional section become the root's servers for the NS records' TTL (at most seven days). The next priming is due a tenth of that TTL before it ends, at most an hour before. The hints are the file shipped in the binary (`crates/tenko-dns/anchors/named.root`, with its date) or the file `[dns.recursion] hints` names, in the zone file format of `named.root`; they are never downloaded, and a hints file whose modification time changed is read again (checked once a minute) and primed from at once. While no root server answers, the hints stay the root's servers, so resolution goes on if any of them is reachable; priming is tried again after 1 second, then 2, doubling up to 5 minutes, and `priming_failed` is in the `problems` of the resolver's status and of the node's status until a priming succeeds. A node whose hints name no reachable server answers every name SERVFAIL with the extended error 22 "No Reachable Authority". The first resolutions after a start may run before the priming has answered, from the hints.
+
+**The walk.** For a name and type the resolver takes the closest zone cut it holds in the infrastructure cache (the longest suffix of the name with an NS set that has not expired, the root at worst; for a DS query a cut above the name itself), chooses a server of the cut (section 10.4) and asks it for the name and type, RD clear. It reads the answer for the zone it asked, as RFC 2181 section 5.4 ranks it and RFC 9471 bounds it:
+
+| The answer | What the resolver does |
+|---|---|
+| AA set, with the records of the type asked at the name (or at the end of a CNAME chain inside the zone) in the answer section | The answer. The records of the chain and the RRset with the RRSIG records that cover it are kept |
+| A CNAME at the name, or a DNAME above it, and nothing for the target inside the zone | Restarts the walk for the target (below) |
+| NXDOMAIN, or NOERROR without data, with AA or with an SOA of the zone in the authority section | A negative answer. The SOA, NSEC and NSEC3 records of the zone and their signatures are kept for the answer |
+| NOERROR without AA and NS records in the authority section, owned by one zone strictly below the zone asked and at or above the name (for DS, strictly above it) | A referral: the walk moves down one cut |
+| Anything else (below) | The server is lame |
+
+A server is **lame** for the zone it was asked when it answers with an RCODE other than NOERROR and NXDOMAIN (REFUSED, SERVFAIL, BADVERS and the others), echoes another question, gives an answer without AA, refers upward or sideways or to more than one zone, answers a CNAME or DNAME it cannot read, or answers a negative answer with an SOA from a zone above the one asked, which is what a server of the parent does for a delegation it does not serve. A lame server is marked lame for that zone in its entry of the infrastructure cache for the infrastructure TTL (section 10.10) and skipped while another server of the cut exists. When every server of a cut is lame, unreachable or out of attempts, the resolution ends: SERVFAIL, extended error 22.
+
+**Ranking and the bailiwick rule.** Only what the zone's own server may say about the zone is used: an answer section of an authoritative answer; records for a name outside the zone that was asked are not used (a CNAME to such a name is followed from the start instead, below). A referral's NS set is cached as the delegation of the child zone, with its smallest TTL (at most one day). Its additional section is read by the bailiwick rule of RFC 9471, for each name server the referral names:
+
+- **In-domain glue**, for a name server at or below the delegated zone, is cached as the name server's addresses with the origin `glue`.
+- **Sibling glue**, for a name server inside the zone that was asked but outside the delegated zone (for example a server in the sibling zone of the same parent), is used for this step and cached with the origin `sibling_glue`.
+- **Every other address** in the additional section is ignored: never cached, never asked. Glue for a name that is not in the referral's NS set is ignored as well.
+
+A name server's addresses carry their origin, ranked `hints` below `sibling_glue` below `glue` below `authoritative` (an address looked up from the name server's own authority). An address of a lower rank never replaces an address of a higher rank that has not expired (RFC 2181 section 5.4.1). The origin shows in the listing of section 10.12. The confirmation of sibling glue by an answer from the glue's own authority is not built: a `sibling_glue` address is used as any other and stays marked until a lookup of the name replaces it.
+
+**Name-server addresses.** A cut whose name servers have no address of a family in force gets them by sub-queries through the same engine: A, then AAAA when A gave nothing (A only under `v4`, AAAA only under `v6`). The fetch policy of Unbound bounds them: three such lookups at the depth of the client's question, then two one level down, then one, then none, so that with the defaults they nest three levels deep; `budget_depth` cuts them shorter when it is set lower. A name server whose lookup is in progress is not looked up again inside itself: a delegation whose servers can only be found through each other (`loop.example.test` and `loop2.example.test` naming each other's servers without glue) is a loop, and the resolution ends with SERVFAIL and the extended error 22. The queries of a lookup are counted in the work budget.
+
+**CNAME and DNAME.** A CNAME at the name restarts the walk for its target, at most 8 links per name (`budget_restarts`), counting every CNAME record in the chain; a DNAME above the name adds the CNAME that RFC 6672 section 3.4 says the server synthesises, with the DNAME's TTL, and restarts for the substituted name (a substitution longer than 255 octets makes the server lame). A target already seen, or a ninth link, ends the resolution: SERVFAIL, extended error 22, the chain so far in the answer. The answer to the client carries the whole chain, each CNAME with its own TTL.
+
+### 10.3 The work budget and the failure cache
+
+One client query may cause at most the work of this table (REC-Q12). The bounds are `[dns.recursion]` settings (section 10.14) except the attempts and the fetch policy. A bound that is hit ends the resolution: SERVFAIL with the extended error 22 "No Reachable Authority", the failure remembered, and the counter that names the bound raised.
+
+| Bound | Default | What moves it | Counter of the status |
+|---|---|---|---|
+| Queries sent to authorities | 32 | Every query to an authority server: the sub-queries for name-server addresses, and the queries the fallback ladder repeats (the retry without EDNS, the retry over TCP after a truncation, the retry in lower case after a 0x20 mismatch, and every attempt after a timeout). The retry after BADCOOKIE is not counted | `budget_queries` |
+| CNAME and DNAME links | 8 | Each CNAME record in the chain of one name | `budget_restarts` |
+| Depth of name-server lookups | 6 | A name-server lookup that needs a name-server lookup (the fetch policy stops them at three levels with the defaults) | `budget_depth` |
+| Attempts per server and question | 3 | Each attempt at one server address in one step of the walk. A fourth is not made: the server is skipped. A 0x20 mismatch retried in lower case does not use an attempt | none |
+| Wall clock | 10,000 ms | The time from the hand-off to the answer | `budget_time` |
+
+The extended error 23 "Network Error" is for a step in which every attempt failed because the query could not be sent at all; a server that is only silent or lame is error 22.
+
+**The failure cache (RFC 9520).** A resolution that ends in SERVFAIL, whatever the cause, is remembered per view, name, type and class: for 5 seconds, then twice as long each time the same question fails again within the hold or as long again after it, up to `failure_cache_max_secs` (300). While a failure is remembered the question is answered SERVFAIL with the same extended error and no query is sent to an authority; it is counted in `failure_cache_hits` and `tenko_dns_failure_cache_hits_total` and not as a resolution. The cache of WP10.1 is the in-memory reference of the recursion contracts (`MemFailures`): it is looked up on the runtime, has no bound, never drops an expired entry from memory and is not emptied by the flush of section 3.5. The bounded cache, with the lookup on the worker, comes with WP10.3.
+
+### 10.4 Server selection and timeouts
+
+A cut's servers are the addresses of its name servers that are of a family in force (section 10.7), not lame for the zone, not marked unreachable and not out of attempts for this question. The resolver asks:
+
+1. The address asked least often for this question, so that attempts spread over the servers before one is asked a second time.
+2. Among those, the addresses not in back-off before the ones in back-off, and among those the one with the smallest smoothed round-trip time; an address never measured counts as the fastest, so it is measured first. One choice in 16 goes to a random one of the addresses not in back-off, so that the times of the others stay current.
+
+The figures per address are those of the upstream pool (section 4.7), kept per address because a delegation's servers are shared by many zones: the smoothed round-trip time (SRTT) is an exponentially weighted mean with weight 1/8 per answer, doubled by a failure; the p50 and p99 come from the answers of the last minute, at most the last 32; three failures in a row put the address in back-off for 1 second, doubling with each further failure up to a minute, and an answer ends it.
+
+The timeout of an attempt is four times the address's SRTT, at least 300 ms and at most `timeout_ms` (2,000); for an address never measured it is half of `timeout_ms`, at least 300 ms. A silent server therefore costs a few seconds, not the whole budget: three attempts of 1, 2 and 2 seconds with the defaults. An address in back-off is asked only when no other address of the cut is left.
+
+### 10.5 The defences (DNS-08)
+
+Every query to an authority carries these, and the answer is used only if it matches them:
+
+- **0x20.** The letters of the question name get a random case, and the answer must carry the question in exactly that case. A mismatch is retried at once in lower case and counts as a strike for the server; after two strikes the address is asked in lower case for the infrastructure TTL, and the case is no longer checked for it. The lab has a server that breaks 0x20 on purpose (section 10.15).
+- **A fresh source port.** Each exchange binds a socket of its own to a random port and drops it after the answer (`[dns.recursion] fresh_port_per_query`, on). With the key off, authorities are asked from the shared sockets of the upstream pool, each used for up to 64 exchanges. What the bind costs is measured by M36 (WP10.5).
+- **Cookies (RFC 7873, RFC 9018).** The client cookie is 8 octets, the SipHash-2-4 of the server's address under a random 16-octet secret the engine makes at start. A server cookie that comes back is kept in the server's entry of the infrastructure cache and sent from then on. An answer whose cookie option carries another client cookie, a cookie to a query that sent none, a server cookie of a bad length or broken options is not ours: over UDP it is ignored like any unwanted answer, over TCP it is a malformed answer. BADCOOKIE is asked again once, with the server cookie the answer carried; a second BADCOOKIE, or one without a server cookie, is a failure. A server that never returns a cookie costs nothing.
+- **Unwanted answers.** A datagram on an exchange's socket that matches no outstanding query (another source address or port, another id, another question, a foreign cookie) is dropped, the wait goes on, and it is counted for the server asked. A server that draws more than 1,000 in an hour is asked over TCP for the rest of the hour; more than 100,000 across the node in an hour flushes the answer cache, as Unbound's `unwanted-reply-threshold` does, and the flush is logged and audited as `dns.recursion.unwanted_flush` with the number of entries. The count is `unwanted` in the status, the flushes `unwanted_flushes`.
+- **Identical queries in flight** are joined (section 10.9).
+
+### 10.6 The EDNS and transport ladder
+
+Every query carries an OPT record: version 0, 1,232 octets, DO (a validator always asks for signatures, RFC 3225) and the cookie option. There is no step to 4,096 or to 512: 1,232 is the one size. The ladder is the one of RFC 8906 and the DNS flag days of 2019 and 2020:
+
+| Event | What the resolver does |
+|---|---|
+| FORMERR or NOTIMP, without an OPT record, to a query with EDNS | The same question once more without EDNS (and so without DO and the cookie). The server is marked as taking no EDNS in its entry, and later queries to it go without EDNS from the start |
+| A timeout | The same query again, with EDNS. A timeout is never a reason to drop EDNS |
+| A truncated UDP answer (TC) | The same question over TCP: one connection per exchange, the two-octet length prefix of RFC 7766, within the attempt's deadline, with the same checks of id, question, case and cookie |
+| Three truncated answers in a row from one server | The server is marked TCP-only: asked over TCP from the start |
+| An answer without an OPT record to a query with EDNS, for another reason | Treated as a server without EDNS |
+
+TCP connections are not reused and queries are not pipelined: each exchange over TCP opens a connection and closes it. The retries of the ladder are queries in the work budget (section 10.3).
+
+### 10.7 IPv4 and IPv6
+
+`[dns.recursion] outbound` (REC-Q9) chooses the families:
+
+| Value | Meaning |
+|---|---|
+| `auto` (default) | Both. A server is asked on its fastest address. An IPv6 address to which the query cannot be sent (no route, or the network refuses it at once) is marked unreachable for 6 hours and skipped; a successful answer clears the mark. The node does not read its own addresses: a node without IPv6 pays one failed attempt per IPv6 server address per 6 hours |
+| `both` | Both, and an address is never skipped |
+| `v4` (`ipv4`) | IPv4 addresses only; name-server lookups ask A only |
+| `v6` (`ipv6`) | IPv6 addresses only; name-server lookups ask AAAA only. Such a node resolves only zones with an IPv6 name server |
+
+### 10.8 Special-use and locally served names
+
+A name under one of 41 zones never reaches an authority: seven names of the special-use registry (RFC 6761, RFC 6762's `local`, RFC 7686's `onion`, RFC 8375's `home.arpa`) and 34 reverse zones of RFC 6303. The first rule is that a zone or a forwarding rule of the node answers such a name when it covers it (step 2 and step 6 come first); the engine answers the rest, on the runtime, and counts them as `local`:
+
+| Zones | Answer |
+|---|---|
+| `localhost`, `invalid`, `test`, `example`, `onion`, `local`, `home.arpa` | NXDOMAIN for every name at or below them, with the zone's SOA in the authority section |
+| `10.in-addr.arpa`, `16.172.in-addr.arpa` to `31.172.in-addr.arpa`, `168.192.in-addr.arpa`, `0.in-addr.arpa`, `127.in-addr.arpa`, `254.169.in-addr.arpa`, `2.0.192.in-addr.arpa`, `100.51.198.in-addr.arpa`, `113.0.203.in-addr.arpa`, `255.255.255.255.in-addr.arpa` | Empty zones (RFC 6303): the apex answers its SOA, and its NS record (the zone itself) for NS; any other type at the apex is NOERROR without data with the SOA; every name below the apex is NXDOMAIN with the SOA |
+| In `ip6.arpa`: the zones of `::` and `::1`, `c.f` and `d.f` (fc00::/7), `8.e.f`, `9.e.f`, `a.e.f` and `b.e.f` (fe80::/10), and `8.b.d.0.1.0.0.2` (2001:db8::/32) | The same |
+
+The SOA is the one RFC 6303 section 3 writes: the zone as the primary name server, `nobody.invalid.` as the mailbox, the serial 1, and 10,800 seconds as the TTL and the minimum, so that the answer is cached as a negative answer. `[dns.recursion] local_zones_except` lifts zones: each name lifts the listed zones at or below it, so `test` lifts the zone `test`, `10.in-addr.arpa` lifts that zone, and `arpa` lifts every reverse zone. The lab lifts `test`, which it uses for its own names. A local answer comes from the engine, after the cache and the hand-over, and is cached; it is not answered on the worker yet (section 10.16).
+
+### 10.9 Identical queries in flight
+
+Client queries with the same name, type, class and view that arrive while one of them is being resolved wait for that resolution and share its answer (the join table, in `recurse/join.rs`; `joined` in the status counts them). A burst of one name costs one resolution, and an attacker cannot have many identical queries outstanding at once, which is what the birthday attack on outstanding queries needs. The table lives on the runtime; the worker hands queries over as before. If the resolution that leads a group is dropped, the others resolve on their own.
+
+### 10.10 The infrastructure cache
+
+The infrastructure cache (`tenko_dns::infra`) holds what the engine learns about the servers it asks. It is read and written on the runtime only, never on the worker, so it may allocate and lock freely, and it holds no client data.
+
+| Per | What it holds |
+|---|---|
+| Zone cut | The zone, its name servers' names, when the NS set expires (the referral's smallest TTL, at most one day; the root's from the priming), a slot for the DS state that WP10.2 fills (`unknown` until then) and a slot for the minimisation fallback of WP10.3 |
+| Name server | Its A and AAAA addresses with their TTLs and origins (section 10.2) |
+| Server address | What the resolver learnt: whether it takes EDNS (unknown, yes, no), TCP-only, the server cookie, the zones it is lame for, each until a time, the time of its last failure, and the mark that the address is unreachable. Beside them, the figures of section 10.4 (SRTT, p50 and p99, failures and back-off), the 0x20 strikes, the unwanted answers of the hour and the TCP hour they cause |
+
+The bounds are zone cuts and server addresses: 1,000 and 2,000 under the Home profile, 10,000 and 20,000 under the others; `infra_entries` sets the cuts and the addresses follow at twice that. The name servers' table and the figures of the servers have the bound of the addresses. A map over its bound drops its least recently used sixteenth at once, so an insert at the bound costs one scan per sixteenth of the bound, not one per insert. Expired cuts, addresses and server entries with nothing left to remember are purged once a minute. `infra_ttl_secs` (900) is the time a learnt lameness and a learnt need for lower case hold; the unreachable mark holds 6 hours; what the resolver learnt about a server's EDNS, TCP and cookie is kept with the server's entry until the least-recently-used rule drops it or a flush empties it. The sizes against the bounds are in the status, and in `tenko_dns_infra_entries{kind}`.
+
+### 10.11 The RPZ triggers NSDNAME and NSIP
+
+A forwarding resolver cannot match the triggers `rpz-nsdname` and `rpz-nsip` of an RPZ zone (section 5.2): it sees only what the upstream's answer carries. The recursive resolver knows the delegation it followed. While any RPZ zone of the catalog has an NSDNAME or NSIP trigger, the engine's answers carry the NS records of the zone cut that gave the answer in the authority section and the addresses it holds for those name servers in the additional section, and the policy matches them as it matches a forwarded answer's (section 5.1). The node looks at the catalog every 200 ms. A name whose answer came from a server named by an NSDNAME trigger, or from an address in an NSIP trigger's prefix, is blocked by the zone's action. Only the cut that gave the answer is matched, not the cuts above it, and an entry cached before such a trigger existed carries no delegation: flush the cache (section 3.5) after the first NSDNAME or NSIP trigger is added. The lab round has a row for each trigger (section 10.15 and the lab's README).
+
+### 10.12 The status, the priming and the infrastructure cache
+
+Four routes and three node commands (`dns.recursion.prime`, `dns.infra.list`, `dns.infra.flush`), run on the node that holds the resolver; in this slice that is the controller's own process, as for the cache (section 3.7). A node that does not run the `dns` role answers 409 `dns.node.not_dns`; the three commands, on a node whose resolver is off, answer 409 `dns.recursion.disabled`.
+
+| Route | Scope | What |
+|---|---|---|
+| `GET /api/v1/nodes/{id}/dns/recursion` | `dns.read` | The resolver's status |
+| `POST /api/v1/nodes/{id}/dns/recursion/prime` | `dns.write` | Prime now. 202 with the id of the recorded command; a priming already running is left to finish. Audited as `dns.recursion.prime` |
+| `GET /api/v1/nodes/{id}/dns/infra` | `dns.read` | A page of the infrastructure cache. Recorded as a node command and not audited: the cache holds the authority servers of zones and no client data |
+| `POST /api/v1/nodes/{id}/dns/infra/flush` | `dns.write` | Drop the infrastructure cache, or with `?suffix=` the zone cuts and name servers at or below it. 200 with `entries`, the number dropped. Audited as `dns.infra.flush` with the suffix |
+
+**The status** answers 200 also when the resolver is off (`enabled: false`, empty and zero fields). Its fields:
+
+| Field | Meaning |
+|---|---|
+| `enabled`, `hints_source`, `hints_date` | Whether it runs; `shipped` or the path of the hints file; the date of the shipped hints or the file's modification date |
+| `last_priming` | `at`, `outcome` (`ok` or `failed`) and `duration_ms`; absent before the first priming |
+| `root_expires_secs` | Seconds until the root's NS set expires |
+| `root_servers` | The root servers in use: `name`, `address` and `srtt_ms` |
+| `infra` | `zones` and `servers` against `max_zones` and `max_servers`, and `names` |
+| `budget` | The work budget in force: `queries`, `restarts`, `depth`, `attempts`, `wall_ms` |
+| `counters` | Since the role started: `answered`, `servfail`, `budget` (the queries, restarts or depth bound), `timeout` (the wall clock bound), `local`, `failure_cache_hits`, `joined`, `subqueries` (queries sent to authorities), `budget_queries`, `budget_restarts`, `budget_depth`, `budget_time`, `primings_ok`, `primings_failed`, `unwanted`, `unwanted_flushes`; and `secure`, `insecure`, `bogus`, `indeterminate`, which stay 0 until WP10.2 |
+| `trust_anchors` | Empty until WP10.2 |
+| `problems` | `priming_failed`, and from WP10.2 `clock` and `trust_anchor_stale`. The node's own status (`GET /api/v1/nodes/{id}/dns`) names `dns.recursion.priming_failed` in its `problems` too |
+
+**The listing** takes `suffix` (the zone cuts at or below it), `limit` (1 to 1,000, default 200) and `cursor` (the `next_cursor` of the previous page), and answers the zone cuts sorted by name. Each cut has `zone`, `ds` (`unknown` until WP10.2), `ttl` (seconds left) and its `servers`; each server has `name` and `addresses`; each address has `address`, `origin` (`hints`, `sibling_glue`, `glue` or `authoritative`), `ttl`, `srtt_ms`, `p50_ms`, `p99_ms`, `failures`, `down` (in back-off), `edns` (`true`, `false`, or absent when not learnt yet), `tcp_only`, `lame` (for this cut's zone), `lower_case` (asked in lower case) and `unwanted`. A malformed `suffix`, `cursor` or `limit` answers 400 `sys.invalid_value` with the field. The Recursion page of the DNS area (`/dns/recursion`) shows the status; the command line and the rest of the page are WP10.4.
+
+### 10.13 Metrics and the query log
+
+The role registers these families when the resolver is on (names as the metrics endpoint prints them; each counter is a per-shard relaxed atomic, OPS-21):
+
+| Family | Labels | What | Counted since |
+|---|---|---|---|
+| `tenko_dns_recursion_total` | `outcome`: `answered`, `servfail`, `budget`, `timeout`, `local` | Resolutions the engine ended. An answer from the failure cache is not one | WP10.1 |
+| `tenko_dns_recursion_duration_seconds` | | Time from the hand-off to the answer (the forwarder's buckets) | WP10.1 |
+| `tenko_dns_recursion_subqueries` | | Queries sent to authorities per resolution that sent any, buckets 1, 2, 3, 4, 6, 8, 12, 16, 24 and 32 | WP10.1 |
+| `tenko_dns_authority_queries_total` | `transport`: `udp`, `tcp`; `outcome`: `ok`, `referral`, `lame`, `timeout`, `unreachable`, `malformed`, `tc`, `badcookie` | Exchanges with authority servers. `malformed` includes the 0x20 mismatches and answers that do not parse; `tc` is the UDP leg of an exchange that went on over TCP | WP10.1 |
+| `tenko_dns_authority_rtt_seconds` | | Round-trip time of answered exchanges, in one histogram: the figures per server are in the listing of section 10.12, not in a label | WP10.1 |
+| `tenko_dns_infra_entries` | `kind`: `zone`, `server` | Entries of the infrastructure cache | WP10.1 |
+| `tenko_dns_failure_cache_hits_total` | | Questions answered from the failure cache | WP10.1 |
+| `tenko_dns_priming_total` | `outcome`: `ok`, `failed` | Priming runs | WP10.1 |
+| `tenko_dns_validation_total`, `tenko_dns_validation_verifications_total` | `state`, `reason` | Validation outcomes and signature checks | WP10.2; they stay 0 until then |
+| `tenko_dns_denial_total` | `kind` | Answers synthesised from the denial cache | WP10.3; stays 0 until then |
+| `tenko_dns_trust_anchor_keys` | `zone`, `state` | Trust anchor keys by RFC 5011 state | WP10.2 |
+
+**The query log** (section 8) gains two fields. `resolution` says how the answer was found: `zone` (a zone of the node), `cache`, `denial` (WP10.3), `stale`, `forward` (a rule's upstream, a stub zone or the default forwarder), `recurse`, `local` (a locally served name, section 10.8), `policy` (a block list or an RPZ zone) or `refused`. `subqueries` is the number of queries the engine sent to authorities for the answer, and is left out of a JSON line when it is 0. The dnstap output (section 8.4) carries both in the `extra` field as `;resolution=<how>` and `;subqueries=<n>`. The reader, the API's lines and the Query log page show them. The validation state and the extended error are logged from WP10.2.
+
+### 10.14 Settings: `[dns.recursion]`
+
+The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.toml)); environment variables follow the usual pattern (`TENKO_DNS__RECURSION__ENABLED=false`). `tenko config check` validates every key against its bounds. The keys are read at start and a change needs a restart, except that a changed hints file is read again by itself (section 10.2). The keys that are not set follow the profile in force.
+
+| Key | Default | Consumed by | Meaning |
+|---|---|---|---|
+| `enabled` | on in every profile | WP10.1 | Run the resolver. Off: no engine, no recursion metrics, and `[dns] forwarders` serves as it did in Phase 2 |
+| `hints` | not set: the shipped hints | WP10.1 | A root hints file in the format of `named.root`. A file that cannot be read stops the start (`config.invalid`) |
+| `outbound` | `auto` | WP10.1 | `auto`, `both`, `v4` (`ipv4`) or `v6` (`ipv6`) (section 10.7) |
+| `timeout_ms` | 2,000 | WP10.1 | The longest an attempt has, 100 to 30,000 (section 10.4) |
+| `budget_queries` | 32 | WP10.1 | Queries sent per client query, 1 to 256 |
+| `budget_restarts` | 8 | WP10.1 | CNAME and DNAME links per name, 1 to 32 |
+| `budget_depth` | 6 | WP10.1 | Nesting of name-server lookups, 1 to 16 |
+| `budget_ms` | 10,000 | WP10.1 | Wall clock per client query, 100 to 60,000 |
+| `infra_entries` | 1,000 (Home), 10,000 | WP10.1 | Zone cuts the infrastructure cache holds, 10 to 1,000,000; server addresses at twice that |
+| `infra_ttl_secs` | 900 | WP10.1 | How long a learnt lameness and a learnt need for lower case hold, 10 to 86,400 |
+| `failure_cache_max_secs` | 300 | WP10.1 | The longest a failure is remembered, 5 to 3,600 |
+| `fresh_port_per_query` | `true` | WP10.1 | A fresh source port for every exchange with an authority |
+| `local_zones_except` | none | WP10.1 | Locally served zones that are resolved all the same (section 10.8) |
+| `qname_minimisation` | `relaxed` | WP10.3 | `relaxed`, `strict` or `off`; read and checked, not used yet |
+| `aggressive_nsec`, `denial_entries` | `true`; 2,000 (Home), 20,000 | WP10.3 | The denial cache; read and checked, not used yet |
+| `trust_anchor_signalling`, `key_sentinel` | on except under Hardened; `true` | WP10.2 | RFC 8145 and RFC 8509; read and checked, not used yet |
+| `rfc5011_hold_down_secs` | not set | WP10.2 | The hold-downs of RFC 5011 in seconds, a test knob that the Lab profile only allows; not used yet |
+
+The attempts per server (3) and the fetch policy (3, 2, 1, 0) are fixed.
+
+### 10.15 Query counts per case (M40)
+
+The engine is tested against a scripted lab (`crates/tenko-dns/src/recurse/tests.rs`) whose zones are spread over servers of their own, so that every referral of the Internet happens: the root, the TLD `test`, `example.test` with its children, and the quirk servers. Each case of E36 starts from a primed engine with a cold infrastructure cache and records the queries sent to authorities; the table `CASES` holds the counts and the test `every_case_of_e36_ends_within_the_budget_with_its_query_count` checks them. A query is counted when it is sent to an authority server: the priming before the case is not counted, a sub-query for a name server's address is, and so is every retry of the fallback ladder (the retry without EDNS, the retry over TCP after a truncation, the retry in lower case after a 0x20 mismatch, every attempt after a timeout); a BADCOOKIE retry is not. In each failing case the resolution ends with SERVFAIL and the extended error 22, and asking the same question again sends nothing (the failure cache of section 10.3).
+
+| Case | Name asked | Answer | Queries |
+|---|---|---|---|
+| A name three labels down: root, TLD, zone | `www.example.test A` | NOERROR | 3 |
+| A wildcard | `any.wild.example.test A` | NOERROR | 3 |
+| NXDOMAIN | `nothing.example.test A` | NXDOMAIN | 3 |
+| NODATA | `www.example.test AAAA` | NOERROR, no data | 3 |
+| A CNAME within the zone, asked again for the target | `alias.example.test A` | NOERROR | 4 |
+| A chain of two CNAME records | `short1.cname.example.test A` | NOERROR | 5 |
+| A lame delegation (NS at BIND, which serves the parent) | `www.lame.example.test A` | SERVFAIL | 4 |
+| A delegation whose name servers point at each other without glue | `www.loop.example.test A` | SERVFAIL | 4 |
+| A CNAME loop | `loop1.cname.example.test A` | SERVFAIL | 4 |
+| A chain of ten CNAME records, over the eight links | `c1.cname.example.test A` | SERVFAIL | 11 |
+| A TLD whose server does not answer | `www.unreachable A` | SERVFAIL | 4 |
+| A server that breaks 0x20, asked again in lower case | `www.case.quirk.example.test A` | NOERROR | 5 |
+| A server that answers FORMERR to EDNS, asked again without | `www.noedns.quirk.example.test A` | NOERROR | 5 |
+| A server that truncates everything, asked again over TCP | `www.tc.quirk.example.test A` | NOERROR | 5 |
+| A referral with out-of-bailiwick glue, which is ignored | `www.oob.example.test A` | NOERROR | 6 |
+| An answer above 1,232 octets, over TCP | `big.example.test AAAA` | NOERROR | 4 |
+
+The counts follow from the walk. The plain cases are the root, the TLD and the zone (3). The scripted servers answer a CNAME on its own, without the record of its target, so each link costs one more query: 4 for one link, 5 for two, and the chain of ten stops at the ninth link (3 + 8 = 11). A server that holds the whole chain in one zone and answers it in one message is read in one query (`classify` follows a chain inside the zone). The lame delegation is those three queries plus one to BIND, whose negative answer carries an SOA of the parent. The unreachable TLD is the query to the root plus the three attempts at the silent server. The quirk cases add the one query the ladder repeats: without EDNS, over TCP, or in lower case. The out-of-bailiwick case has to look up the name server's address, because the glue is ignored: the three queries give the referral, the lookup takes two more (the TLD's referral and the answer of the server of `elsewhere.test`), and the zone's own server one: 6.
+
+The compose lab has the same cases against a root of its own, served by a second Tenko node (`deploy/compose/lab-dns`, the round `recursion`, [its README](../deploy/compose/lab-dns/README.md)). That node serves the root, the TLD and the zones under it from one address and answers from the deepest zone it holds, so a name of its own zones costs one query after priming; a delegation to another server costs one more. The round prints one line per case under the heading M40; the three runs of 2026-10-22 (Docker in WSL, the musl image) gave the same counts each time:
+
+| Case (row of the round) | Answer | Queries | Time |
+|---|---|---|---|
+| `rec.resolve`, `rec.wildcard`, `rec.dname`, `rec.chain`, `rec.nxdomain` | NOERROR or NXDOMAIN | 1 | 0.3 to 0.45 s |
+| `rec.big` (TC, then TCP) | NOERROR | 2 | 0.3 s |
+| `rec.lame`, `rec.nsloop` | SERVFAIL, EDE 22 | 2 | 0.3 s |
+| `rec.cname.loop` | SERVFAIL, EDE 22 | 1 | 0.3 s |
+| `rec.cname.ten` (eight links in the first answer, the rest in the second) | SERVFAIL, EDE 22 | 2 | 0.3 s |
+| `rec.unreachable`, `rec.slow`, `rec.spoof` (three attempts that time out) | SERVFAIL, EDE 22 | 4 | 2.8 to 2.9 s |
+| `rec.0x20`, `rec.formerr`, `rec.tc` (the referral, the ladder's two) | NOERROR | 3 | 0.3 to 0.4 s |
+| `rec.oob` (the referral, the name server's address, the answer) | NOERROR | 4 | 0.4 to 0.5 s |
+
+The times are dig's from the client container through `docker compose exec`, about 0.3 s of which is the exec itself. The second ask of every failing case sent no query. Priming from the lab's hints file took 1.3 ms at start (M41's priming half: under 100 ms). The measurements of resolutions per second, of the memory and of the cost of a fresh source port are WP10.5's (M36 to M41).
+
+### 10.16 What is not built yet
+
+| What | Package | Today |
+|---|---|---|
+| DNSSEC validation, the trust anchors, RFC 5011 and negative trust anchors | WP10.2 | The resolver does not check signatures: AD is never set, every answer is treated as unvalidated, and a client with DO gets the signatures the authority sent. The validation keys of section 10.14, the counters `secure`, `insecure`, `bogus` and `indeterminate`, the families `tenko_dns_validation_*`, the `ds` of a zone cut and the `trust_anchors` of the status are in place and empty. `/dns/trust-anchors` and `/dns/ntas` answer 501 |
+| QNAME minimisation, the denial cache and the bounded failure cache | WP10.3 | Every server on the path is sent the full name, and no answer is synthesised from a cached denial. The failure cache is the in-memory reference of section 10.3 |
+| The command line and the rest of the UI | WP10.4 | No `tenko dns` command for the resolver. The API refuses a forwarding rule of mode `recurse` and a view's `resolution` (501), although the engine follows both when the rows exist. The Recursion page shows the status |
+| The measurements and the exit document | WP10.5 | No figure for throughput, memory or the cost of a fresh port per exchange |
+| Special-use names on the worker | later | Locally served names (section 10.8) are answered on the runtime, after the cache and the hand-over, and the answer is cached; the allocation-free path of ADR 0009 does not answer them first |
+| Other transports, other sources | not planned in this slice | Connection reuse and pipelining over TCP to authorities, encrypted transport to authorities (RFC 9539), a local copy of the root zone (RFC 8806), DNS64 and the client subnet option (RFC 7871) |

@@ -16,7 +16,7 @@
       </unit>
       <unit id="dns.recursion.coming.body">
         <notes><note category="description">Explains on the recursion page that the recursive resolver is not available yet.</note></notes>
-        <segment><source>The recursive resolver, with its trust anchors, negative trust anchors, priming and infrastructure cache, comes with a later release of this slice.</source></segment>
+        <segment><source>The management of the trust anchors and the negative trust anchors comes with a later release of this slice.</source></segment>
       </unit>
       <unit id="dns.recursion.trust_anchors.title">
         <notes><note category="description">Heading of the trust anchors, the keys that DNSSEC validation starts from.</note></notes>
@@ -109,6 +109,202 @@
       <unit id="dns.cache.signature_expiry">
         <notes><note category="description">Explains when the signatures of a validated entry expire; {time} is a date and time.</note></notes>
         <segment><source>Signatures valid until {time}</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.title">
+        <notes><note category="description">Heading of the block that shows the recursive resolver of this server's DNS node.</note></notes>
+        <segment><source>Resolver on this node</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.running">
+        <notes><note category="description">Tag that says the recursive resolver of the node is running.</note></notes>
+        <segment><source>Running</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.loading">
+        <notes><note category="description">Shown while the state of the recursive resolver is being read.</note></notes>
+        <segment><source>Reading the resolver…</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.no_node">
+        <notes><note category="description">Shown on the recursion page when this server has no DNS node, so there is no resolver to show.</note></notes>
+        <segment><source>This server has no DNS node, so there is no resolver to show.</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.off.title">
+        <notes><note category="description">Heading of the note that says the node's recursive resolver is switched off.</note></notes>
+        <segment><source>Recursion is off</source></segment>
+      </unit>
+      <unit id="dns.recursion.status.off.body">
+        <notes><note category="description">Explains that the resolver is off and where it is switched on; enabled and [dns.recursion] are names in the configuration file and stay as they are.</note></notes>
+        <segment><source>The node answers from its own zones and its forwarders only. Set enabled in the [dns.recursion] section of tenko.toml to resolve names from the root.</source></segment>
+      </unit>
+      <unit id="dns.recursion.facts.title">
+        <notes><note category="description">Heading of the card with the hints and the last priming of the recursive resolver.</note></notes>
+        <segment><source>Root hints and priming</source></segment>
+      </unit>
+      <unit id="dns.recursion.hints.shipped">
+        <notes><note category="description">Source of the root hints: the list that ships with the product.</note></notes>
+        <segment><source>Shipped with Tenko</source></segment>
+      </unit>
+      <unit id="dns.recursion.hints.date">
+        <notes><note category="description">Label of the date of the root hints.</note></notes>
+        <segment><source>Hints dated</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.never">
+        <notes><note category="description">Shown when the resolver has not primed itself yet.</note></notes>
+        <segment><source>No priming yet</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.ok">
+        <notes><note category="description">Tag: the last priming succeeded, a root server answered.</note></notes>
+        <segment><source>Succeeded</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.failed">
+        <notes><note category="description">Tag: the last priming failed, no root server answered.</note></notes>
+        <segment><source>Failed</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.duration">
+        <notes><note category="description">How long the last priming took; {ms} is a number of milliseconds.</note></notes>
+        <segment><source>took {ms} ms</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.expires">
+        <notes><note category="description">Label of the time the resolver's list of root servers expires and the next priming is due.</note></notes>
+        <segment><source>Root servers expire</source></segment>
+      </unit>
+      <unit id="dns.recursion.prime.button">
+        <notes><note category="description">Button that asks the node to prime its resolver now.</note></notes>
+        <segment><source>Prime now</source></segment>
+      </unit>
+      <unit id="dns.recursion.prime.sent">
+        <notes><note category="description">Confirms that the node was asked to prime its resolver.</note></notes>
+        <segment><source>Priming requested</source></segment>
+      </unit>
+      <unit id="dns.recursion.prime.failed">
+        <notes><note category="description">Title of the error when the node could not be asked to prime its resolver.</note></notes>
+        <segment><source>The priming could not be requested</source></segment>
+      </unit>
+      <unit id="dns.recursion.problems.title">
+        <notes><note category="description">Heading of the warning that lists what the recursive resolver reports as wrong.</note></notes>
+        <segment><source>The resolver reports a problem</source></segment>
+      </unit>
+      <unit id="dns.recursion.problem.priming_failed">
+        <notes><note category="description">Problem of the resolver: no root server answered the priming query.</note></notes>
+        <segment><source>No root server answered the priming query, so recursed names are answered SERVFAIL until a priming succeeds.</source></segment>
+      </unit>
+      <unit id="dns.recursion.roots.title">
+        <notes><note category="description">Heading of the table of root servers the resolver uses.</note></notes>
+        <segment><source>Root servers</source></segment>
+      </unit>
+      <unit id="dns.recursion.roots.col.name">
+        <notes><note category="description">Column of the root servers table: the name of the server.</note></notes>
+        <segment><source>Server</source></segment>
+      </unit>
+      <unit id="dns.recursion.roots.col.address">
+        <notes><note category="description">Column of the root servers table: the address in use.</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dns.recursion.roots.col.srtt">
+        <notes><note category="description">Column of the root servers table: the smoothed round-trip time to the server.</note></notes>
+        <segment><source>Round-trip time</source></segment>
+      </unit>
+      <unit id="dns.recursion.roots.srtt_none">
+        <notes><note category="description">Shown for a root server that has not answered yet, so its round-trip time is unknown.</note></notes>
+        <segment><source>not measured yet</source></segment>
+      </unit>
+      <unit id="dns.recursion.ms">
+        <notes><note category="description">A time in milliseconds; {ms} is formatted already.</note></notes>
+        <segment><source>{ms} ms</source></segment>
+      </unit>
+      <unit id="dns.recursion.infra.zones">
+        <notes><note category="description">Label of the number of zone cuts the infrastructure cache holds.</note></notes>
+        <segment><source>Zone cuts</source></segment>
+      </unit>
+      <unit id="dns.recursion.infra.servers">
+        <notes><note category="description">Label of the number of name server addresses the infrastructure cache holds.</note></notes>
+        <segment><source>Server addresses</source></segment>
+      </unit>
+      <unit id="dns.recursion.infra.names">
+        <notes><note category="description">Label of the number of name server names the infrastructure cache holds.</note></notes>
+        <segment><source>Server names</source></segment>
+      </unit>
+      <unit id="dns.recursion.infra.of">
+        <notes><note category="description">How full a cache is; {count} is what it holds and {max} its bound, both formatted already.</note></notes>
+        <segment><source>{count} of {max}</source></segment>
+      </unit>
+      <unit id="dns.recursion.counters.title">
+        <notes><note category="description">Heading of the counters of the resolver since the role started.</note></notes>
+        <segment><source>Since the role started</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.answered">
+        <notes><note category="description">Counter: client queries the resolver answered with an answer or NXDOMAIN.</note></notes>
+        <segment><source>Answered</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.servfail">
+        <notes><note category="description">Counter: client queries the resolver answered with SERVFAIL.</note></notes>
+        <segment><source>Answered SERVFAIL</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.budget">
+        <notes><note category="description">Counter: client queries stopped because they used up their budget of queries, restarts or depth.</note></notes>
+        <segment><source>Stopped by the work budget</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.timeout">
+        <notes><note category="description">Counter: client queries that ran out of time.</note></notes>
+        <segment><source>Timed out</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.local">
+        <notes><note category="description">Counter: client queries answered from locally served zones.</note></notes>
+        <segment><source>Answered from local zones</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.failure_cache_hits">
+        <notes><note category="description">Counter: client queries answered SERVFAIL from the failure cache without asking an authority server.</note></notes>
+        <segment><source>Answered from the failure cache</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.subqueries">
+        <notes><note category="description">Counter: queries the resolver sent to authority servers.</note></notes>
+        <segment><source>Queries sent to authorities</source></segment>
+      </unit>
+      <unit id="dns.recursion.counter.unwanted">
+        <notes><note category="description">Counter: answers from authority servers that were dropped as unwanted.</note></notes>
+        <segment><source>Unwanted answers dropped</source></segment>
+      </unit>
+      <unit id="dns.log.col.resolution">
+        <notes><note category="description">Column of the query log: how the answer was found.</note></notes>
+        <segment><source>Resolution</source></segment>
+      </unit>
+      <unit id="dns.log.col.subqueries">
+        <notes><note category="description">Column of the query log: the queries the resolver sent to authority servers for this query.</note></notes>
+        <segment><source>Sub-queries</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.zone">
+        <notes><note category="description">How a query was answered: from a zone the node serves.</note></notes>
+        <segment><source>Zone</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.cache">
+        <notes><note category="description">How a query was answered: from the cache.</note></notes>
+        <segment><source>Cache</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.denial">
+        <notes><note category="description">How a query was answered: from the cache of proven non-existence.</note></notes>
+        <segment><source>Denial cache</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.stale">
+        <notes><note category="description">How a query was answered: from an expired cache entry because the upstreams failed.</note></notes>
+        <segment><source>Stale cache</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.forward">
+        <notes><note category="description">How a query was answered: by a forwarder.</note></notes>
+        <segment><source>Forwarded</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.recurse">
+        <notes><note category="description">How a query was answered: by the recursive resolver.</note></notes>
+        <segment><source>Recursed</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.local">
+        <notes><note category="description">How a query was answered: from local data of the resolver.</note></notes>
+        <segment><source>Local data</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.policy">
+        <notes><note category="description">How a query was answered: by a policy such as a block list.</note></notes>
+        <segment><source>Policy</source></segment>
+      </unit>
+      <unit id="dns.log.resolution.refused">
+        <notes><note category="description">How a query was answered: refused.</note></notes>
+        <segment><source>Refused</source></segment>
       </unit>
     </group>
   </file>

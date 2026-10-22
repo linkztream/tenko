@@ -1,0 +1,34 @@
+; The records of `example.test` on the lab's authority node (round `recursion` of smoke.sh,
+; README.md). The SOA and the apex NS set (a.root.test.) come from the zone's creation
+; through the API; this file is imported into the zone with POST .../records/import.
+$ORIGIN example.test.
+$TTL 3600
+www                  300 A 192.0.2.10
+api                  300 A 192.0.2.11
+; The zones below are served by this node too, each delegated here.
+nsec3                NS a.root.test.
+wild                 NS a.root.test.
+dname                NS a.root.test.
+cname                NS a.root.test.
+big                  NS a.root.test.
+insecure             NS a.root.test.
+bogus                NS a.root.test.
+; A lame delegation: BIND serves example.test, not lame.example.test.
+lame                 NS bind.example.test.
+bind                 A  203.0.113.2
+; Each the other's name server, no glue.
+loop                 NS ns.loop2.example.test.
+loop2                NS ns.loop.example.test.
+; The quirk responders, one misbehaviour each, delegated with glue.
+noedns.quirk           NS ns.noedns.quirk.example.test.
+ns.noedns.quirk        A  203.0.113.11
+case.quirk           NS ns.case.quirk.example.test.
+ns.case.quirk        A  203.0.113.13
+tc.quirk           NS ns.tc.quirk.example.test.
+ns.tc.quirk        A  203.0.113.14
+slow.quirk           NS ns.slow.quirk.example.test.
+ns.slow.quirk        A  203.0.113.15
+spoof.quirk           NS ns.spoof.quirk.example.test.
+ns.spoof.quirk        A  203.0.113.16
+oob.quirk           NS ns.oob.quirk.example.test.
+ns.oob.quirk        A  203.0.113.17

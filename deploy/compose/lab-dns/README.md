@@ -5,8 +5,9 @@ DNS over HTTPS, on one Docker host: the upstream transports, the cache, the nega
 and serve-stale of the resolver of [docs/dns.md](../../../docs/dns.md) (WP5.1) against a real
 server, for the check of deliverable 6 of the plan and for trying things by hand. A fourth
 round, `xfr` (WP6.1), has BIND and Tenko transfer zones to each other, with TSIG, NOTIFY,
-IXFR, XoT and catalog zones, and a fifth, `update` (WP6.2), changes a zone of Tenko with
-`nsupdate`. It is a
+IXFR, XoT and catalog zones, a fifth, `update` (WP6.2), changes a zone of Tenko with
+`nsupdate`, and a sixth, `recursion` (WP10.1), has the recursive resolver walk from a root
+of the lab's own. It is a
 lab, not a deployment example: `smoke.sh` generates the certificate for one run, the Lab
 profile makes the resolver open to every client, and every name and address is a
 documentation value (`203.0.113.0/24`, `example.test`).
@@ -49,7 +50,14 @@ forwarders = [{ address = "203.0.113.2", transport = "doh", tls_name = "bind.exa
 stale_secs = 3600
 stale_answer_ms = 1800      # a stale answer after 1.8 s of waiting for the upstream
 prefetch = false            # so that an entry really expires
+
+[dns.recursion]
+enabled = false             # these rounds forward through [dns] forwarders (see below)
 ```
+
+Since the recursive resolver (WP10.1) a node recurses by default and uses `[dns] forwarders`
+only where recursion is off, so every round except `recursion` writes `[dns.recursion]
+enabled = false`; the round `recursion` writes no forwarder and no `enabled` key.
 
 ## The smoke
 
@@ -88,7 +96,9 @@ service and the last `tenko.toml`.
 
 Settings: `IMAGE`, `BIND_IMAGE` (the BIND image, for the server and for `dig`), `ROUNDS`
 (default `plain dot doh xfr update`; the serve-stale steps run after `doh`, the transfer rows in
-`xfr`, the update rows in `update`), `WAIT_SECS` (300), `KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
+`xfr`, the update rows in `update`; the round `recursion` runs only when named, best alone),
+`QUIRK_IMAGE` (an existing image of the quirk responders for the round `recursion`; default:
+build `tenko-quirk:lab`), `WAIT_SECS` (300), `KEEP`. The lab network is fixed at `203.0.113.0/24`, so two labs, or this one and a
 leftover of an earlier run, cannot run at the same time unless `COMPOSE_PROJECT_NAME`
 differs and the network of the other is gone.
 
@@ -194,30 +204,100 @@ the entry of `forwarders` by its address, `transport = "dot"` and `tls_name`, an
 `upstream_ca` so that the system's root certificates apply; that needs a route out, which
 the lab network does not have.
 
-## The recursion sandbox (Slice 10)
+## The recursion round (WP10.1)
 
-For the recursive resolver ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md)
-section 2.12) the lab gains a root of its own, so that no check touches the real root
-servers. Three services, under the compose profile `recursion` (the other rounds and
-`smoke.sh` start none of them):
+The round `recursion` checks the recursive resolver of [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10 against a root of the lab's own, so that no check touches the real root servers ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md) section 2.12). It runs the rows of E36 (priming at start and again, the work budget, and the cases that fail) and E41 (the RPZ triggers NSDNAME and NSIP on a delegation the resolver followed). The rows of E35 (QNAME minimisation and the denial cache) come with WP10.3, those of E33 and E34 (validation and the root key roll) with WP10.2.
+
+Like the rounds `xfr` and `update` it needs `curl` and `python3` on the host and a host that reaches the lab network `203.0.113.0/24` (a Linux Docker host). It runs best alone:
+
+```sh
+ROUNDS=recursion bash deploy/compose/lab-dns/smoke.sh                       # builds tenko:lab and tenko-quirk:lab first
+IMAGE=tenko:lab QUIRK_IMAGE=tenko-quirk:lab ROUNDS=recursion bash deploy/compose/lab-dns/smoke.sh
+```
+
+`QUIRK_IMAGE` names an existing image of the quirk responders; without it the round builds `tenko-quirk:lab` from `quirk.Dockerfile`, which compiles the engine's example server (`crates/tenko-dns/examples/authoritative.rs`) for musl into a minimal image (`docker build -f deploy/compose/lab-dns/quirk.Dockerfile -t tenko-quirk:lab .` from the repository root; a while). The services below are in the compose profile `recursion`: the other rounds start none of them.
+
+### What runs
 
 | Service | What | Reached at |
 |---|---|---|
-| `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `LAB_DIR/authority/authority.toml`). It will serve the lab root `.` (glue `a.root.test` at `203.0.113.10`), the TLD `test` and the signed test zones under it | `203.0.113.10:53` |
-| `quirk` | The engine's example authoritative server with the misbehaviours of E36 as flags (no EDNS, broken 0x20, TC on everything, delayed answers, wrong source address), authoritative for `quirk.example.test` | `203.0.113.11:53` |
-| `delv` | The BIND image idling, like `client`; `docker compose exec delv delv ...` validates independently of Tenko with the lab root's trust anchor (the second validator of E33) | `203.0.113.12` |
+| `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `LAB_DIR/authority/authority.toml`: DNS on port 53, `[dns.recursion] enabled = false`, the query log on with addresses as the witness). The round sets it up through its API and creates the lab root `.` (NS `a.root.test`, glue `203.0.113.10`), the TLD `test`, `example.test` and its children `nsec3`, `wild`, `dname`, `cname`, `big`, `insecure` and `bogus`, with their records from `recursion/zones/`. The zones are signed online (NSEC; NSEC3 with zero iterations for `nsec3.example.test`; `insecure.example.test` unsigned) and the DS records are published in the parents; the DS of `bogus.example.test` has a digest that matches no key. It also holds the delegations of the failure cases: `lame.example.test` to `bind.example.test` (BIND serves `example.test`, not this zone), `loop.example.test` and `loop2.example.test` (each the other's name server, no glue), the TLD `unreachable` to `203.0.113.250` (where nothing answers) and the six zones under `quirk.example.test`, delegated with glue | `203.0.113.10:53` |
+| `bind` | As in the other rounds; here the target of the lame delegation | `203.0.113.2` |
+| `quirk-noedns`, `quirk-case`, `quirk-tc`, `quirk-slow`, `quirk-spoof`, `quirk-oob`, `quirk-sub` | The quirk responders: the engine's example authoritative server in quirk mode, one container per misbehaviour, each authoritative for one zone (the SOA and NS at the apex, `www` with `192.0.2.7` and `2001:db8::7`, REFUSED outside). Flags and zones below | `203.0.113.11`, `.13`, `.14`, `.15`, `.16`, `.17`, `.18` |
+| `tenko` | The node under test, with `--roles controller,dns`. Its configuration is below | `203.0.113.3:5300` |
+| `client` | `dig`, as in the other rounds | `docker compose exec client dig ...` |
+| `delv` | The BIND image idling, for `delv` against the lab root's trust anchor when WP10.2 validates; unused in this round | `203.0.113.12` |
 
-`bind` stays as it is; WP10.2 gives it `bind.example.test` (signed by BIND), `optout.example.test`
-and `expired.example.test`.
+| Quirk service | Address | Zone | Flags | What it does |
+|---|---|---|---|---|
+| `quirk-noedns` | `203.0.113.11` | `noedns.quirk.example.test` | `--no-edns` | FORMERR, without an OPT record, to a query that carries one |
+| `quirk-case` | `203.0.113.13` | `case.quirk.example.test` | `--lower-case` | Writes the question of every answer in lower case, which breaks 0x20 |
+| `quirk-tc` | `203.0.113.14` | `tc.quirk.example.test` | `--truncate` | Answers every UDP query with the header, the question and TC; TCP in full |
+| `quirk-slow` | `203.0.113.15` | `slow.quirk.example.test` | `--delay-ms 2500` | Holds every answer back 2.5 s, past the attempt's timeout |
+| `quirk-spoof` | `203.0.113.16` | `spoof.quirk.example.test` | `--wrong-source` | Sends the UDP answers from port 5353, the wrong source |
+| `quirk-oob` | `203.0.113.17` | `oob.quirk.example.test` | `--referral sub.oob.quirk.example.test=ns.elsewhere.test`, `--glue ns.elsewhere.test=203.0.113.66` | Refers `sub.oob.quirk.example.test` to a name server whose glue is out of bailiwick and points at an address where nothing answers |
+| `quirk-sub` | `203.0.113.18` | `sub.oob.quirk.example.test` | none | The real server behind the referral; its address is the A record of `ns.elsewhere.test` in the zone `test` |
 
-They are shells until WP10.1 (the lab root zone and the quirk responder) and WP10.2 (the
-signed zones, the BIND zones and the rounds `recursion` and `rfc5011` of `smoke.sh`) fill
-them: `authority` needs its configuration file and `quirk` its binary, so only `delv` starts
-today. Once both packages are in:
+The configuration of the node under test is written by the round (`LAB_DIR/tenko.toml`); there is no `[dns] forwarders`:
+
+```toml
+[dns]
+listen = ["0.0.0.0:5300"]
+
+[dns.recursion]
+hints = "/lab/root.hints"          # the lab root: a.root.test at 203.0.113.10
+local_zones_except = ["test"]      # the lab's names are under the special-use TLD test (RFC 6761)
+timeout_ms = 1000
+
+[dns.cache]
+prefetch = false
+```
+
+Validation is off until WP10.2: the zones are signed and their DS records published so that the validation rows can be added to this round, but today the rows check resolution only, and no answer carries AD. The other rounds forward through `[dns] forwarders` and therefore write `[dns.recursion] enabled = false`, as described above.
+
+### The rows
+
+The round prints one `PASS` or `FAIL` line per row and fails the smoke when a row fails. The witnesses are the node's own counters (`GET /nodes/{id}/dns/recursion`: the queries sent to authorities before and after each case), the answer as `dig` prints it (RCODE and extended error) and the authority's query log. Every case row also requires that the answer came within the work budget (at most 32 queries and 10.5 s), and every row that ends in SERVFAIL asks again and requires that the second ask sent no query (the failure cache of RFC 9520).
+
+| Row | What is checked | How |
+|---|---|---|
+| `rec.prime.file` | The node primed from the hints file at start | The status shows `hints_source` `/lab/root.hints` and a last priming that is `ok` and took under 100 ms (M41), within 30 s |
+| `rec.prime.again` | Priming on request | `POST /nodes/{id}/dns/recursion/prime`; `primings_ok` rises within 10 s |
+| `rec.resolve` | A name three labels down from a cold cache | `www.example.test` is NOERROR with `192.0.2.10` |
+| `rec.wildcard` | A name under a wildcard | `any.wild.example.test` is `192.0.2.20` |
+| `rec.dname` | A name under a DNAME (RFC 6672) | `www.old.dname.example.test` is `192.0.2.31` |
+| `rec.chain` | A CNAME chain | `short.cname.example.test` is `192.0.2.32` |
+| `rec.nxdomain` | NXDOMAIN | `nothing.example.test` is NXDOMAIN |
+| `rec.big` | An answer above 1,232 octets, over TCP | `big.example.test AAAA` is NOERROR and starts with `2001:db8::1` |
+| `rec.lame` | A lame delegation | `www.lame.example.test` is SERVFAIL with EDE 22 |
+| `rec.nsloop` | Name servers that point at each other without glue | `www.loop.example.test` is SERVFAIL with EDE 22 |
+| `rec.cname.loop` | A CNAME loop | `loop1.cname.example.test` is SERVFAIL with EDE 22 |
+| `rec.cname.ten` | A chain of ten CNAME records, over the eight links | `c1.cname.example.test` is SERVFAIL with EDE 22 |
+| `rec.unreachable` | A TLD whose server does not answer | `www.unreachable` is SERVFAIL with EDE 22 |
+| `rec.0x20` | A server that breaks 0x20 | `www.case.quirk.example.test` is `192.0.2.7`, asked again in lower case |
+| `rec.formerr` | A server that answers FORMERR to EDNS | `www.noedns.quirk.example.test` is `192.0.2.7`, asked again without EDNS |
+| `rec.formerr.marked` | The server is remembered as taking no EDNS | The infrastructure listing (`GET /nodes/{id}/dns/infra?suffix=quirk.example.test`) shows `203.0.113.11` with `edns` false |
+| `rec.tc` | A server that truncates everything | `www.tc.quirk.example.test` is `192.0.2.7`, asked again over TCP |
+| `rec.oob` | A referral with out-of-bailiwick glue, which is ignored | `www.sub.oob.quirk.example.test` is `192.0.2.7` through the real server `203.0.113.18` |
+| `rec.slow` | A server that answers after the attempt's timeout | `www.slow.quirk.example.test` is SERVFAIL with EDE 22 |
+| `rec.spoof` | A server that answers from the wrong source port | `www.spoof.quirk.example.test` is SERVFAIL with EDE 22 |
+| `rec.unwanted` | The answers from the wrong source are counted | The status counter `unwanted` is above 0 |
+| `rec.local` | A locally served name never reaches an authority | `printer.local A` is NXDOMAIN and the counter `subqueries` does not move |
+| `rec.witness` | The lab root saw the node's queries | The authority's query log (`GET /nodes/{id}/dns/log` on the authority) holds queries for `www.example.test` |
+| `rec.rpz.nsdname` | The RPZ trigger NSDNAME matches the delegation that was followed (E41) | An RPZ zone with the trigger `ns.case.quirk.example.test.rpz-nsdname`: `other.case.quirk.example.test` is NXDOMAIN with EDE 15 within 30 s |
+| `rec.rpz.nsip` | The RPZ trigger NSIP matches (E41) | A trigger for `203.0.113.14/32`: `other.tc.quirk.example.test` is NXDOMAIN with EDE 15 within 30 s |
+| `rec.rpz.pass` | A name whose delegation no trigger names still resolves | `www.wild.example.test` is NOERROR |
+
+After the rows the round prints the heading `M40: the queries sent per case` and one line per case: the row, the queries sent (the difference of `subqueries` before and after), the milliseconds, the RCODE and the extended error. The lines are in the summary at the end as well. They are the lab's figures of M40; the counts of the same cases in the scripted lab of the engine's tests are in [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10.15.
+
+To look at the lab afterwards, `KEEP=1` leaves it running (see above); the node under test answers on `203.0.113.3:5300`, and the logs of the authority and the quirk servers are one command away:
 
 ```sh
-docker compose --profile recursion up -d authority quirk delv
-docker compose exec delv delv @203.0.113.3 www.example.test A
+KEEP=1 ROUNDS=recursion bash deploy/compose/lab-dns/smoke.sh
+cd deploy/compose/lab-dns && export LAB_DIR=<work>
+docker compose exec client dig @203.0.113.3 -p 5300 www.example.test
+docker compose --profile recursion logs authority quirk-tc
+docker compose --profile recursion down --volumes
 ```
 
 ## What the lab does not show
@@ -225,7 +305,8 @@ docker compose exec delv delv @203.0.113.3 www.example.test A
 It does not measure throughput or latency (the benchmarks under [bench/](../../../bench/)
 do), and a 5 second TTL is not what a zone has. One upstream means no
 upstream health memory, no round robin and no failover between transports. BIND does not
-sign the zone, so DNSSEC validation is not exercised, and nothing here talks to the root
-servers or to an authority outside the lab. The certificate is the lab's and
+sign the zone, and no round exercises DNSSEC validation yet (the zones of the recursion round
+are signed for the rounds WP10.2 adds), and nothing here talks to the root servers or to an
+authority outside the lab. The certificate is the lab's and
 valid for two days. A host with a resolver of its own and Tenko on port 53 is a deployment
 matter, [deploy/README.md](../../README.md).

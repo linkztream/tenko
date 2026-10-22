@@ -39,6 +39,8 @@ impl DnsNode for CacheNode {
 
     fn status(&self) -> DnsStatus {
         DnsStatus {
+            // WP10.1: no recursive resolver in this test.
+            recursion: None,
             node: NODE,
             serving: true,
             revision: Revision(0),

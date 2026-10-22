@@ -29,6 +29,10 @@
 #      Tenko with TSIG (add, prerequisites, replace, TCP, delete) and dig sees each change at
 #      once; an update without the key, one with a wrong secret and one of an address IPAM
 #      manages are refused; one PASS or FAIL line per row (README.md lists them);
+#   5d. the round recursion (WP10.1, recursion.sh; ROUNDS=recursion): a second Tenko node
+#      serves the lab's own root, the TLD test and the zones under it, the quirk responders
+#      misbehave beside it, and the node under test resolves iteratively from the lab root,
+#      one PASS or FAIL line per row of E36 and E41 with the queries sent per case (M40);
 #   6. tears everything down (containers, volumes, network, work directory), also when a
 #      step fails, after printing the logs of every service. KEEP=1 leaves the lab running.
 #
@@ -49,7 +53,10 @@
 #                   internetsystemsconsortium/bind9:9.20)
 #   ROUNDS          the rounds to run, in order (default "plain dot doh xfr update"); the
 #                   serve-stale steps run after the round doh, the transfer rows in xfr,
-#                   the update rows in update (alone, it sets Tenko up itself)
+#                   the update rows in update (alone, it sets Tenko up itself); the round
+#                   recursion (WP10.1) runs only when named, best alone
+#   QUIRK_IMAGE     an existing image of the quirk responders for the round recursion;
+#                   default: build tenko-quirk:lab from deploy/compose/lab-dns/quirk.Dockerfile
 #   WAIT_SECS       how long to wait for Tenko to become healthy (default 300)
 #   KEEP            1: do not tear the lab down at the end, also after a failure
 #                   (README.md says how to later)
@@ -104,6 +111,9 @@ ok() {
   printf '%s\n' "$line"
 }
 compose() { docker compose -f "$compose_file" "$@"; }
+# WP10.1: the round recursion.
+# shellcheck source=deploy/compose/lab-dns/recursion.sh
+source "$here/recursion.sh"
 
 # retry <seconds> <description> <command...>: runs the command every 2 seconds until it
 # succeeds or the time is up.
@@ -125,7 +135,7 @@ cleanup() {
   trap - EXIT
   if ((status != 0)); then
     printf '\n==> FAILED (status %s): logs of the services\n' "$status" >&2
-    for service in bind tenko client; do
+    for service in bind tenko client authority quirk-noedns quirk-case quirk-tc quirk-slow quirk-spoof quirk-oob quirk-sub; do
       printf '\n--- %s ---\n' "$service" >&2
       compose logs --no-color --tail 200 "$service" >&2 2>&1
     done
@@ -148,7 +158,7 @@ cleanup() {
     exit "$status"
   fi
   printf '\n==> tear down\n'
-  compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
+  compose --profile recursion down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
   if [[ -n "$work" ]]; then
     rm -rf "$work"
   fi
@@ -241,6 +251,11 @@ forward_retries = 1
 stale_secs = 3600
 stale_answer_ms = 1800
 prefetch = false
+
+[dns.recursion]
+# These rounds forward to BIND through [dns] forwarders, which a recursing node uses only
+# where a view says forward (WP10.1).
+enabled = false
 $tls
 TOML
   chmod 0444 "$work/tenko.toml"
@@ -318,11 +333,14 @@ cp "$here"/zones/*.zone "$work/zones/"
 chmod 0777 "$work/zones"
 chmod 0666 "$work"/zones/*.zone
 chmod 0755 "$work"
+# WP10.1: the lab root's hints, mounted into the node under test in every round.
+cp "$here/recursion/root.hints" "$work/root.hints"
+chmod 0444 "$work/root.hints"
 write_config plain
 compose config --quiet
 # A lab left over from an interrupted run (its data volume holds secrets under another
 # key-encryption key) goes first.
-compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
+compose --profile recursion down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
 ok "certificate" "lab CA and the BIND certificate for bind.example.test and $bind_ip"
 
 step "start BIND and the client; ask BIND over its three transports"
@@ -779,6 +797,11 @@ for transport in $rounds; do
   # WP6.2: the dynamic updates.
   if [[ "$transport" == update ]]; then
     update
+    continue
+  fi
+  # WP10.1: the recursive resolver against the lab root.
+  if [[ "$transport" == recursion ]]; then
+    recursion
     continue
   fi
   round "$transport"

@@ -343,6 +343,16 @@ impl RpzZone {
     pub fn has_answer_triggers(&self) -> bool {
         !self.ip.is_empty() || !self.nsip.is_empty() || !self.nsdname.is_empty()
     }
+
+    // WP10.1: the triggers on the delegation (E41).
+    /// Whether the zone has NSDNAME or NSIP triggers: the recursive resolver then puts the
+    /// delegation it followed into its answers (its NS records in the authority section,
+    /// their addresses in the additional section), where [`crate::policy::Policy`] matches
+    /// them as it matches a forwarded answer's.
+    pub fn has_ns_triggers(&self) -> bool {
+        !self.nsip.is_empty() || !self.nsdname.is_empty()
+    }
+    // WP10.1: end.
 }
 
 /// Inserts a name trigger from its labels (leftmost first); `false` for none.

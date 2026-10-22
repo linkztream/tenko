@@ -20985,7 +20985,7 @@
           "dns"
         ],
         "summary": "List what a node's infrastructure cache holds",
-        "description": "Scope: `dns.read`. A page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time, EDNS capability, TCP-only and lame flags) and the DS state. `suffix` keeps the cuts at or below it. The cuts reveal which zones the clients asked about, so the read is a node command and recorded in the node's commands.",
+        "description": "Scope: `dns.read`. Issues the node command `dns.infra.list`: a page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time and its median and 99th percentile of the last minute, failures, back-off, EDNS capability, TCP-only, lame and lower-case flags, unwanted answers) and the DS state. `suffix` keeps the cuts at or below it; `cursor` is the `next_cursor` of the previous page. The infrastructure cache holds the authority servers of zones and no client data, so the read is recorded in the node's commands and not audited.",
         "operationId": "list_node_dns_infra",
         "parameters": [
           {
@@ -21089,16 +21089,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -21109,7 +21099,7 @@
           "dns"
         ],
         "summary": "Flush a node's infrastructure cache",
-        "description": "Scope: `dns.write`. Issues a node command that drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. Audited as `dns.infra.flush`.",
+        "description": "Scope: `dns.write`. Issues the node command `dns.infra.flush`, which drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. The command is recorded in the node's commands and audited as `dns.infra.flush`.",
         "operationId": "flush_node_dns_infra",
         "parameters": [
           {
@@ -21135,7 +21125,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The number of zone cuts dropped",
+            "description": "The number of entries dropped",
             "content": {
               "application/json": {
                 "schema": {
@@ -21186,16 +21176,6 @@
           },
           "409": {
             "description": "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21535,7 +21515,7 @@
           "dns"
         ],
         "summary": "Get the recursive resolver of a node",
-        "description": "Scope: `dns.read`. Whether the resolver runs, the source and date of the root hints, the last priming and its outcome, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache, the counters since the role started, the trust anchor keys with their state, and what is wrong (`priming_failed`, `clock`, `trust_anchor_stale`).",
+        "description": "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.",
         "operationId": "get_node_dns_recursion",
         "parameters": [
           {
@@ -21610,16 +21590,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -21630,7 +21600,7 @@
           "dns"
         ],
         "summary": "Prime a node's resolver now",
-        "description": "Scope: `dns.write`. Issues a node command that asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; audited as `dns.recursion.prime`. The outcome shows in the status.",
+        "description": "Scope: `dns.write`. Issues the node command `dns.recursion.prime`, which asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; a priming that is running already is left to finish. The command is recorded in the node's commands and audited as `dns.recursion.prime`. The outcome shows in the status.",
         "operationId": "prime_node_dns_recursion",
         "parameters": [
           {
@@ -21698,16 +21668,6 @@
           },
           "409": {
             "description": "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -44012,13 +43972,21 @@
           "address",
           "origin",
           "ttl",
+          "failures",
+          "down",
           "tcp_only",
-          "lame"
+          "lame",
+          "lower_case",
+          "unwanted"
         ],
         "properties": {
           "address": {
             "type": "string",
             "description": "The address."
+          },
+          "down": {
+            "type": "boolean",
+            "description": "The server is in back-off after failures and is not asked now."
           },
           "edns": {
             "type": [
@@ -44027,13 +43995,39 @@
             ],
             "description": "Whether the server speaks EDNS; absent while unknown."
           },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failures in a row.",
+            "minimum": 0
+          },
           "lame": {
             "type": "boolean",
             "description": "The server is lame for the zone."
           },
+          "lower_case": {
+            "type": "boolean",
+            "description": "The server is asked in lower case because it broke the 0x20 case randomisation."
+          },
           "origin": {
             "type": "string",
             "description": "Where the address was learned: `glue`, `sibling_glue` or `authoritative`."
+          },
+          "p50_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The median round-trip time of the last minute in milliseconds; absent without\nanswers in the window."
+          },
+          "p99_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The 99th percentile of the round-trip time of the last minute in milliseconds;\nabsent without answers in the window."
           },
           "srtt_ms": {
             "type": [
@@ -44051,6 +44045,12 @@
             "type": "integer",
             "format": "int32",
             "description": "Seconds the address stays valid.",
+            "minimum": 0
+          },
+          "unwanted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Unwanted answers from the server in the current hour.",
             "minimum": 0
           }
         }
@@ -44129,10 +44129,24 @@
         "description": "The sizes of a node's infrastructure cache.",
         "required": [
           "zones",
+          "max_zones",
           "servers",
+          "max_servers",
           "names"
         ],
         "properties": {
+          "max_servers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The most server addresses the cache holds.",
+            "minimum": 0
+          },
+          "max_zones": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The most zone cuts the cache holds; the least recently used go first.",
+            "minimum": 0
+          },
           "names": {
             "type": "integer",
             "format": "int64",
@@ -44142,7 +44156,7 @@
           "servers": {
             "type": "integer",
             "format": "int64",
-            "description": "Authority servers held.",
+            "description": "Authority server addresses held.",
             "minimum": 0
           },
           "zones": {
@@ -56609,6 +56623,19 @@
                   "description": "The RCODE answered.",
                   "minimum": 0
                 },
+                "resolution": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "How the answer was found: `zone`, `cache`, `denial`, `stale`, `forward`, `recurse`,\n`local`, `policy` or `refused`; absent in lines written before it was logged."
+                },
+                "subqueries": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Queries the recursive resolver sent to authorities for the answer; 0 (and left out)\nwhen it sent none.",
+                  "minimum": 0
+                },
                 "transport": {
                   "$ref": "#/components/schemas/QueryTransport",
                   "description": "The transport."
@@ -59310,12 +59337,18 @@
         "description": "The last priming of a node's resolver.",
         "required": [
           "at",
-          "outcome"
+          "outcome",
+          "duration_ms"
         ],
         "properties": {
           "at": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the priming ended."
+          },
+          "duration_ms": {
+            "type": "number",
+            "format": "double",
+            "description": "How long the priming took, in milliseconds."
           },
           "outcome": {
             "type": "string",
@@ -60436,6 +60469,19 @@
             "type": "integer",
             "format": "int32",
             "description": "The RCODE answered.",
+            "minimum": 0
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the answer was found: `zone`, `cache`, `denial`, `stale`, `forward`, `recurse`,\n`local`, `policy` or `refused`; absent in lines written before it was logged."
+          },
+          "subqueries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Queries the recursive resolver sent to authorities for the answer; 0 (and left out)\nwhen it sent none.",
             "minimum": 0
           },
           "transport": {
@@ -62409,6 +62455,49 @@
           }
         }
       },
+      "RecursionBudget": {
+        "type": "object",
+        "description": "The work budget one resolution runs under.",
+        "required": [
+          "queries",
+          "restarts",
+          "depth",
+          "attempts",
+          "wall_ms"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts per server before the next one.",
+            "minimum": 0
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The deepest level of name server address lookups.",
+            "minimum": 0
+          },
+          "queries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most queries sent to authorities for one client query, sub-queries included.",
+            "minimum": 0
+          },
+          "restarts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most CNAME and DNAME restarts.",
+            "minimum": 0
+          },
+          "wall_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The wall clock bound of one resolution, in milliseconds.",
+            "minimum": 0
+          }
+        }
+      },
       "RecursionCounters": {
         "type": "object",
         "description": "What a node's resolver did since the role started.",
@@ -62418,6 +62507,17 @@
           "budget",
           "timeout",
           "local",
+          "failure_cache_hits",
+          "joined",
+          "subqueries",
+          "budget_queries",
+          "budget_restarts",
+          "budget_depth",
+          "budget_time",
+          "primings_ok",
+          "primings_failed",
+          "unwanted",
+          "unwanted_flushes",
           "secure",
           "insecure",
           "bogus",
@@ -62433,7 +62533,7 @@
           "bogus": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `bogus`.",
+            "description": "Answers validated `bogus`. Counted from WP10.2; 0 until then.",
             "minimum": 0
           },
           "budget": {
@@ -62442,16 +62542,52 @@
             "description": "Client queries that ran out of budget.",
             "minimum": 0
           },
+          "budget_depth": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Resolutions that hit the bound on the depth of name server address lookups.",
+            "minimum": 0
+          },
+          "budget_queries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Resolutions that hit the bound on queries sent.",
+            "minimum": 0
+          },
+          "budget_restarts": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Resolutions that hit the bound on CNAME and DNAME restarts.",
+            "minimum": 0
+          },
+          "budget_time": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Resolutions that hit the wall clock bound.",
+            "minimum": 0
+          },
+          "failure_cache_hits": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries answered SERVFAIL from the failure cache without asking an authority.",
+            "minimum": 0
+          },
           "indeterminate": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers for which no trust anchor applied (`indeterminate`).",
+            "description": "Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0\nuntil then.",
             "minimum": 0
           },
           "insecure": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `insecure`.",
+            "description": "Answers validated `insecure`. Counted from WP10.2; 0 until then.",
+            "minimum": 0
+          },
+          "joined": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries joined to a resolution of the same question already in flight.",
             "minimum": 0
           },
           "local": {
@@ -62460,10 +62596,22 @@
             "description": "Client queries answered from local data.",
             "minimum": 0
           },
+          "primings_failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Primings that failed.",
+            "minimum": 0
+          },
+          "primings_ok": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Primings that succeeded.",
+            "minimum": 0
+          },
           "secure": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `secure`.",
+            "description": "Answers validated `secure`. Counted from WP10.2; 0 until then.",
             "minimum": 0
           },
           "servfail": {
@@ -62472,10 +62620,28 @@
             "description": "Client queries answered SERVFAIL.",
             "minimum": 0
           },
+          "subqueries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Queries sent to authorities, sub-queries for name server addresses included.",
+            "minimum": 0
+          },
           "timeout": {
             "type": "integer",
             "format": "int64",
             "description": "Client queries that timed out.",
+            "minimum": 0
+          },
+          "unwanted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers dropped as unwanted (wrong source, port, identifier or question) across the\nauthority servers.",
+            "minimum": 0
+          },
+          "unwanted_flushes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Flushes of the answer cache that an excess of unwanted answers caused.",
             "minimum": 0
           }
         }
@@ -62489,11 +62655,16 @@
           "hints_date",
           "root_servers",
           "infra",
+          "budget",
           "counters",
           "trust_anchors",
           "problems"
         ],
         "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/RecursionBudget",
+            "description": "The work budget in force."
+          },
           "counters": {
             "$ref": "#/components/schemas/RecursionCounters",
             "description": "The counters since the role started."
@@ -62512,7 +62683,7 @@
           },
           "infra": {
             "$ref": "#/components/schemas/InfraSizes",
-            "description": "The sizes of the infrastructure cache."
+            "description": "The sizes of the infrastructure cache against their bounds."
           },
           "last_priming": {
             "oneOf": [
@@ -62530,7 +62701,16 @@
             "items": {
               "type": "string"
             },
-            "description": "What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`."
+            "description": "What is wrong now: `priming_failed` (and, from WP10.2, `clock` and\n`trust_anchor_stale`)."
+          },
+          "root_expires_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds until the root's NS set expires and the next priming is due; absent before the\nfirst priming.",
+            "minimum": 0
           },
           "root_servers": {
             "type": "array",
@@ -62544,7 +62724,7 @@
             "items": {
               "$ref": "#/components/schemas/AnchorKeyState"
             },
-            "description": "The keys of the trust anchors with their state."
+            "description": "The keys of the trust anchors with their state. Empty until WP10.2."
           }
         }
       },

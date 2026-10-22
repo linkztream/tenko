@@ -3231,7 +3231,7 @@ export interface paths {
         };
         /**
          * List what a node's infrastructure cache holds
-         * @description Scope: `dns.read`. A page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time, EDNS capability, TCP-only and lame flags) and the DS state. `suffix` keeps the cuts at or below it. The cuts reveal which zones the clients asked about, so the read is a node command and recorded in the node's commands.
+         * @description Scope: `dns.read`. Issues the node command `dns.infra.list`: a page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time and its median and 99th percentile of the last minute, failures, back-off, EDNS capability, TCP-only, lame and lower-case flags, unwanted answers) and the DS state. `suffix` keeps the cuts at or below it; `cursor` is the `next_cursor` of the previous page. The infrastructure cache holds the authority servers of zones and no client data, so the read is recorded in the node's commands and not audited.
          */
         get: operations["list_node_dns_infra"];
         put?: never;
@@ -3253,7 +3253,7 @@ export interface paths {
         put?: never;
         /**
          * Flush a node's infrastructure cache
-         * @description Scope: `dns.write`. Issues a node command that drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. Audited as `dns.infra.flush`.
+         * @description Scope: `dns.write`. Issues the node command `dns.infra.flush`, which drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. The command is recorded in the node's commands and audited as `dns.infra.flush`.
          */
         post: operations["flush_node_dns_infra"];
         delete?: never;
@@ -3331,7 +3331,7 @@ export interface paths {
         };
         /**
          * Get the recursive resolver of a node
-         * @description Scope: `dns.read`. Whether the resolver runs, the source and date of the root hints, the last priming and its outcome, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache, the counters since the role started, the trust anchor keys with their state, and what is wrong (`priming_failed`, `clock`, `trust_anchor_stale`).
+         * @description Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.
          */
         get: operations["get_node_dns_recursion"];
         put?: never;
@@ -3353,7 +3353,7 @@ export interface paths {
         put?: never;
         /**
          * Prime a node's resolver now
-         * @description Scope: `dns.write`. Issues a node command that asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; audited as `dns.recursion.prime`. The outcome shows in the status.
+         * @description Scope: `dns.write`. Issues the node command `dns.recursion.prime`, which asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; a priming that is running already is left to finish. The command is recorded in the node's commands and audited as `dns.recursion.prime`. The outcome shows in the status.
          */
         post: operations["prime_node_dns_recursion"];
         delete?: never;
@@ -8781,12 +8781,33 @@ export interface components {
         InfraAddressItem: {
             /** @description The address. */
             address: string;
+            /** @description The server is in back-off after failures and is not asked now. */
+            down: boolean;
             /** @description Whether the server speaks EDNS; absent while unknown. */
             edns?: boolean | null;
+            /**
+             * Format: int32
+             * @description Failures in a row.
+             */
+            failures: number;
             /** @description The server is lame for the zone. */
             lame: boolean;
+            /** @description The server is asked in lower case because it broke the 0x20 case randomisation. */
+            lower_case: boolean;
             /** @description Where the address was learned: `glue`, `sibling_glue` or `authoritative`. */
             origin: string;
+            /**
+             * Format: double
+             * @description The median round-trip time of the last minute in milliseconds; absent without
+             *     answers in the window.
+             */
+            p50_ms?: number | null;
+            /**
+             * Format: double
+             * @description The 99th percentile of the round-trip time of the last minute in milliseconds;
+             *     absent without answers in the window.
+             */
+            p99_ms?: number | null;
             /**
              * Format: double
              * @description The smoothed round-trip time in milliseconds; absent before the first answer.
@@ -8799,6 +8820,11 @@ export interface components {
              * @description Seconds the address stays valid.
              */
             ttl: number;
+            /**
+             * Format: int32
+             * @description Unwanted answers from the server in the current hour.
+             */
+            unwanted: number;
         };
         /** @description One zone cut of a node's infrastructure cache. */
         InfraCutItem: {
@@ -8833,12 +8859,22 @@ export interface components {
         InfraSizes: {
             /**
              * Format: int64
+             * @description The most server addresses the cache holds.
+             */
+            max_servers: number;
+            /**
+             * Format: int64
+             * @description The most zone cuts the cache holds; the least recently used go first.
+             */
+            max_zones: number;
+            /**
+             * Format: int64
              * @description Server names held.
              */
             names: number;
             /**
              * Format: int64
-             * @description Authority servers held.
+             * @description Authority server addresses held.
              */
             servers: number;
             /**
@@ -13619,6 +13655,17 @@ export interface components {
                  * @description The RCODE answered.
                  */
                 rcode: number;
+                /**
+                 * @description How the answer was found: `zone`, `cache`, `denial`, `stale`, `forward`, `recurse`,
+                 *     `local`, `policy` or `refused`; absent in lines written before it was logged.
+                 */
+                resolution?: string | null;
+                /**
+                 * Format: int32
+                 * @description Queries the recursive resolver sent to authorities for the answer; 0 (and left out)
+                 *     when it sent none.
+                 */
+                subqueries?: number;
                 /** @description The transport. */
                 transport: components["schemas"]["QueryTransport"];
                 /** @description The query type. */
@@ -14598,6 +14645,11 @@ export interface components {
         PrimingItem: {
             /** @description When the priming ended. */
             at: components["schemas"]["Timestamp"];
+            /**
+             * Format: double
+             * @description How long the priming took, in milliseconds.
+             */
+            duration_ms: number;
             /** @description `ok`, or `failed` when no server of the root hints answered. */
             outcome: string;
         };
@@ -15025,6 +15077,17 @@ export interface components {
              * @description The RCODE answered.
              */
             rcode: number;
+            /**
+             * @description How the answer was found: `zone`, `cache`, `denial`, `stale`, `forward`, `recurse`,
+             *     `local`, `policy` or `refused`; absent in lines written before it was logged.
+             */
+            resolution?: string | null;
+            /**
+             * Format: int32
+             * @description Queries the recursive resolver sent to authorities for the answer; 0 (and left out)
+             *     when it sent none.
+             */
+            subqueries?: number;
             /** @description The transport. */
             transport: components["schemas"]["QueryTransport"];
             /** @description The query type. */
@@ -15825,6 +15888,34 @@ export interface components {
             /** @description The codes. */
             codes: components["schemas"]["SecretString"][];
         };
+        /** @description The work budget one resolution runs under. */
+        RecursionBudget: {
+            /**
+             * Format: int32
+             * @description Attempts per server before the next one.
+             */
+            attempts: number;
+            /**
+             * Format: int32
+             * @description The deepest level of name server address lookups.
+             */
+            depth: number;
+            /**
+             * Format: int32
+             * @description The most queries sent to authorities for one client query, sub-queries included.
+             */
+            queries: number;
+            /**
+             * Format: int32
+             * @description The most CNAME and DNAME restarts.
+             */
+            restarts: number;
+            /**
+             * Format: int64
+             * @description The wall clock bound of one resolution, in milliseconds.
+             */
+            wall_ms: number;
+        };
         /** @description What a node's resolver did since the role started. */
         RecursionCounters: {
             /**
@@ -15834,7 +15925,7 @@ export interface components {
             answered: number;
             /**
              * Format: int64
-             * @description Answers validated `bogus`.
+             * @description Answers validated `bogus`. Counted from WP10.2; 0 until then.
              */
             bogus: number;
             /**
@@ -15844,14 +15935,45 @@ export interface components {
             budget: number;
             /**
              * Format: int64
-             * @description Answers for which no trust anchor applied (`indeterminate`).
+             * @description Resolutions that hit the bound on the depth of name server address lookups.
+             */
+            budget_depth: number;
+            /**
+             * Format: int64
+             * @description Resolutions that hit the bound on queries sent.
+             */
+            budget_queries: number;
+            /**
+             * Format: int64
+             * @description Resolutions that hit the bound on CNAME and DNAME restarts.
+             */
+            budget_restarts: number;
+            /**
+             * Format: int64
+             * @description Resolutions that hit the wall clock bound.
+             */
+            budget_time: number;
+            /**
+             * Format: int64
+             * @description Client queries answered SERVFAIL from the failure cache without asking an authority.
+             */
+            failure_cache_hits: number;
+            /**
+             * Format: int64
+             * @description Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0
+             *     until then.
              */
             indeterminate: number;
             /**
              * Format: int64
-             * @description Answers validated `insecure`.
+             * @description Answers validated `insecure`. Counted from WP10.2; 0 until then.
              */
             insecure: number;
+            /**
+             * Format: int64
+             * @description Client queries joined to a resolution of the same question already in flight.
+             */
+            joined: number;
             /**
              * Format: int64
              * @description Client queries answered from local data.
@@ -15859,7 +15981,17 @@ export interface components {
             local: number;
             /**
              * Format: int64
-             * @description Answers validated `secure`.
+             * @description Primings that failed.
+             */
+            primings_failed: number;
+            /**
+             * Format: int64
+             * @description Primings that succeeded.
+             */
+            primings_ok: number;
+            /**
+             * Format: int64
+             * @description Answers validated `secure`. Counted from WP10.2; 0 until then.
              */
             secure: number;
             /**
@@ -15869,12 +16001,30 @@ export interface components {
             servfail: number;
             /**
              * Format: int64
+             * @description Queries sent to authorities, sub-queries for name server addresses included.
+             */
+            subqueries: number;
+            /**
+             * Format: int64
              * @description Client queries that timed out.
              */
             timeout: number;
+            /**
+             * Format: int64
+             * @description Answers dropped as unwanted (wrong source, port, identifier or question) across the
+             *     authority servers.
+             */
+            unwanted: number;
+            /**
+             * Format: int64
+             * @description Flushes of the answer cache that an excess of unwanted answers caused.
+             */
+            unwanted_flushes: number;
         };
         /** @description `GET /nodes/{id}/dns/recursion`: the recursive resolver of a node. */
         RecursionStatus: {
+            /** @description The work budget in force. */
+            budget: components["schemas"]["RecursionBudget"];
             /** @description The counters since the role started. */
             counters: components["schemas"]["RecursionCounters"];
             /** @description The resolver runs on the node. */
@@ -15883,14 +16033,23 @@ export interface components {
             hints_date: string;
             /** @description Where the root hints come from: `shipped` or the path of the file. */
             hints_source: string;
-            /** @description The sizes of the infrastructure cache. */
+            /** @description The sizes of the infrastructure cache against their bounds. */
             infra: components["schemas"]["InfraSizes"];
             last_priming?: components["schemas"]["PrimingItem"] | null;
-            /** @description What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`. */
+            /**
+             * @description What is wrong now: `priming_failed` (and, from WP10.2, `clock` and
+             *     `trust_anchor_stale`).
+             */
             problems: string[];
+            /**
+             * Format: int64
+             * @description Seconds until the root's NS set expires and the next priming is due; absent before the
+             *     first priming.
+             */
+            root_expires_secs?: number | null;
             /** @description The root servers in use with their smoothed round-trip times. */
             root_servers: components["schemas"]["RootServerItem"][];
-            /** @description The keys of the trust anchors with their state. */
+            /** @description The keys of the trust anchors with their state. Empty until WP10.2. */
             trust_anchors: components["schemas"]["AnchorKeyState"][];
         };
         /**
@@ -35939,15 +36098,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     flush_node_dns_infra: {
@@ -35968,7 +36118,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The number of zone cuts dropped */
+            /** @description The number of entries dropped */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -36015,15 +36165,6 @@ export interface operations {
             };
             /** @description The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -36321,15 +36462,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     prime_node_dns_recursion: {
@@ -36391,15 +36523,6 @@ export interface operations {
             };
             /** @description The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

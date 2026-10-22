@@ -2425,6 +2425,8 @@ export type MessageKey =
   | "dns.log.col.latency"
   | "dns.log.col.name"
   | "dns.log.col.rcode"
+  | "dns.log.col.resolution"
+  | "dns.log.col.subqueries"
   | "dns.log.col.time"
   | "dns.log.col.transport"
   | "dns.log.col.type"
@@ -2459,6 +2461,15 @@ export type MessageKey =
   | "dns.log.partial"
   | "dns.log.pseudonym_hint"
   | "dns.log.refresh"
+  | "dns.log.resolution.cache"
+  | "dns.log.resolution.denial"
+  | "dns.log.resolution.forward"
+  | "dns.log.resolution.local"
+  | "dns.log.resolution.policy"
+  | "dns.log.resolution.recurse"
+  | "dns.log.resolution.refused"
+  | "dns.log.resolution.stale"
+  | "dns.log.resolution.zone"
   | "dns.log.start"
   | "dns.log.started_toast"
   | "dns.log.stop"
@@ -2561,10 +2572,48 @@ export type MessageKey =
   | "dns.records.type_filter"
   | "dns.recursion.coming.body"
   | "dns.recursion.coming.title"
+  | "dns.recursion.counter.answered"
+  | "dns.recursion.counter.budget"
+  | "dns.recursion.counter.failure_cache_hits"
+  | "dns.recursion.counter.local"
+  | "dns.recursion.counter.servfail"
+  | "dns.recursion.counter.subqueries"
+  | "dns.recursion.counter.timeout"
+  | "dns.recursion.counter.unwanted"
+  | "dns.recursion.counters.title"
+  | "dns.recursion.facts.title"
+  | "dns.recursion.hints.date"
+  | "dns.recursion.hints.shipped"
+  | "dns.recursion.infra.names"
+  | "dns.recursion.infra.of"
+  | "dns.recursion.infra.servers"
   | "dns.recursion.infra.title"
+  | "dns.recursion.infra.zones"
+  | "dns.recursion.ms"
   | "dns.recursion.ntas.title"
+  | "dns.recursion.prime.button"
+  | "dns.recursion.prime.failed"
+  | "dns.recursion.prime.sent"
+  | "dns.recursion.priming.duration"
+  | "dns.recursion.priming.expires"
+  | "dns.recursion.priming.failed"
   | "dns.recursion.priming.last"
+  | "dns.recursion.priming.never"
+  | "dns.recursion.priming.ok"
+  | "dns.recursion.problem.priming_failed"
+  | "dns.recursion.problems.title"
   | "dns.recursion.root_hints"
+  | "dns.recursion.roots.col.address"
+  | "dns.recursion.roots.col.name"
+  | "dns.recursion.roots.col.srtt"
+  | "dns.recursion.roots.srtt_none"
+  | "dns.recursion.roots.title"
+  | "dns.recursion.status.loading"
+  | "dns.recursion.status.no_node"
+  | "dns.recursion.status.off.body"
+  | "dns.recursion.status.off.title"
+  | "dns.recursion.status.running"
+  | "dns.recursion.status.title"
   | "dns.recursion.title"
   | "dns.recursion.trust_anchors.count"
   | "dns.recursion.trust_anchors.none"
@@ -6780,6 +6829,9 @@ export interface MessageArgs {
   "dns.node.tls": { doh: string | number; dot: string | number };
   "dns.record.line_error": { line: string | number; message: string | number };
   "dns.records.label": { zone: string | number };
+  "dns.recursion.infra.of": { count: string | number; max: string | number };
+  "dns.recursion.ms": { ms: string | number };
+  "dns.recursion.priming.duration": { ms: string | number };
   "dns.recursion.trust_anchors.count": { count: number };
   "dns.rrset.add_records_title": { name: string | number; type: string | number };
   "dns.rrset.delete_body": { count: number };
@@ -9961,6 +10013,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.log.col.latency",
   "dns.log.col.name",
   "dns.log.col.rcode",
+  "dns.log.col.resolution",
+  "dns.log.col.subqueries",
   "dns.log.col.time",
   "dns.log.col.transport",
   "dns.log.col.type",
@@ -9995,6 +10049,15 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.log.partial",
   "dns.log.pseudonym_hint",
   "dns.log.refresh",
+  "dns.log.resolution.cache",
+  "dns.log.resolution.denial",
+  "dns.log.resolution.forward",
+  "dns.log.resolution.local",
+  "dns.log.resolution.policy",
+  "dns.log.resolution.recurse",
+  "dns.log.resolution.refused",
+  "dns.log.resolution.stale",
+  "dns.log.resolution.zone",
   "dns.log.start",
   "dns.log.started_toast",
   "dns.log.stop",
@@ -10097,10 +10160,48 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.records.type_filter",
   "dns.recursion.coming.body",
   "dns.recursion.coming.title",
+  "dns.recursion.counter.answered",
+  "dns.recursion.counter.budget",
+  "dns.recursion.counter.failure_cache_hits",
+  "dns.recursion.counter.local",
+  "dns.recursion.counter.servfail",
+  "dns.recursion.counter.subqueries",
+  "dns.recursion.counter.timeout",
+  "dns.recursion.counter.unwanted",
+  "dns.recursion.counters.title",
+  "dns.recursion.facts.title",
+  "dns.recursion.hints.date",
+  "dns.recursion.hints.shipped",
+  "dns.recursion.infra.names",
+  "dns.recursion.infra.of",
+  "dns.recursion.infra.servers",
   "dns.recursion.infra.title",
+  "dns.recursion.infra.zones",
+  "dns.recursion.ms",
   "dns.recursion.ntas.title",
+  "dns.recursion.prime.button",
+  "dns.recursion.prime.failed",
+  "dns.recursion.prime.sent",
+  "dns.recursion.priming.duration",
+  "dns.recursion.priming.expires",
+  "dns.recursion.priming.failed",
   "dns.recursion.priming.last",
+  "dns.recursion.priming.never",
+  "dns.recursion.priming.ok",
+  "dns.recursion.problem.priming_failed",
+  "dns.recursion.problems.title",
   "dns.recursion.root_hints",
+  "dns.recursion.roots.col.address",
+  "dns.recursion.roots.col.name",
+  "dns.recursion.roots.col.srtt",
+  "dns.recursion.roots.srtt_none",
+  "dns.recursion.roots.title",
+  "dns.recursion.status.loading",
+  "dns.recursion.status.no_node",
+  "dns.recursion.status.off.body",
+  "dns.recursion.status.off.title",
+  "dns.recursion.status.running",
+  "dns.recursion.status.title",
   "dns.recursion.title",
   "dns.recursion.trust_anchors.count",
   "dns.recursion.trust_anchors.none",

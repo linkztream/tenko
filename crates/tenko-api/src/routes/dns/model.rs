@@ -998,7 +998,24 @@ pub struct QueryLogLine {
     pub cached: bool,
     /// Microseconds from arrival to answer.
     pub duration_micros: u32,
+    // WP10.1: how the answer was found and what the recursive resolver asked for it.
+    /// How the answer was found: `zone`, `cache`, `denial`, `stale`, `forward`, `recurse`,
+    /// `local`, `policy` or `refused`; absent in lines written before it was logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    /// Queries the recursive resolver sent to authorities for the answer; 0 (and left out)
+    /// when it sent none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub subqueries: u16,
+    // WP10.1: end.
 }
+
+// WP10.1: the default of `subqueries` is left out of a line.
+#[allow(clippy::trivially_copy_pass_by_ref, reason = "serde's signature")]
+fn is_zero(value: &u16) -> bool {
+    *value == 0
+}
+// WP10.1: end.
 
 /// The query of `POST /nodes/{id}/dns/cache/flush`.
 #[derive(Debug, Clone, Default, Deserialize, IntoParams)]
@@ -1406,6 +1423,8 @@ pub struct PrimingItem {
     pub at: Timestamp,
     /// `ok`, or `failed` when no server of the root hints answered.
     pub outcome: String,
+    /// How long the priming took, in milliseconds.
+    pub duration_ms: f64,
 }
 
 /// One root server of a node's resolver with its smoothed round-trip time.
@@ -1421,18 +1440,22 @@ pub struct RootServerItem {
 }
 
 /// The sizes of a node's infrastructure cache.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct InfraSizes {
     /// Zone cuts held.
     pub zones: u64,
-    /// Authority servers held.
+    /// The most zone cuts the cache holds; the least recently used go first.
+    pub max_zones: u64,
+    /// Authority server addresses held.
     pub servers: u64,
+    /// The most server addresses the cache holds.
+    pub max_servers: u64,
     /// Server names held.
     pub names: u64,
 }
 
 /// What a node's resolver did since the role started.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct RecursionCounters {
     /// Client queries answered by recursion.
     pub answered: u64,
@@ -1444,14 +1467,53 @@ pub struct RecursionCounters {
     pub timeout: u64,
     /// Client queries answered from local data.
     pub local: u64,
-    /// Answers validated `secure`.
+    /// Client queries answered SERVFAIL from the failure cache without asking an authority.
+    pub failure_cache_hits: u64,
+    /// Client queries joined to a resolution of the same question already in flight.
+    pub joined: u64,
+    /// Queries sent to authorities, sub-queries for name server addresses included.
+    pub subqueries: u64,
+    /// Resolutions that hit the bound on queries sent.
+    pub budget_queries: u64,
+    /// Resolutions that hit the bound on CNAME and DNAME restarts.
+    pub budget_restarts: u64,
+    /// Resolutions that hit the bound on the depth of name server address lookups.
+    pub budget_depth: u64,
+    /// Resolutions that hit the wall clock bound.
+    pub budget_time: u64,
+    /// Primings that succeeded.
+    pub primings_ok: u64,
+    /// Primings that failed.
+    pub primings_failed: u64,
+    /// Answers dropped as unwanted (wrong source, port, identifier or question) across the
+    /// authority servers.
+    pub unwanted: u64,
+    /// Flushes of the answer cache that an excess of unwanted answers caused.
+    pub unwanted_flushes: u64,
+    /// Answers validated `secure`. Counted from WP10.2; 0 until then.
     pub secure: u64,
-    /// Answers validated `insecure`.
+    /// Answers validated `insecure`. Counted from WP10.2; 0 until then.
     pub insecure: u64,
-    /// Answers validated `bogus`.
+    /// Answers validated `bogus`. Counted from WP10.2; 0 until then.
     pub bogus: u64,
-    /// Answers for which no trust anchor applied (`indeterminate`).
+    /// Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0
+    /// until then.
     pub indeterminate: u64,
+}
+
+/// The work budget one resolution runs under.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct RecursionBudget {
+    /// The most queries sent to authorities for one client query, sub-queries included.
+    pub queries: u32,
+    /// The most CNAME and DNAME restarts.
+    pub restarts: u32,
+    /// The deepest level of name server address lookups.
+    pub depth: u32,
+    /// Attempts per server before the next one.
+    pub attempts: u32,
+    /// The wall clock bound of one resolution, in milliseconds.
+    pub wall_ms: u64,
 }
 
 /// One key of a trust anchor in the node's status.
@@ -1477,15 +1539,22 @@ pub struct RecursionStatus {
     /// The last priming; absent before the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_priming: Option<PrimingItem>,
+    /// Seconds until the root's NS set expires and the next priming is due; absent before the
+    /// first priming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_expires_secs: Option<u64>,
     /// The root servers in use with their smoothed round-trip times.
     pub root_servers: Vec<RootServerItem>,
-    /// The sizes of the infrastructure cache.
+    /// The sizes of the infrastructure cache against their bounds.
     pub infra: InfraSizes,
+    /// The work budget in force.
+    pub budget: RecursionBudget,
     /// The counters since the role started.
     pub counters: RecursionCounters,
-    /// The keys of the trust anchors with their state.
+    /// The keys of the trust anchors with their state. Empty until WP10.2.
     pub trust_anchors: Vec<AnchorKeyState>,
-    /// What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`.
+    /// What is wrong now: `priming_failed` (and, from WP10.2, `clock` and
+    /// `trust_anchor_stale`).
     pub problems: Vec<String>,
 }
 
@@ -1520,6 +1589,10 @@ pub struct InfraFlushed {
 
 /// One address of an authority server in the infrastructure cache.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the flags of one server address"
+)]
 pub struct InfraAddressItem {
     /// The address.
     pub address: String,
@@ -1530,6 +1603,18 @@ pub struct InfraAddressItem {
     /// The smoothed round-trip time in milliseconds; absent before the first answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub srtt_ms: Option<f64>,
+    /// The median round-trip time of the last minute in milliseconds; absent without
+    /// answers in the window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<f64>,
+    /// The 99th percentile of the round-trip time of the last minute in milliseconds;
+    /// absent without answers in the window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p99_ms: Option<f64>,
+    /// Failures in a row.
+    pub failures: u32,
+    /// The server is in back-off after failures and is not asked now.
+    pub down: bool,
     /// Whether the server speaks EDNS; absent while unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edns: Option<bool>,
@@ -1537,6 +1622,10 @@ pub struct InfraAddressItem {
     pub tcp_only: bool,
     /// The server is lame for the zone.
     pub lame: bool,
+    /// The server is asked in lower case because it broke the 0x20 case randomisation.
+    pub lower_case: bool,
+    /// Unwanted answers from the server in the current hour.
+    pub unwanted: u32,
 }
 
 /// One authority server of a zone cut with its addresses.

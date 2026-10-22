@@ -1,0 +1,19 @@
+; The records of `cname.example.test` (a chain of ten and a loop) on the lab's authority node (round `recursion` of smoke.sh,
+; README.md). The SOA and the apex NS set (a.root.test.) come from the zone's creation
+; through the API; this file is imported into the zone with POST .../records/import.
+$ORIGIN cname.example.test.
+$TTL 3600
+c1                   300 CNAME c2
+c2                   300 CNAME c3
+c3                   300 CNAME c4
+c4                   300 CNAME c5
+c5                   300 CNAME c6
+c6                   300 CNAME c7
+c7                   300 CNAME c8
+c8                   300 CNAME c9
+c9                   300 CNAME c10
+c10                  300 CNAME end
+end                  300 A 192.0.2.32
+short                300 CNAME end
+loop1                300 CNAME loop2
+loop2                300 CNAME loop1

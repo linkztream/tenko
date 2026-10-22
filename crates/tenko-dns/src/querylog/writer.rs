@@ -307,6 +307,9 @@ impl Writer {
             blocked: slot.blocked,
             cached: slot.cached,
             duration_micros: slot.duration_micros,
+            // WP10.1: the resolution and the engine's queries.
+            resolution: slot.resolution,
+            subqueries: slot.subqueries,
         }
     }
 
@@ -345,7 +348,12 @@ impl Writer {
             .then(|| self.settings.identity.as_bytes().to_vec());
         let version =
             (!self.settings.version.is_empty()).then(|| self.settings.version.as_bytes().to_vec());
-        let extra = Some(dnstap::extra(self.settings.client, slot.cached));
+        let extra = Some(dnstap::extra(
+            self.settings.client,
+            slot.cached,
+            slot.resolution,
+            slot.subqueries,
+        ));
         self.message.clear();
         dnstap::build_message(&mut self.message, slot.qname(), slot.qtype, None);
         let query = dnstap::Dnstap {

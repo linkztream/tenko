@@ -117,6 +117,9 @@ async fn the_log_is_read_through_the_command() {
         blocked: None,
         cached: false,
         duration_micros: 9,
+        // WP10.1: the resolution of the log line.
+        resolution: None,
+        subqueries: 0,
     });
     let sink = writer.sink();
     writer.stop();

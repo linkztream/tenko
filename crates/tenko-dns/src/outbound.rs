@@ -203,11 +203,22 @@ impl Pooled {
 }
 
 /// The idle UDP sockets of the outgoing queries, per address family.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UdpSockets {
     idle: Mutex<std::collections::HashMap<std::net::IpAddr, Vec<Pooled>>>,
     stats: SocketStats,
+    // WP10.1: the uses of a socket are a parameter of the set (recursion plan section
+    // 2.1): [`SOCKET_USES`] for upstreams, 1 for authorities (a fresh port per exchange).
+    uses: u32,
 }
+
+// WP10.1: the set with the upstreams' policy, and a set with a policy of its own.
+impl Default for UdpSockets {
+    fn default() -> Self {
+        Self::with_uses(SOCKET_USES)
+    }
+}
+// WP10.1: end.
 
 /// The local address a query to `upstream` leaves from: the upstream's own address when it
 /// is a loopback address, else the wildcard address of its family.
@@ -233,6 +244,24 @@ impl UdpSockets {
         GLOBAL.get_or_init(UdpSockets::default)
     }
 
+    // WP10.1: the socket policy as a parameter.
+    /// A set whose sockets serve at most `uses` exchanges each (at least one): 1 binds a
+    /// fresh port for every exchange, as the recursive resolver does towards authorities
+    /// (`[dns.recursion] fresh_port_per_query`).
+    pub fn with_uses(uses: u32) -> Self {
+        Self {
+            idle: Mutex::new(std::collections::HashMap::new()),
+            stats: SocketStats::default(),
+            uses: uses.max(1),
+        }
+    }
+
+    /// The exchanges a socket of the set serves at most.
+    pub fn uses(&self) -> u32 {
+        self.uses
+    }
+    // WP10.1: end.
+
     fn idle(
         &self,
     ) -> std::sync::MutexGuard<'_, std::collections::HashMap<std::net::IpAddr, Vec<Pooled>>> {
@@ -251,7 +280,7 @@ impl UdpSockets {
             let mut idle = self.idle();
             let list = idle.entry(local).or_default();
             while let Some(pooled) = list.pop() {
-                if pooled.born.elapsed() < SOCKET_AGE && pooled.uses < SOCKET_USES {
+                if pooled.born.elapsed() < SOCKET_AGE && pooled.uses < self.uses {
                     self.stats
                         .reused
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -274,7 +303,7 @@ impl UdpSockets {
     /// is old, or the set is full.
     pub fn give(&self, mut pooled: Pooled, upstream: SocketAddr) {
         pooled.uses += 1;
-        if pooled.uses >= SOCKET_USES || pooled.born.elapsed() >= SOCKET_AGE {
+        if pooled.uses >= self.uses || pooled.born.elapsed() >= SOCKET_AGE {
             return;
         }
         let mut idle = self.idle();
@@ -427,6 +456,20 @@ mod tests {
             "a socket is retired after its uses"
         );
         assert!(sockets.counts().0 >= 2);
+    }
+
+    // WP10.1: one use per socket binds a fresh port for every exchange.
+    #[tokio::test]
+    async fn a_set_of_one_use_binds_a_fresh_socket_each_time() {
+        let sockets = UdpSockets::with_uses(1);
+        let upstream: SocketAddr = "192.0.2.53:53".parse().expect("address");
+        for _ in 0..4 {
+            let socket = sockets.take(upstream).await.expect("socket");
+            sockets.give(socket, upstream);
+        }
+        assert_eq!(sockets.counts(), (4, 0));
+        assert_eq!(UdpSockets::with_uses(0).uses(), 1);
+        assert_eq!(UdpSockets::default().uses(), SOCKET_USES);
     }
 
     #[tokio::test]

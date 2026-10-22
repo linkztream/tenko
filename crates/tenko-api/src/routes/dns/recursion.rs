@@ -2,16 +2,19 @@
 //! trust anchors and, per node, the resolver's status, its priming and its infrastructure
 //! cache.
 //!
-//! Area: dns. Owner: WP10.0 (the contracts); the operations are built by WP10.2 (the trust
-//! anchors and the negative trust anchors, the service behind them) and WP10.4 (the node
-//! routes and the rest of the API). Requirements: DNS-03, DNS-13, OPS-09.
+//! Area: dns. Owner: WP10.0 (the contracts); WP10.1 built the node routes (the status, the
+//! priming and the infrastructure cache); the trust anchors and the negative trust anchors
+//! (the service behind them) are built by WP10.2. Requirements: DNS-03, DNS-13, OPS-09.
 //!
 //! Every operation is declared with its request and answer types so that the OpenAPI
-//! document, the typed client of the UI and the mock server have them; until its package
-//! builds it, an operation checks the caller's scope (and the interactive session where the
-//! table says so, which the authorizer enforces by refusing a token) and answers `501` with
-//! `sys.not_implemented`. A path segment that does not parse answers 400 before any
-//! authorization.
+//! document, the typed client of the UI and the mock server have them. The node routes run
+//! in the node's `dns` role like the cache routes do (`nodes.rs`): the status is the role's
+//! report, the priming and the infrastructure cache are node commands (`dns.recursion.prime`,
+//! `dns.infra.list`, `dns.infra.flush`) recorded in the node's commands. Until WP10.2 builds
+//! them, the trust anchor operations check the caller's scope (and the interactive session
+//! where the table says so, which the authorizer enforces by refusing a token) and answer
+//! `501` with `sys.not_implemented`. A path segment that does not parse answers 400 before
+//! any authorization.
 //!
 //! | Endpoint | Scope | Purpose |
 //! |---|---|---|
@@ -28,6 +31,11 @@
 //! | `GET /nodes/{id}/dns/infra` | `dns.read` | List what a node's infrastructure cache holds |
 //! | `POST /nodes/{id}/dns/infra/flush` | `dns.write` | Flush a node's infrastructure cache |
 //!
+//! The status of a node whose resolver is off is not an error: it answers 200 with
+//! `enabled: false`. The infrastructure cache holds the authority servers of zones and no
+//! client data, so listing it is recorded as a node command and not audited; the priming and
+//! the flush are audited (`dns.recursion.prime`, `dns.infra.flush`).
+//!
 //! # Error codes of the built operations
 //!
 //! | Code | Status | When |
@@ -37,22 +45,44 @@
 //! | `dns.trust_anchor.root_protected` | 409 | Removing or replacing the root's anchor outside Lab |
 //! | `dns.nta.not_found` | 404 | No negative trust anchor of this id |
 //! | `dns.nta.invalid` | 400 | The root, no expiry under Hardened, over seven days, no reason (`field`, `reason`) |
-//! | `dns.recursion.disabled` | 409 | A node command while the node's resolver is off |
+//! | `dns.recursion.disabled` | 409 | A node command (priming, listing or flushing the infrastructure cache) while the node's resolver is off |
+//! | `sys.invalid_value` | 400 | A `suffix`, `cursor` or `limit` of the infrastructure cache that does not parse (`field`) |
 //!
 //! The root zone is written `root` in the path of a trust anchor (a URL turns the segment `.`
 //! into a dot segment); a zone named `root` is written `root.`.
 
+use std::{sync::Arc, time::Duration};
+
 use axum::{
-    extract::{Path, State},
-    response::Response,
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use tenko_auth::authz::anywhere;
-use tenko_core::{Action, ObjectKind, ObjectRef, dns::DnsName, dns::NtaId};
+use tenko_core::{
+    Action, CodedError, NodeId, ObjectKind, ObjectRef,
+    audit::AuditDraft,
+    codec::to_cbor,
+    dns::{DnsName, NtaId, audit, codes as dns_codes},
+    error::codes as error_codes,
+};
+use tenko_dns::{
+    recurse::{InfraAddressView, InfraCutView, RecursionReport},
+    recursion::infra::EdnsSupport,
+    status::{
+        self, CommandResult, DnsNode, InfraFlushArgs, InfraListArgs, InfraPage, Outcome, Output,
+    },
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::{
-    DnsCommandAccepted, InfraCutItem, InfraFlushParams, InfraFlushed, InfraParams, NtaCreate,
-    NtaItem, RecursionStatus, TrustAnchorAdd, TrustAnchorItem, invalid, parse_id, parse_node,
+    DnsCommandAccepted, InfraAddressItem, InfraCutItem, InfraFlushParams, InfraFlushed,
+    InfraParams, InfraServerItem, InfraSizes, NtaCreate, NtaItem, PrimingItem, RecursionCounters,
+    RecursionStatus, RootServerItem, TrustAnchorAdd, TrustAnchorItem, Zones, invalid,
+    model::RecursionBudget,
+    nodes::{Registry, Slot, command_failed, execute, local_role, record},
+    parse_id, parse_node,
 };
 use crate::{
     dto::Page,
@@ -62,6 +92,9 @@ use crate::{
     routes::not_implemented,
     state::AppState,
 };
+
+/// Zone cuts per page of the infrastructure cache when the request names no limit.
+const DEFAULT_PAGE: u32 = 200;
 
 /// A zone name from the path of a trust anchor.
 fn parse_zone(raw: &str) -> Result<DnsName, ApiError> {
@@ -293,13 +326,201 @@ async fn delete_dns_nta(
     Err(not_implemented("DELETE", "/dns/ntas/{id}"))
 }
 
+// WP10.1: the node routes.
+/// A 400 `sys.invalid_value` for a query parameter.
+fn invalid_value(field: &str, detail: impl Into<String>) -> ApiError {
+    ApiError::from_coded_error(
+        CodedError::new(error_codes::INVALID_VALUE, 400, detail.into())
+            .with_param("field", field.to_owned()),
+    )
+}
+
+/// The 409 for a node whose resolver is off.
+fn disabled(node: NodeId) -> ApiError {
+    ApiError::from_coded_error(
+        CodedError::new(
+            dns_codes::RECURSION_DISABLED,
+            409,
+            format!("the recursive resolver of node {node} is off"),
+        )
+        .with_title("Recursion disabled")
+        .with_param("node", node.to_string()),
+    )
+}
+
+/// The role of `node` when this process runs it and its resolver is on.
+async fn recursing_role(
+    app: &AppState,
+    slot: Slot,
+    registry: Registry,
+    node: NodeId,
+) -> Result<Arc<dyn DnsNode>, ApiError> {
+    let role = local_role(app, slot, registry, node).await?;
+    if role.status().recursion.is_none() {
+        return Err(disabled(node));
+    }
+    Ok(role)
+}
+
+/// The error of a command that did not finish: a rejection is the resolver switched off
+/// after the check, anything else is a failure of the node.
+fn failed(node: NodeId, kind: &str, result: &CommandResult) -> ApiError {
+    if result.outcome == Outcome::Rejected {
+        disabled(node)
+    } else {
+        command_failed(kind, result)
+    }
+}
+
+/// Milliseconds of a duration.
+fn millis(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
+}
+
+/// A count as the API's unsigned 64 bits.
+fn count(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+/// The DTO of a node's resolver; a node without one reads as off with empty and zero fields.
+pub(super) fn recursion_dto(report: Option<RecursionReport>) -> RecursionStatus {
+    let Some(report) = report else {
+        return RecursionStatus {
+            enabled: false,
+            hints_source: String::new(),
+            hints_date: String::new(),
+            last_priming: None,
+            root_expires_secs: None,
+            root_servers: Vec::new(),
+            infra: InfraSizes::default(),
+            budget: RecursionBudget::default(),
+            counters: RecursionCounters::default(),
+            trust_anchors: Vec::new(),
+            problems: Vec::new(),
+        };
+    };
+    let counters = report.counters;
+    let (max_zones, max_servers) = report.infra_bounds;
+    RecursionStatus {
+        enabled: true,
+        hints_source: report.hints_source,
+        hints_date: report.hints_date,
+        last_priming: report.priming.map(|priming| PrimingItem {
+            at: priming.at,
+            outcome: if priming.ok { "ok" } else { "failed" }.to_owned(),
+            duration_ms: millis(priming.duration),
+        }),
+        root_expires_secs: report.root_expires_in.map(|left| left.as_secs()),
+        root_servers: report
+            .root
+            .into_iter()
+            .map(|server| RootServerItem {
+                name: server.name.to_string(),
+                address: server.address.to_string(),
+                srtt_ms: server.srtt.map(millis),
+            })
+            .collect(),
+        infra: InfraSizes {
+            zones: count(report.infra.cuts),
+            max_zones: count(max_zones),
+            servers: count(report.infra.servers),
+            max_servers: count(max_servers),
+            names: count(report.infra.names),
+        },
+        budget: RecursionBudget {
+            queries: u32::from(report.budget.queries),
+            restarts: u32::from(report.budget.restarts),
+            depth: u32::from(report.budget.depth),
+            attempts: u32::from(report.budget.attempts),
+            wall_ms: u64::try_from(report.budget.wall.as_millis()).unwrap_or(u64::MAX),
+        },
+        counters: RecursionCounters {
+            answered: counters.answered,
+            servfail: counters.servfail,
+            budget: counters.budget,
+            timeout: counters.timeout,
+            local: counters.local,
+            failure_cache_hits: counters.failure_hits,
+            joined: counters.joined,
+            subqueries: counters.subqueries,
+            budget_queries: counters.bound_queries,
+            budget_restarts: counters.bound_restarts,
+            budget_depth: counters.bound_depth,
+            budget_time: counters.bound_time,
+            primings_ok: counters.primings_ok,
+            primings_failed: counters.primings_failed,
+            unwanted: counters.unwanted,
+            unwanted_flushes: counters.unwanted_flushes,
+            // WP10.2 validates; until then nothing is counted.
+            secure: 0,
+            insecure: 0,
+            bogus: 0,
+            indeterminate: 0,
+        },
+        // WP10.2 holds the trust anchors; until then none is reported.
+        trust_anchors: Vec::new(),
+        problems: report.problems,
+    }
+}
+
+/// The DTO of one address of a server in the listing.
+pub(super) fn address_dto(view: &InfraAddressView) -> InfraAddressItem {
+    let figures = view.figures;
+    InfraAddressItem {
+        address: view.address.to_string(),
+        origin: view.origin.as_str().to_owned(),
+        ttl: view.ttl,
+        srtt_ms: figures.srtt.map(millis),
+        p50_ms: figures.p50.map(millis),
+        p99_ms: figures.p99.map(millis),
+        failures: figures.failures,
+        down: figures.down,
+        edns: match view.edns {
+            EdnsSupport::Unknown => None,
+            EdnsSupport::Yes => Some(true),
+            EdnsSupport::No => Some(false),
+        },
+        tcp_only: view.tcp_only,
+        lame: view.lame,
+        lower_case: figures.lower_case,
+        unwanted: figures.unwanted,
+    }
+}
+
+/// The DTO of one zone cut in the listing.
+fn cut_dto(cut: InfraCutView) -> InfraCutItem {
+    InfraCutItem {
+        zone: cut.zone,
+        servers: cut
+            .servers
+            .into_iter()
+            .map(|server| InfraServerItem {
+                name: server.name,
+                addresses: server.addresses.iter().map(address_dto).collect(),
+            })
+            .collect(),
+        ds: cut.ds.to_owned(),
+        ttl: cut.ttl,
+    }
+}
+
+/// A DNS name from a query parameter; blank counts as absent.
+fn name_param(field: &str, raw: Option<String>) -> Result<Option<String>, ApiError> {
+    let Some(raw) = raw.filter(|raw| !raw.trim().is_empty()) else {
+        return Ok(None);
+    };
+    DnsName::new(&raw)
+        .map_err(|_| invalid_value(field, format!("{field}: `{raw}` is not a DNS name")))?;
+    Ok(Some(raw))
+}
+
 #[utoipa::path(
     get,
     path = "/nodes/{id}/dns/recursion",
     tag = "dns",
     operation_id = "get_node_dns_recursion",
     summary = "Get the recursive resolver of a node",
-    description = "Scope: `dns.read`. Whether the resolver runs, the source and date of the root hints, the last priming and its outcome, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache, the counters since the role started, the trust anchor keys with their state, and what is wrong (`priming_failed`, `clock`, `trust_anchor_stale`).",
+    description = "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.",
     params(("id" = u64, Path, description = "Node id")),
     responses(
         (status = 200, description = "The resolver's status", body = RecursionStatus),
@@ -307,19 +528,21 @@ async fn delete_dns_nta(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn get_node_dns_recursion(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let node = parse_node(&id)?;
     app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/nodes/{id}/dns/recursion"))
+    let role = local_role(&app, slot, registry, node).await?;
+    Ok(Json(recursion_dto(role.status().recursion)).into_response())
 }
 
 #[utoipa::path(
@@ -328,7 +551,7 @@ async fn get_node_dns_recursion(
     tag = "dns",
     operation_id = "prime_node_dns_recursion",
     summary = "Prime a node's resolver now",
-    description = "Scope: `dns.write`. Issues a node command that asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; audited as `dns.recursion.prime`. The outcome shows in the status.",
+    description = "Scope: `dns.write`. Issues the node command `dns.recursion.prime`, which asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; a priming that is running already is left to finish. The command is recorded in the node's commands and audited as `dns.recursion.prime`. The outcome shows in the status.",
     params(("id" = u64, Path, description = "Node id")),
     responses(
         (status = 202, description = "The command was recorded", body = DnsCommandAccepted),
@@ -336,19 +559,44 @@ async fn get_node_dns_recursion(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn prime_node_dns_recursion(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     let node = parse_node(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("POST", "/nodes/{id}/dns/recursion/prime"))
+    let role = recursing_role(&app, slot, registry, node).await?;
+    let result = execute(role, status::RECURSION_PRIME, Vec::new()).await;
+    let draft = AuditDraft::success(audit::RECURSION_PRIME, vec![ObjectRef::node(node)])
+        .with_context("detail", result.detail.clone());
+    let record = record(
+        zones,
+        &cx,
+        node,
+        status::RECURSION_PRIME,
+        Vec::new(),
+        &result,
+        Some(draft),
+    )
+    .await?;
+    if result.outcome != Outcome::Done {
+        return Err(failed(node, status::RECURSION_PRIME, &result));
+    }
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(DnsCommandAccepted {
+            command_id: record.id,
+        }),
+    )
+        .into_response())
 }
 
 #[utoipa::path(
@@ -357,7 +605,7 @@ async fn prime_node_dns_recursion(
     tag = "dns",
     operation_id = "list_node_dns_infra",
     summary = "List what a node's infrastructure cache holds",
-    description = "Scope: `dns.read`. A page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time, EDNS capability, TCP-only and lame flags) and the DS state. `suffix` keeps the cuts at or below it. The cuts reveal which zones the clients asked about, so the read is a node command and recorded in the node's commands.",
+    description = "Scope: `dns.read`. Issues the node command `dns.infra.list`: a page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time and its median and 99th percentile of the last minute, failures, back-off, EDNS capability, TCP-only, lame and lower-case flags, unwanted answers) and the DS state. `suffix` keeps the cuts at or below it; `cursor` is the `next_cursor` of the previous page. The infrastructure cache holds the authority servers of zones and no client data, so the read is recorded in the node's commands and not audited.",
     params(("id" = u64, Path, description = "Node id"), InfraParams),
     responses(
         (status = 200, description = "A page of zone cuts in canonical name order", body = Page<InfraCutItem>),
@@ -365,19 +613,50 @@ async fn prime_node_dns_recursion(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn list_node_dns_infra(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
     Path(id): Path<String>,
+    Query(params): Query<InfraParams>,
 ) -> Result<Response, ApiError> {
     let node = parse_node(&id)?;
     app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/nodes/{id}/dns/infra"))
+    let limit = params.limit.unwrap_or(DEFAULT_PAGE);
+    if !(1..=status::MAX_INFRA_PAGE).contains(&limit) {
+        return Err(invalid_value(
+            "limit",
+            format!("limit must be between 1 and {}", status::MAX_INFRA_PAGE),
+        ));
+    }
+    let suffix = name_param("suffix", params.suffix)?;
+    let after = name_param("cursor", params.cursor)?;
+    let role = recursing_role(&app, slot, registry, node).await?;
+    let args = to_cbor(&InfraListArgs {
+        suffix,
+        after,
+        limit,
+    })?
+    .to_vec();
+    let result = execute(role, status::INFRA_LIST, args.clone()).await;
+    record(zones, &cx, node, status::INFRA_LIST, args, &result, None).await?;
+    let Output::Infra(page) = result.output else {
+        return Err(failed(node, status::INFRA_LIST, &result));
+    };
+    let InfraPage { cuts, next } = *page;
+    let revision = app.store.status().revision;
+    Ok(Json(Page::new(
+        cuts.into_iter().map(cut_dto).collect(),
+        next,
+        revision,
+    ))
+    .into_response())
 }
 
 #[utoipa::path(
@@ -386,25 +665,58 @@ async fn list_node_dns_infra(
     tag = "dns",
     operation_id = "flush_node_dns_infra",
     summary = "Flush a node's infrastructure cache",
-    description = "Scope: `dns.write`. Issues a node command that drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. Audited as `dns.infra.flush`.",
+    description = "Scope: `dns.write`. Issues the node command `dns.infra.flush`, which drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. The command is recorded in the node's commands and audited as `dns.infra.flush`.",
     params(("id" = u64, Path, description = "Node id"), InfraFlushParams),
     responses(
-        (status = 200, description = "The number of zone cuts dropped", body = InfraFlushed),
+        (status = 200, description = "The number of entries dropped", body = InfraFlushed),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such node (`cluster.node.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn flush_node_dns_infra(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    slot: Slot,
+    registry: Registry,
+    zones: Zones,
     Path(id): Path<String>,
+    Query(params): Query<InfraFlushParams>,
 ) -> Result<Response, ApiError> {
     let node = parse_node(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Execute, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("POST", "/nodes/{id}/dns/infra/flush"))
+    let suffix = name_param("suffix", params.suffix)?;
+    let role = recursing_role(&app, slot, registry, node).await?;
+    let args = if suffix.is_some() {
+        to_cbor(&InfraFlushArgs {
+            suffix: suffix.clone(),
+        })?
+        .to_vec()
+    } else {
+        Vec::new()
+    };
+    let result = execute(role, status::INFRA_FLUSH, args.clone()).await;
+    let mut draft = AuditDraft::success(audit::INFRA_FLUSH, vec![ObjectRef::node(node)])
+        .with_context("detail", result.detail.clone());
+    if let Some(suffix) = suffix {
+        draft = draft.with_context("suffix", suffix);
+    }
+    record(
+        zones,
+        &cx,
+        node,
+        status::INFRA_FLUSH,
+        args,
+        &result,
+        Some(draft),
+    )
+    .await?;
+    let Output::Flushed(entries) = result.output else {
+        return Err(failed(node, status::INFRA_FLUSH, &result));
+    };
+    Ok(Json(InfraFlushed { entries }).into_response())
 }
+// WP10.1: end.

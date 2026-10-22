@@ -330,6 +330,9 @@ mod tests {
                 blocked: blocked.map(list),
                 cached: false,
                 duration_micros: 10,
+                // WP10.1: the resolution of the log line.
+                resolution: None,
+                subqueries: 0,
             });
         }
         writer.stop();

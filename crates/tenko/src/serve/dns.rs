@@ -410,8 +410,77 @@ fn forward_settings(
         }),
         stale_budget: Duration::from_millis(cache.stale_answer_ms),
         upstream_ca,
+        // WP10.1: set by `recursion_settings` at the start.
+        recursion: None,
     }
 }
+
+// WP10.1: the recursive resolver's settings from `[dns.recursion]` under the profile.
+/// The engine's settings of `[dns.recursion]` under `profile`, `None` when recursion is
+/// off; a hints file that cannot be read stops the start.
+fn recursion_settings(
+    section: &DnsSection,
+    profile: Profile,
+) -> Result<Option<tenko_dns::recurse::EngineSettings>, StartError> {
+    use tenko_dns::recursion::{
+        InfraBounds, Minimisation, Outbound, RecursionSettings, WorkBudget,
+    };
+    let keys = &section.recursion;
+    if !keys.enabled_for(profile) {
+        return Ok(None);
+    }
+    if let Some(path) = &keys.hints {
+        tenko_dns::recurse::hints::Hints::from_file(path)
+            .map_err(|hints| error("config.invalid", format!("dns.recursion.hints: {hints}")))?;
+    }
+    let cuts = keys.infra_entries_for(profile);
+    let defaults = RecursionSettings::default();
+    let recursion = RecursionSettings {
+        enabled: true,
+        outbound: match keys.outbound {
+            crate::config::RecursionOutbound::Auto => Outbound::Auto,
+            crate::config::RecursionOutbound::V4 => Outbound::V4,
+            crate::config::RecursionOutbound::V6 => Outbound::V6,
+            crate::config::RecursionOutbound::Both => Outbound::Both,
+        },
+        timeout: Duration::from_millis(keys.timeout_ms),
+        budget: WorkBudget {
+            queries: u16::try_from(keys.budget_queries).unwrap_or(u16::MAX),
+            restarts: u8::try_from(keys.budget_restarts).unwrap_or(u8::MAX),
+            depth: u8::try_from(keys.budget_depth).unwrap_or(u8::MAX),
+            wall: Duration::from_millis(keys.budget_ms),
+            ..WorkBudget::DEFAULT
+        },
+        infra: InfraBounds {
+            cuts,
+            servers: cuts.saturating_mul(2),
+            ttl: Duration::from_secs(u64::from(keys.infra_ttl_secs)),
+        },
+        minimisation: match keys.qname_minimisation {
+            crate::config::QnameMinimisation::Relaxed => Minimisation::Relaxed,
+            crate::config::QnameMinimisation::Strict => Minimisation::Strict,
+            crate::config::QnameMinimisation::Off => Minimisation::Off,
+        },
+        aggressive_nsec: keys.aggressive_nsec,
+        denial_entries: keys.denial_entries_for(profile),
+        failure_max: Duration::from_secs(u64::from(keys.failure_cache_max_secs)),
+        signalling: keys.trust_anchor_signalling_for(profile),
+        key_sentinel: keys.key_sentinel,
+        fresh_port: keys.fresh_port_per_query,
+        ..defaults
+    };
+    Ok(Some(tenko_dns::recurse::EngineSettings {
+        recursion,
+        hints: keys.hints.clone(),
+        local_zones_except: keys
+            .local_zones_except
+            .iter()
+            .filter_map(|name| tenko_core::dns::DnsName::new(name).ok())
+            .collect(),
+        metrics: true,
+    }))
+}
+// WP10.1: end.
 
 /// The CA file of `[dns] upstream_ca`, read at start.
 fn upstream_ca(section: &DnsSection) -> Result<Option<Vec<u8>>, StartError> {
@@ -737,6 +806,10 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     tenko_dns::xfr::register_metrics(metrics);
     // WP6.2: the update families.
     tenko_dns::update::register_metrics(metrics);
+    // WP10.1: the recursive resolver's families, when it runs.
+    if section.recursion.enabled.unwrap_or(true) {
+        tenko_dns::metrics::register_recursion(metrics);
+    }
     let log_profile = log_profile(resolved, store.as_ref()).await;
     let feed_store = Arc::clone(&store);
     let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -763,13 +836,20 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         update_profile_of(profile),
     ));
     recursion.set_prefixes(prefixes);
+    // WP10.1: the recursive resolver beside the forwarder, its flushes audited.
+    let mut settings = forward_settings(section, profile, upstream_ca);
+    settings.recursion = recursion_settings(section, profile)?;
     let (forwarder, forward_task) = Forwarder::start(
-        forward_settings(section, profile, upstream_ca),
+        settings,
         handle.clone(),
         log_sink.clone(),
         Arc::clone(&recursion),
         stop.child_token(),
     );
+    forwarder.set_audit(Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(
+        &store,
+    ))));
+    // WP10.1: end.
     let (limiter, limits_line) = limiter(section, profile, &recursion)?;
     let recursion_task = tokio::spawn(follow_recursion(
         Arc::clone(&store),
