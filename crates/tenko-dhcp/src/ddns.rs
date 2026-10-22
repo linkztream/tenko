@@ -1,13 +1,34 @@
-//! The DDNS queue (plan section 2.9, ADR 0020 point 5): names are written after the lease
-//! commit, never inside it.
+//! DDNS from DHCP (plan section 2.9, ADR 0020): names are written after the lease commit,
+//! never inside it.
 //!
-//! When a committed lease gains, keeps or loses a name, the role enqueues a
-//! [`DdnsRequest`] and answers the client; a DDNS worker (WP8.3) applies it as a change set
-//! through the zone service with the RRset origin `dhcp`, retries with a backoff while the
-//! store refuses (`[dhcp.ddns] retries`, `backoff_ms`), and records the outcome on the
-//! lease row. On release and expiry the records go if their DHCID still matches. A full
-//! queue drops the request and counts it; the next renewal enqueues it again.
-//! [`MemDdnsQueue`] is the reference queue.
+//! When a committed lease gains, keeps or loses a name, a [`DdnsRequest`] goes into the
+//! [`DdnsQueue`] and the client has its answer already; the DDNS worker applies it as a
+//! change set through the zone service with the RRset origin `dhcp`, retries with a
+//! backoff while the store refuses (`[dhcp.ddns] retries`, `backoff_ms`), and records the
+//! outcome on the lease row. On release and expiry the records go if their DHCID still
+//! matches. A full queue drops the request and counts it; the lease rows are read again.
+//! [`MemDdnsQueue`] is the queue, sized at start.
+//!
+//! | Module | What |
+//! |---|---|
+//! | [`dhcid`] | the DHCID record of RFC 4701 (identifier types 0, 1 and 2, SHA-256) |
+//! | [`names`] | the name of a lease: option 81, else option 12, under the scope's zone |
+//! | [`flags`] | who writes the A record, and the flags of the reply's option 81 |
+//! | [`plan`] | the RFC 4703 rules: what a request changes in the zones |
+//! | [`worker`] | [`worker::DdnsService`], the leader service `dhcp.ddns` that follows the lease rows |
+//! | [`metrics`] | `tenko_dhcp_ddns_total{outcome}` and `tenko_dhcp_ddns_queue` |
+
+pub mod dhcid;
+pub mod flags;
+pub mod metrics;
+pub mod names;
+pub mod plan;
+pub mod worker;
+
+pub use self::{
+    plan::DdnsProfile,
+    worker::{DdnsService, DdnsSettings, ProfileSource},
+};
 
 use std::{
     collections::VecDeque,
@@ -87,11 +108,12 @@ pub struct MemDdnsQueue {
 }
 
 impl MemDdnsQueue {
-    /// A queue of at most `limit` requests.
+    /// A queue of at most `limit` requests, its room taken at start (up to 65,536
+    /// requests; a larger limit grows the room as it fills).
     pub fn new(limit: usize) -> Self {
         Self {
             limit,
-            queue: Mutex::new(VecDeque::new()),
+            queue: Mutex::new(VecDeque::with_capacity(limit.min(65_536))),
         }
     }
 

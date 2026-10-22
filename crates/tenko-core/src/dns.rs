@@ -633,6 +633,21 @@ pub struct UpdatePolicy {
     /// A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5).
     #[serde(default)]
     pub may_replace_ipam: bool,
+    // WP8.3: whether Tenko DHCP writes names into the zone (ADR 0020 point 6, P3-Q6).
+    /// Whether Tenko DHCP may write the names of its clients into the zone (ADR 0020; the
+    /// internal path, which TGL-09 does not govern). None follows the security profile:
+    /// Home and Lab allow, Standard and Hardened do not until the operator allows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp: Option<bool>,
+}
+
+// WP8.3: the effective DHCP switch of a zone.
+impl UpdatePolicy {
+    /// Whether Tenko DHCP may write into the zone; `profile_allows` is the profile's
+    /// default (true under Home and Lab).
+    pub fn dhcp_allowed(&self, profile_allows: bool) -> bool {
+        self.dhcp.unwrap_or(profile_allows)
+    }
 }
 
 impl Default for UpdatePolicy {
@@ -641,6 +656,7 @@ impl Default for UpdatePolicy {
             allowed: Vec::new(),
             require_tsig: true,
             may_replace_ipam: false,
+            dhcp: None,
         }
     }
 }

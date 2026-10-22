@@ -912,6 +912,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 share,
                 hostname,
                 fqdn,
+                fqdn_flags: None,
                 ddns,
                 fingerprint,
                 relay,

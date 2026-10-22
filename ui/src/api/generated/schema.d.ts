@@ -7436,6 +7436,12 @@ export interface components {
         DnsUpdatePolicy: {
             /** @description The access lists that may update; none means nobody. */
             allowed?: components["schemas"]["AclId"][];
+            /**
+             * @description Whether Tenko DHCP may write the names of its clients into the zone (ADR 0020; the
+             *     internal path, which TGL-09 does not govern). None follows the security profile:
+             *     Home and Lab allow, Standard and Hardened do not until the operator allows it.
+             */
+            dhcp?: boolean | null;
             /** @description A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5). */
             may_replace_ipam?: boolean;
             /** @description Updates need a TSIG key (TGL-09). */
@@ -9442,6 +9448,11 @@ export interface components {
             fingerprint?: components["schemas"]["Fingerprint"] | null;
             /** @description The name the client sent in option 81, as text. */
             fqdn?: string | null;
+            /**
+             * Format: int32
+             * @description The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).
+             */
+            fqdn_flags?: number | null;
             /** @description The host name the client sent (option 12), as text. */
             hostname?: string | null;
             /** @description The node that wrote the row. */

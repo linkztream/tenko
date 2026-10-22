@@ -39787,6 +39787,13 @@
             },
             "description": "The access lists that may update; none means nobody."
           },
+          "dhcp": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether Tenko DHCP may write the names of its clients into the zone (ADR 0020; the\ninternal path, which TGL-09 does not govern). None follows the security profile:\nHome and Lab allow, Standard and Hardened do not until the operator allows it."
+          },
           "may_replace_ipam": {
             "type": "boolean",
             "description": "A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5)."
@@ -45482,6 +45489,15 @@
               "null"
             ],
             "description": "The name the client sent in option 81, as text."
+          },
+          "fqdn_flags": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).",
+            "minimum": 0
           },
           "hostname": {
             "type": [

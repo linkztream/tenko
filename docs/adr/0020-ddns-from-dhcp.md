@@ -1,6 +1,6 @@
 # ADR 0020: DDNS from DHCP
 
-- Status: Proposed
+- Status: Accepted (2026-10-22, with WP8.3)
 - Date: 2026-10-21
 
 ## Context
@@ -21,7 +21,18 @@ ADR 0017 made the DNS engine serve from an index and never write, routed every c
 
 ## Refinements from the contracts (WP7.0)
 
-The status stays Proposed; WP8.3 refines the rest. WP7.0 wrote the scope's settings as `tenko_core::dhcp::DdnsPolicy` (enabled, the forward zone, `reverse` for PTR records, the TTL, `conflict` as `protect` or `replace`, `client_may_update_a` off by default, `legacy_clients` on by default, `refuse_foreign` for names outside the zone), the outcome on the lease as `DdnsState` (the forward and reverse names written, the DHCID, the last error), and the queue between the commit and the DDNS worker as `tenko_dhcp::ddns::DdnsQueue` with the bounded reference `MemDdnsQueue`. The change sets carry the principal of the system component `dhcp`. The new `UpdatePolicy` field `dhcp` of point 6 is left to WP8.3, because it changes the DNS zone row. `Replace` under Hardened is refused by the configuration service, not by the model, because the model does not know the profile.
+WP7.0 wrote the scope's settings as `tenko_core::dhcp::DdnsPolicy` (enabled, the forward zone, `reverse` for PTR records, the TTL, `conflict` as `protect` or `replace`, `client_may_update_a` off by default, `legacy_clients` on by default, `refuse_foreign` for names outside the zone), the outcome on the lease as `DdnsState` (the forward and reverse names written, the DHCID, the last error), and the queue between the commit and the DDNS worker as `tenko_dhcp::ddns::DdnsQueue` with the bounded reference `MemDdnsQueue`. The change sets carry the principal of the system component `dhcp`. The new `UpdatePolicy` field `dhcp` of point 6 is left to WP8.3, because it changes the DNS zone row. `Replace` under Hardened is refused by the configuration service, not by the model, because the model does not know the profile.
+
+## What the code decided (WP8.3)
+
+- **The worker follows the lease rows.** The DDNS worker is the leader service `dhcp.ddns`; it watches `dhcp.leases` in the store, so a grant or renewal from the committer, a release, an operator's reclaim and an expiry from `dhcp.expiry` all reach it after their commit, and nothing runs on the DORA path (no hook in the committer, no allocation added). Each changed row becomes a `DdnsRequest` in a `MemDdnsQueue` sized at start; the worker takes the queue in batches (the first change waits 100 ms for others: M31 showed that fewer, larger change sets keep the lease commits' tail lower) and writes one change set per zone through the shared zone service of the process, the forward and the reverse zone at the same time. Without the DNS module there is no worker. A change of the DHCP configuration or of a zone row makes the worker read every lease again.
+- **One change set per zone, not one across zones.** The A and DHCID sets of a name are one change set in the forward zone; the PTR is a change set of the reverse zone, written beside it. A refused forward name gets no PTR.
+- **The conflict rules** are point 2 as written, checked against one view of the store per batch and against the batch's own earlier claims: a `dhcp` A or DHCID set whose DHCID is not the client's (or a `dhcp` A without a DHCID) is refused under `protect` and taken over under `replace`; Hardened forces `protect` in the worker whatever the scope says (the configuration service does not refuse `replace` yet); an `ipam` set is taken over (`take_over`) only where `Origin::may_replace` allows it; every other origin, and a CNAME at the name, is refused. A `dhcp` PTR belongs to the address and is replaced. Removal deletes the lease's A record, and the DHCID with the last address, only while the DHCID is the client's; a `dhcp` PTR goes when it points at the lease's name.
+- **Names IPAM manages** are the addresses with an IPAM address object that carries a DNS name (`ipam.address_ips`, `ipam.addresses`): such a lease gets no DDNS, and the row says so.
+- **Who writes A.** The lease row and the pending change carry the option 81 flags (`fqdn_flags`, serde default, no format change). The server writes the A record unless the scope allows `client_may_update_a` and the client cleared S or set N; then it writes the PTR only. The reply's option 81 is built from the scope's policy before the update runs: S when the server writes A (with O when it overrode the client), none of S, O and N when the client writes A, N with DDNS off.
+- **The zone switch** is `UpdatePolicy.dhcp: Option<bool>`; none follows the profile (Home and Lab allow, Standard and Hardened do not), read from the system settings at every batch. It applies to the forward and to the reverse zone.
+- **The outcome** is written to the lease row with the row's version as precondition and the leader fence: the names held, the DHCID, the refusal or failure in `last_error`, the time. The worker remembers per address what it wrote for which client, so names of a client that lost its address are removed even when the row already shows the next client. A refusal waits for the lease's next change; a failure after the retries waits 30 s. The outcomes count in `tenko_dhcp_ddns_total{outcome}` with `written`, `removed`, `refused`, `failed`, `skipped` and `dropped`.
+- **Audit.** The zone service audits each change set (`dns.record.change`, principal `system:dhcp`) and journals it; the record names the zone, not each lease's address, and the lease's history and outcome name the lease.
 
 ## Consequences
 

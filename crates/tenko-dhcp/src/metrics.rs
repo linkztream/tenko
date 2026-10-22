@@ -67,7 +67,7 @@ pub const PROBE_DURATION: Desc = Desc::histogram(
     1_000_000,
 );
 
-/// DDNS change sets, by outcome (`written`, `removed`, `refused`, `failed`).
+/// DDNS requests, by outcome (`written`, `removed`, `refused`, `failed`, `skipped`, `dropped`).
 pub const DDNS: Desc =
     Desc::counter("tenko_dhcp_ddns", "DHCP DDNS change sets").labels(&["outcome"]);
 

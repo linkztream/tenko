@@ -21,7 +21,8 @@ use std::net::Ipv4Addr;
 
 use tenko_core::dhcp::{OptionValue, SERVER_MANAGED_V4};
 
-use super::fqdn_flags_without_update;
+// WP8.3: the reply's option 81 says what DDNS does for the scope.
+use crate::ddns::flags::reply_flags;
 use crate::{
     image::{PoolImage, ScopeImage},
     v4::{EncodeError, Message, MessageBuilder, RelayAgentInfo, code},
@@ -154,7 +155,9 @@ pub fn options(
     }
     if let Some(fqdn) = &fqdn {
         // A name the ASCII form cannot carry is left out with the option.
-        let _ = builder.client_fqdn(fqdn_flags_without_update(fqdn), &fqdn.name());
+        // WP8.3: the flags of the scope's DDNS policy (RFC 4702 section 4).
+        let flags = reply_flags(&reply.levels.scope.ddns, fqdn.flags());
+        let _ = builder.client_fqdn(flags, &fqdn.name());
     }
     if let Some(info) = reply.relay {
         builder.relay_agent_info(info.as_bytes())?;

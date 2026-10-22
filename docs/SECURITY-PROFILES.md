@@ -61,6 +61,7 @@ Reading the matrix:
 | TGL-26 | QNAME minimisation | Relaxed | Relaxed | Relaxed (strict allowed) | Relaxed | 3 (Slice 10) | DNS-34 |
 | TGL-27 | Trust anchor signalling (RFC 8145) | On | On | Off | On | 3 (Slice 10) | DNS-13 |
 | TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
+| TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
 
 Notes:
 

@@ -9,6 +9,7 @@ Contents:
 9. [The engine](#9-the-engine)
 10. [The role](#10-the-role)
 12. [Reservations, the move step and observations](#12-reservations-the-move-step-and-observations)
+13. [DDNS](#13-ddns)
 2. [The model](#2-the-model)
 3. [Scopes and pools](#3-scopes-and-pools)
 4. [Options and the catalog](#4-options-and-the-catalog)
@@ -623,3 +624,84 @@ A client may decline at most `[dhcp.decline] limit` addresses per `window_secs` 
 
 M35 (plan section 6) is in `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md`: the offer delay for new addresses stays at most the cap and renewals are not delayed, and a squatter on the node's link is found in 20 of 20 tries, by ARP and by ICMP.
 What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).
+## 13. DDNS
+
+Tenko DHCP writes the names of its clients into the zones Tenko serves (DHCP-13, ADR 0020, plan section 2.9). The update is a change set through the zone service with the RRset origin `dhcp`; no RFC 2136 message and no TSIG key are involved, and TGL-09 (dynamic updates from external clients) does not govern it. Updates to Windows DNS or another server are Phase 4 (CONN-13, DNS-28). This section is for operators who turn DDNS on and for reviewers of `tenko_dhcp::ddns`.
+
+### 13.1 Turning it on
+
+DDNS needs the DNS module next to the DHCP module. Per scope, the DDNS settings (`ddns` of the scope, defaulting to the server's `dhcp.settings.ddns`):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `enabled` | off | Whether the server writes names for the scope's clients |
+| `forward_zone` | none | The zone the names go under; none: the zone whose apex is the scope's domain name (option 15), if Tenko serves it as a primary zone |
+| `reverse` | on | Whether PTR records are written, in the most specific primary zone Tenko serves that is a reverse zone of the address (plain or RFC 2317) |
+| `ttl` | none | The TTL of the records; none: a third of the lease time |
+| `conflict` | `protect` | `protect`: a name that belongs to another client is refused (RFC 4703); `replace`: the last client wins. Hardened always protects |
+| `client_may_update_a` | off | A client that asks to write its A record itself (option 81 with S clear, or N set) does so; the server writes the PTR only |
+| `legacy_clients` | on | Clients without option 81 get their option 12 host name ("update for legacy clients") |
+| `refuse_foreign` | off | A name outside the forward zone is refused instead of cut to its first label under the zone |
+
+Each zone decides whether it takes DHCP updates: the zone's update policy has `dhcp` (true, false, or unset to follow the security profile, P3-Q6).
+
+| Profile | A zone with `dhcp` unset | Name protection |
+|---|---|---|
+| Home | takes DHCP updates | per scope |
+| Standard | does not; set `dhcp: true` on the zone | per scope |
+| Hardened | does not; set `dhcp: true` on the zone | always (`replace` is treated as `protect`) |
+| Lab | takes DHCP updates | per scope |
+
+The rule applies to the forward zone and to the reverse zone alike. A refused zone shows on the lease as the reason and in `tenko_dhcp_ddns_total{outcome="refused"}`.
+
+### 13.2 Names
+
+The name of a lease, in this order:
+
+1. The name of option 81 (RFC 4702), lowercase. A single label goes under the forward zone (`laptop` becomes `laptop.lan.example.test`); a name below the zone stays as it is; a name outside the zone (or the apex itself) is cut to its first label under the zone, or refused with `refuse_foreign`.
+2. Without option 81, the host name of option 12, when `legacy_clients` is on; a host name with dots counts by its first label.
+3. Otherwise no name.
+
+Every label keeps to the host-name rules (letters, digits and hyphens, 1 to 63 octets, no hyphen at either end); a name with another label (an underscore, say) is refused rather than rewritten.
+
+### 13.3 What is written
+
+For a lease with a name, as soon as its commit is durable:
+
+| Record | Where | Data |
+|---|---|---|
+| A | the forward name | the lease's address |
+| DHCID | the forward name | RFC 4701: identifier type, digest type 1 (SHA-256), and the SHA-256 of the client's identifier followed by the name in wire form; the identifier is `htype` and `chaddr` (type 0), option 61 (type 1), or the DUID of an RFC 4361 option 61 (type 2) |
+| PTR | the reverse name of the address | the forward name |
+
+The A and DHCID sets are one change set in the forward zone; the PTR is a change set of the reverse zone, written at the same time. A forward name that is refused gets no PTR. Where the client writes its A record itself (`client_may_update_a`), only the PTR is written. The lease row keeps the option 81 flags the client sent (`fqdn_flags`) for this decision.
+
+The reply's option 81 says what the server does (RFC 4702 section 4): S when the server writes the A record (and O when that overrides the client's wish), none of S, O and N when the client writes it, N when DDNS is off for the scope. The reply leaves before the update runs, so a name refused later shows on the lease, not in the reply.
+
+### 13.4 Who may replace what
+
+| What is at the name | A and DHCID | PTR |
+|---|---|---|
+| nothing | written | written |
+| `dhcp`, the client's DHCID | replaced | replaced |
+| `dhcp`, another client's DHCID, or a `dhcp` A without one | refused (`protect`), taken over (`replace`) | replaced: the PTR belongs to the address |
+| `ipam` | taken over only where the zone's `may_replace_ipam` allows it, else refused | the same |
+| `manual`, `dynamic`, `transfer`, `dnssec`, `ad` | refused | refused |
+| a CNAME | refused | refused |
+
+An address that IPAM names (an IPAM address object with a DNS name, such as a `reserved` host's) gets no DDNS at all: the DNS actuator writes its records with the origin `ipam`.
+
+On release (a DHCPRELEASE or an operator's release), on expiry, and when a lease's name or client changes, the names the lease wrote are removed: the lease's A record (and the DHCID with the last address of the set) only while the DHCID at the name is still the client's, and a `dhcp` PTR that points at the lease's name. Another client's records and records of another origin are never touched. A client refused by name protection gets the name on its next renewal after the holder's names are gone.
+
+### 13.5 The worker
+
+The DDNS worker is the leader service `dhcp.ddns`, registered by the `dhcp` role (one per cluster; on one controller it runs at once). It follows `dhcp.leases` by a store watch, so every committed change reaches it after the commit and the DORA path is not involved: a client is never kept waiting for DNS, and a name appears a moment after the ACK. Each changed row becomes a request in a queue sized at start (`tenko_dhcp_ddns_queue` counts the waiting ones); the worker takes the requests in batches (the first change waits 100 ms for others to join, so that a burst of commits becomes a few change sets) and writes one change set per zone. A zone write that the store refuses is retried with a doubling pause (`[dhcp.ddns] retries`, default 5, and `backoff_ms`, default 1,000); a change set refused as a whole is applied lease by lease so one lease cannot hold up the others. A failed lease is tried again after 30 s; a refused one on its next change. A change of the DHCP configuration or of a zone makes the worker read every lease again, so turning DDNS on or allowing a zone takes effect for the leases already held.
+
+The outcome is written to the lease row (`ddns` in `GET /dhcp/leases/{addr}`): `forward` and `reverse` (the names held), `dhcid`, `last_error` (the refusal, the failure, or why there is no name, in English) and `updated`. The row is written with its version as precondition, so a newer commit of the lease is never overwritten. `tenko_dhcp_ddns_total{outcome}` counts `written`, `removed`, `refused`, `failed`, `skipped` (no name to write: IPAM names the address, the scope names no zone) and `dropped` (the queue was full; the rows are read again). Each change set is audited by the zone service (`dns.record.change`, principal `system:dhcp`) and journalled, so IXFR to secondaries carries it; a signed zone is signed again by the signer's incremental pass.
+
+### 13.6 Tests and measurements
+
+- `crates/tenko-dhcp/src/ddns/`: the RFC 4701 examples of section 3.6 for the three identifier types, the name rules, the reply flags.
+- `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, `replace` and the client that writes its own A record, Hardened's forced protection.
+- `crates/tenko/tests/acceptance_dhcp_ddns.rs` (E26 through the binary): a client with option 81 and a legacy client get their A, DHCID and PTR records served by the DNS role on ACK, a second client claiming the first one's name is refused, and the records go on DHCPRELEASE and on expiry. The lab rows of E26 (dhclient, Playwright) wait for WP7.6's lab.
+- M31 (the DDNS rate end to end): `bench/phase3-dhcp/scripts/run-m31-ddns.sh` with the load client `crates/tenko-dhcp/examples/ddns_load.rs`; results in `bench/phase3-dhcp/results/`.

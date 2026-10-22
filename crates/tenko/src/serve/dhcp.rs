@@ -69,6 +69,8 @@ pub(crate) struct Parts<'a> {
     pub(crate) store: Arc<dyn Store>,
     pub(crate) metrics: &'a Registry,
     pub(crate) leaders: &'a LeaderRegistry,
+    // WP8.3: the zone service the DDNS worker writes through; none without the DNS module.
+    pub(crate) zones: Option<Arc<tenko_dns::zone::ZoneService>>,
 }
 
 fn error(code: &str, message: impl Into<String>) -> StartError {
@@ -88,6 +90,40 @@ fn history_profile(profile: Profile) -> HistoryProfile {
 /// Whether the profile expects conflict detection and warns without a probe (TGL-16).
 fn probe_expected(profile: Profile) -> bool {
     profile == Profile::Hardened
+}
+
+// WP8.3: the DDNS worker with the profile's defaults of P3-Q6, read from the system
+// settings at every batch, and the retries of `[dhcp.ddns]`.
+fn ddns_service(
+    store: &Arc<dyn Store>,
+    zones: Arc<tenko_dns::zone::ZoneService>,
+    bootstrap: Profile,
+    section: &DhcpSection,
+) -> Arc<tenko_dhcp::ddns::DdnsService> {
+    use tenko_dhcp::ddns::DdnsProfile;
+    let profile: tenko_dhcp::ddns::ProfileSource = Arc::new(move |view| {
+        let profile = view
+            .get_typed(&SETTINGS, &())
+            .ok()
+            .flatten()
+            .map_or(bootstrap, |(settings, _)| settings.profile);
+        match profile {
+            Profile::Home => DdnsProfile::HOME,
+            Profile::Standard => DdnsProfile::STANDARD,
+            Profile::Hardened => DdnsProfile::HARDENED,
+            Profile::Lab => DdnsProfile::LAB,
+        }
+    });
+    Arc::new(tenko_dhcp::ddns::DdnsService::new(
+        Arc::clone(store),
+        zones,
+        profile,
+        tenko_dhcp::ddns::DdnsSettings {
+            retries: section.ddns.retries,
+            backoff: Duration::from_millis(section.ddns.backoff_ms),
+            ..tenko_dhcp::ddns::DdnsSettings::default()
+        },
+    ))
 }
 
 /// The listeners and the engine's settings from `[dhcp]`.
@@ -211,12 +247,18 @@ fn describe(node: &LocalNode, section: &DhcpSection) -> (String, String) {
 ///
 /// `start.dhcp.feed` when the store cannot be read, `start.dhcp.bind` when a listener
 /// cannot be bound.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the start steps in their order, each a few lines"
+)]
 pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartError> {
     let Parts {
         resolved,
         store,
         metrics,
         leaders,
+        // WP8.3: the zone service of the DDNS worker.
+        zones,
     } = parts;
     let section = &resolved.config.dhcp;
     dhcp_role::metrics::register(metrics);
@@ -292,6 +334,14 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         Arc::clone(&retention),
         PurgeSettings::default(),
     )));
+    // WP8.3: the DDNS worker `dhcp.ddns` (ADR 0020): it follows the lease rows and writes
+    // the names through the zone service; the profile's defaults of P3-Q6 are read from
+    // the system settings at every batch. Without the DNS module there is no DDNS.
+    if let Some(zones) = zones {
+        leaders.register(ddns_service(&store, zones, bootstrap, section));
+    } else {
+        tracing::info!("DDNS from DHCP needs the DNS module; the dhcp role writes no names");
+    }
     let stop = CancellationToken::new();
     let follower = tokio::spawn(follow_profile(
         Arc::clone(&store),

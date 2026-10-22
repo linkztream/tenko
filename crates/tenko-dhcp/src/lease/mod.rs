@@ -289,6 +289,9 @@ pub struct PendingChange {
     pub hostname: TextBytes,
     /// The name of option 81, as text.
     pub fqdn: TextBytes,
+    // WP8.3: the flags of option 81, for the DDNS worker.
+    /// The flags of option 81 as the client sent them.
+    pub fqdn_flags: Option<u8>,
     /// The relay.
     pub relay: Option<PendingRelay>,
     /// The fingerprint.
@@ -326,6 +329,8 @@ impl PendingChange {
             ends,
             hostname: TextBytes::default(),
             fqdn: TextBytes::default(),
+            // WP8.3: no option 81 flags until the engine sets them.
+            fqdn_flags: None,
             relay: None,
             fingerprint: None,
         }
@@ -403,6 +408,12 @@ impl PendingChange {
                 previous
                     .filter(|_| same_client)
                     .and_then(|held| held.fqdn.clone())
+            }),
+            // WP8.3: the flags go with the name they came with.
+            fqdn_flags: self.fqdn_flags.or_else(|| {
+                previous
+                    .filter(|_| same_client)
+                    .and_then(|held| held.fqdn_flags)
             }),
             ddns: previous
                 .filter(|_| same_client)

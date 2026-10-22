@@ -1884,6 +1884,8 @@ async fn start(
                 store: Arc::clone(&store_dyn),
                 metrics: warnings_state.metrics(),
                 leaders: &leaders,
+                // WP8.3: DDNS writes through the shared zone service (none without DNS).
+                zones: zones.clone(),
             })
             .await?;
             Ok((Some(role), summary))

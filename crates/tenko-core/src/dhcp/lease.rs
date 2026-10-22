@@ -245,6 +245,10 @@ pub struct Lease {
     /// The name the client sent in option 81, as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fqdn: Option<String>,
+    // WP8.3: the flags of option 81, so that the DDNS worker knows who writes the A record.
+    /// The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fqdn_flags: Option<u8>,
     /// The DDNS outcome.
     #[serde(default)]
     pub ddns: DdnsState,

@@ -132,6 +132,7 @@ fn lease(
         share: None,
         hostname: None,
         fqdn: None,
+        fqdn_flags: None,
         ddns: DdnsState::default(),
         fingerprint: None,
         relay: None,

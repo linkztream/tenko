@@ -19,9 +19,7 @@ use std::{
 
 use tenko_core::{
     dhcp::BindingState,
-    metrics::{
-        Collect, Counter, Desc, Gauge, Histogram, HistogramValue, Labels, Registry, Series, Value,
-    },
+    metrics::{Collect, Counter, Desc, Histogram, HistogramValue, Labels, Registry, Series, Value},
 };
 
 use super::{LocalNode, state_name};
@@ -232,20 +230,8 @@ static UTILIZATION: Utilization = Utilization;
 // WP8.5: conflict detection counts these two (`crate::conflict::metrics`).
 pub(crate) static CONFLICTS: Counter = Counter::new(families::CONFLICTS);
 pub(crate) static PROBE_DURATION: Histogram = Histogram::new(families::PROBE_DURATION);
-static DDNS_QUEUE: Gauge = Gauge::new(families::DDNS_QUEUE);
-
-/// `tenko_dhcp_ddns{outcome}`, no series until WP8.3 counts.
-struct Ddns;
-
-impl Collect for Ddns {
-    fn desc(&self) -> &Desc {
-        &families::DDNS
-    }
-
-    fn collect(&self, _out: &mut Vec<Series>) {}
-}
-
-static DDNS: Ddns = Ddns;
+// WP8.3: the DDNS worker counts `tenko_dhcp_ddns{outcome}` and sets the queue gauge.
+use crate::ddns::metrics::{OUTCOMES as DDNS, QUEUE as DDNS_QUEUE};
 
 /// Registers every family of the role with `registry`.
 pub fn register(registry: &Registry) {

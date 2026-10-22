@@ -35,6 +35,10 @@ bytes = { workspace = true }
 # WP8.5: the conflict probe borrows the probe role's pinger and raw ARP link (plan section
 # 2.7, P3-Q7); an internal crate already in the graph through tenko.
 tenko-scan = { workspace = true }
+# WP8.3: DDNS writes its change sets through the zone service of `tenko-dns` (ADR 0020)
+# and computes the DHCID with SHA-256 (RFC 4701); both crates are already in the graph.
+sha2 = { workspace = true }
+tenko-dns = { workspace = true }
 
 # WP7.5: the link-layer reply of direct mode (AF_PACKET), through the safe API the scanner's
 # raw methods use (WP3.14); Linux only, MIT OR Apache-2.0, already in the graph.

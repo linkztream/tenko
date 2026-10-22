@@ -693,6 +693,8 @@ fn describe(client: &Inbound<'_, '_>, change: &mut PendingChange) {
             len += label.len();
         }
         change.fqdn.set(&text[..len]);
+        // WP8.3: the flags tell the DDNS worker who writes the A record.
+        change.fqdn_flags = Some(fqdn.flags());
     }
     if let Some(info) = client.relay {
         let mut relay = PendingRelay {

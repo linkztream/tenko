@@ -237,6 +237,7 @@ mod tests {
             allowed: vec![signed.id, lan.id],
             require_tsig: true,
             may_replace_ipam: false,
+            dhcp: None,
         });
         assert!(check(&both, find, UpdateProfile::Standard, client, Some(&key)).is_ok());
         assert!(check(&both, find, UpdateProfile::Standard, outside, Some(&key)).is_ok());
@@ -250,6 +251,7 @@ mod tests {
             allowed: vec![lan.id],
             require_tsig: false,
             may_replace_ipam: false,
+            dhcp: None,
         });
         assert!(check(&unsigned, find, UpdateProfile::Home, client, None).is_ok());
         assert!(check(&unsigned, find, UpdateProfile::Hardened, client, None).is_err());
