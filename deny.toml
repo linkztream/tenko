@@ -23,6 +23,7 @@ unmaintained = "all"
 # `zip` is the import fixture generator in tenko-ipam's tests, which writes and reads archives in
 # memory. The ignores go when calamine and rust_xlsxwriter move to zip 9 (newest releases on
 # 2026-10-17: calamine 0.36.1 and rust_xlsxwriter 0.99.1 still require zip 8).
+# `.cargo/audit.toml` mirrors this list for cargo-audit; change both together.
 ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
 
 # The project licence is not decided yet (Apache-2.0 or AGPL-3.0, see docs/adr/), so the

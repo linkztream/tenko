@@ -130,23 +130,49 @@ fn status_without_a_running_scanner_shows_the_configuration_and_the_host() {
         .assert_stdout_contains("tcp_connect");
 }
 
+/// Runs a dry-run scan until `ready` accepts its output. The TLS hint waits a fixed 1.5 s for the
+/// listener of this test, a thread of this process; on a machine loaded by a full test run the
+/// thread can answer later than that, and the scan then reports the port open without the hint.
+/// A dry run changes nothing, so the next one starts from the same state; the last outcome is
+/// returned whether or not it was ready, and the caller's assertions say what is missing.
+fn scan_until(site: &Site, args: &[&str], ready: impl Fn(&Outcome) -> bool) -> Outcome {
+    let mut ran = site.scan(args);
+    for _ in 0..9 {
+        if ran.code != Some(0) || ready(&ran) {
+            break;
+        }
+        ran = site.scan(args);
+    }
+    ran
+}
+
 #[test]
 fn a_dry_run_reports_open_ports_with_the_tls_hint() {
     let port = tls_listener();
     let site = Site::new(&scan_config(port));
-    let ran = site.scan(&["run", "tcp-connect", "--dry-run"]);
+    let hint = format!("services 127.0.0.1 {port}/tls");
+    let ran = scan_until(&site, &["run", "tcp-connect", "--dry-run"], |ran| {
+        ran.stdout.contains(&hint)
+    });
     ran.assert_code(0)
         .assert_stdout_contains("tcp_connect: complete, 1 sighting(s), 1 probe(s)")
         .assert_stdout_contains(&format!("services 127.0.0.1 {port}/tls"))
         .assert_stdout_contains("dry run: nothing was queued");
-    let json = site.scan(&[
-        "run",
-        "tcp_connect",
-        "--dry-run",
-        "--json",
-        "--target",
-        "127.0.0.1",
-    ]);
+    let json = scan_until(
+        &site,
+        &[
+            "run",
+            "tcp_connect",
+            "--dry-run",
+            "--json",
+            "--target",
+            "127.0.0.1",
+        ],
+        |ran| {
+            ran.json()["batch"]["sightings"][0]["subject"]["data"]["tls_tcp"]
+                == serde_json::json!([port])
+        },
+    );
     json.assert_code(0);
     let body = json.json();
     assert_eq!(

@@ -231,9 +231,17 @@ check "no [dns] section" sh -c '! grep -q "^\[dns\]" /etc/tenko/tenko.toml'
 check "the old file is kept as .bak" sh -c 'ls /etc/tenko/tenko.toml.*.bak'
 check "the key is unchanged" sh -c '[ "$(sha256sum </etc/tenko/kek.key)" = "'"$key_before"'" ]'
 
-echo "-- --uninstall keeps the data and the key"
+echo "-- --uninstall keeps the data and the key, removes the updates layout"
+# round2: a layout as a running node leaves it (binaries and the two links), next to the store.
+mkdir -p /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/0.0.2
+printf 'binary' >/var/lib/tenko/updates/0.0.1/tenko
+printf 'binary' >/var/lib/tenko/updates/0.0.2/tenko
+ln -sfn /var/lib/tenko/updates/0.0.2 /var/lib/tenko/updates/current
+ln -sfn /var/lib/tenko/updates/0.0.1 /var/lib/tenko/updates/previous
 out="$(bash /i/install.sh --yes --uninstall 2>&1)"; rc=$?
 [ "$rc" = 0 ] && pass "uninstall exit 0" || { fail "uninstall exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
+check "updates/ removed" test ! -e /var/lib/tenko/updates
+printf '%s\n' "$out" | grep -q 'Removed /var/lib/tenko/updates' && pass "the closing lines say so" || fail "no updates line in the output"
 check "binary removed" test ! -e /usr/local/bin/tenko
 check "unit removed" test ! -e /etc/systemd/system/tenko.service
 check "drop-ins removed" test ! -e /etc/systemd/system/tenko.service.d

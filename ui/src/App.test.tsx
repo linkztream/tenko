@@ -57,10 +57,12 @@ describe("shell", () => {
   });
 
   it("shows the DNS page on a deep link into the DNS area", async () => {
+    // The zone page is a lazy chunk, and the DNS message pack loads with it: under a loaded full
+    // run the one-second default of findBy ran out before either arrived, so wait as the DHCP test does.
     const app = await renderApp(`/dns/zones/${DNS_IDS.zone.example}`, "signed-in");
-    const rail = await screen.findByRole("navigation", { name: "Main" });
+    const rail = await screen.findByRole("navigation", { name: "Main" }, { timeout: 5000 });
     expect(within(rail).getByRole("link", { name: /DNS/ }).classList.contains("active")).toBe(true);
-    expect(await screen.findByTestId("page-dns-zone")).toBeTruthy();
+    expect(await screen.findByTestId("page-dns-zone", {}, { timeout: 10000 })).toBeTruthy();
     expect(app.location()).toBe(`/dns/zones/${DNS_IDS.zone.example}`);
   });
 

@@ -221,6 +221,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The live metrics tiles of the start page keep a fixed height: the value, the sparkline, a two-line hint, the warning line and the list rows have reserved room and digits are tabular, so the grid below no longer moves when a sample changes.
 - The cache hit ratio and the answers tiles of the start page show their share over the last 30 seconds (summed hits over hits and misses, NOERROR over all answers) with a bar per 5-second bucket of the last minute, instead of a per-second ratio that was empty or jumped between 0 and 100 with few queries.
 - The updates page shows the settings navigation like the other settings pages; it had no way back to the rest of the settings except the sidebar, and its route loads the settings message pack so the navigation is translated.
+- `tenko upgrade layout` names the path of a binary that it keeps aside because the layout runs a newer version, and says whether that binary is byte-identical to the layout's copy of its own version or differs from it. `install.sh --uninstall` removes `<data directory>/updates`, which holds binaries and not data; a reinstall starts the layout afresh, so going back to the previous version is not possible after an uninstall. The installer's closing lines say that the setup token is a one-time token and how to print it again.
 
 ### Security
 

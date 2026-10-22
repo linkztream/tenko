@@ -1700,7 +1700,9 @@ summary() {
   if ((SETUP_DONE)); then
     printf '    %-14s %s\n' "Administrator:" "$ADMIN (sign in at the URL)"
   elif [[ -n "$SETUP_TOKEN" ]]; then
-    printf '    %-14s %s\n' "Setup token:" "$SETUP_TOKEN" "" "(changes at every start; print it again: runuser -u tenko -- tenko setup token --config ${CONFIG})"
+    # round2: the token is shown once here; say so and where it comes from again.
+    printf '    %-14s %s\n' "Setup token:" "$SETUP_TOKEN" "" "(a one-time token, valid while setup is open; it changes at every start)" \
+      "" "(print it again: runuser -u tenko -- tenko setup token --config ${CONFIG})"
   elif ((OPT_NO_START)); then
     printf '    %-14s %s\n' "Setup:" "after the first start: runuser -u tenko -- tenko setup token --config ${CONFIG}"
   fi
@@ -1751,6 +1753,12 @@ uninstall() {
   ((SYSTEMD)) && run systemctl daemon-reload
   [[ -e "$BIN" ]] && run rm -f "$BIN"
   ok "Removed the service and ${BIN}"
+  # round2: updates/ holds binaries (one per version, plus the links current and previous), not
+  # data; the next install's `tenko upgrade layout` recreates it from the installed binary.
+  if [[ -d "${DATA_DIR}/updates" ]] && ((!OPT_PURGE)); then
+    run rm -rf "${DATA_DIR}/updates"
+    ok "Removed ${DATA_DIR}/updates (the binaries of the installed versions; a reinstall starts the layout afresh, so going back to the previous version is not possible after an uninstall)"
+  fi
   if [[ "$(state_get resolved_stub_off)" == 1 ]]; then
     run rm -f "$RESOLVED_DROPIN"
     link="$(state_get resolv_conf_link)"

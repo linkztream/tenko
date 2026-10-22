@@ -1838,7 +1838,7 @@ that runs it:
 | This binary already runs from the layout | Nothing | `this binary runs from the layout (...)` |
 | No `current` link | Copies the binary to `updates/<version>/` and creates `current` | `created the layout with version 0.1.0` |
 | `current` names an older version | Copies the binary in, points `previous` at the old version and `current` at this one | `switched the layout from 0.1.0 to this binary, 0.2.0` |
-| `current` names this version or a newer one | Copies the binary in if it is missing and leaves `current` alone | `the layout runs 0.2.0; this binary (0.1.0) is not newer and was kept aside` |
+| `current` names this version or a newer one | Copies the binary in if it is missing and leaves `current` alone | `the layout runs 0.2.0; this binary (0.1.0) is not newer and was kept aside at /usr/local/bin/tenko: identical to the layout's copy` |
 
 It prints the path to run, `run: <data_dir>/updates/current/tenko`, and exits with status 0;
 a failure to write exits with status 1 and an invalid configuration with status 3. It moves

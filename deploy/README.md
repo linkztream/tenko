@@ -197,7 +197,11 @@ snapshot or a backup first, as for any upgrade.
 
 **Uninstall.** `bash install.sh --uninstall` stops and removes the unit, its drop-ins and
 `/usr/local/bin/tenko`, and keeps the data directory, `/etc/tenko` (the configuration and
-the key) and the account, so the same command installs it again with its data.
+the key) and the account, so the same command installs it again with its data. It removes
+`<data directory>/updates`, which holds binaries and not data (one per installed version and
+the links `current` and `previous`): the next install recreates it from the installed binary
+and starts the layout afresh, so after an uninstall there is no previous version to roll back
+to.
 `--uninstall --purge` also deletes those; without `--yes` it asks you to type `purge`.
 
 **Exit statuses** of `install.sh`: 0 done or nothing to change, 1 an unexpected failure, 2

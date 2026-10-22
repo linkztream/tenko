@@ -197,9 +197,51 @@ pub fn ensure_layout(
                 "switched the layout from {current} to this binary, {own}"
             ))
         }
-        Some(current) => Ok(format!(
-            "the layout runs {current}; this binary ({own}) is not newer and was kept aside"
-        )),
+        Some(current) => Ok(kept_aside_note(&current, own, exe, &layout.binary(own))),
+    }
+}
+
+// round2: the wording says where the binary was kept and whether it matches the layout's copy.
+/// The note for a binary that is not newer than the layout's `current`: where it was kept, and
+/// whether it is byte-identical to the layout's copy of its own version.
+fn kept_aside_note(
+    current: &ReleaseVersion,
+    own: &ReleaseVersion,
+    exe: &std::path::Path,
+    copy: &std::path::Path,
+) -> String {
+    let head = format!(
+        "the layout runs {current}; this binary ({own}) is not newer and was kept aside at {}",
+        exe.display()
+    );
+    match same_content(exe, copy) {
+        Ok(true) => format!("{head}: identical to the layout's copy"),
+        Ok(false) => format!(
+            "{head}: differs from the layout's copy ({}); {} kept for inspection",
+            copy.display(),
+            exe.display()
+        ),
+        Err(error) => format!("{head}: could not be compared with the layout's copy: {error}"),
+    }
+}
+
+/// Whether two files hold the same bytes.
+fn same_content(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let (mut a, mut b) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    if a.metadata()?.len() != b.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut left, mut right) = (vec![0_u8; 1 << 16], vec![0_u8; 1 << 16]);
+    loop {
+        let n = a.read(&mut left)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        b.read_exact(&mut right[..n])?;
+        if left[..n] != right[..n] {
+            return Ok(false);
+        }
     }
 }
 
@@ -229,6 +271,43 @@ mod tests {
         assert_eq!(layout.current(), Some(v2.clone()));
         let note = ensure_layout(&data, &layout.current_binary(), &v2).expect("runs");
         assert!(note.contains("runs from the layout"), "{note}");
+        std::fs::remove_dir_all(&data).expect("clean up");
+    }
+
+    #[test]
+    fn the_kept_aside_note_says_where_and_whether_the_copy_is_identical() {
+        let data = std::env::temp_dir().join(format!("tenko-kept-aside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(&data).expect("create");
+        let exe = data.join("bootstrap-binary");
+        std::fs::write(&exe, b"binary").expect("binary");
+        let v1: ReleaseVersion = "0.1.0".parse().expect("version");
+        let v2: ReleaseVersion = "0.2.0".parse().expect("version");
+        ensure_layout(&data, &exe, &v1).expect("create");
+        ensure_layout(&data, &exe, &v2).expect("adopt");
+        let layout = layout::Layout::new(&data);
+        let where_kept = format!("was kept aside at {}", exe.display());
+
+        let note = ensure_layout(&data, &exe, &v1).expect("identical");
+        assert!(note.contains(&where_kept), "{note}");
+        assert!(note.ends_with(": identical to the layout's copy"), "{note}");
+
+        std::fs::write(&exe, b"another binary").expect("changed");
+        let note = ensure_layout(&data, &exe, &v1).expect("differs");
+        let copy = layout.binary(&v1);
+        assert!(note.contains(&where_kept), "{note}");
+        assert!(
+            note.contains(&format!(
+                "differs from the layout's copy ({}); {} kept for inspection",
+                copy.display(),
+                exe.display()
+            )),
+            "{note}"
+        );
+
+        std::fs::write(&exe, b"binarY").expect("same length");
+        let note = ensure_layout(&data, &exe, &v1).expect("differs by content");
+        assert!(note.contains("differs from the layout's copy"), "{note}");
         std::fs::remove_dir_all(&data).expect("clean up");
     }
 

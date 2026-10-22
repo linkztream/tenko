@@ -200,28 +200,39 @@ fn listen(termination: Termination) -> TlsListen {
     }
 }
 
+/// Starts a server on ephemeral ports. The plain listener takes a UDP port from the system and
+/// then binds TCP on the same number, which another process's connection can hold already
+/// (under a loaded gate, `AddrInUse`): that one outcome starts again on a fresh port, any other
+/// error fails the test.
 async fn start(
     tls: TlsListen,
     certificates: Option<Arc<dyn ResolvesServerCert>>,
     log: Option<Arc<dyn QueryLogSink>>,
 ) -> Server {
-    let config = ServerConfig {
-        listen: vec!["127.0.0.1:0".parse().expect("address")],
-        udp: UdpSettings {
-            workers: 1,
-            ..UdpSettings::default()
-        },
-        tls: Some(tls),
-        ..ServerConfig::default()
-    };
-    let hooks = Hooks {
-        log,
-        certificates,
-        ..Hooks::default()
-    };
-    Server::start_authoritative(config, catalog(), hooks)
-        .await
-        .expect("start")
+    let mut attempts = 0;
+    loop {
+        let config = ServerConfig {
+            listen: vec!["127.0.0.1:0".parse().expect("address")],
+            udp: UdpSettings {
+                workers: 1,
+                ..UdpSettings::default()
+            },
+            tls: Some(tls.clone()),
+            ..ServerConfig::default()
+        };
+        let hooks = Hooks {
+            log: log.clone(),
+            certificates: certificates.clone(),
+            ..Hooks::default()
+        };
+        match Server::start_authoritative(config, catalog(), hooks).await {
+            Ok(server) => return server,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse && attempts < 20 => {
+                attempts += 1;
+            }
+            Err(error) => panic!("start: {error}"),
+        }
+    }
 }
 
 fn localhost() -> ServerName<'static> {
