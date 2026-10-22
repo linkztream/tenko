@@ -361,6 +361,12 @@ fn ddns_writes_names_on_ack_refuses_a_stolen_name_and_removes_names_on_release_a
             && a_answer(dns, "printer.lan.example.test", printer)
     });
     let to_answer = acked.elapsed();
+    // The PTR lands in the reverse zone a moment after the A record (the two zones are
+    // written in one change set, but the role serves each zone from its own image), so
+    // wait for it as for the A records.
+    until("the PTR", Duration::from_secs(10), || {
+        rcode_and_answers(&udp(dns, &ptr_name(laptop), TYPE_PTR)) == (NOERROR, 1)
+    });
     let ptr = udp(dns, &ptr_name(laptop), TYPE_PTR);
     assert_eq!(rcode_and_answers(&ptr), (NOERROR, 1));
     assert!(holds(&ptr, &wire_name("laptop.lan.example.test")));
