@@ -50,12 +50,28 @@ pub const fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+// WP10.0: the shipped anchors in --version.
+/// The text of `tenko --version`: the crate version, then the shipped root trust anchors and
+/// root hints (`tenko_dns::recursion::shipped::summary`).
+fn long_version() -> &'static str {
+    static TEXT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!(
+            "{} ({})",
+            env!("CARGO_PKG_VERSION"),
+            tenko_dns::recursion::shipped::summary()
+        )
+    });
+    &TEXT
+}
+// WP10.0: end.
+
 /// Tenko DDI: DNS, DHCP and IPAM in one binary, server and command-line client alike.
 #[derive(Debug, Parser)]
 #[command(
     name = "tenko",
     bin_name = "tenko",
     version,
+    long_version = long_version(), // WP10.0
     arg_required_else_help = true
 )]
 pub struct Cli {
@@ -543,6 +559,22 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::DisplayVersion);
         assert!(err.to_string().starts_with("tenko "), "output: {err}");
     }
+
+    // WP10.0: the shipped anchors in --version.
+    #[test]
+    fn long_version_names_the_shipped_anchors_and_hints() {
+        use tenko_dns::recursion::shipped::{ROOT_ANCHORS, ROOT_HINTS_DATE};
+
+        let text = long_version();
+        assert!(text.starts_with(env!("CARGO_PKG_VERSION")), "text: {text}");
+        for anchor in ROOT_ANCHORS.iter().filter(|a| a.valid_until.is_none()) {
+            assert!(text.contains(&anchor.key_tag.to_string()), "text: {text}");
+        }
+        assert!(text.contains(ROOT_HINTS_DATE), "text: {text}");
+        let err = parse(&["--version"]).expect_err("--version exits early");
+        assert!(err.to_string().contains(text), "output: {err}");
+    }
+    // WP10.0: end.
 
     #[test]
     fn bare_invocation_shows_help() {

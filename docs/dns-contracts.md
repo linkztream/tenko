@@ -14,6 +14,7 @@ Contents:
 8. [Node sync](#8-node-sync)
 9. [Engine contracts](#9-engine-contracts)
 10. [Data format](#10-data-format)
+11. [The recursive resolver (WP10.0)](#11-the-recursive-resolver-wp100)
 
 ## 1. Store tables
 
@@ -230,3 +231,61 @@ The tests that hold the contracts: `crates/tenko-dns/tests/alloc.rs` (no allocat
 ## 10. Data format
 
 The format of the data directory is 3 from WP4.0 on (an empty migration, docs/upgrades.md section 4): a format 2 binary cannot decode the `dns` namespace, the DNS object kinds or the system component `dns`. The tables later Phase 2 packages add in the namespace need no format of their own.
+
+## 11. The recursive resolver (WP10.0)
+
+The contracts of Slice 10 ([dns-recursion-plan.md](plans/dns-recursion-plan.md) section 3, [ADR 0021](adr/0021-recursive-resolution-and-validation.md)). Built at 501 or as references by WP10.0; the packages WP10.1 to WP10.5 build on them.
+
+**Model** (`tenko_core::dns::recursion`, re-exported from `tenko_core::dns`): `TrustAnchor { zone, keys: [AnchorKey], last_query, next_query }` with `AnchorKey { key_tag, algorithm, digest_type, data: Ds | Dnskey (wire form), state: AnchorState, source: Shipped { release } | Operator | Rfc5011, added_at, state_since, last_seen }` and `AnchorState = Start | AddPend | Valid | Missing | Revoked | Removed` (Valid and Missing are trusted); `NegativeTrustAnchor { id: NtaId, zone, expires_at, reason, created_by, created_at }` (not the root, a reason of 1 to 500 characters, at most seven days; `expiry_for` refuses a missing expiry under Hardened); `ResolutionMode = Recurse | Forward | Refuse` on `View.resolution` (absent: the profile's default); `RuleMode = Forward | Recurse` and `validate: bool` (true) on `ForwardRule` (a recurse rule names no upstream, no transport other than plain, no TLS name and always validates); `SecurityState = Secure | Insecure | Bogus | Indeterminate | Unvalidated` with `render(ClientFlags, ede) -> Rendering` (SERVFAIL for bogus unless CD, AD for secure with AD or DO, the DNSSEC records for DO only, the extended error); `ExtendedError` with the codes of RFC 8914 the resolver answers with as constants (1, 2, 3, 5 to 13, 15, 17, 18, 20 to 23, 27). Tests: `crates/tenko-core/tests/dns_recursion_model.rs` (unit and property tests).
+
+**Tables** (no format bump, additive): `dns.trust_anchors` (key: the zone, `DnsName`; value `TrustAnchor`), `dns.ntas` (key `NtaId`; value `NegativeTrustAnchor`), `dns.ntas.by_zone` (key (`DnsName`, `NtaId`); value `()`), all three in `tables::NODE_TABLES`, so in the `dns` role's `Subset::role_tables`. `dns.views` and `dns.forwarders` rows gain their fields with defaults; Phase 2 rows decode unchanged.
+
+**Routes** (`crates/tenko-api/src/routes/dns/recursion.rs`; every one answers 501 `sys.not_implemented` after its checks until WP10.2 and WP10.4 build it):
+
+| Endpoint | Check | Body and answer |
+|---|---|---|
+| `GET /dns/trust-anchors`, `GET /dns/trust-anchors/{zone}` | Read on `zone` (`dns.read`) | `Page<TrustAnchorItem>`, `TrustAnchorItem` |
+| `POST /dns/trust-anchors` | Create on `dns_key` (`dns.keys`, interactive) | `TrustAnchorAdd { zone, ds, dnskey, replace_root }`, 201 `TrustAnchorItem` |
+| `DELETE /dns/trust-anchors/{zone}` | Delete on `dns_key` (`dns.keys`, interactive) | 204 |
+| `POST /dns/trust-anchors/{zone}/refresh` | Execute on `dns_key` (`dns.keys`) | 202 `DnsCommandAccepted` |
+| `GET /dns/ntas` | Read on `zone` (`dns.read`) | `Page<NtaItem>` |
+| `POST /dns/ntas`, `DELETE /dns/ntas/{id}` | Create, Delete on `dns_key` (`dns.keys`, interactive) | `NtaCreate { zone, expires_at, reason }`, 201 `NtaItem`; 204 |
+| `GET /nodes/{id}/dns/recursion` | Read on the node and `zone` | `RecursionStatus` |
+| `POST /nodes/{id}/dns/recursion/prime` | Update on the node, Execute on `zone` | 202 `DnsCommandAccepted` |
+| `GET /nodes/{id}/dns/infra` | Read on the node and `zone` | `InfraParams { suffix, limit, cursor }`, `Page<InfraCutItem>` |
+| `POST /nodes/{id}/dns/infra/flush` | Update on the node, Execute on `zone` | `InfraFlushParams { suffix }`, `InfraFlushed { entries }` |
+
+A path spells the root `root` (a URL turns the segment `.` into a dot segment); a zone named `root` is written `root.`. `ForwarderCreate` and `ForwarderPatch` gain `mode` and `validate` (`upstreams` defaults to none), `ViewCreate` and `ViewPatch` gain `resolution` (and `default_resolution` on the patch); a request that sets them to anything but the defaults answers 501 until WP10.1 and WP10.4. `DnsCacheEntry` of `GET /nodes/{id}/dns/cache` loses `dnssec_ok` and `checking_disabled` and gains `state`, `ede` and `signature_expiry`.
+
+**Error codes**: `dns.trust_anchor.not_found` (404, `zone`), `dns.trust_anchor.invalid` (400, `field`, `reason`), `dns.trust_anchor.root_protected` (409, `zone`: removing or replacing the root's anchor outside Lab), `dns.nta.not_found` (404, `id`), `dns.nta.invalid` (400, `field`, `reason`: the root, no expiry under Hardened, over seven days, no reason), `dns.recursion.disabled` (409, `node`); `dns.forwarder.invalid` gains the reasons of a recurse rule.
+
+**Audit actions**: `dns.trust_anchor.add`, `dns.trust_anchor.remove`, `dns.trust_anchor.state` (by the trust anchor service, component `dns`), `dns.trust_anchor.refresh`, `dns.nta.create`, `dns.nta.delete`, `dns.nta.expire` (by the leader service), `dns.recursion.prime`, `dns.infra.flush`, `dns.recursion.unwanted_flush`.
+
+**Health findings** (`tenko_core::dns::findings`, in `GET /system/status`): `dns.recursion.priming_failed`, `dns.validation.clock`, `dns.trust_anchor.stale`, `dns.trust_anchor.pending` (informational), `dns.nta.active` (one per negative trust anchor), `dns.forwarder.strips_dnssec`.
+
+**Events** on the topic `dns`: `dns.trust_anchor` (a key's state, an anchor added or removed) and `dns.nta` (created, deleted, expired); the topic maps the `dns.` namespace, so no SSE change is needed.
+
+**Metric families** (`tenko_dns::metrics::RECURSION_ALL`; registered by the role when recursion is on, `register_recursion`; the trust anchor gauge by the controller, `register_trust_anchors`):
+
+| Family | Kind | Labels |
+|---|---|---|
+| `tenko_dns_recursion` | counter | `outcome` (`answered`, `servfail`, `budget`, `timeout`, `local`) |
+| `tenko_dns_recursion_duration_seconds` | histogram (50 µs to 2 s) | |
+| `tenko_dns_recursion_subqueries` | histogram (1 to 32, no unit) | |
+| `tenko_dns_authority_queries` | counter | `transport` (`udp`, `tcp`), `outcome` (`ok`, `referral`, `lame`, `timeout`, `unreachable`, `malformed`, `tc`, `badcookie`) |
+| `tenko_dns_authority_rtt_seconds` | histogram (50 µs to 2 s) | |
+| `tenko_dns_validation` | counter | `state` (`secure`, `insecure`, `bogus`, `indeterminate`), `reason` (bogus: `signature`, `expired`, `not_yet_valid`, `missing_key`, `missing_rrsig`, `nsec`, `cap`, `algorithm`) |
+| `tenko_dns_validation_verifications` | counter | |
+| `tenko_dns_infra_entries` | gauge, set before a scrape | `kind` (`zone`, `server`) |
+| `tenko_dns_denial` | counter | `kind` (`nxdomain`, `nodata`, `wildcard`, `nxdomain_cut`) |
+| `tenko_dns_failure_cache_hits` | counter | |
+| `tenko_dns_priming` | counter | `outcome` (`ok`, `failed`) |
+| `tenko_dns_trust_anchor_keys` | gauge, set at the scrape | `zone`, `state` |
+
+**Node commands** (local on the one node, as `dns.stats` is; Phase 5 sends them over the cluster channel): `dns.recursion.status`, `dns.recursion.prime`, `dns.infra.list`, `dns.infra.flush`.
+
+**Engine contracts** (`tenko_dns::recursion`): `Authority` (one exchange with one authority: 0x20, cookies, a fresh port, EDNS 1,232 with DO, TCP on TC, one retry without EDNS on FORMERR, one with the new cookie on BADCOOKIE) with the oracle `MemAuthority` scripted from zone data (referrals with NS, DS and glue, AA answers, CNAME, wildcards, NODATA and NXDOMAIN with the SOA and NSEC, and the quirks silent, FORMERR to EDNS, broken 0x20, TC on UDP, REFUSED, SERVFAIL, a server cookie; every query logged); `InfraCache` (zone cuts with their DS state and validated key set, name servers with the origin of each address, server capabilities, lameness, cookies, unwanted counts) with `MemInfra`; `Validator` (an answer and a `ChainContext` in, a `Validation` out; `KeyFetch` for the sub-queries; `ValidationCaps` of the KeyTrap class) with `Unvalidating`; `TrustAnchors` and `AnchorResolver` with `MemAnchors` (the shipped root anchor, negative trust anchors, scripted DNSKEY sets); `DenialCache` with `NoDenial`; `FailureCache` with `MemFailures` (5 s doubling to the bound); `WorkBudget` (32 queries, 8 restarts, depth 6, 3 attempts, 10 s, fetch policy 3, 2, 1, 0), `RecursionSettings`, `LOCAL_ZONES`. `tenko_dns::forward` gains the route of a `recurse` rule and `tenko_dns::pool::PoolKey::Delegation(CutId)`. The answer cache's key is view, type, class and name; its entry holds the state, the RRSIG positions, the extended error and the signature expiry (`cache::Verdict`, `Cache::insert_with`); `tests/alloc.rs` binds the secure, the plain and the bogus hit. The shipped anchors and hints are `tenko_dns::recursion::shipped` (generated by `scripts/root-anchors.mjs` from `crates/tenko-dns/anchors/`, checked by `tests/root_anchors.rs`; `tenko --version` names them).
+
+**Configuration** `[dns.recursion]` (`crates/tenko/src/config.rs`, `deploy/tenko.example.toml`): `enabled`, `hints`, `outbound`, `timeout_ms`, `budget_queries`, `budget_restarts`, `budget_depth`, `budget_ms`, `infra_entries`, `infra_ttl_secs`, `qname_minimisation`, `aggressive_nsec`, `denial_entries`, `failure_cache_max_secs`, `trust_anchor_signalling`, `key_sentinel`, `fresh_port_per_query`, `local_zones_except`, `rfc5011_hold_down_secs` (Lab only); read and validated, consumed from WP10.1 on.
+
+**CLI** (`crates/tenko/src/client/dns_recursion.rs`): `tenko dns trust-anchor list|add|remove|refresh`, `tenko dns nta list|add|remove`, `tenko dns recursion status|prime|infra|flush-infra`, `tenko dns forwarder create --recurse`, `tenko dns view create|update --resolution`.

@@ -576,11 +576,12 @@ describe("phases", () => {
   test("the phases name their file, plan and exit criteria, and an unknown phase is refused", () => {
     assert.equal(PHASES[1]?.trace, TRACE_PATH);
     assert.equal(PHASES[2]?.trace, "docs/plans/phase-2-trace.md");
-    assert.equal(PHASES[2]?.plan, "docs/plans/phase-2-plan.md");
+    assert.deepEqual(PHASES[2]?.plans, ["docs/plans/phase-2-plan.md"]);
     // WP7.0: Phase 3.
     assert.equal(PHASES[3]?.trace, "docs/plans/phase-3-trace.md");
-    assert.equal(PHASES[3]?.plan, "docs/plans/phase-3-plan.md");
-    assert.equal(PHASES[3]?.exits, "E22 to E32");
+    // WP10.0: the recursion plan is a second source of Phase 3's criteria.
+    assert.deepEqual(PHASES[3]?.plans, ["docs/plans/phase-3-plan.md", "docs/plans/dns-recursion-plan.md"]);
+    assert.equal(PHASES[3]?.exits, "E22 to E42");
     assert.throws(() => phaseConfig(4), /phase 4 is not traced/);
   });
 
@@ -601,37 +602,100 @@ describe("phases", () => {
     assert.match(text, /\| IAM-11 \| Must \| - \| - \| `crates\/tenko-dns\/src\/lib\.rs`<br>`docs\/plans\/phase-2-plan\.md` \|/);
   });
 
-  // WP7.0
-  test("the Phase 3 trace lists the Phase 3 rows and E22 to E32 of the Phase 3 plan", () => {
-    const root = makeTree({
-      ...TREE,
-      "docs/REQUIREMENTS.md": REQUIREMENTS.replace(
+  // WP7.0, WP10.0
+  describe("Phase 3 with two plans", () => {
+    const PHASE_3_PLAN = [
+      "# Phase 3 plan",
+      "",
+      "### 1.2 Exit criteria",
+      "",
+      "| # | Check | Requirements | Slice |",
+      "|---|---|---|---|",
+      "| E22 | perfdhcp numbers | DHCP-07 | 7 (loopback), 9 (real link) |",
+      "| E24 | Leases survive the node | DHCP-07 | 7 |",
+      "",
+    ].join("\n");
+    const RECURSION_PLAN = [
+      "# Recursion plan",
+      "",
+      "### 1.2 Exit criteria",
+      "",
+      "| # | Check | Requirements | Package |",
+      "|---|---|---|---|",
+      "| E33 | Validation from the lab root | DNS-13, DHCP-12 | WP10.2 |",
+      "| E35 | QNAME minimisation on the wire | DNS-34 | WP10.3 |",
+      "",
+    ].join("\n");
+    const REQUIREMENTS_3 = REQUIREMENTS.replace(
+      "| MIG-14 | Re-import. | 1 | Must |",
+      [
         "| MIG-14 | Re-import. | 1 | Must |",
-        "| MIG-14 | Re-import. | 1 | Must |\n| DHCP-07 | Leases. | 3 | Must |\n| DHCP-12 | Failover. | 3 | Must |",
-      ),
-      "docs/plans/phase-3-plan.md": [
-        "# Phase 3 plan",
-        "",
-        "### 1.2 Exit criteria",
-        "",
-        "| # | Check | Requirements | Slice |",
-        "|---|---|---|---|",
-        "| E22 | perfdhcp numbers | DHCP-07 | 7 (loopback), 9 (real link) |",
-        "| E24 | Leases survive the node | DHCP-07 | 7 |",
-        "",
+        "| DHCP-07 | Leases. | 3 | Must |",
+        "| DHCP-12 | Failover. | 3 | Must |",
+        "| DNS-13 | Validation. | 3 (Slice 10) | Should |",
+        "| DNS-34 | Minimisation. | 5 | Should |",
+        "| DNS-35 | Other. | 4 (Slice 11) | Could |",
       ].join("\n"),
+    );
+    const TREE_3 = {
+      ...TREE,
+      "docs/REQUIREMENTS.md": REQUIREMENTS_3,
+      "docs/plans/phase-3-plan.md": PHASE_3_PLAN,
+      "docs/plans/dns-recursion-plan.md": RECURSION_PLAN,
       "crates/tenko-dhcp/tests/crash.rs":
         "#[test]\nfn e24_no_lease_lost() {}\n\n/// DHCP-07.\n#[test]\nfn rows_are_committed() {}\n",
+      "crates/tenko-dns/tests/validate.rs":
+        "#[test]\nfn e33_lab_root_chain() {}\n\n/// DNS-13.\n#[test]\nfn chain_is_secure() {}\n",
+    };
+
+    test("the criteria of both plans are merged in ID order and rendered with both plans", () => {
+      const root = makeTree(TREE_3);
+      const trace = buildTrace(root, 3);
+      assert.equal(trace.phase, 3);
+      assert.deepEqual(trace.exits.map((e) => e.id), ["E22", "E24", "E33", "E35"]);
+      const text = renderTrace(trace);
+      assert.match(text, /^# Phase 3 requirement trace\n/);
+      assert.match(
+        text,
+        /the exit criteria E22 to E42 of `docs\/plans\/phase-3-plan\.md` and `docs\/plans\/dns-recursion-plan\.md`/,
+      );
+      assert.match(text, /\| E24 \| Leases survive the node \| DHCP-07 \| `crates\/tenko-dhcp\/tests\/crash\.rs::e24_no_lease_lost` \|/);
+      assert.match(text, /\| E33 \| Validation from the lab root \| DNS-13, DHCP-12 \| `crates\/tenko-dns\/tests\/validate\.rs::e33_lab_root_chain` \|/);
+      assert.match(text, /\| DHCP-07 \| Must \| `crates\/tenko-dhcp\/tests\/crash\.rs::rows_are_committed` \|/);
+      const order = ["| E22 |", "| E24 |", "| E33 |", "| E35 |"].map((m) => text.indexOf(m));
+      assert.deepEqual(order, [...order].sort((a, b) => a - b));
     });
-    const trace = buildTrace(root, 3);
-    assert.equal(trace.phase, 3);
-    assert.deepEqual(trace.requirements.map((r) => r.id), ["DHCP-07", "DHCP-12"]);
-    assert.deepEqual(trace.exits.map((e) => e.id), ["E22", "E24"]);
-    const text = renderTrace(trace);
-    assert.match(text, /^# Phase 3 requirement trace\n/);
-    assert.match(text, /the exit criteria E22 to E32 of `docs\/plans\/phase-3-plan\.md`/);
-    assert.match(text, /\| E24 \| Leases survive the node \| DHCP-07 \| `crates\/tenko-dhcp\/tests\/crash\.rs::e24_no_lease_lost` \|/);
-    assert.match(text, /\| DHCP-07 \| Must \| `crates\/tenko-dhcp\/tests\/crash\.rs::rows_are_committed` \|/);
+
+    test("a phase value such as \"3 (Slice 10)\" is Phase 3, a \"5\" is not", () => {
+      assert.equal(isInPhase("3 (Slice 10)", 3), true);
+      assert.equal(isInPhase("3 (Slice 10)", 1), false);
+      assert.equal(isInPhase("5", 3), false);
+      const root = makeTree(TREE_3);
+      assert.deepEqual(buildTrace(root, 3).requirements.map((r) => r.id), ["DHCP-07", "DHCP-12", "DNS-13"]);
+      const text = generate(root, 3);
+      assert.match(text, /\| DNS-13 \| Should \| `crates\/tenko-dns\/tests\/validate\.rs::chain_is_secure` \|/);
+      assert.doesNotMatch(text, /\| DNS-34 \| Should/);
+    });
+
+    test("an exit criterion ID in both plans is an error, exit code 2", () => {
+      const dup = RECURSION_PLAN.replace("| E35 |", "| E24 |");
+      const root = makeTree({ ...TREE_3, "docs/plans/dns-recursion-plan.md": dup });
+      assert.throws(
+        () => buildTrace(root, 3),
+        /exit criterion E24 is defined in both docs\/plans\/phase-3-plan\.md and docs\/plans\/dns-recursion-plan\.md/,
+      );
+      const r = run("--phase", "3", "--root", root);
+      assert.equal(r.code, 2);
+      assert.match(r.err, /exit criterion E24 is defined in both/);
+    });
+
+    test("a missing second plan exits 2 and names the file", () => {
+      const { "docs/plans/dns-recursion-plan.md": _omitted, ...rest } = TREE_3;
+      const root = makeTree(rest);
+      const r = run("--phase", "3", "--root", root);
+      assert.equal(r.code, 2);
+      assert.match(r.err, /docs\/plans\/dns-recursion-plan\.md not found/);
+    });
   });
 
   test("a generated trace is never a document of another phase", () => {

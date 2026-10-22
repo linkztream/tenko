@@ -67,6 +67,9 @@ export function seedResolver(ctx: DnsContext): ResolverState {
       {
         id: RESOLVER_IDS.forwarder.corp,
         suffix: "corp.example.test",
+        // WP10.0: a Phase 2 rule forwards and validates.
+        mode: "forward",
+        validate: true,
         transport: "plain",
         upstreams: [{ address: "192.0.2.10" }, { address: "192.0.2.11" }],
         tls_name: null,
@@ -164,7 +167,7 @@ function textOrNull(value: unknown): string | null {
 export function upstreamFigures(rule: MockForwarder): S["UpstreamFigures"][] {
   const transport = rule.transport ?? "plain";
   const port = transport === "dot" ? 853 : transport === "doh" ? 443 : 53;
-  return rule.upstreams.map((u, index) => {
+  return (rule.upstreams ?? []).map((u, index) => {
     const host = u.address.includes(":") ? `[${u.address}]` : u.address;
     const upstream = `${host}:${u.port ?? port}`;
     if (index === 0) {
@@ -206,6 +209,9 @@ export function createForwarder(state: ResolverState, ctx: DnsContext, body: Rec
   const rule: MockForwarder = {
     id: ctx.newId(),
     suffix: canonical(typeof body.suffix === "string" ? body.suffix : "") || ".",
+    // WP10.0: the Recurse mode and validate=false come with WP10.2 and WP10.4.
+    mode: "forward",
+    validate: true,
     transport,
     upstreams: checkUpstreams(body.upstreams, transport),
     tls_name: textOrNull(body.tls_name),

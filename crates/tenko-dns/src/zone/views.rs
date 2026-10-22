@@ -296,6 +296,8 @@ impl ZoneService {
             scope_map: new.scope_map,
             order: new.order,
             recursion: new.recursion,
+            // WP10.0: the profile's default until WP10.4 takes the field from the request.
+            resolution: None,
             description: trimmed(new.description),
         };
         check_own(&view)?;

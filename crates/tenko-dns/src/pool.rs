@@ -806,6 +806,10 @@ pub enum PoolKey {
     Stub(ZoneId),
     /// The servers a stub zone's NS set is asked from (its `source`).
     StubSource(ZoneId),
+    // WP10.0: the name servers of a zone cut the recursive resolver follows (recursion
+    // plan section 2.1), by the cut's identifier in the infrastructure cache.
+    /// The name servers of a delegation (a zone cut of the infrastructure cache).
+    Delegation(crate::recursion::CutId),
 }
 
 /// The sets held: each with the specs it was built from.

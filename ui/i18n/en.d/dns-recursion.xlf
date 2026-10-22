@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dns-recursion">
+      <unit id="dns.recursion.title">
+        <notes><note category="description">Title of the page of the recursive resolver and its entry in the browser tab.</note></notes>
+        <segment><source>Recursion</source></segment>
+      </unit>
+      <unit id="dns.nav.recursion">
+        <notes><note category="description">Entry of the DNS sub-navigation that leads to the recursive resolver.</note></notes>
+        <segment><source>Recursion</source></segment>
+      </unit>
+      <unit id="dns.recursion.coming.title">
+        <notes><note category="description">Heading of the recursion page while the recursive resolver is not built yet.</note></notes>
+        <segment><source>Coming with a later release</source></segment>
+      </unit>
+      <unit id="dns.recursion.coming.body">
+        <notes><note category="description">Explains on the recursion page that the recursive resolver is not available yet.</note></notes>
+        <segment><source>The recursive resolver, with its trust anchors, negative trust anchors, priming and infrastructure cache, comes with a later release of this slice.</source></segment>
+      </unit>
+      <unit id="dns.recursion.trust_anchors.title">
+        <notes><note category="description">Heading of the trust anchors, the keys that DNSSEC validation starts from.</note></notes>
+        <segment><source>Trust anchors</source></segment>
+      </unit>
+      <unit id="dns.recursion.trust_anchors.unavailable">
+        <notes><note category="description">Empty state of the trust anchors while the server cannot list them yet.</note></notes>
+        <segment><source>The trust anchors are not available yet.</source></segment>
+      </unit>
+      <unit id="dns.recursion.trust_anchors.none">
+        <notes><note category="description">Empty state of the trust anchors when the server lists none.</note></notes>
+        <segment><source>There are no trust anchors.</source></segment>
+      </unit>
+      <unit id="dns.recursion.trust_anchors.count">
+        <notes><note category="description">Number of zones with a trust anchor; {count} is a number.</note></notes>
+        <segment><source>{count, plural, one {# zone has a trust anchor.} other {# zones have a trust anchor.}}</source></segment>
+      </unit>
+      <unit id="dns.recursion.ntas.title">
+        <notes><note category="description">Heading of the negative trust anchors, names under which DNSSEC validation is switched off for a while.</note></notes>
+        <segment><source>Negative trust anchors</source></segment>
+      </unit>
+      <unit id="dns.recursion.root_hints">
+        <notes><note category="description">Label of the root hints, the addresses of the root servers that the resolver starts from.</note></notes>
+        <segment><source>Root hints</source></segment>
+      </unit>
+      <unit id="dns.recursion.priming.last">
+        <notes><note category="description">Label of the time the resolver last asked the root servers for the list of root servers.</note></notes>
+        <segment><source>Last priming</source></segment>
+      </unit>
+      <unit id="dns.recursion.infra.title">
+        <notes><note category="description">Heading of the infrastructure cache, what the resolver remembers about name servers.</note></notes>
+        <segment><source>Infrastructure cache</source></segment>
+      </unit>
+      <unit id="dns.sec.secure">
+        <notes><note category="description">DNSSEC validation state: the answer is proven genuine.</note></notes>
+        <segment><source>Secure</source></segment>
+      </unit>
+      <unit id="dns.sec.insecure">
+        <notes><note category="description">DNSSEC validation state: the zone is provably not signed.</note></notes>
+        <segment><source>Insecure</source></segment>
+      </unit>
+      <unit id="dns.sec.bogus">
+        <notes><note category="description">DNSSEC validation state: the signatures are wrong or missing, so the answer is refused.</note></notes>
+        <segment><source>Bogus</source></segment>
+      </unit>
+      <unit id="dns.sec.indeterminate">
+        <notes><note category="description">DNSSEC validation state: validation could not reach a result.</note></notes>
+        <segment><source>Indeterminate</source></segment>
+      </unit>
+      <unit id="dns.sec.unvalidated">
+        <notes><note category="description">DNSSEC validation state: nothing validated the answer.</note></notes>
+        <segment><source>Unvalidated</source></segment>
+      </unit>
+      <unit id="dns.resolution.recurse">
+        <notes><note category="description">How a view resolves names it does not serve: the resolver iterates from the root.</note></notes>
+        <segment><source>Recurse</source></segment>
+      </unit>
+      <unit id="dns.resolution.forward">
+        <notes><note category="description">How a view resolves names it does not serve: through the default forwarder.</note></notes>
+        <segment><source>Forward to the default forwarder</source></segment>
+      </unit>
+      <unit id="dns.resolution.refuse">
+        <notes><note category="description">How a view resolves names it does not serve: it refuses them.</note></notes>
+        <segment><source>Refuse</source></segment>
+      </unit>
+      <unit id="dns.resolution.default">
+        <notes><note category="description">How a view resolves names it does not serve: as the profile says.</note></notes>
+        <segment><source>Profile default</source></segment>
+      </unit>
+      <unit id="dns.fwd.mode.recurse">
+        <notes><note category="description">Mode of a forwarding rule that resolves the names under its suffix iteratively instead of forwarding them.</note></notes>
+        <segment><source>Recurse</source></segment>
+      </unit>
+      <unit id="dns.fwd.preset.dot">
+        <notes><note category="description">Preset in the forwarding rule dialog: one rule for all names to a resolver that is reached over DNS over TLS.</note></notes>
+        <segment><source>Forward everything to a DoT resolver</source></segment>
+      </unit>
+      <unit id="dns.cache.col.state">
+        <notes><note category="description">Column of the cache table: the DNSSEC validation state of the entry.</note></notes>
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dns.cache.ede">
+        <notes><note category="description">Extended DNS error (RFC 8914) of a bogus entry; {code} is the info code number.</note></notes>
+        <segment><source>EDE {code}</source></segment>
+      </unit>
+      <unit id="dns.cache.ede_hint">
+        <notes><note category="description">Explains the extended DNS error code shown next to the state of an entry; {code} is the info code number.</note></notes>
+        <segment><source>Extended DNS error {code} (RFC 8914), sent with the failure answer</source></segment>
+      </unit>
+      <unit id="dns.cache.signature_expiry">
+        <notes><note category="description">Explains when the signatures of a validated entry expire; {time} is a date and time.</note></notes>
+        <segment><source>Signatures valid until {time}</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

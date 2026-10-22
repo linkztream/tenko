@@ -562,6 +562,7 @@ fn view(recursion: Option<AclId>) -> View {
         scope_map: Vec::new(),
         order: 1,
         recursion,
+        resolution: None,
         description: None,
     }
 }

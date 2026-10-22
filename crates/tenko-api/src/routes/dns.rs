@@ -69,6 +69,10 @@
 //! | `POST /nodes/{id}/dns/log/stop` | `dns.write` | Stop a node's DNS query log |
 //! | `POST /nodes/{id}/dns/log/start` | `dns.write` | Start a node's DNS query log again |
 //!
+//! The recursive resolver's routes (WP10.0: trust anchors, negative trust anchors, the
+//! node's recursion status, priming and infrastructure cache) are in `dns/recursion.rs`
+//! with their own table.
+//!
 //! # Authorization
 //!
 //! The scopes are those of ADR 0017 in the roles of ADR 0015 (`tenko_core::dns::DnsScope`):
@@ -89,6 +93,9 @@ mod lists;
 mod model;
 mod nodes;
 mod records;
+// WP10.0: the recursive resolver's routes (trust anchors, negative trust anchors, the node's
+// recursion status and infrastructure cache).
+mod recursion;
 // WP6.1: the two transfer routes.
 mod transfer;
 // WP6.4: the view routes.
@@ -97,6 +104,9 @@ mod zones;
 
 #[cfg(test)]
 mod tests;
+// WP10.0: the tests of the recursive resolver's routes.
+#[cfg(test)]
+mod recursion_tests;
 
 use std::sync::Arc;
 
@@ -137,6 +147,14 @@ pub use model::{
     RolloverRequest, RrSetItem, TransferStatus, UdpWorkerItem, ViewCreate, ViewItem, ViewPatch,
     ZoneCreate, ZoneFileImport, ZoneFileImportReport, ZoneItem, ZonePatch,
 };
+
+// WP10.0: the recursive resolver.
+pub use model::{
+    AnchorKeyState, InfraAddressItem, InfraCutItem, InfraFlushParams, InfraFlushed, InfraParams,
+    InfraServerItem, InfraSizes, NtaCreate, NtaItem, PrimingItem, RecursionCounters,
+    RecursionStatus, RootServerItem, TrustAnchorAdd, TrustAnchorItem,
+};
+// WP10.0: end.
 
 use crate::{problem::ApiError, state::AppState};
 
@@ -222,6 +240,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .merge(view_and_forwarder_routes())
         .merge(acl_key_and_list_routes())
         .merge(node_routes())
+        // WP10.0: the recursive resolver.
+        .merge(recursion::routes())
 }
 
 // The registration is split into small functions that are never inlined: the server builds

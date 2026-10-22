@@ -1716,7 +1716,7 @@ export interface paths {
         put?: never;
         /**
          * Create a forwarding rule
-         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates.
+         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and write nothing.
          */
         post: operations["create_dns_forwarder"];
         delete?: never;
@@ -1748,7 +1748,7 @@ export interface paths {
         head?: never;
         /**
          * Change a forwarding rule
-         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view.
+         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and change nothing.
          */
         patch: operations["update_dns_forwarder"];
         trace?: never;
@@ -1893,6 +1893,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dns/ntas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the negative trust anchors
+         * @description Scope: `dns.read`. The negative trust anchors (RFC 7646) that have not expired, by zone: names at or below the zone are `insecure` instead of `bogus` while one lives.
+         */
+        get: operations["list_dns_ntas"];
+        put?: never;
+        /**
+         * Create a negative trust anchor
+         * @description Scope: `dns.keys`, in an interactive session. The expiry is at most seven days ahead and required under the Hardened profile; the reason is shown in the warnings of `GET /system/status` while the anchor lives. Audited as `dns.nta.create`.
+         */
+        post: operations["create_dns_nta"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/ntas/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a negative trust anchor
+         * @description Scope: `dns.keys`, in an interactive session. Ends the anchor before its expiry; audited as `dns.nta.delete`.
+         */
+        delete: operations["delete_dns_nta"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/trust-anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the trust anchors
+         * @description Scope: `dns.read`. One row per zone: the root (the shipped anchors and what RFC 5011 made of them) and the anchors an operator added for private zones, each with its keys, their RFC 5011 state and source, and the times of the last and the next query.
+         */
+        get: operations["list_dns_trust_anchors"];
+        put?: never;
+        /**
+         * Add a trust anchor for a zone
+         * @description Scope: `dns.keys`, in an interactive session. Adds a key, as a DS or a DNSKEY in presentation form, to the zone's trust anchor (creating it); the key is Valid at once and its source is the operator. The root is added to only with `replace_root` and only under the Lab profile. Audited as `dns.trust_anchor.add`.
+         */
+        post: operations["add_dns_trust_anchor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/trust-anchors/{zone}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the trust anchor of a zone
+         * @description Scope: `dns.read`. The root zone is written `.`.
+         */
+        get: operations["get_dns_trust_anchor"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove the trust anchor of a zone
+         * @description Scope: `dns.keys`, in an interactive session. Names under the zone are validated against the next anchor above it, or are `indeterminate` when none applies. The root's anchor is removed only under the Lab profile. Audited as `dns.trust_anchor.remove`.
+         */
+        delete: operations["remove_dns_trust_anchor"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dns/trust-anchors/{zone}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run RFC 5011 for a zone now
+         * @description Scope: `dns.keys`. Asks the zone's DNSKEY set now instead of at the next refresh interval and applies RFC 5011 to the answer; audited as `dns.trust_anchor.refresh`. The answer is the recorded command; the key states follow through the `dns` events.
+         */
+        post: operations["refresh_dns_trust_anchor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dns/views": {
         parameters: {
             query?: never;
@@ -1908,7 +2020,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DNS view
-         * @description Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list.
+         * @description Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list. `resolution` (`recurse`, `forward` or `refuse`) says how the view's clients get names outside the zones and the forwarding rules; until the resolver is built, a value answers 501 and writes nothing.
          */
         post: operations["create_dns_view"];
         delete?: never;
@@ -1940,7 +2052,7 @@ export interface paths {
         head?: never;
         /**
          * Change a DNS view
-         * @description Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it.
+         * @description Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it. `resolution` sets how the view's clients get names outside the zones and the forwarding rules and `default_resolution` clears it; until the resolver is built, either answers 501 and changes nothing.
          */
         patch: operations["update_dns_view"];
         trace?: never;
@@ -3110,6 +3222,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/dns/infra": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List what a node's infrastructure cache holds
+         * @description Scope: `dns.read`. A page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time, EDNS capability, TCP-only and lame flags) and the DS state. `suffix` keeps the cuts at or below it. The cuts reveal which zones the clients asked about, so the read is a node command and recorded in the node's commands.
+         */
+        get: operations["list_node_dns_infra"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns/infra/flush": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Flush a node's infrastructure cache
+         * @description Scope: `dns.write`. Issues a node command that drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. Audited as `dns.infra.flush`.
+         */
+        post: operations["flush_node_dns_infra"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/dns/log": {
         parameters: {
             query?: never;
@@ -3164,6 +3316,46 @@ export interface paths {
          * @description Scope: `dns.write`. Issues the node command `dns.log.stop`, the kill switch: the node logs no query until the log is started again, also after a restart. The files already written stay until their retention removes them. Recorded in the node's commands and audited as `dns.log.stop`. 409 when the node's query log is off in its settings.
          */
         post: operations["stop_node_dns_log"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns/recursion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the recursive resolver of a node
+         * @description Scope: `dns.read`. Whether the resolver runs, the source and date of the root hints, the last priming and its outcome, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache, the counters since the role started, the trust anchor keys with their state, and what is wrong (`priming_failed`, `clock`, `trust_anchor_stale`).
+         */
+        get: operations["get_node_dns_recursion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/dns/recursion/prime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prime a node's resolver now
+         * @description Scope: `dns.write`. Issues a node command that asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; audited as `dns.recursion.prime`. The outcome shows in the status.
+         */
+        post: operations["prime_node_dns_recursion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5175,6 +5367,77 @@ export interface components {
             tags?: components["schemas"]["Tag"][];
             vlan?: components["schemas"]["VlanId"] | null;
         };
+        /** @description The key material of a trust anchor key, in wire form. */
+        AnchorData: {
+            /** @enum {string} */
+            kind: "ds";
+            /** @description The record data. */
+            rdata: string;
+        } | {
+            /** @enum {string} */
+            kind: "dnskey";
+            /** @description The record data. */
+            rdata: string;
+        };
+        /** @description One key of a trust anchor. */
+        AnchorKey: {
+            /** @description When it was added. */
+            added_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description The DNSSEC algorithm number.
+             */
+            algorithm: number;
+            /** @description The key material. */
+            data: components["schemas"]["AnchorData"];
+            /**
+             * Format: int32
+             * @description The DS digest type; present exactly for a DS.
+             */
+            digest_type?: number | null;
+            /**
+             * Format: int32
+             * @description The key tag (RFC 4034 appendix B).
+             */
+            key_tag: number;
+            last_seen?: components["schemas"]["Timestamp"] | null;
+            /** @description Where it came from. */
+            source: components["schemas"]["AnchorSource"];
+            /** @description The RFC 5011 state. */
+            state: components["schemas"]["AnchorState"];
+            /** @description When it entered its state (the add hold-down counts from here). */
+            state_since: components["schemas"]["Timestamp"];
+        };
+        /** @description One key of a trust anchor in the node's status. */
+        AnchorKeyState: {
+            /**
+             * Format: int32
+             * @description The key tag.
+             */
+            key_tag: number;
+            /** @description The key's RFC 5011 state. */
+            state: components["schemas"]["AnchorState"];
+            /** @description The zone. */
+            zone: components["schemas"]["DnsName"];
+        };
+        /** @description Where a trust anchor key came from. */
+        AnchorSource: {
+            /** @enum {string} */
+            kind: "shipped";
+            /** @description The release that shipped it (the crate version). */
+            release: string;
+        } | {
+            /** @enum {string} */
+            kind: "operator";
+        } | {
+            /** @enum {string} */
+            kind: "rfc5011";
+        };
+        /**
+         * @description The RFC 5011 state of a trust anchor key (RFC 5011 section 4).
+         * @enum {string}
+         */
+        AnchorState: "start" | "add_pend" | "valid" | "missing" | "revoked" | "removed";
         /** Format: uuid */
         ApiTokenId: string;
         /** @description The answer of `POST /imports/{id}/apply`. */
@@ -7264,10 +7527,11 @@ export interface components {
         };
         /** @description One entry of a node's DNS cache: the answer to one question in one view. */
         DnsCacheEntry: {
-            /** @description Asked with the CD bit. */
-            checking_disabled: boolean;
-            /** @description Asked with the DO bit: the entry holds the signatures. */
-            dnssec_ok: boolean;
+            /**
+             * Format: int32
+             * @description The extended DNS error (RFC 8914) a bogus entry is answered with.
+             */
+            ede?: number | null;
             /**
              * Format: int32
              * @description Answers from the entry since it was stored.
@@ -7285,11 +7549,17 @@ export interface components {
              *     answer.
              */
             records: components["schemas"]["RecordData"][];
+            signature_expiry?: components["schemas"]["Timestamp"] | null;
             /**
              * @description Expired but within the stale window: it answers only when the upstreams fail
              *     (RFC 8767).
              */
             stale: boolean;
+            /**
+             * @description The validation state: `secure`, `insecure`, `bogus`, `indeterminate`, or
+             *     `unvalidated` when nothing validated the answer.
+             */
+            state: components["schemas"]["SecurityState"];
             /**
              * Format: int32
              * @description Seconds the entry stays fresh; 0 once it is stale.
@@ -8026,14 +8296,21 @@ export interface components {
             description?: string | null;
             /** @description Identifier. */
             id: components["schemas"]["ForwardRuleId"];
+            /** @description Forward to the upstreams, or resolve the names under the suffix iteratively. */
+            mode?: components["schemas"]["RuleMode"];
             /** @description The names the rule covers. */
             suffix: components["schemas"]["DnsName"];
             /** @description The name in the upstreams' certificates, for DoT and DoH. */
             tls_name?: string | null;
             /** @description How they are reached. */
             transport?: components["schemas"]["ForwardTransport"];
-            /** @description The upstreams, 1 to 16. */
-            upstreams: components["schemas"]["Upstream"][];
+            /** @description The upstreams, 1 to 16; none for a rule of mode `recurse`. */
+            upstreams?: components["schemas"]["Upstream"][];
+            /**
+             * @description Validate the upstreams' answers with DNSSEC (REC-Q3); `false` trusts them as Phase 2
+             *     did. Only a `forward` rule may switch it off.
+             */
+            validate?: boolean;
             view?: components["schemas"]["ViewId"] | null;
         };
         /** Format: uuid */
@@ -8047,14 +8324,20 @@ export interface components {
         ForwarderCreate: {
             /** @description Free text. */
             description?: string | null;
+            mode?: components["schemas"]["RuleMode"] | null;
             /** @description The names the rule covers; `.` for the default forwarder. */
             suffix: components["schemas"]["DnsName"];
             /** @description The certificate name of DoT and DoH upstreams. */
             tls_name?: string | null;
             /** @description How they are reached. */
             transport?: components["schemas"]["ForwardTransport"];
-            /** @description The upstreams. */
-            upstreams: components["schemas"]["Upstream"][];
+            /** @description The upstreams, 1 to 16; none for a rule of mode `recurse`. */
+            upstreams?: components["schemas"]["Upstream"][];
+            /**
+             * @description Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`
+             *     answers 501.
+             */
+            validate?: boolean | null;
             view?: components["schemas"]["ViewId"] | null;
         };
         /** @description A forwarding rule as the API reads it. */
@@ -8073,12 +8356,15 @@ export interface components {
             all_views?: boolean;
             /** @description Free text; an empty string clears it. */
             description?: string | null;
+            mode?: components["schemas"]["RuleMode"] | null;
             suffix?: components["schemas"]["DnsName"] | null;
             /** @description The certificate name; an empty string clears it. */
             tls_name?: string | null;
             transport?: components["schemas"]["ForwardTransport"] | null;
             /** @description The upstreams. */
             upstreams?: components["schemas"]["Upstream"][] | null;
+            /** @description Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501. */
+            validate?: boolean | null;
             view?: components["schemas"]["ViewId"] | null;
         };
         /** @description DNS name */
@@ -8481,6 +8767,76 @@ export interface components {
             state: components["schemas"]["ImportState"];
             /** @description The targets the mapping step offers (custom fields included). */
             targets: components["schemas"]["TargetInfo"][];
+        };
+        /** @description One address of an authority server in the infrastructure cache. */
+        InfraAddressItem: {
+            /** @description The address. */
+            address: string;
+            /** @description Whether the server speaks EDNS; absent while unknown. */
+            edns?: boolean | null;
+            /** @description The server is lame for the zone. */
+            lame: boolean;
+            /** @description Where the address was learned: `glue`, `sibling_glue` or `authoritative`. */
+            origin: string;
+            /**
+             * Format: double
+             * @description The smoothed round-trip time in milliseconds; absent before the first answer.
+             */
+            srtt_ms?: number | null;
+            /** @description The server answers only over TCP. */
+            tcp_only: boolean;
+            /**
+             * Format: int32
+             * @description Seconds the address stays valid.
+             */
+            ttl: number;
+        };
+        /** @description One zone cut of a node's infrastructure cache. */
+        InfraCutItem: {
+            /** @description Whether the zone is signed: `unknown`, `secure`, `insecure` or `bogus`. */
+            ds: string;
+            /** @description Its authority servers. */
+            servers: components["schemas"]["InfraServerItem"][];
+            /**
+             * Format: int32
+             * @description Seconds the cut stays valid.
+             */
+            ttl: number;
+            /** @description The zone the cut starts. */
+            zone: components["schemas"]["DnsName"];
+        };
+        /** @description The answer of `POST /nodes/{id}/dns/infra/flush`. */
+        InfraFlushed: {
+            /**
+             * Format: int64
+             * @description The zone cuts dropped.
+             */
+            entries: number;
+        };
+        /** @description One authority server of a zone cut with its addresses. */
+        InfraServerItem: {
+            /** @description Its addresses. */
+            addresses: components["schemas"]["InfraAddressItem"][];
+            /** @description The server's name. */
+            name: components["schemas"]["DnsName"];
+        };
+        /** @description The sizes of a node's infrastructure cache. */
+        InfraSizes: {
+            /**
+             * Format: int64
+             * @description Server names held.
+             */
+            names: number;
+            /**
+             * Format: int64
+             * @description Authority servers held.
+             */
+            servers: number;
+            /**
+             * Format: int64
+             * @description Zone cuts held.
+             */
+            zones: number;
         };
         /** @description How this installation can install a new version. */
         InstallAbility: {
@@ -10853,6 +11209,24 @@ export interface components {
          * @enum {string}
          */
         MoveTimeoutSource: "request" | "lease" | "default";
+        /**
+         * @description A negative trust anchor (RFC 7646, `dns.ntas`): names at or below `zone` are
+         *     `insecure` instead of `bogus` until it expires.
+         */
+        NegativeTrustAnchor: {
+            /** @description When. */
+            created_at: components["schemas"]["Timestamp"];
+            /** @description Who created it. */
+            created_by: components["schemas"]["Principal"];
+            /** @description When it stops applying, at most seven days after it was created. */
+            expires_at: components["schemas"]["Timestamp"];
+            /** @description Identifier. */
+            id: components["schemas"]["NtaId"];
+            /** @description Why it exists, 1 to 500 characters. */
+            reason: string;
+            /** @description The zone; never the root. */
+            zone: components["schemas"]["DnsName"];
+        };
         /** @description A neighbour of a node across one edge. */
         Neighbour: {
             /** @description The edge. */
@@ -11192,6 +11566,24 @@ export interface components {
              * @description The port.
              */
             port?: number;
+        };
+        /** @description `POST /dns/ntas`. */
+        NtaCreate: {
+            expires_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Why it exists, 1 to 500 characters. */
+            reason: string;
+            /**
+             * @description The zone; never the root. Names at or below it are `insecure` instead of `bogus`
+             *     while the anchor lives.
+             */
+            zone: components["schemas"]["DnsName"];
+        };
+        /** Format: uuid */
+        NtaId: string;
+        /** @description A negative trust anchor as the API reads it. */
+        NtaItem: components["schemas"]["NegativeTrustAnchor"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
         };
         /**
          * @description The kind of an object: one variant per entity.
@@ -12287,10 +12679,11 @@ export interface components {
         Page_DnsCacheEntry: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
-                /** @description Asked with the CD bit. */
-                checking_disabled: boolean;
-                /** @description Asked with the DO bit: the entry holds the signatures. */
-                dnssec_ok: boolean;
+                /**
+                 * Format: int32
+                 * @description The extended DNS error (RFC 8914) a bogus entry is answered with.
+                 */
+                ede?: number | null;
                 /**
                  * Format: int32
                  * @description Answers from the entry since it was stored.
@@ -12308,11 +12701,17 @@ export interface components {
                  *     answer.
                  */
                 records: components["schemas"]["RecordData"][];
+                signature_expiry?: components["schemas"]["Timestamp"] | null;
                 /**
                  * @description Expired but within the stale window: it answers only when the upstreams fail
                  *     (RFC 8767).
                  */
                 stale: boolean;
+                /**
+                 * @description The validation state: `secure`, `insecure`, `bogus`, `indeterminate`, or
+                 *     `unvalidated` when nothing validated the answer.
+                 */
+                state: components["schemas"]["SecurityState"];
                 /**
                  * Format: int32
                  * @description Seconds the entry stays fresh; 0 once it is stale.
@@ -12485,6 +12884,34 @@ export interface components {
                 site?: components["schemas"]["SiteId"] | null;
                 /** @description Owning tenant. */
                 tenant: components["schemas"]["TenantId"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_InfraCutItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description Whether the zone is signed: `unknown`, `secure`, `insecure` or `bogus`. */
+                ds: string;
+                /** @description Its authority servers. */
+                servers: components["schemas"]["InfraServerItem"][];
+                /**
+                 * Format: int32
+                 * @description Seconds the cut stays valid.
+                 */
+                ttl: number;
+                /** @description The zone the cut starts. */
+                zone: components["schemas"]["DnsName"];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -12805,6 +13232,25 @@ export interface components {
                  */
                 vrf?: string | null;
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_NtaItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["NegativeTrustAnchor"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -13390,6 +13836,25 @@ export interface components {
                 /** @description The special scopes of a scoped token. */
                 scopes?: components["schemas"]["TokenScope"][];
             }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_TrustAnchorItem: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: (components["schemas"]["TrustAnchor"] & {
+                /** @description The store revision of the row. */
+                revision: components["schemas"]["Revision"];
+            })[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -14018,6 +14483,13 @@ export interface components {
             /** @description The stable code of the last failure. */
             last_error?: string | null;
             last_success?: components["schemas"]["Timestamp"] | null;
+        };
+        /** @description The last priming of a node's resolver. */
+        PrimingItem: {
+            /** @description When the priming ended. */
+            at: components["schemas"]["Timestamp"];
+            /** @description `ok`, or `failed` when no server of the root hints answered. */
+            outcome: string;
         };
         /** @description Who performs an action. */
         Principal: {
@@ -15243,6 +15715,74 @@ export interface components {
             /** @description The codes. */
             codes: components["schemas"]["SecretString"][];
         };
+        /** @description What a node's resolver did since the role started. */
+        RecursionCounters: {
+            /**
+             * Format: int64
+             * @description Client queries answered by recursion.
+             */
+            answered: number;
+            /**
+             * Format: int64
+             * @description Answers validated `bogus`.
+             */
+            bogus: number;
+            /**
+             * Format: int64
+             * @description Client queries that ran out of budget.
+             */
+            budget: number;
+            /**
+             * Format: int64
+             * @description Answers for which no trust anchor applied (`indeterminate`).
+             */
+            indeterminate: number;
+            /**
+             * Format: int64
+             * @description Answers validated `insecure`.
+             */
+            insecure: number;
+            /**
+             * Format: int64
+             * @description Client queries answered from local data.
+             */
+            local: number;
+            /**
+             * Format: int64
+             * @description Answers validated `secure`.
+             */
+            secure: number;
+            /**
+             * Format: int64
+             * @description Client queries answered SERVFAIL.
+             */
+            servfail: number;
+            /**
+             * Format: int64
+             * @description Client queries that timed out.
+             */
+            timeout: number;
+        };
+        /** @description `GET /nodes/{id}/dns/recursion`: the recursive resolver of a node. */
+        RecursionStatus: {
+            /** @description The counters since the role started. */
+            counters: components["schemas"]["RecursionCounters"];
+            /** @description The resolver runs on the node. */
+            enabled: boolean;
+            /** @description The date of the hints (`2026-01-31`). */
+            hints_date: string;
+            /** @description Where the root hints come from: `shipped` or the path of the file. */
+            hints_source: string;
+            /** @description The sizes of the infrastructure cache. */
+            infra: components["schemas"]["InfraSizes"];
+            last_priming?: components["schemas"]["PrimingItem"] | null;
+            /** @description What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`. */
+            problems: string[];
+            /** @description The root servers in use with their smoothed round-trip times. */
+            root_servers: components["schemas"]["RootServerItem"][];
+            /** @description The keys of the trust anchors with their state. */
+            trust_anchors: components["schemas"]["AnchorKeyState"][];
+        };
         /**
          * @description A plain generation file that this controller refused to load because a sealed generation
          *     is older (the protection would silently drop).
@@ -15436,6 +15976,13 @@ export interface components {
          * @enum {string}
          */
         ResetReason: "lagged" | "gap" | "journal";
+        /**
+         * @description How a view's clients get names outside the zones and the forwarding rules (recursion
+         *     plan section 2.7). A view without one follows the profile's default (REC-Q2: recurse in
+         *     every profile).
+         * @enum {string}
+         */
+        ResolutionMode: "recurse" | "forward" | "refuse";
         /** @description The restore this installation was started from. */
         RestoreNoticeView: {
             /** @description When the backup was made. */
@@ -15596,6 +16143,18 @@ export interface components {
             /** @description The role of the key to roll. */
             role: components["schemas"]["KeyRole"];
         };
+        /** @description One root server of a node's resolver with its smoothed round-trip time. */
+        RootServerItem: {
+            /** @description The address in use. */
+            address: string;
+            /** @description The server's name (`a.root-servers.net.`). */
+            name: string;
+            /**
+             * Format: double
+             * @description The smoothed round-trip time in milliseconds; absent before the first answer.
+             */
+            srtt_ms?: number | null;
+        };
         /** @description Rows of the source by outcome. */
         RowCounts: {
             /** @description Address-only rows of pre-filled lists (free addresses). */
@@ -15649,6 +16208,12 @@ export interface components {
         };
         /** @description Record type: a mnemonic (`AAAA`) or the RFC 3597 form (`TYPE65280`) */
         Rtype: string;
+        /**
+         * @description What a forwarding rule does with the names under its suffix (recursion plan section
+         *     2.7).
+         * @enum {string}
+         */
+        RuleMode: "forward" | "recurse";
         /** @description The answer to a run request: the job that runs the connector. */
         RunAccepted: {
             /** @description The job (`GET /jobs/{id}` shows its progress). */
@@ -16515,6 +17080,12 @@ export interface components {
             /** @description Whether the vault holds operator secrets (the PIN coupling rule applies). */
             vault_has_operator_secrets: boolean;
         };
+        /**
+         * @description The DNSSEC state of an answer (RFC 4033 section 5, RFC 4035 section 4.3), shared by the
+         *     cache entry, its listing and the query log.
+         * @enum {string}
+         */
+        SecurityState: "secure" | "insecure" | "bogus" | "indeterminate" | "unvalidated";
         /**
          * @description How the SOA serial moves on a change (DNS-07).
          * @enum {string}
@@ -18115,6 +18686,44 @@ export interface components {
             vrf?: components["schemas"]["VrfId"] | null;
         };
         /**
+         * @description The trust anchors of one zone (`dns.trust_anchors`, one row per zone; the root by
+         *     default, an operator's anchor for a private zone beside it).
+         */
+        TrustAnchor: {
+            /** @description The keys, 1 to 16. */
+            keys: components["schemas"]["AnchorKey"][];
+            last_query?: components["schemas"]["Timestamp"] | null;
+            next_query?: components["schemas"]["Timestamp"] | null;
+            /** @description The zone. */
+            zone: components["schemas"]["DnsName"];
+        };
+        /** @description `POST /dns/trust-anchors`. */
+        TrustAnchorAdd: {
+            /**
+             * @description A DNSKEY record's data in presentation form (`257 3 8 AwEAAa...`): flags, protocol,
+             *     algorithm and the key in base64. Exactly one of `ds` and `dnskey` is given.
+             */
+            dnskey?: string | null;
+            /**
+             * @description A DS record's data in presentation form (`20326 8 2 E06D44B8...`): key tag,
+             *     algorithm, digest type and the digest in hexadecimal. Exactly one of `ds` and
+             *     `dnskey` is given.
+             */
+            ds?: string | null;
+            /**
+             * @description Replace the root's trust anchor with this key instead of adding to it. Allowed only
+             *     under the Lab profile (`dns.trust_anchor.root_protected` otherwise).
+             */
+            replace_root?: boolean;
+            /** @description The zone; `.` for the root. */
+            zone: components["schemas"]["DnsName"];
+        };
+        /** @description A trust anchor as the API reads it. */
+        TrustAnchorItem: components["schemas"]["TrustAnchor"] & {
+            /** @description The store revision of the row. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
          * @description The four truths (IPAM-21).
          * @enum {string}
          */
@@ -18623,6 +19232,7 @@ export interface components {
              */
             order: number;
             recursion?: components["schemas"]["AclId"] | null;
+            resolution?: components["schemas"]["ResolutionMode"] | null;
             /** @description The tests; none matches every query. */
             rules?: components["schemas"]["MatchRule"][];
             /** @description The scopes this view sees per zone; a zone not listed is seen in its default scope. */
@@ -18641,6 +19251,7 @@ export interface components {
              */
             order: number;
             recursion?: components["schemas"]["AclId"] | null;
+            resolution?: components["schemas"]["ResolutionMode"] | null;
             /** @description The tests. */
             rules?: components["schemas"]["MatchRule"][];
             /** @description The scopes per zone. */
@@ -18657,6 +19268,11 @@ export interface components {
         ViewPatch: {
             /** @description Follow the profile's default for recursion (clears `recursion`, WP6.4). */
             default_recursion?: boolean;
+            /**
+             * @description Follow the profile's default for the resolution (clears `resolution`). Until WP10.4
+             *     `true` answers 501.
+             */
+            default_resolution?: boolean;
             /** @description Free text; an empty string clears it. */
             description?: string | null;
             /** @description The name. */
@@ -18667,6 +19283,7 @@ export interface components {
              */
             order?: number | null;
             recursion?: components["schemas"]["AclId"] | null;
+            resolution?: components["schemas"]["ResolutionMode"] | null;
             /** @description The tests. */
             rules?: components["schemas"]["MatchRule"][] | null;
             /** @description The scopes per zone. */
@@ -27993,6 +28610,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description `mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     get_dns_forwarder: {
@@ -28189,6 +28815,15 @@ export interface operations {
             };
             /** @description The rule changed since it was read (`If-Match`) */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -28885,6 +29520,547 @@ export interface operations {
             };
         };
     };
+    list_dns_ntas: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of negative trust anchors by zone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_NtaItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_dns_nta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NtaCreate"];
+            };
+        };
+        responses: {
+            /** @description The negative trust anchor */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NtaItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the anchor is invalid (`dns.nta.invalid`, parameters `field` and `reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to create one */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_dns_nta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Negative trust anchor identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The negative trust anchor is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to delete one */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such negative trust anchor (`dns.nta.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_dns_trust_anchors: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of trust anchors by zone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TrustAnchorItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    add_dns_trust_anchor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrustAnchorAdd"];
+            };
+        };
+        responses: {
+            /** @description The trust anchor of the zone */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustAnchorItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the key is invalid (`dns.trust_anchor.invalid`, parameters `field` and `reason`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to change trust anchors */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_dns_trust_anchor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The zone name; `root` for the root (a URL cannot carry the segment `.`) */
+                zone: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trust anchor with its `ETag` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustAnchorItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No trust anchor for the zone (`dns.trust_anchor.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    remove_dns_trust_anchor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The zone name; `root` for the root (a URL cannot carry the segment `.`) */
+                zone: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trust anchor is gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys`, or a token tries to change trust anchors */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No trust anchor for the zone (`dns.trust_anchor.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    refresh_dns_trust_anchor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The zone name; `root` for the root (a URL cannot carry the segment `.`) */
+                zone: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The refresh is queued on the leader's trust anchor service */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsCommandAccepted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.keys` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No trust anchor for the zone (`dns.trust_anchor.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The resolver is off (`dns.recursion.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     list_dns_views: {
         parameters: {
             query?: {
@@ -28981,6 +30157,15 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.write` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `resolution` is set, which is not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29193,6 +30378,15 @@ export interface operations {
             };
             /** @description The view changed since it was read (`If-Match`) */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `resolution` or `default_resolution` is set, which is not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -34552,6 +35746,176 @@ export interface operations {
             };
         };
     };
+    list_node_dns_infra: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Only the zone cuts equal to this name or under it (`example.test` finds
+                 *     `www.example.test`, not `badexample.test`).
+                 */
+                suffix?: string;
+                /** @description Zone cuts per page, 1 to 1000; 200 by default. */
+                limit?: number;
+                /** @description The cursor of the next page. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of zone cuts in canonical name order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_InfraCutItem"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    flush_node_dns_infra: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Flush only the zone cuts at or below this suffix (`example.test`); everything when
+                 *     absent.
+                 */
+                suffix?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The number of zone cuts dropped */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InfraFlushed"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     read_node_dns_log: {
         parameters: {
             query?: {
@@ -34765,6 +36129,160 @@ export interface operations {
             };
             /** @description The node does not run the dns role or its log is off (`dns.node.not_dns`) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_node_dns_recursion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The resolver's status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecursionStatus"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    prime_node_dns_recursion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The command was recorded */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsCommandAccepted"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `dns.write` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such node (`cluster.node.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not built yet (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

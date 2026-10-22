@@ -122,6 +122,7 @@ fn view(name: &str, order: u32, rules: Vec<MatchRule>, scope_map: Vec<ScopeWeigh
         scope_map,
         order,
         recursion: None,
+        resolution: None,
         description: None,
     }
 }

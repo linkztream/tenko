@@ -24,7 +24,10 @@ use crate::{
     extract::Ctx,
     list::{CursorScope, PageParams, encode_cursor},
     problem::{ApiError, ProblemDetails},
-    routes::auth::{ApiJson, if_match},
+    routes::{
+        auth::{ApiJson, if_match},
+        not_implemented,
+    },
     state::AppState,
 };
 
@@ -99,13 +102,17 @@ pub(super) async fn list_dns_views(
     description = "Scope: `dns.write`. The view goes to `order` (from 1) and the views from \
                    there move one down; a position past the end is the end. Every zone \
                    scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` \
-                   names an access list.",
+                   names an access list. `resolution` (`recurse`, `forward` or `refuse`) \
+                   says how the view's clients get names outside the zones and the \
+                   forwarding rules; until the resolver is built, a value answers 501 and \
+                   writes nothing.",
     request_body(content = ViewCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The view", body = ViewItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "`resolution` is set, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn create_dns_view(
@@ -119,6 +126,11 @@ pub(super) async fn create_dns_view(
         Action::Create,
         &anywhere(ObjectKind::DnsView),
     )?;
+    // WP10.0: the resolution of a view is not built yet.
+    if body.resolution.is_some() {
+        return Err(not_implemented("POST", "/dns/views"));
+    }
+    // WP10.0: end.
     let service = zones.get()?;
     let (view, written) = service
         .create_view(
@@ -178,7 +190,10 @@ pub(super) async fn get_dns_view(
     summary = "Change a DNS view",
     description = "Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` \
                    moves the view and the others make room; `default_recursion` makes the \
-                   view follow the profile's default; an empty `description` clears it.",
+                   view follow the profile's default; an empty `description` clears it. \
+                   `resolution` sets how the view's clients get names outside the zones and \
+                   the forwarding rules and `default_resolution` clears it; until the \
+                   resolver is built, either answers 501 and changes nothing.",
     params(
         ("id" = String, Path, description = "View identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -190,7 +205,8 @@ pub(super) async fn get_dns_view(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such view (`dns.view.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The view changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 412, description = "The view changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "`resolution` or `default_resolution` is set, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn update_dns_view(
@@ -203,6 +219,11 @@ pub(super) async fn update_dns_view(
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ViewId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
+    // WP10.0: the resolution of a view is not built yet.
+    if body.resolution.is_some() || body.default_resolution {
+        return Err(not_implemented("PATCH", "/dns/views/{id}"));
+    }
+    // WP10.0: end.
     let service = zones.get()?;
     let expect = if_match(&headers)?;
     let (_, written) = service

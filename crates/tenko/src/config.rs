@@ -536,6 +536,10 @@ pub struct DnsSection {
     pub limits: DnsLimitsSection,
     /// The fetch and the upload of block lists.
     pub lists: DnsListsSection,
+    // WP10.0: the recursive resolver's keys; nothing reads them before WP10.1.
+    /// The recursive resolver.
+    pub recursion: DnsRecursionSection,
+    // WP10.0: end.
 }
 
 impl Default for DnsSection {
@@ -556,6 +560,8 @@ impl Default for DnsSection {
             tls: DnsTlsSection::default(),
             limits: DnsLimitsSection::default(),
             lists: DnsListsSection::default(),
+            // WP10.0
+            recursion: DnsRecursionSection::default(),
         }
     }
 }
@@ -938,6 +944,476 @@ impl DnsCacheSection {
         })
     }
 }
+
+// WP10.0: `[dns.recursion]`, the recursive resolver's keys (recursion plan section 3.4).
+/// Which address families the recursive resolver uses towards authority servers (REC-Q9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecursionOutbound {
+    /// IPv6 as well as IPv4 where the host has a global IPv6 address, IPv4 otherwise
+    /// (default).
+    #[default]
+    Auto,
+    /// IPv4 only; `ipv4` is accepted as well.
+    #[serde(alias = "ipv4")]
+    V4,
+    /// IPv6 only; `ipv6` is accepted as well.
+    #[serde(alias = "ipv6")]
+    V6,
+    /// Both families, whatever the host's addresses.
+    Both,
+}
+
+/// How much of the query name the resolver tells each authority server (RFC 9156, REC-Q8).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QnameMinimisation {
+    /// Minimise, and send the full name when a server breaks on it (default).
+    #[default]
+    Relaxed,
+    /// Minimise, and fail the query when a server breaks on it.
+    Strict,
+    /// Send the full name to every server.
+    Off,
+}
+
+/// `[dns.recursion]`: the iterative resolver of this node (DNS-03, recursion plan section
+/// 3.4). Read and validated at start; nothing consumes the keys until WP10.1 builds the
+/// engine (the infrastructure and denial bounds, the budgets, the transport policy) and
+/// WP10.2 the validation keys. The keys that are not set follow the security profile in
+/// force when the role starts. Every bound is checked by `tenko config check`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "configuration keys, each a switch of its own"
+)]
+pub struct DnsRecursionSection {
+    /// Resolve iteratively on this node (default: on under every profile).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// A root hints file in the format of `named.root`; not set (the default): the hints
+    /// shipped with Tenko.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<PathBuf>,
+    /// The address families used towards authority servers: `auto` (default), `v4`
+    /// (or `ipv4`), `v6` (or `ipv6`) or `both`.
+    pub outbound: RecursionOutbound,
+    /// Milliseconds one attempt towards an authority server has, 100 to 30,000 (default
+    /// 2,000).
+    pub timeout_ms: u64,
+    /// Queries one client query may cause at most, 1 to 256 (default 32).
+    pub budget_queries: u32,
+    /// Restarts after a CNAME, DNAME or name-server lookup at most, 1 to 32 (default 8).
+    pub budget_restarts: u32,
+    /// Nesting of name-server lookups inside lookups at most, 1 to 16 (default 6).
+    pub budget_depth: u32,
+    /// Milliseconds one client query may take in all, 100 to 60,000 (default 10,000).
+    pub budget_ms: u64,
+    /// Zone cuts the infrastructure cache holds, 10 to 1,000,000 (default 1,000 under the
+    /// Home profile, 10,000 under the others).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub infra_entries: Option<usize>,
+    /// The longest an infrastructure entry lives in seconds, 10 to 86,400 (default 900).
+    pub infra_ttl_secs: u32,
+    /// Query name minimisation (RFC 9156): `relaxed` (default), `strict` or `off`.
+    pub qname_minimisation: QnameMinimisation,
+    /// Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198;
+    /// default true).
+    pub aggressive_nsec: bool,
+    /// Denial-of-existence proofs the cache holds, for `aggressive_nsec`, 1,000 to
+    /// 10,000,000 (default 2,000 under the Home profile, 20,000 under the others).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub denial_entries: Option<usize>,
+    /// The longest a failure (SERVFAIL from the authorities) is remembered in seconds, 5 to
+    /// 3,600 (default 300).
+    pub failure_cache_max_secs: u32,
+    /// Tell the root servers which trust anchor keys the resolver holds (RFC 8145; default
+    /// on, off under the Hardened profile).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_anchor_signalling: Option<bool>,
+    /// Answer the root key sentinel queries (RFC 8509; default true).
+    pub key_sentinel: bool,
+    /// A fresh random source port for every query to an authority server (default true).
+    pub fresh_port_per_query: bool,
+    /// Names under the locally served zones of RFC 6303 that are resolved all the same,
+    /// for example a private reverse zone served elsewhere (default: none). Each is a DNS
+    /// name.
+    #[serde(deserialize_with = "string_or_list")]
+    pub local_zones_except: Vec<String>,
+    /// Seconds of the RFC 5011 add and remove hold-downs, 1 to 2,592,000; not set (the
+    /// default): 30 days. The Lab profile only, to test key rollovers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rfc5011_hold_down_secs: Option<u64>,
+}
+
+impl Default for DnsRecursionSection {
+    fn default() -> Self {
+        Self {
+            enabled: None,
+            hints: None,
+            outbound: RecursionOutbound::Auto,
+            timeout_ms: 2_000,
+            budget_queries: 32,
+            budget_restarts: 8,
+            budget_depth: 6,
+            budget_ms: 10_000,
+            infra_entries: None,
+            infra_ttl_secs: 900,
+            qname_minimisation: QnameMinimisation::Relaxed,
+            aggressive_nsec: true,
+            denial_entries: None,
+            failure_cache_max_secs: 300,
+            trust_anchor_signalling: None,
+            key_sentinel: true,
+            fresh_port_per_query: true,
+            local_zones_except: Vec::new(),
+            rfc5011_hold_down_secs: None,
+        }
+    }
+}
+
+impl DnsRecursionSection {
+    /// Whether the resolver runs under `profile`: on in every profile unless the key says
+    /// otherwise.
+    pub fn enabled_for(&self, _profile: Profile) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
+    /// The zone cuts of the infrastructure cache under `profile`.
+    pub fn infra_entries_for(&self, profile: Profile) -> usize {
+        self.infra_entries.unwrap_or(if profile == Profile::Home {
+            1_000
+        } else {
+            10_000
+        })
+    }
+
+    /// The denial proofs the cache holds under `profile`.
+    pub fn denial_entries_for(&self, profile: Profile) -> usize {
+        self.denial_entries.unwrap_or(if profile == Profile::Home {
+            2_000
+        } else {
+            20_000
+        })
+    }
+
+    /// Whether the resolver signals its trust anchors (RFC 8145) under `profile`: on except
+    /// under Hardened.
+    pub fn trust_anchor_signalling_for(&self, profile: Profile) -> bool {
+        self.trust_anchor_signalling
+            .unwrap_or(profile != Profile::Hardened)
+    }
+
+    /// The bounds of every key, independent of the profile.
+    fn validate(&self) -> Result<(), ConfigError> {
+        fn within<T: PartialOrd + Copy>(
+            value: T,
+            low: T,
+            high: T,
+            key: &str,
+            range: &str,
+        ) -> Result<(), ConfigError> {
+            if (low..=high).contains(&value) {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(format!(
+                    "dns.recursion.{key} must be between {range}"
+                )))
+            }
+        }
+        within(self.timeout_ms, 100, 30_000, "timeout_ms", "100 and 30000")?;
+        within(self.budget_queries, 1, 256, "budget_queries", "1 and 256")?;
+        within(self.budget_restarts, 1, 32, "budget_restarts", "1 and 32")?;
+        within(self.budget_depth, 1, 16, "budget_depth", "1 and 16")?;
+        within(self.budget_ms, 100, 60_000, "budget_ms", "100 and 60000")?;
+        if let Some(entries) = self.infra_entries {
+            within(entries, 10, 1_000_000, "infra_entries", "10 and 1000000")?;
+        }
+        within(
+            self.infra_ttl_secs,
+            10,
+            86_400,
+            "infra_ttl_secs",
+            "10 and 86400",
+        )?;
+        if let Some(entries) = self.denial_entries {
+            within(
+                entries,
+                1_000,
+                10_000_000,
+                "denial_entries",
+                "1000 and 10000000",
+            )?;
+        }
+        within(
+            self.failure_cache_max_secs,
+            5,
+            3_600,
+            "failure_cache_max_secs",
+            "5 and 3600",
+        )?;
+        if let Some(secs) = self.rfc5011_hold_down_secs {
+            within(
+                secs,
+                1,
+                2_592_000,
+                "rfc5011_hold_down_secs",
+                "1 and 2592000",
+            )?;
+        }
+        if let Some(hints) = &self.hints
+            && hints.as_os_str().is_empty()
+        {
+            return Err(ConfigError::invalid(
+                "dns.recursion.hints is empty: name a root hints file, or leave the key out for \
+                 the shipped hints",
+            ));
+        }
+        for name in &self.local_zones_except {
+            tenko_core::dns::DnsName::new(name).map_err(|problem| {
+                ConfigError::invalid(format!(
+                    "dns.recursion.local_zones_except: `{name}` is not a DNS name ({problem})"
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// The keys that depend on the profile: the RFC 5011 hold-down is a Lab knob.
+    fn check_profile(&self, profile: Profile) -> Result<(), ConfigError> {
+        if self.rfc5011_hold_down_secs.is_some() && profile != Profile::Lab {
+            return Err(ConfigError::invalid(format!(
+                "dns.recursion.rfc5011_hold_down_secs is allowed under the Lab profile only; \
+                 the profile is `{}`",
+                profile.as_str()
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod recursion_tests {
+    use super::*;
+
+    fn resolve(text: &str) -> Result<Resolved, ConfigError> {
+        let data = std::env::temp_dir().join("tenko-config-dns-recursion");
+        let text = format!("data_dir = {:?}\n{text}", data.display().to_string());
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("tenko.toml");
+        std::fs::write(&path, text).expect("write configuration");
+        load(
+            &Sources {
+                file: Some(path),
+                ..Sources::default()
+            },
+            Vec::new(),
+        )
+        .and_then(|loaded| loaded.config.resolve())
+    }
+
+    fn recursion(text: &str) -> DnsRecursionSection {
+        resolve(text).expect("valid").config.dns.recursion
+    }
+
+    fn refused(text: &str, needle: &str) {
+        let error = resolve(text).expect_err(text);
+        assert_eq!(error.code, "config.invalid", "{text}");
+        assert!(error.message.contains(needle), "{text}: {error}");
+    }
+
+    #[test]
+    fn the_defaults_follow_the_profile() {
+        let section = recursion("");
+        assert_eq!(section, DnsRecursionSection::default());
+        assert_eq!(section.outbound, RecursionOutbound::Auto);
+        assert_eq!(section.qname_minimisation, QnameMinimisation::Relaxed);
+        assert_eq!(
+            (
+                section.timeout_ms,
+                section.budget_queries,
+                section.budget_restarts,
+                section.budget_depth,
+                section.budget_ms
+            ),
+            (2_000, 32, 8, 6, 10_000)
+        );
+        assert_eq!(
+            (section.infra_ttl_secs, section.failure_cache_max_secs),
+            (900, 300)
+        );
+        assert!(section.aggressive_nsec && section.key_sentinel && section.fresh_port_per_query);
+        assert_eq!(section.local_zones_except, Vec::<String>::new());
+        for (profile, infra, denial, signalling) in [
+            (Profile::Home, 1_000, 2_000, true),
+            (Profile::Standard, 10_000, 20_000, true),
+            (Profile::Hardened, 10_000, 20_000, false),
+            (Profile::Lab, 10_000, 20_000, true),
+        ] {
+            assert!(section.enabled_for(profile), "{profile:?}");
+            assert_eq!(section.infra_entries_for(profile), infra, "{profile:?}");
+            assert_eq!(section.denial_entries_for(profile), denial, "{profile:?}");
+            assert_eq!(
+                section.trust_anchor_signalling_for(profile),
+                signalling,
+                "{profile:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_that_is_set_wins_over_the_profile() {
+        let section = recursion(
+            "[dns.recursion]\nenabled = false\ninfra_entries = 50\ndenial_entries = 1000\n\
+             trust_anchor_signalling = true\n[profile]\nname = \"hardened\"\n",
+        );
+        assert!(!section.enabled_for(Profile::Hardened));
+        assert_eq!(section.infra_entries_for(Profile::Hardened), 50);
+        assert_eq!(section.denial_entries_for(Profile::Home), 1_000);
+        assert!(section.trust_anchor_signalling_for(Profile::Hardened));
+    }
+
+    #[test]
+    fn every_bound_is_refused_on_both_sides() {
+        for (key, low, high) in [
+            ("timeout_ms", 100_u64, 30_000_u64),
+            ("budget_queries", 1, 256),
+            ("budget_restarts", 1, 32),
+            ("budget_depth", 1, 16),
+            ("budget_ms", 100, 60_000),
+            ("infra_entries", 10, 1_000_000),
+            ("infra_ttl_secs", 10, 86_400),
+            ("denial_entries", 1_000, 10_000_000),
+            ("failure_cache_max_secs", 5, 3_600),
+        ] {
+            let at = |value: u64| format!("[dns.recursion]\n{key} = {value}\n");
+            recursion(&at(low));
+            recursion(&at(high));
+            refused(
+                &at(low - 1),
+                &format!("dns.recursion.{key} must be between"),
+            );
+            refused(
+                &at(high + 1),
+                &format!("dns.recursion.{key} must be between"),
+            );
+        }
+        refused("[dns.recursion]\ntimeout_ms = 0\n", "timeout_ms");
+        refused("[dns.recursion]\nhints = \"\"\n", "dns.recursion.hints");
+    }
+
+    #[test]
+    fn the_enumerations_and_their_aliases_parse() {
+        for (text, outbound) in [
+            ("auto", RecursionOutbound::Auto),
+            ("v4", RecursionOutbound::V4),
+            ("ipv4", RecursionOutbound::V4),
+            ("v6", RecursionOutbound::V6),
+            ("ipv6", RecursionOutbound::V6),
+            ("both", RecursionOutbound::Both),
+        ] {
+            let section = recursion(&format!("[dns.recursion]\noutbound = \"{text}\"\n"));
+            assert_eq!(section.outbound, outbound, "{text}");
+        }
+        for (text, mode) in [
+            ("relaxed", QnameMinimisation::Relaxed),
+            ("strict", QnameMinimisation::Strict),
+            ("off", QnameMinimisation::Off),
+        ] {
+            let section = recursion(&format!(
+                "[dns.recursion]\nqname_minimisation = \"{text}\"\n"
+            ));
+            assert_eq!(section.qname_minimisation, mode, "{text}");
+        }
+        assert!(resolve("[dns.recursion]\noutbound = \"ipv5\"\n").is_err());
+        assert!(resolve("[dns.recursion]\nqname_minimisation = \"loose\"\n").is_err());
+        // The alias is read only; the file written back by `config check` says `v4`.
+        let written = recursion("[dns.recursion]\noutbound = \"ipv4\"\n");
+        assert!(
+            toml::to_string(&written)
+                .expect("toml")
+                .contains("outbound = \"v4\"")
+        );
+    }
+
+    #[test]
+    fn local_zones_except_are_dns_names() {
+        let section = recursion(
+            "[dns.recursion]\nlocal_zones_except = [\"10.in-addr.arpa\", \"home.example.test.\"]\n",
+        );
+        assert_eq!(
+            section.local_zones_except,
+            ["10.in-addr.arpa", "home.example.test."]
+        );
+        refused(
+            "[dns.recursion]\nlocal_zones_except = [\"bad name\"]\n",
+            "dns.recursion.local_zones_except",
+        );
+    }
+
+    #[test]
+    fn the_hold_down_is_a_lab_knob() {
+        for profile in ["home", "standard", "hardened"] {
+            refused(
+                &format!(
+                    "[profile]\nname = \"{profile}\"\n[dns.recursion]\nrfc5011_hold_down_secs = 60\n"
+                ),
+                "Lab profile only",
+            );
+        }
+        let lab =
+            recursion("[profile]\nname = \"lab\"\n[dns.recursion]\nrfc5011_hold_down_secs = 60\n");
+        assert_eq!(lab.rfc5011_hold_down_secs, Some(60));
+        refused(
+            "[profile]\nname = \"lab\"\n[dns.recursion]\nrfc5011_hold_down_secs = 0\n",
+            "rfc5011_hold_down_secs must be between",
+        );
+    }
+
+    #[test]
+    fn unknown_keys_are_refused() {
+        let error = resolve("[dns.recursion]\nbudget_query = 3\n").expect_err("unknown key");
+        assert_eq!(error.code, "config.parse");
+    }
+
+    #[test]
+    fn a_full_example_parses() {
+        let section = recursion(
+            "[profile]\nname = \"lab\"\n[dns.recursion]\nenabled = true\n\
+             hints = \"/etc/tenko/root.hints\"\noutbound = \"both\"\ntimeout_ms = 1500\n\
+             budget_queries = 64\nbudget_restarts = 4\nbudget_depth = 5\nbudget_ms = 5000\n\
+             infra_entries = 20000\ninfra_ttl_secs = 600\nqname_minimisation = \"strict\"\n\
+             aggressive_nsec = false\ndenial_entries = 5000\nfailure_cache_max_secs = 60\n\
+             trust_anchor_signalling = false\nkey_sentinel = false\n\
+             fresh_port_per_query = false\nlocal_zones_except = \"10.in-addr.arpa\"\n\
+             rfc5011_hold_down_secs = 120\n",
+        );
+        assert_eq!(section.enabled, Some(true));
+        assert_eq!(section.hints, Some(PathBuf::from("/etc/tenko/root.hints")));
+        assert_eq!(section.outbound, RecursionOutbound::Both);
+        assert_eq!(
+            (
+                section.timeout_ms,
+                section.budget_queries,
+                section.budget_restarts,
+                section.budget_depth,
+                section.budget_ms
+            ),
+            (1_500, 64, 4, 5, 5_000)
+        );
+        assert_eq!(section.infra_entries, Some(20_000));
+        assert_eq!(section.infra_ttl_secs, 600);
+        assert_eq!(section.qname_minimisation, QnameMinimisation::Strict);
+        assert!(!section.aggressive_nsec && !section.key_sentinel && !section.fresh_port_per_query);
+        assert_eq!(section.denial_entries, Some(5_000));
+        assert_eq!(section.failure_cache_max_secs, 60);
+        assert_eq!(section.trust_anchor_signalling, Some(false));
+        assert_eq!(section.local_zones_except, ["10.in-addr.arpa"]);
+        assert_eq!(section.rfc5011_hold_down_secs, Some(120));
+    }
+}
+// WP10.0: end.
 
 /// Whether two TCP listen addresses take the same port: the same family and port, and the
 /// same address or a wildcard on either side.
@@ -1617,6 +2093,9 @@ impl DnsSection {
         )?;
         self.limits.validate()?;
         self.lists.validate()?;
+        // WP10.0
+        self.recursion.validate()?;
+        // WP10.0: end.
         self.tls.validate()
     }
 }
@@ -2715,6 +3194,9 @@ impl Config {
         self.backup.validate()?;
         self.audit_export.validate()?;
         self.dns.validate()?;
+        // WP10.0: the keys of `[dns.recursion]` that depend on the profile.
+        self.dns.recursion.check_profile(self.profile.name)?;
+        // WP10.0: end.
         // WP7.5: the dhcp role's section.
         self.dhcp.validate()?;
         self.dns

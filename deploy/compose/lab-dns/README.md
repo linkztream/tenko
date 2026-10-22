@@ -194,6 +194,32 @@ the entry of `forwarders` by its address, `transport = "dot"` and `tls_name`, an
 `upstream_ca` so that the system's root certificates apply; that needs a route out, which
 the lab network does not have.
 
+## The recursion sandbox (Slice 10)
+
+For the recursive resolver ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md)
+section 2.12) the lab gains a root of its own, so that no check touches the real root
+servers. Three services, under the compose profile `recursion` (the other rounds and
+`smoke.sh` start none of them):
+
+| Service | What | Reached at |
+|---|---|---|
+| `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `LAB_DIR/authority/authority.toml`). It will serve the lab root `.` (glue `a.root.test` at `203.0.113.10`), the TLD `test` and the signed test zones under it | `203.0.113.10:53` |
+| `quirk` | The engine's example authoritative server with the misbehaviours of E36 as flags (no EDNS, broken 0x20, TC on everything, delayed answers, wrong source address), authoritative for `quirk.example.test` | `203.0.113.11:53` |
+| `delv` | The BIND image idling, like `client`; `docker compose exec delv delv ...` validates independently of Tenko with the lab root's trust anchor (the second validator of E33) | `203.0.113.12` |
+
+`bind` stays as it is; WP10.2 gives it `bind.example.test` (signed by BIND), `optout.example.test`
+and `expired.example.test`.
+
+They are shells until WP10.1 (the lab root zone and the quirk responder) and WP10.2 (the
+signed zones, the BIND zones and the rounds `recursion` and `rfc5011` of `smoke.sh`) fill
+them: `authority` needs its configuration file and `quirk` its binary, so only `delv` starts
+today. Once both packages are in:
+
+```sh
+docker compose --profile recursion up -d authority quirk delv
+docker compose exec delv delv @203.0.113.3 www.example.test A
+```
+
 ## What the lab does not show
 
 It does not measure throughput or latency (the benchmarks under [bench/](../../../bench/)

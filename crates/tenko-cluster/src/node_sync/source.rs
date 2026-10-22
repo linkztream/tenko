@@ -437,7 +437,8 @@ mod tests {
         let dns = Subset::new(NodeId(1001), &[Role::Dns]);
         assert!(dns.is_empty());
         let tables: Vec<&str> = dns.role_tables().iter().map(TableName::as_str).collect();
-        assert_eq!(tables.len(), 9);
+        // WP10.0: the trust anchors, the negative trust anchors and their index.
+        assert_eq!(tables.len(), 12);
         assert!(tables.contains(&"dns.zones") && tables.contains(&"dns.rrsets"));
         assert!(tables.contains(&"dns.journal") && tables.contains(&"dns.keys.meta"));
         assert!(!tables.contains(&"dns.sign_state"));

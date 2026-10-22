@@ -69,6 +69,10 @@ pub mod dnssec;
 // dns-visibility: `tenko dns blocking`.
 #[path = "dns_blocking.rs"]
 pub mod blocking;
+// WP10.0: `tenko dns trust-anchor`, `nta` and `recursion`.
+#[path = "dns_recursion.rs"]
+pub mod recursion;
+// WP10.0: end.
 
 /// Subcommands of `tenko dns`.
 #[derive(Debug, Clone, Subcommand)]
@@ -147,6 +151,26 @@ pub enum DnsCommand {
         #[command(subcommand)]
         action: blocking::BlockingCommand,
     },
+    // WP10.0: the recursive resolver (`client/dns_recursion.rs`).
+    /// Trust anchors for DNSSEC validation: list, add, remove, refresh.
+    TrustAnchor {
+        /// The `trust-anchor` subcommand to run.
+        #[command(subcommand)]
+        action: recursion::TrustAnchorCommand,
+    },
+    /// Negative trust anchors: list, add, remove.
+    Nta {
+        /// The `nta` subcommand to run.
+        #[command(subcommand)]
+        action: recursion::NtaCommand,
+    },
+    /// A node's recursive resolver: status, prime, infrastructure cache.
+    Recursion {
+        /// The `recursion` subcommand to run.
+        #[command(subcommand)]
+        action: recursion::RecursionCommand,
+    },
+    // WP10.0: end.
 }
 
 /// Subcommands of `tenko dns list`.
@@ -415,7 +439,11 @@ pub struct ForwarderCreateArgs {
     /// An upstream: an address with an optional port (`192.0.2.1`, `192.0.2.1:5353`,
     /// `[2001:db8::1]:853`) and, for DoH, an optional path (`192.0.2.1:443/dns-query`).
     /// Repeat for more, up to 16.
-    #[arg(long = "upstream", value_name = "UPSTREAM", required = true)]
+    #[arg(
+        long = "upstream",
+        value_name = "UPSTREAM",
+        required_unless_present = "recurse"
+    )]
     pub upstreams: Vec<String>,
     /// How the upstreams are reached; plain when absent.
     #[arg(long, value_enum)]
@@ -423,6 +451,15 @@ pub struct ForwarderCreateArgs {
     /// The name in the upstreams' certificates (DoT and DoH).
     #[arg(long, value_name = "NAME")]
     pub tls_name: Option<String>,
+    // WP10.0: a rule that resolves the names under the suffix itself.
+    /// Resolve the names under the suffix iteratively from the root servers instead of
+    /// asking upstreams (excludes `--upstream`, `--transport` and `--tls-name`).
+    #[arg(long, conflicts_with_all = ["upstreams", "transport", "tls_name"])]
+    pub recurse: bool,
+    /// Do not validate the answers of the rule with DNSSEC.
+    #[arg(long)]
+    pub no_validate: bool,
+    // WP10.0: end.
     /// The view the rule applies in (its identifier); every view when absent.
     #[arg(long, value_name = "VIEW")]
     pub view: Option<String>,
@@ -458,6 +495,14 @@ pub struct ForwarderUpdateArgs {
     /// Apply the rule in every view.
     #[arg(long)]
     pub all_views: bool,
+    // WP10.0: DNSSEC validation of the answers.
+    /// Validate the answers of the rule with DNSSEC.
+    #[arg(long, conflicts_with = "no_validate")]
+    pub validate: bool,
+    /// Do not validate the answers of the rule with DNSSEC.
+    #[arg(long)]
+    pub no_validate: bool,
+    // WP10.0: end.
     /// Free text; an empty text clears it.
     #[arg(long, value_name = "TEXT")]
     pub description: Option<String>,
@@ -574,6 +619,11 @@ impl DnsCommand {
             Self::Dnssec { action } => action.client(),
             // dns-visibility
             Self::Blocking { action } => action.client(),
+            // WP10.0
+            Self::TrustAnchor { action } => action.client(),
+            Self::Nta { action } => action.client(),
+            Self::Recursion { action } => action.client(),
+            // WP10.0: end.
         }
     }
 
@@ -636,6 +686,11 @@ impl DnsCommand {
             Self::Dnssec { action } => action.name(),
             // dns-visibility
             Self::Blocking { action } => action.name(),
+            // WP10.0
+            Self::TrustAnchor { action } => action.name(),
+            Self::Nta { action } => action.name(),
+            Self::Recursion { action } => action.name(),
+            // WP10.0: end.
         }
     }
 }
@@ -1054,6 +1109,11 @@ pub async fn run(command: &DnsCommand) -> Result<Output, Failure> {
         DnsCommand::Dnssec { action } => dnssec::run(&target, action).await,
         // dns-visibility
         DnsCommand::Blocking { action } => blocking::run(&target, action).await,
+        // WP10.0
+        DnsCommand::TrustAnchor { action } => recursion::run_trust_anchor(&target, action).await,
+        DnsCommand::Nta { action } => recursion::run_nta(&target, action).await,
+        DnsCommand::Recursion { action } => recursion::run_recursion(&target, action).await,
+        // WP10.0: end.
     }
 }
 
@@ -2299,6 +2359,14 @@ fn describe_rule(rule: &Value) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "suffix       {}", text(rule, &["suffix"]));
     let _ = writeln!(out, "id           {}", text(rule, &["id"]));
+    // WP10.0
+    if text(rule, &["mode"]) == "recurse" {
+        let _ = writeln!(out, "mode         recurse");
+    }
+    if rule.get("validate").and_then(Value::as_bool) == Some(false) {
+        let _ = writeln!(out, "validation   off");
+    }
+    // WP10.0: end.
     let transport = text(rule, &["transport"]);
     let _ = writeln!(
         out,
@@ -2422,11 +2490,20 @@ fn upstream_columns(figures: Option<&Value>) -> [String; 5] {
 async fn forwarder_create(target: &Target, args: &ForwarderCreateArgs) -> Result<Output, Failure> {
     let upstreams = parse_upstreams(&args.upstreams)?;
     let client = target.connect().await?;
-    let mut body = json!({
-        "suffix": canonical(&args.suffix),
-        "upstreams": upstreams,
-        "transport": args.transport.unwrap_or(TransportArg::Plain).api(),
-    });
+    // WP10.0: a recurse rule names no upstream and no transport.
+    let mut body = if args.recurse {
+        json!({ "suffix": canonical(&args.suffix), "mode": "recurse" })
+    } else {
+        json!({
+            "suffix": canonical(&args.suffix),
+            "upstreams": upstreams,
+            "transport": args.transport.unwrap_or(TransportArg::Plain).api(),
+        })
+    };
+    if args.no_validate {
+        body["validate"] = json!(false);
+    }
+    // WP10.0: end.
     if let Some(tls_name) = &args.tls_name {
         body["tls_name"] = json!(tls_name);
     }
@@ -2479,13 +2556,20 @@ async fn forwarder_update(target: &Target, args: &ForwarderUpdateArgs) -> Result
     if args.all_views {
         body.insert("all_views".to_owned(), json!(true));
     }
+    // WP10.0
+    if args.validate {
+        body.insert("validate".to_owned(), json!(true));
+    } else if args.no_validate {
+        body.insert("validate".to_owned(), json!(false));
+    }
+    // WP10.0: end.
     if let Some(description) = &args.description {
         body.insert("description".to_owned(), json!(description));
     }
     if body.is_empty() {
         return Err(usage(
             "nothing to change: give --suffix, --upstream, --transport, --tls-name, --view, \
-             --all-views or --description",
+             --all-views, --validate, --no-validate or --description",
         ));
     }
     let client = target.connect().await?;

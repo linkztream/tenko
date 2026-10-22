@@ -742,6 +742,7 @@ fn two_zones() -> TwoZones {
         }],
         order: 1,
         recursion: None,
+        resolution: None,
         description: None,
     };
     let id = view.id;
@@ -820,6 +821,7 @@ fn zones_beyond_the_scope_map_follow_in_name_order() {
         }],
         order: 1,
         recursion: None,
+        resolution: None,
         description: None,
     };
     let id = view.id;

@@ -1,6 +1,8 @@
 //! The listing of the cache ([`Cache::list`]): what a node's cache holds, as `rndc dumpdb
 //! -cache` and the cache view of Windows DNS show it, a page at a time in the canonical
-//! order of the names (RFC 4034 section 6.1), then by type, view and the DO and CD bits.
+//! order of the names (RFC 4034 section 6.1), then by type, view and class. Each entry
+//! shows its validation state (recursion plan section 2.2); the DO and CD bits are no
+//! longer part of the key, so the listing does not show them.
 //!
 //! A page is chosen in two steps, so that the query path never waits longer than for a
 //! flush:
@@ -18,9 +20,12 @@
 
 use std::{cmp::Ordering, collections::BinaryHeap, time::Instant};
 
-use tenko_core::dns::{DnsName, RecordData, Rtype, ViewId};
+use tenko_core::{
+    Timestamp,
+    dns::{DnsName, ExtendedError, RecordData, Rtype, SecurityState, ViewId},
+};
 
-use super::{Cache, CacheKey, KEY_MAX};
+use super::{Cache, CacheKey, KEY_MAX, NO_EXPIRY};
 use crate::{
     name::{self, NameBuf},
     tree::canonical_cmp,
@@ -98,8 +103,8 @@ impl ListCursor {
             bytes.push(u8::try_from(high << 4 | low).ok()?);
         }
         let name_at = match bytes.first()? {
-            0 => 6,
-            1 => 22,
+            0 => 5,
+            1 => 21,
             _ => return None,
         };
         // A lowercase, uncompressed name that ends the key exactly.
@@ -134,10 +139,12 @@ pub struct CachedEntry {
     pub class: u16,
     /// The view the entry belongs to; `None` outside any view.
     pub view: Option<ViewId>,
-    /// Asked with the DO bit.
-    pub dnssec_ok: bool,
-    /// Asked with the CD bit.
-    pub checking_disabled: bool,
+    /// The validation state (recursion plan section 2.2).
+    pub state: SecurityState,
+    /// The extended error a bogus entry is answered with.
+    pub ede: Option<ExtendedError>,
+    /// The earliest expiry of the signatures that made the entry secure.
+    pub signature_expiry: Option<Timestamp>,
     /// The RCODE of the answer (0 NOERROR, 3 NXDOMAIN).
     pub rcode: u8,
     /// Seconds the entry stays fresh; 0 once it is stale.
@@ -161,18 +168,17 @@ pub struct CachePage {
 }
 
 /// The order of a listing between two keys: the name in canonical order, then the type,
-/// the view (none first), the DO and CD bits and the class.
+/// the view (none first) and the class.
 fn order(a: &[u8], b: &[u8]) -> Ordering {
     let (view_a, rest_a) = split(a);
     let (view_b, rest_b) = split(b);
-    canonical_cmp(&rest_a[5..], &rest_b[5..])
+    canonical_cmp(&rest_a[4..], &rest_b[4..])
         .then_with(|| rest_a[..2].cmp(&rest_b[..2]))
         .then_with(|| view_a.cmp(view_b))
-        .then_with(|| rest_a[4].cmp(&rest_b[4]))
         .then_with(|| rest_a[2..4].cmp(&rest_b[2..4]))
 }
 
-/// The view part of a key (empty for none) and the rest: type, class, flags, name.
+/// The view part of a key (empty for none) and the rest: type, class, name.
 fn split(key: &[u8]) -> (&[u8], &[u8]) {
     if key.first() == Some(&1) {
         (&key[1..17], &key[17..])
@@ -211,6 +217,10 @@ struct Copied {
     ttl: u32,
     stale: bool,
     hits: u32,
+    state: SecurityState,
+    ede: Option<ExtendedError>,
+    /// Seconds from now to the earliest signature expiry.
+    signature_left: Option<u32>,
 }
 
 impl Cache {
@@ -234,7 +244,7 @@ impl Cache {
             for (key, index) in &shard.map {
                 let admitted = view.admits(key)
                     && cursor.is_none_or(|cursor| order(key, cursor.0.as_bytes()).is_gt())
-                    && suffix.is_none_or(|suffix| name::is_within(&split(key).1[5..], suffix))
+                    && suffix.is_none_or(|suffix| name::is_within(&split(key).1[4..], suffix))
                     && shard.slots[*index as usize]
                         .entry
                         .as_ref()
@@ -279,6 +289,10 @@ impl Cache {
             ttl: entry.ttl.saturating_sub(age),
             stale: !entry.fresh(now),
             hits: entry.hits,
+            state: entry.state,
+            ede: entry.ede,
+            signature_left: (entry.signature_expiry != NO_EXPIRY)
+                .then(|| entry.signature_expiry.saturating_sub(now)),
         })
     }
 }
@@ -303,8 +317,11 @@ fn decode(key: &CacheKey, copied: &Copied) -> Option<CachedEntry> {
         rtype: Rtype(key.qtype()),
         class: key.qclass(),
         view: key.view(),
-        dnssec_ok: key.dnssec_ok(),
-        checking_disabled: key.cd(),
+        state: copied.state,
+        ede: copied.ede,
+        signature_expiry: copied.signature_left.and_then(|left| {
+            Timestamp::now().checked_add(std::time::Duration::from_secs(u64::from(left)))
+        }),
         rcode: copied.wire[3] & 0x0f,
         ttl: if copied.stale { 0 } else { copied.ttl },
         stale: copied.stale,

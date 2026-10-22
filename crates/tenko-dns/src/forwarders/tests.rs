@@ -184,6 +184,7 @@ async fn invalid_rules_are_refused() {
         scope_map: Vec::new(),
         order: 1,
         recursion: None,
+        resolution: None,
         description: None,
     };
     let mut batch = WriteBatch::for_request(&cx());

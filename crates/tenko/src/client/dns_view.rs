@@ -95,6 +95,54 @@ impl QueryTransportArg {
     }
 }
 
+// WP10.0: how a view resolves names outside its zones and the rules.
+/// How a view's clients get names outside the zones and the forwarding rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ResolutionArg {
+    /// Resolve iteratively from the root servers.
+    Recurse,
+    /// Forward to the default forwarder.
+    Forward,
+    /// Answer REFUSED.
+    Refuse,
+}
+
+impl ResolutionArg {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::Recurse => "recurse",
+            Self::Forward => "forward",
+            Self::Refuse => "refuse",
+        }
+    }
+}
+
+/// The values of `tenko dns view update --resolution`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ResolutionUpdateArg {
+    /// Resolve iteratively from the root servers.
+    Recurse,
+    /// Forward to the default forwarder.
+    Forward,
+    /// Answer REFUSED.
+    Refuse,
+    /// Follow the profile's default.
+    Default,
+}
+
+impl ResolutionUpdateArg {
+    /// The body fields: `resolution`, or `default_resolution` for `default`.
+    fn field(self) -> (&'static str, Value) {
+        match self {
+            Self::Recurse => ("resolution", json!("recurse")),
+            Self::Forward => ("resolution", json!("forward")),
+            Self::Refuse => ("resolution", json!("refuse")),
+            Self::Default => ("default_resolution", json!(true)),
+        }
+    }
+}
+// WP10.0: end.
+
 /// The rule flags of `create` and `update`.
 #[derive(Debug, Clone, Default, Args)]
 pub struct RuleArgs {
@@ -149,6 +197,12 @@ pub struct ViewCreateArgs {
     /// profile's default when absent.
     #[arg(long, value_name = "ACL")]
     pub recursion: Option<String>,
+    // WP10.0
+    /// How the view's clients get names outside the zones and the forwarding rules; the
+    /// profile's default when absent.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub resolution: Option<ResolutionArg>,
+    // WP10.0: end.
     /// The position, from 1; the views from there move one down. Last when absent.
     #[arg(long, value_name = "N")]
     pub order: Option<u32>,
@@ -187,6 +241,13 @@ pub struct ViewUpdateArgs {
     /// Follow the profile's default for recursion.
     #[arg(long)]
     pub default_recursion: bool,
+    // WP10.0
+    /// How the view's clients get names outside the zones and the forwarding rules: resolve
+    /// them iteratively, forward them to the default forwarder, refuse them, or `default`
+    /// to follow the profile.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub resolution: Option<ResolutionUpdateArg>,
+    // WP10.0: end.
     /// A new position, from 1.
     #[arg(long, value_name = "N")]
     pub order: Option<u32>,
@@ -388,6 +449,16 @@ fn describe(view: &Value, zones: &[Value], acls: &[Value]) -> String {
     let _ = writeln!(out, "id           {}", text(view, &["id"]));
     let _ = writeln!(out, "order        {}", number(view, &["order"]));
     let _ = writeln!(out, "recursion    {}", recursion_of(view, acls));
+    // WP10.0
+    let _ = writeln!(
+        out,
+        "resolution   {}",
+        match text(view, &["resolution"]) {
+            "" => "profile default",
+            mode => mode,
+        }
+    );
+    // WP10.0: end.
     let description = text(view, &["description"]);
     if !description.is_empty() {
         let _ = writeln!(out, "description  {description}");
@@ -451,6 +522,11 @@ async fn create(target: &Target, args: &ViewCreateArgs) -> Result<Output, Failur
     if let Some(acl) = &args.recursion {
         body["recursion"] = json!(text(&resolve_acl(&client, acl).await?, &["id"]));
     }
+    // WP10.0
+    if let Some(resolution) = args.resolution {
+        body["resolution"] = json!(resolution.api());
+    }
+    // WP10.0: end.
     if let Some(description) = &args.description {
         body["description"] = json!(description);
     }
@@ -493,6 +569,12 @@ async fn update(target: &Target, args: &ViewUpdateArgs) -> Result<Output, Failur
     if args.default_recursion {
         body.insert("default_recursion".to_owned(), json!(true));
     }
+    // WP10.0
+    if let Some(resolution) = args.resolution {
+        let (field, value) = resolution.field();
+        body.insert(field.to_owned(), value);
+    }
+    // WP10.0: end.
     if let Some(order) = args.order {
         body.insert("order".to_owned(), json!(order));
     }
@@ -502,7 +584,7 @@ async fn update(target: &Target, args: &ViewUpdateArgs) -> Result<Output, Failur
     if body.is_empty() && args.scopes.is_empty() && args.recursion.is_none() {
         return Err(usage(
             "nothing to change: give --name, a rule flag, --no-rules, --scope, --no-scopes, \
-             --recursion, --default-recursion, --order or --description",
+             --recursion, --default-recursion, --resolution, --order or --description",
         ));
     }
     let client = target.connect().await?;
@@ -608,6 +690,29 @@ mod tests {
         }
         assert!(!RuleArgs::default().given());
     }
+
+    // WP10.0
+    #[test]
+    fn a_resolution_is_a_mode_or_the_profile_default() {
+        assert_eq!(
+            ResolutionUpdateArg::Recurse.field(),
+            ("resolution", json!("recurse"))
+        );
+        assert_eq!(
+            ResolutionUpdateArg::Refuse.field(),
+            ("resolution", json!("refuse"))
+        );
+        assert_eq!(
+            ResolutionUpdateArg::Default.field(),
+            ("default_resolution", json!(true))
+        );
+        assert_eq!(ResolutionArg::Forward.api(), "forward");
+        let text = describe(&json!({ "name": "a", "resolution": "forward" }), &[], &[]);
+        assert!(text.contains("resolution   forward"), "{text}");
+        let text = describe(&json!({ "name": "a" }), &[], &[]);
+        assert!(text.contains("resolution   profile default"), "{text}");
+    }
+    // WP10.0: end.
 
     #[test]
     fn scopes_and_recursion_are_shown_by_name() {

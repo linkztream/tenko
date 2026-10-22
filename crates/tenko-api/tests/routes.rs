@@ -451,6 +451,36 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("POST", "/dns/blocking/pause", "pause_dns_blocking"),
     ("DELETE", "/dns/blocking/pause", "resume_dns_blocking"),
     ("POST", "/dns/blocking/allow", "allow_dns_name"),
+    // WP10.0: the recursive resolver.
+    ("GET", "/dns/trust-anchors", "list_dns_trust_anchors"),
+    ("POST", "/dns/trust-anchors", "add_dns_trust_anchor"),
+    ("GET", "/dns/trust-anchors/{zone}", "get_dns_trust_anchor"),
+    (
+        "DELETE",
+        "/dns/trust-anchors/{zone}",
+        "remove_dns_trust_anchor",
+    ),
+    (
+        "POST",
+        "/dns/trust-anchors/{zone}/refresh",
+        "refresh_dns_trust_anchor",
+    ),
+    ("GET", "/dns/ntas", "list_dns_ntas"),
+    ("POST", "/dns/ntas", "create_dns_nta"),
+    ("DELETE", "/dns/ntas/{id}", "delete_dns_nta"),
+    ("GET", "/nodes/{id}/dns/recursion", "get_node_dns_recursion"),
+    (
+        "POST",
+        "/nodes/{id}/dns/recursion/prime",
+        "prime_node_dns_recursion",
+    ),
+    ("GET", "/nodes/{id}/dns/infra", "list_node_dns_infra"),
+    (
+        "POST",
+        "/nodes/{id}/dns/infra/flush",
+        "flush_node_dns_infra",
+    ),
+    // WP10.0: end.
     // dhcp (WP7.0 contracts; the DHCP module)
     ("GET", "/dhcp/settings", "get_dhcp_settings"),
     ("PUT", "/dhcp/settings", "update_dhcp_settings"),
@@ -579,6 +609,8 @@ fn concrete(template: &str) -> String {
         .replace("{interface}", ID)
         .replace("{owner}", "server")
         .replace("{addr}", "192.0.2.50")
+        // WP10.0: the zone of a trust anchor.
+        .replace("{zone}", "example.test")
 }
 
 fn request(method: &str, uri: &str) -> Request<Body> {

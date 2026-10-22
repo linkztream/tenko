@@ -358,6 +358,7 @@ fn views_validate_their_rules_and_weights() {
         }],
         order: 10,
         recursion: None,
+        resolution: None,
         description: None,
     };
     view.validate().expect("valid");
@@ -406,6 +407,8 @@ fn forward_rules_validate_their_transport() {
         transport: ForwardTransport::Plain,
         tls_name: None,
         view: None,
+        mode: RuleMode::Forward,
+        validate: true,
         description: None,
     };
     rule.validate().expect("plain");
@@ -572,8 +575,23 @@ fn tables_codes_and_actions_are_in_the_namespace() {
     assert_eq!(tables::KEYS_META.name().as_str(), "dns.keys.meta");
     let node: Vec<&str> = tables::NODE_TABLES.iter().map(TableName::as_str).collect();
     let all: Vec<&str> = tables::all().iter().map(|table| table.as_str()).collect();
-    assert_eq!(node, all[..9]);
+    let without_sign_state: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|table| *table != "dns.sign_state")
+        .collect();
+    assert_eq!(node, without_sign_state);
     assert!(!node.contains(&"dns.sign_state"));
+    // WP10.0: the trust anchors reach a Phase 5 node.
+    for table in ["dns.trust_anchors", "dns.ntas", "dns.ntas.by_zone"] {
+        assert!(node.contains(&table), "{table}");
+    }
+    for finding in findings::ALL {
+        assert!(
+            finding.starts_with("dns.") && is_valid_name(finding),
+            "{finding}"
+        );
+    }
     for code in codes::ALL {
         assert!(code.starts_with("dns.") && is_valid_name(code), "{code}");
     }

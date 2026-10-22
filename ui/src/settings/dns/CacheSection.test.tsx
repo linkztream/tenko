@@ -85,13 +85,31 @@ describe("the cache section", () => {
       if (!row) throw new Error(`no row ${key} ${type}`);
       return within(row).getAllByRole("cell").map((c) => c.textContent);
     };
-    expect(cells("www.example.test", "A")).toEqual(["www.example.test", "A", "4 min", "Default", "", "41", "CNAME cdn.example.test, 192.0.2.80"]);
-    expect(cells("example.test", "MX")).toEqual(["example.test", "MX", "56 min", "Default", "", "3", "10 mail.example.test"]);
+    expect(cells("www.example.test", "A")).toEqual(["www.example.test", "A", "4 min", "Default", "Secure", "", "41", "CNAME cdn.example.test, 192.0.2.80"]);
+    expect(cells("example.test", "MX")).toEqual(["example.test", "MX", "56 min", "Default", "Unvalidated", "", "3", "10 mail.example.test"]);
     expect(cells("example.net", "TXT")[2]).toBe("3 h");
     expect(cells("intranet.example.test", "A")[3]).toBe(CACHE_VIEW);
-    expect(cells("missing.example.test", "A")).toEqual(["missing.example.test", "A", "–", "Default", "Stale", "0", "NXDOMAIN"]);
-    expect(cells("ns1.example.org", "AAAA")[6]).toBe("NODATA");
+    expect(cells("missing.example.test", "A")).toEqual(["missing.example.test", "A", "–", "Default", "Unvalidated", "Stale", "0", "NXDOMAIN"]);
+    expect(cells("ns1.example.org", "AAAA")[7]).toBe("NODATA");
     expect(screen.getAllByTestId("dns-cache-stale")).toHaveLength(1);
+  });
+
+  it("shows the validation state of each entry and the extended error code of a bogus one", async () => {
+    open();
+    await section();
+    show();
+    await waitFor(() => expect(rows().length).toBe(7));
+    const state = (key: string, type: string) => {
+      const row = rows().find((r) => r.dataset.key === key && r.dataset.type === type);
+      return within(row as HTMLElement).getByTestId("dns-cache-state");
+    };
+    expect(state("www.example.test", "A").dataset.state).toBe("secure");
+    expect(state("www.example.test", "A").querySelector(".tag")?.getAttribute("title")).toContain("Signatures valid until");
+    expect(within(state("www.example.test", "A")).queryByTestId("dns-cache-ede")).toBeNull();
+    expect(state("example.net", "TXT").dataset.state).toBe("unvalidated");
+    expect(state("ns1.example.org", "AAAA").dataset.state).toBe("bogus");
+    expect(within(state("ns1.example.org", "AAAA")).getByTestId("dns-cache-ede").textContent).toBe("EDE 6");
+    expect(screen.getAllByTestId("dns-cache-ede")).toHaveLength(1);
   });
 
   it("narrows the listing to a suffix and checks it first", async () => {

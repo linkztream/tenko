@@ -245,7 +245,7 @@ async fn the_cache_is_listed_through_the_command() {
         answer.extend_from_slice(&qname);
         answer.extend_from_slice(&[0, 1, 0, 1, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 0x2c, 0, 4]);
         answer.extend_from_slice(&[192, 0, 2, 1]);
-        let key = CacheKey::new(None, &qname, 1, 1, false, false);
+        let key = CacheKey::new(None, &qname, 1, 1);
         assert!(cache.insert(&key, &answer, now, None));
     }
     let node = LocalNode::new(

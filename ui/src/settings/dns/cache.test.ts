@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { cacheSuffix, entryData, ttlLeft, type DnsCacheEntry } from "./cache";
 
 function entry(extra: Partial<DnsCacheEntry>): DnsCacheEntry {
-  return { name: "www.example.test", type: "A", rcode: 0, ttl: 60, stale: false, hits: 0, dnssec_ok: false, checking_disabled: false, records: [], ...extra };
+  return { name: "www.example.test", type: "A", rcode: 0, ttl: 60, stale: false, hits: 0, state: "unvalidated", records: [], ...extra };
 }
 
 describe("the cache helpers", () => {

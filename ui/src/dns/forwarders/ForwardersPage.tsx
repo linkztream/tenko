@@ -118,10 +118,10 @@ export default function ForwardersPage() {
     {
       id: "upstreams",
       header: () => t("dns.fwd.col.upstreams"),
-      text: (r) => r.upstreams.map((u) => upstreamEndpoint(u, r.transport ?? "plain")).join(", "),
+      text: (r) => (r.upstreams ?? []).map((u) => upstreamEndpoint(u, r.transport ?? "plain")).join(", "),
       render: (r) => (
         <span class="dns-chips">
-          <For each={r.upstreams}>
+          <For each={r.upstreams ?? []}>
             {(u, i) => (
               <span class="fwd-up" data-testid="fwd-upstream-cell" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>
                 <span class="tag mono" data-testid="fwd-upstream" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>

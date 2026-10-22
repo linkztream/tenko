@@ -19,9 +19,10 @@ use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use tenko_core::{
     Revision,
     dns::{
-        Acl, AclEntry, AclId, BlockAction, BlockList, BlockListId, DnsName, ForwardTransport,
-        ListFormat, ListKind, ListSource, ListVersion, MatchRule, Origin, QueryTransport, Rdata,
-        RecordData, RrSet, ScopeName, SoaDefaults, View, ViewId, Zone, ZoneId, ZoneKind,
+        Acl, AclEntry, AclId, BlockAction, BlockList, BlockListId, DnsName, ExtendedError,
+        ForwardTransport, ListFormat, ListKind, ListSource, ListVersion, MatchRule, Origin,
+        QueryTransport, Rdata, RecordData, RrSet, ScopeName, SecurityState, SoaDefaults, View,
+        ViewId, Zone, ZoneId, ZoneKind,
     },
     ipam::Stamp,
     principal::{Principal, SystemComponent},
@@ -29,7 +30,7 @@ use tenko_core::{
 use tenko_dns::{
     AnswerBuf, Codec, DnsData, DomainCodec, Index, Lookup, MemIndex, NameBuf, Request,
     authoritative::{Authoritative, Settings},
-    cache::CacheKey,
+    cache::{CacheKey, Verdict},
     catalog::{Catalog, CatalogHandle},
     codec::{Owner, Section},
     cookie::CookieSecret,
@@ -488,6 +489,7 @@ fn the_cache_hit_path_does_not_allocate() {
         scope_map: Vec::new(),
         order: 1,
         recursion: Some(acl.id),
+        resolution: None,
         description: None,
     };
     let mut image = full_image();
@@ -519,14 +521,7 @@ fn the_cache_hit_path_does_not_allocate() {
         )
     });
     let cache = forwarder.cache().expect("a cache");
-    let key = CacheKey::new(
-        Some(view.id),
-        b"\x03www\x07example\x03org\x00",
-        1,
-        1,
-        false,
-        false,
-    );
+    let key = CacheKey::new(Some(view.id), b"\x03www\x07example\x03org\x00", 1, 1);
     assert!(cache.insert(&key, &upstream_answer(), Instant::now(), None));
     let responder = Responder::new(
         Authoritative::new(catalog).with_settings(Settings {
@@ -580,8 +575,89 @@ fn the_cache_hit_path_does_not_allocate() {
         "the cache hit path allocated"
     );
     assert!(forwarder.stats().hits >= 1_500);
+
+    // WP10.0 (E40): the rendering by state and flags on the same path: a secure hit for a
+    // client with DO (AD, the signatures), the same hit for a client without DO (the
+    // signatures left out, the counts lowered), a bogus hit (SERVFAIL with the extended
+    // error in the OPT record) and the bogus hit for a client with CD (the data).
+    let signed = signed_answer("signed.example.org");
+    let secure = Verdict {
+        state: SecurityState::Secure,
+        ..Verdict::UNVALIDATED
+    };
+    let bogus = Verdict {
+        state: SecurityState::Bogus,
+        ede: Some(ExtendedError::SIGNATURE_EXPIRED),
+        max_ttl: Some(300),
+        ..Verdict::UNVALIDATED
+    };
+    let key = CacheKey::new(Some(view.id), b"\x06signed\x07example\x03org\x00", 1, 1);
+    assert!(cache.insert_with(&key, &signed, Instant::now(), None, &secure));
+    let key = CacheKey::new(Some(view.id), b"\x05bogus\x07example\x03org\x00", 1, 1);
+    assert!(cache.insert_with(
+        &key,
+        &signed_answer("bogus.example.org"),
+        Instant::now(),
+        None,
+        &bogus
+    ));
+    let ask = |id: u16, name: &str, dnssec_ok: bool, cd: bool| {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, id, name, 1, Some(1232));
+        query[2] |= 0x01;
+        if cd {
+            query[3] |= 0x10;
+        }
+        if dnssec_ok {
+            let len = query.len();
+            query[len - 4] = 0x80;
+        }
+        query
+    };
+    let cases = [
+        (ask(11, "signed.example.org", true, false), 0, 2, true),
+        (ask(12, "signed.example.org", false, false), 0, 1, false),
+        (ask(13, "bogus.example.org", true, false), 2, 0, false),
+        (ask(14, "bogus.example.org", true, true), 0, 2, false),
+    ];
+    let (allocations, reallocations, bytes) = measure(500, || {
+        for (query, rcode, answers, ad) in &cases {
+            let reply = responder.respond(query, &inside, &clock, Instant::now(), &mut scratch);
+            assert_eq!(reply, Reply::Send, "a cache hit");
+            let header = wire::parse_header(&scratch.out).expect("header");
+            assert_eq!(
+                (header.rcode, header.ancount, header.ad),
+                (*rcode, *answers, *ad)
+            );
+            black_box(&scratch.out);
+        }
+    });
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "the rendering by state and flags allocated"
+    );
+    // WP10.0: end.
     stop.cancel();
 }
+
+// WP10.0: a signed answer for the rendering section: one A record and its RRSIG.
+fn signed_answer(name: &str) -> Vec<u8> {
+    let mut answer = Vec::new();
+    wire::write_query(&mut answer, 0, name, 1, None);
+    answer[2] = 0x81;
+    answer[3] = 0x80;
+    answer[7] = 2;
+    answer.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 1, 44, 0, 4, 192, 0, 2, 81]);
+    let mut rrsig = vec![0, 1, 13, 3, 0, 0, 1, 44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    rrsig.extend_from_slice(b"\x07example\x03org\x00");
+    rrsig.extend_from_slice(&[0x5a; 64]);
+    answer.extend_from_slice(&[0xc0, 0x0c, 0, 46, 0, 1, 0, 0, 1, 44]);
+    answer.extend_from_slice(&u16::try_from(rrsig.len()).expect("len").to_be_bytes());
+    answer.extend_from_slice(&rrsig);
+    answer
+}
+// WP10.0: end.
 
 /// An RRset of `zone` in its default scope.
 fn rrset_of(zone: &Zone, owner: &str, data: &RecordData) -> RrSet {
@@ -697,7 +773,7 @@ fn the_policy_and_the_limiter_do_not_allocate() {
     let cache = forwarder.cache().expect("a cache");
     for (name, last) in [("www.example.org", 80), ("clean.example.org", 81)] {
         let wire_name = NameBuf::from_dns_name(&dns_name(name));
-        let key = CacheKey::new(None, wire_name.as_wire(), 1, 1, false, false);
+        let key = CacheKey::new(None, wire_name.as_wire(), 1, 1);
         assert!(cache.insert(&key, &answer_for(name, last), Instant::now(), None));
     }
     let limiter = Limiter::new(LimitSettings {

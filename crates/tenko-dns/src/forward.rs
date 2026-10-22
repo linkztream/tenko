@@ -351,6 +351,10 @@ enum Route {
     Default,
     Rule(Box<ForwardRule>),
     Stub(Box<Zone>),
+    // WP10.0: the route of a rule of mode `recurse` (recursion plan section 2.7); the
+    // iterative engine of WP10.1 answers it, until then it fails as a route without
+    // upstreams does.
+    Recurse(Box<ForwardRule>),
 }
 
 /// Whether the lowercase wire name `qname` is at or below `suffix`, without allocating.
@@ -391,6 +395,10 @@ fn route(catalog: &Catalog, qname: &[u8], rule: Option<ForwardRuleId>) -> Route 
             Route::Stub(Box::new(stub.clone()))
         }
         (Some(stub), None) => Route::Stub(Box::new(stub.clone())),
+        // WP10.0
+        (_, Some(rule)) if rule.mode == tenko_core::dns::RuleMode::Recurse => {
+            Route::Recurse(Box::new(rule.clone()))
+        }
         (_, Some(rule)) => Route::Rule(Box::new(rule.clone())),
         (None, None) => Route::Default,
     }
@@ -609,6 +617,11 @@ impl Shared {
                 &UpstreamSpec::of_rule(rule),
             ),
             Route::Stub(zone) => Err(format!("stub zone {} has no direct upstreams", zone.name)),
+            // WP10.0: WP10.1's engine takes this route.
+            Route::Recurse(rule) => Err(format!(
+                "rule {} recurses and the recursive resolver is not built yet",
+                rule.suffix
+            )),
         }
     }
 
@@ -797,7 +810,11 @@ impl Shared {
         let mut answer = Vec::new();
         set.query(&question.as_question(), self.budget(), &mut answer)
             .await?;
-        if let (Some(cache), Some(key)) = (&self.cache, &key) {
+        // WP10.0: an answer asked with CD may be data the upstream would not vouch for; it
+        // goes to its client and not into the entry other clients share.
+        if !question.cd
+            && let (Some(cache), Some(key)) = (&self.cache, &key)
+        {
             cache.insert(key, &answer, Instant::now(), rule);
         }
         Ok(answer)
@@ -937,21 +954,14 @@ impl ForwardSink for Forwarder {
         let Some(question_end) = wire::questions_end(query.message, 1) else {
             return Intake::Forward;
         };
-        let dnssec_ok = request.edns.is_some_and(|edns| edns.dnssec_ok);
-        let key = CacheKey::new(
-            query.view,
-            qname,
-            request.qtype,
-            request.qclass,
-            dnssec_ok,
-            request.cd,
-        );
+        let key = CacheKey::new(query.view, qname, request.qtype, request.qclass);
         let client = Client {
             message: query.message,
             question_end,
             id: request.id,
             rd: request.rd,
             cd: request.cd,
+            ad: request.ad,
             edns: request.edns.map(|edns| ClientEdns {
                 udp_size: query.udp_size,
                 dnssec_ok: edns.dnssec_ok,
@@ -961,7 +971,7 @@ impl ForwardSink for Forwarder {
         };
         let view = metrics::view_index(query.view.is_some());
         match cache.answer(&key, query.now, &client, out) {
-            Hit::Fresh { rcode } => {
+            Hit::Fresh { rcode, .. } => {
                 shared.count(|counters| &counters.hits);
                 if shared.settings.metrics {
                     metrics::CACHE_HIT_COUNTER.inc(view);
@@ -1028,7 +1038,8 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             }
             let catalog = shared.catalog.load_full();
             shared.pools.retain(|key| match key {
-                PoolKey::Default => true,
+                // WP10.0: the delegations' sets belong to the engine (WP10.1).
+                PoolKey::Default | PoolKey::Delegation(_) => true,
                 PoolKey::Rule(id) => catalog.forward_rule(*id).is_some(),
                 PoolKey::Stub(id) | PoolKey::StubSource(id) => catalog.stub_zone(*id).is_some(),
             });
@@ -1054,8 +1065,9 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
         qtype: key.qtype(),
         qclass: key.qclass(),
         rd: true,
-        cd: key.cd(),
-        dnssec_ok: key.dnssec_ok(),
+        cd: false,
+        // WP10.0: every upstream query asks for the signatures (recursion plan 2.2).
+        dnssec_ok: true,
     };
     let rule_id = match &route {
         Route::Rule(rule) => Some(rule.id),
@@ -1091,24 +1103,19 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
     let catalog = shared.catalog.load_full();
     let qname = request.qname.as_wire().to_vec();
     let route = route(&catalog, &qname, query.rule);
-    let dnssec_ok = request.edns.is_some_and(|edns| edns.dnssec_ok);
-    let key = shared.cache.as_ref().map(|_| {
-        CacheKey::new(
-            query.view,
-            &qname,
-            request.qtype,
-            request.qclass,
-            dnssec_ok,
-            request.cd,
-        )
-    });
+    let key = shared
+        .cache
+        .as_ref()
+        .map(|_| CacheKey::new(query.view, &qname, request.qtype, request.qclass));
     let question = OwnedQuestion {
         qname,
         qtype: request.qtype,
         qclass: request.qclass,
         rd: true,
         cd: request.cd,
-        dnssec_ok,
+        // WP10.0: every upstream query asks for the signatures, so that one entry serves
+        // clients with and without DO (recursion plan section 2.2).
+        dnssec_ok: true,
     };
     let rule_id = match &route {
         Route::Rule(rule) => Some(rule.id),
@@ -1170,6 +1177,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         id: request.id,
         rd: request.rd,
         cd: request.cd,
+        ad: request.ad,
         edns: request.edns.map(|edns| ClientEdns {
             udp_size: shared.settings.udp_size,
             dnssec_ok: edns.dnssec_ok,

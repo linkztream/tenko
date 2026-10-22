@@ -6,11 +6,51 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     JobId, NodeId, Revision, TenantId, Timestamp,
     dns::{
-        Acl, AclEntry, AclId, BlockAction, BlockList, DnsKeyId, DnsName, DnssecAlgorithm,
-        DnssecMode, DnssecPolicy, ForwardRule, ForwardTransport, KeyName, KeyRole, KeyState,
-        ListFormat, ListKind, ListSource, MatchRule, Origin, QueryTransport, RecordData, Rtype,
-        ScopeName, ScopeWeight, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy,
-        TsigAlgorithm, UpdatePolicy, Upstream, View, ViewId, Zone, ZoneId, ZoneKind, ZoneScope,
+        Acl,
+        AclEntry,
+        AclId,
+        // WP10.0
+        AnchorState,
+        BlockAction,
+        BlockList,
+        DnsKeyId,
+        DnsName,
+        DnssecAlgorithm,
+        DnssecMode,
+        DnssecPolicy,
+        ForwardRule,
+        ForwardTransport,
+        KeyName,
+        KeyRole,
+        KeyState,
+        ListFormat,
+        ListKind,
+        ListSource,
+        MatchRule,
+        NegativeTrustAnchor,
+        Origin,
+        QueryTransport,
+        RecordData,
+        ResolutionMode,
+        Rtype,
+        RuleMode,
+        ScopeName,
+        ScopeWeight,
+        SecondarySource,
+        SecurityState,
+        SerialPolicy,
+        SoaDefaults,
+        TransferPolicy,
+        TrustAnchor,
+        TsigAlgorithm,
+        UpdatePolicy,
+        Upstream,
+        View,
+        ViewId,
+        Zone,
+        ZoneId,
+        ZoneKind,
+        ZoneScope,
     },
     ipam::Stamp,
 };
@@ -456,6 +496,12 @@ pub struct ViewCreate {
     /// absent.
     #[serde(default)]
     pub recursion: Option<AclId>,
+    // WP10.0: how the view resolves names outside the zones and the rules.
+    /// How the view's clients get names outside the zones and the forwarding rules; the
+    /// profile's default when absent. Until WP10.4 a value answers 501.
+    #[serde(default)]
+    pub resolution: Option<ResolutionMode>,
+    // WP10.0: end.
     /// Free text.
     #[serde(default)]
     pub description: Option<String>,
@@ -482,6 +528,16 @@ pub struct ViewPatch {
     /// Follow the profile's default for recursion (clears `recursion`, WP6.4).
     #[serde(default)]
     pub default_recursion: bool,
+    // WP10.0: how the view resolves names outside the zones and the rules.
+    /// How the view's clients get names outside the zones and the forwarding rules. Until
+    /// WP10.4 a value answers 501.
+    #[serde(default)]
+    pub resolution: Option<ResolutionMode>,
+    /// Follow the profile's default for the resolution (clears `resolution`). Until WP10.4
+    /// `true` answers 501.
+    #[serde(default)]
+    pub default_resolution: bool,
+    // WP10.0: end.
     /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
@@ -507,8 +563,19 @@ pub struct ForwarderItem {
 pub struct ForwarderCreate {
     /// The names the rule covers; `.` for the default forwarder.
     pub suffix: DnsName,
-    /// The upstreams.
+    // WP10.0: a recurse rule names no upstream.
+    /// The upstreams, 1 to 16; none for a rule of mode `recurse`.
+    #[serde(default)]
     pub upstreams: Vec<Upstream>,
+    /// Forward to the upstreams (the default) or resolve the names under the suffix
+    /// iteratively. Until WP10.1 `recurse` answers 501.
+    #[serde(default)]
+    pub mode: Option<RuleMode>,
+    /// Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`
+    /// answers 501.
+    #[serde(default)]
+    pub validate: Option<bool>,
+    // WP10.0: end.
     /// How they are reached.
     #[serde(default)]
     pub transport: ForwardTransport,
@@ -532,6 +599,15 @@ pub struct ForwarderPatch {
     /// The upstreams.
     #[serde(default)]
     pub upstreams: Option<Vec<Upstream>>,
+    // WP10.0: the rule's mode and validation.
+    /// Forward to the upstreams or resolve the names under the suffix iteratively. Until
+    /// WP10.1 `recurse` answers 501.
+    #[serde(default)]
+    pub mode: Option<RuleMode>,
+    /// Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501.
+    #[serde(default)]
+    pub validate: Option<bool>,
+    // WP10.0: end.
     /// How they are reached.
     #[serde(default)]
     pub transport: Option<ForwardTransport>,
@@ -969,10 +1045,19 @@ pub struct DnsCacheEntry {
     pub stale: bool,
     /// Answers from the entry since it was stored.
     pub hits: u32,
-    /// Asked with the DO bit: the entry holds the signatures.
-    pub dnssec_ok: bool,
-    /// Asked with the CD bit.
-    pub checking_disabled: bool,
+    // WP10.0: the validation state (recursion plan section 2.2); the DO and CD bits are no
+    // longer part of the cache key.
+    /// The validation state: `secure`, `insecure`, `bogus`, `indeterminate`, or
+    /// `unvalidated` when nothing validated the answer.
+    pub state: SecurityState,
+    /// The extended DNS error (RFC 8914) a bogus entry is answered with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ede: Option<u16>,
+    /// The earliest expiry of the signatures that made the entry secure; the entry lives
+    /// no longer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_expiry: Option<Timestamp>,
+    // WP10.0: end.
     /// The records of the answer section, in the order received; empty for a negative
     /// answer.
     pub records: Vec<RecordData>,
@@ -1257,3 +1342,222 @@ pub struct BlockingAllowed {
     pub job: Option<JobId>,
 }
 // dns-visibility: end.
+
+// WP10.0: the recursive resolver (recursion plan section 3.4): trust anchors, negative trust
+// anchors and the node's recursion status and infrastructure cache.
+/// A trust anchor as the API reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TrustAnchorItem {
+    /// The trust anchor of the zone with its keys and their RFC 5011 state.
+    #[serde(flatten)]
+    pub anchor: TrustAnchor,
+    /// The store revision of the row.
+    pub revision: Revision,
+}
+
+/// `POST /dns/trust-anchors`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TrustAnchorAdd {
+    /// The zone; `.` for the root.
+    pub zone: DnsName,
+    /// A DS record's data in presentation form (`20326 8 2 E06D44B8...`): key tag,
+    /// algorithm, digest type and the digest in hexadecimal. Exactly one of `ds` and
+    /// `dnskey` is given.
+    #[serde(default)]
+    pub ds: Option<String>,
+    /// A DNSKEY record's data in presentation form (`257 3 8 AwEAAa...`): flags, protocol,
+    /// algorithm and the key in base64. Exactly one of `ds` and `dnskey` is given.
+    #[serde(default)]
+    pub dnskey: Option<String>,
+    /// Replace the root's trust anchor with this key instead of adding to it. Allowed only
+    /// under the Lab profile (`dns.trust_anchor.root_protected` otherwise).
+    #[serde(default)]
+    pub replace_root: bool,
+}
+
+/// A negative trust anchor as the API reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct NtaItem {
+    /// The negative trust anchor.
+    #[serde(flatten)]
+    pub nta: NegativeTrustAnchor,
+    /// The store revision of the row.
+    pub revision: Revision,
+}
+
+/// `POST /dns/ntas`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct NtaCreate {
+    /// The zone; never the root. Names at or below it are `insecure` instead of `bogus`
+    /// while the anchor lives.
+    pub zone: DnsName,
+    /// When it stops applying, at most seven days ahead. Absent: seven days from now,
+    /// which the Hardened profile refuses (`dns.nta.invalid`).
+    #[serde(default)]
+    pub expires_at: Option<Timestamp>,
+    /// Why it exists, 1 to 500 characters.
+    pub reason: String,
+}
+
+/// The last priming of a node's resolver.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PrimingItem {
+    /// When the priming ended.
+    pub at: Timestamp,
+    /// `ok`, or `failed` when no server of the root hints answered.
+    pub outcome: String,
+}
+
+/// One root server of a node's resolver with its smoothed round-trip time.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RootServerItem {
+    /// The server's name (`a.root-servers.net.`).
+    pub name: String,
+    /// The address in use.
+    pub address: String,
+    /// The smoothed round-trip time in milliseconds; absent before the first answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub srtt_ms: Option<f64>,
+}
+
+/// The sizes of a node's infrastructure cache.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InfraSizes {
+    /// Zone cuts held.
+    pub zones: u64,
+    /// Authority servers held.
+    pub servers: u64,
+    /// Server names held.
+    pub names: u64,
+}
+
+/// What a node's resolver did since the role started.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RecursionCounters {
+    /// Client queries answered by recursion.
+    pub answered: u64,
+    /// Client queries answered SERVFAIL.
+    pub servfail: u64,
+    /// Client queries that ran out of budget.
+    pub budget: u64,
+    /// Client queries that timed out.
+    pub timeout: u64,
+    /// Client queries answered from local data.
+    pub local: u64,
+    /// Answers validated `secure`.
+    pub secure: u64,
+    /// Answers validated `insecure`.
+    pub insecure: u64,
+    /// Answers validated `bogus`.
+    pub bogus: u64,
+    /// Answers for which no trust anchor applied (`indeterminate`).
+    pub indeterminate: u64,
+}
+
+/// One key of a trust anchor in the node's status.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AnchorKeyState {
+    /// The zone.
+    pub zone: DnsName,
+    /// The key tag.
+    pub key_tag: u16,
+    /// The key's RFC 5011 state.
+    pub state: AnchorState,
+}
+
+/// `GET /nodes/{id}/dns/recursion`: the recursive resolver of a node.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RecursionStatus {
+    /// The resolver runs on the node.
+    pub enabled: bool,
+    /// Where the root hints come from: `shipped` or the path of the file.
+    pub hints_source: String,
+    /// The date of the hints (`2026-01-31`).
+    pub hints_date: String,
+    /// The last priming; absent before the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_priming: Option<PrimingItem>,
+    /// The root servers in use with their smoothed round-trip times.
+    pub root_servers: Vec<RootServerItem>,
+    /// The sizes of the infrastructure cache.
+    pub infra: InfraSizes,
+    /// The counters since the role started.
+    pub counters: RecursionCounters,
+    /// The keys of the trust anchors with their state.
+    pub trust_anchors: Vec<AnchorKeyState>,
+    /// What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`.
+    pub problems: Vec<String>,
+}
+
+/// The query of `GET /nodes/{id}/dns/infra`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct InfraParams {
+    /// Only the zone cuts equal to this name or under it (`example.test` finds
+    /// `www.example.test`, not `badexample.test`).
+    pub suffix: Option<String>,
+    /// Zone cuts per page, 1 to 1000; 200 by default.
+    pub limit: Option<u32>,
+    /// The cursor of the next page.
+    pub cursor: Option<String>,
+}
+
+/// The query of `POST /nodes/{id}/dns/infra/flush`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct InfraFlushParams {
+    /// Flush only the zone cuts at or below this suffix (`example.test`); everything when
+    /// absent.
+    pub suffix: Option<String>,
+}
+
+/// The answer of `POST /nodes/{id}/dns/infra/flush`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InfraFlushed {
+    /// The zone cuts dropped.
+    pub entries: u64,
+}
+
+/// One address of an authority server in the infrastructure cache.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InfraAddressItem {
+    /// The address.
+    pub address: String,
+    /// Where the address was learned: `glue`, `sibling_glue` or `authoritative`.
+    pub origin: String,
+    /// Seconds the address stays valid.
+    pub ttl: u32,
+    /// The smoothed round-trip time in milliseconds; absent before the first answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub srtt_ms: Option<f64>,
+    /// Whether the server speaks EDNS; absent while unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edns: Option<bool>,
+    /// The server answers only over TCP.
+    pub tcp_only: bool,
+    /// The server is lame for the zone.
+    pub lame: bool,
+}
+
+/// One authority server of a zone cut with its addresses.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InfraServerItem {
+    /// The server's name.
+    pub name: DnsName,
+    /// Its addresses.
+    pub addresses: Vec<InfraAddressItem>,
+}
+
+/// One zone cut of a node's infrastructure cache.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InfraCutItem {
+    /// The zone the cut starts.
+    pub zone: DnsName,
+    /// Its authority servers.
+    pub servers: Vec<InfraServerItem>,
+    /// Whether the zone is signed: `unknown`, `secure`, `insecure` or `bogus`.
+    pub ds: String,
+    /// Seconds the cut stays valid.
+    pub ttl: u32,
+}
+// WP10.0: end.

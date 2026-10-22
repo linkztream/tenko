@@ -99,13 +99,14 @@ fn client(message: &[u8], edns: Option<ClientEdns>, max_len: usize) -> Client<'_
         id: 0x1234,
         rd: true,
         cd: false,
+        ad: false,
         edns,
         max_len,
     }
 }
 
 fn key(qname: &str, qtype: u16) -> CacheKey {
-    CacheKey::new(None, &wire_name(qname), qtype, 1, false, false)
+    CacheKey::new(None, &wire_name(qname), qtype, 1)
 }
 
 fn ttls(message: &[u8]) -> Vec<u32> {
@@ -134,12 +135,13 @@ fn small(entries: usize) -> Cache {
 fn a_key_reads_back_its_parts() {
     let view = ViewId::generate();
     let name = wire_name("www.example.test");
-    let key = CacheKey::new(Some(view), &name, AAAA, 1, true, true);
+    let key = CacheKey::new(Some(view), &name, AAAA, 1);
     assert_eq!(key.qname(), &name[..]);
     assert_eq!((key.qtype(), key.qclass()), (AAAA, 1));
-    assert!(key.dnssec_ok() && key.cd());
     assert_eq!(key.view(), Some(view));
-    let plain = CacheKey::new(None, &name, A, 1, false, false);
+    assert_eq!(CacheKey::from_bytes(key.as_bytes()).qtype(), AAAA);
+    assert_eq!(CacheKey::from_bytes(key.as_bytes()).view(), Some(view));
+    let plain = CacheKey::new(None, &name, A, 1);
     assert_eq!(plain.view(), None);
     assert_eq!(CacheKey::from_bytes(plain.as_bytes()).qname(), &name[..]);
     assert_ne!(plain.as_bytes(), key.as_bytes());
@@ -160,7 +162,13 @@ fn a_hit_answers_with_the_client_id_case_and_lowered_ttls() {
         &client(&asked, None, 512),
         &mut out,
     );
-    assert_eq!(hit, Hit::Fresh { rcode: 0 });
+    assert_eq!(
+        hit,
+        Hit::Fresh {
+            rcode: 0,
+            state: SecurityState::Unvalidated
+        }
+    );
     let header = wire::parse_header(&out).expect("header");
     assert_eq!(header.id, 0x1234);
     assert!(header.qr && header.ra && header.rd);
@@ -238,7 +246,10 @@ fn negative_answers_live_for_the_soa_minimum() {
             &client(&asked, None, 512),
             &mut out
         ),
-        Hit::Fresh { rcode: 3 }
+        Hit::Fresh {
+            rcode: 3,
+            state: SecurityState::Unvalidated
+        }
     );
     assert_eq!(
         ttls(&out),
@@ -266,7 +277,10 @@ fn negative_answers_live_for_the_soa_minimum() {
             &client(&asked, None, 512),
             &mut out
         ),
-        Hit::Fresh { rcode: 0 }
+        Hit::Fresh {
+            rcode: 0,
+            state: SecurityState::Unvalidated
+        }
     );
     assert_eq!(
         cache.answer(
@@ -416,7 +430,10 @@ fn an_answer_over_the_clients_limit_is_cut_with_tc() {
     let mut out = Vec::new();
     assert_eq!(
         cache.answer(&k, now, &client(&asked, None, 512), &mut out),
-        Hit::Fresh { rcode: 0 }
+        Hit::Fresh {
+            rcode: 0,
+            state: SecurityState::Unvalidated
+        }
     );
     let header = wire::parse_header(&out).expect("header");
     assert!(header.tc);
@@ -447,7 +464,10 @@ fn the_entry_bound_holds_and_the_least_recently_used_goes_first() {
             &client(&asked, None, 512),
             &mut out
         ),
-        Hit::Fresh { rcode: 0 }
+        Hit::Fresh {
+            rcode: 0,
+            state: SecurityState::Unvalidated
+        }
     );
     let name = "c.example.test";
     assert!(cache.insert(
@@ -512,39 +532,55 @@ fn the_byte_bound_holds() {
 }
 
 #[test]
-fn views_and_the_do_bit_keep_entries_apart() {
+fn views_keep_entries_apart_and_do_and_cd_do_not() {
     let cache = small(100);
     let now = Instant::now();
     let name = wire_name("www.example.test");
     let view = ViewId::generate();
     let message = upstream("www.example.test", A, 0, &[a(1, 300)], &[], false);
-    assert!(cache.insert(
-        &CacheKey::new(Some(view), &name, A, 1, false, false),
-        &message,
-        now,
-        None
-    ));
+    assert!(cache.insert(&CacheKey::new(Some(view), &name, A, 1), &message, now, None));
     let asked = query("www.example.test", A, None);
     let mut out = Vec::new();
     for other in [
-        CacheKey::new(None, &name, A, 1, false, false),
-        CacheKey::new(Some(ViewId::generate()), &name, A, 1, false, false),
-        CacheKey::new(Some(view), &name, A, 1, true, false),
-        CacheKey::new(Some(view), &name, A, 1, false, true),
+        CacheKey::new(None, &name, A, 1),
+        CacheKey::new(Some(ViewId::generate()), &name, A, 1),
+        CacheKey::new(Some(view), &name, AAAA, 1),
     ] {
         assert_eq!(
             cache.answer(&other, now, &client(&asked, None, 512), &mut out),
             Hit::Miss
         );
     }
+    // One entry for every combination of the client's DO and CD bits.
+    let asked_do = query("www.example.test", A, Some(1232));
+    for (dnssec_ok, cd) in [(false, true), (true, false), (true, true)] {
+        let mut asking = client(&asked_do, Some(edns(dnssec_ok)), 1232);
+        asking.cd = cd;
+        assert_eq!(
+            cache.answer(
+                &CacheKey::new(Some(view), &name, A, 1),
+                now,
+                &asking,
+                &mut out
+            ),
+            Hit::Fresh {
+                rcode: 0,
+                state: SecurityState::Unvalidated
+            }
+        );
+        assert_eq!(out[3] & 0x10 != 0, cd, "CD echoed");
+    }
     assert_eq!(
         cache.answer(
-            &CacheKey::new(Some(view), &name, A, 1, false, false),
+            &CacheKey::new(Some(view), &name, A, 1),
             now,
             &client(&asked, None, 512),
             &mut out
         ),
-        Hit::Fresh { rcode: 0 }
+        Hit::Fresh {
+            rcode: 0,
+            state: SecurityState::Unvalidated
+        }
     );
 }
 
@@ -683,4 +719,13 @@ fn relay_gives_the_client_its_id_case_and_this_nodes_opt() {
     // A question of another length is not this client's.
     let other = query("other.example.test", A, None);
     assert_eq!(relay(&message, &client(&other, None, 512), &mut out), None);
+}
+
+/// The EDNS of a client, with or without DO.
+fn edns(dnssec_ok: bool) -> ClientEdns {
+    ClientEdns {
+        udp_size: 1232,
+        dnssec_ok,
+        cookie: None,
+    }
 }

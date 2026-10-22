@@ -11267,7 +11267,7 @@
           "dns"
         ],
         "summary": "Create a forwarding rule",
-        "description": "Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates.",
+        "description": "Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and write nothing.",
         "operationId": "create_dns_forwarder",
         "requestBody": {
           "content": {
@@ -11312,6 +11312,16 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11486,7 +11496,7 @@
           "dns"
         ],
         "summary": "Change a forwarding rule",
-        "description": "Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view.",
+        "description": "Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and change nothing.",
         "operationId": "update_dns_forwarder",
         "parameters": [
           {
@@ -11574,6 +11584,16 @@
           },
           "412": {
             "description": "The rule changed since it was read (`If-Match`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12470,6 +12490,682 @@
         }
       }
     },
+    "/api/v1/dns/ntas": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List the negative trust anchors",
+        "description": "Scope: `dns.read`. The negative trust anchors (RFC 7646) that have not expired, by zone: names at or below the zone are `insecure` instead of `bogus` while one lives.",
+        "operationId": "list_dns_ntas",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of negative trust anchors by zone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NtaItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Create a negative trust anchor",
+        "description": "Scope: `dns.keys`, in an interactive session. The expiry is at most seven days ahead and required under the Hardened profile; the reason is shown in the warnings of `GET /system/status` while the anchor lives. Audited as `dns.nta.create`.",
+        "operationId": "create_dns_nta",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NtaCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The negative trust anchor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NtaItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the anchor is invalid (`dns.nta.invalid`, parameters `field` and `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to create one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/ntas/{id}": {
+      "delete": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Delete a negative trust anchor",
+        "description": "Scope: `dns.keys`, in an interactive session. Ends the anchor before its expiry; audited as `dns.nta.delete`.",
+        "operationId": "delete_dns_nta",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Negative trust anchor identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The negative trust anchor is gone"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to delete one",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such negative trust anchor (`dns.nta.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/trust-anchors": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List the trust anchors",
+        "description": "Scope: `dns.read`. One row per zone: the root (the shipped anchors and what RFC 5011 made of them) and the anchors an operator added for private zones, each with its keys, their RFC 5011 state and source, and the times of the last and the next query.",
+        "operationId": "list_dns_trust_anchors",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of trust anchors by zone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TrustAnchorItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Add a trust anchor for a zone",
+        "description": "Scope: `dns.keys`, in an interactive session. Adds a key, as a DS or a DNSKEY in presentation form, to the zone's trust anchor (creating it); the key is Valid at once and its source is the operator. The root is added to only with `replace_root` and only under the Lab profile. Audited as `dns.trust_anchor.add`.",
+        "operationId": "add_dns_trust_anchor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustAnchorAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The trust anchor of the zone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustAnchorItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the key is invalid (`dns.trust_anchor.invalid`, parameters `field` and `reason`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/trust-anchors/{zone}": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Get the trust anchor of a zone",
+        "description": "Scope: `dns.read`. The root zone is written `.`.",
+        "operationId": "get_dns_trust_anchor",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "description": "The zone name; `root` for the root (a URL cannot carry the segment `.`)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trust anchor with its `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustAnchorItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No trust anchor for the zone (`dns.trust_anchor.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Remove the trust anchor of a zone",
+        "description": "Scope: `dns.keys`, in an interactive session. Names under the zone are validated against the next anchor above it, or are `indeterminate` when none applies. The root's anchor is removed only under the Lab profile. Audited as `dns.trust_anchor.remove`.",
+        "operationId": "remove_dns_trust_anchor",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "description": "The zone name; `root` for the root (a URL cannot carry the segment `.`)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The trust anchor is gone"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No trust anchor for the zone (`dns.trust_anchor.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/trust-anchors/{zone}/refresh": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Run RFC 5011 for a zone now",
+        "description": "Scope: `dns.keys`. Asks the zone's DNSKEY set now instead of at the next refresh interval and applies RFC 5011 to the answer; audited as `dns.trust_anchor.refresh`. The answer is the recorded command; the key states follow through the `dns` events.",
+        "operationId": "refresh_dns_trust_anchor",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "path",
+            "description": "The zone name; `root` for the root (a URL cannot carry the segment `.`)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The refresh is queued on the leader's trust anchor service",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsCommandAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.keys`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No trust anchor for the zone (`dns.trust_anchor.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resolver is off (`dns.recursion.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/dns/views": {
       "get": {
         "tags": [
@@ -12559,7 +13255,7 @@
           "dns"
         ],
         "summary": "Create a DNS view",
-        "description": "Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list.",
+        "description": "Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list. `resolution` (`recurse`, `forward` or `refuse`) says how the view's clients get names outside the zones and the forwarding rules; until the resolver is built, a value answers 501 and writes nothing.",
         "operationId": "create_dns_view",
         "requestBody": {
           "content": {
@@ -12604,6 +13300,16 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "`resolution` is set, which is not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12788,7 +13494,7 @@
           "dns"
         ],
         "summary": "Change a DNS view",
-        "description": "Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it.",
+        "description": "Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it. `resolution` sets how the view's clients get names outside the zones and the forwarding rules and `default_resolution` clears it; until the resolver is built, either answers 501 and changes nothing.",
         "operationId": "update_dns_view",
         "parameters": [
           {
@@ -12876,6 +13582,16 @@
           },
           "412": {
             "description": "The view changed since it was read (`If-Match`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "`resolution` or `default_resolution` is set, which is not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20242,6 +20958,234 @@
         }
       }
     },
+    "/api/v1/nodes/{id}/dns/infra": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "List what a node's infrastructure cache holds",
+        "description": "Scope: `dns.read`. A page of the zone cuts the node's resolver knows, in the canonical order of their names, each with its authority servers, their addresses (origin, remaining time, smoothed round-trip time, EDNS capability, TCP-only and lame flags) and the DS state. `suffix` keeps the cuts at or below it. The cuts reveal which zones the clients asked about, so the read is a node command and recorded in the node's commands.",
+        "operationId": "list_node_dns_infra",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "suffix",
+            "in": "query",
+            "description": "Only the zone cuts equal to this name or under it (`example.test` finds\n`www.example.test`, not `badexample.test`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Zone cuts per page, 1 to 1000; 200 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The cursor of the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of zone cuts in canonical name order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_InfraCutItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/dns/infra/flush": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Flush a node's infrastructure cache",
+        "description": "Scope: `dns.write`. Issues a node command that drops the zone cuts, server addresses and their figures, at or below `suffix` or all of them; the root hints stay and the next query primes again. Audited as `dns.infra.flush`.",
+        "operationId": "flush_node_dns_infra",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "suffix",
+            "in": "query",
+            "description": "Flush only the zone cuts at or below this suffix (`example.test`); everything when\nabsent.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The number of zone cuts dropped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfraFlushed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/nodes/{id}/dns/log": {
       "get": {
         "tags": [
@@ -20553,6 +21497,196 @@
           },
           "409": {
             "description": "The node does not run the dns role or its log is off (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/dns/recursion": {
+      "get": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Get the recursive resolver of a node",
+        "description": "Scope: `dns.read`. Whether the resolver runs, the source and date of the root hints, the last priming and its outcome, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache, the counters since the role started, the trust anchor keys with their state, and what is wrong (`priming_failed`, `clock`, `trust_anchor_stale`).",
+        "operationId": "get_node_dns_recursion",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resolver's status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecursionStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role (`dns.node.not_dns`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/nodes/{id}/dns/recursion/prime": {
+      "post": {
+        "tags": [
+          "dns"
+        ],
+        "summary": "Prime a node's resolver now",
+        "description": "Scope: `dns.write`. Issues a node command that asks the root servers for the root NS set again and refreshes the infrastructure cache from the answer; audited as `dns.recursion.prime`. The outcome shows in the status.",
+        "operationId": "prime_node_dns_recursion",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The command was recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsCommandAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dns.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The node does not run the dns role (`dns.node.not_dns`), or its resolver is off (`dns.recursion.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34101,6 +35235,210 @@
         },
         "additionalProperties": false
       },
+      "AnchorData": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A DS record's data (RFC 4034 section 5.1): key tag, algorithm, digest type, digest.",
+            "required": [
+              "rdata",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ds"
+                ]
+              },
+              "rdata": {
+                "type": "string",
+                "description": "The record data."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A DNSKEY record's data (RFC 4034 section 2.1): flags, protocol, algorithm, key.",
+            "required": [
+              "rdata",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dnskey"
+                ]
+              },
+              "rdata": {
+                "type": "string",
+                "description": "The record data."
+              }
+            }
+          }
+        ],
+        "description": "The key material of a trust anchor key, in wire form."
+      },
+      "AnchorKey": {
+        "type": "object",
+        "description": "One key of a trust anchor.",
+        "required": [
+          "key_tag",
+          "algorithm",
+          "data",
+          "state",
+          "source",
+          "added_at",
+          "state_since"
+        ],
+        "properties": {
+          "added_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was added."
+          },
+          "algorithm": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The DNSSEC algorithm number.",
+            "minimum": 0
+          },
+          "data": {
+            "$ref": "#/components/schemas/AnchorData",
+            "description": "The key material."
+          },
+          "digest_type": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The DS digest type; present exactly for a DS.",
+            "minimum": 0
+          },
+          "key_tag": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The key tag (RFC 4034 appendix B).",
+            "minimum": 0
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the zone's DNSKEY set last held it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/AnchorSource",
+            "description": "Where it came from."
+          },
+          "state": {
+            "$ref": "#/components/schemas/AnchorState",
+            "description": "The RFC 5011 state."
+          },
+          "state_since": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it entered its state (the add hold-down counts from here)."
+          }
+        }
+      },
+      "AnchorKeyState": {
+        "type": "object",
+        "description": "One key of a trust anchor in the node's status.",
+        "required": [
+          "zone",
+          "key_tag",
+          "state"
+        ],
+        "properties": {
+          "key_tag": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The key tag.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/AnchorState",
+            "description": "The key's RFC 5011 state."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone."
+          }
+        }
+      },
+      "AnchorSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Shipped in the binary from the IANA file (RFC 7958).",
+            "required": [
+              "release",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "shipped"
+                ]
+              },
+              "release": {
+                "type": "string",
+                "description": "The release that shipped it (the crate version)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Added by an operator.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "operator"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Learnt by RFC 5011 from the zone's DNSKEY set.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rfc5011"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where a trust anchor key came from."
+      },
+      "AnchorState": {
+        "type": "string",
+        "description": "The RFC 5011 state of a trust anchor key (RFC 5011 section 4).",
+        "enum": [
+          "start",
+          "add_pend",
+          "valid",
+          "missing",
+          "revoked",
+          "removed"
+        ]
+      },
       "ApiTokenId": {
         "type": "string",
         "format": "uuid"
@@ -39491,18 +40829,18 @@
           "ttl",
           "stale",
           "hits",
-          "dnssec_ok",
-          "checking_disabled",
+          "state",
           "records"
         ],
         "properties": {
-          "checking_disabled": {
-            "type": "boolean",
-            "description": "Asked with the CD bit."
-          },
-          "dnssec_ok": {
-            "type": "boolean",
-            "description": "Asked with the DO bit: the entry holds the signatures."
+          "ede": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The extended DNS error (RFC 8914) a bogus entry is answered with.",
+            "minimum": 0
           },
           "hits": {
             "type": "integer",
@@ -39527,9 +40865,24 @@
             },
             "description": "The records of the answer section, in the order received; empty for a negative\nanswer."
           },
+          "signature_expiry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The earliest expiry of the signatures that made the entry secure; the entry lives\nno longer."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "stale": {
             "type": "boolean",
             "description": "Expired but within the stale window: it answers only when the upstreams fail\n(RFC 8767)."
+          },
+          "state": {
+            "$ref": "#/components/schemas/SecurityState",
+            "description": "The validation state: `secure`, `insecure`, `bogus`, `indeterminate`, or\n`unvalidated` when nothing validated the answer."
           },
           "ttl": {
             "type": "integer",
@@ -41305,8 +42658,7 @@
         "description": "A forwarding rule (DNS-02, DNS-21): queries at or below `suffix` go to the upstreams.\nThe longest matching suffix wins; the root suffix `.` is the default forwarder.",
         "required": [
           "id",
-          "suffix",
-          "upstreams"
+          "suffix"
         ],
         "properties": {
           "description": {
@@ -41319,6 +42671,10 @@
           "id": {
             "$ref": "#/components/schemas/ForwardRuleId",
             "description": "Identifier."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/RuleMode",
+            "description": "Forward to the upstreams, or resolve the names under the suffix iteratively."
           },
           "suffix": {
             "$ref": "#/components/schemas/DnsName",
@@ -41340,7 +42696,11 @@
             "items": {
               "$ref": "#/components/schemas/Upstream"
             },
-            "description": "The upstreams, 1 to 16."
+            "description": "The upstreams, 1 to 16; none for a rule of mode `recurse`."
+          },
+          "validate": {
+            "type": "boolean",
+            "description": "Validate the upstreams' answers with DNSSEC (REC-Q3); `false` trusts them as Phase 2\ndid. Only a `forward` rule may switch it off."
           },
           "view": {
             "oneOf": [
@@ -41372,8 +42732,7 @@
         "type": "object",
         "description": "`POST /dns/forwarders`.",
         "required": [
-          "suffix",
-          "upstreams"
+          "suffix"
         ],
         "properties": {
           "description": {
@@ -41382,6 +42741,17 @@
               "null"
             ],
             "description": "Free text."
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RuleMode",
+                "description": "Forward to the upstreams (the default) or resolve the names under the suffix\niteratively. Until WP10.1 `recurse` answers 501."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "suffix": {
             "$ref": "#/components/schemas/DnsName",
@@ -41403,7 +42773,14 @@
             "items": {
               "$ref": "#/components/schemas/Upstream"
             },
-            "description": "The upstreams."
+            "description": "The upstreams, 1 to 16; none for a rule of mode `recurse`."
+          },
+          "validate": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`\nanswers 501."
           },
           "view": {
             "oneOf": [
@@ -41464,6 +42841,17 @@
             ],
             "description": "Free text; an empty string clears it."
           },
+          "mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RuleMode",
+                "description": "Forward to the upstreams or resolve the names under the suffix iteratively. Until\nWP10.1 `recurse` answers 501."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "suffix": {
             "oneOf": [
               {
@@ -41502,6 +42890,13 @@
               "$ref": "#/components/schemas/Upstream"
             },
             "description": "The upstreams."
+          },
+          "validate": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501."
           },
           "view": {
             "oneOf": [
@@ -42578,6 +43973,154 @@
               "$ref": "#/components/schemas/TargetInfo"
             },
             "description": "The targets the mapping step offers (custom fields included)."
+          }
+        }
+      },
+      "InfraAddressItem": {
+        "type": "object",
+        "description": "One address of an authority server in the infrastructure cache.",
+        "required": [
+          "address",
+          "origin",
+          "ttl",
+          "tcp_only",
+          "lame"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The address."
+          },
+          "edns": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the server speaks EDNS; absent while unknown."
+          },
+          "lame": {
+            "type": "boolean",
+            "description": "The server is lame for the zone."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Where the address was learned: `glue`, `sibling_glue` or `authoritative`."
+          },
+          "srtt_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The smoothed round-trip time in milliseconds; absent before the first answer."
+          },
+          "tcp_only": {
+            "type": "boolean",
+            "description": "The server answers only over TCP."
+          },
+          "ttl": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds the address stays valid.",
+            "minimum": 0
+          }
+        }
+      },
+      "InfraCutItem": {
+        "type": "object",
+        "description": "One zone cut of a node's infrastructure cache.",
+        "required": [
+          "zone",
+          "servers",
+          "ds",
+          "ttl"
+        ],
+        "properties": {
+          "ds": {
+            "type": "string",
+            "description": "Whether the zone is signed: `unknown`, `secure`, `insecure` or `bogus`."
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InfraServerItem"
+            },
+            "description": "Its authority servers."
+          },
+          "ttl": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds the cut stays valid.",
+            "minimum": 0
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone the cut starts."
+          }
+        }
+      },
+      "InfraFlushed": {
+        "type": "object",
+        "description": "The answer of `POST /nodes/{id}/dns/infra/flush`.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The zone cuts dropped.",
+            "minimum": 0
+          }
+        }
+      },
+      "InfraServerItem": {
+        "type": "object",
+        "description": "One authority server of a zone cut with its addresses.",
+        "required": [
+          "name",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InfraAddressItem"
+            },
+            "description": "Its addresses."
+          },
+          "name": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The server's name."
+          }
+        }
+      },
+      "InfraSizes": {
+        "type": "object",
+        "description": "The sizes of a node's infrastructure cache.",
+        "required": [
+          "zones",
+          "servers",
+          "names"
+        ],
+        "properties": {
+          "names": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Server names held.",
+            "minimum": 0
+          },
+          "servers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Authority servers held.",
+            "minimum": 0
+          },
+          "zones": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Zone cuts held.",
+            "minimum": 0
           }
         }
       },
@@ -48850,6 +50393,44 @@
           "default"
         ]
       },
+      "NegativeTrustAnchor": {
+        "type": "object",
+        "description": "A negative trust anchor (RFC 7646, `dns.ntas`): names at or below `zone` are\n`insecure` instead of `bogus` until it expires.",
+        "required": [
+          "id",
+          "zone",
+          "expires_at",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "created_by": {
+            "$ref": "#/components/schemas/Principal",
+            "description": "Who created it."
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it stops applying, at most seven days after it was created."
+          },
+          "id": {
+            "$ref": "#/components/schemas/NtaId",
+            "description": "Identifier."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it exists, 1 to 500 characters."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone; never the root."
+          }
+        }
+      },
       "Neighbour": {
         "type": "object",
         "description": "A neighbour of a node across one edge.",
@@ -49769,6 +51350,60 @@
             "minimum": 0
           }
         }
+      },
+      "NtaCreate": {
+        "type": "object",
+        "description": "`POST /dns/ntas`.",
+        "required": [
+          "zone",
+          "reason"
+        ],
+        "properties": {
+          "expires_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it stops applying, at most seven days ahead. Absent: seven days from now,\nwhich the Hardened profile refuses (`dns.nta.invalid`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it exists, 1 to 500 characters."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone; never the root. Names at or below it are `insecure` instead of `bogus`\nwhile the anchor lives."
+          }
+        }
+      },
+      "NtaId": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "NtaItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NegativeTrustAnchor",
+            "description": "The negative trust anchor."
+          },
+          {
+            "type": "object",
+            "required": [
+              "revision"
+            ],
+            "properties": {
+              "revision": {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The store revision of the row."
+              }
+            }
+          }
+        ],
+        "description": "A negative trust anchor as the API reads it."
       },
       "ObjectKind": {
         "type": "string",
@@ -52764,18 +54399,18 @@
                 "ttl",
                 "stale",
                 "hits",
-                "dnssec_ok",
-                "checking_disabled",
+                "state",
                 "records"
               ],
               "properties": {
-                "checking_disabled": {
-                  "type": "boolean",
-                  "description": "Asked with the CD bit."
-                },
-                "dnssec_ok": {
-                  "type": "boolean",
-                  "description": "Asked with the DO bit: the entry holds the signatures."
+                "ede": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "The extended DNS error (RFC 8914) a bogus entry is answered with.",
+                  "minimum": 0
                 },
                 "hits": {
                   "type": "integer",
@@ -52800,9 +54435,24 @@
                   },
                   "description": "The records of the answer section, in the order received; empty for a negative\nanswer."
                 },
+                "signature_expiry": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "The earliest expiry of the signatures that made the entry secure; the entry lives\nno longer."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "stale": {
                   "type": "boolean",
                   "description": "Expired but within the stale window: it answers only when the upstreams fail\n(RFC 8767)."
+                },
+                "state": {
+                  "$ref": "#/components/schemas/SecurityState",
+                  "description": "The validation state: `secure`, `insecure`, `bogus`, `indeterminate`, or\n`unvalidated` when nothing validated the answer."
                 },
                 "ttl": {
                   "type": "integer",
@@ -53235,6 +54885,64 @@
                 "tenant": {
                   "$ref": "#/components/schemas/TenantId",
                   "description": "Owning tenant."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_InfraCutItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One zone cut of a node's infrastructure cache.",
+              "required": [
+                "zone",
+                "servers",
+                "ds",
+                "ttl"
+              ],
+              "properties": {
+                "ds": {
+                  "type": "string",
+                  "description": "Whether the zone is signed: `unknown`, `secure`, `insecure` or `bogus`."
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InfraServerItem"
+                  },
+                  "description": "Its authority servers."
+                },
+                "ttl": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "Seconds the cut stays valid.",
+                  "minimum": 0
+                },
+                "zone": {
+                  "$ref": "#/components/schemas/DnsName",
+                  "description": "The zone the cut starts."
                 }
               }
             },
@@ -54033,6 +55741,52 @@
                   "description": "The VRF of its observations when a batch names none."
                 }
               }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_NtaItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/NegativeTrustAnchor",
+                  "description": "The negative trust anchor."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "revision"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "$ref": "#/components/schemas/Revision",
+                      "description": "The store revision of the row."
+                    }
+                  }
+                }
+              ],
+              "description": "A negative trust anchor as the API reads it."
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -55436,6 +57190,52 @@
                   "description": "The special scopes of a scoped token."
                 }
               }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_TrustAnchorItem": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/TrustAnchor",
+                  "description": "The trust anchor of the zone with its keys and their RFC 5011 state."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "revision"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "$ref": "#/components/schemas/Revision",
+                      "description": "The store revision of the row."
+                    }
+                  }
+                }
+              ],
+              "description": "A trust anchor as the API reads it."
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -57313,6 +59113,24 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "PrimingItem": {
+        "type": "object",
+        "description": "The last priming of a node's resolver.",
+        "required": [
+          "at",
+          "outcome"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the priming ended."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`ok`, or `failed` when no server of the root hints answered."
           }
         }
       },
@@ -60402,6 +62220,145 @@
           }
         }
       },
+      "RecursionCounters": {
+        "type": "object",
+        "description": "What a node's resolver did since the role started.",
+        "required": [
+          "answered",
+          "servfail",
+          "budget",
+          "timeout",
+          "local",
+          "secure",
+          "insecure",
+          "bogus",
+          "indeterminate"
+        ],
+        "properties": {
+          "answered": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries answered by recursion.",
+            "minimum": 0
+          },
+          "bogus": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers validated `bogus`.",
+            "minimum": 0
+          },
+          "budget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries that ran out of budget.",
+            "minimum": 0
+          },
+          "indeterminate": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers for which no trust anchor applied (`indeterminate`).",
+            "minimum": 0
+          },
+          "insecure": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers validated `insecure`.",
+            "minimum": 0
+          },
+          "local": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries answered from local data.",
+            "minimum": 0
+          },
+          "secure": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Answers validated `secure`.",
+            "minimum": 0
+          },
+          "servfail": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries answered SERVFAIL.",
+            "minimum": 0
+          },
+          "timeout": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Client queries that timed out.",
+            "minimum": 0
+          }
+        }
+      },
+      "RecursionStatus": {
+        "type": "object",
+        "description": "`GET /nodes/{id}/dns/recursion`: the recursive resolver of a node.",
+        "required": [
+          "enabled",
+          "hints_source",
+          "hints_date",
+          "root_servers",
+          "infra",
+          "counters",
+          "trust_anchors",
+          "problems"
+        ],
+        "properties": {
+          "counters": {
+            "$ref": "#/components/schemas/RecursionCounters",
+            "description": "The counters since the role started."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The resolver runs on the node."
+          },
+          "hints_date": {
+            "type": "string",
+            "description": "The date of the hints (`2026-01-31`)."
+          },
+          "hints_source": {
+            "type": "string",
+            "description": "Where the root hints come from: `shipped` or the path of the file."
+          },
+          "infra": {
+            "$ref": "#/components/schemas/InfraSizes",
+            "description": "The sizes of the infrastructure cache."
+          },
+          "last_priming": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrimingItem",
+                "description": "The last priming; absent before the first."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What is wrong now: `priming_failed`, `clock`, `trust_anchor_stale`."
+          },
+          "root_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RootServerItem"
+            },
+            "description": "The root servers in use with their smoothed round-trip times."
+          },
+          "trust_anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnchorKeyState"
+            },
+            "description": "The keys of the trust anchors with their state."
+          }
+        }
+      },
       "RefusedGenerationView": {
         "type": "object",
         "description": "A plain generation file that this controller refused to load because a sealed generation\nis older (the protection would silently drop).",
@@ -60844,6 +62801,15 @@
           "journal"
         ]
       },
+      "ResolutionMode": {
+        "type": "string",
+        "description": "How a view's clients get names outside the zones and the forwarding rules (recursion\nplan section 2.7). A view without one follows the profile's default (REC-Q2: recurse in\nevery profile).",
+        "enum": [
+          "recurse",
+          "forward",
+          "refuse"
+        ]
+      },
       "RestoreNoticeView": {
         "type": "object",
         "description": "The restore this installation was started from.",
@@ -61171,6 +63137,32 @@
           }
         }
       },
+      "RootServerItem": {
+        "type": "object",
+        "description": "One root server of a node's resolver with its smoothed round-trip time.",
+        "required": [
+          "name",
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The address in use."
+          },
+          "name": {
+            "type": "string",
+            "description": "The server's name (`a.root-servers.net.`)."
+          },
+          "srtt_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The smoothed round-trip time in milliseconds; absent before the first answer."
+          }
+        }
+      },
       "RowCounts": {
         "type": "object",
         "description": "Rows of the source by outcome.",
@@ -61310,6 +63302,14 @@
       "Rtype": {
         "type": "string",
         "description": "Record type: a mnemonic (`AAAA`) or the RFC 3597 form (`TYPE65280`)"
+      },
+      "RuleMode": {
+        "type": "string",
+        "description": "What a forwarding rule does with the names under its suffix (recursion plan section\n2.7).",
+        "enum": [
+          "forward",
+          "recurse"
+        ]
       },
       "RunAccepted": {
         "type": "object",
@@ -62801,6 +64801,17 @@
             "description": "Whether the vault holds operator secrets (the PIN coupling rule applies)."
           }
         }
+      },
+      "SecurityState": {
+        "type": "string",
+        "description": "The DNSSEC state of an answer (RFC 4033 section 5, RFC 4035 section 4.3), shared by the\ncache entry, its listing and the query log.",
+        "enum": [
+          "secure",
+          "insecure",
+          "bogus",
+          "indeterminate",
+          "unvalidated"
+        ]
       },
       "SerialPolicy": {
         "type": "string",
@@ -67041,6 +69052,101 @@
           }
         }
       },
+      "TrustAnchor": {
+        "type": "object",
+        "description": "The trust anchors of one zone (`dns.trust_anchors`, one row per zone; the root by\ndefault, an operator's anchor for a private zone beside it).",
+        "required": [
+          "zone",
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnchorKey"
+            },
+            "description": "The keys, 1 to 16."
+          },
+          "last_query": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the trust anchor service last asked the zone's DNSKEY set."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_query": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it asks next (RFC 5011 section 2.3: the active refresh)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone."
+          }
+        }
+      },
+      "TrustAnchorAdd": {
+        "type": "object",
+        "description": "`POST /dns/trust-anchors`.",
+        "required": [
+          "zone"
+        ],
+        "properties": {
+          "dnskey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A DNSKEY record's data in presentation form (`257 3 8 AwEAAa...`): flags, protocol,\nalgorithm and the key in base64. Exactly one of `ds` and `dnskey` is given."
+          },
+          "ds": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A DS record's data in presentation form (`20326 8 2 E06D44B8...`): key tag,\nalgorithm, digest type and the digest in hexadecimal. Exactly one of `ds` and\n`dnskey` is given."
+          },
+          "replace_root": {
+            "type": "boolean",
+            "description": "Replace the root's trust anchor with this key instead of adding to it. Allowed only\nunder the Lab profile (`dns.trust_anchor.root_protected` otherwise)."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/DnsName",
+            "description": "The zone; `.` for the root."
+          }
+        }
+      },
+      "TrustAnchorItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TrustAnchor",
+            "description": "The trust anchor of the zone with its keys and their RFC 5011 state."
+          },
+          {
+            "type": "object",
+            "required": [
+              "revision"
+            ],
+            "properties": {
+              "revision": {
+                "$ref": "#/components/schemas/Revision",
+                "description": "The store revision of the row."
+              }
+            }
+          }
+        ],
+        "description": "A trust anchor as the API reads it."
+      },
       "Truth": {
         "type": "string",
         "description": "The four truths (IPAM-21).",
@@ -68233,6 +70339,17 @@
               }
             ]
           },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolutionMode",
+                "description": "How names outside the zones and the forwarding rules are resolved for this view's\nclients; absent: the profile's default (recurse in every profile, REC-Q2)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rules": {
             "type": "array",
             "items": {
@@ -68279,6 +70396,17 @@
               {
                 "$ref": "#/components/schemas/AclId",
                 "description": "The access list of the clients that may recurse (WP6.4); the profile's default when\nabsent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolutionMode",
+                "description": "How the view's clients get names outside the zones and the forwarding rules; the\nprofile's default when absent. Until WP10.4 a value answers 501."
               },
               {
                 "type": "null"
@@ -68334,6 +70462,10 @@
             "type": "boolean",
             "description": "Follow the profile's default for recursion (clears `recursion`, WP6.4)."
           },
+          "default_resolution": {
+            "type": "boolean",
+            "description": "Follow the profile's default for the resolution (clears `resolution`). Until WP10.4\n`true` answers 501."
+          },
           "description": {
             "type": [
               "string",
@@ -68362,6 +70494,17 @@
               {
                 "$ref": "#/components/schemas/AclId",
                 "description": "The access list of the clients that may recurse (WP6.4)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResolutionMode",
+                "description": "How the view's clients get names outside the zones and the forwarding rules. Until\nWP10.4 a value answers 501."
               },
               {
                 "type": "null"

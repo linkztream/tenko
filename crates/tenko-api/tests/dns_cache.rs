@@ -97,7 +97,7 @@ fn lab(view: ViewId) -> Router {
     .enumerate()
     {
         let qname = DnsName::new(name).expect("name").to_wire();
-        let key = CacheKey::new(view, &qname, 1, 1, false, false);
+        let key = CacheKey::new(view, &qname, 1, 1);
         let last = u8::try_from(n + 1).expect("small");
         assert!(cache.insert(&key, &answer(&qname, last), now, None));
     }
@@ -164,7 +164,8 @@ async fn pages_come_in_canonical_order_and_every_read_is_audited() {
     assert_eq!(item["rcode"], 0);
     assert_eq!(item["stale"], false);
     assert_eq!(item["hits"], 0);
-    assert_eq!(item["dnssec_ok"], false);
+    assert_eq!(item["state"], "unvalidated");
+    assert!(item.get("dnssec_ok").is_none(), "{item}");
     assert!(
         item["ttl"]
             .as_u64()

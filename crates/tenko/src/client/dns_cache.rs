@@ -104,7 +104,9 @@ async fn list(target: &Target, args: &CacheListArgs) -> Result<Output, Failure> 
     }
     let rows: Vec<Vec<String>> = page.items.iter().map(row).collect();
     let mut output = Output::text(table(
-        &["NAME", "TYPE", "TTL", "VIEW", "STALE", "HITS", "DATA"],
+        &[
+            "NAME", "TYPE", "TTL", "VIEW", "STALE", "HITS", "STATE", "DATA",
+        ],
         &rows,
     ));
     if let Some(cursor) = &page.next_cursor {
@@ -164,8 +166,20 @@ fn row(entry: &Value) -> Vec<String> {
             String::new()
         },
         number("hits"),
+        // WP10.0: the validation state replaces the DO and CD bits of the key.
+        state_of(entry),
+        // WP10.0: end.
         data,
     ]
+}
+
+/// The validation state of an entry; a bogus entry carries its extended error code.
+fn state_of(entry: &Value) -> String {
+    let state = text(entry, &["state"]);
+    match entry.get("ede").and_then(Value::as_u64) {
+        Some(code) => format!("{state} (EDE {code})"),
+        None => state.to_owned(),
+    }
 }
 
 async fn flush(target: &Target, args: &CacheFlushArgs) -> Result<Output, Failure> {
@@ -190,7 +204,7 @@ async fn flush(target: &Target, args: &CacheFlushArgs) -> Result<Output, Failure
 }
 
 /// `text` percent-encoded for a query parameter.
-fn encode(text: &str) -> String {
+pub(super) fn encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') {
@@ -212,7 +226,7 @@ mod tests {
     fn rows_show_the_data_the_chain_and_negative_answers() {
         let chain = json!({
             "name": "www.example.test", "type": "A", "ttl": 100, "stale": false, "hits": 2,
-            "rcode": 0,
+            "rcode": 0, "state": "secure",
             "records": [
                 { "type": "CNAME", "target": "cdn.example.test" },
                 { "type": "A", "address": "192.0.2.7" }
@@ -227,16 +241,19 @@ mod tests {
                 "default",
                 "",
                 "2",
+                "secure",
                 "CNAME cdn.example.test, 192.0.2.7"
             ]
         );
         let missing = json!({
             "name": "missing.example.test", "type": "A", "ttl": 0, "stale": true, "hits": 0,
-            "rcode": 3, "records": [], "view": "0190c3a2-0000-7000-8000-000000000001"
+            "rcode": 3, "records": [], "view": "0190c3a2-0000-7000-8000-000000000001",
+            "state": "bogus", "ede": 6
         });
         let cells = row(&missing);
         assert_eq!(cells[3], "0190c3a2-0000-7000-8000-000000000001");
-        assert_eq!((cells[4].as_str(), cells[6].as_str()), ("yes", "NXDOMAIN"));
+        assert_eq!((cells[4].as_str(), cells[7].as_str()), ("yes", "NXDOMAIN"));
+        assert_eq!(cells[6], "bogus (EDE 6)");
     }
 
     #[test]

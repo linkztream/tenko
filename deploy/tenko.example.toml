@@ -525,6 +525,56 @@ max_download = 64
 # MiB an uploaded list may have (1 to 1024): the body limit of PUT /api/v1/dns/lists/{id}/file.
 max_upload = 64
 
+# WP10.0: the recursive resolver.
+# [dns.recursion]
+# The iterative resolver of this node (recursion plan section 3.4). The keys are read and
+# checked at start; nothing uses them until the engine arrives (WP10.1). Keys that are not
+# set follow the profile in force when the role starts.
+# Resolve iteratively on this node. Not set: on under every profile.
+# enabled = true
+# A root hints file in the format of named.root. Not set: the hints shipped with Tenko.
+# hints = "/etc/tenko/root.hints"
+# The address families used towards authority servers: "auto" (IPv6 only where the host has
+# a global address), "v4" (or "ipv4"), "v6" (or "ipv6") or "both".
+# outbound = "auto"
+# Milliseconds one attempt towards an authority server has (100 to 30000).
+# timeout_ms = 2000
+# Queries one client query may cause at most (1 to 256).
+# budget_queries = 32
+# Restarts after a CNAME, DNAME or name-server lookup at most (1 to 32).
+# budget_restarts = 8
+# Nesting of name-server lookups inside lookups at most (1 to 16).
+# budget_depth = 6
+# Milliseconds one client query may take in all (100 to 60000).
+# budget_ms = 10000
+# Zone cuts the infrastructure cache holds (10 to 1000000). Not set: 1000 under the Home
+# profile, 10000 under the others.
+# infra_entries = 10000
+# The longest an infrastructure entry lives, in seconds (10 to 86400).
+# infra_ttl_secs = 900
+# Query name minimisation (RFC 9156): "relaxed" (full name when a server breaks on it),
+# "strict" or "off".
+# qname_minimisation = "relaxed"
+# Synthesize negative answers from validated NSEC and NSEC3 records (RFC 8198).
+# aggressive_nsec = true
+# Denial-of-existence proofs the cache holds (1000 to 10000000). Not set: 2000 under the
+# Home profile, 20000 under the others.
+# denial_entries = 20000
+# The longest a failure from the authorities is remembered, in seconds (5 to 3600).
+# failure_cache_max_secs = 300
+# Tell the root servers which trust anchor keys the resolver holds (RFC 8145). Not set: on,
+# except under the Hardened profile.
+# trust_anchor_signalling = true
+# Answer the root key sentinel queries (RFC 8509).
+# key_sentinel = true
+# A fresh random source port for every query to an authority server.
+# fresh_port_per_query = true
+# Names inside the locally served zones of RFC 6303 that are resolved all the same.
+# local_zones_except = []
+# Seconds of the RFC 5011 hold-downs (1 to 2592000), to test key rollovers. Not set: 30
+# days. Allowed under the Lab profile only.
+# rfc5011_hold_down_secs = 3600
+
 # WP7.5: the dhcp role.
 [dhcp]
 # The dhcp role of this node. It runs when "dhcp" is in roles (on a controller node, in the

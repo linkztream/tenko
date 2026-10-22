@@ -709,6 +709,7 @@ pub(super) async fn list_node_dns_cache(
 }
 
 fn cache_entry_dto(entry: tenko_dns::cache::CachedEntry) -> DnsCacheEntry {
+    use tenko_core::dns::ExtendedError;
     DnsCacheEntry {
         name: entry.name.to_string(),
         rtype: entry.rtype,
@@ -717,8 +718,11 @@ fn cache_entry_dto(entry: tenko_dns::cache::CachedEntry) -> DnsCacheEntry {
         ttl: entry.ttl,
         stale: entry.stale,
         hits: entry.hits,
-        dnssec_ok: entry.dnssec_ok,
-        checking_disabled: entry.checking_disabled,
+        // WP10.0: the validation state replaces the DO and CD bits of the key.
+        state: entry.state,
+        ede: entry.ede.map(ExtendedError::code),
+        signature_expiry: entry.signature_expiry,
+        // WP10.0: end.
         records: entry.records,
     }
 }

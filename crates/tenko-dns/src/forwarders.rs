@@ -176,6 +176,10 @@ impl ZoneService {
             transport: new.transport,
             tls_name: trimmed(new.tls_name),
             view: new.view,
+            // WP10.0: a forward rule that validates until WP10.4 takes the fields from the
+            // request.
+            mode: tenko_core::dns::RuleMode::Forward,
+            validate: true,
             description: trimmed(new.description),
         };
         let (rule, written) = self

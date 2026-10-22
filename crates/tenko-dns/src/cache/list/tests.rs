@@ -18,7 +18,7 @@ fn wire_name(text: &str) -> Vec<u8> {
 }
 
 fn key(view: Option<ViewId>, qname: &str, qtype: u16) -> CacheKey {
-    CacheKey::new(view, &wire_name(qname), qtype, 1, false, false)
+    CacheKey::new(view, &wire_name(qname), qtype, 1)
 }
 
 /// An upstream answer: the question, then `(type, TTL, data)` records owned by a pointer to
@@ -193,6 +193,7 @@ fn an_entry_shows_its_ttl_left_hits_records_and_stale_state() {
         id: 7,
         rd: true,
         cd: false,
+        ad: false,
         edns: None,
         max_len: 512,
     };
@@ -214,7 +215,8 @@ fn an_entry_shows_its_ttl_left_hits_records_and_stale_state() {
     assert_eq!((positive.rcode, positive.ttl, positive.hits), (0, 100, 2));
     assert_eq!(positive.rtype, Rtype::A);
     assert_eq!(positive.class, 1);
-    assert!(!positive.dnssec_ok && !positive.checking_disabled);
+    assert_eq!(positive.state, tenko_core::dns::SecurityState::Unvalidated);
+    assert_eq!((positive.ede, positive.signature_expiry), (None, None));
     assert_eq!(
         positive.records,
         [

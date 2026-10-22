@@ -23,8 +23,7 @@ function entry(name: string, type: string, ttl: number, records: S["RecordData"]
     ttl,
     stale: false,
     hits: 0,
-    dnssec_ok: false,
-    checking_disabled: false,
+    state: "unvalidated",
     records,
     ...extra,
   };
@@ -35,13 +34,13 @@ export function seedDnsCache(): DnsCacheState {
     entry("www.example.test", "A", 245, [
       { type: "CNAME", target: "cdn.example.test" },
       { type: "A", address: "192.0.2.80" },
-    ], { hits: 41 }),
+    ], { hits: 41, state: "secure", signature_expiry: "2026-11-01T00:00:00Z" }),
     entry("www.example.test", "AAAA", 245, [{ type: "AAAA", address: "2001:db8::80" }], { hits: 12 }),
     entry("example.test", "MX", 3_400, [{ type: "MX", preference: 10, exchange: "mail.example.test" }], { hits: 3 }),
     entry("missing.example.test", "A", 0, [], { rcode: 3, stale: true }),
     entry("intranet.example.test", "A", 60, [{ type: "A", address: "198.51.100.10" }], { view: CACHE_VIEW }),
     entry("example.net", "TXT", 12_000, [{ type: "TXT", strings: ["v=spf1 -all"] }]),
-    entry("ns1.example.org", "AAAA", 900, [], { hits: 1 }),
+    entry("ns1.example.org", "AAAA", 900, [], { hits: 1, state: "bogus", ede: 6 }),
   ];
   return { entries: entries.sort(compare) };
 }

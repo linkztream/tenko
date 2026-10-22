@@ -5,6 +5,7 @@ import { For, Show } from "solid-js";
 import { t, type MessageKey } from "../i18n";
 import { mayKeys } from "./access";
 import { dnsPaths } from "./paths";
+import { recursionPath } from "./recursion/paths";
 
 interface Tab {
   id: string;
@@ -29,6 +30,8 @@ const TABS: readonly Tab[] = [
   { id: "blocking", href: dnsPaths.blocking(), label: "dns.nav.blocking", match: (p) => p.startsWith("/dns/blocking"), shown: () => true },
   { id: "acls", href: dnsPaths.acls(), label: "dns.nav.acls", match: (p) => p.startsWith("/dns/acls"), shown: () => true },
   { id: "keys", href: dnsPaths.keys(), label: "dns.nav.keys", match: (p) => p.startsWith("/dns/keys"), shown: mayKeys },
+  // WP10.0
+  { id: "recursion", href: recursionPath, label: "dns.nav.recursion", match: (p) => p.startsWith(recursionPath), shown: () => true },
   { id: "log", href: dnsPaths.log(), label: "dns.nav.log", match: (p) => p.startsWith("/dns/log"), shown: () => true },
 ];
 

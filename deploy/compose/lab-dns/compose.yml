@@ -19,6 +19,8 @@
 #   zones Tenko holds as secondary zones (transfer.conf), with the TSIG key of the run in
 #   LAB_DIR/bind/keys.conf and its primary zone files in LAB_DIR/zones; Tenko serves DoT
 #   and XoT on 8530 with the lab certificate for tenko.example.test.
+# - The recursion sandbox (WP10.0, profile `recursion`): authority, quirk and delv, the lab
+#   root and its authorities for the recursive resolver (see the block at the end).
 #
 # Nothing is published on the host. Variables (smoke.sh sets them): LAB_DIR (the work
 # directory with tls/, secrets/ and tenko.toml, required), TENKO_IMAGE (default tenko:lab),
@@ -108,6 +110,102 @@ services:
       lab:
         ipv4_address: 203.0.113.4
 
+  # WP10.0: the recursion sandbox (dns-recursion-plan.md section 2.12), under the compose
+  # profile `recursion`: `docker compose up` for the other rounds starts none of these, and
+  # smoke.sh is unchanged. Empty shells until WP10.1 (the lab root and the quirk responder)
+  # and WP10.2 (the signed zones, the BIND zones and the rounds) fill them.
+  #
+  # authority: a second Tenko node serving the lab root `.` (NS a.root.test, glue
+  # 203.0.113.10), the TLD `test`, and the signed test zones under it (example.test and its
+  # children). Its Lab profile configuration is LAB_DIR/authority/authority.toml, written
+  # by the round `recursion`. It answers on port 53, as a root server must (the resolver
+  # follows glue addresses on 53), so the container lowers the unprivileged port start
+  # instead of keeping a capability.
+  authority:
+    image: ${TENKO_IMAGE:-tenko:lab}
+    profiles: ["recursion"]
+    command: ["--roles", "controller,dns", "--config", "/lab/authority.toml"]
+    restart: "no"
+    stop_grace_period: 30s
+    expose:
+      - "53/tcp"
+      - "53/udp"
+      - "8443/tcp"
+    environment:
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/kek
+      TENKO_HIBP__ONLINE: "false"
+      TENKO_UPDATES__AIR_GAPPED: "true"
+    secrets:
+      - kek
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
+      interval: 5s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    volumes:
+      - "authority-data:/var/lib/tenko"
+      - "${LAB_DIR:?set LAB_DIR}/authority:/lab:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      lab:
+        ipv4_address: 203.0.113.10
+
+  # quirk: the engine's example authoritative server (crates/tenko-dns/examples/authoritative.rs,
+  # built for musl like the binary) with the misbehaviours of E36 as flags: no EDNS (FORMERR
+  # on OPT), 0x20 broken (answers in lower case), TC on everything, delayed answers, answers
+  # from the wrong source address. It is authoritative for quirk.example.test, delegated
+  # from example.test with glue at this address. WP10.1 builds it into the image named by
+  # QUIRK_IMAGE and gives it its entrypoint; the entrypoint below is the placeholder it
+  # replaces, so this service does not start before then.
+  quirk:
+    image: ${QUIRK_IMAGE:-tenko:lab}
+    profiles: ["recursion"]
+    entrypoint: ["/usr/local/bin/quirk"]
+    restart: "no"
+    stop_grace_period: 1s
+    expose:
+      - "53/tcp"
+      - "53/udp"
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      lab:
+        ipv4_address: 203.0.113.11
+
+  # delv: the client side's second validator. The BIND image idles as the `client` does;
+  # `docker compose exec delv delv @203.0.113.3 ...` (or against the authority) validates
+  # independently of Tenko with the lab root's trust anchor, which WP10.2 puts into
+  # /lab/root.key (E33).
+  delv:
+    image: ${BIND_IMAGE:-internetsystemsconsortium/bind9:9.20}
+    profiles: ["recursion"]
+    entrypoint: ["sleep", "infinity"]
+    restart: "no"
+    stop_grace_period: 1s
+    networks:
+      lab:
+        ipv4_address: 203.0.113.12
+
+  # The bind service above is unchanged here; WP10.2 gives it bind.example.test (signed by
+  # BIND with its own keys, the DS in example.test), optout.example.test and
+  # expired.example.test (made per run with dnssec-keygen and dnssec-signzone).
+  # WP10.0: end.
+
 networks:
   lab:
     driver: bridge
@@ -122,3 +220,5 @@ secrets:
 
 volumes:
   tenko-data: {}
+  # WP10.0: the data of the authority node (profile recursion).
+  authority-data: {}

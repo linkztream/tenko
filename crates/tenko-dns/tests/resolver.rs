@@ -201,6 +201,7 @@ fn fixture() -> Fixture {
         }],
         order: 1,
         recursion: None,
+        resolution: None,
         description: None,
     };
     let rule = ForwardRule {
@@ -214,6 +215,8 @@ fn fixture() -> Fixture {
         transport: ForwardTransport::Plain,
         tls_name: None,
         view: None,
+        mode: tenko_core::dns::RuleMode::Forward,
+        validate: true,
         description: None,
     };
     let (view_id, rule_id) = (view.id, rule.id);

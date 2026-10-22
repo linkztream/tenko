@@ -1906,9 +1906,12 @@ export type MessageKey =
   | "dns.cache.col.hits"
   | "dns.cache.col.name"
   | "dns.cache.col.stale"
+  | "dns.cache.col.state"
   | "dns.cache.col.ttl"
   | "dns.cache.col.type"
   | "dns.cache.col.view"
+  | "dns.cache.ede"
+  | "dns.cache.ede_hint"
   | "dns.cache.empty"
   | "dns.cache.empty_suffix"
   | "dns.cache.flush"
@@ -1924,6 +1927,7 @@ export type MessageKey =
   | "dns.cache.previous"
   | "dns.cache.reload"
   | "dns.cache.show"
+  | "dns.cache.signature_expiry"
   | "dns.cache.stale"
   | "dns.cache.stale_hint"
   | "dns.cache.suffix"
@@ -2074,9 +2078,11 @@ export type MessageKey =
   | "dns.fwd.field.upstreams_help_dot"
   | "dns.fwd.field.upstreams_help_plain"
   | "dns.fwd.known"
+  | "dns.fwd.mode.recurse"
   | "dns.fwd.no_default_body"
   | "dns.fwd.no_default_link"
   | "dns.fwd.no_default_title"
+  | "dns.fwd.preset.dot"
   | "dns.fwd.problems_title"
   | "dns.fwd.recursion.hardened"
   | "dns.fwd.recursion.known"
@@ -2308,6 +2314,7 @@ export type MessageKey =
   | "dns.nav.label"
   | "dns.nav.lists"
   | "dns.nav.log"
+  | "dns.nav.recursion"
   | "dns.nav.views"
   | "dns.nav.zones"
   | "dns.node.col.address"
@@ -2381,6 +2388,21 @@ export type MessageKey =
   | "dns.records.label"
   | "dns.records.origin_filter"
   | "dns.records.type_filter"
+  | "dns.recursion.coming.body"
+  | "dns.recursion.coming.title"
+  | "dns.recursion.infra.title"
+  | "dns.recursion.ntas.title"
+  | "dns.recursion.priming.last"
+  | "dns.recursion.root_hints"
+  | "dns.recursion.title"
+  | "dns.recursion.trust_anchors.count"
+  | "dns.recursion.trust_anchors.none"
+  | "dns.recursion.trust_anchors.title"
+  | "dns.recursion.trust_anchors.unavailable"
+  | "dns.resolution.default"
+  | "dns.resolution.forward"
+  | "dns.resolution.recurse"
+  | "dns.resolution.refuse"
   | "dns.rrset.add_action"
   | "dns.rrset.add_records_title"
   | "dns.rrset.add_submit"
@@ -2399,6 +2421,11 @@ export type MessageKey =
   | "dns.rrset.field.ttl"
   | "dns.rrset.field.type"
   | "dns.rrset.saved"
+  | "dns.sec.bogus"
+  | "dns.sec.indeterminate"
+  | "dns.sec.insecure"
+  | "dns.sec.secure"
+  | "dns.sec.unvalidated"
   | "dns.serial.counter"
   | "dns.serial.counter_help"
   | "dns.serial.date_counter"
@@ -6403,12 +6430,15 @@ export interface MessageArgs {
   "dns.blocking.tile.cached_hint": { share: string | number };
   "dns.blocking.tile.clients_hint": { mode: string };
   "dns.blocking.tile.queries_hint": { window: string };
+  "dns.cache.ede": { code: string | number };
+  "dns.cache.ede_hint": { code: string | number };
   "dns.cache.empty_suffix": { suffix: string | number };
   "dns.cache.flush": { suffix: string | number };
   "dns.cache.flush_body": { suffix: string | number };
   "dns.cache.flush_title": { suffix: string | number };
   "dns.cache.flushed": { suffix: string | number };
   "dns.cache.page": { page: string | number };
+  "dns.cache.signature_expiry": { time: string | number };
   "dns.cache.ttl_h": { value: string | number };
   "dns.cache.ttl_min": { value: string | number };
   "dns.cache.ttl_s": { value: string | number };
@@ -6460,6 +6490,7 @@ export interface MessageArgs {
   "dns.node.tls": { doh: string | number; dot: string | number };
   "dns.record.line_error": { line: string | number; message: string | number };
   "dns.records.label": { zone: string | number };
+  "dns.recursion.trust_anchors.count": { count: number };
   "dns.rrset.add_records_title": { name: string | number; type: string | number };
   "dns.rrset.delete_body": { count: number };
   "dns.rrset.delete_title": { name: string | number; type: string | number };
@@ -9109,9 +9140,12 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.col.hits",
   "dns.cache.col.name",
   "dns.cache.col.stale",
+  "dns.cache.col.state",
   "dns.cache.col.ttl",
   "dns.cache.col.type",
   "dns.cache.col.view",
+  "dns.cache.ede",
+  "dns.cache.ede_hint",
   "dns.cache.empty",
   "dns.cache.empty_suffix",
   "dns.cache.flush",
@@ -9127,6 +9161,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.previous",
   "dns.cache.reload",
   "dns.cache.show",
+  "dns.cache.signature_expiry",
   "dns.cache.stale",
   "dns.cache.stale_hint",
   "dns.cache.suffix",
@@ -9277,9 +9312,11 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.fwd.field.upstreams_help_dot",
   "dns.fwd.field.upstreams_help_plain",
   "dns.fwd.known",
+  "dns.fwd.mode.recurse",
   "dns.fwd.no_default_body",
   "dns.fwd.no_default_link",
   "dns.fwd.no_default_title",
+  "dns.fwd.preset.dot",
   "dns.fwd.problems_title",
   "dns.fwd.recursion.hardened",
   "dns.fwd.recursion.known",
@@ -9511,6 +9548,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.nav.label",
   "dns.nav.lists",
   "dns.nav.log",
+  "dns.nav.recursion",
   "dns.nav.views",
   "dns.nav.zones",
   "dns.node.col.address",
@@ -9584,6 +9622,21 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.records.label",
   "dns.records.origin_filter",
   "dns.records.type_filter",
+  "dns.recursion.coming.body",
+  "dns.recursion.coming.title",
+  "dns.recursion.infra.title",
+  "dns.recursion.ntas.title",
+  "dns.recursion.priming.last",
+  "dns.recursion.root_hints",
+  "dns.recursion.title",
+  "dns.recursion.trust_anchors.count",
+  "dns.recursion.trust_anchors.none",
+  "dns.recursion.trust_anchors.title",
+  "dns.recursion.trust_anchors.unavailable",
+  "dns.resolution.default",
+  "dns.resolution.forward",
+  "dns.resolution.recurse",
+  "dns.resolution.refuse",
   "dns.rrset.add_action",
   "dns.rrset.add_records_title",
   "dns.rrset.add_submit",
@@ -9602,6 +9655,11 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.rrset.field.ttl",
   "dns.rrset.field.type",
   "dns.rrset.saved",
+  "dns.sec.bogus",
+  "dns.sec.indeterminate",
+  "dns.sec.insecure",
+  "dns.sec.secure",
+  "dns.sec.unvalidated",
   "dns.serial.counter",
   "dns.serial.counter_help",
   "dns.serial.date_counter",

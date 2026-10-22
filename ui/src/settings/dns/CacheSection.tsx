@@ -2,7 +2,8 @@
 // Windows DNS and `rndc dumpdb -cache` show it. Nothing is read until the administrator asks,
 // since every page read is audited (`dns.cache.read`): the entries are the names the clients
 // asked. A suffix narrows the listing to a name and the names under it; the table shows the
-// name, type, the time the entry stays fresh, its view, the stale flag, its hits and the data;
+// name, type, the time the entry stays fresh, its view, its validation state (with the extended
+// error code of a bogus entry), the stale flag, its hits and the data;
 // pages follow the cursor of the server. With a suffix applied, "flush" empties those entries
 // through the node command `dns.cache.flush`, after a confirmation.
 import { createResource, createSignal, For, Show } from "solid-js";
@@ -10,7 +11,7 @@ import { errorMessage } from "../../api/problem";
 import { ConfirmDialog } from "../../components/Dialog";
 import { ErrorNotice } from "../../components/Notice";
 import { toast } from "../../components/toast";
-import { formatNumber, t } from "../../i18n";
+import { formatDateTime, formatNumber, t } from "../../i18n";
 import { cacheSuffix, entryData, flushCache, listCache, ttlLeft, type DnsCacheEntry } from "./cache";
 
 function Ttl(props: { entry: DnsCacheEntry }) {
@@ -19,6 +20,28 @@ function Ttl(props: { entry: DnsCacheEntry }) {
     <Show when={!props.entry.stale} fallback={<span class="muted">{t("dns.cache.ttl_none")}</span>}>
       {t(`dns.cache.ttl_${left().unit}`, { value: formatNumber(left().value) })}
     </Show>
+  );
+}
+
+/** The validation state of an entry, the extended error code of a bogus one beside it, and
+ * when the signatures expire as the hint of a secure one. */
+function State(props: { entry: DnsCacheEntry }) {
+  const expiry = () => props.entry.signature_expiry;
+  return (
+    <>
+      <span
+        class="tag"
+        classList={{ discrepancy: props.entry.state === "bogus" }}
+        title={expiry() ? t("dns.cache.signature_expiry", { time: formatDateTime(expiry() ?? "") }) : undefined}
+      >
+        {t(`dns.sec.${props.entry.state}`)}
+      </span>
+      <Show when={props.entry.ede != null}>
+        <span class="tag mono" data-testid="dns-cache-ede" title={t("dns.cache.ede_hint", { code: props.entry.ede ?? 0 })}>
+          {t("dns.cache.ede", { code: props.entry.ede ?? 0 })}
+        </span>
+      </Show>
+    </>
   );
 }
 
@@ -33,6 +56,7 @@ function Entries(props: { entries: DnsCacheEntry[] }) {
             <th scope="col">{t("dns.cache.col.type")}</th>
             <th scope="col">{t("dns.cache.col.ttl")}</th>
             <th scope="col">{t("dns.cache.col.view")}</th>
+            <th scope="col">{t("dns.cache.col.state")}</th>
             <th scope="col">{t("dns.cache.col.stale")}</th>
             <th scope="col" class="r">
               {t("dns.cache.col.hits")}
@@ -53,6 +77,9 @@ function Entries(props: { entries: DnsCacheEntry[] }) {
                   <Show when={entry.view} fallback={<span class="muted">{t("dns.cache.view_default")}</span>}>
                     {(view) => <span class="mono">{view()}</span>}
                   </Show>
+                </td>
+                <td data-testid="dns-cache-state" data-state={entry.state}>
+                  <State entry={entry} />
                 </td>
                 <td>
                   <Show when={entry.stale}>

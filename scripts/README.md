@@ -9,6 +9,7 @@ root.
 | `changelog.mjs` | Validates `CHANGELOG.md`, prints the notes of one release, and checks that a change to the product comes with an entry. |
 | `release-manifest.mjs` | Builds `releases.json` (the manifest running installations read) and `SHA256SUMS` from the changelog and the release binaries. |
 | `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` or `--phase 3` `docs/plans/phase-2-trace.md` or `docs/plans/phase-3-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
+| `root-anchors.mjs` | WP10.0: converts the shipped DNS root trust anchors (`crates/tenko-dns/anchors/root-anchors.xml`, RFC 7958) and root hints (`named.root`) into `crates/tenko-dns/src/recursion/shipped.rs`, and with `--check` (exit 1) verifies that the committed file is current. `crates/tenko-dns/anchors/README.md` says how to refresh the inputs. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh
@@ -109,7 +110,9 @@ whose phase cell names the phase: the cell, or a part of it after a `;`, starts 
 `2 and 3 (DNS and DHCP modules)`, `1 (delta sync, Slice 3); 2 (IXFR)`, not `1 (write: 2)`), and
 the exit criteria of the table under "Exit criteria" of the phase's plan: E1 to E12 of
 `docs/plans/phase-1-execution.md`, E13 to E21 of `docs/plans/phase-2-plan.md`, E22 to E32 of
-`docs/plans/phase-3-plan.md`. `--phase`
+`docs/plans/phase-3-plan.md` and E33 to E42 of `docs/plans/dns-recursion-plan.md` (a phase may
+name several plans: their criteria are merged in ID order, and an ID defined in two plans is an
+error, exit code 2; a phase cell such as `3 (Slice 10)` names Phase 3). `--phase`
 defaults to 1, so the Phase 1 command and its output are unchanged. The generated trace files
 are never scanned as documents. The `CON-NN` design constraints are headings, not rows, and
 are not traced.

@@ -1,20 +1,33 @@
-//! The resolver's cache (plan section 2.8, DNS-23): per node and per view, keyed by view,
-//! name, type and class (and the DO and CD bits, so a client that asks without DNSSEC
-//! never gets the signatures another client asked for), bounded by entries and by octets.
+//! The resolver's cache (plan section 2.8, DNS-23; recursion plan section 2.2): per node
+//! and per view, keyed by view, name, type and class, bounded by entries and by octets.
+//! The DO and CD bits are not part of the key (WP10.0): every query to an upstream or an
+//! authority asks with DO, so one entry holds the answer with its signatures and its
+//! validation state, and a hit renders it for the client's flags.
 //!
 //! - **Entries.** An entry is the upstream's answer in wire form without its OPT record:
 //!   the header (id 0), the question in lower case and the records as received, with the
-//!   positions of their TTLs. Positive answers live for the smallest TTL of their records,
-//!   at most `max_ttl`; negative answers (NXDOMAIN and NODATA, RFC 2308) for the smaller of
-//!   the SOA's TTL and its MINIMUM, at most `negative_ttl`; a negative answer without an
-//!   SOA, a truncated answer and any other RCODE are not cached.
+//!   positions of their TTLs, the positions of the DNSSEC records a client without DO does
+//!   not get (`rrsig_offsets`: every RRSIG, NSEC and NSEC3 record except those of the type
+//!   asked in the answer section), the [`SecurityState`] the validator gave it, the extended
+//!   error of a bogus answer and the earliest signature expiry. Positive answers live for
+//!   the smallest TTL of their records, at most `max_ttl` and never past the earliest
+//!   signature expiry (RFC 4035 section 4.5); negative answers (NXDOMAIN and NODATA, RFC
+//!   2308) for the smaller of the SOA's TTL and its MINIMUM, at most `negative_ttl`; the
+//!   validator may cap a lifetime further (a bogus entry lives for the failure time of RFC
+//!   9520). A negative answer without an SOA, a truncated answer and any other RCODE are
+//!   not cached.
 //! - **A hit** ([`Cache::answer`]) on the query path copies the entry into the answer
-//!   buffer the worker owns: the client's id and question (its own case), RA, the client's
-//!   RD and CD, AD clear (no validation in Phase 2), each TTL lowered by the entry's age, an
-//!   OPT record with the server's size, the DO bit and the client's cookie when the client
-//!   sent EDNS, and TC with no records when the answer does not fit the client's limit. The
-//!   lookup hashes a key built on the stack and the shard's lock is held for the copy: a
-//!   hit allocates nothing.
+//!   buffer the worker owns, rendered by [`SecurityState::render`]: the client's id and
+//!   question (its own case), RA, the client's RD and CD, AD for a secure entry when the
+//!   client asked with AD or DO, the DNSSEC records only for a client with DO (the counts
+//!   lowered), SERVFAIL with the stored extended error for a bogus entry unless the client
+//!   set CD, each TTL lowered by the entry's age, an OPT record with the server's size, the
+//!   DO bit, the client's cookie and the extended error when the client sent EDNS, and TC
+//!   with no records when the answer does not fit the client's limit. The lookup hashes a
+//!   key built on the stack and the shard's lock is held for the copy: a hit allocates
+//!   nothing (`tests/alloc.rs` binds the secure, the plain and the bogus hit). An answer
+//!   whose names point into its DNSSEC records (a compressor that reuses an NSEC owner)
+//!   cannot lose them without breaking, so it goes to every client with them.
 //! - **Bounds.** The entries are spread over shards by a hash of the key, each shard
 //!   holding its share of `entries` and `max_bytes` and dropping its least recently used
 //!   entry when a new one does not fit, so the cache never holds more than `entries`.
@@ -33,22 +46,22 @@ use std::{
         Mutex, PoisonError,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
-use tenko_core::dns::{ForwardRuleId, ViewId};
+use tenko_core::dns::{ClientFlags, ExtendedError, ForwardRuleId, SecurityState, ViewId};
 
 use crate::{
     metrics,
     name::{self, MAX_NAME_LEN},
-    wire::{self, HEADER_LEN, OPTION_COOKIE, TYPE_OPT},
+    wire::{self, HEADER_LEN, OPTION_COOKIE, OPTION_EXTENDED_ERROR, TYPE_OPT},
 };
 
 /// The TTL of a stale answer (RFC 8767 section 4).
 pub const STALE_TTL: u32 = 30;
 
-/// The longest key: a view tag and id, type, class, flags and the name.
-pub const KEY_MAX: usize = 1 + 16 + 2 + 2 + 1 + MAX_NAME_LEN;
+/// The longest key: a view tag and id, type, class and the name.
+pub const KEY_MAX: usize = 1 + 16 + 2 + 2 + MAX_NAME_LEN;
 
 /// Prefetch requests waiting at most; a full queue drops the request (the entry is asked
 /// again when it expires).
@@ -62,6 +75,14 @@ const TYPE_SOA: u16 = 6;
 
 /// The type of a TSIG record.
 const TYPE_TSIG: u16 = 250;
+
+/// The DNSSEC types a client without DO does not get (RFC 4035 section 3.2.1).
+const TYPE_RRSIG: u16 = 46;
+const TYPE_NSEC: u16 = 47;
+const TYPE_NSEC3: u16 = 50;
+
+/// The signature expiry of an entry without one.
+const NO_EXPIRY: u32 = u32::MAX;
 
 /// The settings of the cache (`[dns.cache]`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,15 +132,9 @@ impl std::fmt::Debug for CacheKey {
 }
 
 impl CacheKey {
-    /// The key of a question in a view: `qname` in lowercase wire form.
-    pub fn new(
-        view: Option<ViewId>,
-        qname: &[u8],
-        qtype: u16,
-        qclass: u16,
-        dnssec_ok: bool,
-        cd: bool,
-    ) -> Self {
+    /// The key of a question in a view: `qname` in lowercase wire form. The client's DO and
+    /// CD bits are not part of it (recursion plan section 2.2).
+    pub fn new(view: Option<ViewId>, qname: &[u8], qtype: u16, qclass: u16) -> Self {
         let mut buf = [0u8; KEY_MAX];
         let mut at = 0;
         match view {
@@ -132,8 +147,7 @@ impl CacheKey {
         }
         buf[at..at + 2].copy_from_slice(&qtype.to_be_bytes());
         buf[at + 2..at + 4].copy_from_slice(&qclass.to_be_bytes());
-        buf[at + 4] = u8::from(dnssec_ok) | u8::from(cd) << 1;
-        at += 5;
+        at += 4;
         let name = &qname[..qname.len().min(MAX_NAME_LEN)];
         buf[at..at + name.len()].copy_from_slice(name);
         Self {
@@ -148,6 +162,12 @@ impl CacheKey {
         &self.buf[..usize::from(self.len)]
     }
 
+    /// The name in lowercase wire form of a key's octets ([`CacheKey::as_bytes`]).
+    pub fn qname_of(key: &[u8]) -> &[u8] {
+        let name_at = if key.first() == Some(&1) { 21 } else { 5 };
+        key.get(name_at..).unwrap_or_default()
+    }
+
     /// The name in lowercase wire form.
     pub fn qname(&self) -> &[u8] {
         &self.buf[usize::from(self.name_at)..usize::from(self.len)]
@@ -155,24 +175,14 @@ impl CacheKey {
 
     /// The type.
     pub fn qtype(&self) -> u16 {
-        let at = usize::from(self.name_at) - 5;
+        let at = usize::from(self.name_at) - 4;
         u16::from_be_bytes([self.buf[at], self.buf[at + 1]])
     }
 
     /// The class.
     pub fn qclass(&self) -> u16 {
-        let at = usize::from(self.name_at) - 3;
+        let at = usize::from(self.name_at) - 2;
         u16::from_be_bytes([self.buf[at], self.buf[at + 1]])
-    }
-
-    /// The DNSSEC OK bit the entry was asked with.
-    pub fn dnssec_ok(&self) -> bool {
-        self.buf[usize::from(self.name_at) - 1] & 1 != 0
-    }
-
-    /// The CD bit the entry was asked with.
-    pub fn cd(&self) -> bool {
-        self.buf[usize::from(self.name_at) - 1] & 2 != 0
     }
 
     /// The view.
@@ -187,7 +197,7 @@ impl CacheKey {
     fn from_bytes(bytes: &[u8]) -> Self {
         let mut buf = [0u8; KEY_MAX];
         buf[..bytes.len()].copy_from_slice(bytes);
-        let name_at = if bytes.first() == Some(&1) { 22 } else { 6 };
+        let name_at = if bytes.first() == Some(&1) { 21 } else { 5 };
         Self {
             buf,
             len: u16::try_from(bytes.len()).unwrap_or(0),
@@ -209,10 +219,23 @@ pub struct Client<'a> {
     pub rd: bool,
     /// Its CD bit.
     pub cd: bool,
+    /// Its AD bit (RFC 6840 section 5.7: a client that sets it wants AD back).
+    pub ad: bool,
     /// Its EDNS, when it sent an OPT record.
     pub edns: Option<ClientEdns>,
     /// The largest answer it takes over its transport.
     pub max_len: usize,
+}
+
+impl Client<'_> {
+    /// The flags that decide the rendering.
+    pub fn flags(&self) -> ClientFlags {
+        ClientFlags {
+            dnssec_ok: self.edns.is_some_and(|edns| edns.dnssec_ok),
+            ad: self.ad,
+            cd: self.cd,
+        }
+    }
 }
 
 /// The OPT record of an answer from the cache.
@@ -220,7 +243,7 @@ pub struct Client<'a> {
 pub struct ClientEdns {
     /// The server's EDNS UDP size (`edns.udp_size`).
     pub udp_size: u16,
-    /// Echo the DO bit.
+    /// The client's DO bit: echoed, and the DNSSEC records go to it.
     pub dnssec_ok: bool,
     /// The cookie option's data: the client cookie and a fresh server cookie.
     pub cookie: Option<[u8; 24]>,
@@ -231,13 +254,66 @@ pub struct ClientEdns {
 pub enum Hit {
     /// A fresh entry answered; the RCODE is in the answer.
     Fresh {
-        /// The RCODE.
+        /// The RCODE (SERVFAIL for a bogus entry to a client without CD).
         rcode: u8,
+        /// The entry's validation state.
+        state: SecurityState,
     },
     /// An entry exists but expired (it may still answer stale).
     Expired,
     /// No entry.
     Miss,
+}
+
+/// What the validator says about an answer before it goes into the cache (WP10.2); the
+/// forwarder's answers are [`Verdict::UNVALIDATED`] until then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Verdict {
+    /// The validation state.
+    pub state: SecurityState,
+    /// The extended error a bogus answer is answered with (6 "DNSSEC Bogus" when absent).
+    pub ede: Option<ExtendedError>,
+    /// The earliest expiry of the signatures that made the answer secure: the entry lives
+    /// no longer (RFC 4035 section 4.5).
+    pub signature_expiry: Option<SystemTime>,
+    /// A cap of the lifetime in seconds (a bogus answer lives for the failure time of RFC
+    /// 9520).
+    pub max_ttl: Option<u32>,
+}
+
+impl Verdict {
+    /// An answer nobody validated (validation off, or the forwarder before WP10.2).
+    pub const UNVALIDATED: Self = Self {
+        state: SecurityState::Unvalidated,
+        ede: None,
+        signature_expiry: None,
+        max_ttl: None,
+    };
+}
+
+impl Default for Verdict {
+    fn default() -> Self {
+        Self::UNVALIDATED
+    }
+}
+
+/// A DNSSEC record of a stored answer that a client without DO does not get: its octets
+/// and its section (0 answer, 1 authority, 2 additional).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Skip {
+    start: u16,
+    end: u16,
+    section: u8,
+}
+
+impl Skip {
+    fn contains(self, at: usize) -> bool {
+        (usize::from(self.start)..usize::from(self.end)).contains(&at)
+    }
+
+    fn len(self) -> usize {
+        usize::from(self.end - self.start)
+    }
 }
 
 struct Entry {
@@ -249,11 +325,37 @@ struct Entry {
     hits: u32,
     prefetching: bool,
     rule: Option<ForwardRuleId>,
+    // WP10.0: the validation state and the rendering by flags (recursion plan 2.2).
+    state: SecurityState,
+    ede: Option<ExtendedError>,
+    /// The earliest signature expiry, in the cache's seconds; [`NO_EXPIRY`] for none.
+    signature_expiry: u32,
+    rrsig_offsets: Box<[Skip]>,
+    /// The DNSSEC records can be left out without breaking a name.
+    strip_safe: bool,
 }
 
 impl Entry {
     fn age(&self, now: u32) -> u32 {
         now.saturating_sub(self.stored)
+    }
+
+    fn stored(&self) -> Stored<'_> {
+        Stored {
+            rcode: self.wire[3] & 0x0f,
+            counts: [
+                u16::from_be_bytes([self.wire[6], self.wire[7]]),
+                u16::from_be_bytes([self.wire[8], self.wire[9]]),
+                u16::from_be_bytes([self.wire[10], self.wire[11]]),
+            ],
+            body: &self.wire[HEADER_LEN..],
+            question_end: usize::from(self.question_end),
+            ttls: &self.ttls,
+            skips: &self.rrsig_offsets,
+            strip_safe: self.strip_safe,
+            state: self.state,
+            ede: self.ede,
+        }
     }
 
     fn fresh(&self, now: u32) -> bool {
@@ -264,6 +366,7 @@ impl Entry {
         key_len * 2
             + self.wire.len()
             + self.ttls.len() * 2
+            + self.rrsig_offsets.len() * std::mem::size_of::<Skip>()
             + std::mem::size_of::<Slot>()
             + std::mem::size_of::<(Box<[u8]>, u32)>()
             + 8
@@ -510,11 +613,13 @@ impl Cache {
             }
             let age = entry.age(now);
             let ttl = entry.ttl;
-            let Some(rcode) = write(entry, client, out, |original| {
+            let state = entry.state;
+            let Some(rcode) = render(&entry.stored(), client, out, true, |original| {
                 original.min(ttl) - age.min(original.min(ttl))
             }) else {
                 return Hit::Miss;
             };
+            let rcode = (rcode, state);
             entry.hits = entry.hits.saturating_add(1);
             let prefetch = self.settings.prefetch
                 && !entry.prefetching
@@ -534,7 +639,10 @@ impl Cache {
                 queue.push(key.clone());
             }
         }
-        Hit::Fresh { rcode: prefetch.0 }
+        Hit::Fresh {
+            rcode: prefetch.0.0,
+            state: prefetch.0.1,
+        }
     }
 
     /// Answers `client` from an entry of `key` that is fresh or within the stale window,
@@ -558,11 +666,11 @@ impl Cache {
         }
         let ttl = entry.ttl;
         if entry.fresh(now) {
-            write(entry, client, out, |original| {
+            render(&entry.stored(), client, out, true, |original| {
                 original.min(ttl) - age.min(original.min(ttl))
             })
         } else {
-            write(entry, client, out, |_| STALE_TTL)
+            render(&entry.stored(), client, out, true, |_| STALE_TTL)
         }
     }
 
@@ -578,8 +686,9 @@ impl Cache {
             .is_some_and(|entry| entry.age(now) < entry.ttl.saturating_add(stale))
     }
 
-    /// Stores the upstream answer `message` for `key`, asked through `rule`. Returns
-    /// whether it was cached (see the module documentation for what is not).
+    /// Stores the upstream answer `message` for `key`, asked through `rule`, as
+    /// [`Verdict::UNVALIDATED`]. Returns whether it was cached (see the module
+    /// documentation for what is not).
     pub fn insert(
         &self,
         key: &CacheKey,
@@ -587,7 +696,20 @@ impl Cache {
         now: Instant,
         rule: Option<ForwardRuleId>,
     ) -> bool {
-        let Some(entry) = self.entry(message, self.secs(now), rule) else {
+        self.insert_with(key, message, now, rule, &Verdict::UNVALIDATED)
+    }
+
+    /// Stores the answer `message` for `key`, asked through `rule`, with the validator's
+    /// `verdict` (recursion plan section 2.2). Returns whether it was cached.
+    pub fn insert_with(
+        &self,
+        key: &CacheKey,
+        message: &[u8],
+        now: Instant,
+        rule: Option<ForwardRuleId>,
+        verdict: &Verdict,
+    ) -> bool {
+        let Some(entry) = self.entry(message, self.secs(now), rule, verdict) else {
             return false;
         };
         let cost = entry.cost(key.as_bytes().len());
@@ -628,8 +750,14 @@ impl Cache {
         true
     }
 
-    /// The entry an upstream answer makes, or `None` when it is not cached.
-    fn entry(&self, message: &[u8], now: u32, rule: Option<ForwardRuleId>) -> Option<Entry> {
+    /// The entry an answer makes, or `None` when it is not cached.
+    fn entry(
+        &self,
+        message: &[u8],
+        now: u32,
+        rule: Option<ForwardRuleId>,
+        verdict: &Verdict,
+    ) -> Option<Entry> {
         let header = wire::parse_header(message)?;
         if !header.qr || header.tc || header.opcode != 0 || header.qdcount != 1 {
             return None;
@@ -640,71 +768,53 @@ impl Cache {
             _ => return None,
         };
         let question_end = wire::questions_end(message, 1)?;
-        let total =
-            usize::from(header.ancount) + usize::from(header.nscount) + usize::from(header.arcount);
-        let authority =
-            usize::from(header.ancount)..usize::from(header.ancount) + usize::from(header.nscount);
-        let mut ttls = Vec::with_capacity(total);
-        let mut pos = question_end;
-        let mut end = message.len();
-        let mut opt = false;
-        let mut smallest = u32::MAX;
-        let mut soa_ttl = None;
-        for index in 0..total {
-            let record = wire::read_record(message, pos)?;
-            if record.rtype == TYPE_TSIG {
-                return None;
-            }
-            if record.rtype == TYPE_OPT {
-                // The OPT record goes; only as the last record, so no pointer moves.
-                if index + 1 != total || opt {
-                    return None;
-                }
-                opt = true;
-                end = record.start;
-                break;
-            }
-            smallest = smallest.min(record.ttl);
-            if authority.contains(&index) && record.rtype == TYPE_SOA && record.rdlen >= 20 {
-                let data = record.data(message);
-                let minimum = u32::from_be_bytes([
-                    data[data.len() - 4],
-                    data[data.len() - 3],
-                    data[data.len() - 2],
-                    data[data.len() - 1],
-                ]);
-                soa_ttl = Some(record.ttl.min(minimum));
-            }
-            ttls.push(u16::try_from(record.fixed + 4).ok()?);
-            pos = record.end();
+        let layout = Layout::of(message, &header, question_end)?;
+        if layout.tsig || layout.opt_misplaced {
+            return None;
         }
-        if !opt {
-            end = pos;
-        }
-        let ttl = if negative {
-            soa_ttl?.min(self.settings.negative_ttl)
+        let mut ttl = if negative {
+            layout.soa_ttl?.min(self.settings.negative_ttl)
         } else {
-            smallest.min(self.settings.max_ttl)
+            layout.smallest.min(self.settings.max_ttl)
+        };
+        if let Some(cap) = verdict.max_ttl {
+            ttl = ttl.min(cap);
+        }
+        let signature_expiry = match verdict.signature_expiry {
+            Some(expiry) => {
+                let left = expiry
+                    .duration_since(SystemTime::now())
+                    .map_or(0, |left| u32::try_from(left.as_secs()).unwrap_or(u32::MAX));
+                ttl = ttl.min(left);
+                now.saturating_add(left).min(NO_EXPIRY - 1)
+            }
+            None => NO_EXPIRY,
         };
         if ttl == 0 {
             return None;
         }
+        let end = layout.end;
         let mut stored = message[..end].to_vec();
         stored[..2].copy_from_slice(&[0, 0]);
-        if opt {
+        if layout.opt {
             let arcount = header.arcount - 1;
             stored[10..12].copy_from_slice(&arcount.to_be_bytes());
         }
         stored[HEADER_LEN..question_end - 4].make_ascii_lowercase();
         Some(Entry {
             wire: stored.into_boxed_slice(),
-            ttls: ttls.into_boxed_slice(),
+            ttls: layout.ttls.into_boxed_slice(),
             question_end: u16::try_from(question_end).ok()?,
             stored: now,
             ttl,
             hits: 0,
             prefetching: false,
             rule,
+            state: verdict.state,
+            ede: verdict.ede,
+            signature_expiry,
+            rrsig_offsets: layout.skips.into_boxed_slice(),
+            strip_safe: layout.strip_safe,
         })
     }
 
@@ -807,158 +917,349 @@ impl Cache {
     }
 }
 
-/// Writes the answer of `entry` for `client` into `out`, each TTL mapped by `ttl`. Returns
-/// the RCODE, or `None` when the client's question does not have the entry's length.
-fn write(
-    entry: &Entry,
-    client: &Client<'_>,
-    out: &mut Vec<u8>,
-    ttl: impl Fn(u32) -> u32,
-) -> Option<u8> {
-    assemble(
-        &entry.wire,
-        usize::from(entry.question_end),
-        &entry.ttls,
-        client,
-        out,
-        ttl,
-        true,
-    )
-}
-
-/// Relays an upstream answer `message` to `client` into `out`: the client's id, question
-/// and flags as for a cache hit, the upstream's records with their TTLs, the upstream's OPT
-/// record replaced by this node's. Returns the RCODE, or `None` when `message` does not
-/// parse or its question differs from the client's in length.
-pub fn relay(message: &[u8], client: &Client<'_>, out: &mut Vec<u8>) -> Option<u8> {
-    let header = wire::parse_header(message)?;
-    let question_end = wire::questions_end(message, 1)?;
-    let total =
-        usize::from(header.ancount) + usize::from(header.nscount) + usize::from(header.arcount);
-    let mut pos = question_end;
-    let mut end = None;
-    for index in 0..total {
-        let record = wire::read_record(message, pos)?;
-        if record.rtype == TYPE_OPT && index + 1 == total {
-            end = Some(record.start);
-        }
-        pos = record.end();
-    }
-    match end {
-        Some(end) => {
-            let mut trimmed = [0u8; HEADER_LEN];
-            trimmed.copy_from_slice(&message[..HEADER_LEN]);
-            let arcount = header.arcount - 1;
-            trimmed[10..12].copy_from_slice(&arcount.to_be_bytes());
-            assemble_parts(
-                &trimmed,
-                &message[HEADER_LEN..end],
-                question_end,
-                &[],
-                client,
-                out,
-                |ttl| ttl,
-                true,
-            )
-        }
-        // No OPT record at the end: the records go as they are, without one of ours.
-        None => assemble_parts(
-            &message[..HEADER_LEN],
-            &message[HEADER_LEN..pos],
-            question_end,
-            &[],
-            client,
-            out,
-            |ttl| ttl,
-            false,
-        ),
-    }
-}
-
-#[allow(clippy::too_many_arguments, reason = "the parts of one answer")]
-fn assemble(
-    stored: &[u8],
-    question_end: usize,
-    ttls: &[u16],
-    client: &Client<'_>,
-    out: &mut Vec<u8>,
-    ttl: impl Fn(u32) -> u32,
+/// The records of an answer as the cache and the relay need them.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts of one pass over the records"
+)]
+struct Layout {
+    /// The TTL positions of the records before the OPT record.
+    ttls: Vec<u16>,
+    /// The DNSSEC records a client without DO does not get.
+    skips: Vec<Skip>,
+    /// No kept name points into a skipped record.
+    strip_safe: bool,
+    /// The end of the records before the OPT record.
+    end: usize,
+    /// The last record is an OPT record (left out of `end`).
     opt: bool,
-) -> Option<u8> {
-    assemble_parts(
-        &stored[..HEADER_LEN],
-        &stored[HEADER_LEN..],
-        question_end,
-        ttls,
-        client,
-        out,
-        ttl,
-        opt,
-    )
+    /// An OPT record that is not the last one, or a second one.
+    opt_misplaced: bool,
+    /// A TSIG record.
+    tsig: bool,
+    /// The smallest TTL.
+    smallest: u32,
+    /// The negative TTL of an SOA in the authority section (RFC 2308).
+    soa_ttl: Option<u32>,
 }
 
-/// Writes an answer from a header (`header`, 12 octets: the counts and the RCODE are used),
-/// the octets after it (`body`: the question, replaced by the client's, and the records),
-/// the TTL positions to map, and an OPT record when `opt` and the client sent EDNS.
-#[allow(clippy::too_many_arguments, reason = "the parts of one answer")]
-fn assemble_parts(
-    header: &[u8],
-    body: &[u8],
+impl Layout {
+    /// The layout of `message`, whose question ends at `question_end`; `None` when a
+    /// record does not parse or the message is longer than a position holds.
+    fn of(message: &[u8], header: &wire::RawHeader, question_end: usize) -> Option<Self> {
+        let qtype = u16::from_be_bytes([message[question_end - 4], message[question_end - 3]]);
+        let (answers, authority) = (usize::from(header.ancount), usize::from(header.nscount));
+        let total = answers + authority + usize::from(header.arcount);
+        let mut layout = Layout {
+            ttls: Vec::with_capacity(total),
+            skips: Vec::new(),
+            strip_safe: true,
+            end: message.len(),
+            opt: false,
+            opt_misplaced: false,
+            tsig: false,
+            smallest: u32::MAX,
+            soa_ttl: None,
+        };
+        let mut pos = question_end;
+        for index in 0..total {
+            let record = wire::read_record(message, pos)?;
+            let section = if index < answers {
+                0
+            } else if index < answers + authority {
+                1
+            } else {
+                2
+            };
+            match record.rtype {
+                TYPE_TSIG => layout.tsig = true,
+                TYPE_OPT => {
+                    // The OPT record goes; only as the last record, so no pointer moves.
+                    if index + 1 != total || layout.opt {
+                        layout.opt_misplaced = true;
+                    } else {
+                        layout.opt = true;
+                        layout.end = record.start;
+                    }
+                    break;
+                }
+                _ => {}
+            }
+            layout.smallest = layout.smallest.min(record.ttl);
+            if section == 1 && record.rtype == TYPE_SOA && record.rdlen >= 20 {
+                let data = record.data(message);
+                let minimum = u32::from_be_bytes([
+                    data[data.len() - 4],
+                    data[data.len() - 3],
+                    data[data.len() - 2],
+                    data[data.len() - 1],
+                ]);
+                layout.soa_ttl = Some(record.ttl.min(minimum));
+            }
+            layout.ttls.push(u16::try_from(record.fixed + 4).ok()?);
+            let dnssec = matches!(record.rtype, TYPE_RRSIG | TYPE_NSEC | TYPE_NSEC3);
+            if dnssec && !(section == 0 && record.rtype == qtype) {
+                layout.skips.push(Skip {
+                    start: u16::try_from(record.start).ok()?,
+                    end: u16::try_from(record.end()).ok()?,
+                    section,
+                });
+            }
+            pos = record.end();
+        }
+        if !layout.opt {
+            layout.end = pos;
+        }
+        if !layout.skips.is_empty() {
+            layout.strip_safe = Self::strip_safe(message, question_end, layout.end, &layout.skips);
+        }
+        Some(layout)
+    }
+
+    /// Whether no name outside `skips` points into one of them.
+    fn strip_safe(message: &[u8], question_end: usize, end: usize, skips: &[Skip]) -> bool {
+        let mut pos = question_end;
+        while pos < end {
+            let Some(record) = wire::read_record(message, pos) else {
+                return false;
+            };
+            pos = record.end();
+            if skips.iter().any(|skip| skip.contains(record.start)) {
+                continue;
+            }
+            if points_into(message, record.start, skips) {
+                return false;
+            }
+            // The names in the data of the types of RFC 1035 that may be compressed, and
+            // SRV (as `cache/list.rs` reads them).
+            let (prefix, names) = match record.rtype {
+                2 | 5 | 12 | 39 => (0, 1),
+                6 => (0, 2),
+                15 => (2, 1),
+                33 => (6, 1),
+                _ => continue,
+            };
+            let mut at = record.rdata + prefix;
+            for _ in 0..names {
+                if at >= record.end() {
+                    break;
+                }
+                if points_into(message, at, skips) {
+                    return false;
+                }
+                match wire::skip_name(message, at) {
+                    Some(next) => at = next,
+                    None => return false,
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Whether the name at `pos` ends in a pointer into one of `skips`.
+fn points_into(message: &[u8], mut pos: usize, skips: &[Skip]) -> bool {
+    loop {
+        let Some(&len) = message.get(pos) else {
+            return true;
+        };
+        match len {
+            0 => return false,
+            1..=63 => pos += 1 + usize::from(len),
+            0xc0..=0xff => {
+                let Some(&low) = message.get(pos + 1) else {
+                    return true;
+                };
+                let target = usize::from(u16::from_be_bytes([len & 0x3f, low]));
+                return skips.iter().any(|skip| skip.contains(target));
+            }
+            _ => return true,
+        }
+    }
+}
+
+/// A stored answer, or an upstream's answer to relay, as the renderer reads it.
+struct Stored<'a> {
+    /// The RCODE.
+    rcode: u8,
+    /// The answer, authority and additional counts without the OPT record.
+    counts: [u16; 3],
+    /// The octets after the header: the question and the records, without the OPT record.
+    body: &'a [u8],
+    /// The end of the question (a position in the whole message).
     question_end: usize,
-    ttls: &[u16],
+    /// The TTL positions to map.
+    ttls: &'a [u16],
+    /// The DNSSEC records a client without DO does not get.
+    skips: &'a [Skip],
+    /// They can be left out.
+    strip_safe: bool,
+    /// The validation state.
+    state: SecurityState,
+    /// The extended error of a bogus answer.
+    ede: Option<ExtendedError>,
+}
+
+/// Writes the answer `stored` for `client` into `out` by its state and the client's flags
+/// ([`SecurityState::render`]), each TTL mapped by `ttl`, with an OPT record when `opt` and
+/// the client sent EDNS. Returns the RCODE, or `None` when the client's question does not
+/// have the answer's length. Allocates nothing when `out` has room for 65,535 octets.
+fn render(
+    stored: &Stored<'_>,
     client: &Client<'_>,
     out: &mut Vec<u8>,
-    ttl: impl Fn(u32) -> u32,
     opt: bool,
+    ttl: impl Fn(u32) -> u32,
 ) -> Option<u8> {
+    let question_end = stored.question_end;
     if client.question_end != question_end
         || client.message.len() < question_end
-        || body.len() < question_end - HEADER_LEN
+        || stored.body.len() < question_end - HEADER_LEN
     {
         return None;
     }
-    let rcode = header[3] & 0x0f;
+    let rendering = stored.state.render(client.flags(), stored.ede);
+    let edns = client.edns.filter(|_| opt);
+    let ede = rendering.ede;
     out.clear();
     out.extend_from_slice(&client.id.to_be_bytes());
     out.push(0x80 | u8::from(client.rd));
-    out.push(0x80 | if client.cd { 0x10 } else { 0 } | rcode);
-    out.extend_from_slice(&header[4..HEADER_LEN]);
+    let cd = if client.cd { 0x10 } else { 0 };
+    if rendering.servfail {
+        out.push(0x80 | cd | 2);
+        out.extend_from_slice(&[0, 1, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&client.message[HEADER_LEN..question_end]);
+        if let Some(edns) = &edns {
+            push_opt(out, edns, ede);
+        }
+        return Some(2);
+    }
+    let ad = if rendering.ad { 0x20 } else { 0 };
+    out.push(0x80 | ad | cd | stored.rcode);
+    let strip = !rendering.dnssec_records && stored.strip_safe && !stored.skips.is_empty();
+    let mut counts = stored.counts;
+    if strip {
+        for skip in stored.skips {
+            counts[usize::from(skip.section)] = counts[usize::from(skip.section)].saturating_sub(1);
+        }
+    }
+    out.extend_from_slice(&1u16.to_be_bytes());
+    for count in counts {
+        out.extend_from_slice(&count.to_be_bytes());
+    }
     out.extend_from_slice(&client.message[HEADER_LEN..question_end]);
-    out.extend_from_slice(&body[question_end - HEADER_LEN..]);
-    for offset in ttls {
+    let records = &stored.body[question_end - HEADER_LEN..];
+    if strip {
+        let mut from = question_end;
+        for skip in stored.skips {
+            out.extend_from_slice(
+                &records[from - question_end..usize::from(skip.start) - question_end],
+            );
+            from = usize::from(skip.end);
+        }
+        out.extend_from_slice(&records[from - question_end..]);
+    } else {
+        out.extend_from_slice(records);
+    }
+    // The TTL positions, moved back by the skipped records before them.
+    let mut skips = stored.skips.iter().peekable();
+    let mut shift = 0;
+    for offset in stored.ttls {
         let at = usize::from(*offset);
+        if strip {
+            while let Some(skip) = skips.peek() {
+                if usize::from(skip.end) <= at {
+                    shift += skip.len();
+                    skips.next();
+                } else {
+                    break;
+                }
+            }
+            if skips.peek().is_some_and(|skip| skip.contains(at)) {
+                continue;
+            }
+        }
+        let at = at - shift;
         let original = u32::from_be_bytes([out[at], out[at + 1], out[at + 2], out[at + 3]]);
         out[at..at + 4].copy_from_slice(&ttl(original).to_be_bytes());
     }
-    let edns = client.edns.filter(|_| opt);
     if let Some(edns) = &edns {
-        push_opt(out, edns);
+        push_opt(out, edns, ede);
     }
     if out.len() > client.max_len {
         out.truncate(question_end);
         out[2] |= 0x02;
         out[6..12].copy_from_slice(&[0; 6]);
         if let Some(edns) = &edns {
-            push_opt(out, edns);
+            push_opt(out, edns, ede);
         }
     }
-    Some(rcode)
+    Some(stored.rcode)
 }
 
-/// Appends the OPT record of an answer and counts it.
-fn push_opt(out: &mut Vec<u8>, edns: &ClientEdns) {
+/// Relays an upstream answer `message` to `client` into `out`: the client's id, question
+/// and flags as for a cache hit, the upstream's records with their TTLs (without the
+/// DNSSEC records for a client without DO), the upstream's OPT record replaced by this
+/// node's. The answer is rendered as `unvalidated` (WP10.2 validates forwarded answers).
+/// Returns the RCODE, or `None` when `message` does not parse or its question differs from
+/// the client's in length.
+pub fn relay(message: &[u8], client: &Client<'_>, out: &mut Vec<u8>) -> Option<u8> {
+    let header = wire::parse_header(message)?;
+    let question_end = wire::questions_end(message, 1)?;
+    if header.qdcount != 1 {
+        return None;
+    }
+    let layout = Layout::of(message, &header, question_end)?;
+    if layout.opt_misplaced {
+        // An OPT record that is not the last one: the records go as they are, as received,
+        // without one of ours.
+        let stored = Stored {
+            rcode: header.rcode & 0x0f,
+            counts: [header.ancount, header.nscount, header.arcount],
+            body: &message[HEADER_LEN..],
+            question_end,
+            ttls: &[],
+            skips: &[],
+            strip_safe: false,
+            state: SecurityState::Unvalidated,
+            ede: None,
+        };
+        return render(&stored, client, out, false, |ttl| ttl);
+    }
+    let arcount = header.arcount - u16::from(layout.opt);
+    let stored = Stored {
+        rcode: header.rcode & 0x0f,
+        counts: [header.ancount, header.nscount, arcount],
+        body: &message[HEADER_LEN..layout.end],
+        question_end,
+        ttls: &[],
+        skips: &layout.skips,
+        strip_safe: layout.strip_safe,
+        state: SecurityState::Unvalidated,
+        ede: None,
+    };
+    // No OPT record from the upstream: none of ours either.
+    render(&stored, client, out, layout.opt, |ttl| ttl)
+}
+
+/// Appends the OPT record of an answer, with the client's cookie and the extended error
+/// (RFC 8914, no text), and counts it.
+fn push_opt(out: &mut Vec<u8>, edns: &ClientEdns, ede: Option<ExtendedError>) {
     out.push(0);
     out.extend_from_slice(&TYPE_OPT.to_be_bytes());
     out.extend_from_slice(&edns.udp_size.to_be_bytes());
     out.extend_from_slice(&[0, 0, if edns.dnssec_ok { 0x80 } else { 0 }, 0]);
-    match &edns.cookie {
-        Some(cookie) => {
-            out.extend_from_slice(&28u16.to_be_bytes());
-            out.extend_from_slice(&OPTION_COOKIE.to_be_bytes());
-            out.extend_from_slice(&24u16.to_be_bytes());
-            out.extend_from_slice(cookie);
-        }
-        None => out.extend_from_slice(&[0, 0]),
+    let rdlen = if edns.cookie.is_some() { 28 } else { 0 } + if ede.is_some() { 6 } else { 0 };
+    out.extend_from_slice(&u16::to_be_bytes(rdlen));
+    if let Some(cookie) = &edns.cookie {
+        out.extend_from_slice(&OPTION_COOKIE.to_be_bytes());
+        out.extend_from_slice(&24u16.to_be_bytes());
+        out.extend_from_slice(cookie);
+    }
+    if let Some(ede) = ede {
+        out.extend_from_slice(&OPTION_EXTENDED_ERROR.to_be_bytes());
+        out.extend_from_slice(&2u16.to_be_bytes());
+        out.extend_from_slice(&ede.code().to_be_bytes());
     }
     let arcount = u16::from_be_bytes([out[10], out[11]]).saturating_add(1);
     out[10..12].copy_from_slice(&arcount.to_be_bytes());
@@ -972,3 +1273,6 @@ pub use list::{CachePage, CachedEntry, DEFAULT_LIST, ListCursor, MAX_LIST, ViewF
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod render_tests;

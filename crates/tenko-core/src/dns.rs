@@ -16,6 +16,8 @@
 //! | [`codes`] | the `dns.*` error codes, [`DnsError`] |
 //! | [`audit`] | the `dns.*` audit actions |
 //! | [`DnsScope`] | the scopes `dns.read`, `dns.write` and `dns.keys` |
+//! | [`recursion`] | the recursive resolver's model: [`TrustAnchor`], [`NegativeTrustAnchor`], [`ResolutionMode`], [`RuleMode`], [`SecurityState`], [`ExtendedError`] (WP10.0) |
+//! | [`findings`] | the health findings of the recursive resolver |
 
 use std::{fmt, net::IpAddr};
 
@@ -37,10 +39,19 @@ use crate::{
 pub mod name;
 pub mod rdata;
 pub mod rrset;
+// WP10.0: the recursive resolver's model (recursion plan section 3.1).
+pub mod recursion;
+// WP10.0: end.
 
 pub use name::{DnsName, Rtype, ScopeName};
 pub use rdata::{Rdata, RecordData, SvcParam, TextBytes, split_txt};
 pub use rrset::{MAX_TTL, RrSet, RrSetKey, check_apex, check_node};
+// WP10.0: the recursive resolver's model.
+pub use recursion::{
+    AnchorData, AnchorKey, AnchorSource, AnchorState, ClientFlags, ExtendedError,
+    NegativeTrustAnchor, NtaId, Rendering, ResolutionMode, RuleMode, SecurityState, TrustAnchor,
+};
+// WP10.0: end.
 
 crate::id_type! {
     /// Identifier of a zone.
@@ -188,8 +199,27 @@ pub mod codes {
     /// Params: `node`.
     pub const BLOCKING_LOG_OFF: &str = "dns.blocking.log_off";
 
+    // WP10.0: the recursive resolver (recursion plan section 3.4).
+    /// The trust anchor of the zone does not exist (404). Params: `zone`.
+    pub const TRUST_ANCHOR_NOT_FOUND: &str = "dns.trust_anchor.not_found";
+    /// A trust anchor is invalid (400): a key that does not parse, a key twice, too many
+    /// keys. Params: `field`, `reason`.
+    pub const TRUST_ANCHOR_INVALID: &str = "dns.trust_anchor.invalid";
+    /// The root's trust anchor may not be removed or replaced outside the Lab profile
+    /// (409). Params: `zone`.
+    pub const TRUST_ANCHOR_ROOT_PROTECTED: &str = "dns.trust_anchor.root_protected";
+    /// The negative trust anchor does not exist (404). Params: `id`.
+    pub const NTA_NOT_FOUND: &str = "dns.nta.not_found";
+    /// A negative trust anchor is invalid (400): the root, no expiry under Hardened, more
+    /// than seven days, no reason. Params: `field`, `reason`.
+    pub const NTA_INVALID: &str = "dns.nta.invalid";
+    /// The node's recursive resolver is off, so the node command has nothing to act on
+    /// (409). Params: `node`.
+    pub const RECURSION_DISABLED: &str = "dns.recursion.disabled";
+    // WP10.0: end.
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 30] = [
+    pub const ALL: [&str; 36] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -223,6 +253,13 @@ pub mod codes {
         DEFAULT_ZONE_INVALID,
         // dns-visibility
         BLOCKING_LOG_OFF,
+        // WP10.0
+        TRUST_ANCHOR_NOT_FOUND,
+        TRUST_ANCHOR_INVALID,
+        TRUST_ANCHOR_ROOT_PROTECTED,
+        NTA_NOT_FOUND,
+        NTA_INVALID,
+        RECURSION_DISABLED,
     ];
 }
 
@@ -1218,6 +1255,12 @@ pub struct View {
     /// loopback; Hardened: no client; Lab: every client).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recursion: Option<AclId>,
+    // WP10.0: the view's resolution (recursion plan section 2.7).
+    /// How names outside the zones and the forwarding rules are resolved for this view's
+    /// clients; absent: the profile's default (recurse in every profile, REC-Q2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<ResolutionMode>,
+    // WP10.0: end.
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -1338,7 +1381,8 @@ pub struct ForwardRule {
     pub id: ForwardRuleId,
     /// The names the rule covers.
     pub suffix: DnsName,
-    /// The upstreams, 1 to 16.
+    /// The upstreams, 1 to 16; none for a rule of mode `recurse`.
+    #[serde(default)]
     pub upstreams: Vec<Upstream>,
     /// How they are reached.
     #[serde(default)]
@@ -1349,14 +1393,30 @@ pub struct ForwardRule {
     /// The view the rule applies in; all views when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<ViewId>,
+    // WP10.0: the rule's mode and validation (recursion plan sections 2.3 and 2.7).
+    /// Forward to the upstreams, or resolve the names under the suffix iteratively.
+    #[serde(default)]
+    pub mode: RuleMode,
+    /// Validate the upstreams' answers with DNSSEC (REC-Q3); `false` trusts them as Phase 2
+    /// did. Only a `forward` rule may switch it off.
+    #[serde(default = "validate_default")]
+    pub validate: bool,
+    // WP10.0: end.
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
+// WP10.0: the default of `ForwardRule.validate`.
+const fn validate_default() -> bool {
+    true
+}
+// WP10.0: end.
+
 impl ForwardRule {
-    /// Checks a rule: 1 to 16 upstreams; DoT and DoH name the TLS name; a path only for
-    /// DoH, starting with `/`.
+    /// Checks a rule: a `forward` rule has 1 to 16 upstreams, a `recurse` rule none and
+    /// neither a transport other than plain, a TLS name nor `validate = false`; DoT and DoH
+    /// name the TLS name; a path only for DoH, starting with `/`.
     ///
     /// # Errors
     ///
@@ -1365,6 +1425,23 @@ impl ForwardRule {
         let invalid = |field: &str, reason: &str| {
             Err(DnsError::invalid(codes::FORWARDER_INVALID, field, reason))
         };
+        // WP10.0: the rules of a recurse rule.
+        if self.mode == RuleMode::Recurse {
+            if !self.upstreams.is_empty() {
+                return invalid("upstreams", "a recurse rule names no upstream");
+            }
+            if self.transport != ForwardTransport::Plain {
+                return invalid("transport", "a recurse rule asks the authorities directly");
+            }
+            if self.tls_name.is_some() {
+                return invalid("tls_name", "a recurse rule names no certificate");
+            }
+            if !self.validate {
+                return invalid("validate", "a recurse rule always validates");
+            }
+            return Ok(());
+        }
+        // WP10.0: end.
         if self.upstreams.is_empty() || self.upstreams.len() > 16 {
             return invalid("upstreams", "a rule has 1 to 16 upstreams");
         }
@@ -1834,10 +1911,14 @@ pub struct JournalEntry {
 /// | `dns.list_versions` | ([`BlockListId`], version) | [`ListVersion`] |
 /// | `dns.journal` | ([`ZoneId`], [`ScopeName`], [`Revision`]) | [`JournalEntry`] |
 /// | `dns.sign_state` | [`ZoneId`] | [`SignState`] |
+/// | `dns.trust_anchors` | [`DnsName`] (the zone) | [`TrustAnchor`] |
+/// | `dns.ntas` | [`NtaId`] | [`NegativeTrustAnchor`] |
+/// | `dns.ntas.by_zone` | ([`DnsName`], [`NtaId`]) | `()` |
 pub mod tables {
     use super::{
-        Acl, AclId, BlockList, BlockListId, ForwardRule, ForwardRuleId, JournalEntry, KeyMeta,
-        KeyName, ListVersion, RrSet, RrSetKey, ScopeName, SignState, View, ViewId, Zone, ZoneId,
+        Acl, AclId, BlockList, BlockListId, DnsName, ForwardRule, ForwardRuleId, JournalEntry,
+        KeyMeta, KeyName, ListVersion, NegativeTrustAnchor, NtaId, RrSet, RrSetKey, ScopeName,
+        SignState, TrustAnchor, View, ViewId, Zone, ZoneId,
     };
     use crate::{id::Revision, names::TableName, table::TableDef};
 
@@ -1863,13 +1944,23 @@ pub mod tables {
         TableDef::new("dns.journal");
     /// The signing state of each signed zone (controllers only).
     pub static SIGN_STATE: TableDef<ZoneId, SignState> = TableDef::new("dns.sign_state");
+    // WP10.0: the recursive resolver's tables (recursion plan section 3.2).
+    /// The trust anchors, one row per zone (DNS-13).
+    pub static TRUST_ANCHORS: TableDef<DnsName, TrustAnchor> = TableDef::new("dns.trust_anchors");
+    /// The negative trust anchors (RFC 7646).
+    pub static NTAS: TableDef<NtaId, NegativeTrustAnchor> = TableDef::new("dns.ntas");
+    /// The negative trust anchors by zone.
+    pub static NTAS_BY_ZONE: TableDef<(DnsName, NtaId), ()> = TableDef::new("dns.ntas.by_zone");
+    // WP10.0: end.
 
     /// The tables a node with the `dns` role receives through node sync: every table of the
     /// namespace except `dns.sign_state`, which only the signing service on the controllers
     /// reads (plan section 3.2). Declared now and consumed by no node in Phase 2: the one
     /// node of Phase 2 runs the role in the controller's process and reads the store
-    /// directly (plan section 2.10); the node-file feed is Phase 5.
-    pub static NODE_TABLES: [TableName; 9] = [
+    /// directly (plan section 2.10); the node-file feed is Phase 5. The trust anchors and
+    /// the negative trust anchors are in it (recursion plan section 3.2), so a Phase 5 node
+    /// validates with the same anchors.
+    pub static NODE_TABLES: [TableName; 12] = [
         TableName::from_static("dns.zones"),
         TableName::from_static("dns.rrsets"),
         TableName::from_static("dns.views"),
@@ -1879,10 +1970,14 @@ pub mod tables {
         TableName::from_static("dns.lists"),
         TableName::from_static("dns.list_versions"),
         TableName::from_static("dns.journal"),
+        // WP10.0
+        TableName::from_static("dns.trust_anchors"),
+        TableName::from_static("dns.ntas"),
+        TableName::from_static("dns.ntas.by_zone"),
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 10] {
+    pub fn all() -> [&'static TableName; 13] {
         [
             ZONES.name(),
             RRSETS.name(),
@@ -1894,6 +1989,10 @@ pub mod tables {
             LIST_VERSIONS.name(),
             JOURNAL.name(),
             SIGN_STATE.name(),
+            // WP10.0
+            TRUST_ANCHORS.name(),
+            NTAS.name(),
+            NTAS_BY_ZONE.name(),
         ]
     }
 }
@@ -2004,8 +2103,36 @@ pub mod audit {
     /// A name was added to an allow list from the blocking view.
     pub const BLOCKING_ALLOW: AuditAction = AuditAction::from_static("dns.blocking.allow");
 
+    // WP10.0: the recursive resolver (recursion plan section 3.4).
+    /// A trust anchor key was added by an operator.
+    pub const TRUST_ANCHOR_ADD: AuditAction = AuditAction::from_static("dns.trust_anchor.add");
+    /// A zone's trust anchor was removed by an operator.
+    pub const TRUST_ANCHOR_REMOVE: AuditAction =
+        AuditAction::from_static("dns.trust_anchor.remove");
+    /// A trust anchor key changed its RFC 5011 state (by the trust anchor service,
+    /// component `dns`).
+    pub const TRUST_ANCHOR_STATE: AuditAction = AuditAction::from_static("dns.trust_anchor.state");
+    /// An RFC 5011 refresh of a zone's trust anchor was started by hand.
+    pub const TRUST_ANCHOR_REFRESH: AuditAction =
+        AuditAction::from_static("dns.trust_anchor.refresh");
+    /// A negative trust anchor was created.
+    pub const NTA_CREATE: AuditAction = AuditAction::from_static("dns.nta.create");
+    /// A negative trust anchor was deleted before its expiry.
+    pub const NTA_DELETE: AuditAction = AuditAction::from_static("dns.nta.delete");
+    /// A negative trust anchor expired (by the leader service).
+    pub const NTA_EXPIRE: AuditAction = AuditAction::from_static("dns.nta.expire");
+    /// A node's resolver was primed by hand.
+    pub const RECURSION_PRIME: AuditAction = AuditAction::from_static("dns.recursion.prime");
+    /// A node's infrastructure cache was flushed.
+    pub const INFRA_FLUSH: AuditAction = AuditAction::from_static("dns.infra.flush");
+    /// A node flushed its answer cache after a flood of unwanted answers (recursion plan
+    /// section 2.1).
+    pub const RECURSION_UNWANTED_FLUSH: AuditAction =
+        AuditAction::from_static("dns.recursion.unwanted_flush");
+    // WP10.0: end.
+
     /// Every action of the module, for the contracts document and its test.
-    pub const ALL: [&AuditAction; 44] = [
+    pub const ALL: [&AuditAction; 54] = [
         &ZONE_CREATE,
         &ZONE_UPDATE,
         &ZONE_DELETE,
@@ -2052,6 +2179,17 @@ pub mod audit {
         &BLOCKING_PAUSE,
         &BLOCKING_RESUME,
         &BLOCKING_ALLOW,
+        // WP10.0
+        &TRUST_ANCHOR_ADD,
+        &TRUST_ANCHOR_REMOVE,
+        &TRUST_ANCHOR_STATE,
+        &TRUST_ANCHOR_REFRESH,
+        &NTA_CREATE,
+        &NTA_DELETE,
+        &NTA_EXPIRE,
+        &RECURSION_PRIME,
+        &INFRA_FLUSH,
+        &RECURSION_UNWANTED_FLUSH,
     ];
 }
 
@@ -2065,7 +2203,43 @@ pub mod events {
     pub const TRANSFER: &str = "dns.transfer";
     /// A zone was signed, or signing failed.
     pub const SIGNING: &str = "dns.signing";
+    // WP10.0: the recursive resolver (recursion plan section 3.4).
+    /// A trust anchor key changed its state, or a trust anchor was added or removed (data:
+    /// the zone, the key tag and the state).
+    pub const TRUST_ANCHOR: &str = "dns.trust_anchor";
+    /// A negative trust anchor was created, deleted or expired (data: the id and the zone).
+    pub const NTA: &str = "dns.nta";
+    // WP10.0: end.
 }
+
+// WP10.0: the health findings of the recursive resolver (recursion plan section 3.4).
+/// The names of the health findings the recursive resolver adds to `GET /system/status`.
+pub mod findings {
+    /// Priming failed: no server of the root hints answered.
+    pub const PRIMING_FAILED: &str = "dns.recursion.priming_failed";
+    /// The root's DNSKEY set fails as expired or not yet valid: the clock is probably
+    /// wrong (OPS-09).
+    pub const VALIDATION_CLOCK: &str = "dns.validation.clock";
+    /// Every root anchor is revoked or removed: the node cannot validate the root.
+    pub const TRUST_ANCHOR_STALE: &str = "dns.trust_anchor.stale";
+    /// A key waits for its add hold-down (informational).
+    pub const TRUST_ANCHOR_PENDING: &str = "dns.trust_anchor.pending";
+    /// A negative trust anchor is active (one finding each).
+    pub const NTA_ACTIVE: &str = "dns.nta.active";
+    /// A forwarding rule's upstream strips the DNSSEC records, so its answers are bogus.
+    pub const FORWARDER_STRIPS_DNSSEC: &str = "dns.forwarder.strips_dnssec";
+
+    /// Every finding.
+    pub const ALL: [&str; 6] = [
+        PRIMING_FAILED,
+        VALIDATION_CLOCK,
+        TRUST_ANCHOR_STALE,
+        TRUST_ANCHOR_PENDING,
+        NTA_ACTIVE,
+        FORWARDER_STRIPS_DNSSEC,
+    ];
+}
+// WP10.0: end.
 
 #[cfg(test)]
 mod tests;

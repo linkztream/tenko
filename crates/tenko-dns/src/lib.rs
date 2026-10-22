@@ -65,6 +65,8 @@ pub mod xfr;
 pub mod dnssec;
 // WP6.2: dynamic updates (RFC 2136).
 pub mod update;
+// WP10.0: the recursive resolver's contracts (recursion plan section 3.3).
+pub mod recursion;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};
