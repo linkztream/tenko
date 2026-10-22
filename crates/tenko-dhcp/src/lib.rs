@@ -32,6 +32,8 @@ pub mod conflict;
 // WP7.4: the configuration service, the image build and the effective options.
 pub mod config;
 pub mod ddns;
+// WP9.3: the Kea export (MIG-16).
+pub mod export;
 pub mod feed;
 pub mod fingerprint;
 pub mod image;

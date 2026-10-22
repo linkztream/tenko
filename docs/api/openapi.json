@@ -5907,7 +5907,7 @@
           "dhcp"
         ],
         "summary": "Export the DHCP configuration and leases (Kea JSON)",
-        "description": "Scope: `dhcp.read`. The export is audited (`dhcp.export`).",
+        "description": "Scope: `dhcp.read` on the server-wide DHCP configuration (global roles). The Kea 2.6 export (MIG-16): `dhcp4` is the `kea-dhcp4` configuration file, `leases4_csv` the memfile lease file (unless `leases=false`), `dhcp_ddns` a `kea-dhcp-ddns` skeleton when a scope writes names, `losses` what Kea does not express as Tenko does. The export is audited (`dhcp.export`).",
         "operationId": "export_dhcp",
         "parameters": [
           {
@@ -5970,8 +5970,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39608,7 +39608,7 @@
         "properties": {
           "dhcp4": {
             "type": "object",
-            "description": "The `Dhcp4` configuration."
+            "description": "The `kea-dhcp4` configuration file: `{\"Dhcp4\": {..}}` for Kea 2.6."
           },
           "dhcp6": {
             "type": [
@@ -39617,19 +39617,26 @@
             ],
             "description": "The `Dhcp6` configuration (Slice 9)."
           },
+          "dhcp_ddns": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "A `kea-dhcp-ddns` configuration skeleton (`{\"DhcpDdns\": {..}}`) with the forward and\nreverse domains of the scopes that write names; its DNS servers and TSIG keys are\nthe operator's. Absent when no scope writes names."
+          },
           "leases4_csv": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The DHCPv4 leases as Kea memfile CSV."
+            "description": "The DHCPv4 leases as Kea's memfile lease file (`kea-leases4.csv`), when asked for."
           },
           "losses": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LossEntry"
             },
-            "description": "What did not map."
+            "description": "What Kea does not express as Tenko does: one entry per item, with a stable code\n(`export.kea.*`)."
           }
         }
       },

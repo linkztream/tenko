@@ -3445,6 +3445,7 @@ dependencies = [
  "pnet_datalink",
  "proptest",
  "serde",
+ "serde_json",
  "sha2",
  "socket2",
  "stats_alloc",

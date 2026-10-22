@@ -121,7 +121,8 @@ fn kinds(policy: &Policy) -> Vec<(Action, ObjectKind)> {
 /// route for a node this server does not know) or 501 (a route of a later package).
 async fn expect_after_check(router: &Router, requests: &[(&str, String)]) {
     for (method, path) in requests {
-        let later = path.contains("/reservations") || path.contains("/export");
+        // WP9.3: the export is built; without the configuration service it is disabled.
+        let later = path.contains("/reservations");
         let reply = send(router, method, path).await;
         if later {
             reply.assert_problem(501, STUB);

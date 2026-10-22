@@ -970,7 +970,7 @@ export interface paths {
         };
         /**
          * Export the DHCP configuration and leases (Kea JSON)
-         * @description Scope: `dhcp.read`. The export is audited (`dhcp.export`).
+         * @description Scope: `dhcp.read` on the server-wide DHCP configuration (global roles). The Kea 2.6 export (MIG-16): `dhcp4` is the `kea-dhcp4` configuration file, `leases4_csv` the memfile lease file (unless `leases=false`), `dhcp_ddns` a `kea-dhcp-ddns` skeleton when a scope writes names, `losses` what Kea does not express as Tenko does. The export is audited (`dhcp.export`).
          */
         get: operations["export_dhcp"];
         put?: never;
@@ -7067,13 +7067,22 @@ export interface components {
         };
         /** @description The Kea export (P3-Q17): the configurations, the leases and what did not map. */
         DhcpExport: {
-            /** @description The `Dhcp4` configuration. */
+            /** @description The `kea-dhcp4` configuration file: `{"Dhcp4": {..}}` for Kea 2.6. */
             dhcp4: Record<string, never>;
             /** @description The `Dhcp6` configuration (Slice 9). */
             dhcp6?: Record<string, never> | null;
-            /** @description The DHCPv4 leases as Kea memfile CSV. */
+            /**
+             * @description A `kea-dhcp-ddns` configuration skeleton (`{"DhcpDdns": {..}}`) with the forward and
+             *     reverse domains of the scopes that write names; its DNS servers and TSIG keys are
+             *     the operator's. Absent when no scope writes names.
+             */
+            dhcp_ddns?: Record<string, never> | null;
+            /** @description The DHCPv4 leases as Kea's memfile lease file (`kea-leases4.csv`), when asked for. */
             leases4_csv?: string | null;
-            /** @description What did not map. */
+            /**
+             * @description What Kea does not express as Tenko does: one entry per item, with a stable code
+             *     (`export.kea.*`).
+             */
             losses?: components["schemas"]["LossEntry"][];
         };
         /** @description `POST /dhcp/filters`. */
@@ -24687,8 +24696,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

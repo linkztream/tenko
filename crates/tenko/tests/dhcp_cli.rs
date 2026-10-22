@@ -174,10 +174,11 @@ fn every_command_prints_the_problem_and_exits_with_the_server_status() {
             "tenko dhcp option catalog: error[sys.not_implemented] GET /api/v1/dhcp/option-catalog",
             "GET /api/v1/dhcp/option-catalog",
         ),
+        // WP9.3: the leases only with --leases.
         (
-            &["dhcp", "export", "--format", "kea", "--no-leases"],
+            &["dhcp", "export", "--format", "kea", "--leases"],
             "tenko dhcp export: error[sys.not_implemented] GET /api/v1/dhcp/export",
-            "GET /api/v1/dhcp/export?format=kea&leases=false",
+            "GET /api/v1/dhcp/export?format=kea&leases=true",
         ),
     ];
     for (args, message, request) in cases {

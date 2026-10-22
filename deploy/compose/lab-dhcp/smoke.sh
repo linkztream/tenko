@@ -58,6 +58,10 @@
 #   PXE_IMAGE       an existing pxe image (with PXE_IMAGE_PREBUILT=1); default: build
 #                   tenko-dhcp-lab-pxe:latest
 #   PXE_WAIT_SECS   how long a machine may take to boot to the menu (default 300)
+#   KEA             0: leave E30's Kea export rows out (WP9.3; they build the kea image,
+#                   stop the node and start Kea from the export)
+#   KEA_IMAGE       an existing kea image (with KEA_IMAGE_PREBUILT=1); default: build
+#                   tenko-dhcp-lab-kea:latest
 
 set -euo pipefail
 
@@ -193,6 +197,9 @@ cleanup() {
       pxe_compose logs --no-color --tail 100 "$service" >&2 2>&1
     done
     pxe_compose exec -T bootsrv sh -c 'tail -n 50 /run/lab/*.log' >&2 2>&1
+    # WP9.3: the Kea server's log.
+    printf '\n--- kea ---\n' >&2
+    kea_compose logs --no-color --tail 100 kea >&2 2>&1
     docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >&2 2>&1
   fi
   if ((${#summary[@]} > 0)); then
@@ -210,6 +217,8 @@ cleanup() {
   printf '\n==> tear down\n'
   # WP8.4: the pxe profile's services too.
   pxe_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
+  # WP9.3: the kea profile's service too.
+  kea_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
   compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
   if [[ -n "$work" ]]; then
     rm -rf "$work"
@@ -602,6 +611,109 @@ pxe_rows() {
 # End WP8.4.
 
 # ---------------------------------------------------------------------------------------
+# WP9.3: E30's DHCPv4 rows (docs/dhcp.md section 18), with the binary only. The node's
+# configuration as it stands after the rows above (four scopes, a reservation, classes and
+# policies, the boot policies when the PXE rows ran) plus one policy whose DDNS action Kea
+# cannot express is exported with its leases through GET /dhcp/export. Kea 2.6 (the kea
+# profile, kea.Dockerfile) checks the configuration with `kea-dhcp4 -t`; the report must
+# name the policy; then the node stops and Kea starts from the export on the node's
+# address: client-lan gets its reservation with options 3 and 6, and client-iot keeps
+# the address of its exported lease. KEA=0 leaves the rows out.
+
+kea_rows_on="${KEA:-1}"
+export KEA_IMAGE="${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}"
+kea_compose() { docker compose -f "$compose_file" --profile "$node" --profile kea "$@"; }
+
+# kea_files: the export's answer in $work/export.json split into the files the command
+# line writes (tenko dhcp export --out).
+kea_files() {
+  python3 - "$work/export.json" "$work/kea" <<'PY'
+import json, os, sys
+answer = json.load(open(sys.argv[1]))
+out = sys.argv[2]
+os.makedirs(out, exist_ok=True)
+json.dump(answer["dhcp4"], open(os.path.join(out, "kea-dhcp4.json"), "w"), indent=2)
+open(os.path.join(out, "kea-leases4.csv"), "w").write(answer.get("leases4_csv") or "")
+json.dump({"entries": answer.get("losses", [])}, open(os.path.join(out, "kea-export-report.json"), "w"), indent=2)
+PY
+}
+
+kea_check() {
+  docker run --rm --network none -v "$work/kea:/lab/kea:ro" "$KEA_IMAGE" \
+    kea-dhcp4 -t /lab/kea/kea-dhcp4.json >"$work/kea-check.out" 2>&1
+  local status=$?
+  cat "$work/kea-check.out" >&2
+  return "$status"
+}
+
+# report_names <code> <text>: an entry of the loss report with the code names the text.
+report_names() {
+  python3 - "$work/kea/kea-export-report.json" "$1" "$2" <<'PY'
+import json, sys
+entries = json.load(open(sys.argv[1]))["entries"]
+hits = [e for e in entries if e["code"] == sys.argv[2] and sys.argv[3] in (e["location"].get("sheet") or "")]
+print(hits or entries)
+sys.exit(0 if hits else 1)
+PY
+}
+
+# exported_lease <mac>: the address of the client's lease in the exported lease file.
+exported_lease() {
+  awk -F, -v mac="$1" '$2 == mac && $10 == 0 { print $1 }' "$work/kea/kea-leases4.csv" | head -n 1
+}
+
+kea_rows() {
+  local lan names iot_ip version
+  step "E30: the Kea export"
+  if [[ -z "${KEA_IMAGE_PREBUILT:-}" ]]; then
+    docker build -f "$here/kea.Dockerfile" -t "$KEA_IMAGE" "$here"
+  fi
+  version="$(docker run --rm --network none "$KEA_IMAGE" kea-dhcp4 -V 2>/dev/null | head -n 1 | tr -d '\r')"
+  lan="$(scope_of lan)" || fail "the scope of lan"
+  names="$(new_class lab-names '[{"host_name": {"value": "lab-", "prefix": true}}]')"
+  new_policy "$lan" lab-names 9 "$names" '{"ddns": {"enabled": true}}' '[]'
+  must "the export" api GET "/dhcp/export?format=kea&leases=true"
+  cp "$work/api.out" "$work/export.json"
+  kea_files || fail "the export's files"
+  ok "export" "GET /dhcp/export: $(wc -l <"$work/kea/kea-leases4.csv") lease file line(s), Kea image $version"
+  row "export.kea" "kea-dhcp4 -t ($version) accepts the exported configuration" kea_check
+  row "export.kea.report" "the loss report names the policy lab-names, whose DDNS action Kea cannot express" \
+    report_names export.kea.policy.ddns lab-names
+  iot_ip="$(exported_lease "${client_mac[iot]}")"
+  step "stop the node and start Kea from the export on $node_ip"
+  compose stop tenko
+  kea_compose up -d kea
+  retry 60 "Kea to listen" sh -c "docker compose -f '$compose_file' --profile '$node' --profile kea logs kea 2>&1 | grep -q DHCP4_STARTED"
+  kea_reserved_ok() {
+    local line
+    dhclient_in client-lan -x >/dev/null 2>&1 || true
+    forget client-lan
+    dhclient_in client-lan -1 >/dev/null 2>&1 || return 1
+    line="$(last_event lan)"
+    printf 'lan: %s\n' "$line" >&2
+    [[ "$(event_field ip <<<"$line")" == "$reserved_ip" ]] &&
+      [[ "$(event_field routers <<<"$line")" == "${gateway[lan]}" ]] &&
+      [[ "$(event_field dns <<<"$line")" == "$dns_server" ]]
+  }
+  row "export.kea.reservation" "Kea from the export gives client-lan its reservation $reserved_ip with options 3 and 6" \
+    within 60 kea_reserved_ok
+  kea_lease_ok() {
+    local line
+    [[ -n "$iot_ip" ]] || return 1
+    dhclient_in client-iot -x >/dev/null 2>&1 || true
+    dhclient_in client-iot -1 >/dev/null 2>&1 || return 1
+    line="$(last_event iot)"
+    printf 'iot: %s (exported %s)\n' "$line" "$iot_ip" >&2
+    [[ "$(event_field ip <<<"$line")" == "$iot_ip" ]]
+  }
+  row "export.kea.lease" "client-iot keeps ${iot_ip:-its address} from the exported lease file (INIT-REBOOT to Kea)" \
+    within 60 kea_lease_ok
+  kea_compose logs --no-color --tail 40 kea >&2 2>&1 || true
+  kea_compose stop kea >/dev/null 2>&1 || true
+}
+# End WP9.3.
+
+# ---------------------------------------------------------------------------------------
 # Build and start
 
 if ((build_tools)); then
@@ -747,6 +859,12 @@ if [[ "$node" == tenko ]]; then
     pxe_rows
   else
     skip "pxe" "PXE=0: the network boot rows are left out"
+  fi
+  # WP9.3: E30's DHCPv4 rows, last: they stop the node.
+  if [[ "$kea_rows_on" == 1 ]]; then
+    kea_rows
+  else
+    skip "export.kea" "KEA=0: the Kea export rows are left out"
   fi
 else
   for net in "${networks[@]}"; do

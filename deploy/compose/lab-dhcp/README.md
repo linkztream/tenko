@@ -82,8 +82,12 @@ Then the rows, one `PASS`, `FAIL` or `SKIP` line each:
 | `pxe.uefi`, `pxe.uefi.lease` | the UEFI machine (OVMF) boots to the same menu (`/done?platform=efi`); its lease row holds architecture 7 or 9 |
 | `pxe.http-boot` | `relay-test.py` as a UEFI HTTP boot client (option 60 `HTTPClient:Arch:00016`, option 93 16) gets `http://192.0.2.21/ipxe.efi` in the `file` field and option 60 `HTTPClient`, and the tester fetches the URL |
 | `pxe.proxy` | after its lease, `relay-test.py` as a PXE client sends the boot server discovery to the node's proxy DHCP listener (`[dhcp] proxy`, port 4011): an ACK with no address and `ipxe.efi` |
+| `export.kea` | E30 (WP9.3, `docs/dhcp.md` section 18): the node's configuration and leases from `GET /dhcp/export?format=kea`, with a policy added whose DDNS action Kea cannot express; `kea-dhcp4 -t` in the Kea image (`kea.Dockerfile`, Kea 2.6 from Debian 13) accepts the configuration |
+| `export.kea.report` | the loss report names that policy (`export.kea.policy.ddns`) |
+| `export.kea.reservation` | the node stops and Kea (the `kea` profile, on the node's address, from the exported configuration and lease file) gives client-lan its reservation `192.0.2.80` with options 3 and 6 |
+| `export.kea.lease` | client-iot asks again (INIT-REBOOT) and Kea keeps the address of its exported lease |
 
-The PXE rows build the pxe image (`pxe.Dockerfile`) and run QEMU; `PXE=0` leaves them out, `PXE_WAIT_SECS` (300) bounds a boot, and under TCG the UEFI boot takes the longest.
+The PXE rows build the pxe image (`pxe.Dockerfile`) and run QEMU; `PXE=0` leaves them out, `PXE_WAIT_SECS` (300) bounds a boot, and under TCG the UEFI boot takes the longest. The Kea rows run last, since they stop the node; they build the kea image (`KEA_IMAGE`, with `KEA_IMAGE_PREBUILT=1` an existing one), and `KEA=0` leaves them out.
 
 With `NODE=example` the rows the example server can answer run: `relay-test.py` with option
 118 (offer, ack, a renewal, a release in `198.18.0.0/15`, option 82 echoed), with the link

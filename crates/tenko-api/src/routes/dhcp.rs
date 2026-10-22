@@ -16,9 +16,10 @@
 //! one object carries its revision as the `ETag`, and a change or deletion with `If-Match`
 //! is refused with 412 when the object moved on. The leases, the history and the node
 //! routes are built (WP7.5, file `dhcp/leases.rs`) on the `dhcp` role of the process, which
-//! `tenko serve` puts in the request extension [`DhcpNodeSlot`]. Until its package builds
-//! it, any other operation (reservations, export and `/ipam/reconcile`) checks the caller's
-//! scope and answers `501` with `sys.not_implemented`. The routes belong
+//! `tenko serve` puts in the request extension [`DhcpNodeSlot`]. The Kea export (WP9.3,
+//! file `dhcp/export.rs`) reads through the configuration service. Until its package builds
+//! it, any other operation (the reservations) checks the caller's scope and answers `501`
+//! with `sys.not_implemented`. The routes belong
 //! to the DHCP module (OPS-25): a server without it registers none of them, so they answer
 //! 404 `sys.route_not_found`; a router without the configuration service answers the
 //! configuration routes with 409 `dhcp.module.disabled`. `/ipam/reconcile` belongs to the
@@ -115,6 +116,8 @@ mod leases;
 pub use leases::DhcpNodeSlot;
 // WP8.2: `GET /ipam/reconcile`, the reconciliation view.
 mod reconcile;
+// WP9.3: `GET /dhcp/export`, the Kea export.
+mod export;
 
 #[cfg(test)]
 mod tests;
@@ -419,7 +422,8 @@ fn filter_and_lease_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(leases::get_dhcp_lease))
         .routes(routes!(leases::release_dhcp_lease))
         .routes(routes!(leases::list_dhcp_history))
-        .routes(routes!(export_dhcp))
+        // WP9.3: the Kea export.
+        .routes(routes!(export::export_dhcp))
 }
 
 #[inline(never)]
@@ -488,25 +492,4 @@ async fn get_dhcp_reservation(
         &anywhere(ObjectKind::DhcpScope),
     )?;
     Err(not_implemented("GET", "/dhcp/reservations/{interface}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/export",
-    tag = "dhcp",
-    operation_id = "export_dhcp",
-    summary = "Export the DHCP configuration and leases (Kea JSON)",
-    description = "Scope: `dhcp.read`. The export is audited (`dhcp.export`).",
-    params(DhcpExportParams),
-    responses(
-        (status = 200, description = "The export", body = DhcpExport),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the export format is not known (`dhcp.export.format`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn export_dhcp(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &server_object())?;
-    Err(not_implemented("GET", "/dhcp/export"))
 }

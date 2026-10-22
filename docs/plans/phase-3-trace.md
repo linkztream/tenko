@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-23 Phase 3 requirements; 6 named by at least one test, 17 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 7 named by at least one test, 16 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -35,7 +35,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DNS-13 | Must | - | - | `crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 5 more |
 | DNS-34 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>`docs/plans/dns-recursion-plan.md`<br>and 2 more |
 | IPAM-21 | Must | `crates/tenko-ipam/tests/reconcile_view.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/reconcile.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`crates/tenko/src/client/ipam.rs`<br>`docs/ARCHITECTURE.md`<br>and 6 more |
-| MIG-16 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko/src/client/dhcp.rs`<br>`docs/MIGRATION.md`<br>and 3 more |
+| MIG-16 | Must | `crates/tenko-api/tests/dhcp_export.rs`<br>`crates/tenko/tests/acceptance_kea_export.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/export.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/export.rs`<br>and 7 more |
 
 ## Exit criteria
 
@@ -83,7 +83,6 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - DNS-03 (Should)
 - DNS-13 (Must)
 - DNS-34 (Should)
-- MIG-16 (Must)
 
 ### No test, measurement or document
 

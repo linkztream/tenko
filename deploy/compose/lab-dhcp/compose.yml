@@ -248,6 +248,24 @@ services:
         mac_address: "00:00:5e:00:53:b1"
   # End WP8.4.
 
+  # WP9.3: E30's DHCPv4 rows (profile kea, started by smoke.sh after it stops the node).
+  # ISC Kea 2.6 (kea.Dockerfile, KEA_IMAGE, default tenko-dhcp-lab-kea:latest) in the
+  # node's network namespace, on the node's address, from the configuration and the lease
+  # file of Tenko's export that smoke.sh writes into LAB_DIR/kea.
+  kea:
+    profiles: ["kea"]
+    image: ${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}
+    entrypoint: ["/lab/kea.sh"]
+    network_mode: "service:netns"
+    depends_on:
+      - netns
+      - relay
+    restart: "no"
+    stop_grace_period: 5s
+    volumes:
+      - "${LAB_DIR:?set LAB_DIR}/kea:/lab/kea:ro"
+  # End WP9.3.
+
 # The gateway is a container that routes between the networks, so the node's reply to
 # giaddr (the gateway's address on a client network) arrives on the servers bridge. Docker 28
 # and later drop a packet for a container's address that comes in on another bridge (the

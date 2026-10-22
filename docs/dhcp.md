@@ -20,6 +20,7 @@ Contents:
 16. [Classes, policies, PXE and UEFI](#16-classes-policies-pxe-and-uefi)
 15. [Fingerprinting and the reconciliation view](#15-fingerprinting-and-the-reconciliation-view)
 17. [The home cut-over](#17-the-home-cut-over)
+18. [The Kea export](#18-the-kea-export)
 
 ## 1. The wire format
 
@@ -962,3 +963,101 @@ E23 is met when every row holds; tick each with the date.
 | [ ] | The relay check without the controller (P3-Q18) | Section 17.3, the offer from a host in each network | Server identifier `192.0.2.10`, the network's router |
 
 Record the date, the lease times used and the findings in the Phase 3 status (`docs/plans/phase-3-status.md`).
+
+## 18. The Kea export
+
+WP9.3 writes Tenko's DHCPv4 configuration and leases in the form ISC Kea 2.6 reads (MIG-16, decisions P3-Q10 and P3-Q17 (a)), so that leaving Tenko is never blocked by a format only Tenko reads: `kea-dhcp4` starts from the export and keeps the clients' addresses. This section is for operators who leave Tenko or keep a Kea server as a fallback, and for reviewers of `tenko_dhcp::export::kea`. The DHCPv6 half (`Dhcp6`, `kea-dhcp6 -t`) comes with the DHCPv6 server (WP9.1).
+
+### 18.1 Running it
+
+```sh
+tenko dhcp export --format kea --leases --out kea/   # the files below, in kea/
+tenko dhcp export                                    # the whole answer as JSON, no leases
+```
+
+| File | What |
+|---|---|
+| `kea-dhcp4.json` | `{"Dhcp4": {..}}`, the configuration `kea-dhcp4 -c` reads; check it with `kea-dhcp4 -t kea-dhcp4.json` |
+| `kea-leases4.csv` | with `--leases`: the memfile lease file; copy it to `/var/lib/kea/kea-leases4.csv` before Kea starts (Kea 2.6 accepts a lease file only in its data directory) |
+| `kea-export-report.json` | the loss report, `{"entries": [..]}` with `location`, a stable `code` and an English `detail` per item, the shape the migration imports report in (`tenko_core::ir::LossReport`) |
+| `kea-dhcp-ddns.json` | when a scope writes names: a `{"DhcpDdns": {..}}` skeleton for `kea-dhcp-ddns` |
+
+The route is `GET /api/v1/dhcp/export?format=kea` (`leases=false` leaves the lease file out; `leases` is true when absent): `dhcp4`, `leases4_csv`, `dhcp_ddns` and `losses`. An unknown format answers 400 `dhcp.export.format`, a server without the DHCP configuration service 409 `dhcp.module.disabled`. The export is server-wide configuration and the leases are personal data: the caller needs `dhcp.read` on the `dhcp_scope` singleton (global roles only), and every export writes the audit record `dhcp.export` with the format, whether the leases were included, the number of scopes, lease rows and report entries. It reads every row at one revision; the listeners come from the `dhcp` role when it runs in the process.
+
+### 18.2 What translates
+
+| Tenko | Kea 2.6 |
+|---|---|
+| Server lease times, T1 and T2 | Global `valid-lifetime`, `min-valid-lifetime`, `max-valid-lifetime`; `calculate-tee-times` with `t1-percent` 0.5 and `t2-percent` 0.875 (half and seven eighths), `renew-timer` and `rebind-timer` where T1 and T2 are set |
+| `authoritative` | Global and per subnet; one value per shared network |
+| Server, shared network, scope, pool and reservation options | `option-data` at the global, shared-network, subnet, pool and reservation levels, with Kea's names; text where Kea reads text (addresses, integers, booleans, names, printable strings without a comma), else hexadecimal wire data (`csv-format` false); option 54 from the scope's server identifier |
+| Custom definitions | `option-def`; the catalog codes Kea 2.6 does not define (150 `tftp-server-address`, 209 to 211, 249, 252 `wpad`) get one when used |
+| Scopes | `subnet4` entries numbered from 1 in network order, with `user-context` naming the Tenko prefix; a scope of a shared network inside its `shared-networks` entry |
+| Pools | The `dhcp_pool` ranges without the exclusions (explicit ones, the `reserved` and `infrastructure` ranges, addresses of hosts that are not `dynamic`), split where a policy range begins or ends |
+| Reservations | Per subnet, by `client-id` when the interface has one, else `hw-address`, with `ip-address`, the host name as `hostname`, the reservation's options; `host-reservation-identifiers` client identifier first, as Tenko looks up |
+| Classes | A client class per class, `test` the OR of its matches (below) |
+| Policies | A class per enabled policy (`policy.<name>`, `policy.<network>.<name>` for a scope's) with its condition as `test` and its lease times; its options in a second class `<policy>.options`, `only-if-required`, named in the `require-client-classes` of every subnet the policy applies to, in Tenko's order (the scope's policies by order, then the server's) |
+| Policy ranges, pool and scope classes, restricted scopes | The `client-class` of each pool piece: the client of a range policy only from its range, other clients never from a policy's range, scope and pool classes, the allow class `tenko.allow` for restricted scopes; a combination is a class `admit.<n>` |
+| Deny filters | Kea's `DROP` class, the OR of the patterns |
+| Boot | `next-server` from option 150 (else 66 when it is an address), `boot-file-name` from option 67, at each level; options 66, 67 and 208 to 211 of a policy `always-send`; when any level sets option 67 the class `tenko.pxe` echoes option 60 `PXEClient` and sends option 43 `06 01 08 ff` (unless an option set holds 43), `tenko.http-boot` echoes `HTTPClient` |
+| DDNS (ADR 0020) | Per subnet `ddns-send-updates`, `ddns-qualifying-suffix` (the forward zone, else the scope's option 15), `ddns-conflict-resolution-mode` (`check-with-dhcid` for `protect`, `no-check-with-dhcid` for `replace`), `ddns-override-client-update` and `ddns-override-no-update` (true unless `client_may_update_a`), `ddns-replace-client-name` `never`; global `ddns-send-updates` false and `dhcp-ddns` pointing at `kea-dhcp-ddns` on 127.0.0.1:53001; the skeleton lists the forward domains and the reverse domains of the scopes with PTR records on, with the scope's first option 6 server |
+| Listeners | `interfaces-config`: relay listeners as `udp` sockets with `outbound-interface` `use-routing`, direct ones as `raw`; an interface name where the listener has one, else `*` |
+| Leases | `kea-leases4.csv` (below) |
+
+The match expressions of Kea's classification language:
+
+| Match | `test` |
+|---|---|
+| Vendor class | `option[60].hex == 'PXEClient'`, a prefix `substring(option[60].hex,0,9) == 'PXEClient'` |
+| User class | `option[77].hex == 'iPXE' or substring(option[77].hex,0,5) == 0x0469505845`: the whole value or its first RFC 3004 instance |
+| MAC pattern | `pkt4.mac == 0x00005e005301`; with wildcards one `substring(pkt4.mac,i,n) == 0x..` per run of fixed octets |
+| Client identifier | `option[61].hex == 0x01..` |
+| Circuit-id, remote-id | `relay4[1].hex == ..`, `relay4[2].hex == ..` |
+| Architecture | `substring(option[93].hex,0,2) == 0x0007 or ..` over the first four entries of option 93 |
+| Host name | `lcase(option[12].text) == 'name'`, a prefix with `substring` |
+
+A literal is quoted text when it is printable ASCII without a quote or a backslash, else hexadecimal. `and`, `or` and `not` join the terms of a policy; a term naming a deleted class is false (`not member('ALL')`), as in Tenko. Classes come in the order Kea needs (`member()` names only classes above it): `DROP`, `tenko.allow`, the boot classes, Tenko's classes by name, the policies, their option classes, then the pool and scope classes the subnets add.
+
+**Precedence.** Kea ranks options host, pool, subnet, shared network, class, global; Tenko ranks host, policy, pool, scope, shared network, server. Where a policy that applies to a subnet sets a code the scope or its shared network also sets, the export moves that code from the subnet (and from the shared network, keeping it on the members that do not conflict) into the class `scope.<network>.defaults`, which the subnet requires after its policies' option classes: the first matching policy wins, then the scope's value, as in Tenko. Kea evaluates required classes after the address is chosen, so a policy's lease times and range sit on its first class, which Kea evaluates on arrival.
+
+**The lease file.** Kea 2.6's memfile columns `address,hwaddr,client_id,valid_lifetime,expire,subnet_id,fqdn_fwd,fqdn_rev,hostname,state,user_context,pool_id`. An `active` lease is state 0 with its client's hardware address and client identifier, the time from `cltt` to `ends` and the end; an `abandoned` one is state 1 (declined) without a client until its end; the other states hold no address and are left out. `fqdn_fwd` and `fqdn_rev` say whether the DDNS worker wrote the A and PTR records, `hostname` is the name written, else the client's; a comma is written `&#x2c` as Kea writes it.
+
+### 18.3 The loss report
+
+Every item Kea does not express as Tenko does is one entry; `location.sheet` names the item (`policy printers (192.0.2.64/26)`, `scope 192.0.2.128/26`).
+
+| Code | What |
+|---|---|
+| `export.kea.scope.disabled` | A disabled scope is left out |
+| `export.kea.scope.duplicate` | A second VRF's scope on the same network (Kea has no VRFs) |
+| `export.kea.scope.restricted` | A restricted scope: its pools require `tenko.allow`, but Kea still answers other clients with a NAK or an INFORM reply |
+| `export.kea.pool.lease` | A pool's own lease times (Kea's pools have none) |
+| `export.kea.pool.precedence` | A pool option a policy also sets: Kea's pool level wins |
+| `export.kea.class.partial`, `export.kea.policy.partial` | A user class matched beyond the first RFC 3004 instance |
+| `export.kea.policy.disabled` | A disabled policy is left out |
+| `export.kea.policy.class_missing` | A term names a deleted class |
+| `export.kea.policy.ddns` | A policy's DDNS settings (Kea 2.6 sets DDNS per subnet) |
+| `export.kea.policy.timers` | A policy's T1 and T2 |
+| `export.kea.policy.lease_everywhere` | A scope policy's lease times also apply to matching clients of other subnets |
+| `export.kea.policy.range` | A scope policy's range outside the scope's pools |
+| `export.kea.filter.deny` | Deny filters became `DROP` |
+| `export.kea.option.vendor_space` | Values of a vendor space (option 43 sub-options per vendor class) |
+| `export.kea.option.subnet_mask` | Option 1 (Kea derives it) |
+| `export.kea.reservation.dropped`, `export.kea.reservation.no_identity` | A reservation the image drops (IPAM-23) or cannot make (IPAM-18) |
+| `export.kea.shared_network.authoritative` | Scopes of a shared network that differ in `authoritative` |
+| `export.kea.interfaces.unknown`, `.address`, `.proxy` | No listeners known (the role does not run in the process), a relay listener bound to an address (Kea binds interfaces: write `<interface>/<address>`), a proxy DHCP listener |
+| `export.kea.conflict_detection` | Conflict detection before an offer (Kea's core has none; its ping_check hook does) |
+| `export.kea.history` | The lease history is not exported |
+| `export.kea.ddns.ttl`, `.legacy_clients`, `.refuse_foreign`, `.reverse`, `.zone`, `.d2` | A TTL in seconds (Kea takes a share of the lease time), legacy clients off, foreign names refused, PTR records off in a shared reverse domain, no zone to name, and the `kea-dhcp-ddns` skeleton to complete (DNS servers, TSIG keys) |
+| `export.kea.lease.scope` | Leases of scopes the export left out |
+
+### 18.4 Verification
+
+The unit tests in `crates/tenko-dhcp/src/export/kea/` cover the expressions, the options, the pools, the lab-shaped configuration with every level, class, policy and filter kind (including that every class a test, pool or subnet names is defined before it), the lease file and the report; `crates/tenko-api/tests/dhcp_export.rs` the route, its audit record and its errors; `crates/tenko/tests/acceptance_kea_export.rs` the command line through the binary. E30's DHCPv4 rows run in the compose lab (section 11, `deploy/compose/lab-dhcp`, profile `kea`, `kea.Dockerfile` with Kea 2.6 from Debian 13): after the other rows the smoke adds a policy with a DDNS action, exports with the leases, and checks:
+
+| Row | Checks |
+|---|---|
+| `export.kea` | `kea-dhcp4 -t` accepts `kea-dhcp4.json` |
+| `export.kea.report` | the report names the DDNS policy (`export.kea.policy.ddns`) |
+| `export.kea.reservation` | with the node stopped, Kea on the node's address from the export gives client-lan its reservation `192.0.2.80` with options 3 and 6 |
+| `export.kea.lease` | client-iot asks again (INIT-REBOOT) and keeps the address of its exported lease |

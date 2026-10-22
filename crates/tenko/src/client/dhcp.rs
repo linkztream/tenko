@@ -863,12 +863,15 @@ pub struct ExportArgs {
     /// The format of the export.
     #[arg(long, value_enum, default_value = "kea")]
     pub format: ExportFormat,
-    /// Write the export to this file instead of standard output.
-    #[arg(long, short = 'o', value_name = "FILE")]
-    pub file: Option<PathBuf>,
-    /// Leave the leases out.
+    // WP9.3: the leases on request, and the files of the export in a directory.
+    /// Include the leases (Kea's memfile lease file).
     #[arg(long)]
-    pub no_leases: bool,
+    pub leases: bool,
+    /// Write the files into this directory (created when missing): `kea-dhcp4.json`,
+    /// `kea-leases4.csv` with `--leases`, `kea-export-report.json` and, when a scope writes
+    /// names, `kea-dhcp-ddns.json`; without it the whole answer goes to standard output.
+    #[arg(long, short = 'o', value_name = "DIR")]
+    pub out: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1060,7 +1063,7 @@ pub enum Present {
     Item,
     /// Nothing comes back; the text says what was done.
     Done(String),
-    /// A document that goes to standard output or a file.
+    /// The export: the answer to standard output, or its files into a directory.
     Export(Option<PathBuf>),
 }
 
@@ -1710,13 +1713,11 @@ fn history(args: &HistoryArgs) -> Result<Request, Failure> {
         .with_query("cursor", args.cursor.clone()))
 }
 
+// WP9.3: the leases only with `--leases`.
 fn export(args: &ExportArgs) -> Request {
-    let mut request = Request::get("/dhcp/export", Present::Export(args.file.clone()))
-        .with_query("format", Some(args.format.api().to_owned()));
-    if args.no_leases {
-        request.query.push(("leases", "false".to_owned()));
-    }
-    request
+    Request::get("/dhcp/export", Present::Export(args.out.clone()))
+        .with_query("format", Some(args.format.api().to_owned()))
+        .with_query("leases", Some(args.leases.to_string()))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1929,25 +1930,57 @@ async fn execute(target: &Target, client: &Client, request: &Request) -> Result<
             client.delete(path, None).await?;
             Ok(Output::text(format!("{done}\n")))
         }
-        Present::Export(file) => {
+        // WP9.3: the files of the Kea export in a directory.
+        Present::Export(dir) => {
             let answer: Value = client.get_query(path, &request.query).await?;
+            if let Some(dir) = dir {
+                return write_export(dir, &answer);
+            }
             let mut text = serde_json::to_string_pretty(&answer).unwrap_or_default();
             text.push('\n');
-            match file {
-                Some(out) => {
-                    std::fs::write(out, text.as_bytes()).map_err(|error| {
-                        Failure::other(format!("cannot write {}: {error}", out.display()))
-                    })?;
-                    Ok(Output::default().note(format!(
-                        "{} byte(s) written to {}",
-                        text.len(),
-                        out.display()
-                    )))
-                }
-                None => Ok(Output::text(text)),
-            }
+            Ok(Output::text(text))
         }
     }
+}
+
+// WP9.3: the files of `tenko dhcp export --out <dir>`.
+/// Writes the export's files into `dir`: the `kea-dhcp4` configuration, the lease file
+/// when the answer has one, the loss report (`{"entries": [..]}`, the shape of the
+/// migration imports' report) and the `kea-dhcp-ddns` skeleton when there is one.
+fn write_export(dir: &std::path::Path, answer: &Value) -> Result<Output, Failure> {
+    use tenko_dhcp::export::kea::files;
+    std::fs::create_dir_all(dir)
+        .map_err(|error| Failure::other(format!("cannot create {}: {error}", dir.display())))?;
+    let pretty = |value: &Value| {
+        let mut text = serde_json::to_string_pretty(value).unwrap_or_default();
+        text.push('\n');
+        text
+    };
+    let mut written: Vec<(&str, String)> = vec![(files::CONFIG, pretty(&answer["dhcp4"]))];
+    if let Some(csv) = answer.get("leases4_csv").and_then(Value::as_str) {
+        written.push((files::LEASES, csv.to_owned()));
+    }
+    let losses = answer.get("losses").cloned().unwrap_or_else(|| json!([]));
+    let count = losses.as_array().map_or(0, Vec::len);
+    written.push((files::REPORT, pretty(&json!({ "entries": losses }))));
+    if let Some(ddns) = answer.get("dhcp_ddns").filter(|value| !value.is_null()) {
+        written.push((files::DDNS, pretty(ddns)));
+    }
+    let mut output = Output::default();
+    for (name, text) in &written {
+        let file = dir.join(name);
+        std::fs::write(&file, text.as_bytes())
+            .map_err(|error| Failure::other(format!("cannot write {}: {error}", file.display())))?;
+        output = output.note(format!(
+            "{} byte(s) written to {}",
+            text.len(),
+            file.display()
+        ));
+    }
+    Ok(output.note(format!(
+        "{count} item(s) in {} that Kea does not express as Tenko does",
+        files::REPORT
+    )))
 }
 
 /// A request with an answer body, by its method.
@@ -3016,19 +3049,17 @@ mod tests {
             "/dhcp/export",
             None,
         );
-        assert_eq!(query(&request), [("format", "kea")]);
+        // WP9.3: the leases on request, the files into a directory.
+        assert_eq!(query(&request), [("format", "kea"), ("leases", "false")]);
         assert_eq!(request.present, Present::Export(None));
         let request = check(
-            &["export", "--no-leases", "--file", "kea.json"],
+            &["export", "--leases", "--out", "kea"],
             Method::Get,
             "/dhcp/export",
             None,
         );
-        assert_eq!(query(&request), [("format", "kea"), ("leases", "false")]);
-        assert_eq!(
-            request.present,
-            Present::Export(Some(PathBuf::from("kea.json")))
-        );
+        assert_eq!(query(&request), [("format", "kea"), ("leases", "true")]);
+        assert_eq!(request.present, Present::Export(Some(PathBuf::from("kea"))));
         assert!(parse(&["export", "--format", "isc"]).is_err());
     }
 

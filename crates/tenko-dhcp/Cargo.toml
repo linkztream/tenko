@@ -39,6 +39,8 @@ tenko-scan = { workspace = true }
 # and computes the DHCID with SHA-256 (RFC 4701); both crates are already in the graph.
 sha2 = { workspace = true }
 tenko-dns = { workspace = true }
+# WP9.3: the Kea export writes Kea's JSON configuration (MIG-16); already in the graph.
+serde_json = { workspace = true }
 
 # WP7.5: the link-layer reply of direct mode (AF_PACKET), through the safe API the scanner's
 # raw methods use (WP3.14); Linux only, MIT OR Apache-2.0, already in the graph.

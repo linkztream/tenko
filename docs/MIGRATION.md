@@ -120,11 +120,11 @@ The samples come from query logs, and query logs are personal data. The query-lo
 
 Everything Tenko holds can be exported in standard formats, so leaving Tenko is never blocked by a proprietary format.
 
-| Format | Requirement | Phase |
-|---|---|---|
-| CSV | MIG-14 | 1 |
-| Standard zone files | MIG-15 | 2 |
-| Kea-compatible JSON | MIG-16 | 3 |
+| Format | Requirement | Phase | Done |
+|---|---|---|---|
+| CSV | MIG-14 | 1 | [x] |
+| Standard zone files | MIG-15 | 2 | [x] |
+| Kea-compatible JSON | MIG-16 | 3 | [x] DHCPv4: `tenko dhcp export --format kea` writes Kea 2.6's `kea-dhcp4` configuration, its memfile lease file and a loss report, accepted by `kea-dhcp4 -t` and served by Kea in the DHCP lab (WP9.3, E30's DHCPv4 rows, [dhcp.md](dhcp.md) section 18); [ ] DHCPv6: `Dhcp6` and `kea-dhcp6 -t` with the DHCPv6 server (WP9.1) |
 
 The CSV export is the counterpart of the spreadsheet import, so the import/export round trip is testable from Phase 1 (IPAM-11).
 
