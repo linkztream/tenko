@@ -1,18 +1,51 @@
-//! The lease table and the lease change (plan sections 2.1 and 2.2, ADR 0019 point 3).
+//! The lease table and the lease change (plan sections 2.1 and 2.2, ADR 0019 point 3), and
+//! the lease path on the store (WP7.2).
 //!
 //! The role keeps its leases in memory, indexed by address and by client, and never reads
 //! the store on the DORA path. [`LeaseTable`] is the contract; [`MemLeaseTable`] is the
-//! reference implementation (ordered maps) that WP7.2's production table is tested
-//! against. The table takes the role's own committed rows at once and the feed's copy of
-//! the same rows again: [`LeaseTable::apply`] keeps the row with the later client
-//! transaction time, so applying a row twice, or an older copy after a newer one, changes
-//! nothing and the table equals the store's rows.
+//! reference implementation (ordered maps) and [`LeaseIndex`] the production one. The table
+//! takes the role's own committed rows at once and the feed's copy of the same rows again:
+//! [`LeaseTable::apply`] keeps the row with the later client transaction time (and
+//! [`LeaseIndex::apply_at`] the row of the later revision), so applying a row twice, or an
+//! older copy after a newer one, changes nothing and the table equals the store's rows.
 //!
 //! A [`PendingChange`] is what the DORA path hands to the [`LeaseStore`](crate::store::LeaseStore):
 //! every field in fixed-capacity storage, so building and handing it off allocates nothing
 //! (the counting-allocator test, `tests/alloc.rs`). The committer turns it into the rows
 //! of the batch ([`PendingChange::to_lease`], [`PendingChange::to_event`]) off the DORA
 //! path.
+//!
+//! The lease path of WP7.2 (`docs/dhcp.md` section 7):
+//!
+//! | Module | What |
+//! |---|---|
+//! | [`table`] | [`LeaseIndex`], the production table, and [`SharedLeases`], its shared handle |
+//! | [`batch`] | the lease change as one batch: row, client index, history, observation hook |
+//! | [`commit`] | [`StoreLeases`], the [`LeaseStore`](crate::store::LeaseStore) on the replicated store, and its [`Committer`] |
+//! | [`follow`] | the table from the feed ([`LeaseFollower`]) and from a store view ([`rebuild_from_view`]) |
+//! | [`offer`] | [`OfferTable`], the offer hold |
+//! | [`expiry`] | [`ExpiryService`], expiry as a leader service |
+//! | [`history`] | [`PurgeService`], history retention per profile (P3-Q13) |
+//! | [`refusal`] | [`RefusalGate`], the behaviour while the store refuses (P3-Q14) |
+//! | [`metrics`] | the series the lease path counts |
+
+pub mod batch;
+pub mod commit;
+pub mod expiry;
+pub mod follow;
+pub mod history;
+pub mod metrics;
+pub mod offer;
+pub mod refusal;
+pub mod table;
+
+pub use commit::{CommitSettings, CommitStats, Committer, StoreLeases};
+pub use expiry::{ExpiryService, ExpirySettings};
+pub use follow::{LeaseFollower, rebuild_from_view};
+pub use history::{HistoryProfile, HistoryRetention, PurgeService, PurgeSettings};
+pub use offer::OfferTable;
+pub use refusal::{RefusalGate, WhileRefused};
+pub use table::{LeaseIndex, SharedLeases};
 
 use std::{collections::BTreeMap, net::Ipv4Addr};
 

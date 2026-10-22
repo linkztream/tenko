@@ -3205,10 +3205,15 @@ dependencies = [
 name = "tenko-dhcp"
 version = "0.0.2"
 dependencies = [
+ "async-trait",
+ "futures",
  "ipnet",
  "tenko-core",
+ "tenko-store",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

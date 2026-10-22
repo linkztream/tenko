@@ -5,6 +5,7 @@ This page describes how Tenko DDI reads and writes DHCP messages and, as Phase 3
 Contents:
 
 1. [The wire format](#1-the-wire-format)
+7. [Leases](#7-leases)
 
 ## 1. The wire format
 
@@ -129,3 +130,67 @@ The fixtures in `crates/tenko-dhcp/fixtures/` are annotated hex, one line per fi
 - count allocations (`tests/alloc.rs`): none in parsing, reading and building.
 
 The fuzz target `dhcp_v4` (`fuzz/fuzz_targets/dhcp_v4.rs`, seeds in `fuzz/seeds/dhcp_v4/`, the fixtures as binary) parses arbitrary octets, walks every option, joins split ones, calls every typed accessor, decodes and encodes again the search list and the routes, and builds an OFFER for every message that parses, which must read back with option 53 first and within the limit.
+
+## 7. Leases
+
+A lease is a row of `dhcp.leases` in the replicated store, committed before the ACK (decision P3-Q1, [ADR 0019](adr/0019-dhcp-data-model-and-lease-path.md)); there is no lease file. The `dhcp` role serves from a lease table in memory that equals the rows, and never reads the store while it answers. The code is `tenko_dhcp::lease` (WP7.2); the contracts it implements are in [dhcp-contracts.md](dhcp-contracts.md), section 3.
+
+### 7.1 The lease change
+
+The engine builds a lease change (`PendingChange`: every field inline, no heap) for a REQUEST, a renewal, a rebind, a release or a decline, and hands it to the lease store (`StoreLeases::submit`). The hand-off copies the change into a queue sized at start (4,096 changes) and returns at once; it never allocates and never waits for the disk (`tests/lease_alloc.rs`). A full queue drops the request (`tenko_dhcp_dropped_total{reason="queue"}`); the client retries. A DISCOVER writes nothing: the offered address is held in memory for the offer lifetime (`[dhcp] offer_secs`, 10 s) in the offer hold (`OfferTable`), which has room for a fixed number of offers and allocates nothing either.
+
+The committer, a task of the role, turns each change into one store batch with one revision:
+
+| Table | Key | What the batch writes |
+|---|---|---|
+| `dhcp.leases` | VRF, address | The row after the change; fields the change does not carry (DDNS state, partner times, observation time) come from the row held before, for the same client |
+| `dhcp.leases.by_client` | scope, client identity | The client's latest row in the scope; when the address was another client's, that client's entry moves to its next row or is removed |
+| `dhcp.history` | time, VRF, address | The event (`granted`, `renewed`, `rebound`, `released`, `declined`, `reclaimed`) |
+| IPAM observations | | The fact of `dhcp:<node>`, through the observation hook that WP8.1 fills; nothing until then |
+
+The batch is written as the system component `dhcp`; lease commits are not audited one by one, the history is their record. A change that would take an address another client still holds (an unexpired binding or an abandoned address) is refused before it reaches the store: it is the last guard of "no address on two clients", behind the allocator and the offer hold. An operator's reclaim may take it.
+
+Batches are proposed concurrently, up to 512 at a time, so that the store's coalescer folds what waits into one Raft entry and one fsync. Two changes that touch the same address, or the same client as new or as previous holder, are proposed one after another, each built from the table after the one before has applied, so the rows and the index never depend on the order in which commits finish.
+
+### 7.2 When the ACK leaves
+
+The ticket of a change completes, and the worker sends the ACK, only after the store has answered the batch (on one node: its log entry is on disk and applied) and the committer has applied the row to the role's table at the commit's revision. A change that has not committed within 2 seconds of its hand-off completes as failed and the request is dropped, as the DNS update path answers SERVFAIL when its index wait passes ([dns.md](dns.md)); a commit that lands later still reaches the table, and the client's retry finds its lease. The time from the hand-off to the completion is `tenko_dhcp_commit_duration_seconds`.
+
+### 7.3 The table
+
+The table (`LeaseIndex`) holds every row by VRF and address and, per scope, by client identity, with each client's rows beside its index entry. It takes rows from two sides: the committer's own commits at once, and the feed's copy of every row (`DhcpFeed`: an image at a revision, then the deltas in revision order, a new image after a snapshot install). A row replaces the one held unless the held one is newer: written at a later revision when both revisions are known, else with a later client transaction time. So the feed's copy of an own commit changes nothing, an older copy never overwrites a newer row, and a new image keeps the rows of commits after its revision until the deltas bring them. A delta that does not follow the revision held is a gap, and the role reads a new image.
+
+At start the table is rebuilt from the store, page by page (`rebuild_from_view`). The measured figures are in `bench/phase3-dhcp/results/` (E24, M32): a table of 100,000 leases rebuilds well within the 5 seconds the plan sets.
+
+### 7.4 Expiry
+
+Expiry is a leader service (`dhcp.expiry`, every 10 s). It finds the rows whose state has ended (an active binding past its end, an abandoned address past its hold) and writes them as `expired`, with a history row each, in batches of 256 rows. Each batch carries the leader fence and a version precondition per row: a renewal committed in between makes the batch fail and the row is looked at again in the next round, and a controller that has lost the leadership writes nothing. The client index does not move. The same round drops ended offers from the offer hold. Expiry does not decide whether an address is free (the allocator already treats a binding past its end as free); it makes the row say so, records the event and lets DDNS remove the records (WP8.3). It counts `tenko_dhcp_expired_total`.
+
+### 7.5 History retention
+
+`dhcp.history` is bounded by a retention in days (P3-Q13): the node's `[dhcp.history] days` if set, else the replicated `history_days` of the DHCP settings, else the security profile's default.
+
+| Profile | Days |
+|---|---|
+| Home | 30 |
+| Standard | 90 |
+| Hardened | By policy; 90 unless set, and every purge is in the audit export |
+| Lab | 7 |
+
+A leader service (`dhcp.history.purge`, hourly) deletes the rows older than the retention in batches of 1,000 under the leader fence, each batch with one audit record `dhcp.history.purge` that names the cut-off and the count. `tenko_dhcp_history_purged_total` counts the purged rows and `tenko_dhcp_history_rows` the rows held (counted once per term of office, then kept from the writes and the purges). Every lease change writes one row, renewals included: a network of 100,000 clients on one-hour leases writes about 55 rows a second, so at that size the retention is a setting to choose with care.
+
+### 7.6 While the store refuses
+
+On one node the store refuses a write only when its disk fails, or through the test hook `TENKO_TEST_REFUSE_WRITES_FILE`; in Phase 5 also when a node loses its quorum. The role then promises nothing it has not committed (P3-Q14):
+
+- a renewal, a rebind or a request for the address a client holds is answered with an ACK for the time the lease has left: no extension, nothing written;
+- every other request is dropped, and the client retries; it counts `tenko_dhcp_dropped_total{reason="store_refused"}`;
+- every refused write counts `tenko_dhcp_store_refused_total`, and the health finding `dhcp.role.store_refused` is raised with the time of the first refusal and the counts since.
+
+After a refusal the role tries the store again after one second: the next change goes to the store, a commit clears the finding, and another refusal waits another second. No probe write is made.
+
+### 7.7 Tests and the crash test
+
+The tests are in `crates/tenko-dhcp/tests/`: `lease_table.rs` (the table against the reference table on random sequences, the index moves, the feed, own commits against older copies), `lease_store.rs` (the batches against the reference lease store, a burst of concurrent changes, another client's binding, the queue, a slow commit, a refusing store), `lease_services.rs` (expiry, its fence and its race with a renewal, the offer hold, the retention and the purge), `lease_refusal.rs` (the refusal path on the Raft store with the hook, in a child process), `lease_alloc.rs` (no allocation on the hand-off, the lookups, the offer hold and the refusal gate), `lease_rebuild.rs` (the rebuild of a large table and the commit latency) and `lease_crash.rs`.
+
+The crash test (E24, M32) kills a node under load and restarts it, again and again. The node is a child process of the test: it opens the Raft store, rebuilds its table and runs 200 clients that request, renew and release through the allocator, the offer hold and the lease store, and it prints a line for an ACK only after its ticket completed. The test kills it at a random moment (SIGKILL on Unix, TerminateProcess on Windows), opens the data directory and checks that every ACK received is in the rows at its revision or later, that its history row is there, that the rebuilt table equals the rows and the client index, and that the history never gives an address to a second client while the first one's binding had not ended. `bench/phase3-dhcp/scripts/crash-test.sh` runs it 20 times with the rebuild and the latency measurement; the results, and the procedure of the power-off runs on the lab VM, are in `bench/phase3-dhcp/results/`. Until the `dhcp` role exists in the binary (WP7.5), the crash test drives the lease path through this test entry point rather than through `tenko serve`.

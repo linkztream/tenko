@@ -13,6 +13,13 @@ ipnet = { workspace = true }
 tenko-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+# WP7.2: the lease store on the replicated store, its committer, and the leader services
+# of expiry and history retention.
+async-trait = { workspace = true }
+futures = { workspace = true }
+tenko-store = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The counting allocator of tests/alloc.rs (the DNS codec's allocation test).
@@ -21,6 +28,10 @@ stats_alloc = { workspace = true }
 dhcproto = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true }
+# WP7.2: the lease tests on the Raft store with its write-refusal hook, in temporary
+# directories.
+tempfile = { workspace = true }
+tenko-store = { workspace = true, features = ["raft", "testing", "test-hooks"] }
 
 [lints]
 workspace = true
