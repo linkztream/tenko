@@ -15,7 +15,8 @@ use tenko_core::{
 };
 use tenko_dhcp::config::{
     ConfigService,
-    effective::{ClientFacts, NoMatcher},
+    // WP8.4: the compiled matcher of the image.
+    effective::{ClientFacts, ImageMatcher},
     options::describe,
     scopes::{ExclusionRow, NewScope, ScopeChange, ScopeRow},
 };
@@ -378,8 +379,11 @@ pub(super) async fn get_dhcp_effective_options(
         client_id,
         vendor_class: params.vendor_class,
         user_class: params.user_class,
+        // WP8.4: the fields the query does not carry.
+        ..ClientFacts::default()
     };
-    let effective = ConfigService::effective_options(view.as_ref(), prefix, &client, &NoMatcher)?;
+    let effective =
+        ConfigService::effective_options(view.as_ref(), prefix, &client, &ImageMatcher)?;
     let defs: Vec<_> = ConfigService::option_defs(view.as_ref())?
         .into_iter()
         .map(|row| row.def)

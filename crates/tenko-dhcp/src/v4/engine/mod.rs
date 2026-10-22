@@ -5,10 +5,16 @@
 //! [`handle`] reads one received datagram and decides:
 //!
 //! - **The client.** Its identity is option 61 when sent, else `htype` and `chaddr` (RFC
-//!   4361, RFC 6842); option 61 is echoed in every reply.
+//!   4361, RFC 6842); option 61 is echoed in every reply. Its reservation is found by that
+//!   identity first, then by its hardware address, so that a reservation keyed by MAC holds
+//!   for a client that sends option 61 (WP8.4, [`ConfigImage::client_reservation`]).
 //! - **The filters.** A MAC address the deny list matches is dropped (DHCP-08); a scope
 //!   marked restricted serves only clients the allow list matches and clients with a
 //!   reservation (TGL-17).
+//! - **Classes and policies** (WP8.4, [`crate::class`]): the policies of the scope, then the
+//!   server's, decide the options, the address range, the lease times and the DDNS settings
+//!   of the request; a scope or pool that names classes admits only their clients. A boot
+//!   client gets its boot file in the reply ([`boot`]).
 //! - **The scope** ([`select`]): the link selection sub-option of option 82 (RFC 3527), then
 //!   option 118 (RFC 3011), then `giaddr`, then `ciaddr` of a client that has an address, then
 //!   the address of the listener the request arrived on. A scope of a shared network extends
@@ -32,6 +38,8 @@
 //! reply when the commit returns (`tests/alloc.rs`).
 
 pub mod assemble;
+// WP8.4: PXE, UEFI, iPXE, PXELINUX and ProxyDHCP.
+pub mod boot;
 mod hash;
 pub mod hashed;
 pub mod metrics;
@@ -58,6 +66,8 @@ pub use self::{
     select::Selector,
 };
 use super::{BOOTREQUEST, ClientFqdn, Message, MessageBuilder, MessageType, RelayAgentInfo};
+// WP8.4: the classes and policies of the request.
+use crate::class::{Decision, Facts};
 use crate::{
     allocator::{Allocator, Choice, PoolOwnership, Request, grant_time},
     image::{ConfigImage, PoolImage, ScopeImage},
@@ -191,6 +201,10 @@ pub enum IgnoreReason {
     NotHolder,
     /// A REQUEST or INFORM without the fields its state needs.
     Incomplete,
+    // WP8.4: ProxyDHCP answers boot clients with a boot file only.
+    /// A request on a proxy DHCP listener from a client that is not a boot client, or one
+    /// its scope gives no boot file.
+    NotBootClient,
 }
 
 /// What to do with a request.
@@ -275,6 +289,9 @@ pub fn empty_change() -> PendingChange {
 struct Inbound<'m, 'i> {
     message: &'m Message<'m>,
     identity: &'i [u8],
+    // WP8.4: the hardware identity (MAC-keyed reservations) and the policies.
+    hardware: &'i [u8],
+    decision: &'i Decision<'i>,
     chaddr: &'m [u8],
     client_id: Option<&'m [u8]>,
     relay: Option<RelayAgentInfo<'m>>,
@@ -325,6 +342,11 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     let mut identity = [0u8; MAX_IDENTITY];
     let len = write_identity(message.htype(), chaddr, client_id, &mut identity);
     let identity = &identity[..len];
+    // WP8.4: the hardware identity, which a reservation keyed by MAC holds whether or not
+    // the client sends option 61 (RFC 4361 clients such as Windows send one).
+    let mut hardware = [0u8; MAX_IDENTITY];
+    let hardware_len = write_identity(message.htype(), chaddr, None, &mut hardware);
+    let hardware = &hardware[..hardware_len];
     let verdict = message
         .mac()
         .map_or(FilterVerdict::Unlisted, |mac| ctx.image.verdict(&mac));
@@ -334,11 +356,31 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     let Some((scope, selector)) = select::select(ctx.image, &message, kind, relay, received) else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
+    // WP8.4: a reservation by client identity or by hardware address.
     let reserved = ctx
         .image
-        .siblings(scope)
-        .any(|sibling| ctx.image.reservation(sibling.prefix, identity).is_some());
+        .client_reservation(scope, identity, hardware)
+        .is_some();
     if scope.restricted && verdict != FilterVerdict::Allowed && !reserved {
+        return Answer {
+            request,
+            action: Action::Drop(DropReason::Filtered),
+            selector: Some(selector),
+        };
+    }
+    // WP8.4: the policies of the scope, and its class allow list (a scope that names
+    // classes serves only their clients; a sibling of its shared network may admit the
+    // client instead). A reserved client is always served.
+    let decision = ctx
+        .image
+        .matcher()
+        .decide(scope.prefix, Facts::of(&message));
+    if !reserved
+        && !ctx
+            .image
+            .siblings(scope)
+            .any(|sibling| decision.admits_scope(sibling))
+    {
         return Answer {
             request,
             action: Action::Drop(DropReason::Filtered),
@@ -352,6 +394,8 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     let client = Inbound {
         message: &message,
         identity,
+        hardware,
+        decision: &decision,
         chaddr,
         client_id,
         relay,
@@ -382,12 +426,18 @@ fn home<'a>(
         .find(|sibling| sibling.network.contains(&addr))
 }
 
-/// The lease times of an address: its pool's, else its scope's.
-fn times_of(scope: &ScopeImage, addr: Ipv4Addr) -> (LeaseTimes, Option<&PoolImage>) {
-    match scope.pool_of(addr) {
+/// The lease times of an address: the first matching policy's that sets them (WP8.4),
+/// else its pool's, else its scope's; and its pool.
+fn times_of<'a>(
+    scope: &'a ScopeImage,
+    addr: Ipv4Addr,
+    decision: &Decision<'_>,
+) -> (LeaseTimes, Option<&'a PoolImage>) {
+    let (times, pool) = match scope.pool_of(addr) {
         Some(pool) => (pool.lease, Some(pool)),
         None => (scope.lease, None),
-    }
+    };
+    (decision.lease().copied().unwrap_or(times), pool)
 }
 
 fn later(now: Timestamp, secs: u32) -> Timestamp {
@@ -417,6 +467,9 @@ fn allocate(
         image: ctx.image,
         scope,
         identity: client.identity,
+        // WP8.4: MAC-keyed reservations and the class and policy restrictions.
+        hardware: client.hardware,
+        admission: client.decision,
         requested,
         leases: ctx.leases,
         offers: ctx.offers,
@@ -433,9 +486,10 @@ fn host_options<'a>(
     choice: Choice,
 ) -> Option<&'a [tenko_core::dhcp::OptionValue]> {
     match choice {
+        // WP8.4: by client identity, then by hardware address.
         Choice::Reservation(_) => ctx
             .image
-            .reservation(home.prefix, client.identity)
+            .reservation_of(home.prefix, client.identity, client.hardware)
             .map(|reservation| reservation.options.as_slice()),
         _ => None,
     }
@@ -468,7 +522,7 @@ fn discover(
         {
             continue;
         }
-        let (times, pool) = times_of(home, addr);
+        let (times, pool) = times_of(home, addr, client.decision);
         let granted = grant_time(&times, client.message.lease_time().ok().flatten(), None);
         let host = host_options(ctx, client, home, choice);
         let lease = Some(assemble::LeaseGrant {
@@ -484,6 +538,7 @@ fn discover(
                 scope: home,
                 pool,
                 host,
+                decision: Some(client.decision),
             },
             lease,
             scratch,
@@ -499,11 +554,15 @@ fn choice_home<'a>(
     choice: Choice,
 ) -> Option<&'a ScopeImage> {
     match choice {
-        Choice::Reservation(_) => ctx.image.siblings(scope).find(|sibling| {
-            ctx.image
-                .reservation(sibling.prefix, client.identity)
-                .is_some()
-        }),
+        // WP8.4: the scope of the client's reservation, by identity or hardware address.
+        Choice::Reservation(_) => ctx
+            .image
+            .client_reservation(scope, client.identity, client.hardware)
+            .and_then(|reservation| {
+                ctx.image
+                    .siblings(scope)
+                    .find(|sibling| sibling.prefix == reservation.scope)
+            }),
         other => home(ctx.image, scope, other.addr()),
     }
 }
@@ -563,15 +622,16 @@ fn request(
         return refuse(scratch, b"the address is not on this network");
     };
     if state == State::InitReboot {
-        let known = ctx.image.siblings(scope).any(|sibling| {
-            ctx.image
-                .reservation(sibling.prefix, client.identity)
-                .is_some()
-                || ctx
-                    .leases
+        // WP8.4: a reservation by client identity or by hardware address.
+        let known = ctx
+            .image
+            .client_reservation(scope, client.identity, client.hardware)
+            .is_some()
+            || ctx.image.siblings(scope).any(|sibling| {
+                ctx.leases
                     .by_client(sibling.prefix, client.identity)
                     .is_some()
-        });
+            });
         if !known {
             return Action::Ignore(IgnoreReason::NoRecord);
         }
@@ -586,12 +646,13 @@ fn request(
         .leases
         .get(home.vrf, target)
         .filter(|lease| lease.is_bound(ctx.now) && is_holder(lease, client.identity));
-    let (times, pool) = times_of(home, target);
+    let (times, pool) = times_of(home, target, client.decision);
     let host = host_options(ctx, client, home, choice);
     let levels = assemble::Levels {
         scope: home,
         pool,
         host,
+        decision: Some(client.decision),
     };
     if !ctx.accepting {
         // P3-Q14: a bound lease is answered for the time it still has, and nothing is
@@ -824,6 +885,8 @@ fn inform(
         scope: home,
         pool: home.pool_of(ciaddr),
         host: None,
+        // WP8.4: the policies' options apply to INFORM too.
+        decision: Some(client.decision),
     };
     reply(
         ctx,
@@ -854,6 +917,10 @@ fn reply(
     builder.yiaddr(yiaddr);
     if kind == MessageType::Ack {
         builder.ciaddr(message.ciaddr());
+    }
+    // WP8.4: a boot reply's next server and boot file field.
+    if let Some((_, file)) = boot::boot_reply(&levels) {
+        boot::header(&mut builder, &levels, file);
     }
     let written = assemble::options(
         &mut builder,

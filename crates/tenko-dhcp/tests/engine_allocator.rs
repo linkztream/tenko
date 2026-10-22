@@ -13,7 +13,9 @@ use tenko_core::{
     dhcp::{BindingState, DdnsPolicy, LeaseEventKind, LeaseTimes, SharedNetworkId},
 };
 use tenko_dhcp::{
-    allocator::{Allocator, Choice, NoOffers, OfferHold, ReferenceAllocator, Request, SingleNode},
+    allocator::{
+        AdmitAll, Allocator, Choice, NoOffers, OfferHold, ReferenceAllocator, Request, SingleNode,
+    },
     image::{ConfigImage, ImageBuilder, PoolImage, ReservationImage, ScopeImage},
     lease::{LeaseTable, MemLeaseTable, PendingChange},
     v4::engine::HashedAllocator,
@@ -165,6 +167,8 @@ fn compare(
             image: &image,
             scope,
             identity: &id,
+            hardware: &id,
+            admission: &AdmitAll,
             requested: requested
                 .map(|(index, last)| host(image.scopes()[index % specs.len()].network, last)),
             leases: &table,
@@ -223,6 +227,8 @@ fn the_hashed_order_spreads_clients_and_keeps_each_client_on_its_start() {
             image: &image,
             scope,
             identity: &id,
+            hardware: &id,
+            admission: &AdmitAll,
             requested: None,
             leases: &table,
             offers: &NoOffers,

@@ -4,8 +4,8 @@
     "title": "Tenko DDI API",
     "description": "HTTP API of Tenko DDI: DNS, DHCP and IP address management.",
     "license": {
-      "name": "LicenseRef-Proprietary",
-      "identifier": "LicenseRef-Proprietary"
+      "name": "BUSL-1.1",
+      "identifier": "BUSL-1.1"
     },
     "version": "0.0.2"
   },

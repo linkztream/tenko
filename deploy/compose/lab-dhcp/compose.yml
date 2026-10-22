@@ -191,6 +191,63 @@ services:
       servers:
         ipv4_address: 192.0.2.20
 
+  # WP8.4: E27's PXE rows (profile pxe, started by smoke.sh when the rows run). The boot
+  # server (TFTP and HTTP) on servers, and two machines on lan that boot over the network
+  # through the gateway's relay: QEMU in BIOS mode with its iPXE ROM, and in UEFI mode with
+  # OVMF. The image is pxe.Dockerfile (PXE_IMAGE, default tenko-dhcp-lab-pxe:latest);
+  # compose.kvm.yml hands the machines /dev/kvm where the host has it.
+  bootsrv:
+    profiles: ["pxe"]
+    image: ${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}
+    entrypoint: ["/lab/bootsrv.sh"]
+    restart: "no"
+    stop_grace_period: 1s
+    cap_add:
+      - NET_ADMIN
+    environment:
+      GATEWAY: 192.0.2.2
+      ROUTES: 192.0.2.0/24
+    networks:
+      servers:
+        ipv4_address: 192.0.2.21
+
+  pxe-bios:
+    profiles: ["pxe"]
+    image: ${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}
+    entrypoint: ["/lab/qemu-boot.sh"]
+    restart: "no"
+    stop_grace_period: 1s
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      MODE: bios
+      VM_MAC: "00:00:5e:00:53:a0"
+    networks:
+      lan:
+        ipv4_address: 192.0.2.71
+        mac_address: "00:00:5e:00:53:b0"
+
+  pxe-uefi:
+    profiles: ["pxe"]
+    image: ${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}
+    entrypoint: ["/lab/qemu-boot.sh"]
+    restart: "no"
+    stop_grace_period: 1s
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      MODE: uefi
+      VM_MAC: "00:00:5e:00:53:a1"
+    networks:
+      lan:
+        ipv4_address: 192.0.2.72
+        mac_address: "00:00:5e:00:53:b1"
+  # End WP8.4.
+
 # The gateway is a container that routes between the networks, so the node's reply to
 # giaddr (the gateway's address on a client network) arrives on the servers bridge. Docker 28
 # and later drop a packet for a container's address that comes in on another bridge (the

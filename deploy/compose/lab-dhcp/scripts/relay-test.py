@@ -12,6 +12,14 @@ option 82 back unchanged (RFC 3046 section 2.2), and prints one line per step:
     renew 192.0.2.160
     release 192.0.2.160
 
+WP8.4: with --vendor-class, --user-class and --arch it sends options 60, 77 and 93 (RFC
+4578) as a boot client does; --expect-file and --expect-vendor check the boot file in the
+`file` field and option 60 of the OFFER and the ACK (UEFI HTTP boot, PXE); --proxy-port
+sends the boot server discovery of PXE after the ACK: a REQUEST from the leased address to
+the server's proxy DHCP port, whose ACK must carry no address and the expected boot file:
+
+    proxy 0.0.0.0 file=ipxe.efi
+
 The exit status is 0 when every step passed, 1 otherwise. Written against RFC 2131 only;
 it shares no code with Tenko. Run as root in the tools container (port 67).
 """
@@ -50,6 +58,9 @@ def parse(data):
         return None
     xid = struct.unpack("!I", data[4:8])[0]
     yiaddr = str(ipaddress.IPv4Address(data[16:20]))
+    # WP8.4: the next server and the boot file of a boot reply.
+    siaddr = str(ipaddress.IPv4Address(data[20:24]))
+    boot_file = data[108:236].split(b"\0", 1)[0].decode("ascii", "replace")
     options, pos = {}, 240
     while pos < len(data):
         code = data[pos]
@@ -61,7 +72,8 @@ def parse(data):
         length = data[pos + 1]
         options[code] = options.get(code, b"") + data[pos + 2 : pos + 2 + length]
         pos += 2 + length
-    return {"xid": xid, "yiaddr": yiaddr, "options": options}
+    return {"xid": xid, "yiaddr": yiaddr, "siaddr": siaddr, "file": boot_file,
+            "options": options}
 
 
 def exchange(sock, server, packet, xid, want):
@@ -88,6 +100,13 @@ def main():
     ap.add_argument("--renew", action="store_true")
     ap.add_argument("--release", action="store_true")
     ap.add_argument("--timeout", type=float, default=5.0)
+    # WP8.4: a boot client's options and the checks of a boot reply.
+    ap.add_argument("--vendor-class", help="option 60")
+    ap.add_argument("--user-class", help="option 77, as plain text")
+    ap.add_argument("--arch", type=int, help="option 93, one architecture type")
+    ap.add_argument("--expect-file", help="the boot file the replies carry in `file`")
+    ap.add_argument("--expect-vendor", help="the option 60 the replies carry")
+    ap.add_argument("--proxy-port", type=int, help="the server's proxy DHCP port (4011)")
     args = ap.parse_args()
 
     mac = bytes.fromhex(args.mac.replace(":", ""))
@@ -99,6 +118,13 @@ def main():
     extra = [option(55, bytes([1, 3, 6, 15, 42, 51, 54]))]
     if args.subnet_selection:
         extra.append(option(118, ipaddress.IPv4Address(args.subnet_selection).packed))
+    # WP8.4: the boot client's options.
+    if args.vendor_class:
+        extra.append(option(60, args.vendor_class.encode()))
+    if args.user_class:
+        extra.append(option(77, args.user_class.encode()))
+    if args.arch is not None:
+        extra.append(option(93, struct.pack("!H", args.arch)))
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -124,8 +150,17 @@ def main():
         lease = reply["options"].get(51)
         lease = struct.unpack("!I", lease)[0] if lease and len(lease) == 4 else "-"
         good = inside and echo and (addr is None or addr == yiaddr)
+        # WP8.4: the boot file and option 60 of a boot reply.
+        boot = ""
+        if args.expect_file is not None:
+            good = good and reply["file"] == args.expect_file
+            boot += f" file={reply['file'] or '-'}"
+        if args.expect_vendor is not None:
+            vendor = reply["options"].get(60, b"").decode("ascii", "replace")
+            good = good and vendor == args.expect_vendor
+            boot += f" vendor={vendor or '-'}"
         print(f"{step} {yiaddr} echo={'ok' if echo else 'missing'} lease={lease}"
-              + ("" if inside else f" outside={expect}"))
+              + ("" if inside else f" outside={expect}") + boot)
         ok = ok and good
         return reply if good else None
 
@@ -142,6 +177,33 @@ def main():
         xid, (ACK, NAK)), addr)
     if ack is None:
         return 1
+    # WP8.4: the boot server discovery on the proxy DHCP port, from the leased address.
+    if args.proxy_port:
+        xid += 1
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.bind((args.giaddr, 0))
+        probe.settimeout(args.timeout)
+        probe.sendto(message(REQUEST, xid, mac, "0.0.0.0", addr, extra), (args.server, args.proxy_port))
+        reply = None
+        while reply is None:
+            try:
+                data, _ = probe.recvfrom(4096)
+            except socket.timeout:
+                break
+            parsed = parse(data)
+            if parsed and parsed["xid"] == xid:
+                reply = parsed
+        if reply is None:
+            print("proxy timeout")
+            ok = False
+        else:
+            kind = reply["options"].get(53, b"\0")[0]
+            good = kind == ACK and reply["yiaddr"] == "0.0.0.0"
+            if args.expect_file is not None:
+                good = good and reply["file"] == args.expect_file
+            print(f"proxy {reply['yiaddr']} file={reply['file'] or '-'}"
+                  + ("" if kind == ACK else f" type={kind}"))
+            ok = ok and good
     if args.renew:
         xid += 1
         check("renew", exchange(

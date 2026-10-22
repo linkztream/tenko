@@ -126,9 +126,12 @@ pub fn candidate(
         conflicts.count_cached();
         return None;
     }
+    // WP8.4: the client's reservation, by client identity or by hardware address.
+    let mut hardware = [0u8; MAX_IDENTITY];
+    let hardware_len = write_identity(message.htype(), chaddr, None, &mut hardware);
     let reserved = image
-        .reserved_at(home.prefix, addr)
-        .is_some_and(|reservation| reservation.identity == who);
+        .reservation_of(home.prefix, who, &hardware[..hardware_len])
+        .is_some_and(|reservation| reservation.addr == addr);
     Some(Candidate {
         addr,
         vrf: home.vrf,

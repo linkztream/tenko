@@ -25,7 +25,7 @@ use tenko_store::{ReadViewExt, Store, WriteBatch};
 use super::{
     ConfigService,
     classes::NewPolicy,
-    effective::{ClientFacts, NoMatcher},
+    effective::{ClientFacts, ImageMatcher, NoMatcher},
     options::{NewOptionDef, OptionInput},
     pools::PoolChange,
     scopes::{NewScope, ScopeChange},
@@ -694,4 +694,94 @@ async fn a_reserved_client_gets_its_host_options_over_the_scope_and_server() {
     assert_eq!(stranger.reservation, None);
     assert_eq!(stranger.options[0].owner, OptionOwner::Scope(world.prefix));
     assert_eq!(stranger.options[0].value.data.0, vec![192, 0, 2, 54]);
+}
+
+// WP8.4: the effective view through the compiled matcher of the image.
+#[tokio::test]
+async fn the_effective_view_shows_the_policies_a_client_matches() {
+    let world = world().await;
+    let service = &world.service;
+    service
+        .create_scope(&cx(), new_scope(world.prefix))
+        .await
+        .expect("scope");
+    let (class, _) = service
+        .create_class(
+            &cx(),
+            "uefi".to_owned(),
+            vec![Match::Architecture { code: 7 }],
+            None,
+        )
+        .await
+        .expect("class");
+    let (policy, _) = service
+        .create_policy(
+            &cx(),
+            NewPolicy {
+                name: "uefi-boot".to_owned(),
+                scope: Some(world.prefix),
+                order: None,
+                enabled: None,
+                condition: Condition {
+                    join: Join::Or,
+                    terms: vec![Term::Class(class.id)],
+                },
+                action: PolicyAction::default(),
+                description: None,
+            },
+        )
+        .await
+        .expect("policy");
+    let text = |code: u16, value: &str| OptionInput {
+        space: OptionSpace::dhcp4(),
+        code,
+        data: None,
+        typed: Some(OptionData::Text(value.to_owned())),
+    };
+    service
+        .set_option_set(
+            &cx(),
+            OptionOwner::Scope(world.prefix),
+            vec![text(67, "undionly.kpxe")],
+            None,
+        )
+        .await
+        .expect("scope options");
+    service
+        .set_option_set(
+            &cx(),
+            OptionOwner::Policy(policy.id),
+            vec![text(67, "ipxe.efi")],
+            None,
+        )
+        .await
+        .expect("policy options");
+    let view = service.view(None).await.expect("view");
+    let uefi = ConfigService::effective_options(
+        view.as_ref(),
+        world.prefix,
+        &ClientFacts {
+            mac: Some([0, 0, 0x5e, 0, 0x53, 0x71]),
+            architecture: Some(7),
+            ..ClientFacts::default()
+        },
+        &ImageMatcher,
+    )
+    .expect("effective");
+    assert_eq!(uefi.classes, vec![class.id]);
+    assert_eq!(uefi.policies, vec![policy.id]);
+    assert_eq!(uefi.options[0].owner, OptionOwner::Policy(policy.id));
+    assert_eq!(uefi.options[0].value.data.0, b"ipxe.efi".to_vec());
+    let bios = ConfigService::effective_options(
+        view.as_ref(),
+        world.prefix,
+        &ClientFacts {
+            architecture: Some(0),
+            ..ClientFacts::default()
+        },
+        &ImageMatcher,
+    )
+    .expect("effective");
+    assert!(bios.classes.is_empty() && bios.policies.is_empty());
+    assert_eq!(bios.options[0].owner, OptionOwner::Scope(world.prefix));
 }

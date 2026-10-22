@@ -17,6 +17,7 @@ Contents:
 6. [MAC filters](#6-mac-filters)
 7. [The API and the command line](#7-the-api-and-the-command-line)
 14. [Conflict detection and DECLINE](#14-conflict-detection-and-decline)
+16. [Classes, policies, PXE and UEFI](#16-classes-policies-pxe-and-uefi)
 
 ## 1. The wire format
 
@@ -202,13 +203,13 @@ A custom definition (`/dhcp/option-defs`) gives a code a name and a type: `ipv4_
 
 Options are set per owner: `server`, `shared_network:<id>`, `scope:<prefix>`, `pool:<range>`, `policy:<id>` and `host:<interface>` (a reservation's options, on the IPAM interface). `PUT /dhcp/option-sets/{owner}` replaces the whole set; each value is given in wire form (`data`, hexadecimal) or typed (`typed`, for example `{"ipv4": {"values": ["192.0.2.53"]}}`, `{"text": "example.test"}`, `{"unsigned": [1500]}`, `{"names": ["example.test"]}`) and stored in wire form after it has been checked against the type of its code: `dhcp.option.unknown` for a code without a type, `dhcp.option.invalid` for data that does not fit or a code given twice. An owner without options reads as an empty set at revision 0. Every value reads back with its name and its typed view.
 
-The options a client gets merge the levels from the least to the most specific, the later level winning per code in the order the codes first appear: the server, the scope's shared network, the scope, the policies that match the client (the first in order wins per code), and the client's reservation. `GET /dhcp/scopes/{prefix}/effective-options?mac=&client_id=&vendor_class=&user_class=` shows the result, each option with its level and owner, and the reservation the client has. Pool options depend on the address the allocator picks and are shown on the pool. Which classes and policies match a client is WP8.4's compiled matcher; until it lands the route matches none, and the policy level is empty.
+The options a client gets merge the levels from the least to the most specific, the later level winning per code in the order the codes first appear: the server, the scope's shared network, the scope, the policies that match the client (the first in order wins per code), and the client's reservation. `GET /dhcp/scopes/{prefix}/effective-options?mac=&client_id=&vendor_class=&user_class=` shows the result, each option with its level and owner, and the reservation the client has. Pool options depend on the address the allocator picks and are shown on the pool. Which classes and policies match a client is the compiled matcher the engine uses (section 16), so the route shows the classes and policies the client is in and the options they give it.
 
 ## 5. Classes and policies
 
 A class (`/dhcp/classes`) is a named match on the request that holds when any of its matches holds: vendor class (option 60, exact or prefix), user class (option 77), MAC address with wildcards, client identifier, relay agent circuit-id and remote-id, client architecture (option 93) and host name (exact or prefix). A name is unique; a class needs 1 to 64 matches. A class a scope, a pool or a policy names is not deleted (`dhcp.class.in_use`, parameter `by` with `scope:<prefix>`, `pool:<range>` and `policy:<id>`).
 
-A policy (`/dhcp/policies`) belongs to a scope or, without one, to the server, where it applies after the scope's own. Its condition joins 1 to 64 terms with `and` or `or`: a class, a class negated, a match, a match negated (P3-Q12, the shape of Windows DHCP policies). Its action restricts the clients to an address range inside the scope's network (`dhcp.pool.outside` otherwise), sets lease times and DDNS settings; its options are the option set of `policy:<id>`. The name is unique in the scope; without `order` a new policy goes after the last of its scope. Policies apply in order, the first matching policy per action winning. Classes and policies are stored and validated now; matching them against requests is WP8.4's.
+A policy (`/dhcp/policies`) belongs to a scope or, without one, to the server, where it applies after the scope's own. Its condition joins 1 to 64 terms with `and` or `or`: a class, a class negated, a match, a match negated (P3-Q12, the shape of Windows DHCP policies). Its action restricts the clients to an address range inside the scope's network (`dhcp.pool.outside` otherwise), sets lease times and DDNS settings; its options are the option set of `policy:<id>`. The name is unique in the scope; without `order` a new policy goes after the last of its scope. Policies apply in order, the first matching policy per action winning. How requests are matched, what each action does and how the class lists of scopes and pools admit clients is section 16.
 
 ## 6. MAC filters
 
@@ -240,8 +241,8 @@ tenko dhcp exclusion list PREFIX | add PREFIX FIRST LAST | delete PREFIX ID
 tenko dhcp shared-network list | show ID | create NAME | set ID | delete ID
 tenko dhcp pool list [--scope PREFIX] | show RANGE | set RANGE [--class ID] [--lease-...] | clear RANGE
 tenko dhcp option catalog | defs | define --code N --name NAME --kind KIND [--array] [--space S] | undefine ID | show OWNER | set OWNER CODE=HEXDATA... | clear OWNER
-tenko dhcp class list | show ID | create NAME --match JSON... | delete ID
-tenko dhcp policy list | show ID | create --file POLICY.json | delete ID
+tenko dhcp class list | show ID | create NAME --match JSON... | set ID [--name NAME] [--match JSON...] [--description TEXT] | delete ID
+tenko dhcp policy list | show ID | create --file POLICY.json | set ID [--file CHANGE.json] [--name NAME] [--order N] [--enabled BOOL] [--description TEXT] | delete ID
 tenko dhcp filter list | add MAC-PATTERN --allow|--deny [--note TEXT] | delete ID
 ```
 
@@ -319,7 +320,7 @@ The DHCPv4 engine (`tenko_dhcp::v4::engine`, WP7.3) is a pure function: `engine:
 
 ### 9.1 The client and the scope
 
-The client is its client identifier (option 61) when it sends one, else its hardware type and `chaddr` (RFC 4361, RFC 6842); option 61 is echoed in every reply. A MAC address the deny list matches is dropped (`filtered`, DHCP-08). A scope marked restricted serves only clients the allow list matches and clients with a reservation in it (TGL-17); everyone else is dropped as `filtered`.
+The client is its client identifier (option 61) when it sends one, else its hardware type and `chaddr` (RFC 4361, RFC 6842); its leases and offers are kept under that identity, and option 61 is echoed in every reply. A reservation is looked up by the client identity first and then by the hardware address (WP8.4): a reservation keyed by MAC holds for a client whose `chaddr` it names whether or not the client sends option 61 (Windows sends one of type 1 with the MAC, some Linux clients a DUID), a reservation keyed by a client identifier holds only for that identifier, and where a client has both kinds the client identifier's wins. Until WP8.4 a reservation was looked up by the client identity only, so a client that sent option 61 missed the reservation of its MAC. A MAC address the deny list matches is dropped (`filtered`, DHCP-08). A scope marked restricted serves only clients the allow list matches and clients with a reservation in it (TGL-17); everyone else is dropped as `filtered`.
 
 The scope is selected by the first of: the link selection sub-option of option 82 (RFC 3527), option 118 (RFC 3011), `giaddr`, `ciaddr` of a REQUEST, INFORM or RELEASE that is not relayed (a renewal unicast straight to the server, which in relay mode is how every renewal arrives), and the address of the listener the request came in on. The most specific network that holds the address wins, and a scope of a shared network brings its siblings into the choice of address. The server identifier (option 54) is the relay's override (RFC 5107, sub-option 11), else the scope's, else the listener's address; a client's option 54 names this server when it is any of these.
 
@@ -355,7 +356,7 @@ The lease time is `grant_time` of the times of the address's pool (else the scop
 
 ### 9.5 The options
 
-The value of a code is the most specific level's: the reservation's (host), the pool's, then the scope's, which the image holds already merged with the shared network's and the server's; policies add a level between pool and host in WP8.4. The reply carries option 53, 54 and the lease times first, then the subnet mask (configured, else the scope's prefix length; RFC 2132 wants it before the routers), then every option the client lists in option 55 in the client's order (a split option 55 is joined first), then the routers, the DNS servers and the domain name when they are set and were not asked for (as Kea sends them), then option 61, option 81 and option 82 unchanged and last (RFC 3046). Codes the server manages (`SERVER_MANAGED_V4`) never come from an option set. Room for the closing options is kept; an option that does not fit within the client's size (option 57, else 548 octets) is left out whole. A value above 255 octets goes out as consecutive instances (RFC 3396). Overload into `file` and `sname` stays off until the scope has a switch for it.
+The value of a code is the most specific level's: the reservation's (host), the first matching policy's that holds it (section 16), the pool's, then the scope's, which the image holds already merged with the shared network's and the server's. The reply carries option 53, 54 and the lease times first, then the subnet mask (configured, else the scope's prefix length; RFC 2132 wants it before the routers), then every option the client lists in option 55 in the client's order (a split option 55 is joined first), then the routers, the DNS servers and the domain name when they are set and were not asked for (as Kea sends them), then option 61, option 81 and option 82 unchanged and last (RFC 3046). Codes the server manages (`SERVER_MANAGED_V4`) never come from an option set. Room for the closing options is kept; an option that does not fit within the client's size (option 57, else 548 octets) is left out whole. A value above 255 octets goes out as consecutive instances (RFC 3396). Overload into `file` and `sname` stays off until the scope has a switch for it. A boot client with a boot file gets the boot options and the `file` and `siaddr` fields of section 16.2.
 
 Option 81 is answered as a server that performs no DNS update (RFC 4702 section 4): N set, S clear, O set when the client asked for S, E as the client sent it, the client's name echoed. DDNS (WP8.3) changes the flags when it writes the records.
 
@@ -379,7 +380,7 @@ The counters are per worker, relaxed atomics: `tenko_dhcp_packets_total` by type
 - `tests/engine_allocator.rs` and `tests/engine_server.rs`: the allocator against the reference, and a relay listener on loopback running DORA, a renewal, a release and a refused commit through `MemLeaseStore`.
 - `crates/tenko-dhcp/examples/dhcp_server.rs` serves the engine on a port for perfdhcp and carries a load client; `bench/phase3-dhcp` runs M26 to M28 with it on loopback.
 
-What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3). The link-layer reply and the role's wiring, configuration and metrics are section 10.
+What the engine left to later packages came with them: the conflict probe before an offer and the DECLINE rules (section 14, WP8.5), DDNS (section 13, WP8.3), and the classes, policies, class restrictions and boot options (section 16, WP8.4).
 
 ## 10. The role
 
@@ -411,6 +412,7 @@ The node-local keys (`docs/dhcp-contracts.md` section 9, `deploy/tenko.example.t
 | `[dhcp] workers` | one per CPU, at most 8 | UDP workers per listener, 0 to 64 |
 | `[dhcp] offer_secs` | 10 | How long an offer holds its address in memory, 1 to 300 |
 | `[dhcp] relay_port`, `client_port` | 67, 68 | Where replies to relay agents and to clients go (tests and labs use other ports) |
+| `[dhcp] proxy`, `proxy_port` | none, 4011 | Proxy DHCP listeners for boot clients (WP8.4, section 16.3): unicast IPv4 addresses, each listed once, not on `port` where `listen` holds the same address |
 | `[dhcp.probe] timeout_ms`, `cache_secs` | 300, 600 | The conflict probe (WP8.5) |
 | `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
 | `[dhcp.ddns] retries`, `backoff_ms` | 5, 1,000 | The DDNS worker (WP8.3) |
@@ -543,87 +545,6 @@ A new fact wakes the reconciler like any write to the facts table; its run confi
 - `crates/tenko-ipam/tests/move_dhcp.rs`: the preview kind and the timeout from the scope, the step that waits for the image (and the rollback when the image stays behind), the cleanup that releases the device's old lease and no other, the compensation that releases a new lease, and the lease of a dynamic device in the target's pool that confirms its move.
 - `crates/tenko/tests/acceptance_move.rs`, E25: the five-device lab through the binary with the role in relay mode on loopback.
 
-## 14. Conflict detection and DECLINE
-
-Before the role offers an address that no client has had from it, it asks whether a host already uses the address, and it holds back an address a client declines (DHCP-06, TGL-16, plan section 2.7, decision P3-Q7). The code is `tenko_dhcp::conflict`; the probe contract is `tenko_dhcp::probe::ConflictProbe` (`docs/dhcp-contracts.md` section 3).
-
-### 14.1 When an offer is probed
-
-Only a DISCOVER's OFFER is ever probed, and only when its address has no lease history for this client and no probe found it clean within the probe cache's time. The worker that built the OFFER looks at the lease table and the cache (`conflict::rules::candidate`) and sends the OFFER at once when:
-
-- the table holds a row of this client for the address, in any state: its own binding, an address it had and that expired or was released, its reservation once it uses it;
-- the client's latest row in the scope, or in a sibling of the scope's shared network, is the address (its previous address);
-- a probe found the address clean within `[dhcp.probe] cache_secs` (600 seconds).
-
-A renewal or rebind is a REQUEST and is never probed; neither is an INIT-REBOOT or the REQUEST that follows an OFFER. A reservation its owner has not used yet is probed, and offered even when a host answers (no other address is the client's); the answer is counted and logged, and IPAM-23 reports the squatter.
-
-### 14.2 The pending table and the cap
-
-A DISCOVER whose OFFER waits for a probe waits in the pending table, not in a worker: the worker copies the request, the OFFER it built and where the OFFER goes into a free slot and goes on with the next datagram. The table has `[dhcp.probe] pending` slots (1,024) made at start, with its free list and its queue reserved, so parking allocates nothing (`tests/alloc.rs` measures it). A full table, or a request longer than a slot (1,472 octets), sends its OFFER unprobed and counts it.
-
-One thread of the server, the dispatcher, with a single-threaded runtime of its own, starts a probe per parked request with the time left to the request's deadline: its arrival plus `[dhcp.probe] timeout_ms` (300 ms). The OFFER goes out:
-
-| The probe | What happens |
-|---|---|
-| answered nobody within its time, or the cap cut it | The address enters the probe cache; the OFFER goes out |
-| cannot run (`Unavailable`) | The OFFER goes out |
-| heard the client's own MAC address | No conflict; the OFFER goes out |
-| heard another host | The address is marked (14.3); the engine runs again on the same request and offers the next free address, which is probed with the time left; after three further answers the next OFFER goes out unprobed |
-
-The dispatcher takes one timer tick off the cap (`conflict::TIMER_TICK`: 16 ms on Windows, whose system timer ticks at 15.6 ms, and 5 ms elsewhere), so no OFFER leaves later than the cap after its DISCOVER arrived. A client that sends its DISCOVER again gets the same address from the offer hold, and the cache lets it through at once.
-
-### 14.3 A conflict
-
-An answer from another host marks the address at once: the offer table holds it for no client (so no other worker offers it in the meantime), and a lease change of kind `conflict` writes an `abandoned` row that ends after `[dhcp.decline] hold_secs` (86,400 seconds, Kea's default probation period) with the answering MAC address as the row's hardware address when ARP gave one. The allocator skips the address until the row ends, the history shows the event, and the counters `tenko_dhcp_conflicts_total` and the role's log line (`the conflict probe found an address in use before an offer`) say so.
-
-The abandoned row is the conflict observation of IPAM-23: `conflict::observation::conflict_observation` gives the fact of the source `dhcp:<node>`, `Observed::Address` with the address, its VRF and the answering MAC address when known, valid until the hold ends. It has the subject of the address's lease fact, so it replaces it; IPAM's reconciler compares it with the other sources and with intent and never resolves the conflict on its own. The observation hook of the lease batch (WP8.1) writes it with the lease row, so the fact is as durable as the row.
-
-### 14.4 The probe
-
-`conflict::scan::ScanProbe` uses the methods of the `probe` role in the same process, so the `dhcp` role needs no privilege of its own:
-
-- **ARP** where this node sits on the address's link, that is, an interface with an IPv4 network that holds the address: an ARP request through `tenko-scan`'s raw link (`AF_PACKET`, Linux with `CAP_NET_RAW`, `docs/scanning.md` section 9), sent again halfway to the deadline and at most 100 ms in. Any ARP frame whose sender is the address, from a usable MAC address other than this node's, is an answer. The link of an interface opens on the first probe and closes after ten idle seconds.
-- **ICMP echo** otherwise (relayed scopes, no `CAP_NET_RAW`, Windows): `tenko-scan`'s pinger, an unprivileged ICMP datagram socket on Linux when `net.ipv4.ping_group_range` admits the process, else the `ping` command; `ping.exe` on Windows. A reply is an answer without a MAC address; a host that drops ICMP is not seen.
-
-The role says once per start which it uses (`the dhcp role probes an address never leased to the client before it offers it`, with the method), or that conflict detection is off.
-
-### 14.5 When it runs (TGL-16)
-
-| Profile | Default | Without a probe role |
-|---|---|---|
-| Home | On | Off, one log line per start |
-| Standard | On | Off, one log line per start |
-| Hardened | On | Off, one log line per start and the health row `dhcp.probe.missing` |
-| Lab | Off | Off, one log line per start |
-
-"On" means on when a `probe` role runs in the process and can use ICMP or ARP; the setting `conflict_detection` of `PUT /dhcp/settings` overrides the profile's default and takes effect without a restart. The profile's default is read when the role starts.
-
-### 14.6 DECLINE
-
-A DECLINE from the client that holds the address abandons it for `[dhcp.decline] hold_secs` (the engine, section 9.2): the row belongs to no client, so the allocator offers it to nobody, the decliner included, and the client gets another address on its next DISCOVER. The probe cache forgets the address, the abandoned row is the conflict observation (14.3, without a MAC address: the client does not say who answered it), and the role writes the audit record `dhcp.decline` with the scope, the address, the client's MAC address and the hold time (principal `system:dhcp`).
-
-A client may decline at most `[dhcp.decline] limit` addresses per `window_secs` (3 per hour). A DECLINE beyond the limit is dropped (`tenko_dhcp_dropped_total{reason="rate_limited"}`) and the client keeps the lease it holds, so a broken client that declines every address it is offered cannot drain a pool. The limit is a fixed table of clients made at start; it allocates nothing.
-
-### 14.7 Metrics and settings
-
-| Key | Default | Meaning |
-|---|---|---|
-| `[dhcp.probe] timeout_ms` | 300 | The cap from the DISCOVER to the OFFER, 10 to 1,000 ms |
-| `[dhcp.probe] cache_secs` | 600 | How long a clean result is kept, 0 to 86,400 s |
-| `[dhcp.probe] pending` | 1,024 | Offers that may wait for a probe at once, 16 to 65,536 |
-| `[dhcp.decline] hold_secs` | 86,400 | How long a declined or squatted address stays abandoned |
-| `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs per client and window |
-
-`tenko_dhcp_conflicts_total` counts the answers from other hosts, `tenko_dhcp_probe_duration_seconds` each probe from its start to its outcome, `tenko_dhcp_declines_total` the DECLINEs received and `tenko_dhcp_dropped_total{reason="rate_limited"}` those dropped by the limit. `DhcpServer::conflicts().stats()` has the finer counters (parked, unparked, clear, capped, unavailable, own MAC, reserved, cached, limited).
-
-### 14.8 Tests and measurements
-
-- `crates/tenko-dhcp/tests/conflict.rs`: over loopback with a fake probe that answers at once, late or never: the OFFER on the answer and at the cap, a late answer that marks nothing, an answer that abandons the address with the squatter's MAC and offers the next, every address answering, the client's own MAC, the rules of when (renewals, the client's lease, its previous address, a reservation in use), a reservation that answers, no probe and the setting off, a full pending table, the DECLINE hold, the audit report and the limit, forty DISCOVERs on one worker all answered at about the cap, M35's first half, and the production probe over ICMP on the host.
-- `crates/tenko-dhcp/tests/alloc.rs`: the worker's step (the rules, the park, the DECLINE limit and its report) allocates nothing.
-- The unit tests of the probe cache and the DECLINE limit in `src/conflict/`.
-
-M35 (plan section 6) is in `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md`: the offer delay for new addresses stays at most the cap and renewals are not delayed, and a squatter on the node's link is found in 20 of 20 tries, by ARP and by ICMP.
-What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).
 ## 13. DDNS
 
 Tenko DHCP writes the names of its clients into the zones Tenko serves (DHCP-13, ADR 0020, plan section 2.9). The update is a change set through the zone service with the RRset origin `dhcp`; no RFC 2136 message and no TSIG key are involved, and TGL-09 (dynamic updates from external clients) does not govern it. Updates to Windows DNS or another server are Phase 4 (CONN-13, DNS-28). This section is for operators who turn DDNS on and for reviewers of `tenko_dhcp::ddns`.
@@ -705,3 +626,170 @@ The outcome is written to the lease row (`ddns` in `GET /dhcp/leases/{addr}`): `
 - `crates/tenko-dhcp/tests/ddns.rs`: the worker over the in-memory store: names on commit, name protection, removal on release and expiry, the zone switch under Standard, IPAM's names, a manual record, `replace` and the client that writes its own A record, Hardened's forced protection.
 - `crates/tenko/tests/acceptance_dhcp_ddns.rs` (E26 through the binary): a client with option 81 and a legacy client get their A, DHCID and PTR records served by the DNS role on ACK, a second client claiming the first one's name is refused, and the records go on DHCPRELEASE and on expiry. The lab rows of E26 (dhclient, Playwright) wait for WP7.6's lab.
 - M31 (the DDNS rate end to end): `bench/phase3-dhcp/scripts/run-m31-ddns.sh` with the load client `crates/tenko-dhcp/examples/ddns_load.rs`; results in `bench/phase3-dhcp/results/`.
+
+## 14. Conflict detection and DECLINE
+
+Before the role offers an address that no client has had from it, it asks whether a host already uses the address, and it holds back an address a client declines (DHCP-06, TGL-16, plan section 2.7, decision P3-Q7). The code is `tenko_dhcp::conflict`; the probe contract is `tenko_dhcp::probe::ConflictProbe` (`docs/dhcp-contracts.md` section 3).
+
+### 14.1 When an offer is probed
+
+Only a DISCOVER's OFFER is ever probed, and only when its address has no lease history for this client and no probe found it clean within the probe cache's time. The worker that built the OFFER looks at the lease table and the cache (`conflict::rules::candidate`) and sends the OFFER at once when:
+
+- the table holds a row of this client for the address, in any state: its own binding, an address it had and that expired or was released, its reservation once it uses it;
+- the client's latest row in the scope, or in a sibling of the scope's shared network, is the address (its previous address);
+- a probe found the address clean within `[dhcp.probe] cache_secs` (600 seconds).
+
+A renewal or rebind is a REQUEST and is never probed; neither is an INIT-REBOOT or the REQUEST that follows an OFFER. A reservation its owner has not used yet is probed, and offered even when a host answers (no other address is the client's); the answer is counted and logged, and IPAM-23 reports the squatter.
+
+### 14.2 The pending table and the cap
+
+A DISCOVER whose OFFER waits for a probe waits in the pending table, not in a worker: the worker copies the request, the OFFER it built and where the OFFER goes into a free slot and goes on with the next datagram. The table has `[dhcp.probe] pending` slots (1,024) made at start, with its free list and its queue reserved, so parking allocates nothing (`tests/alloc.rs` measures it). A full table, or a request longer than a slot (1,472 octets), sends its OFFER unprobed and counts it.
+
+One thread of the server, the dispatcher, with a single-threaded runtime of its own, starts a probe per parked request with the time left to the request's deadline: its arrival plus `[dhcp.probe] timeout_ms` (300 ms). The OFFER goes out:
+
+| The probe | What happens |
+|---|---|
+| answered nobody within its time, or the cap cut it | The address enters the probe cache; the OFFER goes out |
+| cannot run (`Unavailable`) | The OFFER goes out |
+| heard the client's own MAC address | No conflict; the OFFER goes out |
+| heard another host | The address is marked (14.3); the engine runs again on the same request and offers the next free address, which is probed with the time left; after three further answers the next OFFER goes out unprobed |
+
+The dispatcher takes one timer tick off the cap (`conflict::TIMER_TICK`: 16 ms on Windows, whose system timer ticks at 15.6 ms, and 5 ms elsewhere), so no OFFER leaves later than the cap after its DISCOVER arrived. A client that sends its DISCOVER again gets the same address from the offer hold, and the cache lets it through at once.
+
+### 14.3 A conflict
+
+An answer from another host marks the address at once: the offer table holds it for no client (so no other worker offers it in the meantime), and a lease change of kind `conflict` writes an `abandoned` row that ends after `[dhcp.decline] hold_secs` (86,400 seconds, Kea's default probation period) with the answering MAC address as the row's hardware address when ARP gave one. The allocator skips the address until the row ends, the history shows the event, and the counters `tenko_dhcp_conflicts_total` and the role's log line (`the conflict probe found an address in use before an offer`) say so.
+
+The abandoned row is the conflict observation of IPAM-23: `conflict::observation::conflict_observation` gives the fact of the source `dhcp:<node>`, `Observed::Address` with the address, its VRF and the answering MAC address when known, valid until the hold ends. It has the subject of the address's lease fact, so it replaces it; IPAM's reconciler compares it with the other sources and with intent and never resolves the conflict on its own. The observation hook of the lease batch (WP8.1) writes it with the lease row, so the fact is as durable as the row.
+
+### 14.4 The probe
+
+`conflict::scan::ScanProbe` uses the methods of the `probe` role in the same process, so the `dhcp` role needs no privilege of its own:
+
+- **ARP** where this node sits on the address's link, that is, an interface with an IPv4 network that holds the address: an ARP request through `tenko-scan`'s raw link (`AF_PACKET`, Linux with `CAP_NET_RAW`, `docs/scanning.md` section 9), sent again halfway to the deadline and at most 100 ms in. Any ARP frame whose sender is the address, from a usable MAC address other than this node's, is an answer. The link of an interface opens on the first probe and closes after ten idle seconds.
+- **ICMP echo** otherwise (relayed scopes, no `CAP_NET_RAW`, Windows): `tenko-scan`'s pinger, an unprivileged ICMP datagram socket on Linux when `net.ipv4.ping_group_range` admits the process, else the `ping` command; `ping.exe` on Windows. A reply is an answer without a MAC address; a host that drops ICMP is not seen.
+
+The role says once per start which it uses (`the dhcp role probes an address never leased to the client before it offers it`, with the method), or that conflict detection is off.
+
+### 14.5 When it runs (TGL-16)
+
+| Profile | Default | Without a probe role |
+|---|---|---|
+| Home | On | Off, one log line per start |
+| Standard | On | Off, one log line per start |
+| Hardened | On | Off, one log line per start and the health row `dhcp.probe.missing` |
+| Lab | Off | Off, one log line per start |
+
+"On" means on when a `probe` role runs in the process and can use ICMP or ARP; the setting `conflict_detection` of `PUT /dhcp/settings` overrides the profile's default and takes effect without a restart. The profile's default is read when the role starts.
+
+### 14.6 DECLINE
+
+A DECLINE from the client that holds the address abandons it for `[dhcp.decline] hold_secs` (the engine, section 9.2): the row belongs to no client, so the allocator offers it to nobody, the decliner included, and the client gets another address on its next DISCOVER. The probe cache forgets the address, the abandoned row is the conflict observation (14.3, without a MAC address: the client does not say who answered it), and the role writes the audit record `dhcp.decline` with the scope, the address, the client's MAC address and the hold time (principal `system:dhcp`).
+
+A client may decline at most `[dhcp.decline] limit` addresses per `window_secs` (3 per hour). A DECLINE beyond the limit is dropped (`tenko_dhcp_dropped_total{reason="rate_limited"}`) and the client keeps the lease it holds, so a broken client that declines every address it is offered cannot drain a pool. The limit is a fixed table of clients made at start; it allocates nothing.
+
+### 14.7 Metrics and settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[dhcp.probe] timeout_ms` | 300 | The cap from the DISCOVER to the OFFER, 10 to 1,000 ms |
+| `[dhcp.probe] cache_secs` | 600 | How long a clean result is kept, 0 to 86,400 s |
+| `[dhcp.probe] pending` | 1,024 | Offers that may wait for a probe at once, 16 to 65,536 |
+| `[dhcp.decline] hold_secs` | 86,400 | How long a declined or squatted address stays abandoned |
+| `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs per client and window |
+
+`tenko_dhcp_conflicts_total` counts the answers from other hosts, `tenko_dhcp_probe_duration_seconds` each probe from its start to its outcome, `tenko_dhcp_declines_total` the DECLINEs received and `tenko_dhcp_dropped_total{reason="rate_limited"}` those dropped by the limit. `DhcpServer::conflicts().stats()` has the finer counters (parked, unparked, clear, capped, unavailable, own MAC, reserved, cached, limited).
+
+### 14.8 Tests and measurements
+
+- `crates/tenko-dhcp/tests/conflict.rs`: over loopback with a fake probe that answers at once, late or never: the OFFER on the answer and at the cap, a late answer that marks nothing, an answer that abandons the address with the squatter's MAC and offers the next, every address answering, the client's own MAC, the rules of when (renewals, the client's lease, its previous address, a reservation in use), a reservation that answers, no probe and the setting off, a full pending table, the DECLINE hold, the audit report and the limit, forty DISCOVERs on one worker all answered at about the cap, M35's first half, and the production probe over ICMP on the host.
+- `crates/tenko-dhcp/tests/alloc.rs`: the worker's step (the rules, the park, the DECLINE limit and its report) allocates nothing.
+- The unit tests of the probe cache and the DECLINE limit in `src/conflict/`.
+
+M35 (plan section 6) is in `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md`: the offer delay for new addresses stays at most the cap and renewals are not delayed, and a squatter on the node's link is found in 20 of 20 tries, by ARP and by ICMP.
+What the engine leaves to later packages: the conflict probe before an offer and the DECLINE rate limit and observation (WP8.5); classes and policies, the class restrictions of scopes and pools included (WP8.4: the image carries them and the engine does not match them yet); DDNS (WP8.3); the link-layer reply and the role's wiring, configuration and metrics registration (WP7.5).
+
+## 16. Classes, policies, PXE and UEFI
+
+WP8.4 makes the classes and policies of section 5 decide what a client gets, and adds network boot: PXE firmware, iPXE, UEFI HTTP boot and PXELINUX, and proxy DHCP for the boot server discovery of PXE (DHCP-03, DHCP-05, decisions P3-Q12 and P3-Q16). This section is for operators who set up classes, policies and boot files, and for reviewers of `tenko_dhcp::class` and `tenko_dhcp::v4::engine::boot`.
+
+### 16.1 How a request is matched
+
+The classes and enabled policies are compiled into the configuration image when it is built (`tenko_dhcp::class::Matcher`); the DORA path reads no store and parses no condition. For each request the engine takes the fields a class can test from the message in one walk over its options and evaluates the policies of the selected scope, then the server's:
+
+| Match | Field | Holds when |
+|---|---|---|
+| `vendor_class` | option 60 | it equals the text, or starts with it (`prefix`) |
+| `user_class` | option 77 | the whole value equals the text, or one of its RFC 3004 instances does (Windows and iPXE send one plain string, ISC dhclient the plain text of `send user-class`) |
+| `mac` | `chaddr` of an Ethernet client | the pattern matches, `*` for any octet (`00:00:5e:00:*:45`) |
+| `client_id` | option 61 | the octets are equal, type octet included |
+| `circuit_id`, `remote_id` | option 82, sub-options 1 and 2 | the octets are equal |
+| `architecture` | option 93 | one of the client's architecture types is the code |
+| `host_name` | option 12 | it equals the name or starts with it, ignoring ASCII case |
+
+An option a client sends twice (RFC 3396) or with a bad length counts as absent: a class never matches half a value. A class is in the request when any of its matches holds; a policy's terms are joined by `and` or `or`, a term naming a deleted class is false and its negation true. Each class is evaluated at most once per request.
+
+The first matching policy wins per action:
+
+| Action | Effect |
+|---|---|
+| Options | An option comes from the first matching policy whose option set (`policy:<id>`) holds its code; the level sits between the pool and the reservation (section 4) |
+| `range` | The client gets addresses of this range only (within the pools of the scope); when the range is full the request is dropped as `pool_full`, as Windows DHCP does. An address inside the range of a policy of the scope, or of a server-level policy, goes only to the clients that policy's range applies to |
+| `lease` | The lease times of the grant, over the pool's and the scope's |
+| `ddns` | The DDNS settings of the client over the scope's, as the matcher and the effective view decide them; the reply's option 81 (section 13) applies them; the DDNS worker still reads the scope's settings when it writes the names, which a follow-up changes |
+
+Admission comes before the address: a scope that names classes serves only the clients of one of them (a sibling of its shared network may serve the client instead), a pool that names classes gives addresses only to the clients of one of them, and a restricted scope only clients the allow list admits (section 6). A client with a reservation is always served and always gets its reserved address; classes and policy ranges do not apply to it, its options and lease times do.
+
+The cost per request is a comparison of a few octets per match of the classes the scope's policies name, on the worker's stack: the decision allocates nothing (`tests/alloc.rs`) and keeps the first 64 matching policies. `GET /dhcp/scopes/{prefix}/effective-options` uses the same matcher, so the classes, the policies and the options it shows for a client are those the engine applies.
+
+### 16.2 Network boot
+
+A boot client is one whose option 60 starts with `PXEClient` (PXE firmware and iPXE) or `HTTPClient` (UEFI HTTP boot). The boot settings are options of the levels a reply merges, so that they inherit and can be set per scope, per policy and per reservation like any other:
+
+| Option | Meaning |
+|---|---|
+| 67 `boot-file-name` | The boot file: a TFTP path, or a URL for iPXE and UEFI HTTP boot |
+| 66 `tftp-server-name`, 150 `tftp-server-address` | The TFTP server; the reply's `siaddr` (the next server) is the first address of option 150, else option 66 when it is a dotted IPv4 address |
+| 43 `vendor-encapsulated-options` | PXE's vendor information; when no level sets it, a PXE client gets discovery control 8 (`06 01 08 ff`: boot from the file of this reply, no boot server discovery) |
+| 209 `pxelinux-configfile`, 210 `pxelinux-pathprefix`, 211 `pxelinux-reboottime` | PXELINUX (RFC 5071); 208, the old magic option, needs a custom definition and goes out only when set |
+
+When the levels give a boot client a boot file, the reply also carries the file in the `file` field (when shorter than 128 octets; PXE firmware reads the field, iPXE and UEFI either), `siaddr`, option 60 echoed as `PXEClient` or `HTTPClient` unless a level sets option 60 (UEFI HTTP boot ignores an offer without it), and options 66, 67 and 208 to 211 when set, asked for or not. A boot client without a boot file is answered as any other client, and a client that is not a boot client gets option 67 only when it asks for it.
+
+The boot file per architecture is a policy per class of option 93 (RFC 4578 and the IANA registry: 0 BIOS, 6 UEFI x86, 7 and 9 UEFI x64, 10 UEFI ARM 32, 11 UEFI ARM 64, 15 and 16 UEFI HTTP boot x86 and x64, 19 UEFI HTTP boot ARM 64). iPXE's chain detection is a policy over the user class `iPXE`, ordered first, so that firmware gets iPXE and iPXE gets its script instead of loading itself again. A typical scope:
+
+| Order | Policy | Condition | Option 67 |
+|---|---|---|---|
+| 1 | `ipxe` | class `ipxe` (`user_class` `iPXE`) | `http://boot.example.test/boot.ipxe` |
+| 2 | `http-boot` | class `http-boot` (`vendor_class` prefix `HTTPClient`) | `http://boot.example.test/ipxe.efi` |
+| 3 | `uefi` | class `uefi` (`architecture` 7 or 9) | `ipxe.efi` |
+| 4 | `bios` | class `bios` (`architecture` 0) | `undionly.kpxe` |
+
+with option 150 (or 66) on the scope naming the TFTP server. With the command line:
+
+```
+tenko dhcp class create ipxe --match '{"user_class":{"value":"iPXE"}}'
+tenko dhcp class create uefi --match '{"architecture":{"code":7}}' --match '{"architecture":{"code":9}}'
+tenko dhcp policy create --file ipxe-policy.json      # {"name":"ipxe","scope":"<prefix>","order":1,"condition":{"join":"or","terms":[{"class":"<id>"}]}}
+tenko dhcp option set policy:<id> 67=<hex of the URL>
+tenko dhcp policy set <id> --order 1 --enabled true
+tenko dhcp class set <id> --match '{"architecture":{"code":7}}'
+```
+
+### 16.3 Proxy DHCP
+
+A listener in `[dhcp] proxy` (an address, on `proxy_port`, 4011 by default) answers boot clients only and hands out no address (P3-Q16): a DISCOVER gets an OFFER with `yiaddr` 0 and the boot information, a REQUEST or INFORM (the boot server discovery of PXE 2.1, from a client that has its address from whichever server) gets an ACK with the same, sent back to the address and port it came from; option 97 (the client's machine identifier) is echoed. The scope is selected as for every request (by `giaddr`, by `ciaddr`, else by the listener's address) and must exist in Tenko for its boot options and policies to apply; its pools are not used and nothing is written. A request from a client that is not a boot client, or that its scope gives no boot file, is ignored (`not_boot_client`). One worker serves each proxy listener.
+
+```toml
+[dhcp]
+listen = [{ address = "192.0.2.10", mode = "relay" }]
+proxy = ["192.0.2.10"]
+proxy_port = 4011
+```
+
+### 16.4 Tests and the lab
+
+- `crates/tenko-dhcp/src/class/tests.rs`: every kind of match on the facts of a message, the plain user class of iPXE, AND and OR with negation and a deleted class, the scope's policies before the server's, the first match per action and per option, the admission of scopes, pools and policy ranges.
+- `crates/tenko-dhcp/tests/classes.rs` (in the world of `tests/class_world`): through the engine, a vendor-class policy selects its range and options, a MAC-wildcard policy its lease time, a scope and a pool admit their classes only; PXE BIOS and UEFI clients get the boot file of their architecture with `siaddr`, `file`, option 60 and option 43; iPXE is chained to its script; a UEFI HTTP boot client gets its URL and option 60; PXELINUX's options go out unasked; proxy DHCP answers without an address, also through a listener on loopback; and the reservation identity of section 9.1.
+- `crates/tenko-dhcp/src/image.rs` (unit test) and the corpus case `requests/windows-reserved-discover.hex`: a Windows-style request (option 61 of type 1 with the MAC) gets the reservation keyed by its MAC.
+- `crates/tenko-dhcp/tests/alloc.rs`: the decision, the admission, the boot options and the proxy path allocate nothing.
+- E27's class and PXE rows in the compose lab (`deploy/compose/lab-dhcp`, section 11): a vendor-class policy and a MAC-wildcard policy select their options and ranges, a user-class client gets its policy's options, QEMU with its iPXE ROM boots in BIOS mode and OVMF in UEFI mode from the lab's TFTP and HTTP server, a UEFI HTTP boot client gets its URL and fetches it, and the proxy DHCP listener answers the boot server discovery.

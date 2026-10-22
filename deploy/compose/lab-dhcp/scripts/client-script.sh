@@ -3,7 +3,7 @@
 # interface, the default route through option 3 and writes one line per event to
 # /run/lab/events, which smoke.sh reads:
 #   <reason> ip=<address> mask=<mask> routers=<option 3> dns=<option 6> ntp=<option 42>
-#            server=<option 54> lease=<option 51>
+#            server=<option 54> lease=<option 51> domain=<option 15>
 # Debian's own dhclient-script also writes resolv.conf and runs hooks; the lab needs
 # neither, and this script keeps the docker-assigned address out of the way the same way.
 # dhclient sets reason, interface and the new_ and old_ variables.
@@ -24,10 +24,12 @@ prefix_len() {
 }
 
 log() {
-  printf '%s ip=%s mask=%s routers=%s dns=%s ntp=%s server=%s lease=%s\n' \
+  # WP8.4: domain= (option 15) for E27's class rows.
+  printf '%s ip=%s mask=%s routers=%s dns=%s ntp=%s server=%s lease=%s domain=%s\n' \
     "$reason" "${new_ip_address:-}" "${new_subnet_mask:-}" "${new_routers:-}" \
     "${new_domain_name_servers:-}" "${new_ntp_servers:-}" \
-    "${new_dhcp_server_identifier:-}" "${new_dhcp_lease_time:-}" >>/run/lab/events
+    "${new_dhcp_server_identifier:-}" "${new_dhcp_lease_time:-}" \
+    "${new_domain_name:-}" >>/run/lab/events
 }
 
 case "$reason" in

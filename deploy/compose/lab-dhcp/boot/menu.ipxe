@@ -1,0 +1,9 @@
+#!ipxe
+# The test image of the DHCP lab's network boot (WP8.4, E27's PXE rows): a boot menu over
+# HTTP. Reaching it is the boot; the machine then fetches /done with its platform and MAC
+# address, which the HTTP server's log shows to smoke.sh, and powers off.
+menu Tenko DHCP lab: network boot reached the menu (${platform})
+item done Done
+choose --timeout 2000 --default done target ||
+imgfetch http://${next-server}/done?platform=${platform}&mac=${net0/mac:hexhyp} ||
+poweroff || exit

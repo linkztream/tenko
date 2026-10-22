@@ -48,7 +48,7 @@ use tenko_core::{
     },
 };
 use tenko_dhcp::{
-    allocator::{Allocator, ReferenceAllocator, Request, SingleNode},
+    allocator::{AdmitAll, Allocator, ReferenceAllocator, Request, SingleNode},
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
     lease::{
         CommitSettings, LeaseTable, MemLeaseTable, OfferTable, PendingChange, SharedLeases,
@@ -248,6 +248,8 @@ async fn node(dir: PathBuf, seed: u64) {
                             image: &image,
                             scope: &scope,
                             identity: id,
+                            hardware: id,
+                            admission: &AdmitAll,
                             requested: None,
                             leases: &*table,
                             offers: &offers,

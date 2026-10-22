@@ -14,6 +14,8 @@
 //! The allocator counts every thread of the process, so the file has one test that runs
 //! the measured sections one after another.
 
+// WP8.4: the world of the classes, policies and boot paths.
+mod class_world;
 mod dora;
 mod support;
 
@@ -188,6 +190,61 @@ fn the_codec_and_the_dora_path_do_not_allocate() {
     dora::section(&requests, GLOBAL);
     // WP8.5: the worker's step of conflict detection.
     conflict_section(&requests);
+    // WP8.4: classes, policies, network boot and proxy DHCP.
+    class_section();
+}
+
+// WP8.4: the engine over an image with classes and policies (the matcher's decision, the
+// class allow lists of scopes and pools, a policy range, the boot options of PXE, iPXE and
+// UEFI HTTP boot, reservations by MAC for clients with option 61) and the proxy DHCP path
+// do not allocate.
+fn class_section() {
+    use std::net::SocketAddrV4;
+
+    use class_world::{Ask, RELAY_L, World, type1_id};
+    use tenko_dhcp::v4::engine::{Action, Scratch};
+
+    let world = World::new();
+    let requests: Vec<Vec<u8>> = vec![
+        Ask::pxe(0x80, 0).bytes(),
+        Ask::pxe(0x81, 7).bytes(),
+        Ask {
+            user_class: Some(b"iPXE".to_vec()),
+            ..Ask::pxe(0x82, 0)
+        }
+        .bytes(),
+        Ask {
+            vendor_class: Some(b"HTTPClient:Arch:00016:UNDI:003001".to_vec()),
+            architecture: Some(16),
+            ..Ask::discover(0x83)
+        }
+        .bytes(),
+        Ask {
+            vendor_class: Some(b"Printer-Laser-2".to_vec()),
+            ..Ask::discover(0x60)
+        }
+        .bytes(),
+        Ask::discover(0x45).bytes(),
+        Ask::discover(0x20).with_id(type1_id(0x20)).bytes(),
+        Ask::discover(0x31).with_id(type1_id(0x31)).bytes(),
+    ];
+    let mut scratch = Scratch::new();
+    let source = SocketAddrV4::new(RELAY_L, 67);
+    let mut answered = 0;
+    let (allocations, reallocations, bytes) = measure(50, || {
+        for bytes in &requests {
+            let answer = world.run_from(black_box(bytes), source, &mut scratch);
+            answered += usize::from(matches!(answer.action, Action::Reply { .. }));
+            let answer = world.proxy(black_box(bytes), source, &mut scratch);
+            answered += usize::from(matches!(answer.action, Action::Reply { .. }));
+        }
+    });
+    assert!(answered > 0, "the engine answers the class requests");
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "classes, policies and network boot"
+    );
 }
 
 // WP8.5: the worker's step of conflict detection does not allocate: the rules of when, the

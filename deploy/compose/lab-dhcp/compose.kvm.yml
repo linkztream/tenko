@@ -1,0 +1,12 @@
+# The DHCP lab's network boot machines with KVM (WP8.4, E27's PXE rows): smoke.sh adds this
+# file to compose.yml when the host has /dev/kvm, so that QEMU runs accelerated; without it
+# QEMU runs under TCG, which is slower and enough for iPXE's menu.
+services:
+  pxe-bios:
+    devices:
+      - /dev/net/tun:/dev/net/tun
+      - /dev/kvm:/dev/kvm
+  pxe-uefi:
+    devices:
+      - /dev/net/tun:/dev/net/tun
+      - /dev/kvm:/dev/kvm

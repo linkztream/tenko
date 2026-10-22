@@ -212,6 +212,7 @@ Node-local settings of the role in `tenko.toml`, built and documented in `deploy
 | `[dhcp] workers` | the CPU count, at most 8 | Blocking UDP workers |
 | `[dhcp] offer_secs` | 10 | How long an offer holds its address in memory |
 | `[dhcp.probe] timeout_ms`, `cache_secs` | 300, 600 | The conflict probe's cap and its clean cache |
+| `[dhcp] proxy`, `proxy_port` | none, 4011 | Proxy DHCP listeners for boot clients (P3-Q16, WP8.4): unicast IPv4 addresses that answer PXE and HTTP boot clients without an address on the proxy port |
 | `[dhcp.probe] pending` | 1,024 | The pending table's size: offers waiting for a probe (WP8.5); a full table offers unprobed |
 | `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
 | `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs accepted per client per window; one beyond is dropped as `rate_limited` and the client keeps its lease (WP8.5) |

@@ -22,8 +22,8 @@ use tenko_core::{
 };
 use tenko_dhcp::{
     allocator::{
-        Allocator, Choice, NoOffers, OfferHold, PartnerLimit, ReferenceAllocator, Request,
-        SingleNode, grant_time,
+        AdmitAll, Allocator, Choice, NoOffers, OfferHold, PartnerLimit, ReferenceAllocator,
+        Request, SingleNode, grant_time,
     },
     ddns::{DdnsAction, DdnsQueue, DdnsRequest, MemDdnsQueue, QueueFull},
     feed::{Change, Delta, DhcpData, DhcpFeed, FeedError, FeedEvent, MemFeed},
@@ -1231,6 +1231,8 @@ fn run_allocation(
             image,
             scope,
             identity: &identity,
+            hardware: &identity,
+            admission: &AdmitAll,
             requested,
             leases: &table,
             offers,
@@ -1354,6 +1356,8 @@ fn a_held_offer_is_never_picked_for_another_client() {
             image: &world.image,
             scope,
             identity: &identity,
+            hardware: &identity,
+            admission: &AdmitAll,
             requested,
             leases: &table,
             offers,
@@ -1399,6 +1403,8 @@ fn a_scope_without_a_free_address_picks_nothing_and_a_sibling_helps() {
             image: &image,
             scope,
             identity,
+            hardware: identity,
+            admission: &AdmitAll,
             requested: None,
             leases: table,
             offers: &NoOffers,

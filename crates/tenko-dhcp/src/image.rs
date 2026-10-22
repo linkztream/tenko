@@ -18,6 +18,9 @@
 
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
+// WP8.4: the compiled classes and policies.
+use crate::class::Matcher;
+
 use ipnet::Ipv4Net;
 use tenko_core::{
     HostId, InterfaceId, PrefixId, RangeId, Revision, VrfId,
@@ -161,6 +164,8 @@ pub struct ConfigImage {
     filters: Vec<Filter>,
     classes: Vec<Class>,
     policies: Vec<Policy>,
+    // WP8.4: the classes and policies compiled for the DORA path.
+    matcher: Matcher,
 }
 
 impl ConfigImage {
@@ -230,12 +235,63 @@ impl ConfigImage {
     pub fn reservations(&self) -> &[ReservationImage] {
         &self.reservations
     }
+
+    // WP8.4: the reservation of a client by its identity or its hardware address, and the
+    // compiled matcher.
+    /// The reservation of a client in a scope: by its client identity first (option 61
+    /// when it sent one), then by its hardware identity (`0`, `htype`, `chaddr`), so that
+    /// a reservation keyed by MAC holds for a client whose `chaddr` it names whether or not
+    /// that client sends option 61 (Windows sends one of type 1), and a reservation keyed
+    /// by a client identifier holds only for that identifier and wins over a MAC-keyed one.
+    /// `hardware` equals `identity` for a client without option 61.
+    pub fn reservation_of(
+        &self,
+        scope: PrefixId,
+        identity: &[u8],
+        hardware: &[u8],
+    ) -> Option<&ReservationImage> {
+        self.reservation(scope, identity).or_else(|| {
+            if hardware == identity {
+                None
+            } else {
+                self.reservation(scope, hardware)
+            }
+        })
+    }
+
+    /// The reservation of a client in `scope` and its shared network's siblings: one by
+    /// client identity in any of them first, then one by hardware identity, in the order
+    /// of [`ConfigImage::reservation_of`].
+    pub fn client_reservation<'a>(
+        &'a self,
+        scope: &'a ScopeImage,
+        identity: &[u8],
+        hardware: &[u8],
+    ) -> Option<&'a ReservationImage> {
+        self.siblings(scope)
+            .find_map(|sibling| self.reservation(sibling.prefix, identity))
+            .or_else(|| {
+                if hardware == identity {
+                    None
+                } else {
+                    self.siblings(scope)
+                        .find_map(|sibling| self.reservation(sibling.prefix, hardware))
+                }
+            })
+    }
+
+    /// The compiled classes and policies.
+    pub fn matcher(&self) -> &Matcher {
+        &self.matcher
+    }
 }
 
 /// Puts a [`ConfigImage`] together.
 #[derive(Debug, Default)]
 pub struct ImageBuilder {
     image: ConfigImage,
+    // WP8.4: the policies' option sets, compiled with them.
+    policy_options: BTreeMap<tenko_core::dhcp::PolicyId, Vec<OptionValue>>,
 }
 
 impl ImageBuilder {
@@ -246,6 +302,7 @@ impl ImageBuilder {
                 revision,
                 ..ConfigImage::default()
             },
+            policy_options: BTreeMap::new(),
         }
     }
 
@@ -312,8 +369,134 @@ impl ImageBuilder {
         self
     }
 
-    /// The image.
-    pub fn build(self) -> ConfigImage {
+    // WP8.4: a policy's option set, and the matcher compiled at the build.
+    /// Sets the option set of a policy (its options when it matches).
+    pub fn policy_options(
+        &mut self,
+        policy: tenko_core::dhcp::PolicyId,
+        values: Vec<OptionValue>,
+    ) -> &mut Self {
+        self.policy_options.insert(policy, values);
+        self
+    }
+
+    /// The image, with the classes and policies compiled into its matcher.
+    pub fn build(mut self) -> ConfigImage {
+        let options = std::mem::take(&mut self.policy_options);
+        self.image.matcher = Matcher::compile(
+            &self.image.classes,
+            &self.image.policies,
+            &self.image.scopes,
+            |id| options.get(&id).cloned().unwrap_or_default(),
+        );
         self.image
+    }
+}
+
+// WP8.4: the reservation lookup by client identity and hardware address.
+#[cfg(test)]
+mod tests {
+    use tenko_core::{HostId, InterfaceId, PrefixId, RangeId, Revision, VrfId, dhcp::DdnsPolicy};
+
+    use super::*;
+
+    fn scope(prefix: PrefixId, network: &str, shared: Option<SharedNetworkId>) -> ScopeImage {
+        let network: Ipv4Net = network.parse().expect("a network");
+        ScopeImage {
+            prefix,
+            vrf: VrfId::generate(),
+            network,
+            authoritative: true,
+            restricted: false,
+            server_id: None,
+            lease: LeaseTimes::default(),
+            shared_network: shared,
+            pools: vec![PoolImage {
+                range: RangeId::generate(),
+                first: network.network(),
+                last: network.broadcast(),
+                lease: LeaseTimes::default(),
+                classes: Vec::new(),
+                options: Vec::new(),
+            }],
+            excluded: Vec::new(),
+            options: Vec::new(),
+            classes: Vec::new(),
+            ddns: DdnsPolicy::default(),
+        }
+    }
+
+    fn reservation(scope: PrefixId, addr: &str, identity: Vec<u8>) -> ReservationImage {
+        ReservationImage {
+            scope,
+            addr: addr.parse().expect("an address"),
+            host: HostId::generate(),
+            interface: InterfaceId::generate(),
+            identity,
+            options: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_reservation_is_found_by_client_identity_then_by_hardware_address() {
+        const MAC: [u8; 6] = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x20];
+        let mut hardware = vec![0, 1];
+        hardware.extend(MAC);
+        let mut client_id = vec![1, 1];
+        client_id.extend(MAC);
+        let mut other_id = vec![1, 0xff, 0, 0, 0, 1];
+        other_id.extend(MAC);
+        let shared = Some(SharedNetworkId::generate());
+        let (a, b, c) = (
+            PrefixId::generate(),
+            PrefixId::generate(),
+            PrefixId::generate(),
+        );
+        let mut builder = ImageBuilder::new(Revision(1));
+        builder
+            .scope(scope(a, "192.0.2.0/25", shared))
+            .scope(scope(b, "192.0.2.128/25", shared))
+            .scope(scope(c, "198.51.100.0/24", None));
+        // Scope A: the MAC's reservation; scope B: the client identifier's; scope C: the
+        // MAC's only.
+        for held in [
+            reservation(a, "192.0.2.20", hardware.clone()),
+            reservation(b, "192.0.2.150", client_id.clone()),
+            reservation(c, "198.51.100.20", hardware.clone()),
+        ] {
+            assert!(builder.reservation(held).is_none());
+        }
+        let image = builder.build();
+        let addr = |found: Option<&ReservationImage>| found.map(|held| held.addr.to_string());
+        // A client without option 61 (its identity is its hardware identity).
+        assert_eq!(
+            addr(image.reservation_of(a, &hardware, &hardware)),
+            Some("192.0.2.20".to_owned())
+        );
+        // A Windows-style client: option 61 of type 1 with the MAC. In scope C only the
+        // MAC's reservation exists, and it holds.
+        assert_eq!(
+            addr(image.reservation_of(c, &client_id, &hardware)),
+            Some("198.51.100.20".to_owned())
+        );
+        // Another identifier from the same MAC: the MAC's reservation holds too.
+        assert_eq!(
+            addr(image.reservation_of(c, &other_id, &hardware)),
+            Some("198.51.100.20".to_owned())
+        );
+        // A reservation keyed by client identifier holds for that identifier only.
+        assert_eq!(image.reservation_of(b, &other_id, &hardware), None);
+        assert_eq!(image.reservation_of(b, &hardware, &hardware), None);
+        // Across the shared network the client identifier's reservation wins, although
+        // the MAC's is in the first sibling.
+        let first = image.scope(a).expect("scope A");
+        assert_eq!(
+            addr(image.client_reservation(first, &client_id, &hardware)),
+            Some("192.0.2.150".to_owned())
+        );
+        assert_eq!(
+            addr(image.client_reservation(first, &other_id, &hardware)),
+            Some("192.0.2.20".to_owned())
+        );
     }
 }

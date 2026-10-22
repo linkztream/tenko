@@ -1,16 +1,17 @@
 //! The options of a reply (plan section 2.4).
 //!
 //! The effective value of a code is the most specific level's: the reservation's (host
-//! level), then the pool's, then the scope's, which the image holds already merged with the
-//! shared network's and the server's. Policies add their level between pool and host in
-//! WP8.4. The merge is a lookup per code over these short lists; nothing is copied.
+//! level), then the first matching policy's that holds the code (WP8.4), then the pool's,
+//! then the scope's, which the image holds already merged with the shared network's and
+//! the server's. The merge is a lookup per code over these short lists; nothing is copied.
 //!
 //! The order in the reply: option 53 (the builder writes it first), 54, the lease times
 //! (51, 58, 59) when a lease is granted, the subnet mask (RFC 2132 section 3.3 wants it
 //! before the routers), then every option the client lists in option 55 in the client's
 //! order, then the options the server sends unasked when they are set (routers, DNS
 //! servers, domain name, as Kea does), then option 61 echoed (RFC 6842), option 81 when
-//! the client sent one, and option 82 unchanged and last (RFC 3046). Codes the server
+//! the client sent one, and option 82 unchanged and last (RFC 3046). A boot client with a
+//! boot file also gets the boot options after the unasked ones ([`super::boot`], WP8.4). Codes the server
 //! manages itself ([`SERVER_MANAGED_V4`]) never come from an option set. Room for the
 //! closing options is kept before the others are written; an option that does not fit
 //! within the client's size is left out whole, never cut. A value above 255 octets is
@@ -23,6 +24,9 @@ use tenko_core::dhcp::{OptionValue, SERVER_MANAGED_V4};
 
 // WP8.3: the reply's option 81 says what DDNS does for the scope.
 use crate::ddns::flags::reply_flags;
+// WP8.4: the policies and the boot options.
+use super::boot;
+use crate::class::Decision;
 use crate::{
     image::{PoolImage, ScopeImage},
     v4::{EncodeError, Message, MessageBuilder, RelayAgentInfo, code},
@@ -40,6 +44,9 @@ pub struct Levels<'a> {
     pub pool: Option<&'a PoolImage>,
     /// The reservation's options.
     pub host: Option<&'a [OptionValue]>,
+    // WP8.4: the policies that match the client, between the pool and the reservation.
+    /// The client's classes and policies; none outside the engine's request paths.
+    pub decision: Option<&'a Decision<'a>>,
 }
 
 impl<'a> Levels<'a> {
@@ -53,8 +60,19 @@ impl<'a> Levels<'a> {
         };
         self.host
             .and_then(find)
+            // WP8.4: the first matching policy whose set holds the code.
+            .or_else(|| self.decision.and_then(|decision| decision.option(code)))
             .or_else(|| self.pool.and_then(|pool| find(&pool.options)))
             .or_else(|| find(&self.scope.options))
+    }
+
+    // WP8.4: the DDNS settings a policy gives the client.
+    /// The DDNS settings for the client: the first matching policy's that sets them, else
+    /// the scope's.
+    pub fn ddns(&self) -> &'a tenko_core::dhcp::DdnsPolicy {
+        self.decision
+            .and_then(Decision::ddns)
+            .unwrap_or(&self.scope.ddns)
     }
 }
 
@@ -150,13 +168,18 @@ pub fn options(
             put(builder, code, data);
         }
     }
+    // WP8.4: a boot client with a boot file gets the boot options.
+    if let Some((client, _)) = boot::boot_reply(&reply.levels) {
+        boot::options(builder, &reply.levels, client, &mut put);
+    }
     if let Some(id) = reply.client_id {
         builder.option(code::CLIENT_IDENTIFIER, id)?;
     }
     if let Some(fqdn) = &fqdn {
         // A name the ASCII form cannot carry is left out with the option.
         // WP8.3: the flags of the scope's DDNS policy (RFC 4702 section 4).
-        let flags = reply_flags(&reply.levels.scope.ddns, fqdn.flags());
+        // WP8.4: the first matching policy's DDNS settings over the scope's.
+        let flags = reply_flags(reply.levels.ddns(), fqdn.flags());
         let _ = builder.client_fqdn(flags, &fqdn.name());
     }
     if let Some(info) = reply.relay {

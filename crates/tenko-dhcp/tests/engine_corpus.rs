@@ -188,6 +188,12 @@ fn the_engine_answers_the_corpus_as_recorded() {
             replies += 1;
             check_reply(name, &request, reply);
         }
+        // WP8.4: a Windows-style client (option 61 of type 1 and the MAC) holds the
+        // reservation keyed by its MAC.
+        if name == "windows-reserved-discover" {
+            let offered = Message::parse(reply).expect("an offer");
+            assert_eq!(offered.yiaddr(), Ipv4Addr::new(192, 0, 2, 20), "{name}");
+        }
         let rendered = render(name, &summary(&answer), reply);
         let path = expected_dir.join(format!("{name}.hex"));
         if bless {

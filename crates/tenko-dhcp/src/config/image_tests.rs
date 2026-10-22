@@ -281,6 +281,15 @@ fn reference(data: &DhcpData) -> Built {
             }
         }
     }
+    // WP8.4: every policy's option set, for the matcher (the image compiles the ones of
+    // the policies it holds).
+    for (owner, set) in &data.option_sets {
+        if let OptionOwner::Policy(policy) = owner
+            && !set.values.is_empty()
+        {
+            builder.policy_options(*policy, set.values.clone());
+        }
+    }
     builder
         .filters(data.filters.values().cloned().collect())
         .classes(data.classes.values().cloned().collect())

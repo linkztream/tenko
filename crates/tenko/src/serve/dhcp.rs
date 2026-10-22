@@ -149,6 +149,12 @@ pub(crate) fn server_config(section: &DhcpSection, node: NodeId) -> ServerConfig
             client_port: section.client_port,
         },
         node,
+        // WP8.4: the ProxyDHCP listeners of `[dhcp] proxy`.
+        proxy: section
+            .proxy
+            .iter()
+            .map(|address| std::net::SocketAddrV4::new(*address, section.proxy_port))
+            .collect(),
         ..ServerConfig::default()
     }
 }

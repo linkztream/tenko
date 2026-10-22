@@ -19,9 +19,44 @@ use tenko_core::{
 };
 
 use crate::{
-    image::{ConfigImage, ScopeImage},
+    image::{ConfigImage, PoolImage, ReservationImage, ScopeImage},
     lease::LeaseTable,
 };
+
+// WP8.4: the class and policy restrictions on which addresses a client may get.
+/// Which addresses a client may be given beyond the rules of the module comment: the
+/// classes a scope or a pool admits and the address ranges of policies (plan section 2.4,
+/// [`crate::class`]). Reservations are not subject to it.
+pub trait Admission {
+    /// Whether `addr` of `scope` may go to the client.
+    fn admits(&self, scope: &ScopeImage, addr: Ipv4Addr) -> bool;
+
+    /// Whether `pool` may give the client any address; a pool it refuses is not walked.
+    fn admits_pool(&self, scope: &ScopeImage, pool: &PoolImage) -> bool {
+        let _ = (scope, pool);
+        true
+    }
+}
+
+/// No restriction: every address the other rules allow.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdmitAll;
+
+impl Admission for AdmitAll {
+    fn admits(&self, _scope: &ScopeImage, _addr: Ipv4Addr) -> bool {
+        true
+    }
+}
+
+impl Admission for crate::class::Decision<'_> {
+    fn admits(&self, scope: &ScopeImage, addr: Ipv4Addr) -> bool {
+        crate::class::Decision::admits(self, scope, addr)
+    }
+
+    fn admits_pool(&self, scope: &ScopeImage, pool: &PoolImage) -> bool {
+        crate::class::Decision::admits_pool(self, scope, pool)
+    }
+}
 
 /// Which addresses this node may hand out (plan section 2.12). On one node every address
 /// is the node's ([`SingleNode`]); in Phase 5 the RFC 3074 bucket of the client in load
@@ -98,6 +133,12 @@ pub struct Request<'a> {
     pub scope: &'a ScopeImage,
     /// The client identity (`ClientKey::identity`).
     pub identity: &'a [u8],
+    // WP8.4: the hardware identity for MAC-keyed reservations, and the admission.
+    /// The client's hardware identity (`0`, `htype`, `chaddr`), which a reservation keyed by
+    /// MAC holds; equal to `identity` for a client without option 61.
+    pub hardware: &'a [u8],
+    /// The class and policy restrictions ([`AdmitAll`] for none).
+    pub admission: &'a dyn Admission,
     /// The address the client asks for.
     pub requested: Option<Ipv4Addr>,
     /// The leases.
@@ -110,16 +151,16 @@ pub struct Request<'a> {
     pub now: Timestamp,
 }
 
-impl Request<'_> {
+impl<'a> Request<'a> {
     /// Whether `addr` may be given to this client: the rules of the module comment.
     pub fn is_free(&self, scope: &ScopeImage, addr: Ipv4Addr) -> bool {
         if !scope.is_dynamic(addr) {
             return false;
         }
-        if self
-            .image
-            .reserved_at(scope.prefix, addr)
-            .is_some_and(|reservation| reservation.identity != self.identity)
+        // WP8.4: reserved for another client; the client's own reservation is found by
+        // identity or by hardware address.
+        if let Some(reservation) = self.image.reserved_at(scope.prefix, addr)
+            && !self.is_own(reservation)
         {
             return false;
         }
@@ -134,6 +175,25 @@ impl Request<'_> {
             .offers
             .held_for_other(scope.prefix, addr, self.identity, self.now)
             && self.ownership.owns(scope.prefix, addr, self.identity)
+            // WP8.4: the classes and the policy ranges.
+            && self.admission.admits(scope, addr)
+    }
+
+    // WP8.4: reservations by identity or by hardware address.
+    /// The client's reservation in the scope or its siblings
+    /// ([`ConfigImage::client_reservation`]).
+    pub fn reservation(&self) -> Option<&'a ReservationImage> {
+        self.image
+            .client_reservation(self.scope, self.identity, self.hardware)
+    }
+
+    /// Whether `reservation` is the client's own.
+    fn is_own(&self, reservation: &ReservationImage) -> bool {
+        reservation.identity == self.identity
+            || (reservation.identity == self.hardware
+                && self
+                    .reservation()
+                    .is_some_and(|own| std::ptr::eq(own, reservation)))
     }
 }
 
@@ -187,10 +247,9 @@ pub struct ReferenceAllocator;
 impl Allocator for ReferenceAllocator {
     fn pick(&self, request: &Request<'_>) -> Option<Choice> {
         let image = request.image;
-        for scope in image.siblings(request.scope) {
-            if let Some(reservation) = image.reservation(scope.prefix, request.identity) {
-                return Some(Choice::Reservation(reservation.addr));
-            }
+        // WP8.4: by client identity, then by hardware address.
+        if let Some(reservation) = request.reservation() {
+            return Some(Choice::Reservation(reservation.addr));
         }
         for scope in image.siblings(request.scope) {
             if let Some(lease) = request.leases.by_client(scope.prefix, request.identity)
@@ -208,7 +267,12 @@ impl Allocator for ReferenceAllocator {
             }
         }
         for scope in image.siblings(request.scope) {
-            for pool in &scope.pools {
+            // WP8.4: the pools the client's classes and policies keep it out of.
+            for pool in scope
+                .pools
+                .iter()
+                .filter(|pool| request.admission.admits_pool(scope, pool))
+            {
                 let (first, last) = (u32::from(pool.first), u32::from(pool.last));
                 for raw in first..=last {
                     let addr = Ipv4Addr::from(raw);

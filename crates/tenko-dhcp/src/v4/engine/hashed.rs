@@ -32,10 +32,9 @@ impl HashedAllocator {
 impl Allocator for HashedAllocator {
     fn pick(&self, request: &Request<'_>) -> Option<Choice> {
         let image = request.image;
-        for scope in image.siblings(request.scope) {
-            if let Some(reservation) = image.reservation(scope.prefix, request.identity) {
-                return Some(Choice::Reservation(reservation.addr));
-            }
+        // WP8.4: by client identity, then by hardware address.
+        if let Some(reservation) = request.reservation() {
+            return Some(Choice::Reservation(reservation.addr));
         }
         for scope in image.siblings(request.scope) {
             if let Some(lease) = request.leases.by_client(scope.prefix, request.identity)
@@ -58,6 +57,11 @@ impl Allocator for HashedAllocator {
                 let size = pool.size();
                 let start = Self::start(request.identity, index, size);
                 index += 1;
+                // WP8.4: a pool the client's classes and policies keep it out of (after
+                // the index, so a client's starts do not move with its classes).
+                if !request.admission.admits_pool(scope, pool) {
+                    continue;
+                }
                 let first = u64::from(u32::from(pool.first));
                 for step in 0..size {
                     let offset = (start + step) % size;

@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-23 Phase 3 requirements; 3 named by at least one test, 20 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 5 named by at least one test, 18 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -15,9 +15,9 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 |---|---|---|---|---|
 | DHCP-01 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-02 | Must | - | - | `crates/tenko-core/src/dhcp/option.rs`<br>`crates/tenko-dhcp/src/config/options.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
-| DHCP-03 | Must | - | - | `crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
+| DHCP-03 | Must | `crates/tenko-dhcp/tests/classes.rs` | - | `crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-04 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
-| DHCP-05 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-05 | Must | `crates/tenko-dhcp/tests/classes.rs` | - | `crates/tenko-dhcp/src/v4/engine/boot.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-06 | Must | `crates/tenko-dhcp/tests/conflict.rs` | `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md` | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/conflict/mod.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 2 more |
 | DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 3 more |
 | DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>and 6 more |
@@ -59,9 +59,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 
 - DHCP-01 (Must)
 - DHCP-02 (Must)
-- DHCP-03 (Must)
 - DHCP-04 (Must)
-- DHCP-05 (Must)
 - DHCP-07 (Must)
 - DHCP-08 (Must)
 - DHCP-09 (Must)

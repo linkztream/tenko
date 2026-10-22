@@ -1,0 +1,7 @@
+#!ipxe
+# The script iPXE gets by TFTP in the DHCP lab (WP8.4, E27's PXE rows): the scope's policy
+# for the user class iPXE names it, so firmware that loaded iPXE does not load it again.
+# It chains the menu over HTTP and names the platform (pcbios or efi) and the MAC address
+# in the URL, which the HTTP server's log shows to smoke.sh.
+echo Tenko DHCP lab: iPXE on ${platform} ${buildarch}, ${net0/mac} at ${net0/ip}
+chain http://${next-server}/menu.ipxe?platform=${platform}&mac=${net0/mac:hexhyp} || shell

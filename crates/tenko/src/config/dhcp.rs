@@ -191,6 +191,12 @@ pub struct DhcpSection {
     pub ddns: DhcpDdnsSection,
     /// The lease history.
     pub history: DhcpHistorySection,
+    // WP8.4: proxy DHCP (DHCP-05, P3-Q16).
+    /// The addresses of proxy DHCP listeners: boot clients get their boot information there
+    /// and no address (PXE boot server discovery). Empty (the default): none.
+    pub proxy: Vec<Ipv4Addr>,
+    /// The proxy DHCP port (default 4011, the PXE boot server port).
+    pub proxy_port: u16,
 }
 
 impl Default for DhcpSection {
@@ -206,6 +212,8 @@ impl Default for DhcpSection {
             decline: DhcpDeclineSection::default(),
             ddns: DhcpDdnsSection::default(),
             history: DhcpHistorySection::default(),
+            proxy: Vec::new(),
+            proxy_port: 4011,
         }
     }
 }
@@ -225,6 +233,41 @@ impl DhcpSection {
     /// The socket address of a listener.
     pub fn socket_addr(&self, listen: &DhcpListen) -> SocketAddrV4 {
         SocketAddrV4::new(listen.address, self.port)
+    }
+
+    // WP8.4: the proxy DHCP listeners.
+    fn validate_proxy(&self) -> Result<(), ConfigError> {
+        let check = |ok: bool, message: String| {
+            if ok {
+                Ok(())
+            } else {
+                Err(ConfigError::invalid(message))
+            }
+        };
+        for (index, address) in self.proxy.iter().enumerate() {
+            check(
+                !address.is_unspecified() && !address.is_broadcast() && !address.is_multicast(),
+                format!(
+                    "dhcp.proxy[{index}]: {address} is not a unicast address; name the \
+                     interface's address"
+                ),
+            )?;
+            check(
+                !self.proxy.iter().take(index).any(|other| other == address),
+                format!("dhcp.proxy[{index}]: {address} is listed twice"),
+            )?;
+            check(
+                self.proxy_port != self.port || !self.listen.iter().any(|l| l.address == *address),
+                format!(
+                    "dhcp.proxy[{index}]: {address} listens on dhcp.port already; give \
+                     dhcp.proxy_port another port (4011)"
+                ),
+            )?;
+        }
+        check(
+            self.proxy_port > 0,
+            "dhcp.proxy_port must be between 1 and 65535".to_owned(),
+        )
     }
 
     pub(super) fn validate(&self) -> Result<(), ConfigError> {
@@ -267,6 +310,8 @@ impl DhcpSection {
                 &format!("dhcp.listen[{index}]: {address} is listed twice"),
             )?;
         }
+        // WP8.4: the proxy DHCP listeners.
+        self.validate_proxy()?;
         check(self.port > 0, "dhcp.port must be between 1 and 65535")?;
         check(
             self.relay_port > 0 && self.client_port > 0,
@@ -399,10 +444,27 @@ mod tests {
             ("[decline]\nwindow_secs = 1", "dhcp.decline.window_secs"),
             ("[ddns]\nretries = 99", "dhcp.ddns.retries"),
             ("[history]\ndays = 0", "dhcp.history.days"),
+            // WP8.4: the proxy DHCP listeners.
+            ("proxy = [\"0.0.0.0\"]", "dhcp.proxy[0]"),
+            ("proxy = [\"192.0.2.1\", \"192.0.2.1\"]", "listed twice"),
+            (
+                "listen = [\"192.0.2.1\"]\nproxy = [\"192.0.2.1\"]\nproxy_port = 67",
+                "dhcp.proxy_port",
+            ),
+            ("proxy_port = 0", "dhcp.proxy_port"),
             ("unknown = 1", "unknown"),
         ] {
             let error = parse(text).expect_err(text);
             assert!(error.contains(key), "{text}: {error}");
         }
+    }
+
+    // WP8.4: the proxy DHCP listeners on port 4011 by default.
+    #[test]
+    fn proxy_listeners_default_to_the_pxe_boot_server_port() {
+        let section = parse("listen = [\"192.0.2.1\"]\nproxy = [\"192.0.2.1\"]").expect("valid");
+        assert_eq!(section.proxy, vec![Ipv4Addr::new(192, 0, 2, 1)]);
+        assert_eq!(section.proxy_port, 4011);
+        assert_eq!(DhcpSection::default().proxy, Vec::<Ipv4Addr>::new());
     }
 }

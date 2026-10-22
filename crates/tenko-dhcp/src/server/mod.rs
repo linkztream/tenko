@@ -27,6 +27,10 @@
 //! and always on Windows, it goes out as a broadcast, which every client accepts (RFC 2131
 //! section 4.1 allows it when unicast is not possible).
 //!
+//! WP8.4: proxy DHCP listeners ([`ServerConfig::proxy`], port 4011 by default) answer boot
+//! clients with the boot information and no address ([`engine::boot::proxy`]); one worker
+//! each, nothing committed.
+//!
 //! WP7.5: the lease table is reached through a [`TableHandle`]: a table the server owns
 //! (`RwLock<T>`, [`DhcpServer::start`]) or the role's [`SharedLeases`], which the
 //! production lease store applies its commits to and the feed follows
@@ -131,6 +135,10 @@ pub struct ServerConfig {
     // WP8.5: conflict detection before an offer and the DECLINE limit.
     /// Conflict detection (`[dhcp.probe]`, `[dhcp.decline]`, TGL-16); without a probe none.
     pub conflict: ConflictSettings,
+    // WP8.4: proxy DHCP (DHCP-05, P3-Q16).
+    /// The proxy DHCP listeners: the unicast address and port (4011 for the boot server
+    /// discovery of PXE), each answered by one worker with [`engine::boot::proxy`].
+    pub proxy: Vec<SocketAddrV4>,
 }
 
 impl Default for ServerConfig {
@@ -148,6 +156,7 @@ impl Default for ServerConfig {
             send_buffer: 4 * 1024 * 1024,
             node: NodeId(1),
             conflict: ConflictSettings::default(),
+            proxy: Vec::new(),
         }
     }
 }
@@ -316,6 +325,8 @@ pub struct DhcpServer<H: TableHandle> {
     threads: Vec<JoinHandle<()>>,
     locals: Vec<SocketAddrV4>,
     listeners: Vec<ListenerInfo>,
+    // WP8.4: the proxy DHCP listeners bound.
+    proxies: Vec<SocketAddrV4>,
 }
 
 impl<H: TableHandle> std::fmt::Debug for DhcpServer<H> {
@@ -352,6 +363,11 @@ impl<H: TableHandle> DhcpServer<H> {
     /// # Errors
     ///
     /// A listener that cannot be bound, or a thread that cannot be started.
+    // WP8.4: the proxy DHCP listeners took the start past the line limit.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the listeners, the shared state and the threads, started in order"
+    )]
     pub fn start_with(
         config: &ServerConfig,
         image: ConfigImage,
@@ -370,6 +386,9 @@ impl<H: TableHandle> DhcpServer<H> {
             )?);
         }
         let total = bound.len() * workers;
+        // WP8.4: one socket and one worker per proxy DHCP listener; their counters follow the
+        // workers', the committer's stay last.
+        let proxies = bind_proxies(config)?;
         let links: Vec<(SocketAddrV4, Option<LinkSender>)> = config
             .listen
             .iter()
@@ -405,7 +424,9 @@ impl<H: TableHandle> DhcpServer<H> {
             sockets: bound.iter().map(|b| Arc::clone(&b.sockets[0])).collect(),
             links,
             last_commit_us: AtomicU64::new(0),
-            metrics: (0..=total).map(|_| WorkerMetrics::default()).collect(),
+            metrics: (0..=total + proxies.len())
+                .map(|_| WorkerMetrics::default())
+                .collect(),
             stop: AtomicBool::new(false),
             committer: Mutex::new(None),
             settings: config.engine,
@@ -454,17 +475,26 @@ impl<H: TableHandle> DhcpServer<H> {
                 );
             }
         }
+        // WP8.4: the proxy DHCP workers.
+        spawn_proxies(&shared, &proxies, total, &mut threads)?;
         Ok(Self {
             shared,
             threads,
             locals: bound.iter().map(|b| b.address).collect(),
             listeners,
+            proxies: proxies.iter().map(|p| p.address).collect(),
         })
     }
 
     /// What each listener is.
     pub fn listeners(&self) -> &[ListenerInfo] {
         &self.listeners
+    }
+
+    // WP8.4: the proxy DHCP listeners.
+    /// The proxy DHCP listeners bound (the port the system chose for port 0).
+    pub fn proxies(&self) -> &[SocketAddrV4] {
+        &self.proxies
     }
 
     // WP7.5: the snapshot reset and the completion wake-up of the role.
@@ -717,6 +747,90 @@ fn worker_loop<H: TableHandle>(
                 );
             }
             Action::Drop(_) | Action::Ignore(_) => {}
+        }
+    }
+}
+
+// WP8.4: the proxy DHCP listeners and their workers.
+/// Binds one socket per proxy DHCP listener.
+fn bind_proxies(config: &ServerConfig) -> io::Result<Vec<socket::Bound>> {
+    config
+        .proxy
+        .iter()
+        .map(|address| {
+            let listen = Listen {
+                address: *address,
+                mode: ListenMode::Relay,
+                interface: None,
+            };
+            socket::bind(
+                &listen,
+                1,
+                SocketLayout::Shared,
+                (config.recv_buffer, config.send_buffer),
+            )
+        })
+        .collect()
+}
+
+/// Starts one worker per proxy DHCP listener; their counters follow the `first` workers'.
+fn spawn_proxies<H: TableHandle>(
+    shared: &Arc<Shared<H>>,
+    proxies: &[socket::Bound],
+    first: usize,
+    threads: &mut Vec<JoinHandle<()>>,
+) -> io::Result<()> {
+    for (offset, proxy) in proxies.iter().enumerate() {
+        let socket = Arc::clone(&proxy.sockets[0]);
+        let shared = Arc::clone(shared);
+        let (local, me) = (proxy.local, first + offset);
+        tracing::info!(listen = %proxy.address, "the dhcp role answers boot clients as a proxy DHCP server");
+        threads.push(
+            std::thread::Builder::new()
+                .name(format!("dhcp-proxy-{offset}"))
+                .spawn(move || proxy_loop(&shared, &socket, me, local))?,
+        );
+    }
+    Ok(())
+}
+
+/// A proxy DHCP worker: boot replies without an address, nothing committed.
+fn proxy_loop<H: TableHandle>(shared: &Shared<H>, socket: &UdpSocket, me: usize, local: Ipv4Addr) {
+    let metrics = &shared.metrics[me];
+    let mut buf = vec![0u8; 4096];
+    let mut scratch = Scratch::new();
+    let none = (SocketAddrV4::new(local, 0), None);
+    while !shared.stop.load(Ordering::Relaxed) {
+        let Ok((len, SocketAddr::V4(source))) = socket.recv_from(&mut buf) else {
+            continue;
+        };
+        let image = Arc::clone(&shared.image.read().unwrap_or_else(PoisonError::into_inner));
+        let answer = {
+            let table = shared.table.read();
+            let ctx = Context {
+                image: &image,
+                leases: &*table,
+                offers: &shared.offers,
+                ownership: &SingleNode,
+                allocator: &HashedAllocator,
+                settings: &shared.settings,
+                accepting: shared.store.accepting(),
+                now: Timestamp::now(),
+            };
+            engine::boot::proxy(
+                &ctx,
+                &Received {
+                    bytes: &buf[..len],
+                    source,
+                    local,
+                    mode: ListenMode::Relay,
+                },
+                &mut scratch,
+            )
+        };
+        metrics.count(&answer);
+        if let Action::Reply { len, dest, .. } = answer.action {
+            let _ = send(socket, &none, dest, &scratch.reply[..len]);
         }
     }
 }

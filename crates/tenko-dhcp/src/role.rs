@@ -333,9 +333,15 @@ impl LocalNode {
     fn row_of(&self, lease: Lease, revision: Revision) -> commands::LeaseRow {
         let image = self.server().map(|server| server.image());
         let identity = lease.client.identity();
+        // WP8.4: a MAC-keyed reservation holds for a client that sends option 61 too.
+        let hardware = tenko_core::dhcp::ClientKey {
+            client_id: None,
+            ..lease.client.clone()
+        }
+        .identity();
         let reservation = image
             .as_ref()
-            .and_then(|image| image.reservation(lease.scope, &identity));
+            .and_then(|image| image.reservation_of(lease.scope, &identity, &hardware));
         commands::LeaseRow {
             reserved: reservation.is_some_and(|held| held.addr == lease.addr),
             host: reservation.map(|held| held.host),

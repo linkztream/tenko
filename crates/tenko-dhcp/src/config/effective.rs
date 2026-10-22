@@ -7,8 +7,9 @@
 //! per code, as the first matching policy wins per action. Pool options depend on the
 //! address the allocator picks and are shown on the pool, not here.
 //!
-//! Which classes and policies match a client is WP8.4's compiled matcher; the route asks a
-//! [`PolicyMatcher`], and until WP8.4 the matcher is [`NoMatcher`], under which no policy
+//! Which classes and policies match a client is the compiled matcher of the image
+//! ([`crate::class`], WP8.4); the route asks a [`PolicyMatcher`], which is
+//! [`ImageMatcher`] (the one the DORA path uses), or [`NoMatcher`], under which no policy
 //! matches.
 
 use tenko_core::{
@@ -18,6 +19,8 @@ use tenko_core::{
 use tenko_store::ReadView;
 
 use super::{ConfigResult, ConfigService, image::build, load::scope_data, scopes::scope_not_found};
+// WP8.4: the facts of the compiled matcher.
+use crate::class::Facts;
 use crate::image::ConfigImage;
 
 /// What a request tells about the client, as far as the effective view asks for it.
@@ -31,9 +34,33 @@ pub struct ClientFacts {
     pub vendor_class: Option<String>,
     /// The user class (option 77).
     pub user_class: Option<String>,
+    // WP8.4: the other fields classes and policies test.
+    /// The client system architecture (option 93).
+    pub architecture: Option<u16>,
+    /// The relay agent's circuit-id (option 82).
+    pub circuit_id: Option<Vec<u8>>,
+    /// The relay agent's remote-id (option 82).
+    pub remote_id: Option<Vec<u8>>,
+    /// The host name (option 12).
+    pub host_name: Option<String>,
 }
 
 impl ClientFacts {
+    // WP8.4: the facts the matcher reads.
+    /// The facts the matcher tests; `architecture` is the octets of option 93 to borrow.
+    pub fn facts<'a>(&'a self, architecture: &'a [u8; 2]) -> Facts<'a> {
+        Facts {
+            mac: self.mac,
+            client_id: self.client_id.as_deref(),
+            vendor_class: self.vendor_class.as_deref().map(str::as_bytes),
+            user_class: self.user_class.as_deref().map(str::as_bytes),
+            circuit_id: self.circuit_id.as_deref(),
+            remote_id: self.remote_id.as_deref(),
+            architectures: self.architecture.map(|_| &architecture[..]),
+            host_name: self.host_name.as_deref().map(str::as_bytes),
+        }
+    }
+
     /// The client identities to look a reservation up by: the client identifier's, then the
     /// hardware address's.
     pub fn identities(&self) -> Vec<Vec<u8>> {
@@ -73,6 +100,25 @@ pub struct NoMatcher;
 impl PolicyMatcher for NoMatcher {
     fn matches(&self, _image: &ConfigImage, _scope: PrefixId, _client: &ClientFacts) -> Matched {
         Matched::default()
+    }
+}
+
+// WP8.4: the compiled matcher of the image.
+/// The matcher of the DORA path: the image's compiled classes and policies
+/// ([`crate::class::Matcher`]).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ImageMatcher;
+
+impl PolicyMatcher for ImageMatcher {
+    fn matches(&self, image: &ConfigImage, scope: PrefixId, client: &ClientFacts) -> Matched {
+        let architecture = client.architecture.unwrap_or_default().to_be_bytes();
+        let facts = client.facts(&architecture);
+        let matcher = image.matcher();
+        let decision = matcher.decide(scope, facts);
+        Matched {
+            classes: matcher.classes_of(&facts),
+            policies: decision.matched().map(|rule| rule.id).collect(),
+        }
     }
 }
 

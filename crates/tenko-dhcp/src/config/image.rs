@@ -272,6 +272,13 @@ pub fn build(data: &DhcpData) -> Built {
             }
         }
     }
+    // WP8.4: the option sets of the policies the image holds, for the matcher.
+    for policy in data.policies.values().filter(|policy| policy.enabled) {
+        let set = values(data, OptionOwner::Policy(policy.id));
+        if !set.is_empty() {
+            builder.policy_options(policy.id, set.to_vec());
+        }
+    }
     builder
         .filters(data.filters.values().cloned().collect())
         .classes(data.classes.values().cloned().collect())

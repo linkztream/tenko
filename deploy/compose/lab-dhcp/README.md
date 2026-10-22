@@ -39,7 +39,9 @@ client-servers┤                             │
 | `tenko` (profile `tenko`) | The node: the image of `deploy/Dockerfile` (the static musl binary) with `--roles controller,dhcp`, the DHCP module on, the Lab profile, `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }]`, the API in plain HTTP on 8443. Read-only root file system, no capability, the key-encryption key as a Docker secret | in `netns` |
 | `node-example` (profile `example`) | Until the binary has the dhcp role: the engine's example server (`crates/tenko-dhcp/examples/dhcp_server.rs`, built by `example.Dockerfile` with the builder of `deploy/Dockerfile` for musl) with the in-memory reference store `MemLeaseStore`. It serves one scope, `198.18.0.0/15`, selected only by option 118 or the link selection sub-option, so the clients' rows cannot run against it | in `netns` |
 | `client-servers`, `client-lan`, `client-iot`, `client-guest` | One client per network with a fixed MAC: ISC's `dhclient` with `scripts/dhclient.conf` and `scripts/client-script.sh` (which puts the address on the interface and writes one line per event to `/run/lab/events`), and BusyBox's `udhcpc` | `.5`, `.69`, `.133`, `.197` before their lease |
-| `tester` | Kea's `perfdhcp` (Debian's `kea-admin` 2.2) and `scripts/relay-test.py`, a relay agent written against RFC 2131 that sends option 82 with a circuit-id and, when asked, the link selection sub-option or option 118, and checks the echo | `192.0.2.20` |
+| `tester` | Kea's `perfdhcp` (Debian's `kea-admin` 2.2) and `scripts/relay-test.py`, a relay agent written against RFC 2131 that sends option 82 with a circuit-id and, when asked, the link selection sub-option or option 118, and checks the echo; for E27 it also sends options 60, 77 and 93 as a boot client, checks the boot file and option 60 of the replies, and sends the boot server discovery to the proxy DHCP port | `192.0.2.20` |
+| `bootsrv` (profile `pxe`) | The boot server of E27's PXE rows (WP8.4): TFTP (Debian's `dnsmasq` with DNS and DHCP off) and HTTP (`python3 -m http.server`) with `undionly.kpxe` and `ipxe.efi` of Debian's `ipxe`, `boot/boot.ipxe` and `boot/menu.ipxe`; it logs to `/run/lab/tftp.log` and `/run/lab/http.log` | `192.0.2.21` |
+| `pxe-bios`, `pxe-uefi` (profile `pxe`) | Two machines that boot over the network on lan (WP8.4): QEMU (Debian's `qemu-system-x86`) with the iPXE ROM of its virtio card in BIOS mode (SeaBIOS), and with OVMF in UEFI mode; the container bridges its `eth0` and the machine's tap device, so the machine's broadcasts reach the gateway. KVM where the host has `/dev/kvm` (`compose.kvm.yml`), else TCG | MACs `00:00:5e:00:53:a0` and `:a1` |
 
 Everything except the node comes from the tools image (`tools.Dockerfile`, Debian 12 packages
 only), so nothing on the other side of the wire shares code with Tenko.
@@ -73,6 +75,15 @@ Then the rows, one `PASS`, `FAIL` or `SKIP` line each:
 | `filter.deny`, `filter.removed` | a deny filter for client-guest's MAC: no lease; the filter deleted: a lease again |
 | `release` | `dhclient -r` on iot: the lease row is `released` |
 | `restart.leases`, `restart.client` | `docker compose restart tenko`: the node lists the same active leases, and client-lan asking again (INIT-REBOOT) keeps `192.0.2.80` |
+| `class.vendor` | E27 (WP8.4): a class by vendor class prefix `Printer` and a guest policy with the range `.230` to `.234` and option 15: `dhclient` with `scripts/dhclient-printer.conf` (option 60 `Printer-Lab-1`) on guest gets an address of the range and `printers.example.test` |
+| `class.mac-wildcard` | a class by the MAC pattern `00:00:5e:00:*:85` and an iot policy with the range `.170` to `.175`, option 15 and a 120-second lease: client-iot gets all three |
+| `class.user` | a class by the user class `lab-ops` and a servers policy with the range `.50` to `.54` and option 15: `dhclient` with `scripts/dhclient-ops.conf` on servers gets both |
+| `pxe.bios`, `pxe.bios.lease` | the boot policies of lan (option 150 the boot server; option 67 `boot.ipxe` for the user class `iPXE`, `http://192.0.2.21/ipxe.efi` for `HTTPClient`, `ipxe.efi` for architecture 7 or 9, `undionly.kpxe` for 0): the BIOS machine's iPXE gets `boot.ipxe` by TFTP and the menu by HTTP, and fetches `/done?platform=pcbios`; its lease row holds architecture 0 and `PXEClient` |
+| `pxe.uefi`, `pxe.uefi.lease` | the UEFI machine (OVMF) boots to the same menu (`/done?platform=efi`); its lease row holds architecture 7 or 9 |
+| `pxe.http-boot` | `relay-test.py` as a UEFI HTTP boot client (option 60 `HTTPClient:Arch:00016`, option 93 16) gets `http://192.0.2.21/ipxe.efi` in the `file` field and option 60 `HTTPClient`, and the tester fetches the URL |
+| `pxe.proxy` | after its lease, `relay-test.py` as a PXE client sends the boot server discovery to the node's proxy DHCP listener (`[dhcp] proxy`, port 4011): an ACK with no address and `ipxe.efi` |
+
+The PXE rows build the pxe image (`pxe.Dockerfile`) and run QEMU; `PXE=0` leaves them out, `PXE_WAIT_SECS` (300) bounds a boot, and under TCG the UEFI boot takes the longest.
 
 With `NODE=example` the rows the example server can answer run: `relay-test.py` with option
 118 (offer, ack, a renewal, a release in `198.18.0.0/15`, option 82 echoed), with the link

@@ -20,6 +20,12 @@
 #      dynamic lease; a deny filter refuses a client and its removal admits it again; a
 #      release reaches the lease row; a restart of the node keeps the leases and the
 #      clients keep their addresses;
+#      WP8.4, E27's class and PXE rows: a vendor-class, a MAC-wildcard and a user-class
+#      policy select their range and option 15 for dhclient clients; QEMU in BIOS mode
+#      with its iPXE ROM and in UEFI mode with OVMF boot to an iPXE menu from the lab's
+#      TFTP and HTTP server (the pxe profile, pxe.Dockerfile), with their architecture on
+#      their lease rows; a UEFI HTTP boot client gets its URL; the proxy DHCP listener
+#      answers the boot server discovery on port 4011;
 #   3'. with NODE=example: the rows the example server can answer (it serves one scope,
 #      198.18.0.0/15, selected by option 118 or link selection, with the in-memory
 #      reference store): relay-test.py with option 118 (offer, ack, renewal, release) and
@@ -47,6 +53,11 @@
 #   TOOLS_IMAGE     an existing tools image; default: build tenko-dhcp-lab-tools:latest
 #   WAIT_SECS       how long to wait for Tenko to become healthy (default 300)
 #   KEEP            1: do not tear the lab down at the end, also after a failure
+#   PXE             0: leave E27's PXE rows out (WP8.4; they build the pxe image and run
+#                   QEMU, with KVM where /dev/kvm exists)
+#   PXE_IMAGE       an existing pxe image (with PXE_IMAGE_PREBUILT=1); default: build
+#                   tenko-dhcp-lab-pxe:latest
+#   PXE_WAIT_SECS   how long a machine may take to boot to the menu (default 300)
 
 set -euo pipefail
 
@@ -176,6 +187,12 @@ cleanup() {
       printf '\n--- %s ---\n' "$service" >&2
       compose logs --no-color --tail 200 "$service" >&2 2>&1
     done
+    # WP8.4: the boot server's and the machines' logs.
+    for service in bootsrv pxe-bios pxe-uefi; do
+      printf '\n--- %s ---\n' "$service" >&2
+      pxe_compose logs --no-color --tail 100 "$service" >&2 2>&1
+    done
+    pxe_compose exec -T bootsrv sh -c 'tail -n 50 /run/lab/*.log' >&2 2>&1
     docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" >&2 2>&1
   fi
   if ((${#summary[@]} > 0)); then
@@ -191,6 +208,8 @@ cleanup() {
     exit "$status"
   fi
   printf '\n==> tear down\n'
+  # WP8.4: the pxe profile's services too.
+  pxe_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
   compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
   if [[ -n "$work" ]]; then
     rm -rf "$work"
@@ -399,6 +418,190 @@ udhcpc_ok() {
 }
 
 # ---------------------------------------------------------------------------------------
+# WP8.4: E27's class and PXE rows (docs/dhcp.md section 16), with the binary only. Three
+# policies over classes of the request select their range and options for real dhclient
+# clients: a vendor class on guest, a MAC wildcard on iot (with its lease time), a user
+# class on servers. Then the boot policies of lan (iPXE's user class first, then UEFI HTTP
+# boot, UEFI and BIOS by option 93) with option 150 naming the boot server, the boot server
+# (TFTP and HTTP), QEMU in BIOS mode with its iPXE ROM and in UEFI mode with OVMF booting
+# to the menu over TFTP and HTTP, their lease rows with their architecture, a UEFI HTTP
+# boot client (relay-test.py) getting its URL and fetching it, and the proxy DHCP listener
+# answering the boot server discovery. PXE=0 leaves the PXE rows out.
+
+pxe_rows="${PXE:-1}"
+pxe_wait="${PXE_WAIT_SECS:-300}"
+export PXE_IMAGE="${PXE_IMAGE:-tenko-dhcp-lab-pxe:latest}"
+boot_ip=192.0.2.21
+declare -A vm_mac=([bios]=00:00:5e:00:53:a0 [uefi]=00:00:5e:00:53:a1)
+declare -A vm_platform=([bios]=pcbios [uefi]=efi)
+declare -A vm_arch=([bios]=0 [uefi]="7 9")
+
+# The lab with the pxe profile, and with KVM for the machines where the host has it.
+pxe_compose() {
+  local files=(-f "$compose_file")
+  if [[ -e /dev/kvm ]]; then
+    files+=(-f "$here/compose.kvm.yml")
+  fi
+  docker compose "${files[@]}" --profile "$node" --profile pxe "$@"
+}
+
+# scope_of <network>: the prefix identifier of the network's scope.
+scope_of() {
+  api GET "/dhcp/scopes?limit=1000" >/dev/null || return 1
+  python3 - "$work/api.out" "${prefix[$1]}" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(next(s["prefix"] for s in d["items"] if s["cidr"] == sys.argv[2]))
+PY
+}
+
+# new_class <name> <matches JSON>: creates a class and prints its identifier.
+new_class() {
+  must "the class $1" api POST /dhcp/classes "{\"name\": \"$1\", \"matches\": $2}"
+  field "d['id']" <"$work/api.out"
+}
+
+# new_policy <scope> <name> <order> <class> <action JSON> <options JSON>: a policy of the
+# scope over the class, with the action and the option set.
+new_policy() {
+  local id
+  must "the policy $2" api POST /dhcp/policies \
+    "{\"name\": \"$2\", \"scope\": \"$1\", \"order\": $3, \"condition\": {\"join\": \"or\", \"terms\": [{\"class\": \"$4\"}]}, \"action\": $5}"
+  id="$(field "d['id']" <"$work/api.out")"
+  must "the options of the policy $2" api PUT "/dhcp/option-sets/policy:$id" "{\"values\": $6}"
+}
+
+text_option() { printf '{"code": %s, "typed": {"text": "%s"}}' "$1" "$2"; }
+
+# fresh <network>: the network's client releases its lease and forgets it.
+fresh() {
+  dhclient_in "client-$1" -r >/dev/null 2>&1 || true
+  forget "client-$1"
+}
+
+# class_lease_ok <network> <dhclient configuration> <first> <last> <domain> [<lease>]:
+# dhclient with the configuration gets an address of the range with option 15 (and the
+# lease time).
+class_lease_ok() {
+  local net="$1" line ip
+  compose exec -T "client-$net" dhclient -v -cf "/lab/$2" -sf /lab/client-script.sh \
+    -lf /run/lab/dhclient.leases -pf /run/lab/dhclient.pid -1 eth0 >/dev/null 2>&1 || return 1
+  line="$(last_event "$net")"
+  [[ "$line" == BOUND* || "$line" == REBOOT* ]] || return 1
+  ip="$(event_field ip <<<"$line")"
+  printf '%s: %s\n' "$net" "$line" >&2
+  python3 -c 'import ipaddress, sys; a, f, l = (ipaddress.IPv4Address(x) for x in sys.argv[1:]); sys.exit(0 if f <= a <= l else 1)' \
+    "$ip" "$3" "$4" &&
+    [[ "$(event_field domain <<<"$line")" == "$5" ]] &&
+    { [[ -z "${6:-}" ]] || [[ "$(event_field lease <<<"$line")" == "$6" ]]; }
+}
+
+class_rows() {
+  local guest iot servers printers wildcard ops
+  step "E27: classes and policies"
+  guest="$(scope_of guest)" && iot="$(scope_of iot)" && servers="$(scope_of servers)" ||
+    fail "the scopes"
+  printers="$(new_class printers '[{"vendor_class": {"value": "Printer", "prefix": true}}]')"
+  wildcard="$(new_class iot-wildcard '[{"mac": {"pattern": "00:00:5e:00:*:85"}}]')"
+  ops="$(new_class ops '[{"user_class": {"value": "lab-ops"}}]')"
+  new_policy "$guest" printers 1 "$printers" \
+    '{"range": {"first": "192.0.2.230", "last": "192.0.2.234"}}' \
+    "[$(text_option 15 printers.example.test)]"
+  new_policy "$iot" iot-devices 1 "$wildcard" \
+    '{"range": {"first": "192.0.2.170", "last": "192.0.2.175"}, "lease": {"default_secs": 120, "min_secs": 120, "max_secs": 120}}' \
+    "[$(text_option 15 iot.example.test)]"
+  new_policy "$servers" ops 1 "$ops" \
+    '{"range": {"first": "192.0.2.50", "last": "192.0.2.54"}}' \
+    "[$(text_option 15 ops.example.test)]"
+  ok "classes" "three classes (vendor class, MAC wildcard, user class) and a policy each"
+  for net in guest iot servers; do
+    fresh "$net"
+  done
+  row "class.vendor" "vendor class Printer-Lab-1 on guest: an address of .230 to .234, option 15 printers.example.test" \
+    within 30 class_lease_ok guest dhclient-printer.conf 192.0.2.230 192.0.2.234 printers.example.test
+  row "class.mac-wildcard" "MAC 00:00:5e:00:*:85 on iot: an address of .170 to .175, option 15 iot.example.test, 120 s" \
+    within 30 class_lease_ok iot dhclient.conf 192.0.2.170 192.0.2.175 iot.example.test 120
+  row "class.user" "user class lab-ops on servers: an address of .50 to .54, option 15 ops.example.test" \
+    within 30 class_lease_ok servers dhclient-ops.conf 192.0.2.50 192.0.2.54 ops.example.test
+}
+
+boot_log_has() { pxe_compose exec -T bootsrv grep -q -F -- "$2" "/run/lab/$1.log"; }
+http_fetch_ok() {
+  compose exec -T tester python3 -c 'import sys, urllib.request; sys.exit(0 if urllib.request.urlopen(sys.argv[1], timeout=5).status == 200 else 1)' "$1"
+}
+
+# pxe_boot_ok <bios|uefi>: the machine boots to the menu: it fetched /done over HTTP with
+# its platform and MAC address within PXE_WAIT_SECS, after its boot script by TFTP.
+pxe_boot_ok() {
+  local vm="$1" mac
+  mac="${vm_mac[$vm]//:/-}"
+  pxe_compose up -d "pxe-$vm" >/dev/null 2>&1 || return 1
+  within "$pxe_wait" boot_log_has http "GET /done?platform=${vm_platform[$vm]}&mac=$mac" &&
+    boot_log_has tftp "boot.ipxe"
+}
+
+# pxe_lease_ok <bios|uefi>: the machine's lease row holds its architecture (option 93: 0
+# for BIOS, 7 or 9 for UEFI x64) and the PXEClient vendor class.
+pxe_lease_ok() {
+  api GET "/dhcp/leases?limit=1000" >/dev/null || return 1
+  python3 - "$work/api.out" "${vm_mac[$1]}" "${vm_arch[$1]}" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+want = sys.argv[2].replace(":", "").lower()
+def mac(lease):
+    return str(lease["client"]["chaddr"]).replace(":", "").replace("-", "").lower()
+rows = [l for l in d["items"] if mac(l) == want]
+arches = {int(a) for a in sys.argv[3].split()}
+ok = any((l.get("fingerprint") or {}).get("architecture") in arches
+         and (l["fingerprint"].get("vendor_class") or "").startswith("PXEClient") for l in rows)
+print(rows[:1])
+sys.exit(0 if ok else 1)
+PY
+}
+
+pxe_rows() {
+  local lan ipxe http uefi bios
+  step "E27: network boot"
+  if [[ -z "${PXE_IMAGE_PREBUILT:-}" ]]; then
+    docker build -f "$here/pxe.Dockerfile" -t "$PXE_IMAGE" "$here"
+  fi
+  lan="$(scope_of lan)" || fail "the scope of lan"
+  must "the boot server of lan" api PUT "/dhcp/option-sets/scope:$lan" \
+    "{\"values\": [{\"code\": 3, \"typed\": {\"ipv4\": {\"values\": [\"${gateway[lan]}\"]}}}, {\"code\": 150, \"typed\": {\"ipv4\": {\"values\": [\"$boot_ip\"]}}}]}"
+  ipxe="$(new_class ipxe '[{"user_class": {"value": "iPXE"}}]')"
+  http="$(new_class http-boot '[{"vendor_class": {"value": "HTTPClient", "prefix": true}}]')"
+  uefi="$(new_class uefi '[{"architecture": {"code": 7}}, {"architecture": {"code": 9}}]')"
+  bios="$(new_class bios '[{"architecture": {"code": 0}}]')"
+  new_policy "$lan" ipxe 1 "$ipxe" '{}' "[$(text_option 67 boot.ipxe)]"
+  new_policy "$lan" http-boot 2 "$http" '{}' "[$(text_option 67 "http://$boot_ip/ipxe.efi")]"
+  new_policy "$lan" uefi 3 "$uefi" '{}' "[$(text_option 67 ipxe.efi)]"
+  new_policy "$lan" bios 4 "$bios" '{}' "[$(text_option 67 undionly.kpxe)]"
+  pxe_compose up -d bootsrv
+  retry 60 "the boot server" http_fetch_ok "http://$boot_ip/boot.ipxe"
+  ok "boot" "the boot policies of lan, option 150 $boot_ip, the boot server (TFTP and HTTP)"
+  row "pxe.bios" "QEMU in BIOS mode with its iPXE ROM boots to the menu: boot.ipxe by TFTP, the menu by HTTP" \
+    pxe_boot_ok bios
+  row "pxe.bios.lease" "the BIOS machine's lease row holds architecture 0 and PXEClient" pxe_lease_ok bios
+  pxe_compose stop pxe-bios >/dev/null 2>&1 || true
+  row "pxe.uefi" "QEMU in UEFI mode (OVMF) boots to the menu: by TFTP and HTTP" pxe_boot_ok uefi
+  row "pxe.uefi.lease" "the UEFI machine's lease row holds architecture 7 or 9 and PXEClient" pxe_lease_ok uefi
+  pxe_compose stop pxe-uefi >/dev/null 2>&1 || true
+  http_boot_ok() {
+    relay_test "${prefix[lan]}" --link "${prefix[lan]%/*}" --mac 00:00:5e:00:53:a2 \
+      --circuit tester --vendor-class HTTPClient:Arch:00016:UNDI:003001 --arch 16 \
+      --expect-file "http://$boot_ip/ipxe.efi" --expect-vendor HTTPClient --release &&
+      http_fetch_ok "http://$boot_ip/ipxe.efi"
+  }
+  row "pxe.http-boot" "a UEFI HTTP boot client gets its URL in file and option 60 HTTPClient, and fetches it" \
+    http_boot_ok
+  row "pxe.proxy" "proxy DHCP on 4011 answers the boot server discovery: no address, ipxe.efi" \
+    relay_test "${prefix[lan]}" --link "${prefix[lan]%/*}" --mac 00:00:5e:00:53:a3 \
+    --circuit tester --vendor-class PXEClient:Arch:00007:UNDI:003016 --arch 7 \
+    --expect-file ipxe.efi --proxy-port 4011 --release
+}
+# End WP8.4.
+
+# ---------------------------------------------------------------------------------------
 # Build and start
 
 if ((build_tools)); then
@@ -449,6 +652,8 @@ listen = ["0.0.0.0:8443"]
 # Relay mode on the node's address: the gateway relays every network, the node's own too.
 listen = [{ address = "$node_ip", mode = "relay" }]
 workers = 2
+# WP8.4: the proxy DHCP listener of E27's PXE rows, on port 4011.
+proxy = ["$node_ip"]
 TOML
 chmod 0444 "$work/tenko.toml"
 chmod 0755 "$work"
@@ -535,6 +740,14 @@ if [[ "$node" == tenko ]]; then
     [[ "$(last_event lan | event_field ip)" == "$reserved_ip" ]]
   }
   row "restart.client" "after the restart client-lan asks again (INIT-REBOOT) and keeps $reserved_ip" kept_address
+
+  # WP8.4: E27's class and PXE rows.
+  class_rows
+  if [[ "$pxe_rows" == 1 ]]; then
+    pxe_rows
+  else
+    skip "pxe" "PXE=0: the network boot rows are left out"
+  fi
 else
   for net in "${networks[@]}"; do
     skip "lease.$net" "the example server has one scope, which giaddr on $net does not select"
@@ -548,6 +761,8 @@ else
   skip "renew, reservation" "need the configuration service: the binary (NODE=tenko)"
   skip "filter, release" "need the configuration service and the lease routes: the binary"
   skip "restart" "the example server keeps its leases in memory"
+  # WP8.4: E27's class and PXE rows need the configuration service.
+  skip "class, pxe" "classes, policies and network boot need the configuration service: the binary"
 fi
 
 ((rows_failed == 0)) || fail "$rows_failed row(s) failed"

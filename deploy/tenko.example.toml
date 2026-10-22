@@ -562,6 +562,14 @@ offer_secs = 10
 relay_port = 67
 # The port that replies to clients go to.
 client_port = 68
+# ProxyDHCP listeners (WP8.4, docs/dhcp.md section 16): addresses where boot clients (PXE
+# firmware, iPXE, UEFI HTTP boot) get the boot file of their scope and no address, which
+# is what the boot server discovery of PXE asks for on port 4011. Their scope must exist;
+# its boot options and policies apply, its pools do not. Empty: none.
+proxy = []
+# proxy = ["192.0.2.10"]
+# The ProxyDHCP port.
+proxy_port = 4011
 
 [dhcp.probe]
 # The conflict probe before an address is offered (WP8.5, TGL-16; docs/dhcp.md section 14).

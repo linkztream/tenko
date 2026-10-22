@@ -212,6 +212,9 @@ pub enum ClassCommand {
     Show(IdArg),
     /// Create a class.
     Create(ClassCreateArgs),
+    // WP8.4: changing a class.
+    /// Change a class: its name, its matches (all replaced) or its description.
+    Set(ClassSetArgs),
     /// Delete a class.
     Delete(IdArg),
 }
@@ -225,6 +228,9 @@ pub enum PolicyCommand {
     Show(IdArg),
     /// Create a policy from a JSON file.
     Create(PolicyCreateArgs),
+    // WP8.4: changing a policy.
+    /// Change a policy: from a JSON file with the parts to change, and the flags.
+    Set(PolicySetArgs),
     /// Delete a policy.
     Delete(IdArg),
 }
@@ -671,6 +677,54 @@ pub struct PolicyCreateArgs {
     pub file: PathBuf,
 }
 
+// WP8.4: the arguments of `class set` and `policy set`.
+/// Arguments of `tenko dhcp class set`.
+#[derive(Debug, Clone, Args)]
+pub struct ClassSetArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The class (identifier).
+    #[arg(value_name = "ID")]
+    pub id: String,
+    /// A new unique name.
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+    /// One test as JSON, as for `class create`; the tests given replace all of the class's.
+    #[arg(long = "match", value_name = "JSON")]
+    pub matches: Vec<String>,
+    /// Free text; an empty text clears it.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+}
+
+/// Arguments of `tenko dhcp policy set`.
+#[derive(Debug, Clone, Args)]
+pub struct PolicySetArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The policy (identifier).
+    #[arg(value_name = "ID")]
+    pub id: String,
+    /// A JSON file with the parts to change as the API takes them (`DhcpPolicyPatch`:
+    /// `name`, `order`, `enabled`, `condition`, `action`, `description`).
+    #[arg(long, value_name = "FILE")]
+    pub file: Option<PathBuf>,
+    /// A new name, unique in the scope.
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+    /// The processing order in the scope, lowest first.
+    #[arg(long, value_name = "N")]
+    pub order: Option<u32>,
+    /// Whether the policy applies.
+    #[arg(long, value_name = "BOOL")]
+    pub enabled: Option<bool>,
+    /// Free text; an empty text clears it.
+    #[arg(long, value_name = "TEXT")]
+    pub description: Option<String>,
+}
+
 /// Arguments of `tenko dhcp filter add`.
 #[derive(Debug, Clone, Args)]
 #[command(group(ArgGroup::new("kind").required(true).args(["allow", "deny"])))]
@@ -864,11 +918,15 @@ impl DhcpCommand {
                 ClassCommand::List(a) => &a.client,
                 ClassCommand::Show(a) | ClassCommand::Delete(a) => &a.client,
                 ClassCommand::Create(a) => &a.client,
+                // WP8.4: class set.
+                ClassCommand::Set(a) => &a.client,
             },
             Self::Policy { action } => match action {
                 PolicyCommand::List(a) => &a.client,
                 PolicyCommand::Show(a) | PolicyCommand::Delete(a) => &a.client,
                 PolicyCommand::Create(a) => &a.client,
+                // WP8.4: policy set.
+                PolicyCommand::Set(a) => &a.client,
             },
             Self::Filter { action } => match action {
                 FilterCommand::List(a) => &a.client,
@@ -936,12 +994,16 @@ impl DhcpCommand {
                 ClassCommand::List(_) => "dhcp class list",
                 ClassCommand::Show(_) => "dhcp class show",
                 ClassCommand::Create(_) => "dhcp class create",
+                // WP8.4: class set.
+                ClassCommand::Set(_) => "dhcp class set",
                 ClassCommand::Delete(_) => "dhcp class delete",
             },
             Self::Policy { action } => match action {
                 PolicyCommand::List(_) => "dhcp policy list",
                 PolicyCommand::Show(_) => "dhcp policy show",
                 PolicyCommand::Create(_) => "dhcp policy create",
+                // WP8.4: policy set.
+                PolicyCommand::Set(_) => "dhcp policy set",
                 PolicyCommand::Delete(_) => "dhcp policy delete",
             },
             Self::Filter { action } => match action {
@@ -1435,6 +1497,31 @@ fn class(action: &ClassCommand) -> Result<Request, Failure> {
             Ok(Request::new(Method::Post, "/dhcp/classes", Present::Item)
                 .with_body(Value::Object(body)))
         }
+        // WP8.4: class set.
+        ClassCommand::Set(args) => {
+            let mut body = Map::new();
+            insert(&mut body, "name", args.name.as_deref());
+            if !args.matches.is_empty() {
+                let matches = args
+                    .matches
+                    .iter()
+                    .map(|text| class_match(text))
+                    .collect::<Result<Vec<_>, _>>()?;
+                body.insert("matches".to_owned(), Value::Array(matches));
+            }
+            if let Some(description) = &args.description {
+                body.insert("description".to_owned(), json!(description));
+            }
+            if body.is_empty() {
+                return Err(usage(
+                    "class set needs --name, --match or --description".to_owned(),
+                ));
+            }
+            Ok(
+                Request::new(Method::Patch, class_path(&args.id)?, Present::Item)
+                    .with_body(Value::Object(body)),
+            )
+        }
         ClassCommand::Delete(args) => Ok(Request::delete(
             class_path(&args.id)?,
             format!("deleted the class {}", args.id.trim()),
@@ -1462,11 +1549,65 @@ fn policy(action: &PolicyCommand) -> Result<Request, Failure> {
             }
             Ok(Request::new(Method::Post, "/dhcp/policies", Present::Item).with_body(body))
         }
+        // WP8.4: policy set.
+        PolicyCommand::Set(args) => policy_set(args),
         PolicyCommand::Delete(args) => Ok(Request::delete(
             policy_path(&args.id)?,
             format!("deleted the policy {}", args.id.trim()),
         )),
     }
+}
+
+// WP8.4: policy set: the file's parts, then the flags over them.
+fn policy_set(args: &PolicySetArgs) -> Result<Request, Failure> {
+    let mut body = match &args.file {
+        Some(file) => {
+            let text = std::fs::read_to_string(file)
+                .map_err(|error| usage(format!("cannot read {}: {error}", file.display())))?;
+            match serde_json::from_str::<Value>(&text)
+                .map_err(|error| usage(format!("{} is not JSON: {error}", file.display())))?
+            {
+                Value::Object(map) => map,
+                _ => {
+                    return Err(usage(format!(
+                        "{} must hold one JSON object, the parts of the policy to change",
+                        file.display()
+                    )));
+                }
+            }
+        }
+        None => Map::new(),
+    };
+    if let Some(key) = body.keys().find(|key| {
+        !matches!(
+            key.as_str(),
+            "name" | "order" | "enabled" | "condition" | "action" | "description"
+        )
+    }) {
+        return Err(usage(format!(
+            "`{key}` is not a part of a policy that changes (name, order, enabled, \
+             condition, action, description; the scope stays)"
+        )));
+    }
+    insert(&mut body, "name", args.name.as_deref());
+    if let Some(order) = args.order {
+        body.insert("order".to_owned(), json!(order));
+    }
+    if let Some(enabled) = args.enabled {
+        body.insert("enabled".to_owned(), json!(enabled));
+    }
+    if let Some(description) = &args.description {
+        body.insert("description".to_owned(), json!(description));
+    }
+    if body.is_empty() {
+        return Err(usage(
+            "policy set needs --file, --name, --order, --enabled or --description".to_owned(),
+        ));
+    }
+    Ok(
+        Request::new(Method::Patch, policy_path(&args.id)?, Present::Item)
+            .with_body(Value::Object(body)),
+    )
 }
 
 fn filter(action: &FilterCommand) -> Result<Request, Failure> {
@@ -2048,6 +2189,9 @@ mod tests {
                 "dhcp class create",
             ),
             (&["class", "delete", OTHER], "dhcp class delete"),
+            // WP8.4: class set and policy set.
+            (&["class", "set", OTHER, "--name", "x"], "dhcp class set"),
+            (&["policy", "set", OTHER, "--order", "1"], "dhcp policy set"),
             (&["policy", "list"], "dhcp policy list"),
             (&["policy", "show", OTHER], "dhcp policy show"),
             (
@@ -2642,6 +2786,77 @@ mod tests {
             let failure = refused(&["policy", "create", "--file", bad.to_str().expect("UTF-8")]);
             assert_eq!(failure.status, exit::USAGE, "{}", failure.message);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // WP8.4: class set and policy set.
+    #[test]
+    fn class_set_and_policy_set() {
+        check(
+            &[
+                "class",
+                "set",
+                OTHER,
+                "--name",
+                "uefi",
+                "--match",
+                r#"{"architecture":{"code":7}}"#,
+                "--match",
+                r#"{"architecture":{"code":9}}"#,
+                "--description",
+                "",
+            ],
+            Method::Patch,
+            &format!("/dhcp/classes/{OTHER}"),
+            Some(json!({
+                "name": "uefi",
+                "matches": [{"architecture": {"code": 7}}, {"architecture": {"code": 9}}],
+                "description": "",
+            })),
+        );
+        for args in [
+            &["class", "set", OTHER][..],
+            &["class", "set", OTHER, "--match", "{}"],
+            &["policy", "set", OTHER],
+            &["class", "set", "not-a-uuid", "--name", "x"],
+        ] {
+            assert_eq!(refused(args).status, exit::USAGE, "{args:?}");
+        }
+        let dir = std::env::temp_dir().join(format!("tenko-dhcp-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let change = dir.join("change.json");
+        let condition = json!({"join": "or", "terms": [{"class": THIRD}]});
+        std::fs::write(
+            &change,
+            json!({"condition": condition, "order": 1}).to_string(),
+        )
+        .expect("write");
+        let scoped = dir.join("scoped.json");
+        std::fs::write(&scoped, json!({"scope": PREFIX}).to_string()).expect("write");
+        check(
+            &[
+                "policy",
+                "set",
+                OTHER,
+                "--file",
+                change.to_str().expect("UTF-8"),
+                "--order",
+                "3",
+                "--enabled",
+                "false",
+            ],
+            Method::Patch,
+            &format!("/dhcp/policies/{OTHER}"),
+            Some(json!({"condition": condition, "order": 3, "enabled": false})),
+        );
+        let failure = refused(&[
+            "policy",
+            "set",
+            OTHER,
+            "--file",
+            scoped.to_str().expect("UTF-8"),
+        ]);
+        assert!(failure.message.contains("scope"), "{}", failure.message);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
