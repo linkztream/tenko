@@ -34,11 +34,8 @@
 # base64) and WINDOWS_SIGNING_PASSWORD exist, and ship unsigned with a notice in the job log
 # otherwise (deploy/windows/sign.ps1, deploy/windows/README.md "Signing").
 
-# The Linux jobs run on GitHub's hosted runners (ubuntu-latest) unless the repository variable
-# LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the Windows
-# build always runs on windows-latest. PUBLICATION: the expression is the same as in ci.yml,
-# so a pull_request event (this workflow has none today) could never reach a self-hosted
-# runner; a tag push and a manual run may.
+# Every Linux job runs on GitHub's hosted runners (ubuntu-latest) and the Windows build on
+# windows-latest; no job runs on a machine of the owner's (see ci.yml).
 name: Release
 
 on:
@@ -74,7 +71,7 @@ jobs:
   # -------------------------------------------------------------------------------------
   verify:
     name: Verify the tag
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
@@ -113,7 +110,7 @@ jobs:
   ui:
     name: UI
     needs: verify
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ui
@@ -151,7 +148,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - os: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             platform: linux-x86_64
             exe: ""
@@ -253,7 +250,7 @@ jobs:
     # The static binary must run on the distributions the product supports (R33). The
     # images carry no bash, no curl and no glibc-specific tooling the binary could lean on.
     needs: [verify, build]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
@@ -433,7 +430,7 @@ jobs:
     # After the binaries and their smoke runs: nothing is pushed, and `latest` does not move,
     # for a release whose build failed or whose binary does not run.
     needs: [verify, build, smoke-linux]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -474,7 +471,7 @@ jobs:
     name: Publish the release
     # WP6.7: msi in needs.
     needs: [verify, build, smoke-linux, image, msi]
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     env:

@@ -26,16 +26,13 @@ on:
 permissions:
   contents: read
 
-# Linux jobs run on GitHub's hosted runners (ubuntu-latest) unless the repository variable
-# LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the
-# Windows jobs always run on windows-latest. Steps that only make sense on a hosted runner
-# check runner.environment.
-#
-# PUBLICATION: a pull_request event always runs on ubuntu-latest, whatever LINUX_RUNNER
-# says. A pull request may come from a fork once the repository is public, and its code
-# must never run on a self-hosted runner; only push and workflow_dispatch (and the
-# schedule) may use the variable. The repository setting "Require approval for all
-# outside collaborators" under Actions is the second half of this protection.
+# Every Linux job runs on GitHub's hosted runners (ubuntu-latest) and the Windows jobs on
+# windows-latest: since the repository is public, no job runs on a machine of the owner's,
+# so a pull request from a fork can reach nothing but a throw-away runner. The
+# self-hosted runner of .github/runner/README.md is not used by these workflows; the
+# repository setting "Require approval for all outside collaborators" under Actions is
+# the second half of the protection. Steps that only make sense on a hosted runner check
+# runner.environment.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -51,7 +48,7 @@ jobs:
   rust-linux:
     name: Rust (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
@@ -112,7 +109,7 @@ jobs:
   deny:
     name: cargo-deny
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -124,7 +121,7 @@ jobs:
   audit:
     name: cargo-audit
     if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -140,7 +137,7 @@ jobs:
   ui:
     name: UI
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ui
@@ -179,7 +176,7 @@ jobs:
     # The server with the embedded UI, driven by a browser (WP1.11).
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -224,7 +221,7 @@ jobs:
     # TENKO_UI_STUB.
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -250,7 +247,7 @@ jobs:
   cluster-smoke:
     name: Cluster smoke (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -300,7 +297,7 @@ jobs:
   cluster-lab:
     name: Cluster lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -348,7 +345,7 @@ jobs:
   dhcp-lab:
     name: DHCP lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -404,7 +401,7 @@ jobs:
   systemd-smoke:
     name: systemd smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -524,7 +521,7 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       # Targets that link tenko-api embed the web UI. cargo-fuzz builds with debug
@@ -585,7 +582,7 @@ jobs:
   deploy-scripts:
     name: Deploy scripts
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -616,7 +613,7 @@ jobs:
     name: Changelog
     # Not on the weekly schedule or on manual runs: there is no base to compare with.
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read # to read the labels of the pull request

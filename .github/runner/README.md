@@ -1,5 +1,7 @@
 # Self-hosted Linux runner
 
+> Not used since the repository went public (2026-10-22): every workflow job runs on GitHub's hosted runners. This page stays for a private fork that wants a runner of its own.
+
 The Linux jobs of the `CI` and `Release` workflows run on GitHub's hosted runners by default
 (`ubuntu-latest`). When the repository variable `LINUX_RUNNER` is set, they run on the
 self-hosted runners that carry that label instead; the Windows jobs always stay on GitHub's
