@@ -476,7 +476,7 @@ Comparison points, with their caveats. ISC publishes performance reports per Kea
 
 ## 7. Owner decisions
 
-**Decided by the owner on 2026-10-21:** P3-Q1 to P3-Q11 below, with the options and trade-offs kept as written. P3-Q12 to P3-Q18 are recommendations, marked "Recommended; the owner decides on 2026-10-22".
+**Decided by the owner on 2026-10-21:** P3-Q1 to P3-Q11 below, with the options and trade-offs kept as written. P3-Q12 to P3-Q18 were decided by the owner on 2026-10-22 (each marked "Decided by the owner on 2026-10-22" below).
 
 Document changes the decisions imply (the lead's files, proposed here): DHCP-07 to read "Durable leases in the replicated store, committed before the answer, with lease history" (it says today that leases never pass through the global Raft group); ARCHITECTURE.md "What lives where" and "Storage and replication" point 4 the same; ADR 0002 point 4 superseded for leases by ADR 0019 once that is accepted; DHCP-12 and DHCP-18 to Phase 5 in REQUIREMENTS.md; the ROADMAP's Phase 3 "Done when" failover line moved to Phase 5 and its "DHCPv4/v6, failover" theme adjusted; OPS-02 and OPS-26 noted for the DHCP behaviour while the store refuses (P3-Q14); a toggle row for DDNS from DHCP and one for lease history in SECURITY-PROFILES.md (2.11); the ROADMAP's open question "IPv6 in the reference home network today" answered by P3-Q3.
 
