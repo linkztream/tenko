@@ -162,7 +162,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 $Msi = (Resolve-Path -LiteralPath $Msi).Path
 if ($UpgradeMsi) { $UpgradeMsi = (Resolve-Path -LiteralPath $UpgradeMsi).Path }
-if ((Get-TenkoProducts).Count -gt 0) {
+if (@(Get-TenkoProducts).Count -gt 0) {
     [Console]::Error.WriteLine("msi-smoke: $ProductName is installed on this machine; the smoke test needs a machine without it")
     exit 1
 }
@@ -221,7 +221,7 @@ try {
     if ($UpgradeMsi) {
         Write-Step '3/7 silent upgrade to the second package'
         Invoke-MsiexecOk 'upgrade' @('/i', "`"$UpgradeMsi`"")
-        Assert-That ((Get-TenkoProducts).Count -eq 1) "after the upgrade $((Get-TenkoProducts).Count) products named $ProductName are installed"
+        Assert-That (@(Get-TenkoProducts).Count -eq 1) "after the upgrade $(@(Get-TenkoProducts).Count) products named $ProductName are installed"
         $current = $UpgradeMsi
     } else {
         Write-Step '3/7 silent reinstall of the same package'
@@ -263,7 +263,7 @@ try {
 
     # -----------------------------------------------------------------------------------
     Write-Step '7/7 nothing left'
-    Assert-That ((Get-TenkoProducts).Count -eq 0) "$ProductName is still registered as installed"
+    Assert-That (@(Get-TenkoProducts).Count -eq 0) "$ProductName is still registered as installed"
     Assert-That (-not (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Tenko\Installer')) 'the remembered properties are still in the registry'
     Write-Host 'msi-smoke: all steps passed'
 }
