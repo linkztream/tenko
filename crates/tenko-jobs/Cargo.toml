@@ -1,6 +1,6 @@
 [package]
 name = "tenko-jobs"
-version = "0.0.2"
+version = "0.0.3"
 description = "Job engine: steps, state, timeouts, rollback"
 edition.workspace = true
 rust-version.workspace = true

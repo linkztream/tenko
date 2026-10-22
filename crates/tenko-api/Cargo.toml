@@ -1,6 +1,6 @@
 [package]
 name = "tenko-api"
-version = "0.0.2"
+version = "0.0.3"
 description = "HTTP API (axum), OpenAPI document, server-sent events, embedded UI and the API client"
 edition.workspace = true
 rust-version.workspace = true

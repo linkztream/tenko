@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-22
+
 ### Added
 
 - One binary, `tenko`: `tenko serve` runs the server with the web UI, and `setup`, `login`, `prefix`, `import`, `export`, `audit verify` and `ca-root` are the command-line client of its API.
