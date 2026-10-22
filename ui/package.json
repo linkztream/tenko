@@ -21,7 +21,8 @@
     "i18n": "node scripts/i18n.mjs",
     "api:types": "node scripts/api-types.mjs",
     "api:check": "node scripts/api-types.mjs --check",
-    "size": "node scripts/size.mjs"
+    "size": "node scripts/size.mjs",
+    "licenses": "node scripts/licenses.mjs"
   },
   "dependencies": {
     "@solidjs/router": "^1.0.0",

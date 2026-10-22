@@ -1,0 +1,49 @@
+name: Feature request
+description: Something Tenko should do that it does not do today.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. A request that starts from the problem is easier to act on than one that starts from a solution; `docs/ROADMAP.md` and `docs/REQUIREMENTS.md` say what is planned already. Everything here is public: use placeholders for your own networks and names.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like Tenko to do
+      description: The behaviour you have in mind, as concretely as you can; a sketch of the UI or the API call if it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: What you do instead today, and other ways the problem could be solved.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - DNS
+        - DHCP
+        - IPAM
+        - Discovery and connectors
+        - Migration from another product
+        - Web UI
+        - API and command line
+        - Installation and operations
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: The kind of network (home lab, company, service provider), the roles and the security profile in use, and any RFC or standard the feature should follow.

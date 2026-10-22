@@ -30,6 +30,12 @@ permissions:
 # LINUX_RUNNER names the label of a self-hosted runner (.github/runner/README.md); the
 # Windows jobs always run on windows-latest. Steps that only make sense on a hosted runner
 # check runner.environment.
+#
+# PUBLICATION: a pull_request event always runs on ubuntu-latest, whatever LINUX_RUNNER
+# says. A pull request may come from a fork once the repository is public, and its code
+# must never run on a self-hosted runner; only push and workflow_dispatch (and the
+# schedule) may use the variable. The repository setting "Require approval for all
+# outside collaborators" under Actions is the second half of this protection.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -45,7 +51,7 @@ jobs:
   rust-linux:
     name: Rust (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
@@ -106,7 +112,7 @@ jobs:
   deny:
     name: cargo-deny
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -118,7 +124,7 @@ jobs:
   audit:
     name: cargo-audit
     if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -134,7 +140,7 @@ jobs:
   ui:
     name: UI
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: ui
@@ -151,6 +157,10 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      # PUBLICATION: every production dependency of the UI carries a licence on the allow
+      # list of scripts/licenses.mjs (the npm counterpart of cargo deny check).
+      - name: Licences of the dependencies
+        run: npm run licenses
       - name: Test
         # Half the cores: vitest starts one process per test file and a self-hosted runner
         # shares its machine, so one worker per core oversubscribes it and tests time out.
@@ -169,7 +179,7 @@ jobs:
     # The server with the embedded UI, driven by a browser (WP1.11).
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -214,7 +224,7 @@ jobs:
     # TENKO_UI_STUB.
     needs: ui
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -240,7 +250,7 @@ jobs:
   cluster-smoke:
     name: Cluster smoke (Linux)
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -290,7 +300,7 @@ jobs:
   cluster-lab:
     name: Cluster lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -338,7 +348,7 @@ jobs:
   dhcp-lab:
     name: DHCP lab (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -394,7 +404,7 @@ jobs:
   systemd-smoke:
     name: systemd smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
     env:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
@@ -514,7 +524,7 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (Linux, weekly schedule)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     env:
       # Targets that link tenko-api embed the web UI. cargo-fuzz builds with debug
@@ -575,7 +585,7 @@ jobs:
   deploy-scripts:
     name: Deploy scripts
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -606,7 +616,7 @@ jobs:
     name: Changelog
     # Not on the weekly schedule or on manual runs: there is no base to compare with.
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.LINUX_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       pull-requests: read # to read the labels of the pull request
@@ -641,3 +651,48 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: node scripts/changelog.mjs check --base "$BASE"
+
+  # -------------------------------------------------------------------------------------
+  # PUBLICATION: the Developer Certificate of Origin check. CONTRIBUTING.md and CLA.md
+  # require a Signed-off-by trailer on every commit, with the name and email of the
+  # commit's author. This job fails a pull request that has a commit without one. It is
+  # a shell step over the pull request's commit range, so it needs no third-party action
+  # and no secret.
+  dco:
+    name: Signed-off-by on every commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commits of the pull request: between the base and the head of the merge.
+          fetch-depth: 0
+      - name: Check the trailers
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          count=0
+          for sha in $(git log --format='%H' --reverse "${BASE}..${HEAD}"); do
+            count=$((count + 1))
+            author_name="$(git log -1 --format='%an' "$sha")"
+            author_email="$(git log -1 --format='%ae' "$sha")"
+            trailers="$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")"
+            if [ -z "$trailers" ]; then
+              echo "::error::Commit $sha (${author_name}) has no Signed-off-by trailer. Commit with 'git commit -s'; CONTRIBUTING.md explains why."
+              missing=$((missing + 1))
+              continue
+            fi
+            expected="${author_name} <${author_email}>"
+            if ! grep -qxF "$expected" <<< "$trailers"; then
+              echo "::error::Commit $sha is signed off by '$(head -n 1 <<< "$trailers")' but its author is '${expected}'. The trailer must carry the author's own name and email."
+              missing=$((missing + 1))
+            fi
+          done
+          echo "Checked $count commit(s)."
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::$missing commit(s) lack a matching Signed-off-by trailer."
+            exit 1
+          fi

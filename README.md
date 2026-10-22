@@ -10,12 +10,20 @@ roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and 
 
 **Status:** pre-alpha, Phase 0 (foundation and spikes). Nothing here is ready for use.
 
+> **Pre-release.** Tenko DDI is under development towards its first release. There is
+> no tagged release yet, and the data-directory format, the configuration and the API may
+> still change between commits. The binaries and installers that the release workflow
+> produces are unsigned until a signing certificate exists
+> ([`deploy/windows/README.md`](deploy/windows/README.md) says what that means when you
+> install). Running it in production is at your own risk; please report what breaks.
+
 ## Documentation
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): system architecture
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md): requirements
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): phases and milestones
 - [`docs/adr/`](docs/adr/): architecture decision records
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability privately, and what to expect
 
 ## Repository layout
 

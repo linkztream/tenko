@@ -11,6 +11,8 @@ Read before changing anything substantial:
 - `docs/REQUIREMENTS.md`: functional and non-functional requirements.
 - `docs/adr/`: architecture decision records. An accepted ADR is never edited to change
   its decision; write a new ADR that supersedes it.
+- `SECURITY.md`: how to report a vulnerability privately; never in a public issue.
+- `CODE_OF_CONDUCT.md`: the Contributor Covenant, which applies in every project space.
 
 ## Non-negotiable rules
 

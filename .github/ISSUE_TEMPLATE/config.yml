@@ -1,0 +1,7 @@
+# Blank issues are off: every issue uses one of the forms in this directory, and a
+# security problem never becomes an issue at all.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/linkztream/tenko/security/policy
+    about: Vulnerabilities are reported privately. SECURITY.md says how and what to expect; never open a public issue for one.

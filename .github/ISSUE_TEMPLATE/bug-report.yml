@@ -1,0 +1,81 @@
+name: Bug report
+description: Something does not behave as documented.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Before you fill in the form: a **security problem** is not an issue, it is reported privately as `SECURITY.md` describes. Everything you write here is public, so redact the addresses, names and accounts of your own network (replace them with placeholders from RFC 5737, RFC 3849 and `example.test`).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `tenko --version`, or the commit you built from.
+      placeholder: tenko 0.2.0 (abc1234)
+    validations:
+      required: true
+  - type: checkboxes
+    id: roles
+    attributes:
+      label: Roles
+      description: The roles the affected node runs.
+      options:
+        - label: controller
+        - label: dns
+        - label: dhcp
+        - label: probe
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Security profile
+      description: The profile chosen in the first-run wizard, and whether toggles were changed from it.
+      options:
+        - Home
+        - Standard
+        - Hardened
+        - Lab
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system and version, and how Tenko runs there (systemd unit, Windows service, the container image, `cargo run`).
+      placeholder: Debian 12, systemd unit from deploy/install.sh
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, step by step, with the configuration that matters (placeholders only).
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: The relevant lines of the server log (`journalctl -u tenko`, the Windows event log, or the container's output) and, for the web UI, the browser console. **Redact addresses, host names, user names and anything that looks like a token or a key before you paste.**
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Packet captures (redacted), screenshots, what you tried already.
