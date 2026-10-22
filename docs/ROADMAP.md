@@ -223,7 +223,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 - **Remote access gateway**: HTML5 RDP/SSH gateway as an opt-in module with credential injection, session recording and just-in-time access (API-12).
 - **Actuators and inventory**: hypervisor actuators (Proxmox `pct set` and cloud-init) that move `static` hosts automatically, more network controllers, and inventory from Docker, Kubernetes and Incus (CONN-14 to CONN-16).
 - **Plugin hub**: signed plugin packages, `tenko plugin install`, the WebAssembly component transport beside the process transport, and the public plugin SDK repository (CONN-21).
-- **Release and licensing**: DoQ, signed releases, SBOM, the license decision and possible publication (DNS-16, API-19, API-20).
+- **Release and licensing**: DoQ, signed releases, SBOM and the possible publication under the licence decided on 2026-10-22 (the Business Source License 1.1 with AGPL-3.0-or-later as the Change License, ADR 0022; DNS-16, API-19, API-20).
 
 ### Done when
 
@@ -254,4 +254,4 @@ These are non-blocking and are resolved during Phase 0.
 | Product name | Resolved: the name Tenko DDI was decided on 2026-10-09. |
 | Windows Server version in the reference environment | Query Resolution Policies require 2016 or later. Affects only the test lab. |
 | IPv6 in the reference home network today | Affects priority within Phase 3, not the data model. |
-| License for a possible publication (Apache-2.0 or AGPL-3.0) | Must be decided before any publication (API-20). |
+| License for a possible publication | Decided on 2026-10-22: the Business Source License 1.1 with an internal-use grant and AGPL-3.0-or-later as the Change License, with a contributor license agreement (`LICENSE.md`, `CLA.md`, ADR 0022); the lawyer's review and the publication itself remain (API-20). |

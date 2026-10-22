@@ -11,7 +11,7 @@ edition = "2024"
 # needs 1.89, utoipa 6 and time 0.3.55 need 1.88).
 rust-version = "1.90"
 # Placeholder until the project licence is decided (open question in docs/ROADMAP.md).
-license = "LicenseRef-Proprietary"
+license = "BUSL-1.1"
 
 # Debug information is opt-in. Development and test builds carry line tables for the workspace
 # crates (file and line in backtraces) and none for dependencies; the Windows PDB files of the

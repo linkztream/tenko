@@ -15,9 +15,11 @@ Read before changing anything substantial:
 ## Non-negotiable rules
 
 1. **No tooling banners or attribution trailers.** Commit messages and pull requests carry
-   no co-author or generator trailers of any kind; the author recorded by git is the only
-   attribution. Code, comments, and docs carry no editor or generator banners. Treat this as
-   a security requirement: the toolchain that produced the code is not advertised.
+   no co-author or generator trailers of any kind. The author recorded by git and the
+   `Signed-off-by` trailer required by the Contributor License Agreement (see "Licensing
+   and the Contributor License Agreement" below) are the only attribution. Code, comments,
+   and docs carry no editor or generator banners. Treat this as a security requirement: the
+   toolchain that produced the code is not advertised.
 2. **Memory safety.** Every crate is `#![forbid(unsafe_code)]` (enforced through the
    workspace lints) unless an accepted ADR names the crate and the reason. Today no crate
    is exempt.
@@ -52,6 +54,41 @@ Read before changing anything substantial:
   claim in a pull request links to a result file.
 - Every RFC behaviour that is implemented or deliberately skipped is recorded in
   `docs/CONFORMANCE.md`.
+
+## Licensing and the Contributor License Agreement
+
+Tenko DDI is source-available under the Business Source License 1.1 (`LICENSE.md`): free
+to use and modify for your own networks, not to be embedded, packaged, hosted or sold
+as part of a commercial product or service without a separate agreement. Every version
+becomes available under the Change License named in `LICENSE.md` four years after its
+release. The licensor also sells commercial licences; to keep that possible while the
+source is open to contributions, every contribution is accepted under the Contributor
+License Agreement in `CLA.md`. You keep the copyright in what you write and grant the
+licensor the right to distribute it under the project's licences, including commercial
+ones.
+
+What this means for a pull request:
+
+- **Accept the CLA once before your first pull request is merged.** Individuals put the
+  acceptance sentence from `CLA.md`, Part D.1, in the description of their first pull
+  request. Companies and other entities have an authorised representative send the
+  completed Schedule 1 from `CLA.md`, Part B, to the contact named there, and each of
+  their contributors uses the sentence from Part D.2 instead.
+- **Sign off every commit.** Each commit carries a `Signed-off-by: Full Name <email>`
+  trailer (`git commit -s`) with your real name and the email of the commit's author
+  field. The trailer certifies that the commit is covered by the CLA you accepted.
+  Pull requests with unsigned commits are not merged, and maintainers merge in a way that
+  keeps the trailers (merge commit or rebase; no squash that drops them).
+- **Third-party code is declared, and only permissive.** Name the source and licence of
+  anything you did not write yourself in the pull request. Dependencies must carry a
+  licence on the allow list in `deny.toml`; `cargo deny check` enforces it. No code or
+  snippets copied into the repository under the GPL, AGPL, SSPL or another copyleft
+  licence, in any amount. MPL-2.0 is accepted only as an unmodified dependency, and a new
+  one is reviewed in its pull request before it is accepted.
+- **No per-file licence headers.** `LICENSE.md` governs the whole repository; files carry
+  no licence or copyright banner (API-13).
+- **Only contribute what you may license.** Code you wrote for an employer or a customer
+  needs their permission or their entity CLA; see `CLA.md`, Part A.4.
 
 ## Workspace layout
 
