@@ -380,7 +380,7 @@ Comparison points, with their caveats. The published resolver figures measure so
 
 ## 7. Owner decisions
 
-Each question lists its options, the trade-offs and the plan's recommendation; the owner answers in the style "REC-Q1: a". Document changes the recommendations imply (the lead's files, proposed here): DNS-03, DNS-13 and DNS-34 moved from Phase 5 to the phase REC-Q1 names in REQUIREMENTS.md; the ROADMAP's Phase 5 "Recursive resolver" bullet moved to that phase and its Phase 5 "Until then" sentence removed; the "Recursion" row of the baseline decisions table pointing at ADR 0021; TGL-12's phase and note in SECURITY-PROFILES.md and the toggle rows of 2.11 below; CONFORMANCE.md rows from Planned as the packages land; ADR 0007 point 2 marked as superseded by ADR 0021 for the "later" part (the ADR itself is not edited beyond its status line, as the ADR rules say).
+Each question lists its options, the trade-offs and the plan's recommendation; the owner decided every question on 2026-10-22, and the decision stands at the end of each question. Document changes the recommendations imply (the lead's files, proposed here): DNS-03, DNS-13 and DNS-34 moved from Phase 5 to the phase REC-Q1 names in REQUIREMENTS.md; the ROADMAP's Phase 5 "Recursive resolver" bullet moved to that phase and its Phase 5 "Until then" sentence removed; the "Recursion" row of the baseline decisions table pointing at ADR 0021; TGL-12's phase and note in SECURITY-PROFILES.md and the toggle rows of 2.11 below; CONFORMANCE.md rows from Planned as the packages land; ADR 0007 point 2 marked as superseded by ADR 0021 for the "later" part (the ADR itself is not edited beyond its status line, as the ADR rules say).
 
 Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 
@@ -440,7 +440,7 @@ Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 **REC-Q10. Trust anchor signalling (RFC 8145) and the root key sentinel (RFC 8509)?**
 - Options: (a) both built: the sentinel always (it is an answer rule), the signalling on by default and off under Hardened; (b) the sentinel only; (c) neither.
 - Trade-offs: (a) lets the root operators see which anchors resolvers hold (the signal that measured the 2018 roll) at the cost of one query a day that names the node's anchors; the sentinel costs a label check. (b) keeps the node silent. (c) saves a day of work.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q11. Client subnet (RFC 7871)?**
 - Options: (a) never: the resolver sends no client subnet and strips the option from clients' queries; (b) send a truncated prefix (/24, /56) to the authorities that ask for it; (c) send it only where a rule says so.
@@ -465,7 +465,7 @@ Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 **REC-Q15. What does the lab root look like?**
 - Options: (a) Tenko's own authoritative engine serving the root, the TLD and the signed test zones from the lab image, with BIND beside it for an independently signed zone, the opt-out and expired zones, and `delv` as the second validator, and the quirk responder from the engine's example server (section 2.12); (b) BIND or Knot containers serving the whole sandbox; (c) Tenko only.
 - Trade-offs: (a) exercises Tenko's signer and authoritative engine as a root (which finds R75 early) and keeps an independent signer and validator in the loop; (b) is independent of Tenko's own bugs but measures a Tenko resolver against servers whose behaviour the project does not control, and needs every zone written as BIND files; (c) has no independent check.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 ## 8. Risks
 
