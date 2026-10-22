@@ -64,7 +64,7 @@ export function licenseOf(pkg) {
   const body = text.replace(/^\(|\)$/g, "");
   const alternatives = body
     .split(/\s+OR\s+/i)
-    .map((alt) => alt.replace(/^\(|\)$/g, "").split(/\s+AND\s+/i).map((id) => id.trim()).filter(Boolean));
+    .map((/** @type {string} */ alt) => alt.replace(/^\(|\)$/g, "").split(/\s+AND\s+/i).map((/** @type {string} */ id) => id.trim()).filter(Boolean));
   return { text, alternatives };
 }
 
@@ -97,6 +97,7 @@ function readPackage(file) {
  */
 function collectInstalled(nodeModules, out) {
   if (!existsSync(nodeModules)) return;
+  /** @param {string} dir */
   const visit = (dir) => {
     const file = path.join(dir, "package.json");
     if (!existsSync(file)) return;
@@ -123,6 +124,11 @@ function collectInstalled(nodeModules, out) {
  * node_modules/<name> walking up from `fromDir`, never above `root`.
  * @returns {string | null}
  */
+/**
+ * @param {string} name
+ * @param {string} fromDir
+ * @param {string} root
+ */
 function resolveFrom(name, fromDir, root) {
   let dir = fromDir;
   for (;;) {
@@ -140,9 +146,16 @@ function resolveFrom(name, fromDir, root) {
  * package through `dependencies` and `optionalDependencies`, resolved like Node does.
  * @returns {Set<string>} directories
  */
+/**
+ * @param {string} root
+ * @param {{ dependencies?: Record<string, string> }} rootPkg
+ */
 function productionClosure(root, rootPkg) {
   const seen = new Set();
+  /** @type {string[]} */
   const queue = [];
+  /** @param {Record<string, string> | undefined} deps
+   *  @param {string} fromDir */
   const enqueue = (deps, fromDir) => {
     for (const name of Object.keys(deps ?? {})) {
       const dir = resolveFrom(name, fromDir, root);
@@ -155,6 +168,7 @@ function productionClosure(root, rootPkg) {
   enqueue(rootPkg.dependencies, root);
   while (queue.length > 0) {
     const dir = queue.shift();
+    if (dir === undefined) break;
     const pkg = readPackage(path.join(dir, "package.json"));
     enqueue(pkg.dependencies, dir);
     enqueue(pkg.optionalDependencies, dir);
@@ -178,6 +192,7 @@ export function run(uiDir = UI_DIR) {
   collectInstalled(nodeModules, installed);
   const prodDirs = productionClosure(uiDir, rootPkg);
 
+  /** @param {(dir: string) => boolean} filter */
   const rows = (filter) => {
     const byKey = new Map();
     for (const [dir, info] of installed) {
@@ -194,8 +209,8 @@ export function run(uiDir = UI_DIR) {
     }
     return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   };
-  const production = rows((dir) => prodDirs.has(dir));
-  const development = rows((dir) => !prodDirs.has(dir));
+  const production = rows((/** @type {string} */ dir) => prodDirs.has(dir));
+  const development = rows((/** @type {string} */ dir) => !prodDirs.has(dir));
   return { ok: production.every((r) => r.allowed), production, development };
 }
 
