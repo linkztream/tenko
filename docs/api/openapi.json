@@ -5497,7 +5497,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5526,8 +5526,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5543,7 +5543,7 @@
           "dhcp"
         ],
         "summary": "Create a DHCP class",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A class holds when any of its matches holds.",
         "operationId": "create_dhcp_class",
         "requestBody": {
           "content": {
@@ -5567,7 +5567,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid or its name taken (`dhcp.class.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5596,8 +5596,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5640,7 +5640,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5679,8 +5679,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5696,7 +5696,7 @@
           "dhcp"
         ],
         "summary": "Delete a DHCP class",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A class a scope, pool or policy names stays (`dhcp.class.in_use`, parameter `by`).",
         "operationId": "delete_dhcp_class",
         "parameters": [
           {
@@ -5707,6 +5707,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -5714,7 +5726,7 @@
             "description": "The class is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5754,7 +5766,7 @@
             }
           },
           "409": {
-            "description": "The class is still named by a scope, a pool or a policy (`dhcp.class.in_use`)",
+            "description": "A scope, pool or policy names the class (`dhcp.class.in_use`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5763,8 +5775,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The class changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5791,6 +5803,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -5815,7 +5839,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid or its name taken (`dhcp.class.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5854,8 +5878,8 @@
               }
             }
           },
-          "412": {
-            "description": "The class changed since it was read (`If-Match`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5864,8 +5888,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The class changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6002,7 +6026,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of filter entries",
+            "description": "A page of filter entries by pattern",
             "content": {
               "application/json": {
                 "schema": {
@@ -6012,7 +6036,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6041,8 +6065,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6058,7 +6082,7 @@
           "dhcp"
         ],
         "summary": "Add a DHCP MAC filter",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A deny entry drops the client on every scope; on a restricted scope only clients an allow entry matches are served.",
         "operationId": "create_dhcp_filter",
         "requestBody": {
           "content": {
@@ -6082,7 +6106,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the entry is invalid (`dhcp.filter.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6112,17 +6136,7 @@
             }
           },
           "409": {
-            "description": "An entry for this pattern exists (`dhcp.filter.exists`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "An entry for the pattern exists (`dhcp.filter.exists`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6165,7 +6179,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6204,8 +6218,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6232,6 +6246,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -6239,98 +6265,7 @@
             "description": "The filter entry is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session or token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The principal lacks the scope `dhcp.write`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such filter entry (`dhcp.filter.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "dhcp"
-        ],
-        "summary": "Change a DHCP MAC filter",
-        "description": "Scope: `dhcp.write`.",
-        "operationId": "update_dhcp_filter",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "description": "Filter entry identifier (UUID)",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DhcpFilterPatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The changed filter entry",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DhcpFilterItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6370,7 +6305,7 @@
             }
           },
           "409": {
-            "description": "An entry for this pattern exists (`dhcp.filter.exists`)",
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6380,7 +6315,70 @@
             }
           },
           "412": {
-            "description": "The filter entry changed since it was read (`If-Match`)",
+            "description": "The entry changed since it was read (`If-Match`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "dhcp"
+        ],
+        "summary": "Change a DHCP MAC filter",
+        "description": "Scope: `dhcp.write`.",
+        "operationId": "update_dhcp_filter",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Filter entry identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DhcpFilterPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The changed filter entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DhcpFilterItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the entry is invalid (`dhcp.filter.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6389,8 +6387,48 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dhcp.write`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such filter entry (`dhcp.filter.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An entry for the pattern exists (`dhcp.filter.exists`), or the DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The entry changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6880,7 +6918,7 @@
           "dhcp"
         ],
         "summary": "List the built-in DHCP options",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors with their types, and the codes the server sets itself, which no option set holds.",
         "operationId": "list_dhcp_option_catalog",
         "responses": {
           "200": {
@@ -6892,16 +6930,6 @@
                   "items": {
                     "$ref": "#/components/schemas/OptionCatalogItem"
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -6918,16 +6946,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dhcp.read`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6992,7 +7010,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7021,8 +7039,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7038,7 +7056,7 @@
           "dhcp"
         ],
         "summary": "Define a custom DHCP option",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A code of the built-in catalog or one the server sets is refused; codes 224 to 254 of `dhcp4` are the site-specific range (RFC 3942), and a vendor space holds the option 43 sub-options of its vendor class.",
         "operationId": "create_dhcp_option_def",
         "requestBody": {
           "content": {
@@ -7062,7 +7080,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the definition is invalid (`dhcp.option.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7092,17 +7110,7 @@
             }
           },
           "409": {
-            "description": "The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) or a definition for this space and code exists (`dhcp.option_def.exists`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "A catalog or server-managed code (`dhcp.option.code_reserved`), a definition of the space and code exists (`dhcp.option_def.exists`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7145,7 +7153,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7175,7 +7183,7 @@
             }
           },
           "404": {
-            "description": "No such option definition (`dhcp.option_def.not_found`)",
+            "description": "No such definition (`dhcp.option_def.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7184,8 +7192,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7201,7 +7209,7 @@
           "dhcp"
         ],
         "summary": "Delete a custom DHCP option definition",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A definition an option set uses stays (`dhcp.option_def.in_use`, parameter `by`).",
         "operationId": "delete_dhcp_option_def",
         "parameters": [
           {
@@ -7212,6 +7220,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7219,7 +7239,7 @@
             "description": "The definition is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7249,7 +7269,7 @@
             }
           },
           "404": {
-            "description": "No such option definition (`dhcp.option_def.not_found`)",
+            "description": "No such definition (`dhcp.option_def.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7259,7 +7279,7 @@
             }
           },
           "409": {
-            "description": "The definition is still used by an option set (`dhcp.option_def.in_use`)",
+            "description": "An option set uses the definition (`dhcp.option_def.in_use`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7268,8 +7288,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The definition changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7285,7 +7305,7 @@
           "dhcp"
         ],
         "summary": "Change a custom DHCP option definition",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. The type does not change while an option set uses the definition.",
         "operationId": "update_dhcp_option_def",
         "parameters": [
           {
@@ -7295,6 +7315,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -7320,7 +7352,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the definition is invalid (`dhcp.option.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7350,7 +7382,7 @@
             }
           },
           "404": {
-            "description": "No such option definition (`dhcp.option_def.not_found`)",
+            "description": "No such definition (`dhcp.option_def.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7360,7 +7392,7 @@
             }
           },
           "409": {
-            "description": "The definition is still used by an option set (`dhcp.option_def.in_use`)",
+            "description": "An option set uses the definition and the type changes (`dhcp.option_def.in_use`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7370,17 +7402,7 @@
             }
           },
           "412": {
-            "description": "The option definition changed since it was read (`If-Match`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The definition changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7398,7 +7420,7 @@
           "dhcp"
         ],
         "summary": "List DHCP option sets",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The sets the caller may read, by level and owner, each value with its name and typed view.",
         "operationId": "list_dhcp_option_sets",
         "parameters": [
           {
@@ -7454,7 +7476,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7483,8 +7505,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7502,7 +7524,7 @@
           "dhcp"
         ],
         "summary": "Get the DHCP options of a level",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read` on the owner. An owner without options reads as an empty set at revision 0.",
         "operationId": "get_dhcp_option_set",
         "parameters": [
           {
@@ -7527,7 +7549,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7557,7 +7579,7 @@
             }
           },
           "404": {
-            "description": "No scope serves the prefix (`dhcp.scope.not_found`) or no such pool (`dhcp.pool.not_found`)",
+            "description": "The owner does not exist (`dhcp.scope.not_found`, `dhcp.shared_network.not_found`, `dhcp.pool.not_found`, `dhcp.policy.not_found`, `ipam.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7566,8 +7588,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7583,7 +7605,7 @@
           "dhcp"
         ],
         "summary": "Replace the DHCP options of a level",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write` on the owner. Each value is given in wire form (`data`, hexadecimal) or typed (`typed`) and checked against the type of its code; no values clear the set.",
         "operationId": "set_dhcp_option_set",
         "parameters": [
           {
@@ -7593,6 +7615,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read (0 for no set); a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -7618,7 +7652,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) or an option code has no definition in its space (`dhcp.option.unknown`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), a value does not fit its type or appears twice (`dhcp.option.invalid`), or a code has no definition (`dhcp.option.unknown`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7647,8 +7681,18 @@
               }
             }
           },
+          "404": {
+            "description": "The owner does not exist (`dhcp.scope.not_found`, `dhcp.shared_network.not_found`, `dhcp.pool.not_found`, `dhcp.policy.not_found`, `ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`)",
+            "description": "A code the server sets itself (`dhcp.option.code_reserved`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7658,17 +7702,7 @@
             }
           },
           "412": {
-            "description": "The option set changed since it was read (`If-Match`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The set changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7684,7 +7718,7 @@
           "dhcp"
         ],
         "summary": "Clear the DHCP options of a level",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write` on the owner. Clearing an empty set is no error.",
         "operationId": "delete_dhcp_option_set",
         "parameters": [
           {
@@ -7695,6 +7729,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -7702,7 +7748,7 @@
             "description": "The option set is empty"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7731,8 +7777,28 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "404": {
+            "description": "The owner does not exist",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The set changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7750,7 +7816,7 @@
           "dhcp"
         ],
         "summary": "List DHCP policies",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The policies of each scope in order, then the server's.",
         "operationId": "list_dhcp_policies",
         "parameters": [
           {
@@ -7815,7 +7881,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7844,8 +7910,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7861,7 +7927,7 @@
           "dhcp"
         ],
         "summary": "Create a DHCP policy",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`, and `dhcp.write` on the scope of a scope policy. Without an order the policy goes after the last of its scope.",
         "operationId": "create_dhcp_policy",
         "requestBody": {
           "content": {
@@ -7885,7 +7951,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the policy is invalid or its name taken in the scope (`dhcp.policy.invalid`), its range lies outside the scope (`dhcp.pool.outside`), or its lease times or DDNS settings are invalid (`dhcp.lease_times.invalid`, `dhcp.ddns.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7915,7 +7981,7 @@
             }
           },
           "404": {
-            "description": "No scope serves the prefix (`dhcp.scope.not_found`) or no such class (`dhcp.class.not_found`)",
+            "description": "No such scope (`dhcp.scope.not_found`) or class (`dhcp.class.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7924,8 +7990,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7968,7 +8034,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8007,8 +8073,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8024,7 +8090,7 @@
           "dhcp"
         ],
         "summary": "Delete a DHCP policy",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. The policy's options go with it.",
         "operationId": "delete_dhcp_policy",
         "parameters": [
           {
@@ -8035,6 +8101,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -8042,7 +8120,7 @@
             "description": "The policy is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8081,8 +8159,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The policy changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8098,7 +8186,7 @@
           "dhcp"
         ],
         "summary": "Change a DHCP policy",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. The scope of a policy does not change.",
         "operationId": "update_dhcp_policy",
         "parameters": [
           {
@@ -8108,6 +8196,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -8133,7 +8233,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the policy is invalid (`dhcp.policy.invalid`), or its range lies outside the scope (`dhcp.pool.outside`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8163,7 +8263,17 @@
             }
           },
           "404": {
-            "description": "No such policy (`dhcp.policy.not_found`)",
+            "description": "No such policy (`dhcp.policy.not_found`) or class (`dhcp.class.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8181,16 +8291,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       }
@@ -8201,7 +8301,7 @@
           "dhcp"
         ],
         "summary": "List DHCP pools",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address.",
         "operationId": "list_dhcp_pools",
         "parameters": [
           {
@@ -8257,80 +8357,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session or token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The principal lacks the scope `dhcp.read`",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/dhcp/pools/{range}": {
-      "get": {
-        "tags": [
-          "dhcp"
-        ],
-        "summary": "Get a DHCP pool",
-        "description": "Scope: `dhcp.read`. The implementation checks the scope of the pool.",
-        "operationId": "get_dhcp_pool",
-        "parameters": [
-          {
-            "name": "range",
-            "in": "path",
-            "description": "Range identifier (UUID) of the pool",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The pool",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DhcpPoolItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8360,7 +8387,7 @@
             }
           },
           "404": {
-            "description": "No such pool (`dhcp.pool.not_found`)",
+            "description": "No scope serves the prefix of `scope` (`dhcp.scope.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8369,8 +8396,91 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dhcp/pools/{range}": {
+      "get": {
+        "tags": [
+          "dhcp"
+        ],
+        "summary": "Get a DHCP pool",
+        "description": "Scope: `dhcp.read` on the pool's scope.",
+        "operationId": "get_dhcp_pool",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "path",
+            "description": "Range identifier (UUID) of the pool",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pool, with the `ETag` of its settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DhcpPoolItem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `dhcp.read`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The range does not exist or is no pool (`dhcp.pool.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8386,7 +8496,7 @@
           "dhcp"
         ],
         "summary": "Set the DHCP settings of a pool",
-        "description": "Scope: `dhcp.write`. The implementation checks the scope of the pool.",
+        "description": "Scope: `dhcp.write` on the pool's scope. The range itself is changed through the IPAM range routes.",
         "operationId": "set_dhcp_pool",
         "parameters": [
           {
@@ -8396,6 +8506,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision of the settings the client read (0 for none); a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -8421,7 +8543,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the lease times are invalid (`dhcp.lease_times.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the range lies outside its scope (`dhcp.pool.outside`) or the lease times are invalid (`dhcp.lease_times.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8451,7 +8573,7 @@
             }
           },
           "404": {
-            "description": "No such pool (`dhcp.pool.not_found`) or no such class (`dhcp.class.not_found`)",
+            "description": "The range does not exist (`dhcp.pool.not_found`), its prefix has no scope (`dhcp.scope.not_found`) or a class does not exist (`dhcp.class.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8461,7 +8583,7 @@
             }
           },
           "409": {
-            "description": "The range is not a DHCP pool (`dhcp.pool.not_pool`)",
+            "description": "The range's role is not `dhcp_pool` (`dhcp.pool.not_pool`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8470,8 +8592,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The settings changed since they were read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8487,7 +8609,7 @@
           "dhcp"
         ],
         "summary": "Remove the DHCP settings of a pool (the range stays)",
-        "description": "Scope: `dhcp.write`. The implementation checks the scope of the pool.",
+        "description": "Scope: `dhcp.write` on the pool's scope. The pool's options go with them.",
         "operationId": "delete_dhcp_pool",
         "parameters": [
           {
@@ -8498,6 +8620,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision of the settings the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -8505,7 +8639,7 @@
             "description": "The settings are gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8535,7 +8669,7 @@
             }
           },
           "404": {
-            "description": "No such pool (`dhcp.pool.not_found`)",
+            "description": "The pool has no settings (`dhcp.pool.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8544,8 +8678,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The settings changed since they were read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8750,7 +8894,7 @@
           "dhcp"
         ],
         "summary": "List DHCP scopes",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The scopes the caller may read, by network, with their pools and active leases.",
         "operationId": "list_dhcp_scopes",
         "parameters": [
           {
@@ -8787,7 +8931,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of scopes by prefix",
+            "description": "A page of scopes by network",
             "content": {
               "application/json": {
                 "schema": {
@@ -8797,7 +8941,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8826,8 +8970,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8843,7 +8987,7 @@
           "dhcp"
         ],
         "summary": "Create a DHCP scope for an IPAM network",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write` on the prefix. The DDNS settings default to the server's; under the Hardened profile a scope is restricted to allowed MAC addresses unless the request says otherwise (TGL-17).",
         "operationId": "create_dhcp_scope",
         "requestBody": {
           "content": {
@@ -8867,7 +9011,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8897,7 +9041,7 @@
             }
           },
           "404": {
-            "description": "No such prefix (`ipam.not_found`)",
+            "description": "No such prefix (`ipam.not_found`), shared network (`dhcp.shared_network.not_found`) or class (`dhcp.class.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8907,17 +9051,7 @@
             }
           },
           "409": {
-            "description": "The prefix has a scope already (`dhcp.scope.exists`) or the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+            "description": "The prefix has a scope already (`dhcp.scope.exists`), the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8960,7 +9094,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8999,8 +9133,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9016,7 +9150,7 @@
           "dhcp"
         ],
         "summary": "Delete a DHCP scope (the prefix stays)",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. Its exclusions, the settings and options of its pools, its policies and its options go with it; the prefix and its ranges stay.",
         "operationId": "delete_dhcp_scope",
         "parameters": [
           {
@@ -9027,6 +9161,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -9034,7 +9180,7 @@
             "description": "The scope is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9073,8 +9219,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The scope changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9090,7 +9246,7 @@
           "dhcp"
         ],
         "summary": "Change a DHCP scope",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. The nil UUID as `shared_network` takes the scope out of its shared network.",
         "operationId": "update_dhcp_scope",
         "parameters": [
           {
@@ -9100,6 +9256,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -9125,7 +9293,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9164,8 +9332,8 @@
               }
             }
           },
-          "412": {
-            "description": "The scope changed since it was read (`If-Match`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9174,8 +9342,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The scope changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9193,7 +9361,7 @@
           "dhcp"
         ],
         "summary": "Get the options a client gets in a DHCP scope",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The server's, the shared network's and the scope's options, those of the policies that match the client (none until classes are matched, WP8.4) and those of the client's reservation, the more specific level winning per code. Pool options depend on the address and are shown on the pool.",
         "operationId": "get_dhcp_effective_options",
         "parameters": [
           {
@@ -9255,7 +9423,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_query`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9294,8 +9462,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9313,7 +9481,7 @@
           "dhcp"
         ],
         "summary": "List the exclusion ranges of a DHCP scope",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. The explicit ranges; the prefix's reserved and infrastructure ranges and the addresses of hosts that are not dynamic are excluded as well.",
         "operationId": "list_dhcp_exclusions",
         "parameters": [
           {
@@ -9369,7 +9537,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9408,8 +9576,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9460,7 +9628,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the exclusion range is unordered or outside the scope (`dhcp.exclusion.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the range is unordered or outside the scope (`dhcp.exclusion.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9499,8 +9667,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9538,6 +9706,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -9545,7 +9725,7 @@
             "description": "The exclusion range is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9575,7 +9755,7 @@
             }
           },
           "404": {
-            "description": "No such exclusion range (`dhcp.exclusion.not_found`)",
+            "description": "No scope serves the prefix (`dhcp.scope.not_found`) or no such exclusion range (`dhcp.exclusion.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9584,8 +9764,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The range changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9603,7 +9793,7 @@
           "dhcp"
         ],
         "summary": "Get how full a DHCP scope is",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses.",
         "operationId": "get_dhcp_scope_utilization",
         "parameters": [
           {
@@ -9628,7 +9818,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9667,8 +9857,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9686,7 +9876,7 @@
           "dhcp"
         ],
         "summary": "Get the DHCP server settings",
-        "description": "Scope: `dhcp.read`.",
+        "description": "Scope: `dhcp.read`. Before the first change the defaults, at revision 0.",
         "operationId": "get_dhcp_settings",
         "responses": {
           "200": {
@@ -9695,16 +9885,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DhcpSettingsItem"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -9729,8 +9909,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9746,8 +9926,22 @@
           "dhcp"
         ],
         "summary": "Change the DHCP server settings",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out.",
         "operationId": "update_dhcp_settings",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read (0 before the first change); a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9799,8 +9993,18 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The settings changed since they were read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9865,7 +10069,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9894,8 +10098,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9911,7 +10115,7 @@
           "dhcp"
         ],
         "summary": "Create a DHCP shared network",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. Scopes join it with their `shared_network`.",
         "operationId": "create_dhcp_shared_network",
         "requestBody": {
           "content": {
@@ -9935,7 +10139,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the name or interface is invalid or the name is taken (`dhcp.shared_network.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9964,8 +10168,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10008,7 +10212,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10047,8 +10251,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10064,7 +10268,7 @@
           "dhcp"
         ],
         "summary": "Delete a DHCP shared network",
-        "description": "Scope: `dhcp.write`.",
+        "description": "Scope: `dhcp.write`. A shared network that scopes still name stays (`dhcp.shared_network.in_use`).",
         "operationId": "delete_dhcp_shared_network",
         "parameters": [
           {
@@ -10075,6 +10279,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -10082,7 +10298,7 @@
             "description": "The shared network is gone"
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)",
+            "description": "The request is malformed (`sys.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10122,7 +10338,7 @@
             }
           },
           "409": {
-            "description": "The shared network still has scopes (`dhcp.shared_network.in_use`)",
+            "description": "Scopes still belong to it (`dhcp.shared_network.in_use`), or the DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10131,8 +10347,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The shared network changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10159,6 +10375,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read; a stale revision is refused with 412",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -10183,7 +10411,7 @@
             }
           },
           "400": {
-            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`)",
+            "description": "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the name or interface is invalid or the name is taken (`dhcp.shared_network.invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10222,8 +10450,8 @@
               }
             }
           },
-          "412": {
-            "description": "The shared network changed since it was read (`If-Match`)",
+          "409": {
+            "description": "The DHCP module is off (`dhcp.module.disabled`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10232,8 +10460,8 @@
               }
             }
           },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
+          "412": {
+            "description": "The shared network changed since it was read (`If-Match`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37790,7 +38018,8 @@
           "first",
           "last",
           "size",
-          "leased"
+          "leased",
+          "revision"
         ],
         "properties": {
           "first": {
@@ -37823,6 +38052,10 @@
           "range": {
             "$ref": "#/components/schemas/RangeId",
             "description": "The range."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The store revision of the settings row (the `ETag`); 0 without settings."
           },
           "settings": {
             "oneOf": [
@@ -51287,7 +51520,8 @@
                 "first",
                 "last",
                 "size",
-                "leased"
+                "leased",
+                "revision"
               ],
               "properties": {
                 "first": {
@@ -51320,6 +51554,10 @@
                 "range": {
                   "$ref": "#/components/schemas/RangeId",
                   "description": "The range."
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision",
+                  "description": "The store revision of the settings row (the `ETag`); 0 without settings."
                 },
                 "settings": {
                   "oneOf": [

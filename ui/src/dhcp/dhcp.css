@@ -1,0 +1,50 @@
+/* The DHCP area (WP7.4): list pages with a grid that fills the page, the scope tabs, the option
+   set editor, the match and term editors, and the dialogs' forms. */
+.dhcp-page.list-page { overflow: hidden; }
+.dhcp-list-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dhcp-tab { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: var(--sp-4); }
+.dhcp-tab > .note { margin-inline: var(--sp-6); }
+.dhcp-sections { display: grid; gap: var(--sp-6); }
+.dhcp-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.dhcp-box { position: relative; display: flex; flex-direction: column; height: 320px; min-height: 0; }
+.dhcp-chips { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.dhcp-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; padding-block: var(--sp-3); }
+.dhcp-list-body + .dhcp-actions, .dhcp-tab > .dhcp-actions { padding-inline: var(--sp-6); }
+.dhcp-set-body { display: grid; gap: var(--sp-5); max-width: 760px; }
+.dhcp-kv dd { margin: 0; }
+
+.dhcp-form { display: grid; gap: var(--sp-5); }
+.dhcp-form .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-5); align-items: start; }
+.dhcp-form .input, .dhcp-form .select { width: 100%; }
+.page-body.dhcp-form { max-width: 760px; }
+.dialog.dhcp-dialog { width: min(720px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+
+.dhcp-lease { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.dhcp-lease legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-2); }
+.dhcp-span { display: flex; gap: var(--sp-3); }
+.dhcp-span .input { flex: 1; }
+.dhcp-span .select { width: auto; flex: 0 0 8em; }
+
+.dhcp-classes { border: 0; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.dhcp-classes legend, .dhcp-matches-field legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-2); }
+.dhcp-matches-field { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4); margin: 0; display: grid; gap: var(--sp-4); }
+
+.dhcp-matches { display: grid; gap: var(--sp-3); }
+.dhcp-match, .dhcp-term { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.dhcp-match .select, .dhcp-term > .select { width: auto; min-width: 12em; }
+.dhcp-match .input { flex: 1; min-width: 12em; }
+.dhcp-match-error { flex-basis: 100%; }
+.dhcp-term .dhcp-match { flex: 1; }
+
+.dhcp-bar { display: inline-block; inline-size: 80px; block-size: 8px; background: var(--line); border-radius: var(--r-2); overflow: hidden; vertical-align: middle; margin-inline-end: var(--sp-3); }
+.dhcp-bar > span { display: block; block-size: 100%; background: var(--accent); }
+.dhcp-bar > span.warn { background: var(--warn, var(--accent)); }
+.dhcp-bar > span.crit { background: var(--danger, var(--accent)); }
+.dhcp-util { display: inline-flex; align-items: center; }
+
+.dhcp-optset-value .input, .dhcp-optset-value .select { width: 100%; }
+.dhcp-optset-add { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; padding-block: var(--sp-3); }
+.dhcp-optset-add .select { width: auto; min-width: 16em; }
+.dhcp-optset-code { display: inline-flex; gap: var(--sp-2); }
+.dhcp-optset-code .input { width: 9em; }
+.dhcp-value { white-space: pre-wrap; overflow-wrap: anywhere; }

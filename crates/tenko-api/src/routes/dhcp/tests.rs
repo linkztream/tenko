@@ -1,5 +1,8 @@
 //! Route tests of the DHCP contracts: every operation checks the scope of its action on the
-//! right object before it answers 501, and refuses a malformed path first.
+//! right object before anything else answers, and refuses a malformed path first. Without
+//! the configuration service the configuration routes answer 409 `dhcp.module.disabled`
+//! after the check; the routes of later packages answer 501. The operations themselves are
+//! tested over the service in `tests/dhcp_*.rs`.
 
 use std::sync::Arc;
 
@@ -8,7 +11,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, header},
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use tenko_auth::authz::anywhere;
 use tenko_core::{
     Action, Authorizer, NodeId, ObjectKind, ObjectRef, PrefixId,
@@ -27,6 +30,8 @@ use crate::{
 
 const PREFIX: &str = "0190d1c2-0000-7000-8000-000000000001";
 const OTHER: &str = "0190d1c2-0000-7000-8000-000000000002";
+const DISABLED: &str = "dhcp.module.disabled";
+const STUB: &str = "sys.not_implemented";
 
 fn id(text: &str) -> Uuid {
     text.parse().expect("UUID")
@@ -39,12 +44,38 @@ fn router(state: AppState) -> Router {
     router.with_state(state)
 }
 
+/// A JSON body that the route accepts, for the requests that need one.
+fn body_for(method: &str, path: &str) -> Option<Value> {
+    if !matches!(method, "POST" | "PUT" | "PATCH") || path.contains("/release") {
+        return None;
+    }
+    Some(match (method, path) {
+        ("POST", "/dhcp/scopes") => json!({ "prefix": PREFIX }),
+        ("POST", p) if p.ends_with("/exclusions") => {
+            json!({ "first": "192.0.2.10", "last": "192.0.2.19" })
+        }
+        ("POST", "/dhcp/shared-networks") => json!({ "name": "lan" }),
+        ("POST", "/dhcp/option-defs") => json!({ "code": 224, "name": "site", "kind": "u8" }),
+        ("POST", "/dhcp/classes") => json!({ "name": "pxe", "matches": [] }),
+        ("POST", "/dhcp/policies") => {
+            json!({ "name": "uefi", "condition": { "join": "and", "terms": [] } })
+        }
+        ("POST", "/dhcp/filters") => json!({ "mac": "00:00:5e:00:53:01", "kind": "deny" }),
+        _ => json!({}),
+    })
+}
+
 async fn send(router: &Router, method: &str, path: &str) -> Reply {
-    let request = Request::builder()
+    let builder = Request::builder()
         .method(method)
-        .uri(format!("{API_BASE}{path}"))
-        .body(Body::empty())
-        .expect("request");
+        .uri(format!("{API_BASE}{path}"));
+    let request = match body_for(method, path) {
+        Some(body) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string())),
+        None => builder.body(Body::empty()),
+    }
+    .expect("request");
     let response = router.clone().oneshot(request).await.expect("response");
     let status = response.status();
     let content_type = response
@@ -82,32 +113,49 @@ fn kinds(policy: &Policy) -> Vec<(Action, ObjectKind)> {
     policy.asked().iter().map(|(a, o)| (*a, o.kind)).collect()
 }
 
-/// Sends every request and expects the stub answer to each.
-async fn expect_stubs(router: &Router, requests: &[(&str, String)]) {
+/// Sends every request and expects 409 `dhcp.module.disabled` (a configuration route
+/// without its service) or 501 (a route of a later package) after the check.
+async fn expect_after_check(router: &Router, requests: &[(&str, String)]) {
     for (method, path) in requests {
-        send(router, method, path)
-            .await
-            .assert_problem(501, "sys.not_implemented");
+        let later = path.contains("/reservations")
+            || path.contains("/leases")
+            || path.contains("/history")
+            || path.contains("/export")
+            || path.starts_with("/nodes/")
+            || path.starts_with("/ipam/");
+        let reply = send(router, method, path).await;
+        if later {
+            reply.assert_problem(501, STUB);
+        } else if path == "/dhcp/option-catalog" {
+            reply.assert_json(200);
+        } else {
+            reply.assert_problem(409, DISABLED);
+        }
     }
 }
 
 #[tokio::test]
-async fn an_allowed_call_reaches_the_stub() {
+async fn an_allowed_call_reaches_the_service_or_the_stub() {
     let (router, policy) = with_policy(true, true);
-    let reply = send(
+    send(
         &router,
         "POST",
         &format!("/dhcp/scopes/{PREFIX}/exclusions"),
     )
-    .await;
-    reply.assert_problem(501, "sys.not_implemented");
+    .await
+    .assert_problem(409, DISABLED);
+    let reply = send(&router, "POST", "/dhcp/leases/192.0.2.50/release").await;
+    reply.assert_problem(501, STUB);
     assert_eq!(
         reply.body["params"]["path"],
-        "/api/v1/dhcp/scopes/{prefix}/exclusions"
+        "/api/v1/dhcp/leases/{addr}/release"
     );
     assert_eq!(
         policy.asked(),
-        [(Action::Update, scope_object(PrefixId(id(PREFIX))))]
+        [
+            (Action::Update, scope_object(PrefixId(id(PREFIX)))),
+            (Action::Execute, anywhere(ObjectKind::DhcpScope)),
+        ]
     );
 }
 
@@ -116,7 +164,7 @@ async fn a_reader_reads_and_is_refused_writes() {
     let (router, policy) = with_policy(true, false);
     send(&router, "GET", "/dhcp/scopes")
         .await
-        .assert_problem(501, "sys.not_implemented");
+        .assert_problem(409, DISABLED);
     send(&router, "POST", "/dhcp/scopes")
         .await
         .assert_problem(403, "auth.forbidden");
@@ -131,13 +179,13 @@ async fn a_reader_reads_and_is_refused_writes() {
         .assert_problem(403, "auth.forbidden");
     send(&router, "GET", "/dhcp/leases")
         .await
-        .assert_problem(501, "sys.not_implemented");
+        .assert_problem(501, STUB);
     send(&router, "PUT", &format!("/dhcp/pools/{PREFIX}"))
         .await
         .assert_problem(403, "auth.forbidden");
     send(&router, "GET", "/ipam/reconcile")
         .await
-        .assert_problem(501, "sys.not_implemented");
+        .assert_problem(501, STUB);
     assert_eq!(
         kinds(&policy),
         [
@@ -156,7 +204,7 @@ async fn a_reader_reads_and_is_refused_writes() {
 #[tokio::test]
 async fn scopes_are_checked_on_the_prefix() {
     let (router, policy) = with_policy(true, true);
-    expect_stubs(
+    expect_after_check(
         &router,
         &[
             ("GET", format!("/dhcp/scopes/{PREFIX}")),
@@ -191,9 +239,24 @@ async fn scopes_are_checked_on_the_prefix() {
 }
 
 #[tokio::test]
+async fn a_scope_is_created_with_the_kind_and_its_prefix() {
+    let (router, policy) = with_policy(true, true);
+    send(&router, "POST", "/dhcp/scopes")
+        .await
+        .assert_problem(409, DISABLED);
+    assert_eq!(
+        policy.asked(),
+        [
+            (Action::Create, anywhere(ObjectKind::DhcpScope)),
+            (Action::Create, scope_object(PrefixId(id(PREFIX)))),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn server_wide_configuration_is_checked_on_the_singleton() {
     let (router, policy) = with_policy(true, true);
-    expect_stubs(
+    expect_after_check(
         &router,
         &[
             ("GET", "/dhcp/settings".to_owned()),
@@ -225,7 +288,7 @@ async fn server_wide_configuration_is_checked_on_the_singleton() {
 #[tokio::test]
 async fn objects_are_checked_on_their_own_kind() {
     let (router, policy) = with_policy(true, true);
-    expect_stubs(
+    expect_after_check(
         &router,
         &[
             ("GET", "/dhcp/option-catalog".to_owned()),
@@ -275,7 +338,7 @@ async fn objects_are_checked_on_their_own_kind() {
 #[tokio::test]
 async fn option_set_owners_map_to_their_objects() {
     let (router, policy) = with_policy(true, true);
-    expect_stubs(
+    expect_after_check(
         &router,
         &[
             ("GET", "/dhcp/option-sets".to_owned()),
@@ -309,7 +372,7 @@ async fn option_set_owners_map_to_their_objects() {
 #[tokio::test]
 async fn node_routes_check_the_node_first() {
     let (router, policy) = with_policy(true, true);
-    expect_stubs(
+    expect_after_check(
         &router,
         &[
             ("GET", "/nodes/1001/dhcp".to_owned()),

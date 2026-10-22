@@ -2,6 +2,7 @@ import { A, useLocation } from "@solidjs/router";
 import { paths } from "../app/paths";
 import { PageHead } from "../components/PageHead";
 import { t, type MessageKey } from "../i18n";
+import { DhcpNav } from "./DhcpNav";
 
 /** The title of each DHCP section, by the segment after /dhcp; the scopes list has no segment. */
 const TITLES: Readonly<Record<string, MessageKey>> = {
@@ -21,11 +22,12 @@ function titleOf(pathname: string): MessageKey {
   return TITLES[segments[1] ?? ""] ?? "dhcp.title";
 }
 
-/** The DHCP area until its views are built: every DHCP path says its part comes later. */
+/** The DHCP paths whose views come with later packages (the leases, the history): they say so. */
 export default function DhcpPage() {
   const location = useLocation();
   return (
     <div class="page" data-testid="page-dhcp">
+      <DhcpNav />
       <PageHead title={t(titleOf(location.pathname))} />
       <div class="empty" data-testid="dhcp-coming">
         <h2>{t("dhcp.coming.title")}</h2>

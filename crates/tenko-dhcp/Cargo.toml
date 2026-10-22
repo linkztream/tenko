@@ -23,6 +23,12 @@ futures = { workspace = true }
 tenko-store = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+# WP7.4: the configuration service (src/config) writes its rows through inline jobs on the
+# store and reads the IPAM rows a scope derives from; every crate is already in the graph.
+serde = { workspace = true }
+tenko-ipam = { workspace = true }
+tenko-jobs = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 # The counting allocator of tests/alloc.rs (the DNS codec's allocation test).

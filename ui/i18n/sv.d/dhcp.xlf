@@ -54,6 +54,1348 @@
         <notes><note category="description">Link on an unbuilt DHCP page that leads back to the list of DHCP scopes.</note></notes>
         <segment><source>Go to the DHCP scopes</source><target>Gå till DHCP-omfången</target></segment>
       </unit>
+      <unit id="dhcp.nav.label">
+        <notes><note category="description">Accessible name of the sub-navigation of the DHCP area.</note></notes>
+        <segment><source>DHCP sections</source><target>DHCP-avsnitt</target></segment>
+      </unit>
+      <unit id="dhcp.nav.scopes">
+        <segment><source>Scopes</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.nav.shared_networks">
+        <segment><source>Shared networks</source><target>Delade nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.nav.options">
+        <segment><source>Options</source><target>Alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.nav.classes">
+        <segment><source>Classes</source><target>Klasser</target></segment>
+      </unit>
+      <unit id="dhcp.nav.policies">
+        <segment><source>Policies</source><target>Principer</target></segment>
+      </unit>
+      <unit id="dhcp.nav.filters">
+        <segment><source>MAC filters</source><target>MAC-filter</target></segment>
+      </unit>
+      <unit id="dhcp.nav.leases">
+        <segment><source>Leases</source><target>Lån</target></segment>
+      </unit>
+      <unit id="dhcp.nav.history">
+        <segment><source>History</source><target>Historik</target></segment>
+      </unit>
+      <unit id="settings.nav.dhcp">
+        <notes><note category="description">Tab of the settings navigation: the DHCP server settings.</note></notes>
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="dhcp.state.not_built_title">
+        <notes><note category="description">Shown when the server answers the DHCP routes with 501 (not implemented).</note></notes>
+        <segment><source>The DHCP service is not available.</source><target>DHCP-tjänsten är inte tillgänglig.</target></segment>
+      </unit>
+      <unit id="dhcp.state.not_built_body">
+        <segment><source>This server does not answer the DHCP requests. Scopes and options can be managed here once it does; nothing has to be set up in the meantime.</source><target>Servern svarar inte på DHCP-förfrågningar. Omfång och alternativ kan hanteras här när den gör det; inget behöver ställas in under tiden.</target></segment>
+      </unit>
+      <unit id="dhcp.state.off_title">
+        <notes><note category="description">Shown when the DHCP module is switched off and the server registers no DHCP routes.</note></notes>
+        <segment><source>The DHCP module is switched off.</source><target>DHCP-modulen är avstängd.</target></segment>
+      </unit>
+      <unit id="dhcp.state.off_body">
+        <segment><source>This installation does not run the DHCP module, so there is nothing to configure. An administrator switches it on in the module settings.</source><target>Installationen kör inte DHCP-modulen, så det finns inget att konfigurera. En administratör slår på den i modulinställningarna.</target></segment>
+      </unit>
+      <unit id="dhcp.state.off_link">
+        <segment><source>Open the settings</source><target>Öppna inställningarna</target></segment>
+      </unit>
+      <unit id="dhcp.do.open">
+        <segment><source>Open</source><target>Öppna</target></segment>
+      </unit>
+      <unit id="dhcp.do.edit">
+        <segment><source>Edit</source><target>Redigera</target></segment>
+      </unit>
+      <unit id="dhcp.do.delete">
+        <segment><source>Delete</source><target>Radera</target></segment>
+      </unit>
+      <unit id="dhcp.field.description">
+        <segment><source>Description</source><target>Beskrivning</target></segment>
+      </unit>
+      <unit id="dhcp.field.name_help">
+        <segment><source>1 to 64 characters: a to z, 0 to 9 and hyphen.</source><target>1 till 64 tecken: a till z, 0 till 9 och bindestreck.</target></segment>
+      </unit>
+      <unit id="dhcp.col.network">
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.col.enabled">
+        <segment><source>State</source><target>Status</target></segment>
+      </unit>
+      <unit id="dhcp.col.pools">
+        <segment><source>Pools</source><target>Pooler</target></segment>
+      </unit>
+      <unit id="dhcp.col.leases">
+        <segment><source>Active leases</source><target>Aktiva lån</target></segment>
+      </unit>
+      <unit id="dhcp.col.utilization">
+        <segment><source>Utilization</source><target>Utnyttjande</target></segment>
+      </unit>
+      <unit id="dhcp.col.description">
+        <segment><source>Description</source><target>Beskrivning</target></segment>
+      </unit>
+      <unit id="dhcp.col.range">
+        <segment><source>Range</source><target>Intervall</target></segment>
+      </unit>
+      <unit id="dhcp.col.size">
+        <segment><source>Size</source><target>Storlek</target></segment>
+      </unit>
+      <unit id="dhcp.col.leased">
+        <segment><source>Leased</source><target>Utlånade</target></segment>
+      </unit>
+      <unit id="dhcp.col.lease">
+        <segment><source>Lease time</source><target>Lånetid</target></segment>
+      </unit>
+      <unit id="dhcp.col.classes">
+        <segment><source>Classes</source><target>Klasser</target></segment>
+      </unit>
+      <unit id="dhcp.col.first">
+        <segment><source>First address</source><target>Första adress</target></segment>
+      </unit>
+      <unit id="dhcp.col.last">
+        <segment><source>Last address</source><target>Sista adress</target></segment>
+      </unit>
+      <unit id="dhcp.col.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dhcp.col.interface">
+        <segment><source>Interface</source><target>Gränssnitt</target></segment>
+      </unit>
+      <unit id="dhcp.col.scopes">
+        <segment><source>Scopes</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.col.space">
+        <segment><source>Space</source><target>Namnrymd</target></segment>
+      </unit>
+      <unit id="dhcp.col.code">
+        <segment><source>Code</source><target>Kod</target></segment>
+      </unit>
+      <unit id="dhcp.col.type">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dhcp.col.vendor_class">
+        <segment><source>Vendor class</source><target>Tillverkarklass</target></segment>
+      </unit>
+      <unit id="dhcp.col.used_by">
+        <segment><source>Used by</source><target>Används av</target></segment>
+      </unit>
+      <unit id="dhcp.col.server_managed">
+        <segment><source>Set by the server</source><target>Sätts av servern</target></segment>
+      </unit>
+      <unit id="dhcp.col.matches">
+        <segment><source>Matches</source><target>Matchningar</target></segment>
+      </unit>
+      <unit id="dhcp.col.condition">
+        <segment><source>Condition</source><target>Villkor</target></segment>
+      </unit>
+      <unit id="dhcp.col.action">
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="dhcp.col.scope">
+        <segment><source>Scope</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.col.order">
+        <segment><source>Order</source><target>Ordning</target></segment>
+      </unit>
+      <unit id="dhcp.col.mac">
+        <segment><source>MAC pattern</source><target>MAC-mönster</target></segment>
+      </unit>
+      <unit id="dhcp.col.filter_kind">
+        <segment><source>Allow or deny</source><target>Tillåt eller neka</target></segment>
+      </unit>
+      <unit id="dhcp.col.note">
+        <segment><source>Note</source><target>Anteckning</target></segment>
+      </unit>
+      <unit id="dhcp.lease.legend">
+        <segment><source>Lease times</source><target>Lånetider</target></segment>
+      </unit>
+      <unit id="dhcp.lease.default">
+        <segment><source>Default lease time</source><target>Standardlånetid</target></segment>
+      </unit>
+      <unit id="dhcp.lease.min">
+        <segment><source>Shortest lease time</source><target>Kortaste lånetid</target></segment>
+      </unit>
+      <unit id="dhcp.lease.max">
+        <segment><source>Longest lease time</source><target>Längsta lånetid</target></segment>
+      </unit>
+      <unit id="dhcp.lease.unit">
+        <segment><source>Unit of {name}</source><target>Enhet för {name}</target></segment>
+      </unit>
+      <unit id="dhcp.unit.minutes">
+        <segment><source>Minutes</source><target>Minuter</target></segment>
+      </unit>
+      <unit id="dhcp.unit.hours">
+        <segment><source>Hours</source><target>Timmar</target></segment>
+      </unit>
+      <unit id="dhcp.unit.days">
+        <segment><source>Days</source><target>Dagar</target></segment>
+      </unit>
+      <unit id="dhcp.lease.inherit">
+        <segment><source>Use the lease times of the server</source><target>Använd serverns lånetider</target></segment>
+      </unit>
+      <unit id="dhcp.lease.server_now">
+        <segment><source>The server grants {lease}.</source><target>Servern ger {lease}.</target></segment>
+      </unit>
+      <unit id="dhcp.lease.words">
+        <segment><source>default {default}, between {min} and {max}</source><target>standard {default}, mellan {min} och {max}</target></segment>
+      </unit>
+      <unit id="dhcp.tri.inherit">
+        <segment><source>Follow the server</source><target>Följ servern</target></segment>
+      </unit>
+      <unit id="dhcp.check.lease_number">
+        <segment><source>Enter a positive number.</source><target>Ange ett positivt tal.</target></segment>
+      </unit>
+      <unit id="dhcp.check.lease_order">
+        <segment><source>The shortest time must not exceed the default, and the default must not exceed the longest.</source><target>Den kortaste tiden får inte överstiga standardtiden, och standardtiden får inte överstiga den längsta.</target></segment>
+      </unit>
+      <unit id="dhcp.check.lease_year">
+        <segment><source>A lease lasts at most one year.</source><target>Ett lån varar högst ett år.</target></segment>
+      </unit>
+      <unit id="dhcp.check.prefix">
+        <segment><source>Choose a network.</source><target>Välj ett nätverk.</target></segment>
+      </unit>
+      <unit id="dhcp.check.server_id">
+        <segment><source>Enter an IPv4 address.</source><target>Ange en IPv4-adress.</target></segment>
+      </unit>
+      <unit id="dhcp.check.server_id_clear">
+        <segment><source>The server identifier cannot be removed; enter another address.</source><target>Serveridentiteten kan inte tas bort; ange en annan adress.</target></segment>
+      </unit>
+      <unit id="dhcp.check.name">
+        <segment><source>Use 1 to 64 characters: a to z, 0 to 9 and hyphen.</source><target>Använd 1 till 64 tecken: a till z, 0 till 9 och bindestreck.</target></segment>
+      </unit>
+      <unit id="dhcp.check.mac">
+        <segment><source>Enter a MAC address such as 00:00:5e:00:53:01.</source><target>Ange en MAC-adress som 00:00:5e:00:53:01.</target></segment>
+      </unit>
+      <unit id="dhcp.check.hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source><target>Ange hela oktetter i hexadecimalt, till exempel c0ff.</target></segment>
+      </unit>
+      <unit id="dhcp.check.mac_pattern">
+        <segment><source>Enter six hexadecimal octets, with * for any octet, or a prefix that ends in *.</source><target>Ange sex hexadecimala oktetter, med * för valfri oktett, eller ett prefix som slutar på *.</target></segment>
+      </unit>
+      <unit id="dhcp.check.def_code">
+        <segment><source>Enter a code from 1 to 254.</source><target>Ange en kod från 1 till 254.</target></segment>
+      </unit>
+      <unit id="dhcp.check.space">
+        <segment><source>Use letters, digits, dots, hyphens and underscores.</source><target>Använd bokstäver, siffror, punkter, bindestreck och understreck.</target></segment>
+      </unit>
+      <unit id="dhcp.check.history_days">
+        <segment><source>Enter a whole number of days from 1 to 3650.</source><target>Ange ett helt antal dagar från 1 till 3650.</target></segment>
+      </unit>
+      <unit id="dhcp.check.order">
+        <segment><source>Enter a whole number, or leave it empty to go last.</source><target>Ange ett heltal, eller lämna tomt för att hamna sist.</target></segment>
+      </unit>
+      <unit id="dhcp.check.term_class">
+        <segment><source>Choose a class.</source><target>Välj en klass.</target></segment>
+      </unit>
+      <unit id="dhcp.check.range_address">
+        <segment><source>Enter two IPv4 addresses.</source><target>Ange två IPv4-adresser.</target></segment>
+      </unit>
+      <unit id="dhcp.check.range_order">
+        <segment><source>The first address must not be after the last.</source><target>Den första adressen får inte vara efter den sista.</target></segment>
+      </unit>
+      <unit id="dhcp.check.range_outside">
+        <segment><source>The range must lie inside the network of the scope.</source><target>Intervallet måste ligga inom omfångets nätverk.</target></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_first">
+        <segment><source>The first address must be an IPv4 address in {network}.</source><target>Den första adressen måste vara en IPv4-adress i {network}.</target></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_last">
+        <segment><source>The last address must be an IPv4 address in {network}.</source><target>Den sista adressen måste vara en IPv4-adress i {network}.</target></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_order">
+        <segment><source>The first address must not be after the last, both in {network}.</source><target>Den första adressen får inte vara efter den sista, båda i {network}.</target></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_outside">
+        <segment><source>Both addresses must lie inside {network}.</source><target>Båda adresserna måste ligga inom {network}.</target></segment>
+      </unit>
+      <unit id="dhcp.check.match_empty">
+        <segment><source>Enter a value.</source><target>Ange ett värde.</target></segment>
+      </unit>
+      <unit id="dhcp.check.match_long">
+        <segment><source>Use at most 255 characters.</source><target>Använd högst 255 tecken.</target></segment>
+      </unit>
+      <unit id="dhcp.check.match_mac">
+        <segment><source>Enter a MAC pattern such as 00:00:5e:*.</source><target>Ange ett MAC-mönster som 00:00:5e:*.</target></segment>
+      </unit>
+      <unit id="dhcp.check.match_hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source><target>Ange hela oktetter i hexadecimalt, till exempel c0ff.</target></segment>
+      </unit>
+      <unit id="dhcp.check.match_number">
+        <segment><source>Enter a number from 0 to 65535.</source><target>Ange ett tal från 0 till 65535.</target></segment>
+      </unit>
+      <unit id="dhcp.scopes.sub">
+        <segment><source>The IPAM networks that are leased out, with their pools, active leases and how full they are.</source><target>IPAM-nätverken som lånas ut, med pooler, aktiva lån och hur fulla de är.</target></segment>
+      </unit>
+      <unit id="dhcp.scopes.empty">
+        <segment><source>No scopes yet</source><target>Inga omfång än</target></segment>
+      </unit>
+      <unit id="dhcp.scopes.empty_body">
+        <segment><source>A scope serves one IPAM network. Create one for a network that has none.</source><target>Ett omfång betjänar ett IPAM-nätverk. Skapa ett för ett nätverk som saknar omfång.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.enabled">
+        <segment><source>Active</source><target>Aktivt</target></segment>
+      </unit>
+      <unit id="dhcp.scope.disabled">
+        <segment><source>Inactive</source><target>Inaktivt</target></segment>
+      </unit>
+      <unit id="dhcp.scope.create">
+        <segment><source>New scope</source><target>Nytt omfång</target></segment>
+      </unit>
+      <unit id="dhcp.scope.create_title">
+        <segment><source>New DHCP scope</source><target>Nytt DHCP-omfång</target></segment>
+      </unit>
+      <unit id="dhcp.scope.created">
+        <segment><source>Scope for {network} created</source><target>Omfång för {network} skapat</target></segment>
+      </unit>
+      <unit id="dhcp.scope.saved">
+        <segment><source>Scope for {network} saved</source><target>Omfång för {network} sparat</target></segment>
+      </unit>
+      <unit id="dhcp.scope.unchanged">
+        <segment><source>Nothing was changed.</source><target>Inget ändrades.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.deleted">
+        <segment><source>Scope for {network} deleted</source><target>Omfång för {network} raderat</target></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_title">
+        <segment><source>Delete the scope for {network}?</source><target>Radera omfånget för {network}?</target></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_body">
+        <segment><source>The scope, its exclusions, the settings of its pools, its policies and its options are deleted, and Tenko stops leasing addresses in {network}. The network and its ranges stay in IPAM.</source><target>Omfånget, dess undantag, poolernas inställningar, dess principer och dess alternativ raderas, och Tenko slutar dela ut adresser i {network}. Nätverket och dess intervall finns kvar i IPAM.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_confirm">
+        <segment><source>Delete the scope</source><target>Radera omfånget</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix">
+        <segment><source>Network</source><target>Nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix_help">
+        <segment><source>Only IPv4 networks of IPAM that have no scope are listed.</source><target>Bara IPv4-nätverk i IPAM som saknar omfång visas.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix_pick">
+        <segment><source>Choose a network</source><target>Välj ett nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.scope.no_networks">
+        <segment><source>Every IPv4 network of IPAM has a scope already.</source><target>Alla IPv4-nätverk i IPAM har redan ett omfång.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.authoritative">
+        <segment><source>Authoritative</source><target>Auktoritativt</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.authoritative_help">
+        <segment><source>An authoritative scope refuses requests for addresses of other networks.</source><target>Ett auktoritativt omfång avvisar förfrågningar om adresser i andra nätverk.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.server_id">
+        <segment><source>Server identifier</source><target>Serveridentitet</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.server_id_help">
+        <segment><source>An IPv4 address of this server. Empty: the address of the listener that receives the request.</source><target>En IPv4-adress på servern. Tom: adressen på den lyssnare som tar emot förfrågan.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.shared_network">
+        <segment><source>Shared network</source><target>Delat nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.scope.shared_none">
+        <segment><source>None</source><target>Inget</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.restricted">
+        <segment><source>Restricted</source><target>Begränsat</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.restricted_help">
+        <segment><source>Only clients that a MAC filter of the kind allow matches are served.</source><target>Bara klienter som ett MAC-filter av typen tillåt träffar betjänas.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.enabled">
+        <segment><source>Serve clients</source><target>Betjäna klienter</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.enabled_help">
+        <segment><source>An inactive scope stays in the configuration and is not served.</source><target>Ett inaktivt omfång finns kvar i konfigurationen men betjänas inte.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.classes">
+        <segment><source>Admitted classes</source><target>Tillåtna klasser</target></segment>
+      </unit>
+      <unit id="dhcp.scope.field.classes_help">
+        <segment><source>Without a class the scope serves every client.</source><target>Utan klass betjänar omfånget alla klienter.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.no_classes">
+        <segment><source>There are no classes yet.</source><target>Det finns inga klasser än.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.settings">
+        <segment><source>Settings</source><target>Inställningar</target></segment>
+      </unit>
+      <unit id="dhcp.scope.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_on">
+        <segment><source>Dynamic DNS updates are on for this scope. Their settings are managed by the DDNS support of a later package.</source><target>Dynamiska DNS-uppdateringar är på för det här omfånget. Deras inställningar hanteras av DDNS-stödet i ett senare paket.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_off">
+        <segment><source>Dynamic DNS updates are off for this scope. Their settings are managed by the DDNS support of a later package.</source><target>Dynamiska DNS-uppdateringar är av för det här omfånget. Deras inställningar hanteras av DDNS-stödet i ett senare paket.</target></segment>
+      </unit>
+      <unit id="dhcp.scope.in_ipam">
+        <segment><source>Open in IPAM</source><target>Öppna i IPAM</target></segment>
+      </unit>
+      <unit id="dhcp.scope.tabs">
+        <segment><source>Sections of the scope</source><target>Omfångets avsnitt</target></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.settings">
+        <segment><source>Settings</source><target>Inställningar</target></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.pools">
+        <segment><source>Pools</source><target>Pooler</target></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.exclusions">
+        <segment><source>Exclusions</source><target>Undantag</target></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.options">
+        <segment><source>Options</source><target>Alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.scope.options_title">
+        <segment><source>Options of {network}</source><target>Alternativ för {network}</target></segment>
+      </unit>
+      <unit id="dhcp.scope.options_help">
+        <segment><source>These options go to every client of the scope and replace the same codes in the options of the server.</source><target>Dessa alternativ går till alla klienter i omfånget och ersätter samma koder i serverns alternativ.</target></segment>
+      </unit>
+      <unit id="dhcp.util.title">
+        <segment><source>Utilization</source><target>Utnyttjande</target></segment>
+      </unit>
+      <unit id="dhcp.util.pool_size">
+        <segment><source>Pool size</source><target>Poolstorlek</target></segment>
+      </unit>
+      <unit id="dhcp.util.leased">
+        <segment><source>Leased</source><target>Utlånade</target></segment>
+      </unit>
+      <unit id="dhcp.util.reserved">
+        <segment><source>Reserved</source><target>Reserverade</target></segment>
+      </unit>
+      <unit id="dhcp.util.abandoned">
+        <segment><source>Abandoned</source><target>Övergivna</target></segment>
+      </unit>
+      <unit id="dhcp.util.free">
+        <segment><source>Free</source><target>Lediga</target></segment>
+      </unit>
+      <unit id="dhcp.util.percent">
+        <segment><source>Used share</source><target>Använd andel</target></segment>
+      </unit>
+      <unit id="dhcp.util.at">
+        <segment><source>Read at {time}</source><target>Läst {time}</target></segment>
+      </unit>
+      <unit id="dhcp.util.label">
+        <segment><source>{percent} percent used</source><target>{percent} procent använt</target></segment>
+      </unit>
+      <unit id="dhcp.pools.title">
+        <segment><source>Pools</source><target>Pooler</target></segment>
+      </unit>
+      <unit id="dhcp.pools.empty">
+        <segment><source>No pools</source><target>Inga pooler</target></segment>
+      </unit>
+      <unit id="dhcp.pools.empty_body">
+        <segment><source>A scope leases addresses from the pools of its network. Make a range of the role DHCP pool in IPAM.</source><target>Ett omfång lånar ut adresser från poolerna i sitt nätverk. Skapa ett intervall med rollen DHCP-pool i IPAM.</target></segment>
+      </unit>
+      <unit id="dhcp.pools.note">
+        <segment><source>Pools are IPAM ranges of the role DHCP pool. They are made, moved and deleted on the page of the prefix in IPAM; here a pool gets the classes it admits and its lease times.</source><target>Pooler är IPAM-intervall med rollen DHCP-pool. De skapas, flyttas och raderas på prefixets sida i IPAM; här får en pool de klasser den tillåter och sina lånetider.</target></segment>
+      </unit>
+      <unit id="dhcp.pools.ipam_link">
+        <segment><source>Open {network} in IPAM</source><target>Öppna {network} i IPAM</target></segment>
+      </unit>
+      <unit id="dhcp.pool.settings">
+        <segment><source>Set DHCP settings</source><target>Ange DHCP-inställningar</target></segment>
+      </unit>
+      <unit id="dhcp.pool.clear">
+        <segment><source>Clear</source><target>Rensa</target></segment>
+      </unit>
+      <unit id="dhcp.pool.clear_title">
+        <segment><source>Clear the DHCP settings of {first} to {last}?</source><target>Rensa DHCP-inställningarna för {first} till {last}?</target></segment>
+      </unit>
+      <unit id="dhcp.pool.clear_body">
+        <segment><source>The classes and the lease times of the pool go; it serves with the settings of the scope again. The range stays in IPAM.</source><target>Poolens klasser och lånetider tas bort; den betjänar med omfångets inställningar igen. Intervallet finns kvar i IPAM.</target></segment>
+      </unit>
+      <unit id="dhcp.pool.cleared">
+        <segment><source>DHCP settings of {first} to {last} cleared</source><target>DHCP-inställningarna för {first} till {last} rensade</target></segment>
+      </unit>
+      <unit id="dhcp.pool.edit_title">
+        <segment><source>DHCP settings of {first} to {last}</source><target>DHCP-inställningar för {first} till {last}</target></segment>
+      </unit>
+      <unit id="dhcp.pool.field.classes">
+        <segment><source>Admitted classes</source><target>Tillåtna klasser</target></segment>
+      </unit>
+      <unit id="dhcp.pool.field.classes_help">
+        <segment><source>Without a class the pool serves every client the scope admits.</source><target>Utan klass betjänar poolen alla klienter som omfånget tillåter.</target></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_inherit_help">
+        <segment><source>The pool then serves with the lease time of its range in IPAM, or else of the scope.</source><target>Poolen betjänar då med lånetiden på sitt intervall i IPAM, annars omfångets.</target></segment>
+      </unit>
+      <unit id="dhcp.pool.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.pool.saved">
+        <segment><source>DHCP settings of {first} to {last} saved</source><target>DHCP-inställningarna för {first} till {last} sparade</target></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_range">
+        <segment><source>{lease} (from the range)</source><target>{lease} (från intervallet)</target></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_scope">
+        <segment><source>From the scope</source><target>Från omfånget</target></segment>
+      </unit>
+      <unit id="dhcp.exclusions.title">
+        <segment><source>Exclusions</source><target>Undantag</target></segment>
+      </unit>
+      <unit id="dhcp.exclusions.empty">
+        <segment><source>No exclusions</source><target>Inga undantag</target></segment>
+      </unit>
+      <unit id="dhcp.exclusions.empty_body">
+        <segment><source>An exclusion is a range of the network that is never leased out.</source><target>Ett undantag är ett intervall i nätverket som aldrig lånas ut.</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.create">
+        <segment><source>Add an exclusion</source><target>Lägg till undantag</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.create_title">
+        <segment><source>Add an exclusion</source><target>Lägg till ett undantag</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.help">
+        <segment><source>The range must lie inside {network}.</source><target>Intervallet måste ligga inom {network}.</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.field.first">
+        <segment><source>First address</source><target>Första adress</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.field.last">
+        <segment><source>Last address</source><target>Sista adress</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.created">
+        <segment><source>{count, plural, one {Exclusion of # address added} other {Exclusion of # addresses added}}</source><target>{count, plural, one {Undantag för # adress tillagt} other {Undantag för # adresser tillagt}}</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_title">
+        <segment><source>Delete the exclusion {range}?</source><target>Radera undantaget {range}?</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_body">
+        <segment><source>The addresses of the range can be leased out again.</source><target>Adresserna i intervallet kan lånas ut igen.</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_confirm">
+        <segment><source>Delete the exclusion</source><target>Radera undantaget</target></segment>
+      </unit>
+      <unit id="dhcp.exclusion.deleted">
+        <segment><source>Exclusion {range} deleted</source><target>Undantaget {range} raderat</target></segment>
+      </unit>
+      <unit id="dhcp.optset.col.code">
+        <segment><source>Code</source><target>Kod</target></segment>
+      </unit>
+      <unit id="dhcp.optset.col.name">
+        <segment><source>Option</source><target>Alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.optset.col.value">
+        <segment><source>Value</source><target>Värde</target></segment>
+      </unit>
+      <unit id="dhcp.optset.col.actions">
+        <segment><source>Actions</source><target>Åtgärder</target></segment>
+      </unit>
+      <unit id="dhcp.optset.empty">
+        <segment><source>No options are set at this level.</source><target>Inga alternativ är angivna på den här nivån.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.unknown">
+        <segment><source>Option {code}</source><target>Alternativ {code}</target></segment>
+      </unit>
+      <unit id="dhcp.optset.raw">
+        <segment><source>(no known type, hexadecimal)</source><target>(okänd typ, hexadecimalt)</target></segment>
+      </unit>
+      <unit id="dhcp.optset.value_of">
+        <segment><source>Value of {name}</source><target>Värde för {name}</target></segment>
+      </unit>
+      <unit id="dhcp.optset.flag">
+        <segment><source>A flag without a value</source><target>En flagga utan värde</target></segment>
+      </unit>
+      <unit id="dhcp.optset.routes_help">
+        <segment><source>One route per line: destination via router, for example 203.0.113.0/24 via 192.0.2.1.</source><target>En rutt per rad: mål via router, till exempel 203.0.113.0/24 via 192.0.2.1.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.remove">
+        <segment><source>Remove {name}</source><target>Ta bort {name}</target></segment>
+      </unit>
+      <unit id="dhcp.optset.add">
+        <segment><source>Add an option</source><target>Lägg till alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.optset.add_code">
+        <segment><source>Other code</source><target>Annan kod</target></segment>
+      </unit>
+      <unit id="dhcp.optset.save">
+        <segment><source>Save the options</source><target>Spara alternativen</target></segment>
+      </unit>
+      <unit id="dhcp.optset.revert">
+        <segment><source>Discard changes</source><target>Förkasta ändringar</target></segment>
+      </unit>
+      <unit id="dhcp.optset.saved">
+        <segment><source>Options saved</source><target>Alternativen sparade</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind_list">
+        <segment><source>{kind}, list</source><target>{kind}, lista</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv4_address">
+        <segment><source>IPv4 address</source><target>IPv4-adress</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv6_address">
+        <segment><source>IPv6 address</source><target>IPv6-adress</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv6_prefix">
+        <segment><source>IPv6 prefix</source><target>IPv6-prefix</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u8">
+        <segment><source>Number (0 to 255)</source><target>Tal (0 till 255)</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u16">
+        <segment><source>Number (0 to 65535)</source><target>Tal (0 till 65535)</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u32">
+        <segment><source>Number (0 to 4294967295)</source><target>Tal (0 till 4294967295)</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.i32">
+        <segment><source>Signed number</source><target>Tal med tecken</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.bool">
+        <segment><source>True or false</source><target>Sant eller falskt</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.string">
+        <segment><source>Text</source><target>Text</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.fqdn">
+        <segment><source>Domain name</source><target>Domännamn</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.classless_routes">
+        <segment><source>Classless routes</source><target>Klasslösa rutter</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.binary">
+        <segment><source>Hexadecimal</source><target>Hexadecimalt</target></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.empty">
+        <segment><source>Flag</source><target>Flagga</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.empty">
+        <segment><source>Enter a value.</source><target>Ange ett värde.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.ipv4">
+        <segment><source>Enter IPv4 addresses.</source><target>Ange IPv4-adresser.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.ipv6">
+        <segment><source>Enter IPv6 addresses.</source><target>Ange IPv6-adresser.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.prefix">
+        <segment><source>Enter IPv6 prefixes such as 2001:db8::/32.</source><target>Ange IPv6-prefix som 2001:db8::/32.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.number">
+        <segment><source>Enter whole numbers.</source><target>Ange heltal.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.range">
+        <segment><source>A number is out of range for this option.</source><target>Ett tal ligger utanför intervallet för alternativet.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.bool">
+        <segment><source>Enter true or false.</source><target>Ange true eller false.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.name">
+        <segment><source>Enter valid domain names.</source><target>Ange giltiga domännamn.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.route">
+        <segment><source>Enter one route per line: destination via router.</source><target>Ange en rutt per rad: mål via router.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source><target>Ange hela oktetter i hexadecimalt, till exempel c0ff.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.count">
+        <segment><source>This option takes one value.</source><target>Alternativet tar ett värde.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.raw_hex">
+        <segment><source>Enter the value in hexadecimal, such as c0ff.</source><target>Ange värdet i hexadecimalt, till exempel c0ff.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.code">
+        <segment><source>Enter a code from 1 to 254.</source><target>Ange en kod från 1 till 254.</target></segment>
+      </unit>
+      <unit id="dhcp.optset.check.managed">
+        <segment><source>The server sets this option itself.</source><target>Servern sätter det här alternativet själv.</target></segment>
+      </unit>
+      <unit id="dhcp.effective.title">
+        <segment><source>Options of a client</source><target>Alternativ för en klient</target></segment>
+      </unit>
+      <unit id="dhcp.effective.help">
+        <segment><source>Enter the MAC address of a client to see the options it gets in this scope and the level each comes from.</source><target>Ange en klients MAC-adress för att se vilka alternativ den får i omfånget och från vilken nivå varje alternativ kommer.</target></segment>
+      </unit>
+      <unit id="dhcp.effective.mac">
+        <segment><source>MAC address</source><target>MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.effective.client_id">
+        <segment><source>Client identifier (hexadecimal, optional)</source><target>Klientidentitet (hexadecimalt, valfri)</target></segment>
+      </unit>
+      <unit id="dhcp.effective.show">
+        <segment><source>Show the options</source><target>Visa alternativen</target></segment>
+      </unit>
+      <unit id="dhcp.effective.reservation">
+        <segment><source>This client has a reservation in IPAM; the options of the reservation are the last level.</source><target>Klienten har en reservation i IPAM; reservationens alternativ är den sista nivån.</target></segment>
+      </unit>
+      <unit id="dhcp.effective.note">
+        <segment><source>Policies are not matched against clients yet, so the policy level stays empty until a later package.</source><target>Principer matchas inte mot klienter än, så principnivån förblir tom till ett senare paket.</target></segment>
+      </unit>
+      <unit id="dhcp.effective.empty">
+        <segment><source>No options are set at any level.</source><target>Inga alternativ är angivna på någon nivå.</target></segment>
+      </unit>
+      <unit id="dhcp.effective.col.level">
+        <segment><source>Level</source><target>Nivå</target></segment>
+      </unit>
+      <unit id="dhcp.level.server">
+        <segment><source>Server</source><target>Server</target></segment>
+      </unit>
+      <unit id="dhcp.level.shared_network">
+        <segment><source>Shared network</source><target>Delat nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.level.scope">
+        <segment><source>Scope</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.level.pool">
+        <segment><source>Pool</source><target>Pool</target></segment>
+      </unit>
+      <unit id="dhcp.level.policy">
+        <segment><source>Policy</source><target>Princip</target></segment>
+      </unit>
+      <unit id="dhcp.level.host">
+        <segment><source>Reservation</source><target>Reservation</target></segment>
+      </unit>
+      <unit id="dhcp.example.mac">
+        <segment><source>00:00:5e:00:53:01</source><target>00:00:5e:00:53:01</target></segment>
+      </unit>
+      <unit id="dhcp.example.mac_pattern">
+        <segment><source>00:00:5e:00:53:*</source><target>00:00:5e:00:53:*</target></segment>
+      </unit>
+      <unit id="dhcp.network.sub">
+        <segment><source>Scopes that share one link.</source><target>Omfång som delar en länk.</target></segment>
+      </unit>
+      <unit id="dhcp.network.empty">
+        <segment><source>No shared networks</source><target>Inga delade nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.network.empty_body">
+        <segment><source>Group the scopes that lease addresses on the same link into a shared network.</source><target>Gruppera omfång som delar ut adresser på samma länk i ett delat nätverk.</target></segment>
+      </unit>
+      <unit id="dhcp.network.create">
+        <segment><source>New shared network</source><target>Nytt delat nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.network.create_title">
+        <segment><source>New shared network</source><target>Nytt delat nätverk</target></segment>
+      </unit>
+      <unit id="dhcp.network.created">
+        <segment><source>Shared network {name} created</source><target>Delat nätverk {name} skapat</target></segment>
+      </unit>
+      <unit id="dhcp.network.edit_title">
+        <segment><source>Shared network {name}</source><target>Delat nätverk {name}</target></segment>
+      </unit>
+      <unit id="dhcp.network.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.network.saved">
+        <segment><source>Shared network {name} saved</source><target>Delat nätverk {name} sparat</target></segment>
+      </unit>
+      <unit id="dhcp.network.delete_title">
+        <segment><source>Delete the shared network {name}?</source><target>Radera det delade nätverket {name}?</target></segment>
+      </unit>
+      <unit id="dhcp.network.delete_body">
+        <segment><source>The shared network is deleted. A shared network that scopes still belong to is not deleted.</source><target>Det delade nätverket raderas. Ett delat nätverk som omfång fortfarande tillhör raderas inte.</target></segment>
+      </unit>
+      <unit id="dhcp.network.delete_confirm">
+        <segment><source>Delete the shared network</source><target>Radera det delade nätverket</target></segment>
+      </unit>
+      <unit id="dhcp.network.deleted">
+        <segment><source>Shared network {name} deleted</source><target>Delat nätverk {name} raderat</target></segment>
+      </unit>
+      <unit id="dhcp.network.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dhcp.network.field.interface">
+        <segment><source>Interface</source><target>Gränssnitt</target></segment>
+      </unit>
+      <unit id="dhcp.network.field.interface_help">
+        <segment><source>The listener interface of a directly attached link. Empty for a relayed link.</source><target>Lyssnarens gränssnitt för en direkt ansluten länk. Tomt för en vidarebefordrad länk.</target></segment>
+      </unit>
+      <unit id="dhcp.options.sub">
+        <segment><source>The options that clients receive with a lease.</source><target>Alternativen som klienter får med ett lån.</target></segment>
+      </unit>
+      <unit id="dhcp.options.server">
+        <segment><source>Options of the server</source><target>Serverns alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.options.server_help">
+        <segment><source>Every scope starts from these options. A scope, a policy or a reservation replaces the codes it sets itself.</source><target>Alla omfång utgår från dessa alternativ. Ett omfång, en princip eller en reservation ersätter de koder den själv anger.</target></segment>
+      </unit>
+      <unit id="dhcp.options.defs">
+        <segment><source>Custom definitions</source><target>Egna definitioner</target></segment>
+      </unit>
+      <unit id="dhcp.options.defs_help">
+        <segment><source>A definition gives a code in the site-specific range 224 to 254, or in a vendor space, a name and a type.</source><target>En definition ger en kod i det platsspecifika intervallet 224 till 254, eller i en tillverkarrymd, ett namn och en typ.</target></segment>
+      </unit>
+      <unit id="dhcp.options.catalog">
+        <segment><source>Catalog</source><target>Katalog</target></segment>
+      </unit>
+      <unit id="dhcp.options.catalog_help">
+        <segment><source>The built-in options. Those marked as set by the server are written by the server itself and never go in an option set.</source><target>De inbyggda alternativen. De som är markerade som satta av servern skrivs av servern själv och ingår aldrig i en alternativuppsättning.</target></segment>
+      </unit>
+      <unit id="dhcp.catalog.managed">
+        <segment><source>Set by the server</source><target>Sätts av servern</target></segment>
+      </unit>
+      <unit id="dhcp.defs.empty">
+        <segment><source>No custom definitions</source><target>Inga egna definitioner</target></segment>
+      </unit>
+      <unit id="dhcp.def.create">
+        <segment><source>Define an option</source><target>Definiera alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.def.create_title">
+        <segment><source>Define an option</source><target>Definiera ett alternativ</target></segment>
+      </unit>
+      <unit id="dhcp.def.created">
+        <segment><source>Option {name} defined</source><target>Alternativet {name} definierat</target></segment>
+      </unit>
+      <unit id="dhcp.def.help">
+        <segment><source>Codes of the catalog and codes the server sets itself are refused. A definition that option sets use cannot change type and is not deleted.</source><target>Koder i katalogen och koder som servern själv sätter avvisas. En definition som alternativuppsättningar använder kan inte byta typ och raderas inte.</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.space">
+        <segment><source>Space</source><target>Namnrymd</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.space_help">
+        <segment><source>dhcp4 for ordinary options, or the name of a vendor space.</source><target>dhcp4 för vanliga alternativ, eller namnet på en tillverkarrymd.</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.code">
+        <segment><source>Code</source><target>Kod</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.code_help">
+        <segment><source>1 to 254; 224 to 254 is the site-specific range.</source><target>1 till 254; 224 till 254 är det platsspecifika intervallet.</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.kind">
+        <segment><source>Type</source><target>Typ</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.array">
+        <segment><source>The option holds a list</source><target>Alternativet innehåller en lista</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.vendor_class">
+        <segment><source>Vendor class</source><target>Tillverkarklass</target></segment>
+      </unit>
+      <unit id="dhcp.def.field.vendor_class_help">
+        <segment><source>For a vendor space: clients whose option 60 equals this receive the options in option 43.</source><target>För en tillverkarrymd: klienter vars alternativ 60 är lika med detta får alternativen i alternativ 43.</target></segment>
+      </unit>
+      <unit id="dhcp.def.delete_title">
+        <segment><source>Delete the definition {name}?</source><target>Radera definitionen {name}?</target></segment>
+      </unit>
+      <unit id="dhcp.def.delete_body">
+        <segment><source>The code has neither a name nor a type afterwards. A definition that option sets use is not deleted.</source><target>Koden har varken namn eller typ efteråt. En definition som alternativuppsättningar använder raderas inte.</target></segment>
+      </unit>
+      <unit id="dhcp.def.delete_confirm">
+        <segment><source>Delete the definition</source><target>Radera definitionen</target></segment>
+      </unit>
+      <unit id="dhcp.def.deleted">
+        <segment><source>Definition {name} deleted</source><target>Definitionen {name} raderad</target></segment>
+      </unit>
+      <unit id="dhcp.classes.sub">
+        <segment><source>Groups of clients that are recognised by what they send.</source><target>Grupper av klienter som känns igen på vad de skickar.</target></segment>
+      </unit>
+      <unit id="dhcp.classes.empty">
+        <segment><source>No classes</source><target>Inga klasser</target></segment>
+      </unit>
+      <unit id="dhcp.classes.empty_body">
+        <segment><source>A class names a match on the vendor class, the user class, the MAC address, the client identifier or other fields of a request.</source><target>En klass ger ett namn åt en matchning på tillverkarklass, användarklass, MAC-adress, klientidentitet eller andra fält i en förfrågan.</target></segment>
+      </unit>
+      <unit id="dhcp.class.create">
+        <segment><source>New class</source><target>Ny klass</target></segment>
+      </unit>
+      <unit id="dhcp.class.create_title">
+        <segment><source>New client class</source><target>Ny klientklass</target></segment>
+      </unit>
+      <unit id="dhcp.class.created">
+        <segment><source>Class {name} created</source><target>Klassen {name} skapad</target></segment>
+      </unit>
+      <unit id="dhcp.class.edit_title">
+        <segment><source>Class {name}</source><target>Klassen {name}</target></segment>
+      </unit>
+      <unit id="dhcp.class.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.class.saved">
+        <segment><source>Class {name} saved</source><target>Klassen {name} sparad</target></segment>
+      </unit>
+      <unit id="dhcp.class.delete_title">
+        <segment><source>Delete the class {name}?</source><target>Radera klassen {name}?</target></segment>
+      </unit>
+      <unit id="dhcp.class.delete_body">
+        <segment><source>The class is deleted. A class that a scope, a pool or a policy names is not deleted.</source><target>Klassen raderas. En klass som ett omfång, en pool eller en princip anger raderas inte.</target></segment>
+      </unit>
+      <unit id="dhcp.class.delete_confirm">
+        <segment><source>Delete the class</source><target>Radera klassen</target></segment>
+      </unit>
+      <unit id="dhcp.class.deleted">
+        <segment><source>Class {name} deleted</source><target>Klassen {name} raderad</target></segment>
+      </unit>
+      <unit id="dhcp.class.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dhcp.class.field.matches">
+        <segment><source>Matches</source><target>Matchningar</target></segment>
+      </unit>
+      <unit id="dhcp.class.field.matches_help">
+        <segment><source>A client is in the class when any of the matches holds.</source><target>En klient tillhör klassen när någon av matchningarna gäller.</target></segment>
+      </unit>
+      <unit id="dhcp.match.add">
+        <segment><source>Add a match</source><target>Lägg till matchning</target></segment>
+      </unit>
+      <unit id="dhcp.match.row">
+        <segment><source>Match {n}</source><target>Matchning {n}</target></segment>
+      </unit>
+      <unit id="dhcp.match.remove">
+        <segment><source>Remove {label}</source><target>Ta bort {label}</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind_label">
+        <segment><source>Kind of match</source><target>Typ av matchning</target></segment>
+      </unit>
+      <unit id="dhcp.match.value_label">
+        <segment><source>Value</source><target>Värde</target></segment>
+      </unit>
+      <unit id="dhcp.match.prefix">
+        <segment><source>Starts with</source><target>Börjar med</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.vendor_class">
+        <segment><source>Vendor class</source><target>Tillverkarklass</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.user_class">
+        <segment><source>User class</source><target>Användarklass</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.mac">
+        <segment><source>MAC address</source><target>MAC-adress</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.client_id">
+        <segment><source>Client identifier</source><target>Klientidentitet</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.circuit_id">
+        <segment><source>Relay circuit-id</source><target>Reläets circuit-id</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.remote_id">
+        <segment><source>Relay remote-id</source><target>Reläets remote-id</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.architecture">
+        <segment><source>Client architecture</source><target>Klientarkitektur</target></segment>
+      </unit>
+      <unit id="dhcp.match.kind.host_name">
+        <segment><source>Host name</source><target>Värdnamn</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.vendor_class">
+        <segment><source>PXEClient</source><target>PXEClient</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.user_class">
+        <segment><source>lab</source><target>lab</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.mac">
+        <segment><source>00:00:5e:00:53:*</source><target>00:00:5e:00:53:*</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.client_id">
+        <segment><source>01000000000001</source><target>01000000000001</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.circuit_id">
+        <segment><source>00010002</source><target>00010002</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.remote_id">
+        <segment><source>0a0b0c0d</source><target>0a0b0c0d</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.architecture">
+        <segment><source>7</source><target>7</target></segment>
+      </unit>
+      <unit id="dhcp.match.example.host_name">
+        <segment><source>printer</source><target>printer</target></segment>
+      </unit>
+      <unit id="dhcp.match.vendor_class">
+        <segment><source>vendor class "{value}"</source><target>tillverkarklass "{value}"</target></segment>
+      </unit>
+      <unit id="dhcp.match.vendor_class_prefix">
+        <segment><source>vendor class starting with "{value}"</source><target>tillverkarklass som börjar med "{value}"</target></segment>
+      </unit>
+      <unit id="dhcp.match.user_class">
+        <segment><source>user class "{value}"</source><target>användarklass "{value}"</target></segment>
+      </unit>
+      <unit id="dhcp.match.mac">
+        <segment><source>MAC address {value}</source><target>MAC-adress {value}</target></segment>
+      </unit>
+      <unit id="dhcp.match.client_id">
+        <segment><source>client identifier {value}</source><target>klientidentitet {value}</target></segment>
+      </unit>
+      <unit id="dhcp.match.circuit_id">
+        <segment><source>relay circuit-id {value}</source><target>reläets circuit-id {value}</target></segment>
+      </unit>
+      <unit id="dhcp.match.remote_id">
+        <segment><source>relay remote-id {value}</source><target>reläets remote-id {value}</target></segment>
+      </unit>
+      <unit id="dhcp.match.architecture">
+        <segment><source>client architecture {value}</source><target>klientarkitektur {value}</target></segment>
+      </unit>
+      <unit id="dhcp.match.host_name">
+        <segment><source>host name "{value}"</source><target>värdnamn "{value}"</target></segment>
+      </unit>
+      <unit id="dhcp.match.host_name_prefix">
+        <segment><source>host name starting with "{value}"</source><target>värdnamn som börjar med "{value}"</target></segment>
+      </unit>
+      <unit id="dhcp.policies.sub">
+        <segment><source>Rules in the order they are evaluated: those of each scope, then those of the server.</source><target>Regler i den ordning de utvärderas: varje omfångs egna, sedan serverns.</target></segment>
+      </unit>
+      <unit id="dhcp.policies.note">
+        <segment><source>Matching clients to classes and policies comes with a later package. The policies are stored and checked now, but they do not change what clients get yet.</source><target>Matchning av klienter mot klasser och principer kommer med ett senare paket. Principerna lagras och kontrolleras nu, men de ändrar ännu inte vad klienter får.</target></segment>
+      </unit>
+      <unit id="dhcp.policies.empty">
+        <segment><source>No policies</source><target>Inga principer</target></segment>
+      </unit>
+      <unit id="dhcp.policies.empty_body">
+        <segment><source>A policy gives lease times or an address range to the clients that match its condition.</source><target>En princip ger lånetider eller ett adressintervall till de klienter som uppfyller dess villkor.</target></segment>
+      </unit>
+      <unit id="dhcp.policy.create">
+        <segment><source>New policy</source><target>Ny princip</target></segment>
+      </unit>
+      <unit id="dhcp.policy.create_title">
+        <segment><source>New DHCP policy</source><target>Ny DHCP-princip</target></segment>
+      </unit>
+      <unit id="dhcp.policy.created">
+        <segment><source>Policy {name} created</source><target>Principen {name} skapad</target></segment>
+      </unit>
+      <unit id="dhcp.policy.edit_title">
+        <segment><source>Policy {name}</source><target>Principen {name}</target></segment>
+      </unit>
+      <unit id="dhcp.policy.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.policy.saved">
+        <segment><source>Policy {name} saved</source><target>Principen {name} sparad</target></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_title">
+        <segment><source>Delete the policy {name}?</source><target>Radera principen {name}?</target></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_body">
+        <segment><source>The policy and its options are deleted.</source><target>Principen och dess alternativ raderas.</target></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_confirm">
+        <segment><source>Delete the policy</source><target>Radera principen</target></segment>
+      </unit>
+      <unit id="dhcp.policy.deleted">
+        <segment><source>Policy {name} deleted</source><target>Principen {name} raderad</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.name">
+        <segment><source>Name</source><target>Namn</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.scope">
+        <segment><source>Scope</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.scope_fixed">
+        <segment><source>The scope of a policy does not change.</source><target>En princips omfång ändras inte.</target></segment>
+      </unit>
+      <unit id="dhcp.policy.scope_server">
+        <segment><source>Server</source><target>Server</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.order">
+        <segment><source>Order</source><target>Ordning</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.order_help">
+        <segment><source>Lowest first. Empty: after the last policy of the scope.</source><target>Lägst först. Tomt: efter omfångets sista princip.</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.enabled">
+        <segment><source>The policy applies</source><target>Principen gäller</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.condition">
+        <segment><source>Condition</source><target>Villkor</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.join">
+        <segment><source>The terms are joined by</source><target>Termerna förenas med</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.action">
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.range_first">
+        <segment><source>Restrict clients to addresses from</source><target>Begränsa klienter till adresser från</target></segment>
+      </unit>
+      <unit id="dhcp.policy.field.range_last">
+        <segment><source>to</source><target>till</target></segment>
+      </unit>
+      <unit id="dhcp.policy.lease_inherit_help">
+        <segment><source>Without lease times of its own the policy leaves them as they are.</source><target>Utan egna lånetider låter principen dem vara som de är.</target></segment>
+      </unit>
+      <unit id="dhcp.join.and">
+        <segment><source>All of the terms (and)</source><target>Alla termer (och)</target></segment>
+      </unit>
+      <unit id="dhcp.join.or">
+        <segment><source>Any of the terms (or)</source><target>Någon av termerna (eller)</target></segment>
+      </unit>
+      <unit id="dhcp.term.add">
+        <segment><source>Add a term</source><target>Lägg till term</target></segment>
+      </unit>
+      <unit id="dhcp.term.row">
+        <segment><source>Term {n}</source><target>Term {n}</target></segment>
+      </unit>
+      <unit id="dhcp.term.kind_label">
+        <segment><source>Kind of term</source><target>Typ av term</target></segment>
+      </unit>
+      <unit id="dhcp.term.class_label">
+        <segment><source>Class</source><target>Klass</target></segment>
+      </unit>
+      <unit id="dhcp.term.class_pick">
+        <segment><source>Choose a class</source><target>Välj en klass</target></segment>
+      </unit>
+      <unit id="dhcp.term.remove">
+        <segment><source>Remove term {n}</source><target>Ta bort term {n}</target></segment>
+      </unit>
+      <unit id="dhcp.term.kind.class">
+        <segment><source>In the class</source><target>I klassen</target></segment>
+      </unit>
+      <unit id="dhcp.term.kind.not_class">
+        <segment><source>Not in the class</source><target>Inte i klassen</target></segment>
+      </unit>
+      <unit id="dhcp.term.kind.match">
+        <segment><source>Matches</source><target>Matchar</target></segment>
+      </unit>
+      <unit id="dhcp.term.kind.not_match">
+        <segment><source>Does not match</source><target>Matchar inte</target></segment>
+      </unit>
+      <unit id="dhcp.term.class">
+        <segment><source>in class {name}</source><target>i klassen {name}</target></segment>
+      </unit>
+      <unit id="dhcp.term.not_class">
+        <segment><source>not in class {name}</source><target>inte i klassen {name}</target></segment>
+      </unit>
+      <unit id="dhcp.term.not_match">
+        <segment><source>not {match}</source><target>inte {match}</target></segment>
+      </unit>
+      <unit id="dhcp.action.range">
+        <segment><source>only addresses {first} to {last}</source><target>endast adresserna {first} till {last}</target></segment>
+      </unit>
+      <unit id="dhcp.action.lease">
+        <segment><source>lease time {lease}</source><target>lånetid {lease}</target></segment>
+      </unit>
+      <unit id="dhcp.action.ddns">
+        <segment><source>its own DDNS settings</source><target>egna DDNS-inställningar</target></segment>
+      </unit>
+      <unit id="dhcp.action.none">
+        <segment><source>no change</source><target>ingen ändring</target></segment>
+      </unit>
+      <unit id="dhcp.filters.sub">
+        <segment><source>Hardware addresses that are allowed or refused on the whole server.</source><target>Hårdvaruadresser som tillåts eller nekas på hela servern.</target></segment>
+      </unit>
+      <unit id="dhcp.filters.note">
+        <segment><source>A deny entry drops the client on every scope. A restricted scope serves only the clients that an allow entry matches. Deny wins over allow.</source><target>En nekapost släpper klienten på alla omfång. Ett begränsat omfång betjänar bara klienter som en tillåtpost träffar. Nekande går före tillåtande.</target></segment>
+      </unit>
+      <unit id="dhcp.filters.empty">
+        <segment><source>No MAC filters</source><target>Inga MAC-filter</target></segment>
+      </unit>
+      <unit id="dhcp.filters.empty_body">
+        <segment><source>Add an entry to allow or refuse hardware addresses.</source><target>Lägg till en post för att tillåta eller neka hårdvaruadresser.</target></segment>
+      </unit>
+      <unit id="dhcp.filter.create">
+        <segment><source>Add a filter</source><target>Lägg till filter</target></segment>
+      </unit>
+      <unit id="dhcp.filter.create_title">
+        <segment><source>Add a MAC filter</source><target>Lägg till ett MAC-filter</target></segment>
+      </unit>
+      <unit id="dhcp.filter.created">
+        <segment><source>Filter {mac} added</source><target>Filtret {mac} tillagt</target></segment>
+      </unit>
+      <unit id="dhcp.filter.edit_title">
+        <segment><source>Filter {mac}</source><target>Filtret {mac}</target></segment>
+      </unit>
+      <unit id="dhcp.filter.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.filter.saved">
+        <segment><source>Filter {mac} saved</source><target>Filtret {mac} sparat</target></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_title">
+        <segment><source>Delete the filter {mac}?</source><target>Radera filtret {mac}?</target></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_body">
+        <segment><source>Clients that match the pattern are served by the other rules again.</source><target>Klienter som matchar mönstret betjänas av övriga regler igen.</target></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_confirm">
+        <segment><source>Delete the filter</source><target>Radera filtret</target></segment>
+      </unit>
+      <unit id="dhcp.filter.deleted">
+        <segment><source>Filter {mac} deleted</source><target>Filtret {mac} raderat</target></segment>
+      </unit>
+      <unit id="dhcp.filter.field.mac">
+        <segment><source>MAC pattern</source><target>MAC-mönster</target></segment>
+      </unit>
+      <unit id="dhcp.filter.field.mac_help">
+        <segment><source>Six hexadecimal octets, * for any octet, or a prefix ending in *, for example 00:00:5e:00:53:*.</source><target>Sex hexadecimala oktetter, * för valfri oktett, eller ett prefix som slutar på *, till exempel 00:00:5e:00:53:*.</target></segment>
+      </unit>
+      <unit id="dhcp.filter.field.kind">
+        <segment><source>Allow or deny</source><target>Tillåt eller neka</target></segment>
+      </unit>
+      <unit id="dhcp.filter.field.note">
+        <segment><source>Note</source><target>Anteckning</target></segment>
+      </unit>
+      <unit id="dhcp.filter.kind.allow">
+        <segment><source>Allow</source><target>Tillåt</target></segment>
+      </unit>
+      <unit id="dhcp.filter.kind.deny">
+        <segment><source>Deny</source><target>Neka</target></segment>
+      </unit>
+      <unit id="dhcp.settings.title">
+        <segment><source>DHCP settings</source><target>DHCP-inställningar</target></segment>
+      </unit>
+      <unit id="dhcp.settings.lede">
+        <segment><source>The settings of the DHCP server that every scope starts from.</source><target>Inställningarna för DHCP-servern som alla omfång utgår från.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.lease">
+        <segment><source>Lease times</source><target>Lånetider</target></segment>
+      </unit>
+      <unit id="dhcp.settings.lease_help">
+        <segment><source>Scopes that set no lease times of their own use these.</source><target>Omfång som saknar egna lånetider använder dessa.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.server">
+        <segment><source>Server</source><target>Server</target></segment>
+      </unit>
+      <unit id="dhcp.settings.authoritative">
+        <segment><source>Authoritative by default</source><target>Auktoritativ som standard</target></segment>
+      </unit>
+      <unit id="dhcp.settings.authoritative_help">
+        <segment><source>Scopes that do not say otherwise refuse requests for addresses of other networks.</source><target>Omfång som inte anger något annat avvisar förfrågningar om adresser i andra nätverk.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict_follow">
+        <segment><source>Conflict detection follows the security profile</source><target>Konfliktdetektering följer säkerhetsprofilen</target></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict">
+        <segment><source>Check that an address is free before it is offered</source><target>Kontrollera att en adress är ledig innan den erbjuds</target></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict_help">
+        <segment><source>A probe of the address before the offer.</source><target>En sondering av adressen före erbjudandet.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.effective">
+        <segment><source>In force now: {value}.</source><target>Gäller nu: {value}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.effective_days">
+        <segment><source>In force now: {days, plural, one {# day} other {# days}}.</source><target>Gäller nu: {days, plural, one {# dag} other {# dagar}}.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.on">
+        <segment><source>on</source><target>på</target></segment>
+      </unit>
+      <unit id="dhcp.settings.off">
+        <segment><source>off</source><target>av</target></segment>
+      </unit>
+      <unit id="dhcp.settings.history_follow">
+        <segment><source>Lease history retention follows the security profile</source><target>Lagringstiden för lånehistoriken följer säkerhetsprofilen</target></segment>
+      </unit>
+      <unit id="dhcp.settings.history_days">
+        <segment><source>Days to keep the lease history</source><target>Antal dagar lånehistoriken sparas</target></segment>
+      </unit>
+      <unit id="dhcp.settings.history_days_help">
+        <segment><source>1 to 3650 days.</source><target>1 till 3650 dagar.</target></segment>
+      </unit>
+      <unit id="dhcp.settings.save">
+        <segment><source>Save</source><target>Spara</target></segment>
+      </unit>
+      <unit id="dhcp.settings.saved">
+        <segment><source>DHCP settings saved</source><target>DHCP-inställningarna sparade</target></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.not_found">
+        <segment><source>There is no DHCP scope for this network.</source><target>Det finns inget DHCP-omfång för det här nätverket.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.exists">
+        <segment><source>This network has a scope already.</source><target>Nätverket har redan ett omfång.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.not_network">
+        <segment><source>A supernet cannot have a scope; choose a network.</source><target>Ett supernät kan inte ha ett omfång; välj ett nätverk.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.invalid">
+        <segment><source>The scope settings are not valid ({field}).</source><target>Omfångets inställningar är inte giltiga ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.attached">
+        <segment><source>A DHCP scope serves this network; delete the scope first.</source><target>Ett DHCP-omfång betjänar nätverket; radera omfånget först.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.not_found">
+        <segment><source>There is no such shared network.</source><target>Det finns inget sådant delat nätverk.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.invalid">
+        <segment><source>The shared network is not valid ({field}).</source><target>Det delade nätverket är inte giltigt ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.in_use">
+        <segment><source>{count, plural, one {# scope still belongs} other {# scopes still belong}} to this shared network; move or delete them first.</source><target>{count, plural, one {# omfång tillhör} other {# omfång tillhör}} fortfarande det här delade nätverket; flytta eller radera dem först.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.not_found">
+        <segment><source>There is no such pool.</source><target>Det finns ingen sådan pool.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.outside">
+        <segment><source>The range lies outside the network of the scope.</source><target>Intervallet ligger utanför omfångets nätverk.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.not_pool">
+        <segment><source>This range does not have the role DHCP pool.</source><target>Intervallet har inte rollen DHCP-pool.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.exclusion.not_found">
+        <segment><source>There is no such exclusion.</source><target>Det finns inget sådant undantag.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.exclusion.invalid">
+        <segment><source>The exclusion is not valid ({field}): the first address must not be after the last, and both must lie inside the network.</source><target>Undantaget är inte giltigt ({field}): den första adressen får inte vara efter den sista, och båda måste ligga inom nätverket.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option.invalid">
+        <segment><source>An option or an option definition is not valid.</source><target>Ett alternativ eller en alternativdefinition är inte giltig.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option.code_reserved">
+        <segment><source>This code is defined by the catalog or set by the server itself.</source><target>Koden finns i katalogen eller sätts av servern själv.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option.unknown">
+        <segment><source>This code has no definition. Define the option first.</source><target>Koden saknar definition. Definiera alternativet först.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.not_found">
+        <segment><source>There is no such option definition.</source><target>Det finns ingen sådan alternativdefinition.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.exists">
+        <segment><source>A definition of this code exists already in the space.</source><target>Det finns redan en definition av koden i namnrymden.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.in_use">
+        <segment><source>Option sets use this definition: {by}.</source><target>Alternativuppsättningar använder definitionen: {by}.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.class.not_found">
+        <segment><source>There is no such class.</source><target>Det finns ingen sådan klass.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.class.invalid">
+        <segment><source>The class is not valid ({field}).</source><target>Klassen är inte giltig ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.class.in_use">
+        <segment><source>This class is named by {by}.</source><target>Klassen anges av {by}.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.policy.not_found">
+        <segment><source>There is no such policy.</source><target>Det finns ingen sådan princip.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.policy.invalid">
+        <segment><source>The policy is not valid ({field}).</source><target>Principen är inte giltig ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.not_found">
+        <segment><source>There is no such filter.</source><target>Det finns inget sådant filter.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.invalid">
+        <segment><source>The filter is not valid ({field}).</source><target>Filtret är inte giltigt ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.exists">
+        <segment><source>An entry for this pattern exists already.</source><target>Det finns redan en post för mönstret.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.settings.invalid">
+        <segment><source>The setting is not valid ({field}).</source><target>Inställningen är inte giltig ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.lease_times.invalid">
+        <segment><source>The lease times are not valid ({field}): the shortest must not exceed the default, the default must not exceed the longest, and none may exceed one year.</source><target>Lånetiderna är inte giltiga ({field}): den kortaste får inte överstiga standardtiden, standardtiden får inte överstiga den längsta, och ingen får överstiga ett år.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.ddns.invalid">
+        <segment><source>The DDNS settings are not valid ({field}).</source><target>DDNS-inställningarna är inte giltiga ({field}).</target></segment>
+      </unit>
+      <unit id="errors.dhcp.lease.not_found">
+        <segment><source>No lease holds this address.</source><target>Inget lån håller adressen.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.lease.state">
+        <segment><source>The state of the lease does not allow this.</source><target>Lånets tillstånd tillåter inte det.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.reservation.no_identity">
+        <segment><source>A reserved host needs a MAC address or a client identifier.</source><target>En reserverad värd behöver en MAC-adress eller en klientidentitet.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.reservation.conflict">
+        <segment><source>This address or this client is reserved twice.</source><target>Adressen eller klienten är reserverad två gånger.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.store_refused">
+        <segment><source>The store refused the lease write. Try again shortly.</source><target>Lagret nekade skrivningen av lånet. Försök igen om en stund.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.node.not_dhcp">
+        <segment><source>This node does not run the DHCP role.</source><target>Noden kör inte DHCP-rollen.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.module.disabled">
+        <segment><source>The DHCP module is switched off.</source><target>DHCP-modulen är avstängd.</target></segment>
+      </unit>
+      <unit id="errors.dhcp.export.format">
+        <segment><source>This export format is not known.</source><target>Exportformatet är okänt.</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

@@ -93,6 +93,7 @@ describe("the secrets page under Settings", () => {
       "reconciler",
       "guardrails",
       "dns",
+      "dhcp", // WP7.4
       "languages",
     ]);
     fireEvent.click(within(nav).getByRole("link", { name: "Secrets" }));

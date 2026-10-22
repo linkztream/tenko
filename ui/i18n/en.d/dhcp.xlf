@@ -54,6 +54,1348 @@
         <notes><note category="description">Link on an unbuilt DHCP page that leads back to the list of DHCP scopes.</note></notes>
         <segment><source>Go to the DHCP scopes</source></segment>
       </unit>
+      <unit id="dhcp.nav.label">
+        <notes><note category="description">Accessible name of the sub-navigation of the DHCP area.</note></notes>
+        <segment><source>DHCP sections</source></segment>
+      </unit>
+      <unit id="dhcp.nav.scopes">
+        <segment><source>Scopes</source></segment>
+      </unit>
+      <unit id="dhcp.nav.shared_networks">
+        <segment><source>Shared networks</source></segment>
+      </unit>
+      <unit id="dhcp.nav.options">
+        <segment><source>Options</source></segment>
+      </unit>
+      <unit id="dhcp.nav.classes">
+        <segment><source>Classes</source></segment>
+      </unit>
+      <unit id="dhcp.nav.policies">
+        <segment><source>Policies</source></segment>
+      </unit>
+      <unit id="dhcp.nav.filters">
+        <segment><source>MAC filters</source></segment>
+      </unit>
+      <unit id="dhcp.nav.leases">
+        <segment><source>Leases</source></segment>
+      </unit>
+      <unit id="dhcp.nav.history">
+        <segment><source>History</source></segment>
+      </unit>
+      <unit id="settings.nav.dhcp">
+        <notes><note category="description">Tab of the settings navigation: the DHCP server settings.</note></notes>
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="dhcp.state.not_built_title">
+        <notes><note category="description">Shown when the server answers the DHCP routes with 501 (not implemented).</note></notes>
+        <segment><source>The DHCP service is not available.</source></segment>
+      </unit>
+      <unit id="dhcp.state.not_built_body">
+        <segment><source>This server does not answer the DHCP requests. Scopes and options can be managed here once it does; nothing has to be set up in the meantime.</source></segment>
+      </unit>
+      <unit id="dhcp.state.off_title">
+        <notes><note category="description">Shown when the DHCP module is switched off and the server registers no DHCP routes.</note></notes>
+        <segment><source>The DHCP module is switched off.</source></segment>
+      </unit>
+      <unit id="dhcp.state.off_body">
+        <segment><source>This installation does not run the DHCP module, so there is nothing to configure. An administrator switches it on in the module settings.</source></segment>
+      </unit>
+      <unit id="dhcp.state.off_link">
+        <segment><source>Open the settings</source></segment>
+      </unit>
+      <unit id="dhcp.do.open">
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="dhcp.do.edit">
+        <segment><source>Edit</source></segment>
+      </unit>
+      <unit id="dhcp.do.delete">
+        <segment><source>Delete</source></segment>
+      </unit>
+      <unit id="dhcp.field.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="dhcp.field.name_help">
+        <segment><source>1 to 64 characters: a to z, 0 to 9 and hyphen.</source></segment>
+      </unit>
+      <unit id="dhcp.col.network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="dhcp.col.enabled">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="dhcp.col.pools">
+        <segment><source>Pools</source></segment>
+      </unit>
+      <unit id="dhcp.col.leases">
+        <segment><source>Active leases</source></segment>
+      </unit>
+      <unit id="dhcp.col.utilization">
+        <segment><source>Utilization</source></segment>
+      </unit>
+      <unit id="dhcp.col.description">
+        <segment><source>Description</source></segment>
+      </unit>
+      <unit id="dhcp.col.range">
+        <segment><source>Range</source></segment>
+      </unit>
+      <unit id="dhcp.col.size">
+        <segment><source>Size</source></segment>
+      </unit>
+      <unit id="dhcp.col.leased">
+        <segment><source>Leased</source></segment>
+      </unit>
+      <unit id="dhcp.col.lease">
+        <segment><source>Lease time</source></segment>
+      </unit>
+      <unit id="dhcp.col.classes">
+        <segment><source>Classes</source></segment>
+      </unit>
+      <unit id="dhcp.col.first">
+        <segment><source>First address</source></segment>
+      </unit>
+      <unit id="dhcp.col.last">
+        <segment><source>Last address</source></segment>
+      </unit>
+      <unit id="dhcp.col.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dhcp.col.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="dhcp.col.scopes">
+        <segment><source>Scopes</source></segment>
+      </unit>
+      <unit id="dhcp.col.space">
+        <segment><source>Space</source></segment>
+      </unit>
+      <unit id="dhcp.col.code">
+        <segment><source>Code</source></segment>
+      </unit>
+      <unit id="dhcp.col.type">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dhcp.col.vendor_class">
+        <segment><source>Vendor class</source></segment>
+      </unit>
+      <unit id="dhcp.col.used_by">
+        <segment><source>Used by</source></segment>
+      </unit>
+      <unit id="dhcp.col.server_managed">
+        <segment><source>Set by the server</source></segment>
+      </unit>
+      <unit id="dhcp.col.matches">
+        <segment><source>Matches</source></segment>
+      </unit>
+      <unit id="dhcp.col.condition">
+        <segment><source>Condition</source></segment>
+      </unit>
+      <unit id="dhcp.col.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="dhcp.col.scope">
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="dhcp.col.order">
+        <segment><source>Order</source></segment>
+      </unit>
+      <unit id="dhcp.col.mac">
+        <segment><source>MAC pattern</source></segment>
+      </unit>
+      <unit id="dhcp.col.filter_kind">
+        <segment><source>Allow or deny</source></segment>
+      </unit>
+      <unit id="dhcp.col.note">
+        <segment><source>Note</source></segment>
+      </unit>
+      <unit id="dhcp.lease.legend">
+        <segment><source>Lease times</source></segment>
+      </unit>
+      <unit id="dhcp.lease.default">
+        <segment><source>Default lease time</source></segment>
+      </unit>
+      <unit id="dhcp.lease.min">
+        <segment><source>Shortest lease time</source></segment>
+      </unit>
+      <unit id="dhcp.lease.max">
+        <segment><source>Longest lease time</source></segment>
+      </unit>
+      <unit id="dhcp.lease.unit">
+        <segment><source>Unit of {name}</source></segment>
+      </unit>
+      <unit id="dhcp.unit.minutes">
+        <segment><source>Minutes</source></segment>
+      </unit>
+      <unit id="dhcp.unit.hours">
+        <segment><source>Hours</source></segment>
+      </unit>
+      <unit id="dhcp.unit.days">
+        <segment><source>Days</source></segment>
+      </unit>
+      <unit id="dhcp.lease.inherit">
+        <segment><source>Use the lease times of the server</source></segment>
+      </unit>
+      <unit id="dhcp.lease.server_now">
+        <segment><source>The server grants {lease}.</source></segment>
+      </unit>
+      <unit id="dhcp.lease.words">
+        <segment><source>default {default}, between {min} and {max}</source></segment>
+      </unit>
+      <unit id="dhcp.tri.inherit">
+        <segment><source>Follow the server</source></segment>
+      </unit>
+      <unit id="dhcp.check.lease_number">
+        <segment><source>Enter a positive number.</source></segment>
+      </unit>
+      <unit id="dhcp.check.lease_order">
+        <segment><source>The shortest time must not exceed the default, and the default must not exceed the longest.</source></segment>
+      </unit>
+      <unit id="dhcp.check.lease_year">
+        <segment><source>A lease lasts at most one year.</source></segment>
+      </unit>
+      <unit id="dhcp.check.prefix">
+        <segment><source>Choose a network.</source></segment>
+      </unit>
+      <unit id="dhcp.check.server_id">
+        <segment><source>Enter an IPv4 address.</source></segment>
+      </unit>
+      <unit id="dhcp.check.server_id_clear">
+        <segment><source>The server identifier cannot be removed; enter another address.</source></segment>
+      </unit>
+      <unit id="dhcp.check.name">
+        <segment><source>Use 1 to 64 characters: a to z, 0 to 9 and hyphen.</source></segment>
+      </unit>
+      <unit id="dhcp.check.mac">
+        <segment><source>Enter a MAC address such as 00:00:5e:00:53:01.</source></segment>
+      </unit>
+      <unit id="dhcp.check.hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source></segment>
+      </unit>
+      <unit id="dhcp.check.mac_pattern">
+        <segment><source>Enter six hexadecimal octets, with * for any octet, or a prefix that ends in *.</source></segment>
+      </unit>
+      <unit id="dhcp.check.def_code">
+        <segment><source>Enter a code from 1 to 254.</source></segment>
+      </unit>
+      <unit id="dhcp.check.space">
+        <segment><source>Use letters, digits, dots, hyphens and underscores.</source></segment>
+      </unit>
+      <unit id="dhcp.check.history_days">
+        <segment><source>Enter a whole number of days from 1 to 3650.</source></segment>
+      </unit>
+      <unit id="dhcp.check.order">
+        <segment><source>Enter a whole number, or leave it empty to go last.</source></segment>
+      </unit>
+      <unit id="dhcp.check.term_class">
+        <segment><source>Choose a class.</source></segment>
+      </unit>
+      <unit id="dhcp.check.range_address">
+        <segment><source>Enter two IPv4 addresses.</source></segment>
+      </unit>
+      <unit id="dhcp.check.range_order">
+        <segment><source>The first address must not be after the last.</source></segment>
+      </unit>
+      <unit id="dhcp.check.range_outside">
+        <segment><source>The range must lie inside the network of the scope.</source></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_first">
+        <segment><source>The first address must be an IPv4 address in {network}.</source></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_last">
+        <segment><source>The last address must be an IPv4 address in {network}.</source></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_order">
+        <segment><source>The first address must not be after the last, both in {network}.</source></segment>
+      </unit>
+      <unit id="dhcp.check.exclusion_outside">
+        <segment><source>Both addresses must lie inside {network}.</source></segment>
+      </unit>
+      <unit id="dhcp.check.match_empty">
+        <segment><source>Enter a value.</source></segment>
+      </unit>
+      <unit id="dhcp.check.match_long">
+        <segment><source>Use at most 255 characters.</source></segment>
+      </unit>
+      <unit id="dhcp.check.match_mac">
+        <segment><source>Enter a MAC pattern such as 00:00:5e:*.</source></segment>
+      </unit>
+      <unit id="dhcp.check.match_hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source></segment>
+      </unit>
+      <unit id="dhcp.check.match_number">
+        <segment><source>Enter a number from 0 to 65535.</source></segment>
+      </unit>
+      <unit id="dhcp.scopes.sub">
+        <segment><source>The IPAM networks that are leased out, with their pools, active leases and how full they are.</source></segment>
+      </unit>
+      <unit id="dhcp.scopes.empty">
+        <segment><source>No scopes yet</source></segment>
+      </unit>
+      <unit id="dhcp.scopes.empty_body">
+        <segment><source>A scope serves one IPAM network. Create one for a network that has none.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.enabled">
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="dhcp.scope.disabled">
+        <segment><source>Inactive</source></segment>
+      </unit>
+      <unit id="dhcp.scope.create">
+        <segment><source>New scope</source></segment>
+      </unit>
+      <unit id="dhcp.scope.create_title">
+        <segment><source>New DHCP scope</source></segment>
+      </unit>
+      <unit id="dhcp.scope.created">
+        <segment><source>Scope for {network} created</source></segment>
+      </unit>
+      <unit id="dhcp.scope.saved">
+        <segment><source>Scope for {network} saved</source></segment>
+      </unit>
+      <unit id="dhcp.scope.unchanged">
+        <segment><source>Nothing was changed.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.deleted">
+        <segment><source>Scope for {network} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_title">
+        <segment><source>Delete the scope for {network}?</source></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_body">
+        <segment><source>The scope, its exclusions, the settings of its pools, its policies and its options are deleted, and Tenko stops leasing addresses in {network}. The network and its ranges stay in IPAM.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.delete_confirm">
+        <segment><source>Delete the scope</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix_help">
+        <segment><source>Only IPv4 networks of IPAM that have no scope are listed.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.prefix_pick">
+        <segment><source>Choose a network</source></segment>
+      </unit>
+      <unit id="dhcp.scope.no_networks">
+        <segment><source>Every IPv4 network of IPAM has a scope already.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.authoritative">
+        <segment><source>Authoritative</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.authoritative_help">
+        <segment><source>An authoritative scope refuses requests for addresses of other networks.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.server_id">
+        <segment><source>Server identifier</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.server_id_help">
+        <segment><source>An IPv4 address of this server. Empty: the address of the listener that receives the request.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.shared_network">
+        <segment><source>Shared network</source></segment>
+      </unit>
+      <unit id="dhcp.scope.shared_none">
+        <segment><source>None</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.restricted">
+        <segment><source>Restricted</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.restricted_help">
+        <segment><source>Only clients that a MAC filter of the kind allow matches are served.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.enabled">
+        <segment><source>Serve clients</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.enabled_help">
+        <segment><source>An inactive scope stays in the configuration and is not served.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.classes">
+        <segment><source>Admitted classes</source></segment>
+      </unit>
+      <unit id="dhcp.scope.field.classes_help">
+        <segment><source>Without a class the scope serves every client.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.no_classes">
+        <segment><source>There are no classes yet.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="dhcp.scope.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_on">
+        <segment><source>Dynamic DNS updates are on for this scope. Their settings are managed by the DDNS support of a later package.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.ddns_off">
+        <segment><source>Dynamic DNS updates are off for this scope. Their settings are managed by the DDNS support of a later package.</source></segment>
+      </unit>
+      <unit id="dhcp.scope.in_ipam">
+        <segment><source>Open in IPAM</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tabs">
+        <segment><source>Sections of the scope</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.settings">
+        <segment><source>Settings</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.pools">
+        <segment><source>Pools</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.exclusions">
+        <segment><source>Exclusions</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.options">
+        <segment><source>Options</source></segment>
+      </unit>
+      <unit id="dhcp.scope.options_title">
+        <segment><source>Options of {network}</source></segment>
+      </unit>
+      <unit id="dhcp.scope.options_help">
+        <segment><source>These options go to every client of the scope and replace the same codes in the options of the server.</source></segment>
+      </unit>
+      <unit id="dhcp.util.title">
+        <segment><source>Utilization</source></segment>
+      </unit>
+      <unit id="dhcp.util.pool_size">
+        <segment><source>Pool size</source></segment>
+      </unit>
+      <unit id="dhcp.util.leased">
+        <segment><source>Leased</source></segment>
+      </unit>
+      <unit id="dhcp.util.reserved">
+        <segment><source>Reserved</source></segment>
+      </unit>
+      <unit id="dhcp.util.abandoned">
+        <segment><source>Abandoned</source></segment>
+      </unit>
+      <unit id="dhcp.util.free">
+        <segment><source>Free</source></segment>
+      </unit>
+      <unit id="dhcp.util.percent">
+        <segment><source>Used share</source></segment>
+      </unit>
+      <unit id="dhcp.util.at">
+        <segment><source>Read at {time}</source></segment>
+      </unit>
+      <unit id="dhcp.util.label">
+        <segment><source>{percent} percent used</source></segment>
+      </unit>
+      <unit id="dhcp.pools.title">
+        <segment><source>Pools</source></segment>
+      </unit>
+      <unit id="dhcp.pools.empty">
+        <segment><source>No pools</source></segment>
+      </unit>
+      <unit id="dhcp.pools.empty_body">
+        <segment><source>A scope leases addresses from the pools of its network. Make a range of the role DHCP pool in IPAM.</source></segment>
+      </unit>
+      <unit id="dhcp.pools.note">
+        <segment><source>Pools are IPAM ranges of the role DHCP pool. They are made, moved and deleted on the page of the prefix in IPAM; here a pool gets the classes it admits and its lease times.</source></segment>
+      </unit>
+      <unit id="dhcp.pools.ipam_link">
+        <segment><source>Open {network} in IPAM</source></segment>
+      </unit>
+      <unit id="dhcp.pool.settings">
+        <segment><source>Set DHCP settings</source></segment>
+      </unit>
+      <unit id="dhcp.pool.clear">
+        <segment><source>Clear</source></segment>
+      </unit>
+      <unit id="dhcp.pool.clear_title">
+        <segment><source>Clear the DHCP settings of {first} to {last}?</source></segment>
+      </unit>
+      <unit id="dhcp.pool.clear_body">
+        <segment><source>The classes and the lease times of the pool go; it serves with the settings of the scope again. The range stays in IPAM.</source></segment>
+      </unit>
+      <unit id="dhcp.pool.cleared">
+        <segment><source>DHCP settings of {first} to {last} cleared</source></segment>
+      </unit>
+      <unit id="dhcp.pool.edit_title">
+        <segment><source>DHCP settings of {first} to {last}</source></segment>
+      </unit>
+      <unit id="dhcp.pool.field.classes">
+        <segment><source>Admitted classes</source></segment>
+      </unit>
+      <unit id="dhcp.pool.field.classes_help">
+        <segment><source>Without a class the pool serves every client the scope admits.</source></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_inherit_help">
+        <segment><source>The pool then serves with the lease time of its range in IPAM, or else of the scope.</source></segment>
+      </unit>
+      <unit id="dhcp.pool.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.pool.saved">
+        <segment><source>DHCP settings of {first} to {last} saved</source></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_range">
+        <segment><source>{lease} (from the range)</source></segment>
+      </unit>
+      <unit id="dhcp.pool.lease_scope">
+        <segment><source>From the scope</source></segment>
+      </unit>
+      <unit id="dhcp.exclusions.title">
+        <segment><source>Exclusions</source></segment>
+      </unit>
+      <unit id="dhcp.exclusions.empty">
+        <segment><source>No exclusions</source></segment>
+      </unit>
+      <unit id="dhcp.exclusions.empty_body">
+        <segment><source>An exclusion is a range of the network that is never leased out.</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.create">
+        <segment><source>Add an exclusion</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.create_title">
+        <segment><source>Add an exclusion</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.help">
+        <segment><source>The range must lie inside {network}.</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.field.first">
+        <segment><source>First address</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.field.last">
+        <segment><source>Last address</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.created">
+        <segment><source>{count, plural, one {Exclusion of # address added} other {Exclusion of # addresses added}}</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_title">
+        <segment><source>Delete the exclusion {range}?</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_body">
+        <segment><source>The addresses of the range can be leased out again.</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.delete_confirm">
+        <segment><source>Delete the exclusion</source></segment>
+      </unit>
+      <unit id="dhcp.exclusion.deleted">
+        <segment><source>Exclusion {range} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.optset.col.code">
+        <segment><source>Code</source></segment>
+      </unit>
+      <unit id="dhcp.optset.col.name">
+        <segment><source>Option</source></segment>
+      </unit>
+      <unit id="dhcp.optset.col.value">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="dhcp.optset.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="dhcp.optset.empty">
+        <segment><source>No options are set at this level.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.unknown">
+        <segment><source>Option {code}</source></segment>
+      </unit>
+      <unit id="dhcp.optset.raw">
+        <segment><source>(no known type, hexadecimal)</source></segment>
+      </unit>
+      <unit id="dhcp.optset.value_of">
+        <segment><source>Value of {name}</source></segment>
+      </unit>
+      <unit id="dhcp.optset.flag">
+        <segment><source>A flag without a value</source></segment>
+      </unit>
+      <unit id="dhcp.optset.routes_help">
+        <segment><source>One route per line: destination via router, for example 203.0.113.0/24 via 192.0.2.1.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.remove">
+        <segment><source>Remove {name}</source></segment>
+      </unit>
+      <unit id="dhcp.optset.add">
+        <segment><source>Add an option</source></segment>
+      </unit>
+      <unit id="dhcp.optset.add_code">
+        <segment><source>Other code</source></segment>
+      </unit>
+      <unit id="dhcp.optset.save">
+        <segment><source>Save the options</source></segment>
+      </unit>
+      <unit id="dhcp.optset.revert">
+        <segment><source>Discard changes</source></segment>
+      </unit>
+      <unit id="dhcp.optset.saved">
+        <segment><source>Options saved</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind_list">
+        <segment><source>{kind}, list</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv4_address">
+        <segment><source>IPv4 address</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv6_address">
+        <segment><source>IPv6 address</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.ipv6_prefix">
+        <segment><source>IPv6 prefix</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u8">
+        <segment><source>Number (0 to 255)</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u16">
+        <segment><source>Number (0 to 65535)</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.u32">
+        <segment><source>Number (0 to 4294967295)</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.i32">
+        <segment><source>Signed number</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.bool">
+        <segment><source>True or false</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.string">
+        <segment><source>Text</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.fqdn">
+        <segment><source>Domain name</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.classless_routes">
+        <segment><source>Classless routes</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.binary">
+        <segment><source>Hexadecimal</source></segment>
+      </unit>
+      <unit id="dhcp.optset.kind.empty">
+        <segment><source>Flag</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.empty">
+        <segment><source>Enter a value.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.ipv4">
+        <segment><source>Enter IPv4 addresses.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.ipv6">
+        <segment><source>Enter IPv6 addresses.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.prefix">
+        <segment><source>Enter IPv6 prefixes such as 2001:db8::/32.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.number">
+        <segment><source>Enter whole numbers.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.range">
+        <segment><source>A number is out of range for this option.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.bool">
+        <segment><source>Enter true or false.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.name">
+        <segment><source>Enter valid domain names.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.route">
+        <segment><source>Enter one route per line: destination via router.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.hex">
+        <segment><source>Enter whole octets in hexadecimal, such as c0ff.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.count">
+        <segment><source>This option takes one value.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.raw_hex">
+        <segment><source>Enter the value in hexadecimal, such as c0ff.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.code">
+        <segment><source>Enter a code from 1 to 254.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.managed">
+        <segment><source>The server sets this option itself.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.title">
+        <segment><source>Options of a client</source></segment>
+      </unit>
+      <unit id="dhcp.effective.help">
+        <segment><source>Enter the MAC address of a client to see the options it gets in this scope and the level each comes from.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.effective.client_id">
+        <segment><source>Client identifier (hexadecimal, optional)</source></segment>
+      </unit>
+      <unit id="dhcp.effective.show">
+        <segment><source>Show the options</source></segment>
+      </unit>
+      <unit id="dhcp.effective.reservation">
+        <segment><source>This client has a reservation in IPAM; the options of the reservation are the last level.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.note">
+        <segment><source>Policies are not matched against clients yet, so the policy level stays empty until a later package.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.empty">
+        <segment><source>No options are set at any level.</source></segment>
+      </unit>
+      <unit id="dhcp.effective.col.level">
+        <segment><source>Level</source></segment>
+      </unit>
+      <unit id="dhcp.level.server">
+        <segment><source>Server</source></segment>
+      </unit>
+      <unit id="dhcp.level.shared_network">
+        <segment><source>Shared network</source></segment>
+      </unit>
+      <unit id="dhcp.level.scope">
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="dhcp.level.pool">
+        <segment><source>Pool</source></segment>
+      </unit>
+      <unit id="dhcp.level.policy">
+        <segment><source>Policy</source></segment>
+      </unit>
+      <unit id="dhcp.level.host">
+        <segment><source>Reservation</source></segment>
+      </unit>
+      <unit id="dhcp.example.mac">
+        <segment><source>00:00:5e:00:53:01</source></segment>
+      </unit>
+      <unit id="dhcp.example.mac_pattern">
+        <segment><source>00:00:5e:00:53:*</source></segment>
+      </unit>
+      <unit id="dhcp.network.sub">
+        <segment><source>Scopes that share one link.</source></segment>
+      </unit>
+      <unit id="dhcp.network.empty">
+        <segment><source>No shared networks</source></segment>
+      </unit>
+      <unit id="dhcp.network.empty_body">
+        <segment><source>Group the scopes that lease addresses on the same link into a shared network.</source></segment>
+      </unit>
+      <unit id="dhcp.network.create">
+        <segment><source>New shared network</source></segment>
+      </unit>
+      <unit id="dhcp.network.create_title">
+        <segment><source>New shared network</source></segment>
+      </unit>
+      <unit id="dhcp.network.created">
+        <segment><source>Shared network {name} created</source></segment>
+      </unit>
+      <unit id="dhcp.network.edit_title">
+        <segment><source>Shared network {name}</source></segment>
+      </unit>
+      <unit id="dhcp.network.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.network.saved">
+        <segment><source>Shared network {name} saved</source></segment>
+      </unit>
+      <unit id="dhcp.network.delete_title">
+        <segment><source>Delete the shared network {name}?</source></segment>
+      </unit>
+      <unit id="dhcp.network.delete_body">
+        <segment><source>The shared network is deleted. A shared network that scopes still belong to is not deleted.</source></segment>
+      </unit>
+      <unit id="dhcp.network.delete_confirm">
+        <segment><source>Delete the shared network</source></segment>
+      </unit>
+      <unit id="dhcp.network.deleted">
+        <segment><source>Shared network {name} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.network.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dhcp.network.field.interface">
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="dhcp.network.field.interface_help">
+        <segment><source>The listener interface of a directly attached link. Empty for a relayed link.</source></segment>
+      </unit>
+      <unit id="dhcp.options.sub">
+        <segment><source>The options that clients receive with a lease.</source></segment>
+      </unit>
+      <unit id="dhcp.options.server">
+        <segment><source>Options of the server</source></segment>
+      </unit>
+      <unit id="dhcp.options.server_help">
+        <segment><source>Every scope starts from these options. A scope, a policy or a reservation replaces the codes it sets itself.</source></segment>
+      </unit>
+      <unit id="dhcp.options.defs">
+        <segment><source>Custom definitions</source></segment>
+      </unit>
+      <unit id="dhcp.options.defs_help">
+        <segment><source>A definition gives a code in the site-specific range 224 to 254, or in a vendor space, a name and a type.</source></segment>
+      </unit>
+      <unit id="dhcp.options.catalog">
+        <segment><source>Catalog</source></segment>
+      </unit>
+      <unit id="dhcp.options.catalog_help">
+        <segment><source>The built-in options. Those marked as set by the server are written by the server itself and never go in an option set.</source></segment>
+      </unit>
+      <unit id="dhcp.catalog.managed">
+        <segment><source>Set by the server</source></segment>
+      </unit>
+      <unit id="dhcp.defs.empty">
+        <segment><source>No custom definitions</source></segment>
+      </unit>
+      <unit id="dhcp.def.create">
+        <segment><source>Define an option</source></segment>
+      </unit>
+      <unit id="dhcp.def.create_title">
+        <segment><source>Define an option</source></segment>
+      </unit>
+      <unit id="dhcp.def.created">
+        <segment><source>Option {name} defined</source></segment>
+      </unit>
+      <unit id="dhcp.def.help">
+        <segment><source>Codes of the catalog and codes the server sets itself are refused. A definition that option sets use cannot change type and is not deleted.</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.space">
+        <segment><source>Space</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.space_help">
+        <segment><source>dhcp4 for ordinary options, or the name of a vendor space.</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.code">
+        <segment><source>Code</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.code_help">
+        <segment><source>1 to 254; 224 to 254 is the site-specific range.</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.kind">
+        <segment><source>Type</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.array">
+        <segment><source>The option holds a list</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.vendor_class">
+        <segment><source>Vendor class</source></segment>
+      </unit>
+      <unit id="dhcp.def.field.vendor_class_help">
+        <segment><source>For a vendor space: clients whose option 60 equals this receive the options in option 43.</source></segment>
+      </unit>
+      <unit id="dhcp.def.delete_title">
+        <segment><source>Delete the definition {name}?</source></segment>
+      </unit>
+      <unit id="dhcp.def.delete_body">
+        <segment><source>The code has neither a name nor a type afterwards. A definition that option sets use is not deleted.</source></segment>
+      </unit>
+      <unit id="dhcp.def.delete_confirm">
+        <segment><source>Delete the definition</source></segment>
+      </unit>
+      <unit id="dhcp.def.deleted">
+        <segment><source>Definition {name} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.classes.sub">
+        <segment><source>Groups of clients that are recognised by what they send.</source></segment>
+      </unit>
+      <unit id="dhcp.classes.empty">
+        <segment><source>No classes</source></segment>
+      </unit>
+      <unit id="dhcp.classes.empty_body">
+        <segment><source>A class names a match on the vendor class, the user class, the MAC address, the client identifier or other fields of a request.</source></segment>
+      </unit>
+      <unit id="dhcp.class.create">
+        <segment><source>New class</source></segment>
+      </unit>
+      <unit id="dhcp.class.create_title">
+        <segment><source>New client class</source></segment>
+      </unit>
+      <unit id="dhcp.class.created">
+        <segment><source>Class {name} created</source></segment>
+      </unit>
+      <unit id="dhcp.class.edit_title">
+        <segment><source>Class {name}</source></segment>
+      </unit>
+      <unit id="dhcp.class.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.class.saved">
+        <segment><source>Class {name} saved</source></segment>
+      </unit>
+      <unit id="dhcp.class.delete_title">
+        <segment><source>Delete the class {name}?</source></segment>
+      </unit>
+      <unit id="dhcp.class.delete_body">
+        <segment><source>The class is deleted. A class that a scope, a pool or a policy names is not deleted.</source></segment>
+      </unit>
+      <unit id="dhcp.class.delete_confirm">
+        <segment><source>Delete the class</source></segment>
+      </unit>
+      <unit id="dhcp.class.deleted">
+        <segment><source>Class {name} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.class.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dhcp.class.field.matches">
+        <segment><source>Matches</source></segment>
+      </unit>
+      <unit id="dhcp.class.field.matches_help">
+        <segment><source>A client is in the class when any of the matches holds.</source></segment>
+      </unit>
+      <unit id="dhcp.match.add">
+        <segment><source>Add a match</source></segment>
+      </unit>
+      <unit id="dhcp.match.row">
+        <segment><source>Match {n}</source></segment>
+      </unit>
+      <unit id="dhcp.match.remove">
+        <segment><source>Remove {label}</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind_label">
+        <segment><source>Kind of match</source></segment>
+      </unit>
+      <unit id="dhcp.match.value_label">
+        <segment><source>Value</source></segment>
+      </unit>
+      <unit id="dhcp.match.prefix">
+        <segment><source>Starts with</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.vendor_class">
+        <segment><source>Vendor class</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.user_class">
+        <segment><source>User class</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.client_id">
+        <segment><source>Client identifier</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.circuit_id">
+        <segment><source>Relay circuit-id</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.remote_id">
+        <segment><source>Relay remote-id</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.architecture">
+        <segment><source>Client architecture</source></segment>
+      </unit>
+      <unit id="dhcp.match.kind.host_name">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.vendor_class">
+        <segment><source>PXEClient</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.user_class">
+        <segment><source>lab</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.mac">
+        <segment><source>00:00:5e:00:53:*</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.client_id">
+        <segment><source>01000000000001</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.circuit_id">
+        <segment><source>00010002</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.remote_id">
+        <segment><source>0a0b0c0d</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.architecture">
+        <segment><source>7</source></segment>
+      </unit>
+      <unit id="dhcp.match.example.host_name">
+        <segment><source>printer</source></segment>
+      </unit>
+      <unit id="dhcp.match.vendor_class">
+        <segment><source>vendor class "{value}"</source></segment>
+      </unit>
+      <unit id="dhcp.match.vendor_class_prefix">
+        <segment><source>vendor class starting with "{value}"</source></segment>
+      </unit>
+      <unit id="dhcp.match.user_class">
+        <segment><source>user class "{value}"</source></segment>
+      </unit>
+      <unit id="dhcp.match.mac">
+        <segment><source>MAC address {value}</source></segment>
+      </unit>
+      <unit id="dhcp.match.client_id">
+        <segment><source>client identifier {value}</source></segment>
+      </unit>
+      <unit id="dhcp.match.circuit_id">
+        <segment><source>relay circuit-id {value}</source></segment>
+      </unit>
+      <unit id="dhcp.match.remote_id">
+        <segment><source>relay remote-id {value}</source></segment>
+      </unit>
+      <unit id="dhcp.match.architecture">
+        <segment><source>client architecture {value}</source></segment>
+      </unit>
+      <unit id="dhcp.match.host_name">
+        <segment><source>host name "{value}"</source></segment>
+      </unit>
+      <unit id="dhcp.match.host_name_prefix">
+        <segment><source>host name starting with "{value}"</source></segment>
+      </unit>
+      <unit id="dhcp.policies.sub">
+        <segment><source>Rules in the order they are evaluated: those of each scope, then those of the server.</source></segment>
+      </unit>
+      <unit id="dhcp.policies.note">
+        <segment><source>Matching clients to classes and policies comes with a later package. The policies are stored and checked now, but they do not change what clients get yet.</source></segment>
+      </unit>
+      <unit id="dhcp.policies.empty">
+        <segment><source>No policies</source></segment>
+      </unit>
+      <unit id="dhcp.policies.empty_body">
+        <segment><source>A policy gives lease times or an address range to the clients that match its condition.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.create">
+        <segment><source>New policy</source></segment>
+      </unit>
+      <unit id="dhcp.policy.create_title">
+        <segment><source>New DHCP policy</source></segment>
+      </unit>
+      <unit id="dhcp.policy.created">
+        <segment><source>Policy {name} created</source></segment>
+      </unit>
+      <unit id="dhcp.policy.edit_title">
+        <segment><source>Policy {name}</source></segment>
+      </unit>
+      <unit id="dhcp.policy.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.policy.saved">
+        <segment><source>Policy {name} saved</source></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_title">
+        <segment><source>Delete the policy {name}?</source></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_body">
+        <segment><source>The policy and its options are deleted.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.delete_confirm">
+        <segment><source>Delete the policy</source></segment>
+      </unit>
+      <unit id="dhcp.policy.deleted">
+        <segment><source>Policy {name} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.name">
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.scope">
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.scope_fixed">
+        <segment><source>The scope of a policy does not change.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.scope_server">
+        <segment><source>Server</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.order">
+        <segment><source>Order</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.order_help">
+        <segment><source>Lowest first. Empty: after the last policy of the scope.</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.enabled">
+        <segment><source>The policy applies</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.condition">
+        <segment><source>Condition</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.join">
+        <segment><source>The terms are joined by</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.action">
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.range_first">
+        <segment><source>Restrict clients to addresses from</source></segment>
+      </unit>
+      <unit id="dhcp.policy.field.range_last">
+        <segment><source>to</source></segment>
+      </unit>
+      <unit id="dhcp.policy.lease_inherit_help">
+        <segment><source>Without lease times of its own the policy leaves them as they are.</source></segment>
+      </unit>
+      <unit id="dhcp.join.and">
+        <segment><source>All of the terms (and)</source></segment>
+      </unit>
+      <unit id="dhcp.join.or">
+        <segment><source>Any of the terms (or)</source></segment>
+      </unit>
+      <unit id="dhcp.term.add">
+        <segment><source>Add a term</source></segment>
+      </unit>
+      <unit id="dhcp.term.row">
+        <segment><source>Term {n}</source></segment>
+      </unit>
+      <unit id="dhcp.term.kind_label">
+        <segment><source>Kind of term</source></segment>
+      </unit>
+      <unit id="dhcp.term.class_label">
+        <segment><source>Class</source></segment>
+      </unit>
+      <unit id="dhcp.term.class_pick">
+        <segment><source>Choose a class</source></segment>
+      </unit>
+      <unit id="dhcp.term.remove">
+        <segment><source>Remove term {n}</source></segment>
+      </unit>
+      <unit id="dhcp.term.kind.class">
+        <segment><source>In the class</source></segment>
+      </unit>
+      <unit id="dhcp.term.kind.not_class">
+        <segment><source>Not in the class</source></segment>
+      </unit>
+      <unit id="dhcp.term.kind.match">
+        <segment><source>Matches</source></segment>
+      </unit>
+      <unit id="dhcp.term.kind.not_match">
+        <segment><source>Does not match</source></segment>
+      </unit>
+      <unit id="dhcp.term.class">
+        <segment><source>in class {name}</source></segment>
+      </unit>
+      <unit id="dhcp.term.not_class">
+        <segment><source>not in class {name}</source></segment>
+      </unit>
+      <unit id="dhcp.term.not_match">
+        <segment><source>not {match}</source></segment>
+      </unit>
+      <unit id="dhcp.action.range">
+        <segment><source>only addresses {first} to {last}</source></segment>
+      </unit>
+      <unit id="dhcp.action.lease">
+        <segment><source>lease time {lease}</source></segment>
+      </unit>
+      <unit id="dhcp.action.ddns">
+        <segment><source>its own DDNS settings</source></segment>
+      </unit>
+      <unit id="dhcp.action.none">
+        <segment><source>no change</source></segment>
+      </unit>
+      <unit id="dhcp.filters.sub">
+        <segment><source>Hardware addresses that are allowed or refused on the whole server.</source></segment>
+      </unit>
+      <unit id="dhcp.filters.note">
+        <segment><source>A deny entry drops the client on every scope. A restricted scope serves only the clients that an allow entry matches. Deny wins over allow.</source></segment>
+      </unit>
+      <unit id="dhcp.filters.empty">
+        <segment><source>No MAC filters</source></segment>
+      </unit>
+      <unit id="dhcp.filters.empty_body">
+        <segment><source>Add an entry to allow or refuse hardware addresses.</source></segment>
+      </unit>
+      <unit id="dhcp.filter.create">
+        <segment><source>Add a filter</source></segment>
+      </unit>
+      <unit id="dhcp.filter.create_title">
+        <segment><source>Add a MAC filter</source></segment>
+      </unit>
+      <unit id="dhcp.filter.created">
+        <segment><source>Filter {mac} added</source></segment>
+      </unit>
+      <unit id="dhcp.filter.edit_title">
+        <segment><source>Filter {mac}</source></segment>
+      </unit>
+      <unit id="dhcp.filter.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.filter.saved">
+        <segment><source>Filter {mac} saved</source></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_title">
+        <segment><source>Delete the filter {mac}?</source></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_body">
+        <segment><source>Clients that match the pattern are served by the other rules again.</source></segment>
+      </unit>
+      <unit id="dhcp.filter.delete_confirm">
+        <segment><source>Delete the filter</source></segment>
+      </unit>
+      <unit id="dhcp.filter.deleted">
+        <segment><source>Filter {mac} deleted</source></segment>
+      </unit>
+      <unit id="dhcp.filter.field.mac">
+        <segment><source>MAC pattern</source></segment>
+      </unit>
+      <unit id="dhcp.filter.field.mac_help">
+        <segment><source>Six hexadecimal octets, * for any octet, or a prefix ending in *, for example 00:00:5e:00:53:*.</source></segment>
+      </unit>
+      <unit id="dhcp.filter.field.kind">
+        <segment><source>Allow or deny</source></segment>
+      </unit>
+      <unit id="dhcp.filter.field.note">
+        <segment><source>Note</source></segment>
+      </unit>
+      <unit id="dhcp.filter.kind.allow">
+        <segment><source>Allow</source></segment>
+      </unit>
+      <unit id="dhcp.filter.kind.deny">
+        <segment><source>Deny</source></segment>
+      </unit>
+      <unit id="dhcp.settings.title">
+        <segment><source>DHCP settings</source></segment>
+      </unit>
+      <unit id="dhcp.settings.lede">
+        <segment><source>The settings of the DHCP server that every scope starts from.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.lease">
+        <segment><source>Lease times</source></segment>
+      </unit>
+      <unit id="dhcp.settings.lease_help">
+        <segment><source>Scopes that set no lease times of their own use these.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.server">
+        <segment><source>Server</source></segment>
+      </unit>
+      <unit id="dhcp.settings.authoritative">
+        <segment><source>Authoritative by default</source></segment>
+      </unit>
+      <unit id="dhcp.settings.authoritative_help">
+        <segment><source>Scopes that do not say otherwise refuse requests for addresses of other networks.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict_follow">
+        <segment><source>Conflict detection follows the security profile</source></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict">
+        <segment><source>Check that an address is free before it is offered</source></segment>
+      </unit>
+      <unit id="dhcp.settings.conflict_help">
+        <segment><source>A probe of the address before the offer.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.effective">
+        <segment><source>In force now: {value}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.effective_days">
+        <segment><source>In force now: {days, plural, one {# day} other {# days}}.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.on">
+        <segment><source>on</source></segment>
+      </unit>
+      <unit id="dhcp.settings.off">
+        <segment><source>off</source></segment>
+      </unit>
+      <unit id="dhcp.settings.history_follow">
+        <segment><source>Lease history retention follows the security profile</source></segment>
+      </unit>
+      <unit id="dhcp.settings.history_days">
+        <segment><source>Days to keep the lease history</source></segment>
+      </unit>
+      <unit id="dhcp.settings.history_days_help">
+        <segment><source>1 to 3650 days.</source></segment>
+      </unit>
+      <unit id="dhcp.settings.save">
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="dhcp.settings.saved">
+        <segment><source>DHCP settings saved</source></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.not_found">
+        <segment><source>There is no DHCP scope for this network.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.exists">
+        <segment><source>This network has a scope already.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.not_network">
+        <segment><source>A supernet cannot have a scope; choose a network.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.invalid">
+        <segment><source>The scope settings are not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.scope.attached">
+        <segment><source>A DHCP scope serves this network; delete the scope first.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.not_found">
+        <segment><source>There is no such shared network.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.invalid">
+        <segment><source>The shared network is not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.shared_network.in_use">
+        <segment><source>{count, plural, one {# scope still belongs} other {# scopes still belong}} to this shared network; move or delete them first.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.not_found">
+        <segment><source>There is no such pool.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.outside">
+        <segment><source>The range lies outside the network of the scope.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.pool.not_pool">
+        <segment><source>This range does not have the role DHCP pool.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.exclusion.not_found">
+        <segment><source>There is no such exclusion.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.exclusion.invalid">
+        <segment><source>The exclusion is not valid ({field}): the first address must not be after the last, and both must lie inside the network.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option.invalid">
+        <segment><source>An option or an option definition is not valid.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option.code_reserved">
+        <segment><source>This code is defined by the catalog or set by the server itself.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option.unknown">
+        <segment><source>This code has no definition. Define the option first.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.not_found">
+        <segment><source>There is no such option definition.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.exists">
+        <segment><source>A definition of this code exists already in the space.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.option_def.in_use">
+        <segment><source>Option sets use this definition: {by}.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.class.not_found">
+        <segment><source>There is no such class.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.class.invalid">
+        <segment><source>The class is not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.class.in_use">
+        <segment><source>This class is named by {by}.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.policy.not_found">
+        <segment><source>There is no such policy.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.policy.invalid">
+        <segment><source>The policy is not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.not_found">
+        <segment><source>There is no such filter.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.invalid">
+        <segment><source>The filter is not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.filter.exists">
+        <segment><source>An entry for this pattern exists already.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.settings.invalid">
+        <segment><source>The setting is not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.lease_times.invalid">
+        <segment><source>The lease times are not valid ({field}): the shortest must not exceed the default, the default must not exceed the longest, and none may exceed one year.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.ddns.invalid">
+        <segment><source>The DDNS settings are not valid ({field}).</source></segment>
+      </unit>
+      <unit id="errors.dhcp.lease.not_found">
+        <segment><source>No lease holds this address.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.lease.state">
+        <segment><source>The state of the lease does not allow this.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.reservation.no_identity">
+        <segment><source>A reserved host needs a MAC address or a client identifier.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.reservation.conflict">
+        <segment><source>This address or this client is reserved twice.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.store_refused">
+        <segment><source>The store refused the lease write. Try again shortly.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.node.not_dhcp">
+        <segment><source>This node does not run the DHCP role.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.module.disabled">
+        <segment><source>The DHCP module is switched off.</source></segment>
+      </unit>
+      <unit id="errors.dhcp.export.format">
+        <segment><source>This export format is not known.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

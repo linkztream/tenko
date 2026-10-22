@@ -50,6 +50,13 @@ const PAGE_ROUTES: readonly AppRoute[] = [
     access: "admin",
     title: "dns.node.title",
   },
+  // WP7.4: the DHCP server settings.
+  {
+    path: "/settings/dhcp",
+    component: lazy(withPacks(["settings", "dhcp"], () => import("../dhcp/settings/DhcpSettingsPage"))),
+    access: "admin",
+    title: "dhcp.settings.title",
+  },
   {
     path: "/settings/languages",
     component: lazy(withPacks(["settings", "languages"], () => import("./languages/LanguagesPage"))),

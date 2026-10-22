@@ -26,6 +26,7 @@ server = [
   "dep:tenko-auth",
   "dep:tenko-cluster",
   "dep:tenko-connect",
+  "dep:tenko-dhcp",
   "dep:tenko-dns",
   "dep:tenko-ipam",
   "dep:tenko-jobs",
@@ -68,6 +69,8 @@ socket2 = { workspace = true, optional = true }
 tenko-auth = { workspace = true, optional = true }
 tenko-cluster = { workspace = true, optional = true }
 tenko-connect = { workspace = true, optional = true }
+# WP7.4: the configuration service of the DHCP routes.
+tenko-dhcp = { path = "../tenko-dhcp", optional = true }
 # The zone service of the DNS routes (WP4.2).
 tenko-dns = { workspace = true, optional = true }
 tenko-vault = { workspace = true, optional = true }

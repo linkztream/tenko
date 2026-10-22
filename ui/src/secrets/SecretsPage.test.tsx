@@ -706,6 +706,7 @@ describe("roles", () => {
       "Reconciler",
       "Guardrails",
       "DNS",
+      "DHCP", // WP7.4
       "Languages",
     ]);
     const current = within(nav).getByRole("link", { name: "Secrets" });

@@ -292,6 +292,8 @@ pub struct DhcpPoolItem {
     pub size: u64,
     /// Addresses with an active lease.
     pub leased: u64,
+    /// The store revision of the settings row (the `ETag`); 0 without settings.
+    pub revision: Revision,
 }
 
 /// The filter of the pool and exclusion lists.

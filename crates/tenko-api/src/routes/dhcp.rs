@@ -8,11 +8,19 @@
 //! DHCP-08, DHCP-13, DHCP-15, DHCP-16, IPAM-21, MIG-16, OPS-25.
 //!
 //! Every operation is declared with its request and answer types so that the OpenAPI
-//! document, the typed client of the UI and the mock server have them; until its package
-//! builds it, an operation checks the caller's scope and answers `501` with
-//! `sys.not_implemented`. The routes belong to the DHCP module (OPS-25): a server without
-//! it registers none of them, so they answer 404 `sys.route_not_found`. `/ipam/reconcile`
-//! belongs to the IPAM module and is registered by `reconcile_routes`.
+//! document, the typed client of the UI and the mock server have them. The configuration
+//! routes are built (WP7.4, files `dhcp/settings.rs`, `dhcp/scopes.rs`, `dhcp/networks.rs`,
+//! `dhcp/pools.rs`, `dhcp/options.rs`, `dhcp/classes.rs`) on the configuration service
+//! (`tenko_dhcp::config`), which the server adds as the request extension
+//! `Arc<ConfigService>`; every change is an inline job with its audit record, every read of
+//! one object carries its revision as the `ETag`, and a change or deletion with `If-Match`
+//! is refused with 412 when the object moved on. Until its package builds it, any other
+//! operation (reservations, leases, history, export, the node routes and `/ipam/reconcile`)
+//! checks the caller's scope and answers `501` with `sys.not_implemented`. The routes belong
+//! to the DHCP module (OPS-25): a server without it registers none of them, so they answer
+//! 404 `sys.route_not_found`; a router without the configuration service answers the
+//! configuration routes with 409 `dhcp.module.disabled`. `/ipam/reconcile` belongs to the
+//! IPAM module and is registered by `reconcile_routes`.
 //!
 //! | Endpoint | Scope | Purpose |
 //! |---|---|---|
@@ -84,32 +92,42 @@
 //! interface of a reservation. Server-wide configuration (the settings, shared networks,
 //! the server level of the options, the export) is the `dhcp_scope` singleton, which no
 //! scoped grant reaches, so only global roles use it. A route that names no object checks
-//! the kind (lists and creates); a pool is checked on the kind here and on its scope by the
-//! implementation. The node routes need the action on the node as well, and check it first.
+//! the kind (lists and creates); a pool and the option set of a pool are checked on the
+//! kind first and then on the scope of the pool's prefix. A list shows only the scopes,
+//! pools, exclusions and option sets of the scopes the caller may read. The node routes
+//! need the action on the node as well, and check it first.
 //!
 //! A path segment that does not parse answers 400 `sys.invalid_request` before any
 //! authorization.
 
+// WP7.4: the configuration routes.
+mod classes;
 mod model;
+mod networks;
+mod options;
+mod pools;
+mod scopes;
+mod settings;
 
 #[cfg(test)]
 mod tests;
 
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, sync::Arc};
 
 use axum::{
-    extract::{Path, State},
-    response::Response,
+    Json,
+    extract::{FromRequestParts, Path, State},
+    http::{HeaderValue, StatusCode, header, request::Parts},
+    response::{IntoResponse, Response},
 };
+use serde::Serialize;
 use tenko_auth::authz::anywhere;
 use tenko_core::{
-    Action, CodedError, InterfaceId, NodeId, ObjectKind, ObjectRef, PrefixId, RangeId,
-    dhcp::{
-        ClassId, ExclusionId, FilterId, OptionDefId, OptionOwner, PolicyId, SharedNetworkId,
-        scope_object, server_object,
-    },
+    Action, CodedError, InterfaceId, NodeId, ObjectKind, ObjectRef, Principal, Revision,
+    dhcp::{OptionOwner, scope_object, server_object},
     error::codes,
 };
+use tenko_dhcp::config::ConfigService;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use model::{
@@ -176,8 +194,8 @@ fn parse_owner(raw: &str) -> Result<OptionOwner, ApiError> {
     })
 }
 
-/// The object an option set is checked on: the server-wide singleton for the server and
-/// shared network levels, the scope of a prefix, the kind for a pool (the implementation
+/// The object an option set is checked on first: the server-wide singleton for the server
+/// and shared network levels, the scope of a prefix, the kind for a pool (the handler then
 /// checks the pool's scope), the policy, and the interface of a reservation.
 fn owner_object(owner: OptionOwner) -> ObjectRef {
     match owner {
@@ -187,6 +205,88 @@ fn owner_object(owner: OptionOwner) -> ObjectRef {
         OptionOwner::Policy(id) => ObjectRef::from(id),
         OptionOwner::Host(interface) => ObjectRef::new(ObjectKind::Interface, interface.0),
     }
+}
+
+/// The configuration service of the request, from the `Arc<ConfigService>` extension the
+/// server adds while the DHCP module runs. Taken after the path and the scope are checked
+/// ([`Configs::get`]), so a malformed path or a missing scope answers first.
+pub(crate) struct Configs(Option<Arc<ConfigService>>);
+
+impl Configs {
+    /// The service; 409 `dhcp.module.disabled` when the server runs none.
+    pub(crate) fn get(self) -> Result<Arc<ConfigService>, ApiError> {
+        self.0.ok_or_else(|| {
+            ApiError::from_coded_error(
+                CodedError::new(
+                    tenko_core::dhcp::codes::MODULE_DISABLED,
+                    409,
+                    "the DHCP configuration service does not run on this server",
+                )
+                .with_title("DHCP module disabled"),
+            )
+        })
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for Configs {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(Ok(Configs(
+            parts.extensions.get::<Arc<ConfigService>>().cloned(),
+        )))
+    }
+}
+
+/// A JSON answer with the revision as its `ETag`.
+fn with_etag(status: StatusCode, body: &impl Serialize, revision: Revision) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    if let Ok(etag) = HeaderValue::from_str(&format!("\"{}\"", revision.0)) {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    response
+}
+
+/// Whether the caller may read the scope of `prefix`, for the filtering of lists.
+fn may_read_scope(app: &AppState, principal: &Principal, prefix: tenko_core::PrefixId) -> bool {
+    app.authorize(principal, Action::Read, &scope_object(prefix))
+        .is_ok()
+}
+
+/// One page of `items`, already sorted by `position`, after the cursor of `page`.
+fn page_of<T, P>(
+    items: Vec<T>,
+    position: impl Fn(&T) -> P,
+    page: &PageParams,
+    scope: crate::list::CursorScope,
+    revision: Revision,
+) -> Result<Page<T>, ApiError>
+where
+    P: Serialize + serde::de::DeserializeOwned + PartialOrd,
+{
+    let limit = page.limit()?;
+    let after: Option<P> = page.cursor(scope)?;
+    let mut out = Vec::new();
+    let mut next = None;
+    for item in items {
+        if after
+            .as_ref()
+            .is_some_and(|after| position(&item) <= *after)
+        {
+            continue;
+        }
+        if out.len() == limit {
+            next = out
+                .last()
+                .map(|last| crate::list::encode_cursor(scope, &position(last)));
+            break;
+        }
+        out.push(item);
+    }
+    Ok(Page::new(out, next, revision))
 }
 
 /// The routes of the area: everything under `/dhcp` and `/nodes/{id}/dhcp`.
@@ -211,78 +311,100 @@ pub(crate) fn reconcile_routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn settings_and_scope_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(get_dhcp_settings, update_dhcp_settings))
-        .routes(routes!(list_dhcp_scopes, create_dhcp_scope))
         .routes(routes!(
-            get_dhcp_scope,
-            update_dhcp_scope,
-            delete_dhcp_scope
+            settings::get_dhcp_settings,
+            settings::update_dhcp_settings
         ))
-        .routes(routes!(get_dhcp_scope_utilization))
-        .routes(routes!(get_dhcp_effective_options))
-        .routes(routes!(list_dhcp_exclusions, create_dhcp_exclusion))
-        .routes(routes!(delete_dhcp_exclusion))
+        .routes(routes!(scopes::list_dhcp_scopes, scopes::create_dhcp_scope))
+        .routes(routes!(
+            scopes::get_dhcp_scope,
+            scopes::update_dhcp_scope,
+            scopes::delete_dhcp_scope
+        ))
+        .routes(routes!(scopes::get_dhcp_scope_utilization))
+        .routes(routes!(scopes::get_dhcp_effective_options))
+        .routes(routes!(
+            scopes::list_dhcp_exclusions,
+            scopes::create_dhcp_exclusion
+        ))
+        .routes(routes!(scopes::delete_dhcp_exclusion))
 }
 
 #[inline(never)]
 fn network_and_pool_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(
-            list_dhcp_shared_networks,
-            create_dhcp_shared_network
+            networks::list_dhcp_shared_networks,
+            networks::create_dhcp_shared_network
         ))
         .routes(routes!(
-            get_dhcp_shared_network,
-            update_dhcp_shared_network,
-            delete_dhcp_shared_network,
+            networks::get_dhcp_shared_network,
+            networks::update_dhcp_shared_network,
+            networks::delete_dhcp_shared_network,
         ))
-        .routes(routes!(list_dhcp_pools))
-        .routes(routes!(get_dhcp_pool, set_dhcp_pool, delete_dhcp_pool))
+        .routes(routes!(pools::list_dhcp_pools))
+        .routes(routes!(
+            pools::get_dhcp_pool,
+            pools::set_dhcp_pool,
+            pools::delete_dhcp_pool
+        ))
 }
 
 #[inline(never)]
 fn option_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dhcp_option_catalog))
-        .routes(routes!(list_dhcp_option_defs, create_dhcp_option_def))
+        .routes(routes!(options::list_dhcp_option_catalog))
         .routes(routes!(
-            get_dhcp_option_def,
-            update_dhcp_option_def,
-            delete_dhcp_option_def
+            options::list_dhcp_option_defs,
+            options::create_dhcp_option_def
         ))
-        .routes(routes!(list_dhcp_option_sets))
         .routes(routes!(
-            get_dhcp_option_set,
-            set_dhcp_option_set,
-            delete_dhcp_option_set
+            options::get_dhcp_option_def,
+            options::update_dhcp_option_def,
+            options::delete_dhcp_option_def
+        ))
+        .routes(routes!(options::list_dhcp_option_sets))
+        .routes(routes!(
+            options::get_dhcp_option_set,
+            options::set_dhcp_option_set,
+            options::delete_dhcp_option_set
         ))
 }
 
 #[inline(never)]
 fn class_and_policy_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dhcp_classes, create_dhcp_class))
         .routes(routes!(
-            get_dhcp_class,
-            update_dhcp_class,
-            delete_dhcp_class
+            classes::list_dhcp_classes,
+            classes::create_dhcp_class
         ))
-        .routes(routes!(list_dhcp_policies, create_dhcp_policy))
         .routes(routes!(
-            get_dhcp_policy,
-            update_dhcp_policy,
-            delete_dhcp_policy
+            classes::get_dhcp_class,
+            classes::update_dhcp_class,
+            classes::delete_dhcp_class
+        ))
+        .routes(routes!(
+            classes::list_dhcp_policies,
+            classes::create_dhcp_policy
+        ))
+        .routes(routes!(
+            classes::get_dhcp_policy,
+            classes::update_dhcp_policy,
+            classes::delete_dhcp_policy
         ))
 }
 
 #[inline(never)]
 fn filter_and_lease_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_dhcp_filters, create_dhcp_filter))
         .routes(routes!(
-            get_dhcp_filter,
-            update_dhcp_filter,
-            delete_dhcp_filter
+            classes::list_dhcp_filters,
+            classes::create_dhcp_filter
+        ))
+        .routes(routes!(
+            classes::get_dhcp_filter,
+            classes::update_dhcp_filter,
+            classes::delete_dhcp_filter
         ))
         .routes(routes!(list_dhcp_reservations))
         .routes(routes!(get_dhcp_reservation))
@@ -300,1286 +422,6 @@ fn node_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(list_node_dhcp_leases))
         .routes(routes!(release_node_dhcp_lease))
         .routes(routes!(read_node_dhcp_history))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/settings",
-    tag = "dhcp",
-    operation_id = "get_dhcp_settings",
-    summary = "Get the DHCP server settings",
-    description = "Scope: `dhcp.read`.",
-    responses(
-        (status = 200, description = "The settings, with their `ETag`", body = DhcpSettingsItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_settings(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &server_object())?;
-    Err(not_implemented("GET", "/dhcp/settings"))
-}
-
-#[utoipa::path(
-    put,
-    path = "/dhcp/settings",
-    tag = "dhcp",
-    operation_id = "update_dhcp_settings",
-    summary = "Change the DHCP server settings",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = DhcpSettingsUpdate, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed settings", body = DhcpSettingsItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dhcp.settings.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_settings(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Update, &server_object())?;
-    Err(not_implemented("PUT", "/dhcp/settings"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/scopes",
-    tag = "dhcp",
-    operation_id = "list_dhcp_scopes",
-    summary = "List DHCP scopes",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of scopes by prefix", body = Page<DhcpScopeItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_scopes(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/scopes"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/scopes",
-    tag = "dhcp",
-    operation_id = "create_dhcp_scope",
-    summary = "Create a DHCP scope for an IPAM network",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = DhcpScopeCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The scope", body = DhcpScopeItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such prefix (`ipam.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The prefix has a scope already (`dhcp.scope.exists`) or the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_scope(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("POST", "/dhcp/scopes"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/scopes/{prefix}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_scope",
-    summary = "Get a DHCP scope",
-    description = "Scope: `dhcp.read`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
-    responses(
-        (status = 200, description = "The scope, with its `ETag`", body = DhcpScopeItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_scope(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Read, &scope_object(prefix))?;
-    Err(not_implemented("GET", "/dhcp/scopes/{prefix}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/scopes/{prefix}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_scope",
-    summary = "Change a DHCP scope",
-    description = "Scope: `dhcp.write`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
-    request_body(content = DhcpScopePatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed scope", body = DhcpScopeItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`) or no such shared network (`dhcp.shared_network.not_found`) or no such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The scope changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_scope(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Update, &scope_object(prefix))?;
-    Err(not_implemented("PATCH", "/dhcp/scopes/{prefix}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/scopes/{prefix}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_scope",
-    summary = "Delete a DHCP scope (the prefix stays)",
-    description = "Scope: `dhcp.write`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
-    responses(
-        (status = 204, description = "The scope is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_scope(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Delete, &scope_object(prefix))?;
-    Err(not_implemented("DELETE", "/dhcp/scopes/{prefix}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/scopes/{prefix}/utilization",
-    tag = "dhcp",
-    operation_id = "get_dhcp_scope_utilization",
-    summary = "Get how full a DHCP scope is",
-    description = "Scope: `dhcp.read`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
-    responses(
-        (status = 200, description = "The figures of the scope", body = DhcpScopeUtilization),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_scope_utilization(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Read, &scope_object(prefix))?;
-    Err(not_implemented("GET", "/dhcp/scopes/{prefix}/utilization"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/scopes/{prefix}/effective-options",
-    tag = "dhcp",
-    operation_id = "get_dhcp_effective_options",
-    summary = "Get the options a client gets in a DHCP scope",
-    description = "Scope: `dhcp.read`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope"), EffectiveOptionsParams),
-    responses(
-        (status = 200, description = "The options with the level each came from", body = EffectiveOptions),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_effective_options(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Read, &scope_object(prefix))?;
-    Err(not_implemented(
-        "GET",
-        "/dhcp/scopes/{prefix}/effective-options",
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/scopes/{prefix}/exclusions",
-    tag = "dhcp",
-    operation_id = "list_dhcp_exclusions",
-    summary = "List the exclusion ranges of a DHCP scope",
-    description = "Scope: `dhcp.read`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope"), PageParams),
-    responses(
-        (status = 200, description = "A page of exclusion ranges by start address", body = Page<ExclusionItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_exclusions(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Read, &scope_object(prefix))?;
-    Err(not_implemented("GET", "/dhcp/scopes/{prefix}/exclusions"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/scopes/{prefix}/exclusions",
-    tag = "dhcp",
-    operation_id = "create_dhcp_exclusion",
-    summary = "Exclude a range of a DHCP scope",
-    description = "Scope: `dhcp.write`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
-    request_body(content = ExclusionCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The exclusion range", body = ExclusionItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the exclusion range is unordered or outside the scope (`dhcp.exclusion.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_exclusion(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(prefix): Path<String>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    app.authorize(&cx.principal, Action::Update, &scope_object(prefix))?;
-    Err(not_implemented("POST", "/dhcp/scopes/{prefix}/exclusions"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/scopes/{prefix}/exclusions/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_exclusion",
-    summary = "Delete an exclusion range",
-    description = "Scope: `dhcp.write`.",
-    params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope"), ("id" = String, Path, description = "Exclusion identifier (UUID)")),
-    responses(
-        (status = 204, description = "The exclusion range is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such exclusion range (`dhcp.exclusion.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_exclusion(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path((prefix, id)): Path<(String, String)>,
-) -> Result<Response, ApiError> {
-    let prefix = parse_id::<PrefixId>("prefix", &prefix)?;
-    parse_id::<ExclusionId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &scope_object(prefix))?;
-    Err(not_implemented(
-        "DELETE",
-        "/dhcp/scopes/{prefix}/exclusions/{id}",
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/shared-networks",
-    tag = "dhcp",
-    operation_id = "list_dhcp_shared_networks",
-    summary = "List DHCP shared networks",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of shared networks by name", body = Page<SharedNetworkItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_shared_networks(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Read, &server_object())?;
-    Err(not_implemented("GET", "/dhcp/shared-networks"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/shared-networks",
-    tag = "dhcp",
-    operation_id = "create_dhcp_shared_network",
-    summary = "Create a DHCP shared network",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = SharedNetworkCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The shared network", body = SharedNetworkItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_shared_network(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(&cx.principal, Action::Create, &server_object())?;
-    Err(not_implemented("POST", "/dhcp/shared-networks"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/shared-networks/{id}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_shared_network",
-    summary = "Get a DHCP shared network",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = String, Path, description = "Shared network identifier (UUID)")),
-    responses(
-        (status = 200, description = "The shared network, with its `ETag`", body = SharedNetworkItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such shared network (`dhcp.shared_network.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_shared_network(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<SharedNetworkId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &server_object())?;
-    Err(not_implemented("GET", "/dhcp/shared-networks/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/shared-networks/{id}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_shared_network",
-    summary = "Change a DHCP shared network",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Shared network identifier (UUID)")),
-    request_body(content = SharedNetworkPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed shared network", body = SharedNetworkItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such shared network (`dhcp.shared_network.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The shared network changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_shared_network(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<SharedNetworkId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &server_object())?;
-    Err(not_implemented("PATCH", "/dhcp/shared-networks/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/shared-networks/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_shared_network",
-    summary = "Delete a DHCP shared network",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Shared network identifier (UUID)")),
-    responses(
-        (status = 204, description = "The shared network is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such shared network (`dhcp.shared_network.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The shared network still has scopes (`dhcp.shared_network.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_shared_network(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<SharedNetworkId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &server_object())?;
-    Err(not_implemented("DELETE", "/dhcp/shared-networks/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/pools",
-    tag = "dhcp",
-    operation_id = "list_dhcp_pools",
-    summary = "List DHCP pools",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams, DhcpScopeFilter),
-    responses(
-        (status = 200, description = "A page of pools by start address", body = Page<DhcpPoolItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_pools(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/pools"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/pools/{range}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_pool",
-    summary = "Get a DHCP pool",
-    description = "Scope: `dhcp.read`. The implementation checks the scope of the pool.",
-    params(("range" = String, Path, description = "Range identifier (UUID) of the pool")),
-    responses(
-        (status = 200, description = "The pool", body = DhcpPoolItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such pool (`dhcp.pool.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_pool(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(range): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<RangeId>("range", &range)?;
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/pools/{range}"))
-}
-
-#[utoipa::path(
-    put,
-    path = "/dhcp/pools/{range}",
-    tag = "dhcp",
-    operation_id = "set_dhcp_pool",
-    summary = "Set the DHCP settings of a pool",
-    description = "Scope: `dhcp.write`. The implementation checks the scope of the pool.",
-    params(("range" = String, Path, description = "Range identifier (UUID) of the pool")),
-    request_body(content = DhcpPoolSet, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The pool with its settings", body = DhcpPoolItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the lease times are invalid (`dhcp.lease_times.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such pool (`dhcp.pool.not_found`) or no such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The range is not a DHCP pool (`dhcp.pool.not_pool`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn set_dhcp_pool(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(range): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<RangeId>("range", &range)?;
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("PUT", "/dhcp/pools/{range}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/pools/{range}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_pool",
-    summary = "Remove the DHCP settings of a pool (the range stays)",
-    description = "Scope: `dhcp.write`. The implementation checks the scope of the pool.",
-    params(("range" = String, Path, description = "Range identifier (UUID) of the pool")),
-    responses(
-        (status = 204, description = "The settings are gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such pool (`dhcp.pool.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_pool(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(range): Path<String>,
-) -> Result<Response, ApiError> {
-    parse_id::<RangeId>("range", &range)?;
-    app.authorize(
-        &cx.principal,
-        Action::Update,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("DELETE", "/dhcp/pools/{range}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/option-catalog",
-    tag = "dhcp",
-    operation_id = "list_dhcp_option_catalog",
-    summary = "List the built-in DHCP options",
-    description = "Scope: `dhcp.read`.",
-    responses(
-        (status = 200, description = "The built-in options in code order", body = Vec<OptionCatalogItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_option_catalog(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpOptionDef),
-    )?;
-    Err(not_implemented("GET", "/dhcp/option-catalog"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/option-defs",
-    tag = "dhcp",
-    operation_id = "list_dhcp_option_defs",
-    summary = "List custom DHCP option definitions",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of definitions by space and code", body = Page<OptionDefItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_option_defs(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpOptionDef),
-    )?;
-    Err(not_implemented("GET", "/dhcp/option-defs"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/option-defs",
-    tag = "dhcp",
-    operation_id = "create_dhcp_option_def",
-    summary = "Define a custom DHCP option",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = OptionDefCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The definition", body = OptionDefItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) or a definition for this space and code exists (`dhcp.option_def.exists`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_option_def(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DhcpOptionDef),
-    )?;
-    Err(not_implemented("POST", "/dhcp/option-defs"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/option-defs/{id}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_option_def",
-    summary = "Get a custom DHCP option definition",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = String, Path, description = "Option definition identifier (UUID)")),
-    responses(
-        (status = 200, description = "The definition, with its `ETag`", body = OptionDefItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such option definition (`dhcp.option_def.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_option_def(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<OptionDefId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
-    Err(not_implemented("GET", "/dhcp/option-defs/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/option-defs/{id}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_option_def",
-    summary = "Change a custom DHCP option definition",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Option definition identifier (UUID)")),
-    request_body(content = OptionDefPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed definition", body = OptionDefItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such option definition (`dhcp.option_def.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The definition is still used by an option set (`dhcp.option_def.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The option definition changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_option_def(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<OptionDefId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
-    Err(not_implemented("PATCH", "/dhcp/option-defs/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/option-defs/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_option_def",
-    summary = "Delete a custom DHCP option definition",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Option definition identifier (UUID)")),
-    responses(
-        (status = 204, description = "The definition is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such option definition (`dhcp.option_def.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The definition is still used by an option set (`dhcp.option_def.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_option_def(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<OptionDefId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &ObjectRef::from(id))?;
-    Err(not_implemented("DELETE", "/dhcp/option-defs/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/option-sets",
-    tag = "dhcp",
-    operation_id = "list_dhcp_option_sets",
-    summary = "List DHCP option sets",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams, OptionSetFilter),
-    responses(
-        (status = 200, description = "A page of option sets by level and owner", body = Page<OptionSetItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_option_sets(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpScope),
-    )?;
-    Err(not_implemented("GET", "/dhcp/option-sets"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/option-sets/{owner}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_option_set",
-    summary = "Get the DHCP options of a level",
-    description = "Scope: `dhcp.read`.",
-    params(("owner" = String, Path, description = "Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>`")),
-    responses(
-        (status = 200, description = "The option set, with its `ETag`", body = OptionSetItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`) or no such pool (`dhcp.pool.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_option_set(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(owner): Path<String>,
-) -> Result<Response, ApiError> {
-    let owner = parse_owner(&owner)?;
-    app.authorize(&cx.principal, Action::Read, &owner_object(owner))?;
-    Err(not_implemented("GET", "/dhcp/option-sets/{owner}"))
-}
-
-#[utoipa::path(
-    put,
-    path = "/dhcp/option-sets/{owner}",
-    tag = "dhcp",
-    operation_id = "set_dhcp_option_set",
-    summary = "Replace the DHCP options of a level",
-    description = "Scope: `dhcp.write`.",
-    params(("owner" = String, Path, description = "Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>`")),
-    request_body(content = OptionSetPut, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The option set", body = OptionSetItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) or an option code has no definition in its space (`dhcp.option.unknown`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The option set changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn set_dhcp_option_set(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(owner): Path<String>,
-) -> Result<Response, ApiError> {
-    let owner = parse_owner(&owner)?;
-    app.authorize(&cx.principal, Action::Update, &owner_object(owner))?;
-    Err(not_implemented("PUT", "/dhcp/option-sets/{owner}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/option-sets/{owner}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_option_set",
-    summary = "Clear the DHCP options of a level",
-    description = "Scope: `dhcp.write`.",
-    params(("owner" = String, Path, description = "Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>`")),
-    responses(
-        (status = 204, description = "The option set is empty"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_option_set(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(owner): Path<String>,
-) -> Result<Response, ApiError> {
-    let owner = parse_owner(&owner)?;
-    app.authorize(&cx.principal, Action::Update, &owner_object(owner))?;
-    Err(not_implemented("DELETE", "/dhcp/option-sets/{owner}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/classes",
-    tag = "dhcp",
-    operation_id = "list_dhcp_classes",
-    summary = "List DHCP classes",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of classes by name", body = Page<DhcpClassItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_classes(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpClass),
-    )?;
-    Err(not_implemented("GET", "/dhcp/classes"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/classes",
-    tag = "dhcp",
-    operation_id = "create_dhcp_class",
-    summary = "Create a DHCP class",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = DhcpClassCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The class", body = DhcpClassItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_class(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DhcpClass),
-    )?;
-    Err(not_implemented("POST", "/dhcp/classes"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/classes/{id}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_class",
-    summary = "Get a DHCP class",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = String, Path, description = "Class identifier (UUID)")),
-    responses(
-        (status = 200, description = "The class, with its `ETag`", body = DhcpClassItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_class(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<ClassId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
-    Err(not_implemented("GET", "/dhcp/classes/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/classes/{id}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_class",
-    summary = "Change a DHCP class",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Class identifier (UUID)")),
-    request_body(content = DhcpClassPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed class", body = DhcpClassItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The class changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_class(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<ClassId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
-    Err(not_implemented("PATCH", "/dhcp/classes/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/classes/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_class",
-    summary = "Delete a DHCP class",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Class identifier (UUID)")),
-    responses(
-        (status = 204, description = "The class is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The class is still named by a scope, a pool or a policy (`dhcp.class.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_class(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<ClassId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &ObjectRef::from(id))?;
-    Err(not_implemented("DELETE", "/dhcp/classes/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/policies",
-    tag = "dhcp",
-    operation_id = "list_dhcp_policies",
-    summary = "List DHCP policies",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams, DhcpPolicyFilter),
-    responses(
-        (status = 200, description = "A page of policies in evaluation order", body = Page<DhcpPolicyItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_policies(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpPolicy),
-    )?;
-    Err(not_implemented("GET", "/dhcp/policies"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/policies",
-    tag = "dhcp",
-    operation_id = "create_dhcp_policy",
-    summary = "Create a DHCP policy",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = DhcpPolicyCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The policy", body = DhcpPolicyItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No scope serves the prefix (`dhcp.scope.not_found`) or no such class (`dhcp.class.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_policy(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DhcpPolicy),
-    )?;
-    Err(not_implemented("POST", "/dhcp/policies"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/policies/{id}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_policy",
-    summary = "Get a DHCP policy",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = String, Path, description = "Policy identifier (UUID)")),
-    responses(
-        (status = 200, description = "The policy, with its `ETag`", body = DhcpPolicyItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such policy (`dhcp.policy.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_policy(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<PolicyId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
-    Err(not_implemented("GET", "/dhcp/policies/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/policies/{id}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_policy",
-    summary = "Change a DHCP policy",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Policy identifier (UUID)")),
-    request_body(content = DhcpPolicyPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed policy", body = DhcpPolicyItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such policy (`dhcp.policy.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The policy changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_policy(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<PolicyId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
-    Err(not_implemented("PATCH", "/dhcp/policies/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/policies/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_policy",
-    summary = "Delete a DHCP policy",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Policy identifier (UUID)")),
-    responses(
-        (status = 204, description = "The policy is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such policy (`dhcp.policy.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_policy(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<PolicyId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &ObjectRef::from(id))?;
-    Err(not_implemented("DELETE", "/dhcp/policies/{id}"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/filters",
-    tag = "dhcp",
-    operation_id = "list_dhcp_filters",
-    summary = "List DHCP MAC filters",
-    description = "Scope: `dhcp.read`.",
-    params(PageParams),
-    responses(
-        (status = 200, description = "A page of filter entries", body = Page<DhcpFilterItem>),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn list_dhcp_filters(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Read,
-        &anywhere(ObjectKind::DhcpFilter),
-    )?;
-    Err(not_implemented("GET", "/dhcp/filters"))
-}
-
-#[utoipa::path(
-    post,
-    path = "/dhcp/filters",
-    tag = "dhcp",
-    operation_id = "create_dhcp_filter",
-    summary = "Add a DHCP MAC filter",
-    description = "Scope: `dhcp.write`.",
-    request_body(content = DhcpFilterCreate, content_type = "application/json"),
-    responses(
-        (status = 201, description = "The filter entry", body = DhcpFilterItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "An entry for this pattern exists (`dhcp.filter.exists`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn create_dhcp_filter(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-) -> Result<Response, ApiError> {
-    app.authorize(
-        &cx.principal,
-        Action::Create,
-        &anywhere(ObjectKind::DhcpFilter),
-    )?;
-    Err(not_implemented("POST", "/dhcp/filters"))
-}
-
-#[utoipa::path(
-    get,
-    path = "/dhcp/filters/{id}",
-    tag = "dhcp",
-    operation_id = "get_dhcp_filter",
-    summary = "Get a DHCP MAC filter",
-    description = "Scope: `dhcp.read`.",
-    params(("id" = String, Path, description = "Filter entry identifier (UUID)")),
-    responses(
-        (status = 200, description = "The filter entry, with its `ETag`", body = DhcpFilterItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such filter entry (`dhcp.filter.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn get_dhcp_filter(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<FilterId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &ObjectRef::from(id))?;
-    Err(not_implemented("GET", "/dhcp/filters/{id}"))
-}
-
-#[utoipa::path(
-    patch,
-    path = "/dhcp/filters/{id}",
-    tag = "dhcp",
-    operation_id = "update_dhcp_filter",
-    summary = "Change a DHCP MAC filter",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Filter entry identifier (UUID)")),
-    request_body(content = DhcpFilterPatch, content_type = "application/json"),
-    responses(
-        (status = 200, description = "The changed filter entry", body = DhcpFilterItem),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such filter entry (`dhcp.filter.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "An entry for this pattern exists (`dhcp.filter.exists`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The filter entry changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn update_dhcp_filter(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<FilterId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
-    Err(not_implemented("PATCH", "/dhcp/filters/{id}"))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/dhcp/filters/{id}",
-    tag = "dhcp",
-    operation_id = "delete_dhcp_filter",
-    summary = "Delete a DHCP MAC filter",
-    description = "Scope: `dhcp.write`.",
-    params(("id" = String, Path, description = "Filter entry identifier (UUID)")),
-    responses(
-        (status = 204, description = "The filter entry is gone"),
-        (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dhcp.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such filter entry (`dhcp.filter.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-async fn delete_dhcp_filter(
-    State(app): State<AppState>,
-    Ctx(cx): Ctx,
-    Path(id): Path<String>,
-) -> Result<Response, ApiError> {
-    let id = parse_id::<FilterId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &ObjectRef::from(id))?;
-    Err(not_implemented("DELETE", "/dhcp/filters/{id}"))
 }
 
 #[utoipa::path(

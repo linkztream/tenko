@@ -1079,19 +1079,426 @@ export type MessageKey =
   | "dashboard.waiting.none"
   | "dashboard.waiting.step"
   | "dashboard.waiting.title"
+  | "dhcp.action.ddns"
+  | "dhcp.action.lease"
+  | "dhcp.action.none"
+  | "dhcp.action.range"
+  | "dhcp.catalog.managed"
+  | "dhcp.check.def_code"
+  | "dhcp.check.exclusion_first"
+  | "dhcp.check.exclusion_last"
+  | "dhcp.check.exclusion_order"
+  | "dhcp.check.exclusion_outside"
+  | "dhcp.check.hex"
+  | "dhcp.check.history_days"
+  | "dhcp.check.lease_number"
+  | "dhcp.check.lease_order"
+  | "dhcp.check.lease_year"
+  | "dhcp.check.mac"
+  | "dhcp.check.mac_pattern"
+  | "dhcp.check.match_empty"
+  | "dhcp.check.match_hex"
+  | "dhcp.check.match_long"
+  | "dhcp.check.match_mac"
+  | "dhcp.check.match_number"
+  | "dhcp.check.name"
+  | "dhcp.check.order"
+  | "dhcp.check.prefix"
+  | "dhcp.check.range_address"
+  | "dhcp.check.range_order"
+  | "dhcp.check.range_outside"
+  | "dhcp.check.server_id"
+  | "dhcp.check.server_id_clear"
+  | "dhcp.check.space"
+  | "dhcp.check.term_class"
+  | "dhcp.class.create"
+  | "dhcp.class.create_title"
+  | "dhcp.class.created"
+  | "dhcp.class.delete_body"
+  | "dhcp.class.delete_confirm"
+  | "dhcp.class.delete_title"
+  | "dhcp.class.deleted"
+  | "dhcp.class.edit_title"
+  | "dhcp.class.field.matches"
+  | "dhcp.class.field.matches_help"
+  | "dhcp.class.field.name"
+  | "dhcp.class.save"
+  | "dhcp.class.saved"
+  | "dhcp.classes.empty"
+  | "dhcp.classes.empty_body"
+  | "dhcp.classes.sub"
   | "dhcp.classes.title"
+  | "dhcp.col.action"
+  | "dhcp.col.classes"
+  | "dhcp.col.code"
+  | "dhcp.col.condition"
+  | "dhcp.col.description"
+  | "dhcp.col.enabled"
+  | "dhcp.col.filter_kind"
+  | "dhcp.col.first"
+  | "dhcp.col.interface"
+  | "dhcp.col.last"
+  | "dhcp.col.lease"
+  | "dhcp.col.leased"
+  | "dhcp.col.leases"
+  | "dhcp.col.mac"
+  | "dhcp.col.matches"
+  | "dhcp.col.name"
+  | "dhcp.col.network"
+  | "dhcp.col.note"
+  | "dhcp.col.order"
+  | "dhcp.col.pools"
+  | "dhcp.col.range"
+  | "dhcp.col.scope"
+  | "dhcp.col.scopes"
+  | "dhcp.col.server_managed"
+  | "dhcp.col.size"
+  | "dhcp.col.space"
+  | "dhcp.col.type"
+  | "dhcp.col.used_by"
+  | "dhcp.col.utilization"
+  | "dhcp.col.vendor_class"
   | "dhcp.coming.body"
   | "dhcp.coming.scopes"
   | "dhcp.coming.title"
+  | "dhcp.def.create"
+  | "dhcp.def.create_title"
+  | "dhcp.def.created"
+  | "dhcp.def.delete_body"
+  | "dhcp.def.delete_confirm"
+  | "dhcp.def.delete_title"
+  | "dhcp.def.deleted"
+  | "dhcp.def.field.array"
+  | "dhcp.def.field.code"
+  | "dhcp.def.field.code_help"
+  | "dhcp.def.field.kind"
+  | "dhcp.def.field.name"
+  | "dhcp.def.field.space"
+  | "dhcp.def.field.space_help"
+  | "dhcp.def.field.vendor_class"
+  | "dhcp.def.field.vendor_class_help"
+  | "dhcp.def.help"
+  | "dhcp.defs.empty"
+  | "dhcp.do.delete"
+  | "dhcp.do.edit"
+  | "dhcp.do.open"
+  | "dhcp.effective.client_id"
+  | "dhcp.effective.col.level"
+  | "dhcp.effective.empty"
+  | "dhcp.effective.help"
+  | "dhcp.effective.mac"
+  | "dhcp.effective.note"
+  | "dhcp.effective.reservation"
+  | "dhcp.effective.show"
+  | "dhcp.effective.title"
+  | "dhcp.example.mac"
+  | "dhcp.example.mac_pattern"
+  | "dhcp.exclusion.create"
+  | "dhcp.exclusion.create_title"
+  | "dhcp.exclusion.created"
+  | "dhcp.exclusion.delete_body"
+  | "dhcp.exclusion.delete_confirm"
+  | "dhcp.exclusion.delete_title"
+  | "dhcp.exclusion.deleted"
+  | "dhcp.exclusion.field.first"
+  | "dhcp.exclusion.field.last"
+  | "dhcp.exclusion.help"
+  | "dhcp.exclusions.empty"
+  | "dhcp.exclusions.empty_body"
+  | "dhcp.exclusions.title"
+  | "dhcp.field.description"
+  | "dhcp.field.name_help"
+  | "dhcp.filter.create"
+  | "dhcp.filter.create_title"
+  | "dhcp.filter.created"
+  | "dhcp.filter.delete_body"
+  | "dhcp.filter.delete_confirm"
+  | "dhcp.filter.delete_title"
+  | "dhcp.filter.deleted"
+  | "dhcp.filter.edit_title"
+  | "dhcp.filter.field.kind"
+  | "dhcp.filter.field.mac"
+  | "dhcp.filter.field.mac_help"
+  | "dhcp.filter.field.note"
+  | "dhcp.filter.kind.allow"
+  | "dhcp.filter.kind.deny"
+  | "dhcp.filter.save"
+  | "dhcp.filter.saved"
+  | "dhcp.filters.empty"
+  | "dhcp.filters.empty_body"
+  | "dhcp.filters.note"
+  | "dhcp.filters.sub"
   | "dhcp.filters.title"
   | "dhcp.history.title"
+  | "dhcp.join.and"
+  | "dhcp.join.or"
+  | "dhcp.lease.default"
+  | "dhcp.lease.inherit"
+  | "dhcp.lease.legend"
+  | "dhcp.lease.max"
+  | "dhcp.lease.min"
+  | "dhcp.lease.server_now"
+  | "dhcp.lease.unit"
+  | "dhcp.lease.words"
   | "dhcp.leases.title"
+  | "dhcp.level.host"
+  | "dhcp.level.policy"
+  | "dhcp.level.pool"
+  | "dhcp.level.scope"
+  | "dhcp.level.server"
+  | "dhcp.level.shared_network"
+  | "dhcp.match.add"
+  | "dhcp.match.architecture"
+  | "dhcp.match.circuit_id"
+  | "dhcp.match.client_id"
+  | "dhcp.match.example.architecture"
+  | "dhcp.match.example.circuit_id"
+  | "dhcp.match.example.client_id"
+  | "dhcp.match.example.host_name"
+  | "dhcp.match.example.mac"
+  | "dhcp.match.example.remote_id"
+  | "dhcp.match.example.user_class"
+  | "dhcp.match.example.vendor_class"
+  | "dhcp.match.host_name"
+  | "dhcp.match.host_name_prefix"
+  | "dhcp.match.kind.architecture"
+  | "dhcp.match.kind.circuit_id"
+  | "dhcp.match.kind.client_id"
+  | "dhcp.match.kind.host_name"
+  | "dhcp.match.kind.mac"
+  | "dhcp.match.kind.remote_id"
+  | "dhcp.match.kind.user_class"
+  | "dhcp.match.kind.vendor_class"
+  | "dhcp.match.kind_label"
+  | "dhcp.match.mac"
+  | "dhcp.match.prefix"
+  | "dhcp.match.remote_id"
+  | "dhcp.match.remove"
+  | "dhcp.match.row"
+  | "dhcp.match.user_class"
+  | "dhcp.match.value_label"
+  | "dhcp.match.vendor_class"
+  | "dhcp.match.vendor_class_prefix"
+  | "dhcp.nav.classes"
+  | "dhcp.nav.filters"
+  | "dhcp.nav.history"
+  | "dhcp.nav.label"
+  | "dhcp.nav.leases"
+  | "dhcp.nav.options"
+  | "dhcp.nav.policies"
+  | "dhcp.nav.scopes"
+  | "dhcp.nav.shared_networks"
+  | "dhcp.network.create"
+  | "dhcp.network.create_title"
+  | "dhcp.network.created"
+  | "dhcp.network.delete_body"
+  | "dhcp.network.delete_confirm"
+  | "dhcp.network.delete_title"
+  | "dhcp.network.deleted"
+  | "dhcp.network.edit_title"
+  | "dhcp.network.empty"
+  | "dhcp.network.empty_body"
+  | "dhcp.network.field.interface"
+  | "dhcp.network.field.interface_help"
+  | "dhcp.network.field.name"
+  | "dhcp.network.save"
+  | "dhcp.network.saved"
+  | "dhcp.network.sub"
+  | "dhcp.options.catalog"
+  | "dhcp.options.catalog_help"
+  | "dhcp.options.defs"
+  | "dhcp.options.defs_help"
+  | "dhcp.options.server"
+  | "dhcp.options.server_help"
+  | "dhcp.options.sub"
   | "dhcp.options.title"
+  | "dhcp.optset.add"
+  | "dhcp.optset.add_code"
+  | "dhcp.optset.check.bool"
+  | "dhcp.optset.check.code"
+  | "dhcp.optset.check.count"
+  | "dhcp.optset.check.empty"
+  | "dhcp.optset.check.hex"
+  | "dhcp.optset.check.ipv4"
+  | "dhcp.optset.check.ipv6"
+  | "dhcp.optset.check.managed"
+  | "dhcp.optset.check.name"
+  | "dhcp.optset.check.number"
+  | "dhcp.optset.check.prefix"
+  | "dhcp.optset.check.range"
+  | "dhcp.optset.check.raw_hex"
+  | "dhcp.optset.check.route"
+  | "dhcp.optset.col.actions"
+  | "dhcp.optset.col.code"
+  | "dhcp.optset.col.name"
+  | "dhcp.optset.col.value"
+  | "dhcp.optset.empty"
+  | "dhcp.optset.flag"
+  | "dhcp.optset.kind.binary"
+  | "dhcp.optset.kind.bool"
+  | "dhcp.optset.kind.classless_routes"
+  | "dhcp.optset.kind.empty"
+  | "dhcp.optset.kind.fqdn"
+  | "dhcp.optset.kind.i32"
+  | "dhcp.optset.kind.ipv4_address"
+  | "dhcp.optset.kind.ipv6_address"
+  | "dhcp.optset.kind.ipv6_prefix"
+  | "dhcp.optset.kind.string"
+  | "dhcp.optset.kind.u16"
+  | "dhcp.optset.kind.u32"
+  | "dhcp.optset.kind.u8"
+  | "dhcp.optset.kind_list"
+  | "dhcp.optset.raw"
+  | "dhcp.optset.remove"
+  | "dhcp.optset.revert"
+  | "dhcp.optset.routes_help"
+  | "dhcp.optset.save"
+  | "dhcp.optset.saved"
+  | "dhcp.optset.unknown"
+  | "dhcp.optset.value_of"
+  | "dhcp.policies.empty"
+  | "dhcp.policies.empty_body"
+  | "dhcp.policies.note"
+  | "dhcp.policies.sub"
   | "dhcp.policies.title"
+  | "dhcp.policy.create"
+  | "dhcp.policy.create_title"
+  | "dhcp.policy.created"
+  | "dhcp.policy.delete_body"
+  | "dhcp.policy.delete_confirm"
+  | "dhcp.policy.delete_title"
+  | "dhcp.policy.deleted"
+  | "dhcp.policy.edit_title"
+  | "dhcp.policy.field.action"
+  | "dhcp.policy.field.condition"
+  | "dhcp.policy.field.enabled"
+  | "dhcp.policy.field.join"
+  | "dhcp.policy.field.name"
+  | "dhcp.policy.field.order"
+  | "dhcp.policy.field.order_help"
+  | "dhcp.policy.field.range_first"
+  | "dhcp.policy.field.range_last"
+  | "dhcp.policy.field.scope"
+  | "dhcp.policy.field.scope_fixed"
+  | "dhcp.policy.lease_inherit_help"
+  | "dhcp.policy.save"
+  | "dhcp.policy.saved"
+  | "dhcp.policy.scope_server"
+  | "dhcp.pool.clear"
+  | "dhcp.pool.clear_body"
+  | "dhcp.pool.clear_title"
+  | "dhcp.pool.cleared"
+  | "dhcp.pool.edit_title"
+  | "dhcp.pool.field.classes"
+  | "dhcp.pool.field.classes_help"
+  | "dhcp.pool.lease_inherit_help"
+  | "dhcp.pool.lease_range"
+  | "dhcp.pool.lease_scope"
+  | "dhcp.pool.save"
+  | "dhcp.pool.saved"
+  | "dhcp.pool.settings"
+  | "dhcp.pools.empty"
+  | "dhcp.pools.empty_body"
+  | "dhcp.pools.ipam_link"
+  | "dhcp.pools.note"
+  | "dhcp.pools.title"
+  | "dhcp.scope.create"
+  | "dhcp.scope.create_title"
+  | "dhcp.scope.created"
+  | "dhcp.scope.ddns_off"
+  | "dhcp.scope.ddns_on"
+  | "dhcp.scope.delete_body"
+  | "dhcp.scope.delete_confirm"
+  | "dhcp.scope.delete_title"
+  | "dhcp.scope.deleted"
+  | "dhcp.scope.disabled"
+  | "dhcp.scope.enabled"
+  | "dhcp.scope.field.authoritative"
+  | "dhcp.scope.field.authoritative_help"
+  | "dhcp.scope.field.classes"
+  | "dhcp.scope.field.classes_help"
+  | "dhcp.scope.field.enabled"
+  | "dhcp.scope.field.enabled_help"
+  | "dhcp.scope.field.prefix"
+  | "dhcp.scope.field.prefix_help"
+  | "dhcp.scope.field.prefix_pick"
+  | "dhcp.scope.field.restricted"
+  | "dhcp.scope.field.restricted_help"
+  | "dhcp.scope.field.server_id"
+  | "dhcp.scope.field.server_id_help"
+  | "dhcp.scope.field.shared_network"
+  | "dhcp.scope.in_ipam"
+  | "dhcp.scope.no_classes"
+  | "dhcp.scope.no_networks"
+  | "dhcp.scope.options_help"
+  | "dhcp.scope.options_title"
+  | "dhcp.scope.save"
+  | "dhcp.scope.saved"
+  | "dhcp.scope.settings"
+  | "dhcp.scope.shared_none"
+  | "dhcp.scope.tab.exclusions"
+  | "dhcp.scope.tab.options"
+  | "dhcp.scope.tab.pools"
+  | "dhcp.scope.tab.settings"
+  | "dhcp.scope.tabs"
   | "dhcp.scope.title"
+  | "dhcp.scope.unchanged"
+  | "dhcp.scopes.empty"
+  | "dhcp.scopes.empty_body"
+  | "dhcp.scopes.sub"
   | "dhcp.scopes.title"
+  | "dhcp.settings.authoritative"
+  | "dhcp.settings.authoritative_help"
+  | "dhcp.settings.conflict"
+  | "dhcp.settings.conflict_follow"
+  | "dhcp.settings.conflict_help"
+  | "dhcp.settings.effective"
+  | "dhcp.settings.effective_days"
+  | "dhcp.settings.history_days"
+  | "dhcp.settings.history_days_help"
+  | "dhcp.settings.history_follow"
+  | "dhcp.settings.lease"
+  | "dhcp.settings.lease_help"
+  | "dhcp.settings.lede"
+  | "dhcp.settings.off"
+  | "dhcp.settings.on"
+  | "dhcp.settings.save"
+  | "dhcp.settings.saved"
+  | "dhcp.settings.server"
+  | "dhcp.settings.title"
   | "dhcp.shared_networks.title"
+  | "dhcp.state.not_built_body"
+  | "dhcp.state.not_built_title"
+  | "dhcp.state.off_body"
+  | "dhcp.state.off_link"
+  | "dhcp.state.off_title"
+  | "dhcp.term.add"
+  | "dhcp.term.class"
+  | "dhcp.term.class_label"
+  | "dhcp.term.class_pick"
+  | "dhcp.term.kind.class"
+  | "dhcp.term.kind.match"
+  | "dhcp.term.kind.not_class"
+  | "dhcp.term.kind.not_match"
+  | "dhcp.term.kind_label"
+  | "dhcp.term.not_class"
+  | "dhcp.term.not_match"
+  | "dhcp.term.remove"
+  | "dhcp.term.row"
   | "dhcp.title"
+  | "dhcp.tri.inherit"
+  | "dhcp.unit.days"
+  | "dhcp.unit.hours"
+  | "dhcp.unit.minutes"
+  | "dhcp.util.abandoned"
+  | "dhcp.util.at"
+  | "dhcp.util.free"
+  | "dhcp.util.label"
+  | "dhcp.util.leased"
+  | "dhcp.util.percent"
+  | "dhcp.util.pool_size"
+  | "dhcp.util.reserved"
+  | "dhcp.util.title"
   | "discovery.action.approve"
   | "discovery.action.dismiss"
   | "discovery.action.open"
@@ -2163,6 +2570,44 @@ export type MessageKey =
   | "errors.connect.unreachable"
   | "errors.connect.verify_mismatch"
   | "errors.connect.writes_disabled"
+  | "errors.dhcp.class.in_use"
+  | "errors.dhcp.class.invalid"
+  | "errors.dhcp.class.not_found"
+  | "errors.dhcp.ddns.invalid"
+  | "errors.dhcp.exclusion.invalid"
+  | "errors.dhcp.exclusion.not_found"
+  | "errors.dhcp.export.format"
+  | "errors.dhcp.filter.exists"
+  | "errors.dhcp.filter.invalid"
+  | "errors.dhcp.filter.not_found"
+  | "errors.dhcp.lease.not_found"
+  | "errors.dhcp.lease.state"
+  | "errors.dhcp.lease_times.invalid"
+  | "errors.dhcp.module.disabled"
+  | "errors.dhcp.node.not_dhcp"
+  | "errors.dhcp.option.code_reserved"
+  | "errors.dhcp.option.invalid"
+  | "errors.dhcp.option.unknown"
+  | "errors.dhcp.option_def.exists"
+  | "errors.dhcp.option_def.in_use"
+  | "errors.dhcp.option_def.not_found"
+  | "errors.dhcp.policy.invalid"
+  | "errors.dhcp.policy.not_found"
+  | "errors.dhcp.pool.not_found"
+  | "errors.dhcp.pool.not_pool"
+  | "errors.dhcp.pool.outside"
+  | "errors.dhcp.reservation.conflict"
+  | "errors.dhcp.reservation.no_identity"
+  | "errors.dhcp.scope.attached"
+  | "errors.dhcp.scope.exists"
+  | "errors.dhcp.scope.invalid"
+  | "errors.dhcp.scope.not_found"
+  | "errors.dhcp.scope.not_network"
+  | "errors.dhcp.settings.invalid"
+  | "errors.dhcp.shared_network.in_use"
+  | "errors.dhcp.shared_network.invalid"
+  | "errors.dhcp.shared_network.not_found"
+  | "errors.dhcp.store_refused"
   | "errors.dns.acl.in_use"
   | "errors.dns.acl.not_found"
   | "errors.dns.forwarder.invalid"
@@ -4299,6 +4744,7 @@ export type MessageKey =
   | "settings.nav.access"
   | "settings.nav.audit_export"
   | "settings.nav.backup"
+  | "settings.nav.dhcp"
   | "settings.nav.dns"
   | "settings.nav.guardrails"
   | "settings.nav.label"
@@ -5550,6 +5996,79 @@ export interface MessageArgs {
   "dashboard.use.more": { count: number };
   "dashboard.use.vrf": { tenant: string | number; vrf: string | number };
   "dashboard.waiting.step": { step: number; total: number };
+  "dhcp.action.lease": { lease: string | number };
+  "dhcp.action.range": { first: string | number; last: string | number };
+  "dhcp.check.exclusion_first": { network: string | number };
+  "dhcp.check.exclusion_last": { network: string | number };
+  "dhcp.check.exclusion_order": { network: string | number };
+  "dhcp.check.exclusion_outside": { network: string | number };
+  "dhcp.class.created": { name: string | number };
+  "dhcp.class.delete_title": { name: string | number };
+  "dhcp.class.deleted": { name: string | number };
+  "dhcp.class.edit_title": { name: string | number };
+  "dhcp.class.saved": { name: string | number };
+  "dhcp.def.created": { name: string | number };
+  "dhcp.def.delete_title": { name: string | number };
+  "dhcp.def.deleted": { name: string | number };
+  "dhcp.exclusion.created": { count: number };
+  "dhcp.exclusion.delete_title": { range: string | number };
+  "dhcp.exclusion.deleted": { range: string | number };
+  "dhcp.exclusion.help": { network: string | number };
+  "dhcp.filter.created": { mac: string | number };
+  "dhcp.filter.delete_title": { mac: string | number };
+  "dhcp.filter.deleted": { mac: string | number };
+  "dhcp.filter.edit_title": { mac: string | number };
+  "dhcp.filter.saved": { mac: string | number };
+  "dhcp.lease.server_now": { lease: string | number };
+  "dhcp.lease.unit": { name: string | number };
+  "dhcp.lease.words": { default: string | number; max: string | number; min: string | number };
+  "dhcp.match.architecture": { value: string | number };
+  "dhcp.match.circuit_id": { value: string | number };
+  "dhcp.match.client_id": { value: string | number };
+  "dhcp.match.host_name": { value: string | number };
+  "dhcp.match.host_name_prefix": { value: string | number };
+  "dhcp.match.mac": { value: string | number };
+  "dhcp.match.remote_id": { value: string | number };
+  "dhcp.match.remove": { label: string | number };
+  "dhcp.match.row": { n: string | number };
+  "dhcp.match.user_class": { value: string | number };
+  "dhcp.match.vendor_class": { value: string | number };
+  "dhcp.match.vendor_class_prefix": { value: string | number };
+  "dhcp.network.created": { name: string | number };
+  "dhcp.network.delete_title": { name: string | number };
+  "dhcp.network.deleted": { name: string | number };
+  "dhcp.network.edit_title": { name: string | number };
+  "dhcp.network.saved": { name: string | number };
+  "dhcp.optset.kind_list": { kind: string | number };
+  "dhcp.optset.remove": { name: string | number };
+  "dhcp.optset.unknown": { code: string | number };
+  "dhcp.optset.value_of": { name: string | number };
+  "dhcp.policy.created": { name: string | number };
+  "dhcp.policy.delete_title": { name: string | number };
+  "dhcp.policy.deleted": { name: string | number };
+  "dhcp.policy.edit_title": { name: string | number };
+  "dhcp.policy.saved": { name: string | number };
+  "dhcp.pool.clear_title": { first: string | number; last: string | number };
+  "dhcp.pool.cleared": { first: string | number; last: string | number };
+  "dhcp.pool.edit_title": { first: string | number; last: string | number };
+  "dhcp.pool.lease_range": { lease: string | number };
+  "dhcp.pool.saved": { first: string | number; last: string | number };
+  "dhcp.pools.ipam_link": { network: string | number };
+  "dhcp.scope.created": { network: string | number };
+  "dhcp.scope.delete_body": { network: string | number };
+  "dhcp.scope.delete_title": { network: string | number };
+  "dhcp.scope.deleted": { network: string | number };
+  "dhcp.scope.options_title": { network: string | number };
+  "dhcp.scope.saved": { network: string | number };
+  "dhcp.settings.effective": { value: string | number };
+  "dhcp.settings.effective_days": { days: number };
+  "dhcp.term.class": { name: string | number };
+  "dhcp.term.not_class": { name: string | number };
+  "dhcp.term.not_match": { match: string | number };
+  "dhcp.term.remove": { n: string | number };
+  "dhcp.term.row": { n: string | number };
+  "dhcp.util.at": { time: string | number };
+  "dhcp.util.label": { percent: string | number };
   "discovery.approve.confirm": { count: number };
   "discovery.count": { count: number; more: string };
   "discovery.count_open": { count: number; more: string };
@@ -5734,6 +6253,18 @@ export interface MessageArgs {
   "errors.connect.secret.not_found": { purpose: string | number };
   "errors.connect.secret.not_operator": { purpose: string | number };
   "errors.connect.secret.undeclared": { purpose: string | number };
+  "errors.dhcp.class.in_use": { by: string | number };
+  "errors.dhcp.class.invalid": { field: string | number };
+  "errors.dhcp.ddns.invalid": { field: string | number };
+  "errors.dhcp.exclusion.invalid": { field: string | number };
+  "errors.dhcp.filter.invalid": { field: string | number };
+  "errors.dhcp.lease_times.invalid": { field: string | number };
+  "errors.dhcp.option_def.in_use": { by: string | number };
+  "errors.dhcp.policy.invalid": { field: string | number };
+  "errors.dhcp.scope.invalid": { field: string | number };
+  "errors.dhcp.settings.invalid": { field: string | number };
+  "errors.dhcp.shared_network.in_use": { count: number };
+  "errors.dhcp.shared_network.invalid": { field: string | number };
   "errors.dns.record.conflict": { name: string | number };
   "errors.dns.record.invalid": { name: string | number; type: string | number };
   "errors.dns.record.origin": { name: string | number; type: string | number };
@@ -7455,19 +7986,426 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.waiting.none",
   "dashboard.waiting.step",
   "dashboard.waiting.title",
+  "dhcp.action.ddns",
+  "dhcp.action.lease",
+  "dhcp.action.none",
+  "dhcp.action.range",
+  "dhcp.catalog.managed",
+  "dhcp.check.def_code",
+  "dhcp.check.exclusion_first",
+  "dhcp.check.exclusion_last",
+  "dhcp.check.exclusion_order",
+  "dhcp.check.exclusion_outside",
+  "dhcp.check.hex",
+  "dhcp.check.history_days",
+  "dhcp.check.lease_number",
+  "dhcp.check.lease_order",
+  "dhcp.check.lease_year",
+  "dhcp.check.mac",
+  "dhcp.check.mac_pattern",
+  "dhcp.check.match_empty",
+  "dhcp.check.match_hex",
+  "dhcp.check.match_long",
+  "dhcp.check.match_mac",
+  "dhcp.check.match_number",
+  "dhcp.check.name",
+  "dhcp.check.order",
+  "dhcp.check.prefix",
+  "dhcp.check.range_address",
+  "dhcp.check.range_order",
+  "dhcp.check.range_outside",
+  "dhcp.check.server_id",
+  "dhcp.check.server_id_clear",
+  "dhcp.check.space",
+  "dhcp.check.term_class",
+  "dhcp.class.create",
+  "dhcp.class.create_title",
+  "dhcp.class.created",
+  "dhcp.class.delete_body",
+  "dhcp.class.delete_confirm",
+  "dhcp.class.delete_title",
+  "dhcp.class.deleted",
+  "dhcp.class.edit_title",
+  "dhcp.class.field.matches",
+  "dhcp.class.field.matches_help",
+  "dhcp.class.field.name",
+  "dhcp.class.save",
+  "dhcp.class.saved",
+  "dhcp.classes.empty",
+  "dhcp.classes.empty_body",
+  "dhcp.classes.sub",
   "dhcp.classes.title",
+  "dhcp.col.action",
+  "dhcp.col.classes",
+  "dhcp.col.code",
+  "dhcp.col.condition",
+  "dhcp.col.description",
+  "dhcp.col.enabled",
+  "dhcp.col.filter_kind",
+  "dhcp.col.first",
+  "dhcp.col.interface",
+  "dhcp.col.last",
+  "dhcp.col.lease",
+  "dhcp.col.leased",
+  "dhcp.col.leases",
+  "dhcp.col.mac",
+  "dhcp.col.matches",
+  "dhcp.col.name",
+  "dhcp.col.network",
+  "dhcp.col.note",
+  "dhcp.col.order",
+  "dhcp.col.pools",
+  "dhcp.col.range",
+  "dhcp.col.scope",
+  "dhcp.col.scopes",
+  "dhcp.col.server_managed",
+  "dhcp.col.size",
+  "dhcp.col.space",
+  "dhcp.col.type",
+  "dhcp.col.used_by",
+  "dhcp.col.utilization",
+  "dhcp.col.vendor_class",
   "dhcp.coming.body",
   "dhcp.coming.scopes",
   "dhcp.coming.title",
+  "dhcp.def.create",
+  "dhcp.def.create_title",
+  "dhcp.def.created",
+  "dhcp.def.delete_body",
+  "dhcp.def.delete_confirm",
+  "dhcp.def.delete_title",
+  "dhcp.def.deleted",
+  "dhcp.def.field.array",
+  "dhcp.def.field.code",
+  "dhcp.def.field.code_help",
+  "dhcp.def.field.kind",
+  "dhcp.def.field.name",
+  "dhcp.def.field.space",
+  "dhcp.def.field.space_help",
+  "dhcp.def.field.vendor_class",
+  "dhcp.def.field.vendor_class_help",
+  "dhcp.def.help",
+  "dhcp.defs.empty",
+  "dhcp.do.delete",
+  "dhcp.do.edit",
+  "dhcp.do.open",
+  "dhcp.effective.client_id",
+  "dhcp.effective.col.level",
+  "dhcp.effective.empty",
+  "dhcp.effective.help",
+  "dhcp.effective.mac",
+  "dhcp.effective.note",
+  "dhcp.effective.reservation",
+  "dhcp.effective.show",
+  "dhcp.effective.title",
+  "dhcp.example.mac",
+  "dhcp.example.mac_pattern",
+  "dhcp.exclusion.create",
+  "dhcp.exclusion.create_title",
+  "dhcp.exclusion.created",
+  "dhcp.exclusion.delete_body",
+  "dhcp.exclusion.delete_confirm",
+  "dhcp.exclusion.delete_title",
+  "dhcp.exclusion.deleted",
+  "dhcp.exclusion.field.first",
+  "dhcp.exclusion.field.last",
+  "dhcp.exclusion.help",
+  "dhcp.exclusions.empty",
+  "dhcp.exclusions.empty_body",
+  "dhcp.exclusions.title",
+  "dhcp.field.description",
+  "dhcp.field.name_help",
+  "dhcp.filter.create",
+  "dhcp.filter.create_title",
+  "dhcp.filter.created",
+  "dhcp.filter.delete_body",
+  "dhcp.filter.delete_confirm",
+  "dhcp.filter.delete_title",
+  "dhcp.filter.deleted",
+  "dhcp.filter.edit_title",
+  "dhcp.filter.field.kind",
+  "dhcp.filter.field.mac",
+  "dhcp.filter.field.mac_help",
+  "dhcp.filter.field.note",
+  "dhcp.filter.kind.allow",
+  "dhcp.filter.kind.deny",
+  "dhcp.filter.save",
+  "dhcp.filter.saved",
+  "dhcp.filters.empty",
+  "dhcp.filters.empty_body",
+  "dhcp.filters.note",
+  "dhcp.filters.sub",
   "dhcp.filters.title",
   "dhcp.history.title",
+  "dhcp.join.and",
+  "dhcp.join.or",
+  "dhcp.lease.default",
+  "dhcp.lease.inherit",
+  "dhcp.lease.legend",
+  "dhcp.lease.max",
+  "dhcp.lease.min",
+  "dhcp.lease.server_now",
+  "dhcp.lease.unit",
+  "dhcp.lease.words",
   "dhcp.leases.title",
+  "dhcp.level.host",
+  "dhcp.level.policy",
+  "dhcp.level.pool",
+  "dhcp.level.scope",
+  "dhcp.level.server",
+  "dhcp.level.shared_network",
+  "dhcp.match.add",
+  "dhcp.match.architecture",
+  "dhcp.match.circuit_id",
+  "dhcp.match.client_id",
+  "dhcp.match.example.architecture",
+  "dhcp.match.example.circuit_id",
+  "dhcp.match.example.client_id",
+  "dhcp.match.example.host_name",
+  "dhcp.match.example.mac",
+  "dhcp.match.example.remote_id",
+  "dhcp.match.example.user_class",
+  "dhcp.match.example.vendor_class",
+  "dhcp.match.host_name",
+  "dhcp.match.host_name_prefix",
+  "dhcp.match.kind.architecture",
+  "dhcp.match.kind.circuit_id",
+  "dhcp.match.kind.client_id",
+  "dhcp.match.kind.host_name",
+  "dhcp.match.kind.mac",
+  "dhcp.match.kind.remote_id",
+  "dhcp.match.kind.user_class",
+  "dhcp.match.kind.vendor_class",
+  "dhcp.match.kind_label",
+  "dhcp.match.mac",
+  "dhcp.match.prefix",
+  "dhcp.match.remote_id",
+  "dhcp.match.remove",
+  "dhcp.match.row",
+  "dhcp.match.user_class",
+  "dhcp.match.value_label",
+  "dhcp.match.vendor_class",
+  "dhcp.match.vendor_class_prefix",
+  "dhcp.nav.classes",
+  "dhcp.nav.filters",
+  "dhcp.nav.history",
+  "dhcp.nav.label",
+  "dhcp.nav.leases",
+  "dhcp.nav.options",
+  "dhcp.nav.policies",
+  "dhcp.nav.scopes",
+  "dhcp.nav.shared_networks",
+  "dhcp.network.create",
+  "dhcp.network.create_title",
+  "dhcp.network.created",
+  "dhcp.network.delete_body",
+  "dhcp.network.delete_confirm",
+  "dhcp.network.delete_title",
+  "dhcp.network.deleted",
+  "dhcp.network.edit_title",
+  "dhcp.network.empty",
+  "dhcp.network.empty_body",
+  "dhcp.network.field.interface",
+  "dhcp.network.field.interface_help",
+  "dhcp.network.field.name",
+  "dhcp.network.save",
+  "dhcp.network.saved",
+  "dhcp.network.sub",
+  "dhcp.options.catalog",
+  "dhcp.options.catalog_help",
+  "dhcp.options.defs",
+  "dhcp.options.defs_help",
+  "dhcp.options.server",
+  "dhcp.options.server_help",
+  "dhcp.options.sub",
   "dhcp.options.title",
+  "dhcp.optset.add",
+  "dhcp.optset.add_code",
+  "dhcp.optset.check.bool",
+  "dhcp.optset.check.code",
+  "dhcp.optset.check.count",
+  "dhcp.optset.check.empty",
+  "dhcp.optset.check.hex",
+  "dhcp.optset.check.ipv4",
+  "dhcp.optset.check.ipv6",
+  "dhcp.optset.check.managed",
+  "dhcp.optset.check.name",
+  "dhcp.optset.check.number",
+  "dhcp.optset.check.prefix",
+  "dhcp.optset.check.range",
+  "dhcp.optset.check.raw_hex",
+  "dhcp.optset.check.route",
+  "dhcp.optset.col.actions",
+  "dhcp.optset.col.code",
+  "dhcp.optset.col.name",
+  "dhcp.optset.col.value",
+  "dhcp.optset.empty",
+  "dhcp.optset.flag",
+  "dhcp.optset.kind.binary",
+  "dhcp.optset.kind.bool",
+  "dhcp.optset.kind.classless_routes",
+  "dhcp.optset.kind.empty",
+  "dhcp.optset.kind.fqdn",
+  "dhcp.optset.kind.i32",
+  "dhcp.optset.kind.ipv4_address",
+  "dhcp.optset.kind.ipv6_address",
+  "dhcp.optset.kind.ipv6_prefix",
+  "dhcp.optset.kind.string",
+  "dhcp.optset.kind.u16",
+  "dhcp.optset.kind.u32",
+  "dhcp.optset.kind.u8",
+  "dhcp.optset.kind_list",
+  "dhcp.optset.raw",
+  "dhcp.optset.remove",
+  "dhcp.optset.revert",
+  "dhcp.optset.routes_help",
+  "dhcp.optset.save",
+  "dhcp.optset.saved",
+  "dhcp.optset.unknown",
+  "dhcp.optset.value_of",
+  "dhcp.policies.empty",
+  "dhcp.policies.empty_body",
+  "dhcp.policies.note",
+  "dhcp.policies.sub",
   "dhcp.policies.title",
+  "dhcp.policy.create",
+  "dhcp.policy.create_title",
+  "dhcp.policy.created",
+  "dhcp.policy.delete_body",
+  "dhcp.policy.delete_confirm",
+  "dhcp.policy.delete_title",
+  "dhcp.policy.deleted",
+  "dhcp.policy.edit_title",
+  "dhcp.policy.field.action",
+  "dhcp.policy.field.condition",
+  "dhcp.policy.field.enabled",
+  "dhcp.policy.field.join",
+  "dhcp.policy.field.name",
+  "dhcp.policy.field.order",
+  "dhcp.policy.field.order_help",
+  "dhcp.policy.field.range_first",
+  "dhcp.policy.field.range_last",
+  "dhcp.policy.field.scope",
+  "dhcp.policy.field.scope_fixed",
+  "dhcp.policy.lease_inherit_help",
+  "dhcp.policy.save",
+  "dhcp.policy.saved",
+  "dhcp.policy.scope_server",
+  "dhcp.pool.clear",
+  "dhcp.pool.clear_body",
+  "dhcp.pool.clear_title",
+  "dhcp.pool.cleared",
+  "dhcp.pool.edit_title",
+  "dhcp.pool.field.classes",
+  "dhcp.pool.field.classes_help",
+  "dhcp.pool.lease_inherit_help",
+  "dhcp.pool.lease_range",
+  "dhcp.pool.lease_scope",
+  "dhcp.pool.save",
+  "dhcp.pool.saved",
+  "dhcp.pool.settings",
+  "dhcp.pools.empty",
+  "dhcp.pools.empty_body",
+  "dhcp.pools.ipam_link",
+  "dhcp.pools.note",
+  "dhcp.pools.title",
+  "dhcp.scope.create",
+  "dhcp.scope.create_title",
+  "dhcp.scope.created",
+  "dhcp.scope.ddns_off",
+  "dhcp.scope.ddns_on",
+  "dhcp.scope.delete_body",
+  "dhcp.scope.delete_confirm",
+  "dhcp.scope.delete_title",
+  "dhcp.scope.deleted",
+  "dhcp.scope.disabled",
+  "dhcp.scope.enabled",
+  "dhcp.scope.field.authoritative",
+  "dhcp.scope.field.authoritative_help",
+  "dhcp.scope.field.classes",
+  "dhcp.scope.field.classes_help",
+  "dhcp.scope.field.enabled",
+  "dhcp.scope.field.enabled_help",
+  "dhcp.scope.field.prefix",
+  "dhcp.scope.field.prefix_help",
+  "dhcp.scope.field.prefix_pick",
+  "dhcp.scope.field.restricted",
+  "dhcp.scope.field.restricted_help",
+  "dhcp.scope.field.server_id",
+  "dhcp.scope.field.server_id_help",
+  "dhcp.scope.field.shared_network",
+  "dhcp.scope.in_ipam",
+  "dhcp.scope.no_classes",
+  "dhcp.scope.no_networks",
+  "dhcp.scope.options_help",
+  "dhcp.scope.options_title",
+  "dhcp.scope.save",
+  "dhcp.scope.saved",
+  "dhcp.scope.settings",
+  "dhcp.scope.shared_none",
+  "dhcp.scope.tab.exclusions",
+  "dhcp.scope.tab.options",
+  "dhcp.scope.tab.pools",
+  "dhcp.scope.tab.settings",
+  "dhcp.scope.tabs",
   "dhcp.scope.title",
+  "dhcp.scope.unchanged",
+  "dhcp.scopes.empty",
+  "dhcp.scopes.empty_body",
+  "dhcp.scopes.sub",
   "dhcp.scopes.title",
+  "dhcp.settings.authoritative",
+  "dhcp.settings.authoritative_help",
+  "dhcp.settings.conflict",
+  "dhcp.settings.conflict_follow",
+  "dhcp.settings.conflict_help",
+  "dhcp.settings.effective",
+  "dhcp.settings.effective_days",
+  "dhcp.settings.history_days",
+  "dhcp.settings.history_days_help",
+  "dhcp.settings.history_follow",
+  "dhcp.settings.lease",
+  "dhcp.settings.lease_help",
+  "dhcp.settings.lede",
+  "dhcp.settings.off",
+  "dhcp.settings.on",
+  "dhcp.settings.save",
+  "dhcp.settings.saved",
+  "dhcp.settings.server",
+  "dhcp.settings.title",
   "dhcp.shared_networks.title",
+  "dhcp.state.not_built_body",
+  "dhcp.state.not_built_title",
+  "dhcp.state.off_body",
+  "dhcp.state.off_link",
+  "dhcp.state.off_title",
+  "dhcp.term.add",
+  "dhcp.term.class",
+  "dhcp.term.class_label",
+  "dhcp.term.class_pick",
+  "dhcp.term.kind.class",
+  "dhcp.term.kind.match",
+  "dhcp.term.kind.not_class",
+  "dhcp.term.kind.not_match",
+  "dhcp.term.kind_label",
+  "dhcp.term.not_class",
+  "dhcp.term.not_match",
+  "dhcp.term.remove",
+  "dhcp.term.row",
   "dhcp.title",
+  "dhcp.tri.inherit",
+  "dhcp.unit.days",
+  "dhcp.unit.hours",
+  "dhcp.unit.minutes",
+  "dhcp.util.abandoned",
+  "dhcp.util.at",
+  "dhcp.util.free",
+  "dhcp.util.label",
+  "dhcp.util.leased",
+  "dhcp.util.percent",
+  "dhcp.util.pool_size",
+  "dhcp.util.reserved",
+  "dhcp.util.title",
   "discovery.action.approve",
   "discovery.action.dismiss",
   "discovery.action.open",
@@ -8539,6 +9477,44 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.connect.unreachable",
   "errors.connect.verify_mismatch",
   "errors.connect.writes_disabled",
+  "errors.dhcp.class.in_use",
+  "errors.dhcp.class.invalid",
+  "errors.dhcp.class.not_found",
+  "errors.dhcp.ddns.invalid",
+  "errors.dhcp.exclusion.invalid",
+  "errors.dhcp.exclusion.not_found",
+  "errors.dhcp.export.format",
+  "errors.dhcp.filter.exists",
+  "errors.dhcp.filter.invalid",
+  "errors.dhcp.filter.not_found",
+  "errors.dhcp.lease.not_found",
+  "errors.dhcp.lease.state",
+  "errors.dhcp.lease_times.invalid",
+  "errors.dhcp.module.disabled",
+  "errors.dhcp.node.not_dhcp",
+  "errors.dhcp.option.code_reserved",
+  "errors.dhcp.option.invalid",
+  "errors.dhcp.option.unknown",
+  "errors.dhcp.option_def.exists",
+  "errors.dhcp.option_def.in_use",
+  "errors.dhcp.option_def.not_found",
+  "errors.dhcp.policy.invalid",
+  "errors.dhcp.policy.not_found",
+  "errors.dhcp.pool.not_found",
+  "errors.dhcp.pool.not_pool",
+  "errors.dhcp.pool.outside",
+  "errors.dhcp.reservation.conflict",
+  "errors.dhcp.reservation.no_identity",
+  "errors.dhcp.scope.attached",
+  "errors.dhcp.scope.exists",
+  "errors.dhcp.scope.invalid",
+  "errors.dhcp.scope.not_found",
+  "errors.dhcp.scope.not_network",
+  "errors.dhcp.settings.invalid",
+  "errors.dhcp.shared_network.in_use",
+  "errors.dhcp.shared_network.invalid",
+  "errors.dhcp.shared_network.not_found",
+  "errors.dhcp.store_refused",
   "errors.dns.acl.in_use",
   "errors.dns.acl.not_found",
   "errors.dns.forwarder.invalid",
@@ -10675,6 +11651,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.access",
   "settings.nav.audit_export",
   "settings.nav.backup",
+  "settings.nav.dhcp",
   "settings.nav.dns",
   "settings.nav.guardrails",
   "settings.nav.label",

@@ -30,6 +30,8 @@ import { stubs } from "./stubs";
 import { nodeRoutes } from "./routes-nodes";
 import { connectorRoutes } from "./routes-connectors";
 import { dnsRoutes } from "./routes-dns";
+// WP7.4
+import { dhcpRoutes } from "./routes-dhcp";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -75,6 +77,8 @@ export const happyPaths: HttpHandler[] = [
   ...i18nRoutes,
   // The DNS area of Phase 2 (WP4.5): zones, records, zone files, access lists and TSIG keys.
   ...dnsRoutes,
+  // WP7.4: the DHCP configuration of Phase 3.
+  ...dhcpRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

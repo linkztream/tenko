@@ -924,7 +924,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DHCP class
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A class holds when any of its matches holds.
          */
         post: operations["create_dhcp_class"];
         delete?: never;
@@ -949,7 +949,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a DHCP class
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A class a scope, pool or policy names stays (`dhcp.class.in_use`, parameter `by`).
          */
         delete: operations["delete_dhcp_class"];
         options?: never;
@@ -996,7 +996,7 @@ export interface paths {
         put?: never;
         /**
          * Add a DHCP MAC filter
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A deny entry drops the client on every scope; on a restricted scope only clients an allow entry matches are served.
          */
         post: operations["create_dhcp_filter"];
         delete?: never;
@@ -1122,7 +1122,7 @@ export interface paths {
         };
         /**
          * List the built-in DHCP options
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors with their types, and the codes the server sets itself, which no option set holds.
          */
         get: operations["list_dhcp_option_catalog"];
         put?: never;
@@ -1148,7 +1148,7 @@ export interface paths {
         put?: never;
         /**
          * Define a custom DHCP option
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A code of the built-in catalog or one the server sets is refused; codes 224 to 254 of `dhcp4` are the site-specific range (RFC 3942), and a vendor space holds the option 43 sub-options of its vendor class.
          */
         post: operations["create_dhcp_option_def"];
         delete?: never;
@@ -1173,14 +1173,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom DHCP option definition
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A definition an option set uses stays (`dhcp.option_def.in_use`, parameter `by`).
          */
         delete: operations["delete_dhcp_option_def"];
         options?: never;
         head?: never;
         /**
          * Change a custom DHCP option definition
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. The type does not change while an option set uses the definition.
          */
         patch: operations["update_dhcp_option_def"];
         trace?: never;
@@ -1194,7 +1194,7 @@ export interface paths {
         };
         /**
          * List DHCP option sets
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The sets the caller may read, by level and owner, each value with its name and typed view.
          */
         get: operations["list_dhcp_option_sets"];
         put?: never;
@@ -1214,18 +1214,18 @@ export interface paths {
         };
         /**
          * Get the DHCP options of a level
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read` on the owner. An owner without options reads as an empty set at revision 0.
          */
         get: operations["get_dhcp_option_set"];
         /**
          * Replace the DHCP options of a level
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write` on the owner. Each value is given in wire form (`data`, hexadecimal) or typed (`typed`) and checked against the type of its code; no values clear the set.
          */
         put: operations["set_dhcp_option_set"];
         post?: never;
         /**
          * Clear the DHCP options of a level
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write` on the owner. Clearing an empty set is no error.
          */
         delete: operations["delete_dhcp_option_set"];
         options?: never;
@@ -1242,13 +1242,13 @@ export interface paths {
         };
         /**
          * List DHCP policies
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The policies of each scope in order, then the server's.
          */
         get: operations["list_dhcp_policies"];
         put?: never;
         /**
          * Create a DHCP policy
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`, and `dhcp.write` on the scope of a scope policy. Without an order the policy goes after the last of its scope.
          */
         post: operations["create_dhcp_policy"];
         delete?: never;
@@ -1273,14 +1273,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a DHCP policy
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. The policy's options go with it.
          */
         delete: operations["delete_dhcp_policy"];
         options?: never;
         head?: never;
         /**
          * Change a DHCP policy
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. The scope of a policy does not change.
          */
         patch: operations["update_dhcp_policy"];
         trace?: never;
@@ -1294,7 +1294,7 @@ export interface paths {
         };
         /**
          * List DHCP pools
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address.
          */
         get: operations["list_dhcp_pools"];
         put?: never;
@@ -1314,18 +1314,18 @@ export interface paths {
         };
         /**
          * Get a DHCP pool
-         * @description Scope: `dhcp.read`. The implementation checks the scope of the pool.
+         * @description Scope: `dhcp.read` on the pool's scope.
          */
         get: operations["get_dhcp_pool"];
         /**
          * Set the DHCP settings of a pool
-         * @description Scope: `dhcp.write`. The implementation checks the scope of the pool.
+         * @description Scope: `dhcp.write` on the pool's scope. The range itself is changed through the IPAM range routes.
          */
         put: operations["set_dhcp_pool"];
         post?: never;
         /**
          * Remove the DHCP settings of a pool (the range stays)
-         * @description Scope: `dhcp.write`. The implementation checks the scope of the pool.
+         * @description Scope: `dhcp.write` on the pool's scope. The pool's options go with them.
          */
         delete: operations["delete_dhcp_pool"];
         options?: never;
@@ -1382,13 +1382,13 @@ export interface paths {
         };
         /**
          * List DHCP scopes
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The scopes the caller may read, by network, with their pools and active leases.
          */
         get: operations["list_dhcp_scopes"];
         put?: never;
         /**
          * Create a DHCP scope for an IPAM network
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write` on the prefix. The DDNS settings default to the server's; under the Hardened profile a scope is restricted to allowed MAC addresses unless the request says otherwise (TGL-17).
          */
         post: operations["create_dhcp_scope"];
         delete?: never;
@@ -1413,14 +1413,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a DHCP scope (the prefix stays)
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. Its exclusions, the settings and options of its pools, its policies and its options go with it; the prefix and its ranges stay.
          */
         delete: operations["delete_dhcp_scope"];
         options?: never;
         head?: never;
         /**
          * Change a DHCP scope
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. The nil UUID as `shared_network` takes the scope out of its shared network.
          */
         patch: operations["update_dhcp_scope"];
         trace?: never;
@@ -1434,7 +1434,7 @@ export interface paths {
         };
         /**
          * Get the options a client gets in a DHCP scope
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The server's, the shared network's and the scope's options, those of the policies that match the client (none until classes are matched, WP8.4) and those of the client's reservation, the more specific level winning per code. Pool options depend on the address and are shown on the pool.
          */
         get: operations["get_dhcp_effective_options"];
         put?: never;
@@ -1454,7 +1454,7 @@ export interface paths {
         };
         /**
          * List the exclusion ranges of a DHCP scope
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. The explicit ranges; the prefix's reserved and infrastructure ranges and the addresses of hosts that are not dynamic are excluded as well.
          */
         get: operations["list_dhcp_exclusions"];
         put?: never;
@@ -1498,7 +1498,7 @@ export interface paths {
         };
         /**
          * Get how full a DHCP scope is
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses.
          */
         get: operations["get_dhcp_scope_utilization"];
         put?: never;
@@ -1518,12 +1518,12 @@ export interface paths {
         };
         /**
          * Get the DHCP server settings
-         * @description Scope: `dhcp.read`.
+         * @description Scope: `dhcp.read`. Before the first change the defaults, at revision 0.
          */
         get: operations["get_dhcp_settings"];
         /**
          * Change the DHCP server settings
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A field left out keeps its value, except `conflict_detection` and `history_days`, which follow the security profile when left out.
          */
         put: operations["update_dhcp_settings"];
         post?: never;
@@ -1548,7 +1548,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DHCP shared network
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. Scopes join it with their `shared_network`.
          */
         post: operations["create_dhcp_shared_network"];
         delete?: never;
@@ -1573,7 +1573,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a DHCP shared network
-         * @description Scope: `dhcp.write`.
+         * @description Scope: `dhcp.write`. A shared network that scopes still name stays (`dhcp.shared_network.in_use`).
          */
         delete: operations["delete_dhcp_shared_network"];
         options?: never;
@@ -6728,6 +6728,8 @@ export interface components {
             prefix: components["schemas"]["PrefixId"];
             /** @description The range. */
             range: components["schemas"]["RangeId"];
+            /** @description The store revision of the settings row (the `ETag`); 0 without settings. */
+            revision: components["schemas"]["Revision"];
             settings?: components["schemas"]["PoolSettings"] | null;
             /**
              * Format: int64
@@ -11847,6 +11849,8 @@ export interface components {
                 prefix: components["schemas"]["PrefixId"];
                 /** @description The range. */
                 range: components["schemas"]["RangeId"];
+                /** @description The store revision of the settings row (the `ETag`); 0 without settings. */
+                revision: components["schemas"]["Revision"];
                 settings?: components["schemas"]["PoolSettings"] | null;
                 /**
                  * Format: int64
@@ -23148,7 +23152,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpClassItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23175,8 +23179,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23208,7 +23212,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpClassItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid or its name taken (`dhcp.class.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23235,8 +23239,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23267,7 +23271,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpClassItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23303,8 +23307,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23317,7 +23321,10 @@ export interface operations {
     delete_dhcp_class: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Class identifier (UUID) */
                 id: string;
@@ -23333,7 +23340,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23369,7 +23376,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The class is still named by a scope, a pool or a policy (`dhcp.class.in_use`) */
+            /** @description A scope, pool or policy names the class (`dhcp.class.in_use`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23378,8 +23385,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The class changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23392,7 +23399,10 @@ export interface operations {
     update_dhcp_class: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Class identifier (UUID) */
                 id: string;
@@ -23414,7 +23424,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpClassItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid (`dhcp.class.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the class is invalid or its name taken (`dhcp.class.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23450,8 +23460,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The class changed since it was read (`If-Match`) */
-            412: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23459,8 +23469,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The class changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23547,7 +23557,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of filter entries */
+            /** @description A page of filter entries by pattern */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -23556,7 +23566,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpFilterItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23583,8 +23593,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23616,7 +23626,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpFilterItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the entry is invalid (`dhcp.filter.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23643,17 +23653,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An entry for this pattern exists (`dhcp.filter.exists`) */
+            /** @description An entry for the pattern exists (`dhcp.filter.exists`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23684,7 +23685,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpFilterItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23720,8 +23721,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23734,7 +23735,10 @@ export interface operations {
     delete_dhcp_filter: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Filter entry identifier (UUID) */
                 id: string;
@@ -23750,7 +23754,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23786,8 +23790,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The entry changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23800,7 +23813,10 @@ export interface operations {
     update_dhcp_filter: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Filter entry identifier (UUID) */
                 id: string;
@@ -23822,7 +23838,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpFilterItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the filter entry is invalid (`dhcp.filter.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the entry is invalid (`dhcp.filter.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23858,7 +23874,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An entry for this pattern exists (`dhcp.filter.exists`) */
+            /** @description An entry for the pattern exists (`dhcp.filter.exists`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23867,17 +23883,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The filter entry changed since it was read (`If-Match`) */
+            /** @description The entry changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24210,15 +24217,6 @@ export interface operations {
                     "application/json": components["schemas"]["OptionCatalogItem"][];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description No valid session or token */
             401: {
                 headers: {
@@ -24230,15 +24228,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dhcp.read` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24273,7 +24262,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_OptionDefItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24300,8 +24289,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24333,7 +24322,7 @@ export interface operations {
                     "application/json": components["schemas"]["OptionDefItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the definition is invalid (`dhcp.option.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24360,17 +24349,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) or a definition for this space and code exists (`dhcp.option_def.exists`) */
+            /** @description A catalog or server-managed code (`dhcp.option.code_reserved`), a definition of the space and code exists (`dhcp.option_def.exists`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24401,7 +24381,7 @@ export interface operations {
                     "application/json": components["schemas"]["OptionDefItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24428,7 +24408,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            /** @description No such definition (`dhcp.option_def.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -24437,8 +24417,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24451,7 +24431,10 @@ export interface operations {
     delete_dhcp_option_def: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Option definition identifier (UUID) */
                 id: string;
@@ -24467,7 +24450,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24494,7 +24477,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            /** @description No such definition (`dhcp.option_def.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -24503,7 +24486,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The definition is still used by an option set (`dhcp.option_def.in_use`) */
+            /** @description An option set uses the definition (`dhcp.option_def.in_use`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -24512,8 +24495,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The definition changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24526,7 +24509,10 @@ export interface operations {
     update_dhcp_option_def: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Option definition identifier (UUID) */
                 id: string;
@@ -24548,7 +24534,7 @@ export interface operations {
                     "application/json": components["schemas"]["OptionDefItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the definition is invalid (`dhcp.option.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24575,7 +24561,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such option definition (`dhcp.option_def.not_found`) */
+            /** @description No such definition (`dhcp.option_def.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -24584,7 +24570,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The definition is still used by an option set (`dhcp.option_def.in_use`) */
+            /** @description An option set uses the definition and the type changes (`dhcp.option_def.in_use`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -24593,17 +24579,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The option definition changed since it was read (`If-Match`) */
+            /** @description The definition changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24640,7 +24617,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_OptionSetItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24667,8 +24644,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24699,7 +24676,7 @@ export interface operations {
                     "application/json": components["schemas"]["OptionSetItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24726,7 +24703,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such pool (`dhcp.pool.not_found`) */
+            /** @description The owner does not exist (`dhcp.scope.not_found`, `dhcp.shared_network.not_found`, `dhcp.pool.not_found`, `dhcp.policy.not_found`, `ipam.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -24735,8 +24712,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24749,7 +24726,10 @@ export interface operations {
     set_dhcp_option_set: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read (0 for no set); a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>` */
                 owner: string;
@@ -24771,7 +24751,7 @@ export interface operations {
                     "application/json": components["schemas"]["OptionSetItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or an option value or definition is invalid (`dhcp.option.invalid`) or an option code has no definition in its space (`dhcp.option.unknown`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), a value does not fit its type or appears twice (`dhcp.option.invalid`), or a code has no definition (`dhcp.option.unknown`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24798,7 +24778,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The option code is reserved by the catalog or the server (`dhcp.option.code_reserved`) */
+            /** @description The owner does not exist (`dhcp.scope.not_found`, `dhcp.shared_network.not_found`, `dhcp.pool.not_found`, `dhcp.policy.not_found`, `ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A code the server sets itself (`dhcp.option.code_reserved`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -24807,17 +24796,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The option set changed since it was read (`If-Match`) */
+            /** @description The set changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24830,7 +24810,10 @@ export interface operations {
     delete_dhcp_option_set: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Option set owner: `server`, `scope:<prefix>`, `shared_network:<id>`, `pool:<range>`, `policy:<id>` or `host:<interface>` */
                 owner: string;
@@ -24846,7 +24829,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24873,8 +24856,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The owner does not exist */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The set changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24913,7 +24914,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpPolicyItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24940,8 +24941,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24973,7 +24974,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpPolicyItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the policy is invalid or its name taken in the scope (`dhcp.policy.invalid`), its range lies outside the scope (`dhcp.pool.outside`), or its lease times or DDNS settings are invalid (`dhcp.lease_times.invalid`, `dhcp.ddns.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25000,7 +25001,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such class (`dhcp.class.not_found`) */
+            /** @description No such scope (`dhcp.scope.not_found`) or class (`dhcp.class.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -25009,8 +25010,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25041,7 +25042,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpPolicyItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25077,8 +25078,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25091,7 +25092,10 @@ export interface operations {
     delete_dhcp_policy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Policy identifier (UUID) */
                 id: string;
@@ -25107,7 +25111,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25143,8 +25147,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The policy changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25157,7 +25170,10 @@ export interface operations {
     update_dhcp_policy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Policy identifier (UUID) */
                 id: string;
@@ -25179,7 +25195,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpPolicyItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the policy is invalid (`dhcp.policy.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the policy is invalid (`dhcp.policy.invalid`), or its range lies outside the scope (`dhcp.pool.outside`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25206,8 +25222,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such policy (`dhcp.policy.not_found`) */
+            /** @description No such policy (`dhcp.policy.not_found`) or class (`dhcp.class.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25217,15 +25242,6 @@ export interface operations {
             };
             /** @description The policy changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25262,7 +25278,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpPoolItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25289,8 +25305,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description No scope serves the prefix of `scope` (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25312,7 +25337,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The pool */
+            /** @description The pool, with the `ETag` of its settings */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -25321,7 +25346,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpPoolItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25348,7 +25373,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such pool (`dhcp.pool.not_found`) */
+            /** @description The range does not exist or is no pool (`dhcp.pool.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -25357,8 +25382,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25371,7 +25396,10 @@ export interface operations {
     set_dhcp_pool: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision of the settings the client read (0 for none); a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Range identifier (UUID) of the pool */
                 range: string;
@@ -25393,7 +25421,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpPoolItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), the range lies outside its scope (`dhcp.pool.outside`) or the lease times are invalid (`dhcp.lease_times.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25420,7 +25448,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such pool (`dhcp.pool.not_found`) or no such class (`dhcp.class.not_found`) */
+            /** @description The range does not exist (`dhcp.pool.not_found`), its prefix has no scope (`dhcp.scope.not_found`) or a class does not exist (`dhcp.class.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -25429,7 +25457,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The range is not a DHCP pool (`dhcp.pool.not_pool`) */
+            /** @description The range's role is not `dhcp_pool` (`dhcp.pool.not_pool`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -25438,8 +25466,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The settings changed since they were read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25452,7 +25480,10 @@ export interface operations {
     delete_dhcp_pool: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision of the settings the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Range identifier (UUID) of the pool */
                 range: string;
@@ -25468,7 +25499,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25495,7 +25526,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such pool (`dhcp.pool.not_found`) */
+            /** @description The pool has no settings (`dhcp.pool.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -25504,8 +25535,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The settings changed since they were read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25664,7 +25704,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of scopes by prefix */
+            /** @description A page of scopes by network */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -25673,7 +25713,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_DhcpScopeItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25700,8 +25740,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25733,7 +25773,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpScopeItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25760,7 +25800,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such prefix (`ipam.not_found`) */
+            /** @description No such prefix (`ipam.not_found`), shared network (`dhcp.shared_network.not_found`) or class (`dhcp.class.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -25769,17 +25809,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The prefix has a scope already (`dhcp.scope.exists`) or the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`) */
+            /** @description The prefix has a scope already (`dhcp.scope.exists`), the prefix is a supernet, not a network a scope can serve (`dhcp.scope.not_network`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25810,7 +25841,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpScopeItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25846,8 +25877,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25860,7 +25891,10 @@ export interface operations {
     delete_dhcp_scope: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Prefix identifier (UUID) of the scope */
                 prefix: string;
@@ -25876,7 +25910,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25912,8 +25946,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The scope changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25926,7 +25969,10 @@ export interface operations {
     update_dhcp_scope: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Prefix identifier (UUID) of the scope */
                 prefix: string;
@@ -25948,7 +25994,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpScopeItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the scope settings are invalid (`dhcp.scope.invalid`) or the lease times are invalid (`dhcp.lease_times.invalid`) or the DDNS settings are invalid (`dhcp.ddns.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -25984,8 +26030,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The scope changed since it was read (`If-Match`) */
-            412: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25993,8 +26039,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The scope changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26037,7 +26083,7 @@ export interface operations {
                     "application/json": components["schemas"]["EffectiveOptions"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_query`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26073,8 +26119,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26112,7 +26158,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_ExclusionItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26148,8 +26194,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26184,7 +26230,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExclusionItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the exclusion range is unordered or outside the scope (`dhcp.exclusion.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the range is unordered or outside the scope (`dhcp.exclusion.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26220,8 +26266,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26234,7 +26280,10 @@ export interface operations {
     delete_dhcp_exclusion: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Prefix identifier (UUID) of the scope */
                 prefix: string;
@@ -26252,7 +26301,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26279,7 +26328,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such exclusion range (`dhcp.exclusion.not_found`) */
+            /** @description No scope serves the prefix (`dhcp.scope.not_found`) or no such exclusion range (`dhcp.exclusion.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -26288,8 +26337,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The range changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26320,7 +26378,7 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpScopeUtilization"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26356,8 +26414,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26385,15 +26443,6 @@ export interface operations {
                     "application/json": components["schemas"]["DhcpSettingsItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description No valid session or token */
             401: {
                 headers: {
@@ -26412,8 +26461,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26426,7 +26475,10 @@ export interface operations {
     update_dhcp_settings: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read (0 before the first change); a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -26472,8 +26524,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The settings changed since they were read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26508,7 +26569,7 @@ export interface operations {
                     "application/json": components["schemas"]["Page_SharedNetworkItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26535,8 +26596,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26568,7 +26629,7 @@ export interface operations {
                     "application/json": components["schemas"]["SharedNetworkItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the name or interface is invalid or the name is taken (`dhcp.shared_network.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26595,8 +26656,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26627,7 +26688,7 @@ export interface operations {
                     "application/json": components["schemas"]["SharedNetworkItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26663,8 +26724,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26677,7 +26738,10 @@ export interface operations {
     delete_dhcp_shared_network: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Shared network identifier (UUID) */
                 id: string;
@@ -26693,7 +26757,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`) */
+            /** @description The request is malformed (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26729,7 +26793,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The shared network still has scopes (`dhcp.shared_network.in_use`) */
+            /** @description Scopes still belong to it (`dhcp.shared_network.in_use`), or the DHCP module is off (`dhcp.module.disabled`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -26738,8 +26802,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The shared network changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26752,7 +26816,10 @@ export interface operations {
     update_dhcp_shared_network: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The revision the client read; a stale revision is refused with 412 */
+                "If-Match"?: string | null;
+            };
             path: {
                 /** @description Shared network identifier (UUID) */
                 id: string;
@@ -26774,7 +26841,7 @@ export interface operations {
                     "application/json": components["schemas"]["SharedNetworkItem"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the shared network settings are invalid (`dhcp.shared_network.invalid`) */
+            /** @description The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the name or interface is invalid or the name is taken (`dhcp.shared_network.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26810,8 +26877,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The shared network changed since it was read (`If-Match`) */
-            412: {
+            /** @description The DHCP module is off (`dhcp.module.disabled`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26819,8 +26886,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
+            /** @description The shared network changed since it was read (`If-Match`) */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };

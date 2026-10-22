@@ -1338,6 +1338,16 @@ async fn start(
             tenko_dns::zone::ZoneConfig::default(),
         )
     });
+    // WP7.4: the configuration service of the DHCP module; its write step joins the engine
+    // before it starts. Without the module nothing is built and no DHCP route exists.
+    let dhcp_config = modules.contains(crate::modules::Module::Dhcp).then(|| {
+        tenko_dhcp::config::register_steps(&mut engine);
+        tenko_dhcp::config::ConfigService::new(
+            Arc::clone(&store_dyn),
+            Arc::new(engine.clone()),
+            tenko_dhcp::config::ConfigLimits::default(),
+        )
+    });
     // The fetches of the URL block lists on their intervals (`dns.lists`, P2-Q6).
     if let Some(zones) = &zones {
         leaders.register(Arc::new(lists::ListService::new(
@@ -1687,6 +1697,10 @@ async fn start(
                     ));
             }
             server.extensions.insert(dns_slot.clone());
+            // WP7.4: the DHCP configuration routes read and write through the service.
+            if let Some(config) = &dhcp_config {
+                server.extensions.insert(Arc::clone(config));
+            }
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =
                 Arc::new(crate::modules::ModuleSwitch::new(
                     Arc::clone(&store_dyn),

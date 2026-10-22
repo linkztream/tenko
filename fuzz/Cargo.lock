@@ -2963,6 +2963,7 @@ dependencies = [
  "tenko-connect-proxmox",
  "tenko-connect-unifi",
  "tenko-core",
+ "tenko-dhcp",
  "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
@@ -3010,6 +3011,7 @@ dependencies = [
  "tenko-cluster",
  "tenko-connect",
  "tenko-core",
+ "tenko-dhcp",
  "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
@@ -3208,13 +3210,17 @@ dependencies = [
  "async-trait",
  "futures",
  "ipnet",
+ "serde",
  "socket2",
  "tenko-core",
+ "tenko-ipam",
+ "tenko-jobs",
  "tenko-store",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

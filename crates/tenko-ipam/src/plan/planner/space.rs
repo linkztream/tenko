@@ -354,6 +354,10 @@ impl Planner<'_> {
             self.descendants(vrf, &before.cidr)?
         };
         if role != before.role {
+            // WP7.4: a network a DHCP scope serves stays a network.
+            if role == PrefixRole::Supernet {
+                self.refuse_if_dhcp_scope(&before)?;
+            }
             self.check_role_change(&after, role, &descendants)?;
             after.role = role;
         }
@@ -482,6 +486,29 @@ impl Planner<'_> {
         }
     }
 
+    // WP7.4: the scope-to-prefix link (P3-Q4). A prefix that a DHCP scope serves is
+    // neither deleted nor turned into a supernet while the scope exists
+    // (`dhcp.scope.attached`, 409). The read is tracked, so a scope created meanwhile makes
+    // the plan stale, and the scope's own write expects the prefix's version.
+    fn refuse_if_dhcp_scope(&mut self, prefix: &Prefix) -> IpamResult<()> {
+        if self
+            .ws
+            .exists(&tenko_core::dhcp::tables::SCOPES, &prefix.id, true)?
+        {
+            return Err(IpamError::new(
+                tenko_core::dhcp::codes::SCOPE_ATTACHED,
+                409,
+                format!(
+                    "{} is served by a DHCP scope; delete the scope first",
+                    prefix.cidr
+                ),
+            )
+            .titled("The prefix has a DHCP scope")
+            .param("prefix", prefix.cidr));
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_prefix(
         &mut self,
         id: PrefixId,
@@ -489,6 +516,8 @@ impl Planner<'_> {
         cascade: bool,
     ) -> IpamResult<ObjectRef> {
         let before = self.load_for_change::<Prefix>(id, expected, false)?;
+        // WP7.4: a prefix a DHCP scope serves is not deleted (the rule of reverse zones).
+        self.refuse_if_dhcp_scope(&before)?;
         let vrf = before.vrf;
         self.ws.expect_and_bump(&tree_counter(vrf))?;
         self.ws.expect_and_bump(&alloc_counter(id))?;

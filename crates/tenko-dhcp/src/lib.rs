@@ -25,6 +25,8 @@
 //! the contracts; `docs/dhcp.md` section 1 the wire format.
 
 pub mod allocator;
+// WP7.4: the configuration service, the image build and the effective options.
+pub mod config;
 pub mod ddns;
 pub mod feed;
 pub mod fingerprint;

@@ -53,6 +53,8 @@ tenko-connect-hass = { workspace = true }
 tenko-connect-proxmox = { workspace = true }
 tenko-connect-unifi = { workspace = true }
 tenko-core = { workspace = true }
+# WP7.4: the DHCP configuration service the server adds to the API.
+tenko-dhcp = { path = "../tenko-dhcp" }
 tenko-dns = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }

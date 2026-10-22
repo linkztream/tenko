@@ -8,13 +8,15 @@ import { For } from "solid-js";
 import { paths } from "../app/paths";
 import { t, type MessageKey } from "../i18n";
 import { DNS_SETTINGS_PATH } from "./dns/paths";
+// WP7.4
+import { DHCP_SETTINGS_PATH } from "../dhcp/paths";
 import { GUARDRAILS_PATH } from "./guardrails/paths";
 import { RECONCILER_PATH } from "./reconciler/paths";
 import { SECRETS_PATH } from "../secrets/paths";
 import { UPDATES_PATH } from "../updates/paths";
 
 interface Tab {
-  id: "security" | "users" | "updates" | "secrets" | "access" | "audit-export" | "vault" | "backup" | "reconciler" | "guardrails" | "dns" | "languages";
+  id: "security" | "users" | "updates" | "secrets" | "access" | "audit-export" | "vault" | "backup" | "reconciler" | "guardrails" | "dns" | "dhcp" | "languages";
   href: string;
   label: MessageKey;
 }
@@ -31,6 +33,8 @@ const TABS: readonly Tab[] = [
   { id: "reconciler", href: RECONCILER_PATH, label: "settings.nav.reconciler" },
   { id: "guardrails", href: GUARDRAILS_PATH, label: "settings.nav.guardrails" },
   { id: "dns", href: DNS_SETTINGS_PATH, label: "settings.nav.dns" },
+  // WP7.4
+  { id: "dhcp", href: DHCP_SETTINGS_PATH, label: "settings.nav.dhcp" },
   { id: "languages", href: paths.settings("languages"), label: "settings.nav.languages" },
 ];
 
