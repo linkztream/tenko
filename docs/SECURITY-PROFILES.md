@@ -44,7 +44,7 @@ Reading the matrix:
 | TGL-09 | DNS dynamic updates from external clients | None | TSIG; GSS-TSIG for AD zones | TSIG or GSS-TSIG only, "secure only" on every AD zone, unsigned rejected | Unsigned allowed | 2 (GSS-TSIG in 4) | DNS-11, DNS-28 |
 | TGL-10 | Zone transfer ACL | Deny all | Listed secondaries with TSIG | Listed secondaries, TSIG required, XoT for transfers that leave the site | Allow any | 2 | DNS-09, DNS-19 |
 | TGL-11 | Response Rate Limiting | On | On | On, stricter limits | Off | 2 | DNS-17 |
-| TGL-12 | DNSSEC validation | On | On | On, negative trust anchors must have an expiry | Off allowed | 5 | DNS-13 |
+| TGL-12 | DNSSEC validation | On | On | On, negative trust anchors must have an expiry | Off allowed | 3 (Slice 10) | DNS-13 |
 | TGL-13 | DNSSEC signing | Off | Opt-in per zone | On for zones served externally | Off | 2 | DNS-12 |
 | TGL-14 | DoT/DoH to upstreams | Preferred, plaintext fallback | Preferred, plaintext fallback logged | Required, no plaintext fallback | Off | 2 | DNS-15 |
 | TGL-15 | Query logging and retention | Off (opt-in, 7 days) | On, pseudonymized, 30 days | On, pseudonymized, retention per policy (default 30 days), exported with the audit stream | On, not pseudonymized, 7 days | 2 | OPS-06 |
@@ -57,11 +57,15 @@ Reading the matrix:
 | TGL-22 | Recursion and forwarding ACL | Prefixes known to IPAM | Prefixes known to IPAM | Explicit allow-list per view | Any (open resolver allowed) | 2 | DNS-02, DNS-20 |
 | TGL-23 | In-app update check and install (OPS-24) | Check daily, install from the UI | Check daily, install from the UI with step-up authentication | Check daily (version string only), install only from an uploaded and verified release file | Check daily, install from the UI | 1 (Slice 2) | OPS-24, API-19 |
 | TGL-24 | Secret reveal (IAM-16, API-11) | A signed-in session of password strength or stronger | Step-up: a sign-in within the last five minutes | Step-up with a passkey or hardware security key within the last five minutes; reveal only secrets bound to the host in view | A signed-in session of password strength or stronger | 1 (Slice 2) | IAM-07, IAM-16, API-11 |
+| TGL-25 | Default resolution outside the zones and rules | Recurse | Recurse | Recurse | Recurse | 3 (Slice 10) | DNS-03 |
+| TGL-26 | QNAME minimisation | Relaxed | Relaxed | Relaxed (strict allowed) | Relaxed | 3 (Slice 10) | DNS-34 |
+| TGL-27 | Trust anchor signalling (RFC 8145) | On | On | Off | On | 3 (Slice 10) | DNS-13 |
+| TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
 
 Notes:
 
 - **TGL-06 and a PIN.** A PIN-like secret (digits only, under 12 characters) under a preset that admits a PIN is not checked against the corpus, because every short numeric code is in it. The PIN preset relies on the coupling rule (IAM-07) instead.
-- **TGL-12 before Phase 5.** Until the own resolver ships, Tenko forwards and caches, so DNSSEC validation is the upstream resolver's job (DNS-03, DNS-13).
+- **TGL-12 before Slice 10.** Until the own resolver ships (Phase 3, Slice 10, [dns-recursion-plan.md](plans/dns-recursion-plan.md)), Tenko forwards and caches, so DNSSEC validation is the upstream resolver's job (DNS-03, DNS-13). From Slice 10 the toggle applies to recursed and to forwarded answers alike (REC-Q3); a forwarding rule may set `validate = false`.
 - **TGL-09 scope.** The toggle concerns dynamic updates from external clients. The DDNS path from Tenko DHCP to Tenko DNS is internal and is not governed by it (DHCP-13).
 - **TGL-24 and the PIN rule.** The PIN coupling rule applies on top of every value: a PIN-strength session never reveals, and personal API tokens never reveal. No value is weaker than Home, so the toggle never raises the banner. Operators may reveal (administrators create, change, bind and delete), so they count as accounts that can reach the vault.
 - **TGL-19 values.** The packet rates are starting points. The slower profiles exist because IDS/EDR products (for example Defender for Identity) flag port scans (SCAN-07).

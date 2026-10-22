@@ -1,6 +1,6 @@
 # ADR 0021: Recursive resolution and validation
 
-- Status: Proposed
+- Status: Accepted (the owner decided REC-Q1 to REC-Q15 of the plan on 2026-10-22)
 - Date: 2026-10-22
 
 ## Context

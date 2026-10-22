@@ -170,6 +170,7 @@ From this phase the move job's DNS step is automatic.
 - **DDNS**: option 81, DHCID and name protection, PTR records, and updates on commit, expire and release (DHCP-13).
 - **IPAM reconciliation**: leases, DNS, scans and intent in one view with conflict rules (IPAM-21). Fingerprinting from options 55 and 60 feeds the OS field (DHCP-14).
 - **Tenko DHCP as actuator**: reservations are created directly from IPAM intent, and leases become observations without polling (DHCP-16).
+- **Recursive resolver** (Slice 10, the owner's decision REC-Q1 of 2026-10-22, moved here from Phase 5): Tenko's own recursive resolver from the root hints with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34), planned in [dns-recursion-plan.md](plans/dns-recursion-plan.md) and ADR 0021; until it ships, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
 
 The move job becomes fully automatic for `reserved` hosts (the DNS step was already automatic in Phase 2). This is where the IoT move becomes one click.
 
@@ -178,6 +179,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 - kea perfdhcp numbers are documented.
 - The failover pair passes the chaos test: a partner is killed mid-load and no duplicate leases result (DHCP-18).
 - The reference home-lab environment runs DHCP through Tenko for all four networks via relay.
+- The reference home-lab environment resolves through Tenko alone, with no upstream resolver, with DNSSEC validation on (the recursion plan's Internet smoke).
 
 ## Phase 4: AD integration and migration
 
@@ -215,7 +217,6 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 
 - **Multi-node data plane**: `dns` and `dhcp` nodes fed by the controllers through node sync, DHCP failover pairs, the cluster labs on VMs (E9, M2, M4 and M7 of Phase 1, deviation 74 of its exit document), the single-node figures of Phases 2 and 3 compared against the cluster (owner's direction of 2026-10-17: single node first).
 - **Multi-site ownership**: site-local Raft groups for the objects a site owns, so a cut-off site keeps changing its own prefixes, scopes and zones (OPS-27).
-- **Recursive resolver**: Tenko's own recursive resolver with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34). Until then, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
 - **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).
 - **Scaling hooks**: anycast health hooks (BGP withdrawal) and autoscaling hooks for the Kubernetes, Nomad and Proxmox APIs (OPS-17, OPS-18).
 - **Ecosystem**: Terraform provider, Ansible collection, webhooks, and a NetBox-compatible API for Proxmox SDN (API-06, API-07, CONN-17).

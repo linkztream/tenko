@@ -1,6 +1,6 @@
 # ADR 0007: Delivery order
 
-- Status: Accepted
+- Status: Accepted; the "later" part of point 2 (the recursive resolver in Phase 5) is superseded by ADR 0021 (2026-10-22)
 - Date: 2026-10-09
 
 ## Context

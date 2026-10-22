@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-20 Phase 3 requirements; 1 named by at least one test, 19 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 1 named by at least one test, 22 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -31,6 +31,9 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-16 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/plans/phase-3-plan.md`<br>`docs/reconciliation.md` |
 | DHCP-17 | Should | - | - | `docs/plans/phase-3-plan.md` |
 | DHCP-18 | Must | - | - | `docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/plans/phase-3-plan.md` |
+| DNS-03 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0007-delivery-order.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 4 more |
+| DNS-13 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0007-delivery-order.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 3 more |
+| DNS-34 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>`docs/plans/dns-recursion-plan.md`<br>and 2 more |
 | IPAM-21 | Must | `ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0005-ipam-intent-hub.md`<br>and 3 more |
 | MIG-16 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko/src/client/dhcp.rs`<br>`docs/MIGRATION.md`<br>and 3 more |
 
@@ -72,6 +75,9 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - DHCP-16 (Must)
 - DHCP-17 (Should)
 - DHCP-18 (Must)
+- DNS-03 (Should)
+- DNS-13 (Must)
+- DNS-34 (Should)
 - MIG-16 (Must)
 
 ### No test, measurement or document

@@ -60,7 +60,7 @@ Change rules:
 | External DHCP/DNS actuators | Not in Phase 1. Tenko's own engines in Phases 2 and 3 become the actuators; the Windows connector arrives in Phase 4 as a migration source | ADR 0005 |
 | Delivery order | Platform and IPAM first, then DNS, DHCP, AD integration and migration, then enterprise | ADR 0007 |
 | RDP/SSH | URI handoff first; HTML5 gateway as an opt-in module in a later phase | ADR 0007 |
-| Recursion | Forwarder + cache + RPZ first; own full recursive resolver later | ADR 0007 |
+| Recursion | Forwarder + cache + RPZ first (Phase 2); Tenko's own recursive resolver with DNSSEC validation in Phase 3, Slice 10 (the owner's decision REC-Q1 of 2026-10-22) | ADR 0007, ADR 0021 |
 | Distribution | Private repository now, written as if it will become public | ADR 0007 |
 
 ## Personas
@@ -188,7 +188,7 @@ Tenko DNS has three engines, not one, because AD clients expect a single server 
 |---|---|---|---|
 | DNS-01 | Authoritative engine serving all common RR types and unknown types (RFC 3597) over UDP and TCP. | 2 | Must |
 | DNS-02 | Forwarder/cache engine in the same server as the authoritative engine, with conditional forwarders per zone and stub zones. Recursive service is restricted by an ACL per view (TGL-22). | 2 | Must |
-| DNS-03 | Own full recursive resolver. Until it is delivered, recursion is provided by forwarder + cache + RPZ (DNS-02, DNS-21). | 5 | Should |
+| DNS-03 | Own full recursive resolver. Until it is delivered, recursion is provided by forwarder + cache + RPZ (DNS-02, DNS-21). | 3 (Slice 10) | Should |
 | DNS-04 | IPv6 parity: AAAA records, `ip6.arpa` reverse zones and IPv6 transport for every DNS function. | 2 | Must |
 | DNS-05 | TCP is mandatory and implemented per RFC 7766. | 2 | Must |
 | DNS-06 | EDNS(0) per RFC 6891 with a default UDP buffer size of 1232 bytes. | 2 | Must |
@@ -198,7 +198,7 @@ Tenko DNS has three engines, not one, because AD clients expect a single server 
 | DNS-10 | Catalog zones (RFC 9432). | 2 | Should |
 | DNS-11 | Dynamic updates per RFC 2136, authenticated with TSIG and restricted by ACLs. | 2 | Must |
 | DNS-12 | DNSSEC signing: online and offline signing, NSEC and NSEC3, automatic key rollover driven by CDS/CDNSKEY. | 2 | Must |
-| DNS-13 | DNSSEC validation in the resolver, with RFC 5011 trust anchor maintenance and negative trust anchors. | 5 | Must |
+| DNS-13 | DNSSEC validation in the resolver, with RFC 5011 trust anchor maintenance and negative trust anchors. | 3 (Slice 10) | Must |
 | DNS-14 | DoT and DoH served to clients. | 2 | Must |
 | DNS-15 | DoT and DoH used toward upstream forwarders. | 2 | Must |
 | DNS-16 | DoQ as server and as upstream transport. | 5 | Should |
@@ -219,7 +219,7 @@ Tenko DNS has three engines, not one, because AD clients expect a single server 
 | DNS-31 | Global Query Block List, with `wpad` and `isatap` as default entries. | 4 | Must |
 | DNS-32 | GlobalNames zone. | 4 | Should |
 | DNS-33 | Netmask ordering and round robin as toggles. | 4 | Should |
-| DNS-34 | Resolver QNAME minimization (RFC 9156) and aggressive use of the DNSSEC-validated cache (RFC 8198). | 5 | Should |
+| DNS-34 | Resolver QNAME minimization (RFC 9156) and aggressive use of the DNSSEC-validated cache (RFC 8198). | 3 (Slice 10) | Should |
 
 ## DHCP
 
