@@ -20,8 +20,11 @@
 //!   ([`CounterVec::seal_with_shards`]), which a family on a path of bounded throughput with
 //!   many series does to keep its memory small. A stripe starts on a 64-byte boundary and spans whole
 //!   cache lines, so two shards never share a line; the series of one family lie
-//!   contiguously inside a stripe. A thread picks its shard once, round-robin at its first
-//!   update, and keeps it.
+//!   contiguously inside a stripe. A worker thread on a hot path pins its shard with
+//!   [`pin_worker_shard`] before its first update: workers count up from the first shard, so
+//!   two of them never share one while there are no more workers than shards. Every other
+//!   thread picks its shard once, at its first update, counting down from the last shard,
+//!   and keeps it.
 //! - **Checking.** [`check`] is a strict line checker of the text [`encode`] writes, for the
 //!   tests of the crates that serve metrics.
 //! - **The update path** ([`CounterVec::inc`], [`HistogramVec::observe`]) is a thread-local
@@ -390,21 +393,44 @@ pub fn default_shards() -> usize {
     })
 }
 
-/// The next shard number handed to a thread at its first update.
+/// Shard numbers are counted modulo this, a multiple of every shard count, so that a shard
+/// number masked by any family's `shards - 1` keeps its place in the cycle.
+const SHARD_CYCLE: usize = MAX_SHARDS * 64;
+
+/// How many threads without a pinned shard have taken one.
 static NEXT_SHARD: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
-    /// The shard number of this thread (unmasked); `usize::MAX` until its first update.
+    /// The shard number of this thread (unmasked); `usize::MAX` until its first update or
+    /// its pin.
     static SHARD: Cell<usize> = const { Cell::new(usize::MAX) };
 }
 
-/// The shard number of the calling thread, assigned round-robin at its first call.
+/// The shard number of the `n`-th thread without a pinned shard: counting down from the
+/// last shard of every family, away from the pinned workers, which count up from the first.
+const fn unpinned_shard(n: usize) -> usize {
+    SHARD_CYCLE - 1 - n % SHARD_CYCLE
+}
+
+/// Pins the calling thread to shard `worker` of every family (modulo the family's shard
+/// count). A role whose workers update metrics on their hot path (the UDP workers of the
+/// `dns` role) calls it on each worker thread before its first update, with the worker's
+/// index among the role's workers: workers `0..n` take shards `0..n`, so two of them never
+/// share a shard, and its cache lines never move between their cores, while `n` is at most
+/// the family's shard count. Every other thread takes its shard at its first update,
+/// counting down from the last shard, so it meets a pinned worker only when the threads
+/// that update a family outnumber its shards. No allocation.
+pub fn pin_worker_shard(worker: usize) {
+    SHARD.with(|shard| shard.set(worker % SHARD_CYCLE));
+}
+
+/// The shard number of the calling thread: its pin, or else assigned at its first call.
 #[inline]
 fn thread_shard() -> usize {
     SHARD.with(|shard| {
         let current = shard.get();
         if current == usize::MAX {
-            let assigned = NEXT_SHARD.fetch_add(1, Ordering::Relaxed) % (MAX_SHARDS * 64);
+            let assigned = unpinned_shard(NEXT_SHARD.fetch_add(1, Ordering::Relaxed));
             shard.set(assigned);
             assigned
         } else {

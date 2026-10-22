@@ -151,17 +151,45 @@ impl HistogramVec {
         let Some(sum) = stripe.cell(base + width - 1) else {
             return;
         };
-        let mut bucket = self.bounds.len();
-        for (index, bound) in self.bounds.iter().enumerate() {
-            if value <= *bound {
-                bucket = index;
-                break;
-            }
-        }
-        if let Some(count) = stripe.cell(base + bucket) {
+        if let Some(count) = stripe.cell(base + self.bucket_of(value)) {
             count.fetch_add(1, Ordering::Relaxed);
             sum.fetch_add(value, Ordering::Relaxed);
         }
+    }
+
+    /// The bucket of `value`: the index of the first bound at or above it, or the number
+    /// of bounds for `+Inf`. What [`HistogramVec::observe`] counts into.
+    #[inline]
+    pub fn bucket_of(&self, value: u64) -> usize {
+        self.bounds
+            .iter()
+            .position(|bound| value <= *bound)
+            .unwrap_or(self.bounds.len())
+    }
+
+    /// Adds observations counted elsewhere to series `series`: `counts[b]` observations in
+    /// bucket `b` (as [`HistogramVec::bucket_of`] numbers them, `+Inf` last) whose values
+    /// sum to `sum`. A thread that observes on a hot path counts in its own memory and
+    /// merges in batches; the family then reads as if each had been observed. Buckets
+    /// beyond the family's are ignored. No allocation.
+    pub fn merge(&self, series: u16, counts: &[u64], sum: u64) {
+        let Some(sealed) = self.sealed() else {
+            return;
+        };
+        let width = self.width();
+        let base = usize::from(series) * width;
+        let stripe = sealed.stripes.local();
+        let Some(total) = stripe.cell(base + width - 1) else {
+            return;
+        };
+        for (bucket, count) in counts.iter().enumerate().take(width - 1) {
+            if *count > 0
+                && let Some(cell) = stripe.cell(base + bucket)
+            {
+                cell.fetch_add(*count, Ordering::Relaxed);
+            }
+        }
+        total.fetch_add(sum, Ordering::Relaxed);
     }
 
     /// The number of shards (0 before sealing).

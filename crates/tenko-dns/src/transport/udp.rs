@@ -135,9 +135,16 @@ pub(crate) fn spawn<R: Resolver + 'static>(
         let responder = Arc::clone(responder);
         let stop = Arc::clone(stop);
         let local = bound.local;
+        let index = first_index + worker;
         let handle = std::thread::Builder::new()
-            .name(format!("dns-udp-{}", first_index + worker))
-            .spawn(move || run(&socket, local, &responder, &stop, &counters))?;
+            .name(format!("dns-udp-{index}"))
+            .spawn(move || {
+                // M22: each worker counts on a metrics shard of its own, numbered across
+                // every listen address, so no two workers share the cache lines of the
+                // query families (tenko_core::metrics::pin_worker_shard).
+                tenko_core::metrics::pin_worker_shard(index);
+                run(&socket, local, &responder, &stop, &counters);
+            })?;
         workers.push((handle, slot));
     }
     Ok(workers)
@@ -164,6 +171,8 @@ fn run<R: Resolver>(
                         | io::ErrorKind::Interrupted
                 ) =>
             {
+                // M22: an idle socket flushes the counts of the last queries.
+                scratch.flush_counts();
                 continue;
             }
             // Windows reports the ICMP port unreachable of an earlier answer as a reset on

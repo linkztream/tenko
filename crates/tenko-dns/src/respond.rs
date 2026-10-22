@@ -21,12 +21,15 @@
 //!    truncation rules; an answer it cannot write becomes SERVFAIL.
 //! 6. With metrics on, the query is counted by transport, view and RCODE and its time from
 //!    arrival to answer goes into the latency histogram, both on the worker's shard; the
-//!    query log sink gets one entry without blocking.
+//!    query log sink gets one entry without blocking. A UDP worker counts its queries in
+//!    its scratch and adds them to the shared families in batches (M22): every 128
+//!    queries, a second after the first query of a batch, and when its socket is idle
+//!    ([`Scratch::flush_counts`]).
 
 use std::{
     net::SocketAddr,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use tenko_core::dns::{ForwardRuleId, QueryTransport, ViewId};
@@ -54,6 +57,8 @@ pub struct Scratch {
     answer: AnswerBuf,
     /// The answer's octets after [`Responder::respond`] returned [`Reply::Send`].
     pub out: Vec<u8>,
+    // M22: the UDP queries counted since the last flush.
+    batch: Batch,
 }
 
 impl Default for Scratch {
@@ -69,7 +74,98 @@ impl Scratch {
             request: Request::default(),
             answer: AnswerBuf::with_capacity(ANSWER_RECORDS, ANSWER_ARENA),
             out: Vec::with_capacity(MAX_MESSAGE_LEN),
+            batch: Batch::default(),
         }
+    }
+
+    // M22: the counts of a UDP worker go to the families in batches.
+
+    /// Adds the UDP queries counted since the last flush to the shared metric families.
+    /// A UDP worker calls it when its socket is idle, so that the counts never wait for
+    /// the next query; dropping the scratch flushes too. No allocation.
+    pub fn flush_counts(&mut self) {
+        self.batch.flush();
+    }
+}
+
+// M22: the query path's counts of one UDP worker, added to the families in batches.
+
+/// Series of the query counter a UDP query falls into: two views by the RCODEs of
+/// [`metrics::RCODES`]; for UDP, [`metrics::query_index`] numbers them from 0.
+const UDP_SERIES: usize = 20;
+
+/// The latency buckets: the bounds of [`metrics::LATENCY_BUCKETS_US`] and `+Inf`.
+const UDP_BUCKETS: usize = metrics::LATENCY_BUCKETS_US.len() + 1;
+
+/// A batch goes to the families after this many queries...
+const BATCH_QUERIES: u32 = 128;
+
+/// ...or once its first query is this old, whichever comes first.
+const BATCH_AGE: Duration = Duration::from_secs(1);
+
+/// The UDP queries a worker answered since its last flush: plain integers in the worker's
+/// own scratch, so that a query costs a few increments of lines the worker just wrote
+/// rather than atomic adds on the lines of two shared families (M22). The families read as
+/// if every query had been counted on its own, a batch late at most.
+#[derive(Debug, Default)]
+struct Batch {
+    queries: [u32; UDP_SERIES],
+    buckets: [u32; UDP_BUCKETS],
+    sum: u64,
+    pending: u32,
+    since: Option<Instant>,
+}
+
+impl Batch {
+    /// Counts one UDP query that arrived at `now`, flushing first when the batch is due.
+    #[inline]
+    fn count(&mut self, named: bool, rcode: u16, micros: u64, now: Instant) {
+        if self.pending >= BATCH_QUERIES
+            || self
+                .since
+                .is_some_and(|since| now.saturating_duration_since(since) >= BATCH_AGE)
+        {
+            self.flush();
+        }
+        let series = usize::from(metrics::query_index(QueryTransport::Udp, named, rcode));
+        let bucket = metrics::QUERY_LATENCY.bucket_of(micros);
+        if let (Some(queries), Some(count)) =
+            (self.queries.get_mut(series), self.buckets.get_mut(bucket))
+        {
+            *queries += 1;
+            *count += 1;
+            self.sum = self.sum.wrapping_add(micros);
+            self.pending += 1;
+            self.since.get_or_insert(now);
+        }
+    }
+
+    /// Adds the counts to the families and starts a new batch.
+    fn flush(&mut self) {
+        if self.pending == 0 {
+            return;
+        }
+        for (series, queries) in (0_u16..).zip(self.queries.iter_mut()) {
+            if *queries > 0 {
+                metrics::QUERY_COUNTER.add(series, u64::from(*queries));
+                *queries = 0;
+            }
+        }
+        let mut counts = [0_u64; UDP_BUCKETS];
+        for (total, count) in counts.iter_mut().zip(self.buckets.iter_mut()) {
+            *total = u64::from(*count);
+            *count = 0;
+        }
+        metrics::QUERY_LATENCY.merge(metrics::proto_index(QueryTransport::Udp), &counts, self.sum);
+        self.sum = 0;
+        self.pending = 0;
+        self.since = None;
+    }
+}
+
+impl Drop for Batch {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -381,6 +477,7 @@ impl<R: Resolver> Responder<R> {
             request,
             answer,
             out,
+            batch,
         } = scratch;
         // WP6.2: an UPDATE leaves the query path; the path answers it through the reply
         // path of the transport.
@@ -408,7 +505,7 @@ impl<R: Resolver> Responder<R> {
                 if !wire::write_formerr(message, out) {
                     return Reply::Drop;
                 }
-                self.finish(conn, None, None, rcode::FORMERR, false, clock, now);
+                self.finish(batch, conn, None, None, rcode::FORMERR, false, clock, now);
                 return Reply::Send;
             }
         };
@@ -453,6 +550,7 @@ impl<R: Resolver> Responder<R> {
                         answer.clear();
                         answer.rcode = rcode::SERVFAIL;
                         return self.build(
+                            batch,
                             conn,
                             request,
                             view,
@@ -482,7 +580,7 @@ impl<R: Resolver> Responder<R> {
                     match sink.intake(&intake, out) {
                         Intake::Forward => return Reply::Forward { view, rule },
                         Intake::Answered { rcode } => {
-                            self.finish(conn, Some(request), view, rcode, true, clock, now);
+                            self.finish(batch, conn, Some(request), view, rcode, true, clock, now);
                             return Reply::Send;
                         }
                         Intake::Refuse { ede } => {
@@ -497,6 +595,7 @@ impl<R: Resolver> Responder<R> {
             }
         }
         self.build(
+            batch,
             conn,
             request,
             view,
@@ -517,6 +616,7 @@ impl<R: Resolver> Responder<R> {
     )]
     fn build(
         &self,
+        batch: &mut Batch,
         conn: &Conn,
         request: &Request,
         view: Option<ViewId>,
@@ -548,7 +648,16 @@ impl<R: Resolver> Responder<R> {
                 return Reply::Drop;
             }
         }
-        self.finish(conn, Some(request), view, answer.rcode, false, clock, now);
+        self.finish(
+            batch,
+            conn,
+            Some(request),
+            view,
+            answer.rcode,
+            false,
+            clock,
+            now,
+        );
         Reply::Send
     }
 
@@ -603,6 +712,7 @@ impl<R: Resolver> Responder<R> {
     )]
     fn finish(
         &self,
+        batch: &mut Batch,
         conn: &Conn,
         request: Option<&Request>,
         view: Option<ViewId>,
@@ -616,8 +726,18 @@ impl<R: Resolver> Responder<R> {
         }
         let micros = u64::try_from(now.elapsed().as_micros()).unwrap_or(u64::MAX);
         if self.metrics {
-            metrics::QUERY_COUNTER.inc(metrics::query_index(conn.transport, view.is_some(), rcode));
-            metrics::QUERY_LATENCY.observe(metrics::proto_index(conn.transport), micros);
+            // M22: a UDP worker counts in its scratch and flushes in batches; the other
+            // transports (tokio threads, a scratch per thread) count on the families.
+            if conn.transport == QueryTransport::Udp {
+                batch.count(view.is_some(), rcode, micros, now);
+            } else {
+                metrics::QUERY_COUNTER.inc(metrics::query_index(
+                    conn.transport,
+                    view.is_some(),
+                    rcode,
+                ));
+                metrics::QUERY_LATENCY.observe(metrics::proto_index(conn.transport), micros);
+            }
         }
         if self.log_on {
             self.log.record(&QueryLogEntry {
@@ -633,5 +753,120 @@ impl<R: Resolver> Responder<R> {
                 duration_micros: u32::try_from(micros).unwrap_or(u32::MAX),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::Revision;
+
+    use super::*;
+    use crate::{
+        authoritative::Authoritative,
+        catalog::{Catalog, CatalogHandle},
+        feed::DnsData,
+    };
+
+    /// `example.test` A, no EDNS, no cookie.
+    fn query() -> Vec<u8> {
+        let mut message = vec![0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
+        message.extend_from_slice(b"\x07example\x04test\x00\x00\x01\x00\x01");
+        message
+    }
+
+    /// The queries counted on the families for a transport, over its 20 series.
+    fn counted(transport: QueryTransport) -> u64 {
+        let first = metrics::query_index(transport, false, 0);
+        (first..first + 20)
+            .map(|series| metrics::QUERY_COUNTER.get(series))
+            .sum()
+    }
+
+    fn timed(transport: QueryTransport) -> u64 {
+        metrics::QUERY_LATENCY
+            .get(metrics::proto_index(transport))
+            .count()
+    }
+
+    #[test]
+    fn udp_counts_reach_the_families_in_batches() {
+        let catalog = CatalogHandle::new(Catalog::build(&DnsData::at(Revision(1))));
+        let responder = Responder::new(
+            Authoritative::new(catalog),
+            CookieSecret::with_secret([5; 16]),
+        )
+        .with_metrics(true);
+        let message = query();
+        let clock = Clock::now();
+        let conn = |transport| Conn {
+            client: "192.0.2.77:40000".parse().expect("client"),
+            local: "192.0.2.53:53".parse().expect("local"),
+            transport,
+        };
+        let udp = conn(QueryTransport::Udp);
+        let mut scratch = Scratch::new();
+        let (before, timed_before) = (counted(QueryTransport::Udp), timed(QueryTransport::Udp));
+        let now = Instant::now();
+        let ask = |at: Instant, scratch: &mut Scratch| {
+            assert_eq!(
+                responder.respond(&message, &udp, &clock, at, scratch),
+                Reply::Send
+            );
+        };
+        for _ in 0..BATCH_QUERIES {
+            ask(now, &mut scratch);
+        }
+        assert_eq!(counted(QueryTransport::Udp), before, "a batch waits");
+        ask(now, &mut scratch);
+        assert_eq!(
+            counted(QueryTransport::Udp),
+            before + 128,
+            "a full batch goes"
+        );
+        assert_eq!(timed(QueryTransport::Udp), timed_before + 128);
+        scratch.flush_counts();
+        assert_eq!(counted(QueryTransport::Udp), before + 129, "an idle flush");
+        ask(now, &mut scratch);
+        ask(now + BATCH_AGE, &mut scratch);
+        assert_eq!(
+            counted(QueryTransport::Udp),
+            before + 130,
+            "an old batch goes"
+        );
+        drop(scratch);
+        assert_eq!(
+            counted(QueryTransport::Udp),
+            before + 131,
+            "a dropped scratch"
+        );
+        assert_eq!(timed(QueryTransport::Udp), timed_before + 131);
+
+        // The other transports count on the families at once.
+        let tcp_before = counted(QueryTransport::Tcp);
+        let mut scratch = Scratch::new();
+        let reply = responder.respond(
+            &message,
+            &conn(QueryTransport::Tcp),
+            &clock,
+            Instant::now(),
+            &mut scratch,
+        );
+        assert_eq!(reply, Reply::Send);
+        assert_eq!(counted(QueryTransport::Tcp), tcp_before + 1);
+    }
+
+    #[test]
+    fn every_udp_series_fits_the_batch() {
+        for named in [false, true] {
+            for rcode in [0, 1, 2, 3, 4, 5, 9, 16, 23, 7] {
+                let series = metrics::query_index(QueryTransport::Udp, named, rcode);
+                assert!(usize::from(series) < UDP_SERIES);
+            }
+        }
+        assert_eq!(
+            metrics::QUERY_LATENCY.bucket_of(u64::MAX),
+            UDP_BUCKETS - 1,
+            "+Inf is the last bucket"
+        );
     }
 }

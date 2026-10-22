@@ -191,3 +191,85 @@ fn the_index_holds_its_bytes_for_the_m18_data_set() {
     assert_eq!(stats.base_rrsets, rrsets);
     assert!(index_bytes > 0);
 }
+
+/// The SOA and NS RRsets of a small zone, as the reconciler creates a reverse zone.
+fn apex_sets(zone: &Zone, stamp: &Stamp) -> Vec<RrSet> {
+    [
+        RecordData::Soa {
+            mname: name("ns1.example.test"),
+            rname: name("hostmaster.example.test"),
+            serial: 1,
+            refresh: 3600,
+            retry: 900,
+            expire: 604_800,
+            minimum: 300,
+        },
+        RecordData::Ns {
+            host: name("ns1.example.test"),
+        },
+    ]
+    .iter()
+    .map(|record| RrSet {
+        zone: zone.id,
+        scope: ScopeName::DEFAULT,
+        name: zone.name.clone(),
+        rtype: record.rtype(),
+        ttl: 3600,
+        rdata: vec![Rdata::from_data(record)],
+        origin: Origin::Ipam,
+        key: None,
+        updated: stamp.clone(),
+    })
+    .collect()
+}
+
+#[test]
+#[allow(clippy::cast_precision_loss, reason = "sizes for the report")]
+#[ignore = "M23: a measurement; run it by hand in release with --nocapture"]
+fn a_small_zone_costs_the_catalog_a_few_kib() {
+    const ZONES: usize = 195;
+    let stamp = Stamp::new(
+        "2026-10-22T12:00:00Z".parse().expect("a time"),
+        Principal::system(SystemComponent::Dns),
+    );
+    let zones: Vec<Zone> = (0..ZONES)
+        .map(|n| zone(&format!("{}.{}.10.in-addr.arpa", n % 250, n / 250), &stamp))
+        .collect();
+    // Built at once from an image (a start).
+    let mut data = DnsData::at(Revision(1));
+    for zone in &zones {
+        for set in apex_sets(zone, &stamp) {
+            data.rrsets.insert(set.key(), set);
+        }
+        data.zones.insert(zone.id, zone.clone());
+    }
+    let region = Region::new(GLOBAL);
+    let built = tenko_dns::catalog::Catalog::build(&data);
+    let built_bytes = held(&region);
+    drop(built);
+    // Applied one zone at a time (a running node: the reconciler creates them one by one).
+    let empty = DnsData::at(Revision(1));
+    let mut catalog = tenko_dns::catalog::Catalog::build(&empty);
+    let region = Region::new(GLOBAL);
+    for (n, zone) in zones.iter().enumerate() {
+        let from = Revision(1 + n as u64);
+        let mut changes = vec![tenko_dns::feed::Change::Zone(zone.id, Some(zone.clone()))];
+        for set in apex_sets(zone, &stamp) {
+            changes.push(tenko_dns::feed::Change::RrSet(set.key(), Some(set)));
+        }
+        let delta = tenko_dns::feed::Delta {
+            from,
+            to: Revision(from.0 + 1),
+            changes,
+        };
+        catalog = catalog.apply(&delta).expect("a delta in order");
+    }
+    let applied_bytes = held(&region);
+    println!(
+        "M23 catalog memory: {ZONES} zones of two RRsets; built at once {:.0} B per zone, \
+         applied one at a time {:.0} B per zone",
+        built_bytes as f64 / ZONES as f64,
+        applied_bytes as f64 / ZONES as f64,
+    );
+    drop(catalog);
+}

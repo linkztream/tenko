@@ -5,7 +5,7 @@
 
 use tenko_core::{
     dns::QueryTransport,
-    metrics::{Counter, CounterVec, Desc, Gauge, HistogramVec, Registry},
+    metrics::{Counter, CounterVec, Desc, Gauge, HistogramVec, MAX_SHARDS, Registry},
 };
 
 /// Query latency buckets in microseconds: 50 µs to 2 s.
@@ -219,6 +219,9 @@ pub fn query_index(transport: QueryTransport, named: bool, rcode: u16) -> u16 {
     (proto_index(transport) * 2 + u16::from(named)) * 10 + rcode_index(rcode)
 }
 
+/// The shards of the query families: one for each UDP worker, up to the most a family has.
+pub const QUERY_SHARDS: usize = MAX_SHARDS;
+
 /// Seals the engine's own families with every series, once per process. Allocates; the
 /// updates after it do not.
 pub fn seal() {
@@ -231,10 +234,14 @@ pub fn seal() {
         }
     }
     let series: Vec<&[&str]> = rows.iter().map(|row| &row[..]).collect();
-    QUERY_COUNTER.seal(&series);
+    // M22: the query path counts on a shard per UDP worker (each pins its own, numbered
+    // across every listen address), so these two families take the most shards rather
+    // than one per CPU: a node listening on two addresses runs twice as many workers as
+    // CPUs by default. About 38 KiB for both.
+    QUERY_COUNTER.seal_with_shards(&series, QUERY_SHARDS);
     let protos: Vec<[&str; 1]> = PROTOS.iter().map(|proto| [*proto]).collect();
     let series: Vec<&[&str]> = protos.iter().map(|row| &row[..]).collect();
-    QUERY_LATENCY.seal(&series);
+    QUERY_LATENCY.seal_with_shards(&series, QUERY_SHARDS);
     // The fixed families seal at their first use; using them once here keeps that
     // allocation off the query path.
     CACHE_HIT_COUNTER.add(0, 0);
@@ -281,6 +288,8 @@ mod tests {
 "
         ));
         assert_eq!(QUERY_COUNTER.len(), 80);
+        assert_eq!(QUERY_COUNTER.shards(), QUERY_SHARDS, "a shard per worker");
+        assert_eq!(QUERY_LATENCY.shards(), QUERY_SHARDS);
         let mut seen = std::collections::BTreeSet::new();
         for transport in [
             QueryTransport::Udp,

@@ -14,8 +14,8 @@
 //! `bench/README.md` and `acceptance_observability.rs`: one line `Verdict: <word>`,
 //! optionally followed by ` (<qualifier>)`, in the lines right below the title. The tests
 //! read files only, so they run anywhere. The two E21 tests are ignored while E21 is not
-//! met (M22 and M23 FAIL, deviations 145 and 146 of `docs/plans/phase-2-exit.md`); run
-//! them with `--run-ignored all` once the fixes and the new results are in.
+//! met: M22 passes since the follow-up of 2026-10-22, M23 still fails (deviations 145 and 146
+//! of `docs/plans/phase-2-exit.md`); run them with `--run-ignored all` once M23 passes.
 
 use std::path::{Path, PathBuf};
 
@@ -122,7 +122,7 @@ fn e13_dns_27_the_newest_m17_run_over_a_real_link_is_documented() {
 /// E13 and E21, OPS-21: the metrics cost on the query path over the link (M22, the M8 of
 /// Phase 1 again with the DNS engine) is within its budget: below 2 percent, p99 unchanged.
 #[test]
-#[ignore = "E21 is not met: M22 and M23 FAIL (phase-2-exit.md deviations 145 and 146); run when they are fixed"]
+#[ignore = "E21 is not met: M23 FAILs (phase-2-exit.md deviation 145; M22 passes since 2026-10-22); run when M23 passes"]
 fn e21_ops_21_the_newest_m22_metrics_cost_over_the_link_passes() {
     let path = newest_result("m22");
     let (_, line) = verdict(&path, "E21 (OPS-21), M22");
@@ -151,7 +151,7 @@ fn e13_ops_21_the_link_figures_are_recorded_with_and_without_metrics() {
 /// zones and a cache at its 10,000-entry bound is below 100 MB on the musl binary (M23, the
 /// M9 of Phase 1 again).
 #[test]
-#[ignore = "E21 is not met: M22 and M23 FAIL (phase-2-exit.md deviations 145 and 146); run when they are fixed"]
+#[ignore = "E21 is not met: M23 FAILs (phase-2-exit.md deviation 145; M22 passes since 2026-10-22); run when M23 passes"]
 fn e21_ops_15_the_newest_m23_idle_rss_with_every_role_and_a_full_cache_passes() {
     let path = newest_result("m23");
     let (text, line) = verdict(&path, "E21 (OPS-15), M23");

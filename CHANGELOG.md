@@ -202,6 +202,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - In a controller cluster the connectors are polled on schedule by the leader only; every controller still runs the plugins, their health checks and the runs a person asks for.
 - An import with credential columns is refused, like storing a secret by hand, while another account that may reveal secrets signs in with a PIN alone; the preview names the accounts.
 - The monospace font is served with a content-hashed name and cached for a year, like the other build output; it was revalidated on every page load before.
+- DNS metrics cost less on the query path: each UDP worker counts on a metrics shard of its own and adds its query counts and latencies to the shared metrics in batches (every 128 queries, a second after the first, and when it is idle), so a scrape may see a UDP query up to a second late; release builds are optimised as one unit, which makes the Linux binary about a fifth smaller and an idle node about 6 MiB smaller, and takes longer to build.
 
 ### Fixed
 

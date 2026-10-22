@@ -39,6 +39,10 @@
 #                compare): by default both servers at once with half the last --workers
 #                count each (--metrics-mode together), so that the hypervisor's noise
 #                hits both alike; `tenko serve` has no metrics switch (docs/dns.md 12.7)
+#                (the ports swap every pair, which server starts first every two pairs, so
+#                that neither the port nor the start order follows the metrics; with
+#                --metrics-control both servers run with the metrics off, an A/A run
+#                whose cost is the design's own bias)
 #   m23          M23: the instance stopped; an upstream (the example server) on the load
 #                host; bench/phase1-server/m9-idle-rss.sh on the node with the roles
 #                controller,probe,dns, ten home zones and the cache filled to its bound
@@ -75,6 +79,8 @@
 #   --metrics-mode M     together (default: an on and an off server at once, half the
 #                        workers and half the rate each) or alternate (one server, on and
 #                        off one after the other)
+#   --metrics-control    M22's A/A control: the server on the "on" side runs with the
+#                        metrics off too (together mode only)
 #   --api-port N         the instance's API on 127.0.0.1 (default 18443)
 #   --dns-port N         UDP and TCP (default 15353); DoT and DoH on --dot-port (15853)
 #                        and --doh-port (15443); M23's upstream on the load host on
@@ -96,7 +102,7 @@ NODE=""; NODE_ADDR=""; LOAD=""; LOAD_ADDR=""; SERVER_BINARY=""; HARNESS=""; EXAM
 DATA=""; PHASES="prepare dnsperf tls flame harness workstation metrics m23 stop report"
 WORKERS="1 2 4"; RUNS=2; PAIRS=3; DURATION=30; THREADS=8; CLIENTS=64; OUTSTANDING=1024; TCP_OUTSTANDING=4096
 FLAME_RATE=10000; METRICS_RATE=200000; METRICS_MODE=together; API_PORT=18443; DNS_PORT=15353; DOT_PORT=15853; DOH_PORT=15443
-UPSTREAM_PORT=15354; REMOTE_DIR=m17; OUT=""; IDLE_SECS=600; M23_PREFIXES=200; M23_HOME=1
+UPSTREAM_PORT=15354; REMOTE_DIR=m17; OUT=""; IDLE_SECS=600; M23_PREFIXES=200; M23_HOME=1; METRICS_CONTROL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
@@ -119,6 +125,7 @@ while [ $# -gt 0 ]; do
     --flame-rate) FLAME_RATE="$2"; shift 2 ;;
     --metrics-rate) METRICS_RATE="$2"; shift 2 ;;
     --metrics-mode) METRICS_MODE="$2"; shift 2 ;;
+    --metrics-control) METRICS_CONTROL=1; shift ;;
     --api-port) API_PORT="$2"; shift 2 ;;
     --dns-port) DNS_PORT="$2"; shift 2 ;;
     --dot-port) DOT_PORT="$2"; shift 2 ;;
@@ -519,14 +526,24 @@ if has_phase metrics; then
     # Together: two example servers at once, one with the metrics on and one with them off,
     # each with half the workers and half the rate, loaded by two dnsperf processes in the
     # same window, so that whatever else the hypervisor does at that moment costs both the
-    # same. The ports swap from pair to pair.
+    # same. The ports swap from pair to pair and the start order every two pairs, so that
+    # neither follows the metrics (WP6.5 started the server with the metrics on first in
+    # every pair). With --metrics-control the "on" side runs with the metrics off too: the
+    # cost such a run reports is the design's own bias.
     half=$((FULL / 2)); [ "$half" -ge 1 ] || half=1
     rate=$((METRICS_RATE / 2)); threads=$((THREADS / 2)); [ "$threads" -ge 1 ] || threads=1
+    m_on=on; kind=together
+    [ "$METRICS_CONTROL" = 1 ] && { m_on=off; kind=control; }
     for i in $(seq 1 "$PAIRS"); do
       if [ $((i % 2)) = 1 ]; then p_on=$DNS_PORT; p_off=$((DNS_PORT + 10)); else p_on=$((DNS_PORT + 10)); p_off=$DNS_PORT; fi
-      node_do example-start "$half" "$NODE_ADDR:$p_on" on on
-      node_do example-start "$half" "$NODE_ADDR:$p_off" off off
-      l_on="metrics-together-on-w$half-rate$rate-p$i"; l_off="metrics-together-off-w$half-rate$rate-p$i"
+      if [ $(((i - 1) / 2 % 2)) = 0 ]; then
+        node_do example-start "$half" "$NODE_ADDR:$p_on" "$m_on" on
+        node_do example-start "$half" "$NODE_ADDR:$p_off" off off
+      else
+        node_do example-start "$half" "$NODE_ADDR:$p_off" off off
+        node_do example-start "$half" "$NODE_ADDR:$p_on" "$m_on" on
+      fi
+      l_on="metrics-$kind-on-w$half-rate$rate-p$i"; l_off="metrics-$kind-off-w$half-rate$rate-p$i"
       a0=$(on_node "bash $RD/node.sh cpu example-on"); b0=$(on_node "bash $RD/node.sh cpu example-off"); s0=$(load_stat); t0=$(now)
       on_load "for x in 'on $p_on $l_on' 'off $p_off $l_off'; do set -- \$x; bash $RD/scripts/run-dnsperf.sh --server $NODE_ADDR --port \$2 --names $RD/queries.txt --transport udp --rates $rate --duration $DURATION --threads $threads --clients $((CLIENTS / 2)) --outstanding $((OUTSTANDING / 2)) --extra '-O latency-histogram' --out-dir $RD/raw/\$3 > /dev/null 2>&1 & done; wait"
       t1=$(now); s1=$(load_stat); a1=$(on_node "bash $RD/node.sh cpu example-on"); b1=$(on_node "bash $RD/node.sh cpu example-off")

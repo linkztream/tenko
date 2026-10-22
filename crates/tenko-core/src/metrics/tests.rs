@@ -410,3 +410,74 @@ fn labels_compare_and_serialize_in_order() {
         "[\"a\",\"b\"]"
     );
 }
+
+#[test]
+fn pinned_workers_never_share_a_shard() {
+    for shards in [1, 2, 4, 8, MAX_SHARDS] {
+        let stripes = Arc::new(Stripes::new(80, shards));
+        let taken: std::collections::HashSet<usize> = (0..shards)
+            .map(|worker| {
+                let stripes = Arc::clone(&stripes);
+                std::thread::spawn(move || {
+                    pin_worker_shard(worker);
+                    std::ptr::from_ref(&stripes.local().lines[0]).addr()
+                })
+                .join()
+                .expect("a worker")
+            })
+            .collect();
+        assert_eq!(taken.len(), shards, "{shards} workers on {shards} shards");
+    }
+}
+
+#[test]
+fn unpinned_threads_count_down_from_the_last_shard() {
+    for shards in [1, 2, 4, 8, MAX_SHARDS] {
+        let mask = shards - 1;
+        for n in 0..shards {
+            assert_eq!(unpinned_shard(n) & mask, mask - n, "thread {n} of {shards}");
+        }
+        assert_eq!(unpinned_shard(SHARD_CYCLE) & mask, mask, "the cycle wraps");
+    }
+    // A pinned worker keeps its shard: a pin is not replaced at the first update.
+    std::thread::spawn(|| {
+        pin_worker_shard(1);
+        assert_eq!(thread_shard(), 1);
+        assert_eq!(thread_shard(), 1);
+    })
+    .join()
+    .expect("a worker");
+}
+
+#[test]
+fn merged_counts_read_as_if_each_value_had_been_observed() {
+    static OBSERVED: HistogramVec = HistogramVec::new(
+        Desc::histogram(
+            "test_observed_seconds",
+            "Observed.",
+            LATENCY_BOUNDS,
+            1_000_000,
+        )
+        .labels(&["class"]),
+    );
+    static MERGED: HistogramVec = HistogramVec::new(
+        Desc::histogram("test_merged_seconds", "Merged.", LATENCY_BOUNDS, 1_000_000)
+            .labels(&["class"]),
+    );
+    OBSERVED.seal(&[&["a"], &["b"]]);
+    MERGED.seal(&[&["a"], &["b"]]);
+    let values = [0, 250, 251, 999, 1_000, 2_600, 5_000_000, 7];
+    let mut counts = [0_u64; 6];
+    let mut sum = 0;
+    for value in values {
+        OBSERVED.observe(1, value);
+        counts[MERGED.bucket_of(value)] += 1;
+        sum += value;
+    }
+    MERGED.merge(1, &counts, sum);
+    // A bucket beyond the family's is ignored.
+    MERGED.merge(1, &[0, 0, 0, 0, 0, 0, 9], 0);
+    assert_eq!(MERGED.get(1), OBSERVED.get(1));
+    assert_eq!(MERGED.get(0).count(), 0);
+    assert_eq!(MERGED.bucket_of(5_000_000), LATENCY_BOUNDS.len());
+}

@@ -30,6 +30,17 @@ debug = 2
 [profile.dev-full.package."*"]
 debug = 2
 
+# M23 (OPS-15, deviation 145 of docs/plans/phase-2-exit.md): the code segment is most of a
+# node's idle resident set, since every page of code a node runs once stays mapped. Whole-
+# program optimisation in one unit makes the musl binary a fifth smaller (113.9 against
+# 143.7 MiB; 77.8 against 82.8 MiB of code, 20.9 against 26.2 MiB of read-only data) and the
+# idle node of the M9 procedure about 6.4 MiB smaller. Its cost
+# is build time: the musl release build takes about 13 minutes instead of 3. The dev profile,
+# the tests and the gates are untouched.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
