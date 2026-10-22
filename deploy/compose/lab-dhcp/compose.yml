@@ -1,0 +1,238 @@
+# The DHCP lab (WP7.6): four client networks behind one gateway that relays every one of
+# them to one Tenko node, the topology of E23 (docs/plans/phase-3-plan.md section 2.5). A
+# lab, not a deployment: the addresses are documentation values (RFC 5737), the MACs those
+# of RFC 7042, and nothing is published on the host. README.md has the commands; smoke.sh
+# runs the rows.
+#
+#   servers 192.0.2.0/26     the node (.10), the gateway (.2), the tester (.20), a client
+#   lan     192.0.2.64/26    the gateway (.66), a client
+#   iot     192.0.2.128/26   the gateway (.130), a client
+#   guest   192.0.2.192/26   the gateway (.194), a client
+#
+# - relay: the gateway. ISC's dhcrelay relays all four networks to the node, the node's own
+#   network included, so the node runs in relay mode and never sees a broadcast; it adds
+#   option 82 with the network's name as the circuit-id. It also routes between the
+#   networks (a renewal is a unicast from the client to the node).
+# - netns: owns the node's network namespace and its route to the other networks through
+#   the gateway; the node joins it. Ports below 1024 are open to the node's user there
+#   (net.ipv4.ip_unprivileged_port_start), so the node needs no capability for port 67.
+# - tenko (profile tenko): the node from the musl image (deploy/Dockerfile) with the roles
+#   controller and dhcp, the dhcp listener in relay mode on 192.0.2.10:67, the API in plain
+#   HTTP (the Lab profile) on 8443, its data on a volume. smoke.sh writes tenko.toml into
+#   LAB_DIR.
+# - node-example (profile example): until the binary has the dhcp role, the engine's
+#   example server (example.Dockerfile) with the in-memory reference store, on the same
+#   address. It serves one scope, 198.18.0.0/15, that only option 118 or the link
+#   selection sub-option selects, so only the tester's rows run against it.
+# - client-servers, client-lan, client-iot, client-guest: dhclient (and busybox udhcpc) in
+#   the tools image, one per network, each with a fixed MAC.
+# - tester: perfdhcp (Kea) and relay-test.py, a relay agent on the servers network.
+#
+# Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
+# file, required), TENKO_IMAGE (default tenko:lab), TOOLS_IMAGE (default
+# tenko-dhcp-lab-tools:latest), EXAMPLE_IMAGE (default tenko-dhcp-lab-example:latest).
+
+name: ${COMPOSE_PROJECT_NAME:-tenkodhcplab}
+
+x-tools: &tools
+  image: ${TOOLS_IMAGE:-tenko-dhcp-lab-tools:latest}
+  restart: "no"
+  stop_grace_period: 1s
+
+x-client: &client
+  <<: *tools
+  entrypoint: ["/lab/client.sh"]
+  # dhclient needs a raw socket and sets the address and the route.
+  cap_add:
+    - NET_ADMIN
+    - NET_RAW
+
+services:
+  relay:
+    <<: *tools
+    entrypoint: ["/lab/relay.sh"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      NODE: 192.0.2.10
+      UPSTREAM: servers
+      NETWORKS: "servers=192.0.2.2 lan=192.0.2.66 iot=192.0.2.130 guest=192.0.2.194"
+    networks:
+      servers:
+        ipv4_address: 192.0.2.2
+      lan:
+        ipv4_address: 192.0.2.66
+      iot:
+        ipv4_address: 192.0.2.130
+      guest:
+        ipv4_address: 192.0.2.194
+
+  netns:
+    <<: *tools
+    entrypoint: ["/lab/netns.sh"]
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    environment:
+      GATEWAY: 192.0.2.2
+      ROUTES: 192.0.2.0/24
+    # The API of the node is reached from the host on this address; nothing is published.
+    networks:
+      servers:
+        ipv4_address: 192.0.2.10
+
+  tenko:
+    profiles: ["tenko"]
+    image: ${TENKO_IMAGE:-tenko:lab}
+    command: ["--roles", "controller,dhcp", "--config", "/lab/tenko.toml"]
+    network_mode: "service:netns"
+    depends_on:
+      - netns
+      - relay
+    # smoke.sh restarts it on purpose; nothing restarts it behind its back.
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/kek
+      TENKO_HIBP__ONLINE: "false"
+      TENKO_UPDATES__AIR_GAPPED: "true"
+    secrets:
+      - kek
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
+      interval: 5s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    volumes:
+      - "tenko-data:/var/lib/tenko"
+      - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  node-example:
+    profiles: ["example"]
+    image: ${EXAMPLE_IMAGE:-tenko-dhcp-lab-example:latest}
+    command:
+      - serve
+      - --listen
+      - 192.0.2.10:67
+      - --relay-port
+      - "67"
+      - --workers
+      - "2"
+      - --store
+      - mem
+      - --lease-secs
+      - "60"
+      - --seconds
+      - "3600"
+    network_mode: "service:netns"
+    depends_on:
+      - netns
+      - relay
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  client-servers:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.2
+    networks:
+      servers:
+        ipv4_address: 192.0.2.5
+        mac_address: "00:00:5e:00:53:05"
+
+  client-lan:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.66
+    networks:
+      lan:
+        ipv4_address: 192.0.2.69
+        mac_address: "00:00:5e:00:53:45"
+
+  client-iot:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.130
+    networks:
+      iot:
+        ipv4_address: 192.0.2.133
+        mac_address: "00:00:5e:00:53:85"
+
+  client-guest:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.194
+    networks:
+      guest:
+        ipv4_address: 192.0.2.197
+        mac_address: "00:00:5e:00:53:c5"
+
+  tester:
+    <<: *tools
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      servers:
+        ipv4_address: 192.0.2.20
+
+# The gateway is a container that routes between the networks, so the node's reply to
+# giaddr (the gateway's address on a client network) arrives on the servers bridge. Docker 28
+# and later drop a packet for a container's address that comes in on another bridge (the
+# raw-table rules that keep other hosts from reaching unpublished containers);
+# nat-unprotected leaves those rules out for the lab's networks, which publish nothing.
+networks:
+  servers:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.0/26
+          gateway: 192.0.2.1
+  lan:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.64/26
+          gateway: 192.0.2.65
+  iot:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.128/26
+          gateway: 192.0.2.129
+  guest:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.192/26
+          gateway: 192.0.2.193
+
+secrets:
+  kek:
+    file: ${LAB_DIR:?set LAB_DIR}/secrets/kek
+
+volumes:
+  tenko-data: {}

@@ -1,6 +1,6 @@
 # Phase 3 DHCP measurements
 
-The measurements of the DHCP role in [phase-3-plan.md](../../docs/plans/phase-3-plan.md) section 6 (M26 to M35), with their scripts and results. WP7.3 wrote the loopback procedure for M26 to M28; WP7.6 adds perfdhcp on Linux, the load VM and the lab. Every figure is a single-node figure (plan section 2.12): one Tenko process, the load generator on the same host (loopback, an upper bound, labelled so) or on the load VM. Linux figures come from the static musl build, the target that ships; Windows figures from the release build.
+The measurements of the DHCP role in [phase-3-plan.md](../../docs/plans/phase-3-plan.md) section 6 (M26 to M35), with their scripts and results. WP7.3 wrote the loopback procedure for M26 to M28; WP7.6 adds perfdhcp on Linux (loopback and from the load VM, `scripts/run-perfdhcp.sh`) and the lab. Every figure is a single-node figure (plan section 2.12): one Tenko process, the load generator on the same host (loopback, an upper bound, labelled so) or on the load VM. Linux figures come from the static musl build, the target that ships; Windows figures from the release build.
 
 ## The server
 
@@ -41,12 +41,54 @@ Build the binary first: on Windows `cargo build -p tenko-dhcp --release --locked
 
 ## perfdhcp (Linux, WP7.6)
 
-ISC's perfdhcp (Kea) sends as a relay from port 67, so the server runs with `--relay-port 67`. Its relay address must select the scope: add an address of the range to the loopback interface and use it as the local address, or add option 118 to every packet:
+ISC's perfdhcp (Kea; the `kea-admin` package of Debian and Ubuntu, 2.2 and 2.4) sends as a relay agent: its local address is `giaddr`, and option 118 (`-o 118,c6120000`, 198.18.0.0) selects the bench scope whatever that address is. `-L` and `-N` move its own port and the server's off 67, so neither side needs privileges; the server answers relays on `--relay-port` (the example) or `[dhcp] relay_port` (the binary). `-R` is the number of simulated clients (with `-s 1` the same clients in every run), `-r` the rate of new 4-way exchanges, `-f` the rate of renewals of the leases perfdhcp holds, `-p` the period; its report gives sent, received and dropped packets and the delays per exchange, and `-x t` every packet's timestamps, from which the percentiles come.
 
-```text
-perfdhcp -4 -l 198.18.0.2 -r 1000 -R 100000 -p 60 127.0.0.1             # 4-way at 1,000/s
-perfdhcp -4 -l 127.0.0.1 -o 118,c6120000 -r 0 -R 100000 -p 60 127.0.0.1 # as fast as it goes
-perfdhcp -4 -l 198.18.0.2 -r 1000 -f 500 -R 100000 -p 60 127.0.0.1      # with renewals
+`scripts/run-perfdhcp.sh` runs the measurements, one fresh server per run, every rung twice, the better run the figure (the higher achieved rate, then the fewer drops):
+
+| | What | perfdhcp |
+|---|---|---|
+| M26 | a ladder of offered rates per worker count (default 1, 2, 4; rates 1,000 to 40,000); the ceiling is the highest rung answered with at most 0.1 percent drops, and the ladder stops at the first rung that loses more than 1 percent; with `--client` also the own client's closed loop (64 exchanges in flight), since perfdhcp on a small host saturates first | `-r RATE -R 100000 -p 20` |
+| M27 | a ladder of renewal rates, each beside new 4-way exchanges at the same rate (perfdhcp renews only leases it got in the run, at most at `-r`), at the largest worker count; with `--client` also pure renewals after a fill of 100,000 leases from the own client, closed loop | `-r RATE -f RATE -R 100000 -p 20` |
+| M28 | 1,000 and 5,000 exchanges per second: p50 and p99 of DISCOVER to OFFER and of REQUEST to ACK from the timestamps; DISCOVER to ACK from the example's own load client at the same rate (`--client`); the server's commit time (the example prints its histograms, the binary serves `tenko_dhcp_commit_duration_seconds`) | `-r RATE -R 100000 -p 20 -x t` |
+
+The server is `--kind tenko`, the binary with the roles controller and dhcp (`scripts/node-setup.sh` starts it as the ssh user from `~/dhcp` with its own data directory and the API on `--api-port`, sets it up under the Lab profile and creates the scope `198.18.0.0/15` with one pool through the API; every lease is committed to the store before the ACK), or `--kind example` with `--store queue|mem`, the engine without the store, for the comparison with WP7.3's rows. A Tenko service installed on the node is never touched: other ports, another data directory, the instance stopped by the pid it wrote.
+
+### Loopback
+
+Server and perfdhcp on one Linux host, `127.0.0.1`: an upper bound, labelled so. On the node VM (from a host that reaches it by ssh, or with `--node local --load local` on the host itself):
+
+```sh
+cargo build -p tenko --release --locked --target x86_64-unknown-linux-musl
+cargo build -p tenko-dhcp --release --locked --example dhcp_server --target x86_64-unknown-linux-musl
+bench/phase3-dhcp/scripts/run-perfdhcp.sh --kind tenko \
+  --binary target/x86_64-unknown-linux-musl/release/tenko \
+  --client target/x86_64-unknown-linux-musl/release/examples/dhcp_server \
+  --node USER@node --load USER@node --node-addr 127.0.0.1
 ```
 
-`-r` is the rate of new exchanges, `-R` the number of simulated clients, `-p` the test period, `-f` the renewal rate; its report gives the drops and the delays per exchange. WP7.6 runs it against `tenko serve` with the store and records the rows beside the own client's.
+WSL2 loses datagrams on loopback under load (risk R68, as M24 did for DNS): Linux figures come from the lab VMs, the workstation gives functional runs.
+
+### Two hosts
+
+The server on the node VM, perfdhcp on the load VM, over the link between them (a bridge or VLAN with no other DHCP server on it):
+
+```sh
+bench/phase3-dhcp/scripts/run-perfdhcp.sh --kind tenko --binary ... --client ... \
+  --node USER@node --node-addr 198.51.100.34 --load USER@load --load-addr 198.51.100.35 --tune
+```
+
+`--tune` raises the load host's UDP sysctls for the run with `bench/phase2-dns/scripts/tune-udp.sh` and restores them at the end; the node's are recorded, not changed (they are part of what is measured).
+
+### The rules
+
+- **The shipped binary.** Linux figures come from the static musl build, the target that ships; `run-perfdhcp.sh` refuses a dynamically linked binary (`check_linkage` of `bench/phase2-dns/scripts/lib.sh`; `--allow-dynamic` overrides and marks the run not publishable). Windows figures come from the release build.
+- **One node.** Every figure is a single-node figure (plan section 2.12): one server process on the node, perfdhcp on the same host (loopback) or on the load VM.
+- **The record.** `meta.txt` in the raw directory holds the machines (CPU, cores, memory, OS, kernel), perfdhcp's version, the binary's hash, the node's sysctls and the load host's before and after; `summary.tsv` one line per run; `report.md` the tables for the results file, written by `scripts/perfdhcp-report.py`, which also rebuilds them alone from a finished raw directory (`perfdhcp-report.py DIR/summary.tsv DIR`). For M28 the better run is the one with the lower p99 from REQUEST to ACK, and the report adds the server's own view: the bucket of the 50th and 99th percentile of REQUEST to ACK and of the commit, from `tenko_dhcp_exchange_duration_seconds` and `tenko_dhcp_commit_duration_seconds` on the node's loopback metrics listener (`[metrics] listen`). Raw output stays out of the repository.
+
+### Comparison caveats (plan section 6)
+
+ISC publishes performance reports per Kea release (reports.kea.isc.org) with DORA and SARR rates per lease backend; WP9.5 records the figure of the release current then beside Tenko's. They are not like for like: other hardware, Kea's multi-threading settings, other perfdhcp options, and Kea's memfile backend, whose lease file write is not a replicated commit and whose durability depends on its settings, while Tenko commits every lease to the Raft store before the ACK. An old figure from the Kea developers' list (2014, Kea 0.9: about 4,100 leases per second with the memfile on a RAM disk, 4,900 without persistence) shows the order of magnitude only. ISC dhcpd writes its lease file before the ACK and is the closer durability model; Windows DHCP publishes no comparable figure. The DNS-side reference points of Phase 2 do not apply, and loopback figures are upper bounds that no link reaches.
+
+### The lab
+
+`deploy/compose/lab-dhcp` runs perfdhcp too, as one functional row among real clients behind a real relay; it measures nothing.

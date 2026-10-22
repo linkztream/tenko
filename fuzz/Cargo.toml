@@ -244,3 +244,20 @@ path = "fuzz_targets/dhcp_v4.rs"
 test = false
 doc = false
 bench = false
+
+# WP7.6: the DHCPv4 option walk with every typed parser, and option 82 through scope
+# selection to the echo in the reply.
+[[bin]]
+name = "dhcp4_options"
+path = "fuzz_targets/dhcp4_options.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dhcp4_relay_info"
+path = "fuzz_targets/dhcp4_relay_info.rs"
+test = false
+doc = false
+bench = false
+# End WP7.6.
