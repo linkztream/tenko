@@ -395,47 +395,47 @@ Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 **REC-Q1. Where does the slice sit?**
 - Options: (a) now, beside Phase 3's Slice 8 and 9, as Slice 10 with its own exit criteria and status file, one recursion builder at a time next to the DHCP builders; (b) after Phase 3 closes, before Phase 4; (c) Phase 5, as the ROADMAP says.
 - Trade-offs: (a) gives the home the single resolver soonest and uses the DNS lab and bench while they are fresh; the packages touch no DHCP file (section 4), so the only shared resource is the quota (R79) and the lead's gating time; the ROADMAP, REQUIREMENTS.md and ADR 0007 change as listed above. (b) keeps the quota for DHCP and starts recursion with the whole Phase 3 lab in place; the home runs a second resolver for the length of Phase 3. (c) is the ROADMAP's order and the owner's wish disagrees with it.
-- **Recommended; the owner decides: (a)**, with DNS-03, DNS-13 and DNS-34 moved to Phase 3 as "3 (Slice 10)" so that one trace covers them (section 10 says what the trace script needs), and with the rule that a DHCP package that is ready to merge goes before a recursion package in the lead's queue.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, with DNS-03, DNS-13 and DNS-34 moved to Phase 3 as "3 (Slice 10)" so that one trace covers them (section 10 says what the trace script needs), and with the rule that a DHCP package that is ready to merge goes before a recursion package in the lead's queue.
 
 **REC-Q2. The default resolution per profile: recursion or forwarding?**
 - Options: (a) recursion in every profile for a new installation; an installation that has a root forwarding rule keeps it (a rule wins over the default), so nothing changes at an upgrade; (b) recursion under Home and Lab, forwarding under Standard and Hardened (an enterprise usually has an upstream of its own); (c) forwarding everywhere, recursion by a rule or a view.
 - Trade-offs: (a) is the owner's goal and what Unbound, BIND and Knot Resolver do out of the box; under Hardened it means plaintext UDP to the authorities, which TGL-14 forbids towards upstreams: the plan's reading is that TGL-14 governs rules that name an upstream and that DNSSEC validation is the integrity story for authorities, with RFC 9539 as the later privacy step; an operator who wants DoT everywhere adds a root rule. (b) matches enterprise habit but makes the Standard default a forwarder with no upstream configured until the operator adds one, which is today's REFUSED behaviour. (c) is today's behaviour with recursion opt-in.
-- **Recommended; the owner decides: (a)**, with the first-run wizard's sentence of section 2.8 and the DoT preset on the forwarders page. The Hardened reading of TGL-14 is recorded in the toggle's note.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, with the first-run wizard's sentence of section 2.8 and the DoT preset on the forwarders page. The Hardened reading of TGL-14 is recorded in the toggle's note.
 
 **REC-Q3. Validation on by default, and for forwarded answers too?**
 - Options: (a) on under Home, Standard and Hardened, off allowed under Lab (TGL-12 as written), applied to recursed and to forwarded answers alike; (b) on for recursed answers only, with forwarded answers trusted as today; (c) off by default under Home ("permissive" like some consumer routers), on elsewhere.
 - Trade-offs: (a) is one behaviour and what the Home user expects from a resolver that replaces a public one; a forwarding upstream that strips signatures shows up as bogus, which the health view names, and the rule's `validate = false` is the escape. (b) leaves a hole where a rule forwards. (c) gives up the one defence against a poisoned answer at home, where it is cheapest.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q4. Whose validator?**
 - Options: (a) Tenko's own, over the signer's `canonical.rs`, `crypto.rs` and `chain.rs`, extended with RSA, P-384 and the SHA-1 and SHA-384 digests through `aws-lc-rs`; (b) the `domain` crate's validator module (behind an `unstable-validator` feature in its 0.12 line; WP10.0 confirms what 0.12.3 holds); (c) another crate.
 - Trade-offs: (a) keeps the rule of ADR 0017 (no `unstable-*` features of `domain`), reuses tested code, gives the project one DNSSEC implementation to fuzz, test against the vectors and own; its cost is writing the chain walk and the proof logic, the security-sensitive part, which WP10.2 sizes as L. (b) saves part of that writing, but the module's API moves between minor versions, it would need Tenko's caches, trust anchors and extended errors around it anyway, and its licence (BSD-3-Clause) and maintenance are fine while its stability is not. (c) brings a second DNS wire implementation into the tree.
-- **Recommended; the owner decides: (a)**, with the published vectors and `delv` as the independent check (E33).
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a), with the published vectors and `delv` as the independent check (E33).**, with the published vectors and `delv` as the independent check (E33).
 
 **REC-Q5. The Home profile's privacy stance?**
 - Options: (a) recursion with QNAME minimisation by default, the DoT preset one click away, the wizard saying what each means; (b) forwarding over DoT to a resolver the operator names as the Home default, recursion one click away; (c) recursion but with a built-in list of public DoT resolvers to choose from in the wizard.
 - Trade-offs: (a) sends each query to the authorities of its name and nothing to a third party; it is the Pi-hole-with-Unbound setup many home users build by hand, and it is what the owner asked for. (b) trusts one operator with everything and depends on it being up. (c) was declined for Phase 2 (P2-Q5: no upstream built in) and the reason holds.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q6. Trust anchor shipping and maintenance?**
 - Options: (a) the anchors shipped in the binary from the IANA XML with their validity, maintained by RFC 5011, replaced at an upgrade where the stored set still equals the previous shipped set; (b) shipped only, maintained by releases; (c) (a) plus the updates channel (OPS-24's release source) serving an anchors file the controller fetches.
 - Trade-offs: (a) is what BIND and Unbound do (`managed-keys`, `auto-trust-anchor-file`); a node that is off for longer than the hold-down of a roll needs a release or the operator (section 2.4), which the health view says. (b) fails any installation that does not upgrade during a roll. (c) adds a fetch of security material from the project's release source, which the Hardened profile's "version string only" update check (TGL-23) would have to allow; it is a later addition if (a)'s gap turns out to matter.
-- **Recommended; the owner decides: (a)**, with (c) noted as the second path for later.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a), with (c), the updates channel as a second path, kept as a later item.**, with (c) noted as the second path for later.
 
 **REC-Q7. Root hints: shipped and primed, or a local root?**
 - Options: (a) the IANA hints shipped and primed per RFC 8109, `[dns.recursion] hints` for a file (the lab); (b) RFC 8806 (a local copy of the root zone kept by AXFR from the root servers that allow it) as the default; (c) (a) now and (b) as an option in a later package.
 - Trade-offs: (a) is every resolver's default and costs one priming per root NS TTL. (b) answers every root query locally and hides the node's queries for TLDs from the root operators, but needs a transfer every refresh, a zone kind flag the engine lacks (section 2.5) and a fallback when the transfer fails. (c) keeps the option without the work now.
-- **Recommended; the owner decides: (c).**
+- **Recommendation: (c). Decided by the owner on 2026-10-22: (c).**
 
 **REC-Q8. QNAME minimisation and aggressive NSEC defaults?**
 - Options: (a) minimisation relaxed in every profile (strict allowed under Hardened), aggressive NSEC on in every profile; (b) minimisation strict everywhere; (c) both off under Lab.
 - Trade-offs: (a) is the default of BIND and Unbound and is safe against the broken servers that answer NXDOMAIN to a minimised query; aggressive NSEC costs memory bounded by the denial cache and saves queries under random-subdomain floods. (b) breaks names under non-compliant servers for a privacy gain that the relaxed fallback mostly keeps. (c) makes Lab measurements differ from production for no reason.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q9. Outbound IPv6 policy?**
 - Options: (a) `auto`: both families, the fastest address, unreachable addresses marked for the infrastructure TTL and re-probed every six hours; (b) IPv4 only unless the operator enables IPv6; (c) both, no marking (every v6 failure costs a timeout).
 - Trade-offs: (a) works on v4-only, v6-only and dual-stack nodes with one failure per server per six hours on a v4-only node. (b) ignores the IPv6-only authorities that exist. (c) makes a v4-only node slow.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a), with an explicit setting that disables IPv6 outbound (`outbound = ipv4`) for an installation whose ISP carries IPv4 only; the auto mode stays the default.**
 
 **REC-Q10. Trust anchor signalling (RFC 8145) and the root key sentinel (RFC 8509)?**
 - Options: (a) both built: the sentinel always (it is an answer rule), the signalling on by default and off under Hardened; (b) the sentinel only; (c) neither.
@@ -445,22 +445,22 @@ Proposed toggle rows (SECURITY-PROFILES.md, the lead's file):
 **REC-Q11. Client subnet (RFC 7871)?**
 - Options: (a) never: the resolver sends no client subnet and strips the option from clients' queries; (b) send a truncated prefix (/24, /56) to the authorities that ask for it; (c) send it only where a rule says so.
 - Trade-offs: (a) keeps client prefixes inside the installation (OPS-06) and keeps the cache simple (one entry per name, not per client prefix); a content network answers for the resolver's own location, which at home is the home. (b) gives geographically closer answers to large installations at the cost of a cache keyed by prefix and of telling authorities where clients are. (c) is (b) with a switch.
-- **Recommended; the owner decides: (a)**, as the conformance row has said since Phase 0's note.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, as the conformance row has said since Phase 0's note.
 
 **REC-Q12. The work budget defaults?**
 - Options: (a) 32 queries, 8 restarts, 6 levels, 3 attempts per server, 10 s, the fetch policy 3, 2, 1, 0 and the failure cache 5 s doubling to 5 minutes; (b) BIND's shape (`max-recursion-queries` 50 and depth 7); (c) Unbound's (`max-sent-count` 32, `max-query-restarts` 11, `target-fetch-policy` "3 2 1 0 0").
 - Trade-offs: the three are close; (a) takes Unbound's send count and fetch policy, which bound the NXNSAttack class best, and the index's chain limit of 8 so that one number means one thing in Tenko. All are configuration keys; Lab may raise them.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q13. What does the home cut-over do first?**
 - Options: (a) after E37 and E38, the node's root rule is deleted and the AD zone's rule kept, one client for a day, then the networks follow as they already point at the node (nothing changes for them); the DoT root rule is recreated by one command to roll back; (b) a `recurse` rule for one suffix first (a name the household uses), the root rule kept, widened suffix by suffix; (c) a second node for recursion, the first kept forwarding.
 - Trade-offs: (a) is one setting and the rollback is one command; the household notices only through the dashboard. (b) proves recursion on real names first with no risk to the rest, at the cost of several steps. (c) needs the cluster data plane.
-- **Recommended; the owner decides: (a)**, with (b) as the first hour's warm-up if the owner prefers; section 9 lists both.
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**, with (b) as the first hour's warm-up if the owner prefers; section 9 lists both.
 
 **REC-Q14. DNS64 and RFC 9539?**
 - Options: (a) later (Phase 5), with the hooks named in section 2.9; (b) DNS64 now as part of WP10.1 (the home has no NAT64 today); (c) RFC 9539 now as a transport of WP10.1.
 - Trade-offs: (a) keeps the slice to what the home and the requirements need. (b) is a day of work for a function nobody here uses yet. (c) is an experimental RFC with few authorities deployed; the probing state costs memory and timeouts.
-- **Recommended; the owner decides: (a).**
+- **Recommendation: (a). Decided by the owner on 2026-10-22: (a).**
 
 **REC-Q15. What does the lab root look like?**
 - Options: (a) Tenko's own authoritative engine serving the root, the TLD and the signed test zones from the lab image, with BIND beside it for an independently signed zone, the opt-out and expired zones, and `delv` as the second validator, and the quirk responder from the engine's example server (section 2.12); (b) BIND or Knot containers serving the whole sandbox; (c) Tenko only.
