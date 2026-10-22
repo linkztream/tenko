@@ -309,7 +309,9 @@ GET /api/v1/dns/zones/{id}/records?name=printer
 
 ### Reverse zones per prefix
 
-A network prefix has the setting `dns_reverse`: `managed` creates and keeps its reverse zones, `off` keeps none, and absent (the default, P2-Q11) means `managed` when the tenant of the prefix's VRF has a forward zone in Tenko (a primary zone outside `arpa` of that tenant, or one without a tenant for the default tenant), else `off`. It is set with `PATCH /prefixes/{id}` (`{"dns_reverse": "off"}`; `null` returns to the default). Supernets have no reverse zones.
+A network prefix has the setting `dns_reverse`: `managed` creates and keeps its reverse zones, `off` keeps none, and absent (the default, P2-Q11) means `managed` when the tenant of the prefix's VRF has a forward zone in Tenko (a primary zone outside `arpa` of that tenant, or one without a tenant for the default tenant), else `off`. It is set with `PATCH /prefixes/{id}` (`{"dns_reverse": "off"}`; `null` returns to the default), on the prefix form in the UI (Managed, Off, or Default with the explanation of what the default means for the prefix's tenant), or with `tenko prefix update <id-or-cidr> --dns-reverse managed|off|default` (`--if-match <revision>` refuses the change when the prefix moved on, as for zones). Supernets have no reverse zones.
+
+The first forward zone a tenant gets switches every network prefix of the tenant without a setting to managed, so the zone form says beforehand, when the new zone would be the tenant's first forward zone, how many network prefixes of the tenant have no setting and will get reverse zones with this zone's SOA values and name servers. Set `dns_reverse` to `off` first on the prefixes whose reverse zones live elsewhere.
 
 | Network | Reverse zones |
 |---|---|
@@ -318,9 +320,24 @@ A network prefix has the setting `dns_reverse`: `managed` creates and keeps its 
 | IPv6 /0 to /124 | one per nibble boundary at or below the prefix length: a /48 is one zone of 12 nibbles, a /62 four zones of 16 nibbles |
 | IPv6 longer than /124 | none |
 
-A prefix length off the boundary rounds up, so the zones cover the prefix and nothing outside it. A new reverse zone is a primary zone whose SOA values, serial policy and name servers are copied from the longest reverse zone above it in Tenko, else from the tenant's first forward zone, else from the first forward zone; its `reverse_of` names the prefix (read only in the zone's answer). A zone of the same name that an operator created by hand is adopted: the actuator sets its `reverse_of` and keeps its PTR records. When two prefixes cover one zone, the shorter one keeps it.
+A prefix length off the boundary rounds up, so the zones cover the prefix and nothing outside it. A new reverse zone is a primary zone whose SOA values, serial policy and name servers are copied from its template (below); its `reverse_of` names the prefix (read only in the zone's answer). A zone of the same name that an operator created by hand is adopted: the actuator sets its `reverse_of` and keeps its PTR records. When two prefixes cover one zone, the shorter one keeps it.
 
-Deleting the prefix or switching its setting off leaves the zone and its records in place; the actuator stops writing there and the finding `ipam.reconcile.dns_reverse_orphaned` says so. A reverse zone that belongs to no prefix (no `reverse_of`) is still written to, like any forward zone.
+### The template of the reverse zones
+
+The template of a reverse zone is, in this order and always a primary zone with name servers: the longest reverse zone above it in Tenko; the default zone of the tenant of the prefix's VRF; the tenant's first forward zone; the first forward zone without a tenant; the first forward zone. The default zone is the tenant's field `dns.default_zone`, set with `PATCH /tenants/{id}` (`{"dns": {"default_zone": "<zone id>"}}`, `{"dns": {}}` clears it; `If-Match` as for every IPAM object) or on the tenant's form in the UI. It must be a primary forward zone of the tenant or one without a tenant, else the change is refused with `dns.default_zone.invalid` (409, `reason`: `missing`, `not_primary`, `reverse` or `other_tenant`). A default zone that is deleted later is skipped, and the next template in the order serves.
+
+The actuator records what each reverse zone copied (the table `ipam.dns_reverse_templates`: the template, its SOA values and its name servers). Every run compares:
+
+| The reverse zone's SOA values and name servers | What the run does |
+|---|---|
+| Equal to the template's now | Nothing; the record is brought up to date when the template is another zone |
+| Equal to what it copied, and the template changed its SOA values or name servers, or another zone became the template (the old one was deleted, or a default zone was chosen) | The zone follows: the new SOA values through a zone update that expects the zone's revision as read, the new apex NS set with its origin kept, and the description when it still names the old template; one audit record per zone change (`dns.zone.update`, `dns.record.change`); the run report counts `zones_followed` |
+| Anything else (an operator edited the SOA or the name servers) | Nothing: a zone edited by hand never follows |
+| Never recorded (kept before this rule, or adopted with other values) | Nothing until its values equal the template's, which records them |
+
+A reverse zone below another reverse zone follows that one in the same run, because the shorter zones go first. A change that stops half way (the SOA written, the NS set refused) is finished by the next run: each part may equal what the zone copied or already the template's.
+
+Deleting the prefix or switching its setting off leaves the zone and its records in place; the actuator stops writing there, the zone no longer follows its template, and the finding `ipam.reconcile.dns_reverse_orphaned` says so. A reverse zone that belongs to no prefix (no `reverse_of`) is still written to, like any forward zone.
 
 ### RFC 2317
 

@@ -97,6 +97,44 @@ fn work_with_prefixes(node: &Node) {
     by_id.assert_code(0);
     assert_eq!(by_id.json()["cidr"], CIDR);
 
+    // The reverse zones of the prefix, with If-Match as for zones.
+    node.client(&["prefix", "get", CIDR])
+        .assert_code(0)
+        .assert_stdout_contains("dns_reverse  default");
+    node.client(&["prefix", "update", CIDR, "--dns-reverse", "off"])
+        .assert_code(0)
+        .assert_stdout_contains(&format!(
+            "updated prefix {CIDR}: dns_reverse off at revision "
+        ));
+    let revision = node.client(&["prefix", "get", &id, "--json"]).json()["meta"]["revision"]
+        .as_u64()
+        .expect("a revision");
+    node.client(&[
+        "prefix",
+        "update",
+        &id,
+        "--dns-reverse",
+        "managed",
+        "--if-match",
+        "1",
+    ])
+    .assert_code(5)
+    .assert_stderr_contains("error[ipam.revision_mismatch]");
+    node.client(&[
+        "prefix",
+        "update",
+        &id,
+        "--dns-reverse",
+        "default",
+        "--if-match",
+        &revision.to_string(),
+    ])
+    .assert_code(0)
+    .assert_stdout_contains("dns_reverse default");
+    node.client(&["prefix", "update", CIDR])
+        .assert_code(2)
+        .assert_stderr_contains("nothing to change");
+
     node.client(&["prefix", "create", "198.51.100.0/24", "--dry-run"])
         .assert_code(0)
         .assert_stdout_contains("would create prefix 198.51.100.0/24");

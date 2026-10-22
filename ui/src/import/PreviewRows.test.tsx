@@ -285,3 +285,71 @@ describe("row list limits", () => {
     expect(reduce(s, { type: "rows", page: page(0, 100, "c100"), fromStart: true })).toBe(s);
   });
 });
+
+describe("steps and notices of the preview", () => {
+  const preview = (over: Partial<ImportPreview>): WizardState => {
+    const base: ImportPreview = {
+      id: "imp-2",
+      base_revision: 7,
+      summary: { counts: [], lines: [], rows: { total: 0, free: 0, imported: 0, skipped: 0 }, loss: { info: 0, warning: 0, error: 0 }, chunks: 1 },
+      sheets: [],
+      rows: [],
+      total_rows: 0,
+      loss: [],
+      proposals: [],
+      credentials: { hosts: 0, new: 0, changed: 0, unchanged: 0, statement: "", allowed: true },
+      warnings: [],
+      can_apply: true,
+      blockers: [],
+    };
+    return { ...INITIAL, step: "preview", preview: { ...base, ...over } };
+  };
+  const show = (s: WizardState, onAcknowledge: (code: string, on: boolean) => void = () => {}) =>
+    renderRoute(() => <PreviewStep state={s} busy={false} onAcknowledge={onAcknowledge} onMappingChange={() => {}} onBack={() => {}} onApply={() => {}} />);
+  const step = (cidr: string, networks: string | null) => ({
+    code: "ipam.prefix.becomes_supernet",
+    message: "english",
+    params: { cidr, ...(networks !== null ? { networks } : {}) },
+    requires_ack: true,
+    acknowledged: false,
+  });
+
+  it("words a supernet step with the count of networks inside and passes the acknowledgement on", () => {
+    const given: [string, boolean][] = [];
+    show(preview({ warnings: [step("192.0.2.0/24", "1"), step("198.51.100.0/24", "3")] }), (code, on) => given.push([code, on]));
+    const rows = screen.getAllByTestId("import-supernet-step");
+    expect(rows.map((r) => r.dataset.cidr)).toEqual(["192.0.2.0/24", "198.51.100.0/24"]);
+    expect(rows[0]?.textContent).toContain("Step: 192.0.2.0/24 becomes a supernet so that the 1 imported network inside it can be created; its addresses move to it.");
+    expect(rows[1]?.textContent).toContain("so that the 3 imported networks inside it can be created; its addresses move to them.");
+    fireEvent.click(within(rows[0] as HTMLElement).getByTestId("import-ack"));
+    expect(given).toEqual([["ipam.prefix.becomes_supernet", true]]);
+  });
+
+  it("falls back to the generic words of the warning when the count is missing, and keeps the other warnings apart", () => {
+    show(
+      preview({
+        warnings: [
+          step("192.0.2.0/24", null),
+          { code: "ipam.prefix.nibble_boundary", message: "english", params: {}, requires_ack: false, acknowledged: false },
+        ],
+      }),
+    );
+    expect(screen.getByTestId("import-supernet-step").textContent).toContain("192.0.2.0/24 is a network and becomes a supernet");
+    const steps = screen.getByTestId("import-steps");
+    expect(within(steps).queryByText(/nibble boundary/)).toBeNull();
+    expect(screen.getByText(/nibble boundary/)).toBeTruthy();
+  });
+
+  it("offers a passkey when the credentials are held back by the PIN coupling rule", () => {
+    const credentials = { hosts: 2, new: 2, changed: 0, unchanged: 0, statement: "", allowed: false, reason: "pin_coupling" } as const;
+    show(preview({ credentials }));
+    const link = screen.getByTestId("import-pin-coupling-enrol");
+    expect(link.textContent).toBe("Enrol a passkey");
+    expect(link.getAttribute("href")).toBe("/account/security");
+  });
+
+  it("offers no passkey for another reason", () => {
+    show(preview({ credentials: { hosts: 2, new: 2, changed: 0, unchanged: 0, statement: "", allowed: false, reason: "forbidden" } }));
+    expect(screen.queryByTestId("import-pin-coupling-enrol")).toBeNull();
+  });
+});

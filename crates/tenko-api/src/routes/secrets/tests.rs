@@ -565,6 +565,14 @@ async fn a_pin_session_never_stores_or_reveals_and_a_pin_only_revealer_blocks_th
         .await;
     blocked.assert_problem(409, "vault.pin_coupling");
     assert_eq!(blocked.body["params"]["accounts"], "olga");
+    // The refusal names the rule in words and the next step with its route.
+    assert_eq!(blocked.body["params"]["next"], "passkey");
+    assert_eq!(
+        blocked.body["params"]["route"],
+        "/api/v1/auth/webauthn/register/start"
+    );
+    let detail = blocked.body["detail"].as_str().expect("detail");
+    assert!(detail.contains("PIN coupling rule") && detail.contains("enrol a passkey"));
     // A viewer cannot reveal, so a PIN is fine for them.
     h.create_user("vera", &["viewer"]).await;
     let olga_pin = h.login("olga", USER_PIN).await;

@@ -49,6 +49,12 @@ describe("prefix form: create", () => {
     expect(await screen.findByText("Created prefix 2001:db8:0:40::/62")).toBeTruthy();
   });
 
+  it("has no reverse-zone setting: a new prefix has none to set", async () => {
+    renderRoute(() => <PrefixForm vrf={vrf()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-prefix-form");
+    expect(screen.queryByTestId("prefix-dns-reverse")).toBeNull();
+  });
+
   it("submits with Enter", async () => {
     renderRoute(() => <PrefixForm vrf={vrf()} onDone={() => {}} onClose={() => {}} />);
     const form = await screen.findByTestId("dialog-prefix-form");
@@ -287,5 +293,53 @@ describe("prefix form: edit", () => {
     await confirmPlan();
     await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
     expect((done.mock.calls[0]?.[0] as Prefix).cidr).toBe("203.0.113.192/27");
+  });
+
+  it("shows the reverse-zone setting of a network and sends only a change of it", async () => {
+    const writes = recordWrites();
+    const prefix = lan();
+    prefix.dns_reverse = "managed";
+    const done = vi.fn();
+    renderRoute(() => <PrefixForm vrf={vrf()} prefix={prefix} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-prefix-form");
+    const select = screen.getByTestId("prefix-dns-reverse") as HTMLSelectElement;
+    expect(select.value).toBe("managed");
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Default", "Managed", "Off"]);
+    expect(noteOf("prefix-dns-reverse")).toMatch(/as soon as its tenant has a forward zone/);
+    expect((screen.getByTestId("form-submit") as HTMLButtonElement).disabled).toBe(true);
+    choose("prefix-dns-reverse", "off");
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    const sent = applied(writes());
+    expect(sent[0]?.body).toEqual({ dns_reverse: "off" });
+    expect(lan().dns_reverse).toBe("off");
+  });
+
+  it("returns the reverse-zone setting to the default with null", async () => {
+    const writes = recordWrites();
+    const prefix = lan();
+    prefix.dns_reverse = "off";
+    const done = vi.fn();
+    renderRoute(() => <PrefixForm vrf={vrf()} prefix={prefix} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-prefix-form");
+    expect((screen.getByTestId("prefix-dns-reverse") as HTMLSelectElement).value).toBe("off");
+    choose("prefix-dns-reverse", "");
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(applied(writes())[0]?.body).toEqual({ dns_reverse: null });
+    expect(lan().dns_reverse).toBeUndefined();
+  });
+
+  it("shows the default for a network without a setting and does not offer it on a supernet", async () => {
+    const view = renderRoute(() => <PrefixForm vrf={vrf()} prefix={lan()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-prefix-form");
+    expect((screen.getByTestId("prefix-dns-reverse") as HTMLSelectElement).value).toBe("");
+    view.unmount();
+    const supernet = ipamState().data.prefix.get(IPAM_IDS.prefix.documentation) as Prefix;
+    renderRoute(() => <PrefixForm vrf={vrf()} prefix={supernet} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-prefix-form");
+    expect(screen.queryByTestId("prefix-dns-reverse")).toBeNull();
   });
 });

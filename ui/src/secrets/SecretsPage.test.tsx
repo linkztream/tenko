@@ -282,6 +282,11 @@ describe("create", () => {
     const notice = await screen.findByTestId("secret-pin-coupling");
     expect(notice.getAttribute("role")).toBe("alert");
     expect(notice.textContent).toContain("Accounts with a PIN alone: sam.");
+    expect(notice.textContent).toContain("(the PIN coupling rule)");
+    expect(notice.textContent).toContain("Enrol a passkey for them first; a second factor, a password or other roles also lift the rule.");
+    const enrol = within(notice).getByTestId("secret-pin-coupling-enrol");
+    expect(enrol.textContent).toBe("Enrol a passkey");
+    expect(enrol.getAttribute("href")).toBe("/account/security");
     expect(screen.getByTestId("dialog-secret-form")).toBeTruthy();
     expect((screen.getByTestId("field-value") as HTMLInputElement).value).toBe("");
     expect(secretList()).toHaveLength(2);

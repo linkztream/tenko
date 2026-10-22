@@ -178,8 +178,14 @@ pub mod codes {
     /// (500). Params: `zone`, `reason`.
     pub const DNSSEC_SIGNING_FAILED: &str = "dns.dnssec.signing_failed";
 
+    // Backlog: the tenant's default zone.
+    /// The default zone of a tenant is not one it may have (409): the zone does not
+    /// exist, is not a primary zone, is a reverse zone, or belongs to another tenant.
+    /// Params: `zone`, `reason` (`missing`, `not_primary`, `reverse`, `other_tenant`).
+    pub const DEFAULT_ZONE_INVALID: &str = "dns.default_zone.invalid";
+
     /// Every code of the namespace, for the contracts document and its test.
-    pub const ALL: [&str; 28] = [
+    pub const ALL: [&str; 29] = [
         ZONE_NOT_FOUND,
         ZONE_EXISTS,
         ZONE_INVALID,
@@ -209,6 +215,8 @@ pub mod codes {
         DNSSEC_NOT_ONLINE,
         DNSSEC_ROLLOVER_RUNNING,
         DNSSEC_SIGNING_FAILED,
+        // Backlog
+        DEFAULT_ZONE_INVALID,
     ];
 }
 
@@ -442,6 +450,27 @@ pub enum SerialPolicy {
     /// `YYYYMMDDnn`, falling back to plus one when `nn` runs out.
     #[default]
     DateCounter,
+}
+
+// Backlog: the tenant's default zone.
+/// The DNS settings of a tenant (`dns` on the tenant, `PATCH /tenants/{id}` with
+/// `If-Match`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct TenantDns {
+    /// The default zone: a primary forward zone of the tenant, or one without a tenant.
+    /// The reverse zones IPAM creates for the tenant's prefixes take their SOA values and
+    /// name servers from it and follow it when they change (`docs/dns.md` section 7).
+    /// Without it, the tenant's first forward zone serves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub default_zone: Option<ZoneId>,
+}
+
+impl TenantDns {
+    /// Whether nothing is set.
+    pub fn is_empty(&self) -> bool {
+        self.default_zone.is_none()
+    }
 }
 
 /// The SOA values of a zone apart from the serial.

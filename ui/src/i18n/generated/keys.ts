@@ -2524,6 +2524,7 @@ export type MessageKey =
   | "dns.zone.create.action"
   | "dns.zone.create.done"
   | "dns.zone.create.primaries_required"
+  | "dns.zone.create.reverse_notice"
   | "dns.zone.create.submit"
   | "dns.zone.create.title"
   | "dns.zone.delete.body"
@@ -2696,6 +2697,7 @@ export type MessageKey =
   | "errors.dhcp.store_refused"
   | "errors.dns.acl.in_use"
   | "errors.dns.acl.not_found"
+  | "errors.dns.default_zone.invalid"
   | "errors.dns.forwarder.invalid"
   | "errors.dns.forwarder.not_found"
   | "errors.dns.key.exists"
@@ -2799,6 +2801,7 @@ export type MessageKey =
   | "errors.ipam.parent_status"
   | "errors.ipam.plan.stale"
   | "errors.ipam.plan.unacknowledged"
+  | "errors.ipam.prefix.becomes_supernet"
   | "errors.ipam.prefix.full"
   | "errors.ipam.prefix.has_children"
   | "errors.ipam.prefix.has_ranges"
@@ -3137,6 +3140,7 @@ export type MessageKey =
   | "import.conflict.skip"
   | "import.conflict.update"
   | "import.credentials.not_allowed"
+  | "import.credentials.pin_enrol"
   | "import.credentials.reason.forbidden"
   | "import.credentials.reason.pin_coupling"
   | "import.credentials.reason.step_up_required"
@@ -3183,6 +3187,7 @@ export type MessageKey =
   | "import.loss.name.normalized"
   | "import.loss.none"
   | "import.loss.prefix.host_bits"
+  | "import.loss.prefix.in_network"
   | "import.loss.prefix.proposed"
   | "import.loss.prefix.unlisted"
   | "import.loss.prefix.unparsable"
@@ -3222,7 +3227,9 @@ export type MessageKey =
   | "import.preview.rows_imported"
   | "import.preview.rows_skipped"
   | "import.preview.rows_total"
+  | "import.preview.steps"
   | "import.preview.summary"
+  | "import.preview.supernet_step"
   | "import.preview.warnings"
   | "import.proposals.body"
   | "import.proposals.holds"
@@ -3611,6 +3618,11 @@ export type MessageKey =
   | "ipam.prefix.alloc_lowest"
   | "ipam.prefix.children_grid"
   | "ipam.prefix.crumbs"
+  | "ipam.prefix.dns_reverse"
+  | "ipam.prefix.dns_reverse_default"
+  | "ipam.prefix.dns_reverse_help"
+  | "ipam.prefix.dns_reverse_managed"
+  | "ipam.prefix.dns_reverse_off"
   | "ipam.prefix.in_several"
   | "ipam.prefix.no_children"
   | "ipam.prefix.not_found"
@@ -3659,6 +3671,9 @@ export type MessageKey =
   | "ipam.tenancy.saved"
   | "ipam.tenant.create"
   | "ipam.tenant.create_title"
+  | "ipam.tenant.default_zone"
+  | "ipam.tenant.default_zone_help"
+  | "ipam.tenant.default_zone_none"
   | "ipam.tenant.edit_title"
   | "ipam.tenant.empty"
   | "ipam.tenant.filter_label"
@@ -4762,6 +4777,7 @@ export type MessageKey =
   | "secrets.form.name_help"
   | "secrets.form.notes"
   | "secrets.form.notes_help"
+  | "secrets.form.pin_enrol"
   | "secrets.form.pin_title"
   | "secrets.form.reload"
   | "secrets.form.reloaded"
@@ -6333,6 +6349,7 @@ export interface MessageArgs {
   "dns.view.scope_chip": { scope: string | number; share: string | number; weight: string | number; zone: string | number };
   "dns.view.share": { share: string | number };
   "dns.zone.create.done": { name: string | number };
+  "dns.zone.create.reverse_notice": { count: number };
   "dns.zone.delete.body": { count: number; name: string | number; rrsets: string | number };
   "dns.zone.delete.done": { name: string | number };
   "dns.zone.delete.title": { name: string | number };
@@ -6359,6 +6376,7 @@ export interface MessageArgs {
   "errors.dhcp.settings.invalid": { field: string | number };
   "errors.dhcp.shared_network.in_use": { count: number };
   "errors.dhcp.shared_network.invalid": { field: string | number };
+  "errors.dns.default_zone.invalid": { reason: string };
   "errors.dns.record.conflict": { name: string | number };
   "errors.dns.record.invalid": { name: string | number; type: string | number };
   "errors.dns.record.origin": { name: string | number; type: string | number };
@@ -6383,6 +6401,7 @@ export interface MessageArgs {
   "errors.ipam.not_found": { kind: string | number };
   "errors.ipam.object_deleted": { kind: string | number };
   "errors.ipam.plan.unacknowledged": { codes: string | number };
+  "errors.ipam.prefix.becomes_supernet": { cidr: string | number };
   "errors.ipam.prefix.full": { cidr: string | number; length: string | number };
   "errors.ipam.prefix.has_children": { cidr: string | number };
   "errors.ipam.prefix.has_ranges": { cidr: string | number };
@@ -6454,6 +6473,7 @@ export interface MessageArgs {
   "import.loss.counts": { error: number; info: number; warning: number };
   "import.mapping.text": { delimiter: string | number; encoding: string | number };
   "import.preview.apply": { count: number };
+  "import.preview.supernet_step": { cidr: string | number; networks: number };
   "import.proposals.holds": { count: number; row: string | number; sheet: string | number };
   "import.result.count": { action: string | number; count: number; kind: string | number };
   "import.result.more": { count: number };
@@ -9525,6 +9545,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.create.action",
   "dns.zone.create.done",
   "dns.zone.create.primaries_required",
+  "dns.zone.create.reverse_notice",
   "dns.zone.create.submit",
   "dns.zone.create.title",
   "dns.zone.delete.body",
@@ -9697,6 +9718,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dhcp.store_refused",
   "errors.dns.acl.in_use",
   "errors.dns.acl.not_found",
+  "errors.dns.default_zone.invalid",
   "errors.dns.forwarder.invalid",
   "errors.dns.forwarder.not_found",
   "errors.dns.key.exists",
@@ -9800,6 +9822,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.parent_status",
   "errors.ipam.plan.stale",
   "errors.ipam.plan.unacknowledged",
+  "errors.ipam.prefix.becomes_supernet",
   "errors.ipam.prefix.full",
   "errors.ipam.prefix.has_children",
   "errors.ipam.prefix.has_ranges",
@@ -10138,6 +10161,7 @@ export const messageKeys: readonly MessageKey[] = [
   "import.conflict.skip",
   "import.conflict.update",
   "import.credentials.not_allowed",
+  "import.credentials.pin_enrol",
   "import.credentials.reason.forbidden",
   "import.credentials.reason.pin_coupling",
   "import.credentials.reason.step_up_required",
@@ -10184,6 +10208,7 @@ export const messageKeys: readonly MessageKey[] = [
   "import.loss.name.normalized",
   "import.loss.none",
   "import.loss.prefix.host_bits",
+  "import.loss.prefix.in_network",
   "import.loss.prefix.proposed",
   "import.loss.prefix.unlisted",
   "import.loss.prefix.unparsable",
@@ -10223,7 +10248,9 @@ export const messageKeys: readonly MessageKey[] = [
   "import.preview.rows_imported",
   "import.preview.rows_skipped",
   "import.preview.rows_total",
+  "import.preview.steps",
   "import.preview.summary",
+  "import.preview.supernet_step",
   "import.preview.warnings",
   "import.proposals.body",
   "import.proposals.holds",
@@ -10612,6 +10639,11 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix.alloc_lowest",
   "ipam.prefix.children_grid",
   "ipam.prefix.crumbs",
+  "ipam.prefix.dns_reverse",
+  "ipam.prefix.dns_reverse_default",
+  "ipam.prefix.dns_reverse_help",
+  "ipam.prefix.dns_reverse_managed",
+  "ipam.prefix.dns_reverse_off",
   "ipam.prefix.in_several",
   "ipam.prefix.no_children",
   "ipam.prefix.not_found",
@@ -10660,6 +10692,9 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.tenancy.saved",
   "ipam.tenant.create",
   "ipam.tenant.create_title",
+  "ipam.tenant.default_zone",
+  "ipam.tenant.default_zone_help",
+  "ipam.tenant.default_zone_none",
   "ipam.tenant.edit_title",
   "ipam.tenant.empty",
   "ipam.tenant.filter_label",
@@ -11763,6 +11798,7 @@ export const messageKeys: readonly MessageKey[] = [
   "secrets.form.name_help",
   "secrets.form.notes",
   "secrets.form.notes_help",
+  "secrets.form.pin_enrol",
   "secrets.form.pin_title",
   "secrets.form.reload",
   "secrets.form.reloaded",

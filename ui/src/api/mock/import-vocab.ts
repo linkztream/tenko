@@ -275,6 +275,7 @@ export const LOSS = {
   customUndefined: "import.custom.undefined",
   conflictKept: "import.conflict.kept",
   hostLocked: "import.host.locked",
+  prefixInNetwork: "import.prefix.in_network",
 } as const;
 
 export type Severity = "info" | "warning" | "error";

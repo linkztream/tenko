@@ -3,7 +3,10 @@
 // prefixes to accept or reject; what happens to credentials, in plain words; the warnings
 // with their acknowledgements; and why apply is blocked, when it is. The outcome of every
 // sheet comes first; the source rows are listed page by page in a data grid.
+import { A } from "@solidjs/router";
 import { createMemo, For, Show } from "solid-js";
+import { paths } from "../../app/paths";
+import type { PlanWarning } from "../../api/types";
 import { Icon } from "../../components/Icon";
 import { Notice } from "../../components/Notice";
 import { DataGrid } from "../../grid/DataGrid";
@@ -17,6 +20,9 @@ import type { ItemAction, ItemKey, LossItem, Mapping, PreviewRow, Severity } fro
 import { blockersOf, canApply, decideProposal, nextRows, UNACKNOWLEDGED_BLOCKER, unacknowledged, type WizardState } from "../model";
 
 const ACTIONS: readonly ItemAction[] = ["create", "update", "unchanged", "kept"];
+
+/** The warning an existing network gets when the import turns it into a supernet (a step to acknowledge). */
+const SUPERNET_STEP = "ipam.prefix.becomes_supernet";
 
 /** The natural key of an item as a person reads it. */
 export function itemLabel(key: ItemKey): string {
@@ -86,6 +92,14 @@ const ROW_COLUMNS: Column<ListedRow>[] = [
   },
 ];
 
+/** The step in words, with the number of imported networks inside; the generic text when the count is missing. */
+function supernetText(w: PlanWarning): string {
+  const networks = Number(w.params?.networks);
+  const cidr = w.params?.cidr;
+  if (!cidr || !Number.isInteger(networks) || networks < 1) return warningText(w);
+  return t("import.preview.supernet_step", { cidr, networks });
+}
+
 function lossText(entry: LossItem): string {
   return tDynamic(`import.loss.${entry.code.replace(/^import\./, "")}`) ?? entry.code;
 }
@@ -108,6 +122,10 @@ export function PreviewStep(props: {
   /** How many rows the next page adds. */
   const more = () => Math.max(0, nextRows(props.state) - (p()?.rows.length ?? 0));
 
+  /** The supernet steps come first, in a card of their own; the other warnings follow. */
+  const steps = createMemo(() => (p()?.warnings ?? []).filter((w) => w.code === SUPERNET_STEP));
+  const otherWarnings = createMemo(() => (p()?.warnings ?? []).filter((w) => w.code !== SUPERNET_STEP));
+
   /** Every planned item, grouped by kind and action, once. */
   const groups = createMemo(() => {
     const out = new Map<string, { kind: string; action: ItemAction; items: Map<string, ItemKey> }>();
@@ -121,6 +139,23 @@ export function PreviewStep(props: {
     }
     return [...out.values()].sort((a, b) => a.kind.localeCompare(b.kind) || ACTIONS.indexOf(a.action) - ACTIONS.indexOf(b.action));
   });
+
+  /** The acknowledgement of a warning that needs one. */
+  const AckRow = (row: { warning: PlanWarning }) => (
+    <Show when={row.warning.requires_ack && !row.warning.acknowledged}>
+      <label class="ackrow">
+        <input
+          type="checkbox"
+          class="cb"
+          checked={!blocking().has(row.warning.code)}
+          data-testid="import-ack"
+          data-code={row.warning.code}
+          onChange={(e) => props.onAcknowledge(row.warning.code, e.currentTarget.checked)}
+        />
+        {t("ipam.plan.ack")}
+      </label>
+    </Show>
+  );
 
   const downloadLoss = () => {
     const rows = (p()?.loss ?? []).flatMap((sheet) =>
@@ -197,26 +232,30 @@ export function PreviewStep(props: {
               </Notice>
             </Show>
 
-            <Show when={preview().warnings.length > 0}>
+            <Show when={steps().length > 0}>
+              <section class="import-card" aria-labelledby="import-steps-title" data-testid="import-steps">
+                <h2 id="import-steps-title">{t("import.preview.steps")}</h2>
+                <For each={steps()}>
+                  {(w) => (
+                    <div data-testid="import-supernet-step" data-cidr={w.params?.cidr}>
+                      <Notice kind="warn">
+                        <p>{supernetText(w)}</p>
+                        <AckRow warning={w} />
+                      </Notice>
+                    </div>
+                  )}
+                </For>
+              </section>
+            </Show>
+
+            <Show when={otherWarnings().length > 0}>
               <section class="import-card" aria-labelledby="import-warnings-title">
                 <h2 id="import-warnings-title">{t("import.preview.warnings")}</h2>
-                <For each={preview().warnings}>
+                <For each={otherWarnings()}>
                   {(w) => (
                     <Notice kind={w.requires_ack ? "warn" : "info"}>
                       <p>{warningText(w)}</p>
-                      <Show when={w.requires_ack && !w.acknowledged}>
-                        <label class="ackrow">
-                          <input
-                            type="checkbox"
-                            class="cb"
-                            checked={!blocking().has(w.code)}
-                            data-testid="import-ack"
-                            data-code={w.code}
-                            onChange={(e) => props.onAcknowledge(w.code, e.currentTarget.checked)}
-                          />
-                          {t("ipam.plan.ack")}
-                        </label>
-                      </Show>
+                      <AckRow warning={w} />
                     </Notice>
                   )}
                 </For>
@@ -240,6 +279,13 @@ export function PreviewStep(props: {
                   <Notice kind="warn">
                     {/* The reason is translated when it is a known code; an English explanation is not shown. */}
                     {tDynamic(`import.credentials.reason.${preview().credentials.reason ?? ""}`) ?? t("import.credentials.not_allowed")}
+                    <Show when={preview().credentials.reason === "pin_coupling"}>
+                      <div>
+                        <A class="btn sm" href={paths.account("security")} data-testid="import-pin-coupling-enrol">
+                          {t("import.credentials.pin_enrol")}
+                        </A>
+                      </div>
+                    </Show>
                   </Notice>
                 </Show>
               </section>

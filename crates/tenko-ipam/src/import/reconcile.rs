@@ -24,9 +24,10 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     AddressId, HostId, ImportId, InterfaceId, ObjectKind, PrefixId, SiteId, TenantId, Timestamp,
     VlanId, VrfId,
+    codec::encode_key,
     ipam::{
-        Address, CustomFieldDef, CustomValue, FieldKey, Host, Interface, Prefix, Status, Tag,
-        UtilizationAlarm, Vlan,
+        Address, CustomFieldDef, CustomValue, FieldKey, Host, Interface, Prefix, PrefixRole, Range,
+        Status, Tag, UtilizationAlarm, Vlan,
     },
     ir::{LossEntry, SourceLocation},
     net::HostName,
@@ -55,7 +56,7 @@ use crate::{
     plan::status_transition_allowed,
     tables::{
         ADDRESS_IPS, ADDRESSES, HOST_INTERFACES, HOST_NAMES, HOSTS, INTERFACES, PREFIX_CIDRS,
-        PREFIXES, SITE_NAMES, TENANT_NAMES, VLAN_VIDS, VLANS, VRF_NAMES,
+        PREFIX_RANGES, PREFIXES, RANGES, SITE_NAMES, TENANT_NAMES, VLAN_VIDS, VLANS, VRF_NAMES,
     },
 };
 
@@ -218,6 +219,9 @@ pub struct Reconciled {
     pub issues: Vec<LossEntry>,
     /// Whether a conflict under [`ConflictPolicy::Fail`] blocks the import.
     pub blocked: bool,
+    /// The supernet steps: existing networks the slice turns into supernets, with the
+    /// number of imported networks inside each.
+    pub supernet_steps: BTreeMap<PrefixId, usize>,
 }
 
 /// Reconciles `items` of `model` against `view`.
@@ -675,6 +679,10 @@ impl<'a> Reconciler<'a> {
             None => None,
         };
         let Some(existing) = existing else {
+            if !self.supernet_step(prefix)? {
+                self.outcome(key, ItemAction::Kept, Vec::new());
+                return Ok(());
+            }
             let alarm = self.alarm(prefix, None);
             let vrf = self.vrf_input(prefix.vrf.as_deref())?;
             self.out
@@ -703,6 +711,10 @@ impl<'a> Reconciler<'a> {
         {
             patch.role = Some(role);
             fields.push("role".to_owned());
+            if role == PrefixRole::Supernet {
+                // The networks of the import inside it need no supernet step of their own.
+                self.out.supernet_steps.entry(existing.id).or_default();
+            }
         }
         if let Some(status) = prefix.status
             && status != existing.status
@@ -760,6 +772,106 @@ impl<'a> Reconciler<'a> {
             self.outcome(key, ItemAction::Kept, fields);
         }
         Ok(())
+    }
+
+    /// The supernet step (the owner's backlog): a new network inside an existing network
+    /// of the store turns that network into a supernet, once per network, with an update
+    /// the plan warns about (`ipam.prefix.becomes_supernet`, to acknowledge) instead of
+    /// refusing every network inside with `ipam.prefix.overlap`. A network a DHCP scope
+    /// serves (`dhcp.scope.attached`) or one with ranges stays a network: the imported
+    /// network is left out with `import.prefix.in_network`, and its addresses go to the
+    /// existing network. Returns whether the imported network can be created.
+    fn supernet_step(&mut self, prefix: &ModelPrefix) -> IpamResult<bool> {
+        let Some(vrf) = self.vrf_id(prefix.vrf.as_deref())? else {
+            return Ok(true);
+        };
+        let Some(parent) = self.store_parent(vrf, &prefix.cidr)? else {
+            return Ok(true);
+        };
+        if parent.role != PrefixRole::Network {
+            return Ok(true);
+        }
+        if let Some(count) = self.out.supernet_steps.get_mut(&parent.id) {
+            *count += 1;
+            return Ok(true);
+        }
+        let reason = if self
+            .view
+            .get_typed(&tenko_core::dhcp::tables::SCOPES, &parent.id)?
+            .is_some()
+        {
+            Some("a DHCP scope serves it")
+        } else if self.has_ranges(parent.id)? {
+            Some("it has ranges")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            self.issue(
+                &prefix.origin,
+                codes::PREFIX_IN_NETWORK,
+                format!(
+                    "{} lies in the network {}, which stays a network because {reason}; {} is not created and its addresses go to {}",
+                    prefix.cidr, parent.cidr, prefix.cidr, parent.cidr
+                ),
+            );
+            return Ok(false);
+        }
+        self.out
+            .commands
+            .push(IpamCommand::UpdatePrefix(UpdatePrefix {
+                id: parent.id,
+                expected: None,
+                patch: PrefixPatch {
+                    role: Some(PrefixRole::Supernet),
+                    ..PrefixPatch::default()
+                },
+            }));
+        self.out.supernet_steps.insert(parent.id, 1);
+        self.outcome(
+            ItemKey::Prefix {
+                vrf: vrf_key(prefix.vrf.as_deref(), self.options.vrf.as_deref()),
+                cidr: parent.cidr.to_string(),
+            },
+            ItemAction::Update,
+            vec!["role".to_owned()],
+        );
+        Ok(true)
+    }
+
+    /// The most specific live prefix of the store that contains `cidr` (not `cidr` itself).
+    fn store_parent(&self, vrf: VrfId, cidr: &IpNet) -> IpamResult<Option<Prefix>> {
+        for length in (0..cidr.prefix_len()).rev() {
+            let Ok(net) = IpNet::new(cidr.network(), length) else {
+                continue;
+            };
+            if let Some((id, _)) = self.view.get_typed(&PREFIX_CIDRS, &(vrf, net.trunc()))?
+                && let Some((parent, _)) = self.view.get_typed(&PREFIXES, &id)?
+                && !parent.meta.is_deleted()
+            {
+                return Ok(Some(parent));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether a prefix has live ranges.
+    fn has_ranges(&self, prefix: PrefixId) -> IpamResult<bool> {
+        let rows = self.view.scan_typed(
+            &PREFIX_RANGES,
+            KeyRange::prefix(encode_key(&prefix)),
+            usize::MAX,
+            false,
+        )?;
+        for ((_, range), (), _) in rows {
+            if let Some((range, _)) = self.view.get_typed(&RANGES, &range)? {
+                let range: Range = range;
+                if !range.meta.is_deleted() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     fn transition_issue(

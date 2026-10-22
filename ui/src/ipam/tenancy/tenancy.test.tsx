@@ -1,11 +1,15 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DNS_IDS } from "../../api/mock/dns-model";
 import { IPAM_IDS, ipamState } from "../../api/mock/ipam/api";
+import { dnsState } from "../../api/mock/routes-dns";
 import type { Site } from "../../api/types";
 import { paths } from "../../app/paths";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
+import { dnsSwitchedOff } from "../../dns/testkit";
+import { applied, choose, recordWrites } from "../testkit";
 import CustomFieldsView from "./CustomFieldsView";
 import SitesView, { descendants, sitePath } from "./SitesView";
 import TagsView from "./TagsView";
@@ -117,6 +121,82 @@ describe("tenants and VRFs", () => {
     await confirmPlan();
     await waitFor(() => expect(rowKeys(tenants)).toContain("Lab customer"));
     expect(await axeViolations(screen.getByTestId("page-ipam-tenancy"))).toEqual([]);
+  });
+});
+
+describe("the default zone of a tenant", () => {
+  async function editWorkshop() {
+    renderRoute(TenancyView, { url: "/ipam/tenants" });
+    const tenants = await screen.findByTestId("grid-tenants");
+    await waitFor(() => expect(rows(tenants).length).toBe(2));
+    fireEvent.dblClick(rows(tenants).find((r) => r.dataset.id === IPAM_IDS.tenant.workshop)!);
+    return screen.findByTestId("dialog-tenant-form");
+  }
+  const zoneNamed = (name: string) => dnsState().zones.find((z) => z.name === name)!;
+
+  it("lists the primary forward zones of the tenant and sends the one that is chosen", async () => {
+    const writes = recordWrites();
+    // A zone of another tenant is not offered; one of this tenant is.
+    zoneNamed("lab.example.test").kind = "primary";
+    zoneNamed("lab.example.test").tenant = IPAM_IDS.tenant.default;
+    zoneNamed("corp.example.test").kind = "primary";
+    zoneNamed("corp.example.test").tenant = IPAM_IDS.tenant.workshop;
+    const form = await editWorkshop();
+    const select = (await within(form).findByTestId("tenant-default-zone")) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["None (the tenant's first forward zone)", "corp.example.test", "example.test"]);
+    expect(select.value).toBe("");
+    expect(within(form).getByText(/follow it when they change/)).toBeTruthy();
+    expect((within(form).getByTestId("form-submit") as HTMLButtonElement).disabled).toBe(true);
+    choose("tenant-default-zone", DNS_IDS.zone.example);
+    fireEvent.click(within(form).getByTestId("form-submit"));
+    await confirmPlan();
+    await waitFor(() => expect(ipamState().data.tenant.get(IPAM_IDS.tenant.workshop)?.dns).toEqual({ default_zone: DNS_IDS.zone.example }));
+    const sent = applied(writes());
+    expect(sent[0]?.body).toEqual({ dns: { default_zone: DNS_IDS.zone.example } });
+  });
+
+  it("clears the default zone with an empty dns member", async () => {
+    const writes = recordWrites();
+    const tenant = ipamState().data.tenant.get(IPAM_IDS.tenant.workshop)!;
+    tenant.dns = { default_zone: DNS_IDS.zone.example };
+    const form = await editWorkshop();
+    const select = (await within(form).findByTestId("tenant-default-zone")) as HTMLSelectElement;
+    expect(select.value).toBe(DNS_IDS.zone.example);
+    choose("tenant-default-zone", "");
+    fireEvent.click(within(form).getByTestId("form-submit"));
+    await confirmPlan();
+    await waitFor(() => expect(ipamState().data.tenant.get(IPAM_IDS.tenant.workshop)?.dns).toBeUndefined());
+    expect(applied(writes())[0]?.body).toEqual({ dns: {} });
+  });
+
+  it("shows the refusal of the server under the field, worded by the reason", async () => {
+    const form = await editWorkshop();
+    await within(form).findByTestId("tenant-default-zone");
+    choose("tenant-default-zone", DNS_IDS.zone.example);
+    // The zone is deleted meanwhile.
+    dnsState().zones.splice(dnsState().zones.indexOf(zoneNamed("example.test")), 1);
+    fireEvent.click(within(form).getByTestId("form-submit"));
+    // The refusal brings the person back to the form, which is rendered anew.
+    await waitFor(() => expect(screen.getByTestId("tenant-default-zone").getAttribute("aria-invalid")).toBe("true"));
+    expect(screen.getByTestId("field-error").textContent).toBe("The zone no longer exists.");
+    expect((screen.getByTestId("tenant-default-zone") as HTMLSelectElement).value).toBe(DNS_IDS.zone.example);
+    expect(screen.queryByTestId("dialog-plan")).toBeNull();
+  });
+
+  it("does not offer the setting when the DNS service is off", async () => {
+    dnsSwitchedOff();
+    const form = await editWorkshop();
+    await within(form).findByTestId("field-name");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(within(form).queryByTestId("tenant-default-zone")).toBeNull();
+  });
+
+  it("does not offer it for a new tenant", async () => {
+    renderRoute(TenancyView, { url: "/ipam/tenants" });
+    await waitFor(() => expect(rows(screen.getByTestId("grid-tenants")).length).toBe(2));
+    fireEvent.click(screen.getByTestId("tenant-create"));
+    const form = await screen.findByTestId("dialog-tenant-form");
+    expect(within(form).queryByTestId("tenant-default-zone")).toBeNull();
   });
 });
 

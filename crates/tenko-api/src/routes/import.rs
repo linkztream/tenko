@@ -532,9 +532,10 @@ async fn gate(
     Ok(CredentialGate::Denied {
         reason: "pin_coupling",
         required: None,
+        // Backlog: the rule and the next step in the words of `POST /secrets`.
         detail: format!(
-            "the vault takes operator secrets only when every account that may reveal them has more than a PIN (IAM-07): {} sign in with a PIN alone; add a passkey or TOTP to them, give them a password, change their roles, or leave the credential columns out",
-            accounts.join(", ")
+            "{}; or leave the credential columns out",
+            tenko_auth::service::reveal::pin_coupling_detail(&accounts)
         ),
         accounts,
     })

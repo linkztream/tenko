@@ -74,9 +74,7 @@ use axum::{
 };
 use tenko_auth::AuthService;
 use tenko_connect::host::ConnectorHost;
-use tenko_core::{
-    Action, CodedError, HostId, ObjectKind, ObjectRef, Revision, SecretId, ipam::Host,
-};
+use tenko_core::{Action, HostId, ObjectKind, ObjectRef, Revision, SecretId, ipam::Host};
 use tenko_ipam::query;
 use tenko_vault::{
     SecretBytes,
@@ -111,7 +109,7 @@ use crate::{
 const CURSOR_ENDPOINT: &str = "vault.secrets";
 
 /// The code of the PIN coupling refusal.
-pub const PIN_COUPLING: &str = "vault.pin_coupling";
+pub const PIN_COUPLING: &str = tenko_auth::service::reveal::VAULT_PIN_COUPLING;
 
 /// The platform routes of the area: `/secrets`.
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
@@ -275,7 +273,7 @@ async fn list_secrets(
         (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or the session is weaker than a password (`auth.forbidden`, `auth.step_up_required` with `required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameter `accounts`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The value exceeds 64 KiB (`vault.secret.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "A value is invalid (`vault.secret.invalid`, parameter `field`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -293,17 +291,9 @@ async fn create_secret(
     if let Some(Extension(auth)) = auth {
         let accounts = auth.pin_only_revealers().await?;
         if !accounts.is_empty() {
+            // Backlog: the refusal names the rule and the next step (tenko-auth).
             return Err(RouteError::from(ApiError::from_coded_error(
-                CodedError::new(
-                    PIN_COUPLING,
-                    409,
-                    format!(
-                        "the vault takes operator secrets only when every account that may reveal them has more than a PIN (IAM-07): {} sign in with a PIN alone; add a passkey or TOTP to them, give them a password, or change their roles",
-                        accounts.join(", ")
-                    ),
-                )
-                .with_title("PIN coupling rule")
-                .with_param("accounts", accounts.join(",")),
+                tenko_auth::service::reveal::pin_coupling_refusal(&accounts),
             )));
         }
     }

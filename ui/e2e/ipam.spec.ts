@@ -275,6 +275,33 @@ test("clearing a custom value in the host form removes it", async ({ page, api, 
   expect((await api.get<Schemas["Host"]>(`/hosts/${created.item.id}`)).meta.custom ?? {}).toEqual({});
 });
 
+test("the reverse zones of a network are set to Off and back to the default", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  const made = await api.post<Schemas["WriteResponse_Prefix"]>("/prefixes", { cidr: "192.0.2.0/24" });
+  const id = made.item?.id ?? "";
+  expect(made.item?.dns_reverse ?? null).toBeNull();
+
+  await page.goto("/ipam/prefixes/192.0.2.0/24");
+  await expect(withKey(page, "prefix-pane", "192.0.2.0/24")).toBeVisible();
+  await page.getByTestId("prefix-edit").click();
+  const form = page.getByTestId("dialog-prefix-form");
+  const reverse = form.getByTestId("prefix-dns-reverse");
+  await expect(reverse).toHaveValue("");
+  await reverse.selectOption("off");
+  await form.getByTestId("form-submit").click();
+  await confirmPlan(page);
+  await expect.poll(async () => (await api.get<Schemas["Prefix"]>(`/prefixes/${id}`)).dns_reverse).toBe("off");
+
+  // Back to the default: the member is null (the server then leaves it out).
+  await page.getByTestId("prefix-edit").click();
+  const again = page.getByTestId("dialog-prefix-form").getByTestId("prefix-dns-reverse");
+  await expect(again).toHaveValue("off");
+  await again.selectOption("");
+  await page.getByTestId("dialog-prefix-form").getByTestId("form-submit").click();
+  await confirmPlan(page);
+  await expect.poll(async () => (await api.get<Schemas["Prefix"]>(`/prefixes/${id}`)).dns_reverse ?? null).toBeNull();
+});
+
 test("an IPv6 prefix off a nibble boundary needs an acknowledgement before it applies", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
 

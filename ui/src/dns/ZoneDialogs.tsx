@@ -1,15 +1,39 @@
 // The dialogs of the zone list: create a zone (name, kind, SOA names, name servers, serial
 // policy, the primaries of a secondary or stub zone) and delete one with its records. The form
 // checks the names before it sends; the server's refusals land on the field they name.
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { fetchAll } from "../api/paginate";
 import { ApiError } from "../api/problem";
+import type { Prefix, Tenant, Vrf } from "../api/types";
 import { ConfirmDialog, Dialog } from "../components/Dialog";
-import { ErrorNotice } from "../components/Notice";
+import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { formatNumber, t } from "../i18n";
-import { createZone, deleteZone, SERIAL_POLICIES, ZONE_KINDS, type SerialPolicy, type Zone, type ZoneCreate, type ZoneKind } from "./api";
-import { canonical, defaultSoa, parseTtl, splitList, validName } from "./model";
+import { createZone, deleteZone, listZones, SERIAL_POLICIES, ZONE_KINDS, type SerialPolicy, type Zone, type ZoneCreate, type ZoneKind } from "./api";
+import { canonical, defaultSoa, isReverse, parseTtl, splitList, validName } from "./model";
 import { describedBy, Field, fieldErrors, kindWord } from "./Parts";
+
+/** The tenant a zone without a tenant counts for. */
+const DEFAULT_TENANT = "default";
+
+/** Whether a name is a forward name: not `arpa` and not under it. */
+function isForwardName(name: string): boolean {
+  return validName(name) && name !== "." && name !== "arpa" && !name.endsWith(".arpa");
+}
+
+/**
+ * How many network prefixes of the default tenant have no reverse-zone setting: the prefixes
+ * that get reverse zones once the tenant has a forward zone. Zero when there are none.
+ */
+async function prefixesWithoutReverseSetting(tenant: string): Promise<number> {
+  const vrfs = (await fetchAll<Vrf>("/api/v1/vrfs")).items.filter((v) => v.tenant === tenant);
+  let count = 0;
+  for (const vrf of vrfs) {
+    const prefixes = (await fetchAll<Prefix>("/api/v1/prefixes", { query: { vrf: vrf.id, role: "network" } })).items;
+    count += prefixes.filter((p) => !p.dns_reverse).length;
+  }
+  return count;
+}
 
 function policyWord(policy: SerialPolicy): string {
   return t(`dns.serial.${policy}`);
@@ -37,6 +61,37 @@ export function CreateZoneDialog(props: { onClose: () => void; onDone: (zone: Zo
     return { mname: mname() ?? d.mname, rname: rname() ?? d.rname };
   });
   const needsPrimaries = () => kind() === "secondary" || kind() === "stub";
+
+  // A zone created here has no tenant, so it counts for the default tenant. When it is the
+  // first primary forward zone of that tenant, the tenant's network prefixes without a
+  // reverse-zone setting get reverse zones with its values: the dialog says so before the submit.
+  // A failure to read the zones or to count hides the notice; it never blocks the form.
+  const [known] = createResource(async () => {
+    try {
+      const zones = (await listZones()).items;
+      const tenant = (await fetchAll<Tenant>("/api/v1/tenants")).items.find((tn) => tn.name === DEFAULT_TENANT);
+      return tenant ? { zones, tenant: tenant.id } : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  /** The default tenant, when this zone would be its first primary forward zone. */
+  const firstForwardOf = (): string | undefined => {
+    const state = known();
+    if (!state || kind() !== "primary" || !isForwardName(zoneName())) return undefined;
+    const has = state.zones.some(
+      (z) => z.kind === "primary" && !isReverse(z) && !z.name.endsWith(".arpa") && (z.tenant == null || z.tenant === state.tenant),
+    );
+    return has ? undefined : state.tenant;
+  };
+  const [affected] = createResource(firstForwardOf, async (tenant) => {
+    try {
+      return await prefixesWithoutReverseSetting(tenant);
+    } catch {
+      return 0;
+    }
+  });
+  const reverseCount = () => (firstForwardOf() ? (affected() ?? 0) : 0);
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
@@ -145,6 +200,11 @@ export function CreateZoneDialog(props: { onClose: () => void; onDone: (zone: Zo
         <Field id="description" label={t("dns.zone.field.description")}>
           {input("description", description, setDescription, false)}
         </Field>
+        <Show when={reverseCount() > 0}>
+          <Notice kind="warn" testid="zone-reverse-notice">
+            {t("dns.zone.create.reverse_notice", { count: reverseCount() })}
+          </Notice>
+        </Show>
         <ErrorNotice error={error()} />
         <div class="dialog-actions">
           <button type="button" class="btn ghost" data-testid="form-cancel" onClick={() => props.onClose()}>

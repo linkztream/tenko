@@ -17,6 +17,7 @@ import type { Download, Locator, Page } from "@playwright/test";
 import { ApiError, type Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { fixturePath, listAll, loadExpected, parseCsv, raiseSession, type Expected } from "./support/import";
+import { prefixByCidr } from "./support/ipam";
 import { cell, withKey } from "./support/ui";
 
 type Preview = Schemas["ImportPreview"];
@@ -551,6 +552,40 @@ test("a plan warning needs an acknowledgement before the import can be applied",
   const prefixes = await listAll<Schemas["Prefix"]>(api, "/prefixes");
   expect(prefixes.map((p) => p.cidr)).toContain("2001:db8:4::/46");
   expect((await api.get<View>(`/imports/${id}`)).state).toBe("applied");
+});
+
+test("networks inside an existing network turn it into a supernet after an acknowledged step", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.strength).toBe("pin");
+  // 192.0.2.0/24 is a network without ranges; the import brings two networks inside it.
+  await api.post("/prefixes", { cidr: "192.0.2.0/24" });
+  expect((await prefixByCidr(api, "192.0.2.0/24"))?.role).toBe("network");
+  const csv = "Network,Description\n192.0.2.0/26,servers\n192.0.2.64/26,clients\n";
+  const id = await upload(page, { name: "networks.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  await openPreview(page);
+
+  // The step has its own row: the network, how many imported networks lie inside, the box.
+  const step = page.getByTestId("import-supernet-step");
+  await expect(step).toHaveCount(1);
+  await expect(step).toHaveAttribute("data-cidr", "192.0.2.0/24");
+  await expect(step).toContainText("192.0.2.0/24 becomes a supernet");
+  await expect(step).toContainText("2 imported networks");
+  const apply = page.getByTestId("import-apply");
+  await expect(apply).toBeDisabled();
+  const ack = step.getByTestId("import-ack");
+  await expect(ack).toHaveAttribute("data-code", "ipam.prefix.becomes_supernet");
+  await expect(ack).not.toBeChecked();
+
+  await ack.check();
+  await expect(apply).toBeEnabled();
+  await applyAndWaitForResult(page);
+  expect((await api.get<View>(`/imports/${id}`)).state).toBe("applied");
+
+  // The existing network is a supernet now and holds the two imported networks.
+  expect((await prefixByCidr(api, "192.0.2.0/24"))?.role).toBe("supernet");
+  const prefixes = await listAll<Schemas["Prefix"]>(api, "/prefixes");
+  for (const cidr of ["192.0.2.0/26", "192.0.2.64/26"]) {
+    expect(prefixes.find((p) => p.cidr === cidr)?.role, cidr).toBe("network");
+  }
 });
 
 test("an import resumes from its URL and can be discarded", async ({ page, api, signedIn }) => {

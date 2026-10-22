@@ -11,6 +11,7 @@ import { ipamState } from "../api/mock/ipam/api";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
+import { recordWrites } from "../ipam/testkit";
 import { api } from "../api/client";
 import type { ImportView } from "./api";
 import Wizard from "./Wizard";
@@ -25,6 +26,7 @@ const PLAN_CSV = [
 // The view is rendered without the shell's <main>, which holds all page content in the app.
 const NO_SHELL = { disable: ["region"] } as const;
 
+const SUPERNET_CSV = "network,description\n203.0.113.192/29,servers\n203.0.113.200/29,clients\n";
 const NETWORKS_CSV = "network,description\n2001:db8:4::/46,Test site\n";
 
 beforeAll(useNodeFormData);
@@ -152,6 +154,44 @@ describe("import wizard", () => {
     fireEvent.click(apply);
     await screen.findByTestId("import-created");
     expect([...ipamState().data.prefix.values()].some((p) => p.cidr === "2001:db8:4::/46")).toBe(true);
+  });
+
+  // The supernet step: networks inside an existing network (the cameras network has no ranges)
+  // turn it into a supernet, once, and the person acknowledges the step before apply.
+  it("shows the supernet step with its count and applies it once it is acknowledged", async () => {
+    open();
+    await upload("cameras.csv", SUPERNET_CSV);
+    await preview();
+    const step = await screen.findByTestId("import-supernet-step");
+    expect(step.dataset.cidr).toBe("203.0.113.192/28");
+    expect(step.textContent).toContain("Step: 203.0.113.192/28 becomes a supernet so that the 2 imported networks inside it can be created; its addresses move to them.");
+    const apply = screen.getByTestId("import-apply") as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    // The step is the only warning: it has a card of its own above the warnings.
+    expect(screen.getAllByTestId("import-ack")).toHaveLength(1);
+    const ack = within(step).getByTestId("import-ack") as HTMLInputElement;
+    expect(ack.dataset.code).toBe("ipam.prefix.becomes_supernet");
+    expect(ack.checked).toBe(false);
+    const writes = recordWrites();
+    fireEvent.click(ack);
+    await waitFor(() => expect(apply.disabled).toBe(false));
+    fireEvent.click(apply);
+    await screen.findByTestId("import-created");
+    const sent = writes().find((w) => w.url.endsWith("/apply"));
+    expect(sent?.body).toMatchObject({ acknowledge: ["ipam.prefix.becomes_supernet"] });
+    const prefixes = [...ipamState().data.prefix.values()].filter((p) => p.meta.deleted === undefined || p.meta.deleted === null);
+    expect(prefixes.find((p) => p.cidr === "203.0.113.192/28")?.role).toBe("supernet");
+    expect(prefixes.some((p) => p.cidr === "203.0.113.192/29")).toBe(true);
+  });
+
+  it("leaves a network inside a network with ranges out and says so in the loss report", async () => {
+    open();
+    await upload("lan.csv", "network,description\n192.0.2.0/26,servers\n");
+    await preview();
+    expect(screen.queryByTestId("import-supernet-step")).toBeNull();
+    const entry = (await screen.findAllByTestId("import-loss-entry")).find((el) => el.dataset.code === "import.prefix.in_network");
+    expect(entry?.dataset.severity).toBe("warning");
+    expect(entry?.textContent).toContain("stays a network because it has ranges");
   });
 
   // A list of hosts (the hosts.csv of the export is one) names its rows by host, not by address.

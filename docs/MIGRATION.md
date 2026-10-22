@@ -92,6 +92,10 @@ The same three stages run for every source (MIG-03). Each stage is a job on the 
 
 `plan` has no side effects on Tenko or on the source. Because `apply` is a set of ordinary jobs, a failed or interrupted run can be rolled back or resumed with the same tooling as any other change.
 
+### Spreadsheet import: networks inside an existing network
+
+The spreadsheet import (IPAM-11) follows the same shape: a preview (`GET /imports/{id}/preview`) with the IPAM plan's warnings, then `POST /imports/{id}/apply` as a job in chunks. A network of the sheet that lies inside an existing prefix of role `network` would overlap it (`ipam.prefix.overlap`, IPAM-23). Instead, the preview offers one step per existing network: it becomes a supernet, so that the networks of the sheet can be created inside it, and the addresses it holds move to them. The step is the warning `ipam.prefix.becomes_supernet` (parameters `cidr` and `networks`, the number of imported networks inside), shown in the preview as a plan row with its acknowledgement; the import applies once it is acknowledged (`{"acknowledge": ["ipam.prefix.becomes_supernet"]}` in the apply request), and a rollback of the job turns the supernet back into a network. A network that a DHCP scope serves (`dhcp.scope.attached`) or that has ranges cannot become a supernet: the networks of the sheet inside it are left out with the loss entry `import.prefix.in_network` (a warning), and their addresses go to the existing network.
+
 ## Coexistence modes
 
 The mode is chosen per zone or scope in the UI (MIG-04). It controls who is authoritative while Tenko is being proven.

@@ -5,7 +5,7 @@
 //! | Module | What |
 //! |---|---|
 //! | [`reverse`] | PTR names, the reverse zones of a prefix, the RFC 2317 form |
-//! | [`plan`] | the planner: zones to create or adopt, RRset changes per zone, findings |
+//! | [`plan`] | the planner: zones to create or adopt, reverse zones that follow their template, RRset changes per zone, findings |
 //! | this module | [`DnsActuator`]: the dry run and the writes, as the reconciler's driver and for the move step |
 //!
 //! The actuator writes only RRsets of the origin `ipam` (the zone service refuses the rest
@@ -23,16 +23,18 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tenko_core::{
     RequestCtx, Revision,
-    dns::{Origin, ScopeName, ZoneKind},
+    dns::{Origin, RecordData, Rtype, ScopeName, ZoneKind},
 };
 use tenko_dns::zone::{
     NewZone, ZoneChange, ZoneService,
     records::{Change, Op},
 };
+use tenko_store::WriteBatch;
 use utoipa::ToSchema;
 
 pub use self::plan::{
-    DnsFinding, DnsPlan, MoveOverride, PlanOptions, RecordChange, ZoneAdopt, ZoneBatch, ZoneCreate,
+    DnsFinding, DnsPlan, MoveOverride, PlanOptions, REVERSE_TEMPLATES, RecordChange,
+    ReverseTemplate, ZoneAdopt, ZoneBatch, ZoneCreate, ZoneFollow,
 };
 use crate::error::{IpamError, IpamResult};
 
@@ -78,6 +80,9 @@ pub struct DnsActuation {
     pub zones_created: u32,
     /// Existing zones adopted as reverse zones of a prefix.
     pub zones_adopted: u32,
+    /// Reverse zones that took new SOA values or name servers from their template.
+    #[serde(default)]
+    pub zones_followed: u32,
     /// RRsets written or deleted.
     pub rrsets_changed: u32,
     /// Batches committed (one per zone and chunk).
@@ -157,8 +162,8 @@ impl DnsActuator {
     }
 
     /// Plans and writes: the reverse zones to create and adopt first, then, planned again
-    /// over them, the RRset changes of every zone. A failed zone is reported and the
-    /// others go on.
+    /// over them, the reverse zones that follow their template and the RRset changes of
+    /// every zone. A failed zone is reported and the others go on.
     ///
     /// # Errors
     ///
@@ -176,8 +181,66 @@ impl DnsActuator {
         } else {
             first
         };
+        self.follow(cx, &planned, &mut report).await;
         self.write(cx, &planned.batches, &mut report).await;
         Ok(report)
+    }
+
+    /// Brings the reverse zones that follow their template up to date and records what
+    /// they copied. The SOA change expects the zone row the plan read, so a zone an
+    /// operator changes meanwhile fails and stays as it is; each zone write is audited by
+    /// the zone service.
+    async fn follow(&self, cx: &RequestCtx, planned: &DnsPlan, report: &mut DnsActuation) {
+        let mut stamps = WriteBatch::for_request(cx);
+        let mut any = false;
+        for follow in &planned.follow {
+            if follow.soa.is_some() || follow.description.is_some() {
+                let change = ZoneChange {
+                    soa: follow.soa.clone(),
+                    description: follow.description.clone(),
+                    ..ZoneChange::default()
+                };
+                if let Err(error) = self
+                    .zones
+                    .update(cx, follow.zone, change, Some(follow.revision))
+                    .await
+                {
+                    failure(report, &follow.name, &error);
+                    continue;
+                }
+            }
+            if let Some(name_servers) = &follow.name_servers {
+                let change = Change {
+                    op: Op::Set,
+                    scope: ScopeName::DEFAULT,
+                    name: follow.name.clone(),
+                    rtype: Rtype::NS,
+                    ttl: None,
+                    records: name_servers
+                        .iter()
+                        .map(|host| RecordData::Ns { host: host.clone() })
+                        .collect(),
+                    take_over: false,
+                    origin: follow.ns_origin,
+                };
+                if let Err(error) = self
+                    .zones
+                    .change_records(cx, follow.zone, &[change], false)
+                    .await
+                {
+                    failure(report, &follow.name, &error);
+                    continue;
+                }
+            }
+            report.zones_followed += 1;
+            any |= stamp(&mut stamps, follow.zone, &follow.stamp);
+        }
+        for (zone, template) in &planned.stamps {
+            any |= stamp(&mut stamps, *zone, template);
+        }
+        if any && let Err(error) = self.zones.store().propose(stamps).await {
+            tracing::warn!(%error, "the DNS actuator could not record the reverse-zone templates");
+        }
     }
 
     /// Writes the batches of a plan; failures go to the report.
@@ -233,10 +296,7 @@ impl DnsActuator {
                 update: tenko_core::dns::UpdatePolicy::default(),
                 dnssec: tenko_core::dns::DnssecPolicy::default(),
                 source: None,
-                description: Some(format!(
-                    "Reverse zone kept by IPAM; SOA and name servers from {}",
-                    create.source
-                )),
+                description: Some(plan::reverse_description(&create.source)),
                 reverse_of: Some(create.prefix),
                 catalog: false,
             };
@@ -262,6 +322,20 @@ impl DnsActuator {
             }
         }
         last
+    }
+}
+
+fn stamp(
+    batch: &mut WriteBatch,
+    zone: tenko_core::dns::ZoneId,
+    template: &ReverseTemplate,
+) -> bool {
+    match batch.put_typed(&REVERSE_TEMPLATES, &zone, template) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, "a reverse-zone template does not encode");
+            false
+        }
     }
 }
 

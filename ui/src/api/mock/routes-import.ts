@@ -350,7 +350,7 @@ const apply = route("post", "/api/v1/imports/{id}/apply", async (ctx) => {
       403,
       "Credentials need the vault",
       `${model.credentials.length} hosts have credential columns, which become operator secrets in the vault: ${gate.detail}`,
-      { params: { reason: gate.reason, hosts: String(model.credentials.length), ...(gate.required ? { required: gate.required } : {}) } },
+      { params: { reason: gate.reason, hosts: String(model.credentials.length), ...(gate.required ? { required: gate.required } : {}), ...(gate.accounts ? { accounts: gate.accounts } : {}) } },
     );
   }
   if (!ev.plan.ok) throw ev.plan.problem;
@@ -368,7 +368,7 @@ const apply = route("post", "/api/v1/imports/{id}/apply", async (ctx) => {
 
   // The creates and updates, in dependency order, as one change: prefixes, then hosts with
   // their interfaces, then addresses.
-  applyCommands(ev.reconciled.commands as never, { acknowledge: ev.mapping.options.acknowledge });
+  applyCommands(ev.reconciled.commands as never, { acknowledge: ev.mapping.options.acknowledge, supernetStep: true });
   const vault = vaultDigests();
   let secrets = 0;
   for (const op of ev.reconciled.credentials) {

@@ -1116,6 +1116,9 @@
       <unit id="errors.ipam.prefix.nibble_boundary">
         <segment><source>The IPv6 prefix is not on a nibble boundary (a length divisible by 4), which makes reverse DNS and planning harder.</source></segment>
       </unit>
+      <unit id="errors.ipam.prefix.becomes_supernet">
+        <segment><source>{cidr} is a network and becomes a supernet so that the imported networks inside it can be created; its addresses move to them.</source></segment>
+      </unit>
       <unit id="errors.ipam.host.reservation_identifier">
         <segment><source>The host is reserved but has no MAC address (IPv4) or DUID (IPv6), so no DHCP reservation can be made.</source></segment>
       </unit>
@@ -3710,6 +3713,22 @@
       <unit id="ipam.prefix.alloc_highest">
         <segment><source>From the highest address</source></segment>
       </unit>
+      <unit id="ipam.prefix.dns_reverse">
+        <notes><note category="description">Label of the setting that says whether Tenko keeps the reverse DNS zones of a network.</note></notes>
+        <segment><source>Reverse zones</source></segment>
+      </unit>
+      <unit id="ipam.prefix.dns_reverse_default">
+        <segment><source>Default</source></segment>
+      </unit>
+      <unit id="ipam.prefix.dns_reverse_managed">
+        <segment><source>Managed</source></segment>
+      </unit>
+      <unit id="ipam.prefix.dns_reverse_off">
+        <segment><source>Off</source></segment>
+      </unit>
+      <unit id="ipam.prefix.dns_reverse_help">
+        <segment><source>Default: Tenko keeps the reverse zones of this network as soon as its tenant has a forward zone in Tenko, and none until then. Managed always keeps them. Off keeps none; existing zones stay but are no longer written.</source></segment>
+      </unit>
       <unit id="ipam.prefix.alarm">
         <segment><source>Alarm at</source></segment>
       </unit>
@@ -4226,6 +4245,16 @@
       </unit>
       <unit id="ipam.tenant.edit_title">
         <segment><source>Edit tenant {name}</source></segment>
+      </unit>
+      <unit id="ipam.tenant.default_zone">
+        <notes><note category="description">Label of the setting of a tenant: the forward zone the reverse zones of its prefixes take their SOA values and name servers from.</note></notes>
+        <segment><source>Default zone for reverse zones</source></segment>
+      </unit>
+      <unit id="ipam.tenant.default_zone_none">
+        <segment><source>None (the tenant's first forward zone)</source></segment>
+      </unit>
+      <unit id="ipam.tenant.default_zone_help">
+        <segment><source>New reverse zones of the tenant's prefixes take their SOA values and name servers from it and follow it when they change. Reverse zones an operator edited stay as they are.</source></segment>
       </unit>
       <unit id="ipam.tenant.filter_label">
         <segment><source>Filter tenants</source></segment>
@@ -6190,6 +6219,14 @@
       <unit id="import.preview.warnings">
         <segment><source>Warnings</source></segment>
       </unit>
+      <unit id="import.preview.steps">
+        <notes><note category="description">Heading of the card that lists changes the import makes to existing objects and that need an acknowledgement.</note></notes>
+        <segment><source>Steps the import takes</source></segment>
+      </unit>
+      <unit id="import.preview.supernet_step">
+        <notes><note category="description">A step of the import preview. Arguments: cidr is an existing network, networks is the number of imported networks inside it.</note></notes>
+        <segment><source>Step: {cidr} becomes a supernet so that the {networks, plural, one {# imported network} other {# imported networks}} inside it can be created; its addresses move to {networks, plural, one {it} other {them}}.</source></segment>
+      </unit>
       <unit id="import.preview.back">
         <segment><source>Back to the mapping</source></segment>
       </unit>
@@ -6282,6 +6319,9 @@
       </unit>
       <unit id="import.loss.prefix.unlisted">
         <segment><source>The network is not in the Index sheet; the mask was inferred</source></segment>
+      </unit>
+      <unit id="import.loss.prefix.in_network">
+        <segment><source>The network lies in a network that stays a network, so it is not created; its addresses go to that network</source></segment>
       </unit>
       <unit id="import.loss.sheet.empty">
         <segment><source>The sheet is empty</source></segment>
@@ -6411,6 +6451,10 @@
       </unit>
       <unit id="import.credentials.reason.pin_coupling">
         <segment><source>Another account that may reveal secrets still signs in with a PIN alone. Add a second factor or a password to it first, or leave the credential columns out.</source></segment>
+      </unit>
+      <unit id="import.credentials.pin_enrol">
+        <notes><note category="description">Link in the import preview when credentials cannot be stored because of the PIN coupling rule; it opens the account page where a passkey is enrolled.</note></notes>
+        <segment><source>Enrol a passkey</source></segment>
       </unit>
       <unit id="import.sheets.title">
         <segment><source>Outcome per sheet</source></segment>
@@ -7513,7 +7557,7 @@
       </unit>
       <unit id="errors.vault.pin_coupling">
         <notes><note category="description">Argument: accounts is a comma-separated list of login names.</note></notes>
-        <segment><source>The vault takes secrets only when every account that may reveal them has more than a PIN. Accounts with a PIN alone: {accounts}.</source></segment>
+        <segment><source>A secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule). Accounts with a PIN alone: {accounts}. Enrol a passkey for them first; a second factor, a password or other roles also lift the rule.</source></segment>
       </unit>
       <unit id="errors.vault.reveal.host_required">
         <segment><source>The security profile reveals secrets only on the page of a host they are bound to.</source></segment>
@@ -7960,6 +8004,10 @@
       </unit>
       <unit id="secrets.form.pin_title">
         <segment><source>Secrets cannot be stored yet</source></segment>
+      </unit>
+      <unit id="secrets.form.pin_enrol">
+        <notes><note category="description">Link in the notice about the PIN coupling rule; it opens the account page where a passkey is enrolled.</note></notes>
+        <segment><source>Enrol a passkey</source></segment>
       </unit>
       <unit id="secrets.form.reload">
         <segment><source>Reload</source></segment>

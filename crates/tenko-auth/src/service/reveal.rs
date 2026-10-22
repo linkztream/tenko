@@ -2,7 +2,9 @@
 //! reveal policy TGL-24 on top of the role and the PIN coupling rule IAM-07), and which
 //! accounts keep the vault from taking operator secrets at all (CON-07).
 
-use tenko_core::{Action, AuthStrength, ObjectKind, ObjectRef, RequestCtx, SecretId, UserId};
+use tenko_core::{
+    Action, AuthStrength, CodedError, ObjectKind, ObjectRef, RequestCtx, SecretId, UserId,
+};
 use tenko_store::{KeyRange, ReadViewExt};
 
 use super::{AuthService, FRESH_AUTHENTICATION};
@@ -19,6 +21,42 @@ pub const STEP_UP_FRESH: &str = "fresh";
 /// The `required` parameter of a step-up for a policy that wants a sign-in with a passkey
 /// or a hardware security key within the last five minutes.
 pub const STEP_UP_PASSKEY: &str = "passkey";
+
+// Backlog: the PIN coupling refusal names the rule in words and the next step.
+/// The code of the refusal to store an operator secret while an account that may reveal
+/// secrets signs in with a PIN alone (IAM-07, CON-07).
+pub const VAULT_PIN_COUPLING: &str = "vault.pin_coupling";
+
+/// The `next` parameter of that refusal: the step that lifts it.
+pub const PIN_COUPLING_NEXT: &str = "passkey";
+
+/// The route that starts the next step, passkey enrolment (the `route` parameter).
+pub const PASSKEY_ENROLMENT_ROUTE: &str = "/api/v1/auth/webauthn/register/start";
+
+/// The PIN coupling rule in words, the accounts that break it and the next step, for the
+/// refusal of `POST /secrets` and for the import's credential columns.
+pub fn pin_coupling_detail(accounts: &[String]) -> String {
+    let (who, them) = if accounts.len() == 1 {
+        ("this account signs", "it")
+    } else {
+        ("these accounts sign", "them")
+    };
+    format!(
+        "a secret cannot be stored while an account that may reveal secrets signs in with a PIN alone (the PIN coupling rule, IAM-07); {who} in with a PIN alone: {}. Next step: enrol a passkey for {them} (POST {PASSKEY_ENROLMENT_ROUTE}, in the UI under Account, Security); adding TOTP, a password or other roles also lifts the rule",
+        accounts.join(", ")
+    )
+}
+
+/// The refusal of `POST /secrets` under the PIN coupling rule: 409 `vault.pin_coupling`
+/// with the parameters `accounts` (comma-separated), `next` (`passkey`) and `route` (the
+/// passkey enrolment route).
+pub fn pin_coupling_refusal(accounts: &[String]) -> CodedError {
+    CodedError::new(VAULT_PIN_COUPLING, 409, pin_coupling_detail(accounts))
+        .with_title("PIN coupling rule: enrol a passkey first")
+        .with_param("accounts", accounts.join(","))
+        .with_param("next", PIN_COUPLING_NEXT)
+        .with_param("route", PASSKEY_ENROLMENT_ROUTE)
+}
 
 /// What a granted reveal check found out: who reveals and under which policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +188,31 @@ mod tests {
     use tenko_core::Timestamp;
 
     use super::*;
+
+    #[test]
+    fn the_pin_coupling_refusal_names_the_rule_and_the_next_step() {
+        let one = pin_coupling_refusal(&["olga".to_owned()]);
+        assert_eq!(one.code, VAULT_PIN_COUPLING);
+        assert_eq!(one.status, 409);
+        assert!(
+            one.detail.contains("signs in with a PIN alone"),
+            "{}",
+            one.detail
+        );
+        assert!(
+            one.detail
+                .contains("this account signs in with a PIN alone: olga")
+        );
+        assert!(one.detail.contains("enrol a passkey for it"));
+        assert!(one.detail.contains(PASSKEY_ENROLMENT_ROUTE));
+        let params = &one.params;
+        assert_eq!(params["accounts"], "olga");
+        assert_eq!(params["next"], "passkey");
+        assert_eq!(params["route"], PASSKEY_ENROLMENT_ROUTE);
+        let two = pin_coupling_detail(&["olga".to_owned(), "per".to_owned()]);
+        assert!(two.contains("these accounts sign in with a PIN alone: olga, per"));
+        assert!(two.contains("enrol a passkey for them"));
+    }
 
     fn at(secs: u64) -> Timestamp {
         Timestamp::from_unix_nanos(1_800_000_000_000_000_000)

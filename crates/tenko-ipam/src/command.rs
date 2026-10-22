@@ -102,6 +102,11 @@ meta_patch_fields! {
         /// New name.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub name: Option<String>,
+        // Backlog: the tenant's default zone.
+        /// The DNS settings, replaced as a whole: `{"default_zone": "<zone id>"}` sets the
+        /// default zone of the tenant's reverse zones, `{}` clears it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub dns: Option<tenko_core::dns::TenantDns>,
     }
 }
 

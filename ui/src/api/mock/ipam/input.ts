@@ -203,6 +203,13 @@ export class Body {
     return value as T;
   }
 
+  /** One of `values` where `null` clears: absent is `undefined`. */
+  nullableOneOf<T extends string>(key: string, values: readonly T[]): T | null | undefined {
+    if (this.raw[key] === undefined) return undefined;
+    if (this.raw[key] === null) return null;
+    return this.oneOf(key, values);
+  }
+
   reqOneOf<T extends string>(key: string, values: readonly T[]): T {
     if (this.missing(key)) {
       this.add(key, `${key} is required`);

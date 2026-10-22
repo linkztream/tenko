@@ -14,6 +14,7 @@ import type { Mapping } from "./import-mapping";
 import { itemId, type ItemKey, type LossEntry } from "./import-model";
 import { knownPrefixes, reconcile, type ItemAction, type ItemOutcome, type Reconciled } from "./import-reconcile";
 import { vaultDigests, type ImportRecord } from "./import-store";
+import { mockSecrets } from "./secrets-store";
 import { translate, type Translation } from "./import-translate";
 import { PROBLEM, severityOf, LOSS } from "./import-vocab";
 import { STRENGTH_RANK } from "./auth";
@@ -39,7 +40,7 @@ export function evaluate(record: ImportRecord, acknowledge: readonly string[] = 
   const translation = translate(record.files, withAck, knownPrefixes());
   const reconciled = reconcile(translation.model, withAck.options);
   try {
-    const result = applyCommands(reconciled.commands as never, { dryRun: true, acknowledge: withAck.options.acknowledge });
+    const result = applyCommands(reconciled.commands as never, { dryRun: true, acknowledge: withAck.options.acknowledge, supernetStep: true });
     return { mapping: withAck, translation, reconciled, plan: { ok: true, result } };
   } catch (error) {
     if (error instanceof Problem) return { mapping: withAck, translation, reconciled, plan: { ok: false, problem: error } };
@@ -52,7 +53,7 @@ export function evaluate(record: ImportRecord, acknowledge: readonly string[] = 
 
 export type CredentialGate =
   | { allowed: true }
-  | { allowed: false; reason: "forbidden" | "step_up_required"; required: string | null; detail: string };
+  | { allowed: false; reason: "forbidden" | "step_up_required" | "pin_coupling"; required: string | null; detail: string; accounts?: string };
 
 /** Whether the signed-in account may store operator secrets now (IAM-07): an administrator with more than a PIN. */
 export function credentialGate(principal: Principal): CredentialGate {
@@ -72,6 +73,17 @@ export function credentialGate(principal: Principal): CredentialGate {
       required: "password",
       detail:
         "storing operator secrets needs a session of at least `password` (IAM-07); sign in with a stronger method or leave the credential columns out",
+    };
+  }
+  // IAM-07: another account that may reveal secrets signs in with a PIN alone.
+  if (mockSecrets.pinOnlyAccounts.length > 0) {
+    const accounts = mockSecrets.pinOnlyAccounts.join(",");
+    return {
+      allowed: false,
+      reason: "pin_coupling",
+      required: null,
+      accounts,
+      detail: `the vault takes operator secrets only when every account that may reveal them has more than a PIN: ${accounts} sign in with a PIN alone`,
     };
   }
   return { allowed: true };
@@ -222,7 +234,11 @@ export function buildPreview(record: ImportRecord, ev: Evaluation, limit: number
   if (ev.plan.ok) {
     const plan = ev.plan.result.plan;
     planSummary = plan.summary;
-    warnings = plan.warnings;
+    // The supernet step names how many imported networks lie inside.
+    warnings = plan.warnings.map((w) => {
+      const networks = w.code === "ipam.prefix.becomes_supernet" && w.object ? reconciled.supernetSteps.get(w.object.id) : undefined;
+      return networks === undefined ? w : { ...w, params: { ...w.params, networks: String(networks) } };
+    });
     if (plan.summary.unacknowledged.length > 0) blockers.push("ipam.plan.unacknowledged");
   } else {
     planError = planProblem(ev.plan.problem);

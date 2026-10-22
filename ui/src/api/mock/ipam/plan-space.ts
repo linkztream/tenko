@@ -290,6 +290,7 @@ export function updatePrefix(ws: Workspace, args: Json): ObjectRef {
     "cidr",
     "custom",
     "description",
+    "dns_reverse",
     "role",
     "site",
     "status",
@@ -298,6 +299,8 @@ export function updatePrefix(ws: Workspace, args: Json): ObjectRef {
   ]);
   const net = readCidr(patch, "cidr", false);
   const role = patch.oneOf<PrefixRole>("role", ROLES);
+  // `null` returns to the default (the key is dropped); only networks have reverse zones.
+  const dnsReverse = patch.nullableOneOf<NonNullable<Prefix["dns_reverse"]>>("dns_reverse", ["managed", "off"]);
   const status = patch.oneOf<Status>("status", STATUSES);
   const vlan = patch.nullUuid("vlan");
   const site = patch.nullUuid("site");
@@ -316,6 +319,15 @@ export function updatePrefix(ws: Workspace, args: Json): ObjectRef {
   }
   if (nextRole !== before.role) {
     checkRoleChange(ws, after, nextRole);
+    if (ws.supernetStep && before.role === "network" && nextRole === "supernet") {
+      ws.warn(
+        "ipam.prefix.becomes_supernet",
+        `${before.cidr} is a network and becomes a supernet, so that the imported networks inside it can be created`,
+        ref("prefix", id),
+        { cidr: before.cidr },
+        true,
+      );
+    }
     after.role = nextRole;
   }
   if (status !== undefined) {
@@ -332,6 +344,18 @@ export function updatePrefix(ws: Workspace, args: Json): ObjectRef {
   }
   if (alarm !== undefined) after.alarm = alarm;
   if (alloc !== undefined) after.alloc = alloc;
+  if (dnsReverse !== undefined) {
+    if (dnsReverse !== null && nextRole !== "network") {
+      throw new Problem("ipam.prefix.dns_reverse_role", {
+        status: 409,
+        detail: `${after.cidr} is a supernet, only networks have reverse zones`,
+        params: { cidr: after.cidr },
+        errors: [fieldError("dns_reverse", "ipam.prefix.dns_reverse_role")],
+      });
+    }
+    if (dnsReverse === null) delete after.dns_reverse;
+    else after.dns_reverse = dnsReverse;
+  }
   ws.patchMeta("prefix", after.meta, meta);
   if (moved) nibbleWarning(ws, after);
   ws.finishUpdate("prefix", before, after);

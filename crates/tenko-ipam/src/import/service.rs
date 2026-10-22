@@ -785,6 +785,7 @@ impl ImportService {
                 .chain(acknowledge)
                 .cloned()
                 .collect(),
+            supernet_step: true,
         };
         let plan = crate::plan::plan(
             view.as_ref(),
@@ -1167,7 +1168,24 @@ impl ImportService {
                 if !plan.unacknowledged().is_empty() {
                     blockers.push(crate::error::codes::PLAN_UNACKNOWLEDGED.to_owned());
                 }
-                (Some(plan.summary()), plan.warnings.clone(), None)
+                let mut warnings = plan.warnings.clone();
+                // The supernet step names how many imported networks lie inside.
+                for warning in &mut warnings {
+                    if warning.code != crate::error::codes::WARN_BECOMES_SUPERNET {
+                        continue;
+                    }
+                    let networks = reconciled
+                        .supernet_steps
+                        .iter()
+                        .find(|(id, _)| warning.object == Some((**id).into()))
+                        .map(|(_, count)| *count);
+                    if let Some(networks) = networks {
+                        warning
+                            .params
+                            .insert("networks".to_owned(), networks.to_string());
+                    }
+                }
+                (Some(plan.summary()), warnings, None)
             }
             Err(error) => {
                 blockers.push(error.code_str().to_owned());

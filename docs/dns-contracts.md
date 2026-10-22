@@ -148,6 +148,7 @@ The node routes sit beside the node's other routes, as the scan configuration of
 | `dns.dnssec.not_online` | 409 | The zone is not signed online, so its keys cannot roll (`zone`, `mode`) (WP6.3) |
 | `dns.dnssec.rollover_running` | 409 | A key rollover of the zone runs (`zone`, `job`) (WP6.3) |
 | `dns.dnssec.signing_failed` | 500 | A key is missing from the vault or does not load; the signer's error (`zone`, `reason`) (WP6.3) |
+| `dns.default_zone.invalid` | 409 | The default zone of a tenant (`dns.default_zone`) is missing, not primary, a reverse zone or another tenant's (`zone`, `reason`) ([dns.md](dns.md) section 7) |
 
 ## 6. Audit actions
 

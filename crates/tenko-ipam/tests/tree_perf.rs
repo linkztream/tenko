@@ -92,6 +92,7 @@ async fn fill(store: &MemStore) -> Space {
             &TENANTS,
             &tenant,
             &Tenant {
+                dns: tenko_core::dns::TenantDns::default(),
                 id: tenant,
                 name: "default".to_owned(),
                 meta: meta(),

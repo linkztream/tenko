@@ -11,7 +11,7 @@
 //
 // Simplification: VRFs are found by name across tenants, so an export of a store with VRFs of
 // several tenants imports back unchanged.
-import { cidrOf, formatCidr, formatIp, parseIp, type Cidr } from "../../ipam/ip";
+import { cidrOf, containsCidr, formatCidr, formatIp, parseCidr, parseIp, type Cidr } from "../../ipam/ip";
 import type {
   Address,
   CustomFieldDef,
@@ -59,6 +59,8 @@ export interface Reconciled {
   issues: LossEntry[];
   /** Whether a conflict under the `fail` policy blocks the import. */
   blocked: boolean;
+  /** The supernet steps: existing networks turned into supernets, with the number of imported networks inside each. */
+  supernetSteps: Map<string, number>;
 }
 
 const DEFAULT_NAME = "default";
@@ -137,7 +139,7 @@ function sameJson(a: unknown, b: unknown): boolean {
 type MetaKindName = "prefix" | "host" | "address";
 
 class Reconciler {
-  readonly out: Reconciled = { commands: [], outcomes: [], credentials: [], issues: [], blocked: false };
+  readonly out: Reconciled = { commands: [], outcomes: [], credentials: [], issues: [], blocked: false, supernetSteps: new Map() };
   private readonly data = ipamState().data;
   private readonly defs = new Map<string, CustomFieldDef>();
   private readonly reportedUndefined = new Set<string>();
@@ -414,6 +416,10 @@ class Reconciler {
     const vrfId = this.vrfId(prefix.vrf);
     const existing = vrfId === null ? undefined : this.prefixIdx.get(`${vrfId}|${formatCidr(prefix.cidr)}`);
     if (!existing) {
+      if (vrfId !== null && !this.supernetStep(prefix, vrfId)) {
+        this.outcome(key, "kept");
+        return;
+      }
       const alarm = this.alarm(prefix, null);
       const vrf = this.vrfInput(prefix.vrf);
       this.command("create_prefix", {
@@ -438,6 +444,8 @@ class Reconciler {
     if (prefix.role !== null && prefix.role !== existing.role) {
       patch.role = prefix.role;
       fields.push("role");
+      // The networks of the import inside it need no supernet step of their own.
+      if (prefix.role === "supernet" && !this.out.supernetSteps.has(existing.id)) this.out.supernetSteps.set(existing.id, 0);
     }
     if (prefix.status !== null && prefix.status !== existing.status) {
       if (statusTransitionAllowed(existing.status, prefix.status as Prefix["status"])) {
@@ -466,6 +474,45 @@ class Reconciler {
     }
     Object.assign(patch, this.metaPatch(existing.meta, prefix.description, tags, custom, fields));
     this.finishUpdate("update_prefix", existing.id, key, patch, fields, prefix.origin);
+  }
+
+  /**
+   * The supernet step: a new network inside an existing network of the store turns that network
+   * into a supernet, once, instead of failing every network inside it with an overlap. A network
+   * with ranges stays a network: the imported network is left out and its addresses go to it.
+   * Returns whether the imported network can be created.
+   */
+  private supernetStep(prefix: ModelPrefix, vrfId: string): boolean {
+    let parent: Prefix | undefined;
+    let parentLength = -1;
+    for (const other of this.prefixIdx.values()) {
+      if (other.vrf !== vrfId) continue;
+      const there = parseCidr(other.cidr);
+      if (!there || there.version !== prefix.cidr.version || there.length >= prefix.cidr.length) continue;
+      if (containsCidr(there, prefix.cidr) && there.length > parentLength) {
+        parent = other;
+        parentLength = there.length;
+      }
+    }
+    if (!parent || parent.role !== "network") return true;
+    const count = this.out.supernetSteps.get(parent.id);
+    if (count !== undefined) {
+      this.out.supernetSteps.set(parent.id, count + 1);
+      return true;
+    }
+    const ranges = [...this.data.range.values()].some((r) => r.prefix === (parent as Prefix).id && !r.meta.deleted);
+    if (ranges) {
+      this.issue(
+        prefix.origin,
+        LOSS.prefixInNetwork,
+        `${formatCidr(prefix.cidr)} lies in the network ${parent.cidr}, which stays a network because it has ranges; ${formatCidr(prefix.cidr)} is not created and its addresses go to ${parent.cidr}`,
+      );
+      return false;
+    }
+    this.command("update_prefix", { id: parent.id, expected: null, patch: { role: "supernet" } });
+    this.out.supernetSteps.set(parent.id, 1);
+    this.outcome({ kind: "prefix", vrf: vrfKey(prefix.vrf, this.options.vrf), cidr: parent.cidr }, "update", ["role"]);
+    return true;
   }
 
   private finishUpdate(op: string, id: string, key: ItemKey, patch: Record<string, unknown>, fields: string[], origin: Loc): void {

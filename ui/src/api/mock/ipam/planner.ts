@@ -242,6 +242,8 @@ export interface PlanOptions {
   acknowledge?: Iterable<string> | undefined;
   /** Who acts; the signed-in user by default. */
   principal?: Principal | undefined;
+  /** The import sets it: turning a network into a supernet then warns (`ipam.prefix.becomes_supernet`). */
+  supernetStep?: boolean | undefined;
 }
 
 export interface Plan {
@@ -270,6 +272,7 @@ export function planCommands(commands: readonly RawCommand[], options: PlanOptio
   }
   const principal = options.principal ?? principalNow();
   const ws = new Workspace(store.data, new Date().toISOString(), principal);
+  ws.supernetStep = options.supernetStep === true;
   const results = commands.map((command) => runCommand(ws, command));
   checkReservations(ws);
   const acknowledge = new Set(options.acknowledge ?? []);
@@ -518,6 +521,8 @@ export interface ApplyOptions {
   dryRun?: boolean;
   /** Who acts; the signed-in user by default. */
   principal?: Principal;
+  /** Turning a network into a supernet is a step to acknowledge (the import). */
+  supernetStep?: boolean;
 }
 
 export interface ApplyResult {

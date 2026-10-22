@@ -4,6 +4,7 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DNS_IDS } from "../api/mock/dns-model";
+import { IPAM_IDS, ipamState } from "../api/mock/ipam/api";
 import { dnsState } from "../api/mock/routes-dns";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -123,6 +124,64 @@ describe("creating a zone", () => {
     fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "example.test" } });
     fireEvent.click(within(dialog).getByTestId("form-submit"));
     await waitFor(() => expect(within(dialog).getByTestId("field-error").textContent).toBe("A zone of this name exists already."));
+  });
+
+  // The zone is created without a tenant, so it counts for the default tenant: when it is that
+  // tenant's first primary forward zone, the dialog says how many network prefixes get reverse zones.
+  describe("the notice about the reverse zones", () => {
+    const withoutForwardZone = () => {
+      const zones = dnsState().zones;
+      zones.splice(0, zones.length, ...zones.filter((z) => z.name !== "example.test"));
+    };
+    const fill = async (name: string, kind = "primary") => {
+      const dialog = await screen.findByTestId("dialog-zone-form");
+      fireEvent.change(within(dialog).getByTestId("field-kind"), { target: { value: kind } });
+      fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: name } });
+      return dialog;
+    };
+    const openCreate = async () => {
+      open();
+      await waitFor(() => expect(rows("dns-zones").length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByTestId("dns-zone-create"));
+    };
+
+    it("counts the network prefixes without a setting when the zone is the first forward zone", async () => {
+      withoutForwardZone();
+      // One network of the default tenant has its setting: it is not counted.
+      const lan = ipamState().data.prefix.get(IPAM_IDS.prefix.lan);
+      if (lan) lan.dns_reverse = "off";
+      const networks = [...ipamState().data.prefix.values()].filter(
+        (p) => p.vrf === IPAM_IDS.vrf.default && p.role === "network" && !p.meta.deleted && !p.dns_reverse,
+      ).length;
+      expect(networks).toBeGreaterThan(0);
+      await openCreate();
+      const dialog = await fill("home.example.test");
+      const notice = await within(dialog).findByTestId("zone-reverse-notice");
+      expect(notice.textContent).toContain("This is the first forward zone of the tenant.");
+      expect(notice.textContent).toContain(`${networks} network prefixes without a reverse-zone setting will get reverse zones`);
+      expect(notice.textContent).toContain("Set the prefixes whose reverse zones live elsewhere to Off first.");
+      // A reverse name and another kind of zone are not a forward zone.
+      await fill("2.0.192.in-addr.arpa");
+      await waitFor(() => expect(within(dialog).queryByTestId("zone-reverse-notice")).toBeNull());
+      await fill("home.example.test", "stub");
+      expect(within(dialog).queryByTestId("zone-reverse-notice")).toBeNull();
+    });
+
+    it("says nothing when the tenant has a forward zone already", async () => {
+      await openCreate();
+      const dialog = await fill("home.example.test");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(within(dialog).queryByTestId("zone-reverse-notice")).toBeNull();
+    });
+
+    it("says nothing when no prefix would get reverse zones", async () => {
+      withoutForwardZone();
+      for (const prefix of ipamState().data.prefix.values()) if (prefix.role === "network") prefix.dns_reverse = "off";
+      await openCreate();
+      const dialog = await fill("home.example.test");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(within(dialog).queryByTestId("zone-reverse-notice")).toBeNull();
+    });
   });
 
   it("asks a secondary zone for its primary servers", async () => {

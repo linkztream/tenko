@@ -313,6 +313,7 @@ impl StepHandler for ChunkStep {
         }
         let options = PlanOptions {
             acknowledge: prepared.mapping.options.acknowledge.clone(),
+            supernet_step: true,
         };
         let plan = service
             .ipam()

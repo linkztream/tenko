@@ -109,6 +109,11 @@ pub mod codes {
     pub const WARN_DUPLICATE_MAC: &str = "ipam.interface.duplicate_mac";
     /// Warning: the address lies inside a reserved or infrastructure range.
     pub const WARN_ADDRESS_IN_RANGE: &str = "ipam.address.in_range";
+    // Backlog: the import's supernet step.
+    /// Warning (needs acknowledgement): an import turns an existing network into a
+    /// supernet so that the networks it imports inside it can be created. Params: `cidr`,
+    /// in the import preview also `networks` (how many imported networks lie inside).
+    pub const WARN_BECOMES_SUPERNET: &str = "ipam.prefix.becomes_supernet";
 }
 
 /// An error of the IPAM domain: a stable code, an HTTP status, parameters and field

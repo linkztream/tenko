@@ -30,11 +30,25 @@
 //! other data is a finding and stays as it is; one that holds the same data is left alone.
 //! An `ipam` RRset that nothing wants any more is deleted, or with the orphan rule
 //! `propose` kept and listed.
+//!
+//! # The template of a reverse zone
+//!
+//! A new reverse zone copies its SOA values, serial policy and name servers from its
+//! template: the longest reverse zone above it in Tenko, else the default zone of the
+//! tenant (`dns.default_zone` on the tenant), else the tenant's first forward zone, else
+//! one without a tenant, else the first forward zone. [`REVERSE_TEMPLATES`] keeps what a
+//! reverse zone copied the last time. When the template's SOA values or name servers
+//! change, or another zone becomes the template (the old one was deleted, or a default
+//! zone was chosen), a reverse zone whose SOA values and name servers still equal the
+//! copied ones follows in the same run; a zone that differs (an operator edited it) stays
+//! as it is.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::IpAddr,
 };
+
+use serde::{Deserialize, Serialize};
 
 use tenko_core::{
     AddressId, JobId, PrefixId, Revision, TenantId, VrfId,
@@ -46,6 +60,7 @@ use tenko_core::{
     },
     ipam::{Address, DnsReverse, Prefix, PrefixRole, Status, Tenant, Vrf},
     net::Fqdn,
+    table::TableDef,
 };
 use tenko_jobs::{
     Job, JobState, StepState,
@@ -65,6 +80,36 @@ use crate::{
 
 /// The most RRset changes in one batch (the zone service's limit).
 pub const MAX_CHANGES: usize = 10_000;
+
+// Backlog: the reverse-zone template.
+/// What a reverse zone kept by IPAM copied from its template the last time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReverseTemplate {
+    /// The template zone.
+    pub template: ZoneId,
+    /// Its apex.
+    pub template_name: DnsName,
+    /// The SOA values copied.
+    pub soa: SoaDefaults,
+    /// The name servers copied, sorted.
+    pub name_servers: Vec<DnsName>,
+}
+
+/// The templates of the reverse zones, by zone (written by the actuator only).
+pub static REVERSE_TEMPLATES: TableDef<ZoneId, ReverseTemplate> =
+    TableDef::new("ipam.dns_reverse_templates");
+
+/// The description of a reverse zone the actuator creates.
+pub fn reverse_description(template: &DnsName) -> String {
+    format!("Reverse zone kept by IPAM; SOA and name servers from {template}")
+}
+
+fn sorted(names: &[DnsName]) -> Vec<DnsName> {
+    let mut names = names.to_vec();
+    names.sort();
+    names.dedup();
+    names
+}
 
 /// Name of the default tenant.
 const DEFAULT_TENANT: &str = "default";
@@ -107,6 +152,28 @@ pub struct ZoneCreate {
     pub name_servers: Vec<DnsName>,
     /// The zone the SOA values and name servers come from.
     pub source: DnsName,
+}
+
+/// A reverse zone that follows its template: the SOA values and the name servers that
+/// change, and the template it copied them from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoneFollow {
+    /// The zone.
+    pub zone: ZoneId,
+    /// Its apex.
+    pub name: DnsName,
+    /// The revision of the zone row the plan read; the update expects it.
+    pub revision: Revision,
+    /// The new SOA values, when they change.
+    pub soa: Option<SoaDefaults>,
+    /// The new name servers, when they change.
+    pub name_servers: Option<Vec<DnsName>>,
+    /// The origin of the apex NS set, kept by the change.
+    pub ns_origin: Origin,
+    /// The new description, when the zone still has the one the actuator gave it.
+    pub description: Option<String>,
+    /// What the zone copied after the change.
+    pub stamp: ReverseTemplate,
 }
 
 /// An existing zone that becomes the reverse zone of a prefix.
@@ -239,12 +306,21 @@ pub struct DnsPlan {
     pub batches: Vec<ZoneBatch>,
     /// Findings.
     pub findings: Vec<DnsFinding>,
+    /// Reverse zones that follow their template.
+    pub follow: Vec<ZoneFollow>,
+    /// Templates to record without a zone change: reverse zones in step with their
+    /// template.
+    pub stamps: Vec<(ZoneId, ReverseTemplate)>,
 }
 
 impl DnsPlan {
     /// Whether the plan writes nothing.
     pub fn is_empty(&self) -> bool {
-        self.create.is_empty() && self.adopt.is_empty() && self.batches.is_empty()
+        self.create.is_empty()
+            && self.adopt.is_empty()
+            && self.batches.is_empty()
+            && self.follow.is_empty()
+            && self.stamps.is_empty()
     }
 
     /// The RRset changes in all zones.
@@ -259,8 +335,12 @@ impl DnsPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct ZoneInfo {
     pub zone: Zone,
+    /// The revision of the zone row.
+    pub revision: Revision,
     /// The apex NS set of the default scope.
     pub name_servers: Vec<DnsName>,
+    /// The origin of that NS set.
+    pub ns_origin: Origin,
     /// Whether it holds `ipam` RRsets (the store's counters).
     pub has_ipam: bool,
     /// The network when the apex is a reverse zone name.
@@ -275,9 +355,13 @@ pub(crate) struct World {
     pub vrf_tenant: BTreeMap<VrfId, TenantId>,
     pub default_tenant: Option<TenantId>,
     pub addresses: BTreeMap<AddressId, Address>,
+    /// The default zone of each tenant that has one.
+    pub tenant_default: BTreeMap<TenantId, ZoneId>,
+    /// What each reverse zone copied from its template.
+    pub templates: BTreeMap<ZoneId, ReverseTemplate>,
 }
 
-fn ns_set(view: &dyn ReadView, zone: &Zone) -> IpamResult<Vec<DnsName>> {
+fn ns_set(view: &dyn ReadView, zone: &Zone) -> IpamResult<(Vec<DnsName>, Origin)> {
     let key = RrSetKey {
         zone: zone.id,
         scope: ScopeName::DEFAULT,
@@ -285,9 +369,9 @@ fn ns_set(view: &dyn ReadView, zone: &Zone) -> IpamResult<Vec<DnsName>> {
         rtype: Rtype::NS,
     };
     let Some((rrset, _)) = view.get_typed(&RRSETS, &key)? else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Origin::Manual));
     };
-    Ok(rrset
+    let hosts = rrset
         .records()
         .unwrap_or_default()
         .into_iter()
@@ -295,13 +379,14 @@ fn ns_set(view: &dyn ReadView, zone: &Zone) -> IpamResult<Vec<DnsName>> {
             RecordData::Ns { host } => Some(host),
             _ => None,
         })
-        .collect())
+        .collect();
+    Ok((hosts, rrset.origin))
 }
 
 impl World {
     pub(crate) fn load(view: &dyn ReadView) -> IpamResult<Self> {
         let mut world = World::default();
-        for (_, zone, _) in view.scan_typed(&ZONES, KeyRange::all(), usize::MAX, false)? {
+        for (_, zone, revision) in view.scan_typed(&ZONES, KeyRange::all(), usize::MAX, false)? {
             let zone: Zone = zone;
             if zone.kind != ZoneKind::Primary {
                 continue;
@@ -312,8 +397,11 @@ impl World {
                 .origins
                 .iter()
                 .any(|(origin, count)| *origin == Origin::Ipam && *count > 0);
+            let (name_servers, ns_origin) = ns_set(view, &zone)?;
             world.zones.push(ZoneInfo {
-                name_servers: ns_set(view, &zone)?,
+                revision,
+                name_servers,
+                ns_origin,
                 has_ipam,
                 reverse: reverse::parse_zone(&zone.name),
                 zone,
@@ -322,9 +410,20 @@ impl World {
         world.zones.sort_by(|a, b| a.zone.name.cmp(&b.zone.name));
         for (_, tenant, _) in view.scan_typed(&TENANTS, KeyRange::all(), usize::MAX, false)? {
             let tenant: Tenant = tenant;
-            if !tenant.meta.is_deleted() && tenant.name.eq_ignore_ascii_case(DEFAULT_TENANT) {
+            if tenant.meta.is_deleted() {
+                continue;
+            }
+            if tenant.name.eq_ignore_ascii_case(DEFAULT_TENANT) {
                 world.default_tenant = Some(tenant.id);
             }
+            if let Some(zone) = tenant.dns.default_zone {
+                world.tenant_default.insert(tenant.id, zone);
+            }
+        }
+        for (zone, template, _) in
+            view.scan_typed(&REVERSE_TEMPLATES, KeyRange::all(), usize::MAX, false)?
+        {
+            world.templates.insert(zone, template);
         }
         for (_, vrf, _) in view.scan_typed(&VRFS, KeyRange::all(), usize::MAX, false)? {
             let vrf: Vrf = vrf;
@@ -384,9 +483,10 @@ impl World {
         })
     }
 
-    /// The zone that lends a new reverse zone its SOA values and name servers: the
-    /// longest reverse zone above it, else the tenant's first forward zone, else the first
-    /// forward zone; always one with name servers.
+    /// The zone that lends a new reverse zone its SOA values and name servers (its
+    /// template): the longest reverse zone above it, else the tenant's default zone, else
+    /// the tenant's first forward zone, else the first forward zone without a tenant, else
+    /// the first forward zone; always one with name servers.
     fn lender(&self, apex: &DnsName, vrf: VrfId) -> Option<&ZoneInfo> {
         let usable = |info: &&ZoneInfo| !info.name_servers.is_empty();
         let above = self
@@ -406,11 +506,94 @@ impl World {
                 .filter(usable)
                 .filter(|info| is_forward(&info.zone.name))
         };
+        // Backlog: the tenant's default zone comes first.
+        let chosen = tenant
+            .and_then(|tenant| self.tenant_default.get(&tenant))
+            .and_then(|zone| forward().find(|info| info.zone.id == *zone));
+        if chosen.is_some() {
+            return chosen;
+        }
         forward()
             .find(|info| info.zone.tenant.is_some() && info.zone.tenant == tenant)
             .or_else(|| forward().find(|info| info.zone.tenant.is_none()))
             .or_else(|| forward().next())
     }
+}
+
+/// The reverse zones that follow their template, and the templates to record for zones in
+/// step with theirs (see the module documentation). Shorter apexes go first, so a zone
+/// whose template is a reverse zone that follows in the same run takes its new values.
+fn follow_templates(
+    world: &World,
+    frozen: &BTreeSet<ZoneId>,
+) -> (Vec<ZoneFollow>, Vec<(ZoneId, ReverseTemplate)>) {
+    let mut follow = Vec::new();
+    let mut stamps = Vec::new();
+    let mut planned: BTreeMap<ZoneId, (SoaDefaults, Vec<DnsName>)> = BTreeMap::new();
+    let mut zones: Vec<&ZoneInfo> = world
+        .zones
+        .iter()
+        .filter(|info| info.reverse.is_some() && !frozen.contains(&info.zone.id))
+        .collect();
+    zones.sort_by_key(|info| info.zone.name.label_count());
+    for info in zones {
+        let Some(prefix) = info
+            .zone
+            .reverse_of
+            .and_then(|prefix| world.prefixes.get(&prefix))
+        else {
+            continue;
+        };
+        let Some(lender) = world.lender(&info.zone.name, prefix.vrf) else {
+            continue;
+        };
+        let (soa, name_servers) = planned
+            .get(&lender.zone.id)
+            .cloned()
+            .unwrap_or_else(|| (lender.zone.soa.clone(), sorted(&lender.name_servers)));
+        let want = ReverseTemplate {
+            template: lender.zone.id,
+            template_name: lender.zone.name.clone(),
+            soa,
+            name_servers,
+        };
+        let current_ns = sorted(&info.name_servers);
+        let stamp = world.templates.get(&info.zone.id);
+        if info.zone.soa == want.soa && current_ns == want.name_servers {
+            if stamp != Some(&want) {
+                stamps.push((info.zone.id, want));
+            }
+            continue;
+        }
+        // A zone never recorded (kept before templates were, or adopted with other
+        // values) does not follow.
+        let Some(stamp) = stamp else {
+            continue;
+        };
+        // Each part equals what the zone copied, or already the template's (a follow
+        // that stopped half way); anything else is an operator's edit.
+        let soa_kept = info.zone.soa == stamp.soa || info.zone.soa == want.soa;
+        let ns_kept = current_ns == stamp.name_servers || current_ns == want.name_servers;
+        if !soa_kept || !ns_kept {
+            continue;
+        }
+        let description = (info.zone.description.as_deref()
+            == Some(reverse_description(&stamp.template_name).as_str())
+            && stamp.template_name != want.template_name)
+            .then(|| reverse_description(&want.template_name));
+        planned.insert(info.zone.id, (want.soa.clone(), want.name_servers.clone()));
+        follow.push(ZoneFollow {
+            zone: info.zone.id,
+            name: info.zone.name.clone(),
+            revision: info.revision,
+            soa: (info.zone.soa != want.soa).then(|| want.soa.clone()),
+            name_servers: (current_ns != want.name_servers).then(|| want.name_servers.clone()),
+            ns_origin: info.ns_origin,
+            description,
+            stamp: want,
+        });
+    }
+    (follow, stamps)
 }
 
 fn is_forward(name: &DnsName) -> bool {
@@ -557,7 +740,7 @@ pub(crate) fn plan_world(
                     tenant: world.vrf_tenant.get(&prefix.vrf).copied(),
                     serial: lender.zone.serial,
                     soa: lender.zone.soa.clone(),
-                    name_servers: lender.name_servers.clone(),
+                    name_servers: sorted(&lender.name_servers),
                     source: lender.zone.name.clone(),
                 }),
                 None => no_servers.entry(*prefix_id).or_default().push(name.clone()),
@@ -593,6 +776,7 @@ pub(crate) fn plan_world(
             });
         }
     }
+    (out.follow, out.stamps) = follow_templates(world, &frozen);
     let active: Vec<&ZoneInfo> = world
         .zones
         .iter()

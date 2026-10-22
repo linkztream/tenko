@@ -574,8 +574,8 @@ describe("GET /imports/{id}/preview", () => {
   });
 
   it("reports a plan that cannot run as plan_error and blocks apply", async () => {
-    const view = await uploaded("nets.csv", "network,description\n192.0.2.0/25,First half\n");
-    // 192.0.2.0/24 is a network in the seed: a prefix inside it overlaps.
+    // 192.0.2.0/24 is a network in the seed: a network that surrounds it overlaps.
+    const view = await uploaded("nets.csv", "network,role\n192.0.2.0/23,network\n");
     const p = (await preview(view.id)).body;
     expect(p.can_apply).toBe(false);
     expect(p.plan_error).toMatchObject({ code: "ipam.prefix.overlap", status: 409 });

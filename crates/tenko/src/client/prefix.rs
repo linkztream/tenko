@@ -1,12 +1,15 @@
-//! `tenko prefix list|get|create`: the prefix endpoints of the public API.
+//! `tenko prefix list|get|create|update`: the prefix endpoints of the public API.
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use tenko_api::{dto::Page, problem::ProblemDetails};
-use tenko_core::ipam::Prefix;
+use tenko_api::{client::Client, dto::Page, problem::ProblemDetails};
+use tenko_core::{
+    Revision,
+    ipam::{DnsReverse, Prefix},
+};
 
 use super::{ClientOpts, Failure, Output, Target, table};
 
@@ -19,6 +22,8 @@ pub enum PrefixCommand {
     Get(GetArgs),
     /// Create a prefix.
     Create(CreateArgs),
+    /// Change a prefix: its reverse zones (`--dns-reverse`).
+    Update(UpdateArgs),
 }
 
 impl PrefixCommand {
@@ -28,6 +33,7 @@ impl PrefixCommand {
             Self::List(args) => &args.client,
             Self::Get(args) => &args.client,
             Self::Create(args) => &args.client,
+            Self::Update(args) => &args.client,
         }
     }
 
@@ -37,6 +43,7 @@ impl PrefixCommand {
             Self::List(_) => "prefix list",
             Self::Get(_) => "prefix get",
             Self::Create(_) => "prefix create",
+            Self::Update(_) => "prefix update",
         }
     }
 }
@@ -115,6 +122,49 @@ pub struct CreateArgs {
     pub dry_run: bool,
 }
 
+/// The reverse zones of a prefix (`dns_reverse`, `docs/dns.md` section 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DnsReverseArg {
+    /// IPAM creates and keeps the prefix's reverse zones.
+    Managed,
+    /// No reverse zones for the prefix.
+    Off,
+    /// The setting is cleared: managed once the tenant has a forward zone in Tenko.
+    Default,
+}
+
+impl DnsReverseArg {
+    fn api(self) -> Value {
+        match self {
+            Self::Managed => json!("managed"),
+            Self::Off => json!("off"),
+            Self::Default => Value::Null,
+        }
+    }
+}
+
+/// Arguments of `tenko prefix update`.
+#[derive(Debug, Clone, Args)]
+pub struct UpdateArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The prefix identifier, or its network (`192.0.2.0/24`) in the default VRF or the one
+    /// given with `--vrf`.
+    #[arg(value_name = "ID_OR_CIDR")]
+    pub prefix: String,
+    /// The VRF to look a network up in.
+    #[arg(long, value_name = "ID")]
+    pub vrf: Option<String>,
+    /// The reverse zones of the prefix: `managed`, `off`, or `default` (managed once the
+    /// tenant has a forward zone in Tenko).
+    #[arg(long, value_name = "SETTING")]
+    pub dns_reverse: Option<DnsReverseArg>,
+    /// Refuse the change when the prefix is no longer at this revision.
+    #[arg(long, value_name = "REV")]
+    pub if_match: Option<u64>,
+}
+
 /// Runs a `tenko prefix` subcommand.
 ///
 /// # Errors
@@ -126,6 +176,7 @@ pub async fn run(command: &PrefixCommand) -> Result<Output, Failure> {
         PrefixCommand::List(args) => list(&target, args).await,
         PrefixCommand::Get(args) => get(&target, args).await,
         PrefixCommand::Create(args) => create(&target, args).await,
+        PrefixCommand::Update(args) => update(&target, args).await,
     }
 }
 
@@ -185,17 +236,27 @@ async fn list(target: &Target, args: &ListArgs) -> Result<Output, Failure> {
 
 async fn get(target: &Target, args: &GetArgs) -> Result<Output, Failure> {
     let client = target.connect().await?;
-    let value: Value = if args.prefix.contains('/') {
+    let value = fetch(&client, &args.prefix, args.vrf.as_deref()).await?;
+    if target.json {
+        return Ok(Output::json(&value));
+    }
+    let prefix = decode(&value)?;
+    Ok(Output::text(describe(&prefix)))
+}
+
+/// One prefix by identifier, or by network in the VRF.
+async fn fetch(client: &Client, prefix: &str, vrf: Option<&str>) -> Result<Value, Failure> {
+    let value: Value = if prefix.contains('/') {
         let query = ListQuery {
             limit: 1000,
             cursor: None,
-            vrf: args.vrf.as_deref(),
-            within: Some(&args.prefix),
+            vrf,
+            within: Some(prefix),
             status: None,
             q: None,
         };
         let page: Page<Value> = client.get_query("/prefixes", &query).await?;
-        let wanted = args.prefix.trim().to_ascii_lowercase();
+        let wanted = prefix.trim().to_ascii_lowercase();
         page.items
             .into_iter()
             .find(|item| {
@@ -211,20 +272,57 @@ async fn get(target: &Target, args: &GetArgs) -> Result<Output, Failure> {
                     status: 404,
                     code: "ipam.not_found".to_owned(),
                     title: "Not Found".to_owned(),
-                    detail: format!("no prefix {} in the VRF", args.prefix),
-                    params: BTreeMap::from([("cidr".to_owned(), args.prefix.clone())]),
+                    detail: format!("no prefix {prefix} in the VRF"),
+                    params: BTreeMap::from([("cidr".to_owned(), prefix.to_owned())]),
                     errors: Vec::new(),
                     instance: None,
                 })
             })?
     } else {
-        client.get(&format!("/prefixes/{}", args.prefix)).await?
+        client.get(&format!("/prefixes/{prefix}")).await?
     };
+    Ok(value)
+}
+
+async fn update(target: &Target, args: &UpdateArgs) -> Result<Output, Failure> {
+    let Some(dns_reverse) = args.dns_reverse else {
+        return Err(Failure::new(
+            crate::exit::USAGE,
+            "nothing to change: give --dns-reverse",
+        ));
+    };
+    let client = target.connect().await?;
+    let found = decode(&fetch(&client, &args.prefix, args.vrf.as_deref()).await?)?;
+    let body = json!({ "dns_reverse": dns_reverse.api() });
+    let answer: Value = client
+        .patch(
+            &format!("/prefixes/{}", found.id),
+            &body,
+            args.if_match.map(Revision),
+        )
+        .await?;
     if target.json {
-        return Ok(Output::json(&value));
+        return Ok(Output::json(&answer));
     }
-    let prefix = decode(&value)?;
-    Ok(Output::text(describe(&prefix)))
+    let item = answer.get("item").filter(|item| !item.is_null());
+    let after = match item {
+        Some(item) => decode(item)?,
+        None => found,
+    };
+    let mut text = format!(
+        "updated prefix {}: dns_reverse {}",
+        after.cidr,
+        dns_reverse_word(after.dns_reverse)
+    );
+    if let Some(revision) = answer.get("revision").and_then(Value::as_u64) {
+        let _ = write!(text, " at revision {revision}");
+    }
+    text.push('\n');
+    Ok(Output::text(text))
+}
+
+fn dns_reverse_word(setting: Option<DnsReverse>) -> String {
+    setting.map_or_else(|| "default".to_owned(), |setting| word(&setting))
 }
 
 async fn create(target: &Target, args: &CreateArgs) -> Result<Output, Failure> {
@@ -350,6 +448,7 @@ fn describe(prefix: &Prefix) -> String {
     if let Some(site) = &prefix.site {
         lines.push(("site", site.to_string()));
     }
+    lines.push(("dns_reverse", dns_reverse_word(prefix.dns_reverse)));
     let width = lines
         .iter()
         .map(|(key, _)| key.len())

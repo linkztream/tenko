@@ -80,6 +80,11 @@ pub const CUSTOM_UNDEFINED: &str = "import.custom.undefined";
 pub const CONFLICT_KEPT: &str = "import.conflict.kept";
 /// A host is locked against automation (IPAM-16); the import leaves it unchanged.
 pub const HOST_LOCKED: &str = "import.host.locked";
+// Backlog: the import's supernet step.
+/// A network of the import lies in an existing network that cannot become a supernet (a
+/// DHCP scope serves it, or it has ranges); the network is not created and its addresses
+/// go to the existing one.
+pub const PREFIX_IN_NETWORK: &str = "import.prefix.in_network";
 
 /// The severity of a loss code.
 pub fn severity(code: &str) -> Severity {

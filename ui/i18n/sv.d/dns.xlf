@@ -244,6 +244,10 @@
       <unit id="dns.zone.create.primaries_required">
         <segment><source>Name at least one primary server.</source><target>Ange minst en primär server.</target></segment>
       </unit>
+      <unit id="dns.zone.create.reverse_notice">
+        <notes><note category="description">Warning in the create-zone dialog, shown before the zone is created. Argument: count is the number of network prefixes of the default tenant that would get reverse zones.</note></notes>
+        <segment><source>This is the first forward zone of the tenant. {count, plural, one {# network prefix without a reverse-zone setting will get} other {# network prefixes without a reverse-zone setting will get}} reverse zones with this zone's SOA values and name servers. Set the prefixes whose reverse zones live elsewhere to Off first.</source><target>Det här är organisationens första framåtzon. {count, plural, one {# nätverksprefix utan inställning för omvända zoner kommer att få} other {# nätverksprefix utan inställning för omvända zoner kommer att få}} omvända zoner med den här zonens SOA-värden och namnservrar. Ställ först in de prefix vars omvända zoner finns någon annanstans på Av.</target></segment>
+      </unit>
       <unit id="dns.zone.field.name">
         <segment><source>Zone name</source><target>Zonnamn</target></segment>
       </unit>
@@ -1074,6 +1078,10 @@
       </unit>
       <unit id="errors.dns.zone.exists">
         <segment><source>A zone of this name exists already.</source><target>Det finns redan en zon med det namnet.</target></segment>
+      </unit>
+      <unit id="errors.dns.default_zone.invalid">
+        <notes><note category="description">Argument: reason is missing, not_primary, reverse or other_tenant.</note></notes>
+        <segment><source>{reason, select, missing {The zone no longer exists.} not_primary {Only a primary zone can be the default zone.} reverse {A reverse zone cannot be the default zone.} other_tenant {The zone belongs to another tenant.} other {This zone cannot be the default zone.}}</source><target>{reason, select, missing {Zonen finns inte längre.} not_primary {Bara en primär zon kan vara standardzon.} reverse {En omvänd zon kan inte vara standardzon.} other_tenant {Zonen tillhör en annan organisation.} other {Den här zonen kan inte vara standardzon.}}</target></segment>
       </unit>
       <unit id="errors.dns.zone.invalid">
         <segment><source>The zone settings are not valid ({field}).</source><target>Zonens inställningar är inte giltiga ({field}).</target></segment>

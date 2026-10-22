@@ -29,7 +29,10 @@ import { checkAlarm, checkNetwork, networkHint } from "./inputs";
 
 const ROLES: readonly PrefixRole[] = ["network", "supernet"];
 const POLICIES: readonly AllocPolicy[] = ["lowest", "highest"];
-const PLACED = ["cidr", "description", "status", "role", "vlan", "site", "alloc", "alarm", "tags", "custom"] as const;
+const PLACED = ["cidr", "description", "status", "role", "vlan", "site", "alloc", "alarm", "dns_reverse", "tags", "custom"] as const;
+/** The reverse-zone setting; the empty text is the default (the member is absent or null). */
+type Reverse = "" | NonNullable<Prefix["dns_reverse"]>;
+const REVERSE: readonly Reverse[] = ["", "managed", "off"];
 
 export function PrefixForm(props: {
   vrf: Vrf;
@@ -53,6 +56,7 @@ export function PrefixForm(props: {
   const [warn, setWarn] = createSignal(original?.alarm ? String(original.alarm.warn_pct) : "");
   const [crit, setCrit] = createSignal(original?.alarm ? String(original.alarm.crit_pct) : "");
   const [alarmTouched, setAlarmTouched] = createSignal(false);
+  const [reverse, setReverse] = createSignal<Reverse>(original?.dns_reverse ?? "");
   const [tags, setTags] = createSignal<string[]>([...(original?.meta.tags ?? [])]);
   const [custom, setCustom] = createSignal<Record<string, CustomValue>>({ ...(original?.meta.custom ?? {}) });
   const [customProblems, setCustomProblems] = createSignal<Record<string, string>>({});
@@ -60,6 +64,9 @@ export function PrefixForm(props: {
   const vlanChoices = useVlanChoices();
   const siteChoices = useSiteChoices();
   const kind = () => kindWord("prefix");
+
+  // Only networks have reverse zones; the setting is for an edit of one.
+  const showReverse = () => original?.role === "network" && role() !== "supernet";
 
   const network = createMemo(() => checkNetwork(cidr()));
   const alarm = createMemo(() => checkAlarm(warn(), crit()));
@@ -113,6 +120,8 @@ export function PrefixForm(props: {
     if (alloc() !== (original.alloc ?? "lowest")) out.alloc = alloc();
     const a = alarm();
     if (a.ok && (a.alarm?.warn_pct !== original.alarm?.warn_pct || a.alarm?.crit_pct !== original.alarm?.crit_pct)) out.alarm = a.alarm;
+    const rev = reverse();
+    if (showReverse() && rev !== (original.dns_reverse ?? "")) out.dns_reverse = rev === "" ? null : rev;
     if (!sameTags(tags(), original.meta.tags ?? [])) out.tags = tags();
     const values = customPatch(original.meta.custom ?? {}, custom());
     if (values) out.custom = values as PrefixPatch["custom"];
@@ -149,6 +158,11 @@ export function PrefixForm(props: {
     ...(original ? [] : [{ value: "", label: t("ipam.form.role_auto") }]),
     ...ROLES.map((r) => ({ value: r as string, label: t(`ipam.prefix_role.${r}`) })),
   ];
+  const reverseOptions = (): Option<Reverse>[] =>
+    REVERSE.map((r) => ({
+      value: r,
+      label: r === "" ? t("ipam.prefix.dns_reverse_default") : r === "managed" ? t("ipam.prefix.dns_reverse_managed") : t("ipam.prefix.dns_reverse_off"),
+    }));
   const allocOptions = (): Option<AllocPolicy>[] =>
     POLICIES.map((p) => ({ value: p, label: t(p === "lowest" ? "ipam.prefix.alloc_lowest" : "ipam.prefix.alloc_highest") }));
 
@@ -300,6 +314,24 @@ export function PrefixForm(props: {
                 )}
               </Field>
             </FieldRow>
+            <Show when={showReverse()}>
+              <Field
+                name="dns_reverse"
+                label={t("ipam.prefix.dns_reverse")}
+                help={t("ipam.prefix.dns_reverse_help")}
+                error={serverFieldMessage(flow.error(), "dns_reverse")}
+              >
+                {(c) => (
+                  <SelectInput
+                    {...c}
+                    data-testid="prefix-dns-reverse"
+                    value={reverse()}
+                    options={reverseOptions()}
+                    onChange={tracked(setReverse, flow)}
+                  />
+                )}
+              </Field>
+            </Show>
             <TagsInput label={t("ipam.col.tags")} value={tags()} onChange={tracked(setTags, flow)} error={serverFieldMessage(flow.error(), "tags")} />
             <CustomFieldsEditor
               kind="prefix"

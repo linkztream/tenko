@@ -7010,6 +7010,11 @@ export interface components {
              * @description Reverse zones created.
              */
             zones_created: number;
+            /**
+             * Format: int32
+             * @description Reverse zones that took new SOA values or name servers from their template.
+             */
+            zones_followed?: number;
         };
         /** @description One entry of a node's DNS cache: the answer to one question in one view. */
         DnsCacheEntry: {
@@ -13035,6 +13040,8 @@ export interface components {
         Page_Tenant: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
+                /** @description DNS settings: the default zone (`dns.default_zone`). */
+                dns?: components["schemas"]["TenantDns"];
                 /** @description Identifier. */
                 id: components["schemas"]["TenantId"];
                 /** @description Metadata. */
@@ -17231,12 +17238,27 @@ export interface components {
         };
         /** @description A tenant (IPAM-01). */
         Tenant: {
+            /** @description DNS settings: the default zone (`dns.default_zone`). */
+            dns?: components["schemas"]["TenantDns"];
             /** @description Identifier. */
             id: components["schemas"]["TenantId"];
             /** @description Metadata. */
             meta: components["schemas"]["Meta"];
             /** @description Unique name. */
             name: string;
+        };
+        /**
+         * @description The DNS settings of a tenant (`dns` on the tenant, `PATCH /tenants/{id}` with
+         *     `If-Match`).
+         */
+        TenantDns: {
+            /**
+             * @description The default zone: a primary forward zone of the tenant, or one without a tenant.
+             *     The reverse zones IPAM creates for the tenant's prefixes take their SOA values and
+             *     name servers from it and follow it when they change (`docs/dns.md` section 7).
+             *     Without it, the tenant's first forward zone serves.
+             */
+            default_zone?: string | null;
         };
         /** Format: uuid */
         TenantId: string;
@@ -17262,6 +17284,7 @@ export interface components {
             } | null;
             /** @description Replaces the description; `null` clears it. */
             description?: string | null;
+            dns?: components["schemas"]["TenantDns"] | null;
             /** @description New name. */
             name?: string | null;
             /** @description Replaces the tags. */
@@ -18762,6 +18785,8 @@ export interface components {
             dry_run: boolean;
             /** @description A tenant (IPAM-01). */
             item?: {
+                /** @description DNS settings: the default zone (`dns.default_zone`). */
+                dns?: components["schemas"]["TenantDns"];
                 /** @description Identifier. */
                 id: components["schemas"]["TenantId"];
                 /** @description Metadata. */
@@ -37708,7 +37733,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameter `accounts`) */
+            /** @description An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route) */
             409: {
                 headers: {
                     [name: string]: unknown;

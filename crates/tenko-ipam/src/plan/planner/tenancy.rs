@@ -95,7 +95,12 @@ impl Planner<'_> {
             &input.custom,
             input.description.as_ref(),
         )?;
-        let tenant = Tenant { id, name, meta };
+        let tenant = Tenant {
+            id,
+            name,
+            dns: tenko_core::dns::TenantDns::default(),
+            meta,
+        };
         self.write(&tenant)?;
         self.ws
             .put_typed(&TENANT_NAMES, &tenant.name.to_lowercase(), &id)?;
@@ -131,6 +136,14 @@ impl Planner<'_> {
             }
             after.name = name;
         }
+        if let Some(dns) = &patch.dns {
+            if let Some(zone) = dns.default_zone
+                && dns.default_zone != before.dns.default_zone
+            {
+                self.check_default_zone(before.id, zone)?;
+            }
+            after.dns = dns.clone();
+        }
         self.patch_meta(
             Tenant::KIND,
             &mut after.meta,
@@ -141,6 +154,49 @@ impl Planner<'_> {
         self.finish_update(&before, &after, |p, t| {
             p.ws.put_typed(&TENANT_NAMES, &t.name.to_lowercase(), &t.id)
         })
+    }
+
+    // Backlog: the tenant's default zone. The zone must be a primary forward zone of the
+    // tenant or one without a tenant; the read is tracked, so a zone deleted or moved
+    // meanwhile makes the plan stale.
+    fn check_default_zone(
+        &mut self,
+        tenant: TenantId,
+        zone: tenko_core::dns::ZoneId,
+    ) -> IpamResult<()> {
+        use tenko_core::dns::{DnsName, ZoneKind, codes::DEFAULT_ZONE_INVALID, tables::ZONES};
+        let found = self
+            .ws
+            .get_typed(&ZONES, &zone, true)?
+            .map(|(zone, _)| zone);
+        let reason = match &found {
+            None => Some("missing"),
+            Some(found) if found.kind != ZoneKind::Primary => Some("not_primary"),
+            Some(found)
+                if DnsName::new("arpa").is_ok_and(|arpa| found.name.is_subdomain_of(&arpa)) =>
+            {
+                Some("reverse")
+            }
+            Some(found) if found.tenant.is_some_and(|owner| owner != tenant) => {
+                Some("other_tenant")
+            }
+            Some(_) => None,
+        };
+        let Some(reason) = reason else {
+            return Ok(());
+        };
+        let name = found.map_or_else(|| zone.to_string(), |found| found.name.to_string());
+        Err(IpamError::new(
+            DEFAULT_ZONE_INVALID,
+            409,
+            format!(
+                "{name} cannot be the default zone of the tenant ({reason}): it must be a primary forward zone of the tenant or one without a tenant"
+            ),
+        )
+        .titled("Not a default zone for the tenant")
+        .param("zone", zone)
+        .param("reason", reason)
+        .field("dns.default_zone", DEFAULT_ZONE_INVALID))
     }
 
     pub(super) fn delete_tenant(

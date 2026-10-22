@@ -25376,7 +25376,7 @@
             }
           },
           "409": {
-            "description": "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameter `accounts`)",
+            "description": "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38748,6 +38748,12 @@
             "type": "integer",
             "format": "int32",
             "description": "Reverse zones created.",
+            "minimum": 0
+          },
+          "zones_followed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Reverse zones that took new SOA values or name servers from their template.",
             "minimum": 0
           }
         }
@@ -54404,6 +54410,10 @@
                 "meta"
               ],
               "properties": {
+                "dns": {
+                  "$ref": "#/components/schemas/TenantDns",
+                  "description": "DNS settings: the default zone (`dns.default_zone`)."
+                },
                 "id": {
                   "$ref": "#/components/schemas/TenantId",
                   "description": "Identifier."
@@ -64512,6 +64522,10 @@
           "meta"
         ],
         "properties": {
+          "dns": {
+            "$ref": "#/components/schemas/TenantDns",
+            "description": "DNS settings: the default zone (`dns.default_zone`)."
+          },
           "id": {
             "$ref": "#/components/schemas/TenantId",
             "description": "Identifier."
@@ -64523,6 +64537,19 @@
           "name": {
             "type": "string",
             "description": "Unique name."
+          }
+        }
+      },
+      "TenantDns": {
+        "type": "object",
+        "description": "The DNS settings of a tenant (`dns` on the tenant, `PATCH /tenants/{id}` with\n`If-Match`).",
+        "properties": {
+          "default_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The default zone: a primary forward zone of the tenant, or one without a tenant.\nThe reverse zones IPAM creates for the tenant's prefixes take their SOA values and\nname servers from it and follow it when they change (`docs/dns.md` section 7).\nWithout it, the tenant's first forward zone serves."
           }
         }
       },
@@ -64604,6 +64631,17 @@
               "null"
             ],
             "description": "Replaces the description; `null` clears it."
+          },
+          "dns": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TenantDns",
+                "description": "The DNS settings, replaced as a whole: `{\"default_zone\": \"<zone id>\"}` sets the\ndefault zone of the tenant's reverse zones, `{}` clears it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "type": [
@@ -68791,6 +68829,10 @@
               "meta"
             ],
             "properties": {
+              "dns": {
+                "$ref": "#/components/schemas/TenantDns",
+                "description": "DNS settings: the default zone (`dns.default_zone`)."
+              },
               "id": {
                 "$ref": "#/components/schemas/TenantId",
                 "description": "Identifier."

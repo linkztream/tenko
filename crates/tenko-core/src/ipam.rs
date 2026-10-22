@@ -102,6 +102,10 @@ pub struct Tenant {
     pub id: TenantId,
     /// Unique name.
     pub name: String,
+    // Backlog: the tenant's default zone.
+    /// DNS settings: the default zone (`dns.default_zone`).
+    #[serde(default, skip_serializing_if = "crate::dns::TenantDns::is_empty")]
+    pub dns: crate::dns::TenantDns,
     /// Metadata.
     pub meta: Meta,
 }

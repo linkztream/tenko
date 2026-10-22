@@ -186,6 +186,9 @@ export class Workspace {
     return { at: this.at, by: this.principal };
   }
 
+  /** Turning a network into a supernet warns: the import's supernet step. */
+  supernetStep = false;
+
   get automation(): boolean {
     return isAutomation(this.principal);
   }

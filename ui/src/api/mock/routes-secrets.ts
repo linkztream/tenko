@@ -298,7 +298,7 @@ const createSecret = route("post", "/api/v1/secrets", async (ctx) => {
     const accounts = mockSecrets.pinOnlyAccounts.join(",");
     return fail("vault.pin_coupling", {
       detail: `the vault takes operator secrets only when every account that may reveal them has more than a PIN: ${mockSecrets.pinOnlyAccounts.join(", ")} sign in with a PIN alone`,
-      params: { accounts },
+      params: { accounts, next: "passkey", route: "/api/v1/auth/webauthn/register/start" },
     });
   }
   const body = await ctx.body();

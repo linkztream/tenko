@@ -244,6 +244,10 @@
       <unit id="dns.zone.create.primaries_required">
         <segment><source>Name at least one primary server.</source></segment>
       </unit>
+      <unit id="dns.zone.create.reverse_notice">
+        <notes><note category="description">Warning in the create-zone dialog, shown before the zone is created. Argument: count is the number of network prefixes of the default tenant that would get reverse zones.</note></notes>
+        <segment><source>This is the first forward zone of the tenant. {count, plural, one {# network prefix without a reverse-zone setting will get} other {# network prefixes without a reverse-zone setting will get}} reverse zones with this zone's SOA values and name servers. Set the prefixes whose reverse zones live elsewhere to Off first.</source></segment>
+      </unit>
       <unit id="dns.zone.field.name">
         <segment><source>Zone name</source></segment>
       </unit>
@@ -1074,6 +1078,10 @@
       </unit>
       <unit id="errors.dns.zone.exists">
         <segment><source>A zone of this name exists already.</source></segment>
+      </unit>
+      <unit id="errors.dns.default_zone.invalid">
+        <notes><note category="description">Argument: reason is missing, not_primary, reverse or other_tenant.</note></notes>
+        <segment><source>{reason, select, missing {The zone no longer exists.} not_primary {Only a primary zone can be the default zone.} reverse {A reverse zone cannot be the default zone.} other_tenant {The zone belongs to another tenant.} other {This zone cannot be the default zone.}}</source></segment>
       </unit>
       <unit id="errors.dns.zone.invalid">
         <segment><source>The zone settings are not valid ({field}).</source></segment>

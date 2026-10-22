@@ -3,8 +3,10 @@
 // answer was, and is never shown. An edit sends only the members that changed, `null` to
 // clear the user name or the notes, with the revision the person looked at; if someone else
 // changed the secret meanwhile, the dialog says so and offers to load the latest version.
+import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, Show, untrack } from "solid-js";
 import { errorMessage, isApiError } from "../api/problem";
+import { paths } from "../app/paths";
 import { Dialog } from "../components/Dialog";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { t } from "../i18n";
@@ -160,7 +162,10 @@ export function SecretFormDialog(props: {
         <div class="dialog-body">
           <Show when={pinCoupling()}>
             <Notice kind="warn" role="alert" title={t("secrets.form.pin_title")} testid="secret-pin-coupling">
-              {errorMessage(error())}
+              <p>{errorMessage(error())}</p>
+              <A class="btn sm" href={paths.account("security")} data-testid="secret-pin-coupling-enrol">
+                {t("secrets.form.pin_enrol")}
+              </A>
             </Notice>
           </Show>
           <ConflictNotice error={error()} busy={busy()} onReload={() => void reload()} />

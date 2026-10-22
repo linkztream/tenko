@@ -42,6 +42,11 @@ pub struct PlanOptions {
     /// an acknowledgement applies only when its code is listed here.
     #[serde(default)]
     pub acknowledge: BTreeSet<String>,
+    /// Whether turning a network into a supernet is a step to review: the import sets it,
+    /// and the change then warns with `ipam.prefix.becomes_supernet`, which needs an
+    /// acknowledgement. Not part of the API.
+    #[serde(skip)]
+    pub supernet_step: bool,
 }
 
 impl PlanOptions {
@@ -53,6 +58,7 @@ impl PlanOptions {
     {
         Self {
             acknowledge: codes.into_iter().map(Into::into).collect(),
+            supernet_step: false,
         }
     }
 }

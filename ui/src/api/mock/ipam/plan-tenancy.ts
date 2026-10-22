@@ -3,7 +3,8 @@
 import type { CustomFieldDef, CustomKind, ObjectRef, Site, Status, Tenant, Vlan, Vrf } from "../../types";
 import { STATUSES } from "../../types";
 import { Problem, fieldError } from "../reply";
-import { Body, readMeta, readUpdate, type Json, type MetaInput } from "./input";
+import { dnsState } from "../routes-dns";
+import { Body, isJson, readMeta, readUpdate, type Json, type MetaInput } from "./input";
 import { inUse, nameTaken, notFound, revisionMismatch } from "./problems";
 import { META_KINDS, type MetaKind } from "./state";
 import type { Workspace } from "./workspace";
@@ -45,9 +46,49 @@ export function createTenant(ws: Workspace, args: Json): ObjectRef {
   return { kind: "tenant", id: insertTenant(ws, id, name, meta, false).id };
 }
 
+/**
+ * `dns` of a tenant patch: absent leaves it, `{}` and `null` clear it, `{ default_zone }` sets
+ * the default zone. Returns the zone to set (null to clear), or undefined for no change.
+ */
+function readTenantDns(patch: Body): { zone: string | null } | undefined {
+  const raw = patch.raw.dns;
+  if (raw === undefined) return undefined;
+  if (raw === null) return { zone: null };
+  if (!isJson(raw)) {
+    patch.add("dns", "dns must be an object");
+    return undefined;
+  }
+  const dns = new Body(raw, "dns.").only(["default_zone"]);
+  const zone = dns.nullUuid("default_zone");
+  patch.absorb(dns);
+  return { zone: zone ?? null };
+}
+
+/** The zone must be a primary forward zone of the tenant or one without a tenant (`dns.default_zone.invalid`). */
+function checkDefaultZone(tenant: string, zone: string): void {
+  const found = dnsState().zones.find((z) => z.id === zone);
+  const reason = !found
+    ? "missing"
+    : found.kind !== "primary"
+      ? "not_primary"
+      : found.name === "arpa" || found.name.endsWith(".arpa")
+        ? "reverse"
+        : found.tenant && found.tenant !== tenant
+          ? "other_tenant"
+          : null;
+  if (reason === null) return;
+  throw new Problem("dns.default_zone.invalid", {
+    status: 409,
+    detail: `${found?.name ?? zone} cannot be the default zone of the tenant (${reason}): it must be a primary forward zone of the tenant or one without a tenant`,
+    params: { zone, reason },
+    errors: [fieldError("dns.default_zone", "dns.default_zone.invalid")],
+  });
+}
+
 export function updateTenant(ws: Workspace, args: Json): ObjectRef {
-  const { id, expected, patch } = readUpdate(args, ["custom", "description", "name", "tags"]);
+  const { id, expected, patch } = readUpdate(args, ["custom", "description", "dns", "name", "tags"]);
   const name = patch.name("name");
+  const dns = readTenantDns(patch);
   const meta = readMeta(patch);
   patch.done();
   const before = ws.loadForChange("tenant", id, expected);
@@ -55,6 +96,11 @@ export function updateTenant(ws: Workspace, args: Json): ObjectRef {
   if (name !== undefined) {
     if (!same(name, before.name)) ws.assertFree("tenant", "tenant", name, (t) => same(t.name, name), id);
     after.name = name;
+  }
+  if (dns !== undefined) {
+    if (dns.zone !== null && dns.zone !== before.dns?.default_zone) checkDefaultZone(id, dns.zone);
+    if (dns.zone === null) delete after.dns;
+    else after.dns = { default_zone: dns.zone };
   }
   ws.patchMeta("tenant", after.meta, meta);
   ws.finishUpdate("tenant", before, after);

@@ -357,6 +357,18 @@ impl Planner<'_> {
             // WP7.4: a network a DHCP scope serves stays a network.
             if role == PrefixRole::Supernet {
                 self.refuse_if_dhcp_scope(&before)?;
+                if self.options.supernet_step && before.role == PrefixRole::Network {
+                    self.warn(
+                        codes::WARN_BECOMES_SUPERNET,
+                        format!(
+                            "{} is a network and becomes a supernet, so that the imported networks inside it can be created",
+                            before.cidr
+                        ),
+                        Some(id.into()),
+                        &[("cidr", before.cidr.to_string())],
+                        true,
+                    );
+                }
             }
             self.check_role_change(&after, role, &descendants)?;
             after.role = role;
