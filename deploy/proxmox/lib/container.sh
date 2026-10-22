@@ -8,7 +8,7 @@
 #
 # Usage: source "<dir>/container.sh"   (then call tenko_container_init)
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # shellcheck source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"

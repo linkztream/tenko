@@ -18,7 +18,7 @@
 # the download in the container while the repository is private); TENKO_ADMIN_PASSWORD;
 # TENKO_SCRIPTS_URL; TENKO_DRY_RUN=1.
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # Secrets stay variables of this shell: exported, they would reach every child process.
 export -n GITHUB_TOKEN TENKO_ADMIN_PASSWORD 2>/dev/null || true

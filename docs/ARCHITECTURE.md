@@ -497,7 +497,7 @@ Policy: no `unsafe` code without an ADR.
 ```
 tenko/
   Cargo.toml                 # workspace
-  LICENSE                    # placeholder until the license decision
+  LICENSE.md                 # the Business Source License 1.1 (ADR 0022)
   docs/
     README.md                # entry point
     REQUIREMENTS.md          # living requirements specification

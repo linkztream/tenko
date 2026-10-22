@@ -234,7 +234,7 @@ pwsh -File deploy\windows\build-msi.ps1 -Binary target\release\tenko.exe -Versio
 
 The sources are in `deploy/windows/wix/`: `Package.wxs` (the files, the properties, the
 custom actions and their order) and `TenkoUI.wxs` (the wizard). The licence page is the
-repository's `LICENSE`, converted at build time. The `UpgradeCode` in `Package.wxs` must never
+repository's `LICENSE.md`, converted at build time. The `UpgradeCode` in `Package.wxs` must never
 change: it is what makes a newer MSI an upgrade of an older one.
 
 To look at the files without installing, extract them (no elevation needed):

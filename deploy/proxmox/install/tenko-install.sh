@@ -26,7 +26,7 @@
 #   TENKO_INSTALL_TEST=1  under the container test: no systemd, so install.sh --no-start
 # Exit status: that of install.sh (0 done, 9 the node runs but setup failed; see its header).
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 TENKO_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for TENKO_LIB in "${TENKO_HERE}/container.sh" "${TENKO_HERE}/../lib/container.sh"; do

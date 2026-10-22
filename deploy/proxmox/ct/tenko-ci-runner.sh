@@ -12,7 +12,7 @@
 # Settings: the var_* of lib/host.sh and below, RUNNER_TOKEN, TENKO_SCRIPTS_URL,
 # GITHUB_TOKEN, TENKO_DRY_RUN=1 (print the Proxmox commands instead of running them).
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # Secrets stay variables of this shell: exported, they would reach every child process.
 export -n RUNNER_TOKEN GITHUB_TOKEN 2>/dev/null || true

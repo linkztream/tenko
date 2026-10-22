@@ -12,7 +12,7 @@
 #   docker build -f deploy/Dockerfile -t ghcr.io/linkztream/tenko:<version> .
 # Port 53 is published on 127.0.0.1 only (TENKO_DNS_BIND), 8443 on every address.
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 set -uo pipefail
 

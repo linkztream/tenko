@@ -5,7 +5,7 @@
 #
 # Usage:  bash deploy/proxmox/test/unit-test.sh
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 set -uo pipefail
 

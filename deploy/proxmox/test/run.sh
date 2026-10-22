@@ -15,7 +15,7 @@
 #   TENKO_TEST_NEWER=<the same, a higher version>   adds the systemd container to (e)
 #   TENKO_TEST_IMAGE_VERSION=<x.y.z>   runs (g) on ghcr.io/linkztream/tenko:<x.y.z>
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 set -uo pipefail
 

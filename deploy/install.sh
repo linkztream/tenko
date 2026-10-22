@@ -41,7 +41,7 @@
 #   9  first-run setup failed (the node runs; complete setup in the browser)
 #  10  cancelled at a question
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 # Validators are called by name (check_or_die), and /etc/os-release is the host's.
 # shellcheck disable=SC1091,SC2329

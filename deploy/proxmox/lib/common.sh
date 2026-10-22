@@ -6,7 +6,7 @@
 #
 # Usage: source "<dir>/common.sh"
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 [[ -n "${TENKO_COMMON_LOADED:-}" ]] && return 0
 TENKO_COMMON_LOADED=1

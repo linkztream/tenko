@@ -25,7 +25,7 @@
 # The binaries are static musl builds of the same source; the newer one reports a higher
 # version (bump crates/tenko/Cargo.toml in a copy of the tree to build it).
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 set -uo pipefail
 

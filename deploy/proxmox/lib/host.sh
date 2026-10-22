@@ -13,7 +13,7 @@
 # needs, sources this file and calls tenko_main. deploy/proxmox/README.md, "Writing another
 # ct script", lists the contract.
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 TENKO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh

@@ -9,7 +9,7 @@
 #
 # Usage:  bash deploy/proxmox/test/dry-run-test.sh     (bash, python3 and curl)
 #
-# License: Copyright (c) 2026. All rights reserved. See LICENSE at the repository root.
+# License: Business Source License 1.1; see LICENSE.md at the repository root.
 
 set -uo pipefail
 
