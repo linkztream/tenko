@@ -1108,8 +1108,16 @@ mod tests {
     #[test]
     fn the_compiled_in_changelog_parses() {
         let sections = parse_changelog(CHANGELOG).expect("CHANGELOG.md parses");
-        let first = sections.first().expect("at least one section");
-        assert!(first.entries > 0, "the first section lists changes");
+        // Right after a release cut the Unreleased section is empty, so it is the running
+        // version's section that must list changes.
+        let running: ReleaseVersion = env!("CARGO_PKG_VERSION")
+            .parse()
+            .expect("the crate's version is a release version");
+        let own = sections
+            .iter()
+            .find(|section| section.version.as_ref() == Some(&running))
+            .expect("CHANGELOG.md has the running version's section");
+        assert!(own.entries > 0, "the running version's section lists changes");
     }
 
     #[tokio::test]
