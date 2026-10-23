@@ -769,6 +769,288 @@ fn the_cache_hit_path_does_not_allocate() {
     stop.cancel();
 }
 
+// WP10.3 (E40): the worker's denial lookup and synthesis (RFC 8198, RFC 8020) allocate
+// nothing: NXDOMAIN and NODATA from NSEC, NXDOMAIN and NODATA from NSEC3 (the hashes in
+// fixed buffers), a wildcard answer, and a name below a cached NXDOMAIN of an unsigned
+// zone, each for a client with DO and one without.
+mod denial_data {
+    use tenko_core::dns::DnsName;
+    use tenko_dns::{
+        dnssec::chain::{base32hex, nsec3_hash},
+        recurse::message::{Composed, Rr, compose},
+    };
+
+    pub const A: u16 = 1;
+    const NS: u16 = 2;
+    const SOA: u16 = 6;
+    const RRSIG: u16 = 46;
+    const NSEC: u16 = 47;
+    const NSEC3: u16 = 50;
+
+    pub fn wire(text: &str) -> Vec<u8> {
+        DnsName::new(text).expect("name").to_wire()
+    }
+
+    fn rr(owner: &str, rtype: u16, data: Vec<u8>) -> Rr {
+        Rr {
+            owner: wire(owner),
+            rtype,
+            class: 1,
+            ttl: 300,
+            data,
+        }
+    }
+
+    fn bitmap(types: &[u16]) -> Vec<u8> {
+        let mut bits = [0u8; 32];
+        for rtype in types {
+            bits[usize::from(*rtype / 8)] |= 0x80 >> (rtype % 8);
+        }
+        let len = bits
+            .iter()
+            .rposition(|octet| *octet != 0)
+            .map_or(0, |at| at + 1);
+        let mut out = vec![0, u8::try_from(len).expect("len")];
+        out.extend_from_slice(&bits[..len]);
+        out
+    }
+
+    fn rrsig(owner: &str, covered: u16, labels: u8, signer: &str) -> Rr {
+        let now = u32::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_secs(),
+        )
+        .expect("2106");
+        let mut data = covered.to_be_bytes().to_vec();
+        data.extend_from_slice(&[13, labels, 0, 0, 1, 44]);
+        data.extend_from_slice(&(now + 3600).to_be_bytes());
+        data.extend_from_slice(&(now - 3600).to_be_bytes());
+        data.extend_from_slice(&[0x12, 0x34]);
+        data.extend(wire(signer));
+        data.extend_from_slice(&[0x5a; 64]);
+        rr(owner, RRSIG, data)
+    }
+
+    fn labels(owner: &str) -> u8 {
+        u8::try_from(DnsName::new(owner).expect("name").label_count()).expect("labels")
+    }
+
+    fn soa(zone: &str, signed: bool) -> Vec<Rr> {
+        let mut data = wire(&format!("ns.{zone}"));
+        data.extend(wire(&format!("hostmaster.{zone}")));
+        for value in [1u32, 3600, 900, 1_209_600, 300] {
+            data.extend_from_slice(&value.to_be_bytes());
+        }
+        let mut out = vec![rr(zone, SOA, data)];
+        if signed {
+            out.push(rrsig(zone, SOA, labels(zone), zone));
+        }
+        out
+    }
+
+    fn nsec(zone: &str, owner: &str, next: &str, types: &[u16]) -> [Rr; 2] {
+        let mut data = wire(next);
+        data.extend(bitmap(types));
+        [
+            rr(owner, NSEC, data),
+            rrsig(owner, NSEC, labels(owner), zone),
+        ]
+    }
+
+    fn message(qname: &str, rcode: u8, answer: &[Rr], authority: &[Rr]) -> Vec<u8> {
+        compose(&Composed {
+            qname: &wire(qname),
+            qtype: A,
+            qclass: 1,
+            rcode,
+            answer,
+            authority,
+            additional: &[],
+        })
+    }
+
+    /// The signed answers of `example.org` (NSEC: the apex, `a`, `m`, the wildcard `*.w`),
+    /// `example.net` (NSEC3: the apex and `www`) and the NXDOMAIN of `gone.example.com`
+    /// (unsigned), each with its zone and whether it is secure.
+    pub fn answers() -> Vec<(&'static str, Vec<u8>, bool)> {
+        let mut out = Vec::new();
+        let mut authority = soa("example.org", true);
+        authority.extend(nsec(
+            "example.org",
+            "example.org",
+            "a.example.org",
+            &[NS, SOA, RRSIG, NSEC],
+        ));
+        authority.extend(nsec(
+            "example.org",
+            "a.example.org",
+            "m.example.org",
+            &[A, RRSIG, NSEC],
+        ));
+        out.push((
+            "example.org",
+            message("b.example.org", 3, &[], &authority),
+            true,
+        ));
+        let answer = [
+            rr("one.w.example.org", A, vec![192, 0, 2, 9]),
+            rrsig("one.w.example.org", A, 3, "example.org"),
+        ];
+        let authority = nsec(
+            "example.org",
+            "*.w.example.org",
+            "example.org",
+            &[A, RRSIG, NSEC],
+        );
+        out.push((
+            "example.org",
+            message("one.w.example.org", 0, &answer, &authority),
+            true,
+        ));
+        let mut hashes = [
+            (
+                nsec3_hash(&wire("example.net"), &[], 0),
+                bitmap(&[NS, SOA, RRSIG, 51]),
+            ),
+            (
+                nsec3_hash(&wire("www.example.net"), &[], 0),
+                bitmap(&[A, RRSIG]),
+            ),
+        ];
+        hashes.sort();
+        let mut authority = soa("example.net", true);
+        for index in 0..hashes.len() {
+            let owner = format!(
+                "{}.example.net",
+                std::str::from_utf8(&base32hex(&hashes[index].0)).expect("ascii")
+            );
+            let mut data = vec![1, 0, 0, 0, 0, 20];
+            data.extend_from_slice(&hashes[(index + 1) % hashes.len()].0);
+            data.extend_from_slice(&hashes[index].1);
+            authority.push(rr(&owner, NSEC3, data));
+            authority.push(rrsig(&owner, NSEC3, 3, "example.net"));
+        }
+        out.push((
+            "example.net",
+            message("nothing.example.net", 3, &[], &authority),
+            true,
+        ));
+        out.push((
+            "example.com",
+            message("gone.example.com", 3, &[], &soa("example.com", false)),
+            false,
+        ));
+        out
+    }
+}
+
+fn the_denial_synthesis_does_not_allocate() {
+    use tenko_dns::recursion::DenialCache as _;
+    let catalog = CatalogHandle::new(Catalog::build(&full_image()));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let stop = tokio_util::sync::CancellationToken::new();
+    let (forwarder, _task) = runtime.block_on(async {
+        Forwarder::start(
+            ForwardSettings {
+                upstreams: vec![UpstreamSpec {
+                    address: "192.0.2.1:53".parse().expect("address"),
+                    transport: ForwardTransport::Plain,
+                    tcp_only: false,
+                    tls_name: None,
+                    path: None,
+                }],
+                ..ForwardSettings::default()
+            },
+            catalog.clone(),
+            None,
+            Arc::new(RecursionPolicy::new(RecursionDefault::Anyone)),
+            stop.clone(),
+        )
+    });
+    let denials = forwarder.denials().expect("a denial cache");
+    for (zone, answer, secure) in denial_data::answers() {
+        let verdict = Verdict {
+            state: if secure {
+                SecurityState::Secure
+            } else {
+                SecurityState::Insecure
+            },
+            ..Verdict::UNVALIDATED
+        };
+        assert!(denials.insert(
+            None,
+            &DnsName::new(zone).expect("zone"),
+            &answer,
+            &verdict,
+            Instant::now()
+        ));
+    }
+    let responder = Responder::new(
+        Authoritative::new(catalog).with_settings(Settings {
+            recursion_available: true,
+            default_forwarder: true,
+            ..Settings::default()
+        }),
+        CookieSecret::with_secret([5; 16]),
+    )
+    .with_metrics(true)
+    .with_forwarder(Arc::clone(&forwarder) as Arc<dyn ForwardSink>);
+    let ask = |id: u16, name: &str, qtype: u16, dnssec_ok: bool| {
+        let mut query = Vec::new();
+        wire::write_query(&mut query, id, name, qtype, Some(1232));
+        query[2] |= 0x01;
+        if dnssec_ok {
+            let len = query.len();
+            query[len - 4] = 0x80;
+        }
+        query
+    };
+    // (query, RCODE, answers)
+    let mut cases = Vec::new();
+    for dnssec_ok in [true, false] {
+        cases.extend([
+            (ask(21, "c.example.org", 1, dnssec_ok), 3, 0),
+            (ask(22, "a.example.org", 28, dnssec_ok), 0, 0),
+            (
+                ask(23, "two.w.example.org", 1, dnssec_ok),
+                0,
+                if dnssec_ok { 2 } else { 1 },
+            ),
+            (ask(24, "other.example.net", 1, dnssec_ok), 3, 0),
+            (ask(25, "www.example.net", 28, dnssec_ok), 0, 0),
+            (ask(26, "x.gone.example.com", 1, dnssec_ok), 3, 0),
+        ]);
+    }
+    let conn = Conn {
+        client: "192.0.2.77:40000".parse().expect("client"),
+        local: "192.0.2.53:53".parse().expect("local"),
+        transport: QueryTransport::Udp,
+    };
+    let mut scratch = Scratch::new();
+    let clock = Clock::now();
+    let measured = measure(500, |t| {
+        for (query, rcode, answers) in &cases {
+            let reply = responder.respond(query, &conn, &clock, Instant::now(), &mut scratch);
+            assert_eq!(reply, Reply::Send, "synthesised");
+            let header = wire::parse_header(&scratch.out).expect("header");
+            assert_eq!((header.rcode, header.ancount), (*rcode, *answers));
+            black_box(&scratch.out);
+            t.step("respond (denial synthesis)");
+        }
+    });
+    measured.assert_none("the denial synthesis allocated");
+    assert!(forwarder.stats().synthesised.iter().sum::<u64>() >= 6_000);
+    let _ = denial_data::A;
+    let _ = denial_data::wire("example.org");
+    stop.cancel();
+}
+// WP10.3: end.
+
 // WP10.0: a signed answer for the rendering section: one A record and its RRSIG.
 fn signed_answer(name: &str) -> Vec<u8> {
     let mut answer = Vec::new();
@@ -1000,6 +1282,8 @@ fn the_query_path_allocates_nothing() {
     index_lookups_do_not_allocate();
     the_full_query_path_does_not_allocate();
     the_cache_hit_path_does_not_allocate();
+    // WP10.3 (E40): a synthesised NXDOMAIN, NODATA and wildcard answer and RFC 8020.
+    the_denial_synthesis_does_not_allocate();
     the_policy_and_the_limiter_do_not_allocate();
     tsig_verify_and_sign_do_not_allocate();
 }

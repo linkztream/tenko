@@ -70,7 +70,8 @@ pub trait DenialCache: Send + Sync {
 
     /// Keeps the NSEC or NSEC3 records and the SOA of the validated negative (or
     /// wildcard) answer `answer` of `zone` (the runtime). Returns whether anything was
-    /// kept: only a `secure` verdict is.
+    /// kept: the records only from a `secure` verdict, the name an NXDOMAIN of an unsigned
+    /// zone denies (RFC 8020) from any verdict but `bogus`.
     fn insert(
         &self,
         view: Option<ViewId>,

@@ -1287,6 +1287,14 @@ mod list;
 pub use list::{CachePage, CachedEntry, DEFAULT_LIST, ListCursor, MAX_LIST, ViewFilter};
 // cache-browse: end.
 
+// WP10.3: the denial cache (RFC 8198, RFC 8020) and the failure cache (RFC 9520).
+pub mod denial;
+pub mod failure;
+
+pub use denial::{DenialSettings, Denials};
+pub use failure::Failures;
+// WP10.3: end.
+
 #[cfg(test)]
 mod tests;
 

@@ -8,8 +8,9 @@
 # parents; the round checks resolution first: E36 (priming, the work budget and the failure
 # cases) and E41 (the RPZ triggers NSDNAME and NSIP on the delegation the resolver
 # followed), then the validation rows of E33 (validation.sh, WP10.2: every state with delv
-# agreeing, the KeyTrap zone, the forwarded answers). E35's rows come with WP10.3; E34's
-# roll is the round rfc5011 (validation.sh).
+# agreeing, the KeyTrap zone, the forwarded answers), E35's rows (denial.sh, WP10.3: QNAME
+# minimisation and the denial cache) and, at the end, the rows that restart the node with
+# other minimisation and denial settings. E34's roll is the round rfc5011 (validation.sh).
 #
 # Witnesses: the node's own counters (GET /nodes/{id}/dns/recursion: the queries sent to
 # authorities before and after each case, M40), the answers as dig prints them (RCODE and
@@ -121,6 +122,7 @@ hints = "/lab/root.hints"
 # The lab's names are under the special-use TLD test (RFC 6761).
 local_zones_except = ["test"]
 timeout_ms = 1000
+${recursion_extra:-}
 
 [dns.cache]
 prefetch = false
@@ -295,7 +297,7 @@ recursion() {
   fi
   write_authority_config
   compose --profile recursion up -d --no-build authority quirk-noedns quirk-case quirk-tc \
-    quirk-slow quirk-spoof quirk-oob quirk-sub quirk-strip client bind bind-resolver delv
+    quirk-slow quirk-spoof quirk-oob quirk-sub quirk-strip quirk-ent client bind bind-resolver delv
   retry "$wait_secs" "the authority to become healthy" healthy authority
   auth_cookie="$(setup_node authority "$authority_ip" a.root.test)"
   [[ -n "$auth_cookie" ]] || fail "recursion: the authority's setup did not sign in: $(cat "$work/api.out")"
@@ -374,8 +376,14 @@ recursion() {
   row rec.rpz.nsip "NSIP 203.0.113.14/32 blocks a name of the zone it serves" within 30 blocked_by other.tc.quirk.example.test
   row rec.rpz.pass "a name whose delegation no trigger names still resolves" not_blocked www.wild.example.test
 
+  # WP10.3: QNAME minimisation and the denial cache (E35).
+  denial_rows
+
   # WP10.2: the validation rows (E33).
   validation_rows
+
+  # WP10.3: strict and off, and the denial cache off (the node restarted; M42=1 measures).
+  denial_mode_rows
 
   printf '\n==> M40: the queries sent per case\n'
   printf '%s\n' "${m40[@]}"

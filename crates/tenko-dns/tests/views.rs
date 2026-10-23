@@ -544,7 +544,7 @@ fn from_cache(forwarder: &Forwarder, view: Option<ViewId>) -> Option<Vec<u8>> {
         &mut out,
     );
     match intake {
-        Intake::Answered { .. } => Some(out),
+        Intake::Answered { .. } | Intake::Synthesised { .. } => Some(out),
         Intake::Forward => None,
         Intake::Refuse { ede } => panic!("refused with {ede}"),
     }

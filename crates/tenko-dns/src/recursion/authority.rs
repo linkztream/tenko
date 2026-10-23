@@ -249,6 +249,9 @@ pub struct Quirks {
     pub cookie: Option<ServerCookie>,
     /// The round-trip time it reports.
     pub rtt: Duration,
+    /// WP10.3: answers NXDOMAIN for an empty non-terminal, as the servers RFC 9156
+    /// section 3 falls back for do (not RFC 8020 clean).
+    pub nxdomain_for_ent: bool,
 }
 
 /// One scripted server: the zones it serves and how it misbehaves.
@@ -418,6 +421,8 @@ impl MemAuthority {
         };
         let built = match rcode {
             Some(rcode) => Built::empty(rcode, false),
+            None if quirks.nxdomain_for_ent => ent_nxdomain(&state.zones, &qname)
+                .unwrap_or_else(|| build(&state.zones, &qname, query.qtype, edns)),
             None => build(&state.zones, &qname, query.qtype, edns),
         };
         let size = if edns { AUTHORITY_UDP_SIZE } else { 512 };
@@ -539,6 +544,21 @@ fn nsec_for(zone: &MemZone, name: &DnsName) -> Vec<(DnsName, u32, RecordData)> {
         }
     }
     out
+}
+
+// WP10.3: the server that is not RFC 8020 clean.
+/// NXDOMAIN with the SOA when `qname` is an empty non-terminal of the zone that serves it.
+fn ent_nxdomain(zones: &[MemZone], qname: &DnsName) -> Option<Built> {
+    let zone = zones
+        .iter()
+        .filter(|zone| qname.is_subdomain_of(&zone.apex))
+        .max_by_key(|zone| zone.apex.label_count())?;
+    if *qname == zone.apex || zone.at(qname).next().is_some() || !zone.exists(qname) {
+        return None;
+    }
+    let mut built = Built::empty(3, true);
+    built.sections[1] = rrset(zone, &zone.apex, Rtype::SOA, false, &zone.apex);
+    Some(built)
 }
 
 /// The answer of a server with `zones` to `qname`/`qtype`.

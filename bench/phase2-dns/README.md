@@ -59,6 +59,7 @@ engine is measured against.
 | `scripts/run-m20-sign.sh` | M20: DNSSEC signing through `tenko serve`: a 1 M-record zone signed in one full pass with ECDSA P-256 and Ed25519, NSEC and NSEC3, and a 100-record change signed again |
 | `scripts/run-m21-update.sh` | M21: TSIG-signed RFC 2136 updates at a fixed rate against one node (`tenko serve --roles controller,dns`, set up through the API with curl), driven by the example `update_load` of `tenko-dns`; the latency from send to answer, every answer's RCODE and TSIG checked |
 | `scripts/run-m25-lists.sh` | M25: the block list compiler and matcher (the engine's example `lists_bench`) on a generated list of 1 M names: compile time, the size of the version, the time per lookup and per label |
+| `scripts/run-m42-denial.sh` | M42 (recursion plan): the queries the recursive resolver sends the lab root's authority for 1,000 random names under one NSEC and one NSEC3 range, with the denial cache on and off and QNAME minimisation relaxed, strict and off (the compose DNS lab's round `recursion` with `M42=1`) |
 | `scripts/server-cpu.sh` | CPU seconds and RSS of a server pid on a Linux host, for the runs where the harness cannot sample the server |
 | `scripts/lib.sh` | Shared helpers: machine line, musl linkage check, readiness probe |
 | `data/` | Generated zone and query files (git-ignored) |

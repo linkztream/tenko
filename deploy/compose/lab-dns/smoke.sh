@@ -58,6 +58,8 @@
 #   QUIRK_IMAGE     an existing image of the quirk responders for the round recursion;
 #                   default: build tenko-quirk:lab from deploy/compose/lab-dns/quirk.Dockerfile
 #   WAIT_SECS       how long to wait for Tenko to become healthy (default 300)
+#   M42             1: the round recursion also measures M42 (the denial cache's effect,
+#                   denial.sh; bench/phase2-dns/scripts/run-m42-denial.sh)
 #   KEEP            1: do not tear the lab down at the end, also after a failure
 #                   (README.md says how to later)
 
@@ -117,6 +119,9 @@ source "$here/recursion.sh"
 # WP10.2: the validation rows of the round recursion (E33) and the round rfc5011 (E34).
 # shellcheck source=deploy/compose/lab-dns/validation.sh
 source "$here/validation.sh"
+# WP10.3: the rows of E35 (QNAME minimisation and the denial cache) and M42.
+# shellcheck source=deploy/compose/lab-dns/denial.sh
+source "$here/denial.sh"
 
 # retry <seconds> <description> <command...>: runs the command every 2 seconds until it
 # succeeds or the time is up.

@@ -20,7 +20,18 @@
 //!    unconfirmed, other addresses ignored), NXDOMAIN or NODATA ends it, and a lame answer
 //!    (REFUSED, SERVFAIL, a non-authoritative answer, an upward referral) marks the server
 //!    lame for the zone for the infrastructure TTL and moves to the next server.
-//! 5. *Name-server addresses*: a cut whose servers have no address gets them by
+//! 5. *Minimised* (WP10.3, RFC 9156 section 3 in the relaxed mode of REC-Q8,
+//!    [`Minimiser`]): each cut's servers are asked for the cut and one label more of the
+//!    name (four times, then more labels at a time, at most ten minimised steps), with the
+//!    original type or A for the types a server may refuse ([`minimised_type`]); a referral
+//!    moves the walk down, an answer or NODATA asks one label more of the same servers. In
+//!    the relaxed mode an NXDOMAIN or a lame answer to a minimised question is asked again
+//!    with the full name of the same servers, and when that answer is no NXDOMAIN (the
+//!    server is not RFC 8020 clean) the zone is asked with the full name for the
+//!    infrastructure TTL (the cut's `minimise_fallback`); `strict` never falls back and
+//!    takes the NXDOMAIN for the name (RFC 8020); `off` asks the full name. The minimised
+//!    answers fill the infrastructure cache only; the answer cache gets the final answer.
+//! 6. *Name-server addresses*: a cut whose servers have no address gets them by
 //!    sub-queries through the same walk, at most 3, 2, 1, 0 lookups at the depths 0, 1, 2,
 //!    3 (Unbound's fetch policy) and at most `budget_depth` levels; a lookup that needs
 //!    itself is a loop and the cut has no reachable server (extended error 22).
@@ -85,8 +96,8 @@ use crate::{
     metrics, name,
     recursion::{
         AddressOrigin, Authority, AuthorityError, AuthorityQuery, AuthorityTransport, BudgetBound,
-        FailureCache, FailureCause, InfraCache, InfraSizes, Outbound, RecursionSettings,
-        WorkBudget, ZoneCut,
+        FailureCache, FailureCause, InfraCache, InfraSizes, Minimisation, Outbound,
+        RecursionSettings, WorkBudget, ZoneCut,
         infra::{EdnsSupport, UNREACHABLE_REPROBE},
     },
 };
@@ -145,6 +156,10 @@ pub struct Counters {
     primings_ok: AtomicU64,
     primings_failed: AtomicU64,
     unwanted_flushes: AtomicU64,
+    // WP10.3: QNAME minimisation.
+    minimised: AtomicU64,
+    minimise_retries: AtomicU64,
+    minimise_fallbacks: AtomicU64,
 }
 
 /// A copy of [`Counters`].
@@ -410,6 +425,18 @@ pub struct Engine<A> {
     joins: Joins<Resolved>,
     counters: Counters,
     delegation: AtomicBool,
+    // WP10.3: the names minimised questions showed to exist without a cut.
+    names: Mutex<KnownNames>,
+}
+
+// WP10.3: QNAME minimisation's memory.
+/// The names a minimised question showed to exist without being a cut (an answer, NODATA
+/// or an alias), so that the next walk through them does not ask them again: by name,
+/// until when and when used last; bounded like the infrastructure cache's servers.
+#[derive(Debug, Default)]
+struct KnownNames {
+    names: HashMap<Vec<u8>, (Instant, u64)>,
+    tick: u64,
 }
 
 impl<A> std::fmt::Debug for Engine<A> {
@@ -460,6 +487,7 @@ impl<A: Authority> Engine<A> {
             joins: Joins::default(),
             counters: Counters::default(),
             delegation: AtomicBool::new(false),
+            names: Mutex::new(KnownNames::default()),
         };
         engine.install_hints(now);
         engine
@@ -571,9 +599,27 @@ impl<A: Authority> Engine<A> {
         }
     }
 
+    // WP10.3: the minimisation's counters.
+    /// Queries sent with a minimised name (RFC 9156), minimised questions asked again with
+    /// the full name, and zones remembered as asked with the full name.
+    pub fn minimisation_counters(&self) -> [u64; 3] {
+        let c = &self.counters;
+        [&c.minimised, &c.minimise_retries, &c.minimise_fallbacks]
+            .map(|counter| counter.load(Ordering::Relaxed))
+    }
+
     /// Counts a flush of the answer cache for unwanted answers.
     pub fn count_unwanted_flush(&self) {
         self.count(|c| &c.unwanted_flushes);
+    }
+
+    // WP10.3: 0 a minimised query, 1 a retry with the full name, 2 a fallback remembered.
+    fn count_minimisation(&self, what: u8) {
+        match what {
+            0 => self.count(|c| &c.minimised),
+            1 => self.count(|c| &c.minimise_retries),
+            _ => self.count(|c| &c.minimise_fallbacks),
+        }
     }
 
     // -----------------------------------------------------------------------------------
@@ -1090,7 +1136,8 @@ impl<A: Authority> Engine<A> {
         None
     }
 
-    /// Walks from the closest cut down to the server that answers `name`/`qtype`.
+    /// Walks from the closest cut down to the server that answers `name`/`qtype`, asking
+    /// each cut's servers only for the labels they need (WP10.3, RFC 9156).
     async fn walk(
         &self,
         name: &[u8],
@@ -1101,9 +1148,57 @@ impl<A: Authority> Engine<A> {
         let mut cut = self
             .closest_cut(name, qtype, Instant::now())
             .ok_or(FailureCause::NoReachableAuthority)?;
+        // WP10.3: QNAME minimisation.
+        let mut labels = Minimiser::new(self.settings.minimisation, name, qtype);
         loop {
             let zone = cut.zone.to_wire();
-            let step = self.ask_zone(&cut, &zone, name, qtype, depth, work).await?;
+            let now = Instant::now();
+            let (asked, asked_type) =
+                labels.next(&zone, cut.minimise_fallback.is_some(), &|name| {
+                    self.known_name(name, now)
+                });
+            let shorter = asked.len() != name.len();
+            if shorter {
+                self.count_minimisation(0);
+            }
+            let mut step = self
+                .ask_zone(&cut, &zone, asked, asked_type, depth, work, shorter)
+                .await?;
+            if shorter {
+                match &step {
+                    Step::Referral(_) => {}
+                    // Strict: a name below a name that does not exist does not exist
+                    // either (RFC 8020), and nothing falls back.
+                    Step::Negative { rcode: 3, .. }
+                        if self.settings.minimisation == Minimisation::Strict =>
+                    {
+                        return Ok((step, cut));
+                    }
+                    // Relaxed: the full name, for this zone; a server that denied a name
+                    // whose descendant exists, or failed on the shorter question, is not
+                    // asked minimised again for the infrastructure TTL.
+                    Step::Negative { rcode: 3, .. } | Step::Lame(_) => {
+                        self.count_minimisation(1);
+                        step = self
+                            .ask_zone(&cut, &zone, name, qtype, depth, work, false)
+                            .await?;
+                        if !matches!(step, Step::Negative { rcode: 3, .. }) {
+                            tracing::debug!(zone = %cut.zone, "a server broke on a minimised question: the full name for the zone from now on");
+                            self.count_minimisation(2);
+                            self.infra.set_minimise_fallback(
+                                &cut.zone,
+                                Instant::now() + self.infra_ttl(),
+                            );
+                        }
+                    }
+                    // The name exists and is no cut: one label more of the same servers,
+                    // and the name is not asked again while the memory holds it.
+                    _ => {
+                        self.learn_name(asked, Instant::now());
+                        continue;
+                    }
+                }
+            }
             let Step::Referral(referral) = step else {
                 return Ok((step, cut));
             };
@@ -1138,6 +1233,7 @@ impl<A: Authority> Engine<A> {
                 }
             }
             let id = self.infra.put_cut(&child, hosts.clone(), ttl, now);
+            labels.referred(&referral.zone);
             cut = self.infra.cut(&child, now).unwrap_or(ZoneCut {
                 id,
                 zone: child,
@@ -1209,6 +1305,12 @@ impl<A: Authority> Engine<A> {
     }
 
     /// Asks `cut`'s servers for `name`/`qtype` until one gives an answer that is not lame.
+    /// A lame answer to a `minimised` question under relaxed minimisation ends the step
+    /// without marking the server: the walk asks the full name instead (WP10.3).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the question, the cut and the state of one resolution"
+    )]
     async fn ask_zone(
         &self,
         cut: &ZoneCut,
@@ -1217,6 +1319,7 @@ impl<A: Authority> Engine<A> {
         qtype: u16,
         depth: u8,
         work: &mut Work,
+        minimised: bool,
     ) -> Result<Step, FailureCause> {
         let mut fetched: Vec<DnsName> = Vec::new();
         // Whether every attempt of this step failed for want of a route (extended error
@@ -1260,6 +1363,13 @@ impl<A: Authority> Engine<A> {
                     };
                     let step = message::classify(&parsed, zone, name, qtype);
                     match &step {
+                        // WP10.3: the walk falls back to the full name.
+                        Step::Lame(_)
+                            if minimised && self.settings.minimisation == Minimisation::Relaxed =>
+                        {
+                            self.count_authority(tcp, "lame");
+                            return Ok(step);
+                        }
                         Step::Lame(reason) => {
                             self.count_authority(tcp, "lame");
                             tracing::debug!(server = %address, zone = %cut.zone, reason, "a lame answer");
@@ -1599,6 +1709,19 @@ impl<A: Authority> Engine<A> {
     /// removed.
     pub fn flush_infra(&self, suffix: Option<&DnsName>) -> usize {
         let removed = self.infra.flush(suffix);
+        // WP10.3: the names known to exist go with the cuts.
+        {
+            let mut known = self.names.lock().unwrap_or_else(PoisonError::into_inner);
+            match suffix {
+                None => known.names.clear(),
+                Some(suffix) => {
+                    let suffix = suffix.to_wire();
+                    known
+                        .names
+                        .retain(|name, _| !name::is_within(name, &suffix));
+                }
+            }
+        }
         if suffix.is_none() {
             self.servers.clear();
         }
@@ -1615,12 +1738,36 @@ impl<A: Authority> Engine<A> {
         self.failures.flush(suffix)
     }
 
-    /// Bounds the failure cache: past `bound` failures it is emptied (the reference of
-    /// WP10.0 keeps no order to evict by; WP10.3 builds the bounded one).
-    pub fn bound_failures(&self, bound: usize) {
-        if self.failures.len() > bound {
-            self.failures.flush(None);
+    /// The failure cache.
+    pub fn failures(&self) -> &Arc<dyn FailureCache> {
+        &self.failures
+    }
+
+    // WP10.3: QNAME minimisation's memory.
+    /// Whether a minimised question showed `name` to exist without a cut, within the
+    /// infrastructure TTL.
+    fn known_name(&self, name: &[u8], now: Instant) -> bool {
+        let mut known = self.names.lock().unwrap_or_else(PoisonError::into_inner);
+        known.tick += 1;
+        let tick = known.tick;
+        match known.names.get_mut(name) {
+            Some((until, used)) if *until > now => {
+                *used = tick;
+                true
+            }
+            _ => false,
         }
+    }
+
+    /// Remembers that `name` exists without a cut for the infrastructure TTL.
+    fn learn_name(&self, name: &[u8], now: Instant) {
+        let until = now + self.infra_ttl();
+        let bound = self.settings.infra.servers.max(16);
+        let mut known = self.names.lock().unwrap_or_else(PoisonError::into_inner);
+        known.tick += 1;
+        let tick = known.tick;
+        known.names.insert(name.to_vec(), (until, tick));
+        crate::infra::trim(&mut known.names, bound, |(_, used)| *used);
     }
 
     /// Starts a priming now (`dns.recursion.prime`); false when one is in flight.
@@ -1633,6 +1780,106 @@ impl<A: Authority> Engine<A> {
         true
     }
 }
+
+// WP10.3: QNAME minimisation (RFC 9156 section 3, REC-Q8).
+/// The minimising steps that add one label each (RFC 9156 `MINIMISE_ONE_LAB`).
+pub const MINIMISE_ONE_LABEL: u8 = 4;
+
+/// The most minimising steps of one walk (RFC 9156 `MAX_MINIMISE_COUNT`).
+pub const MAX_MINIMISE: u8 = 10;
+
+/// The type of a minimised question: the original type, or A for the types a server may
+/// refuse or answer from another zone at a name that is not the one asked (DS, ANY, the
+/// DNSSEC and the meta types), as RFC 9156 section 2.1 allows.
+pub fn minimised_type(qtype: u16) -> u16 {
+    if matches!(
+        qtype,
+        0 | types::DS | types::RRSIG | types::NSEC | types::NSEC3 | 41
+    ) || (128..=255).contains(&qtype)
+    {
+        types::A
+    } else {
+        qtype
+    }
+}
+
+/// The name each step of a walk asks (RFC 9156 section 3): the zone cut and one more label
+/// for the first [`MINIMISE_ONE_LABEL`] steps, then more labels at a time so that at most
+/// [`MAX_MINIMISE`] steps are minimised; the full name when the mode is off, when the cut's
+/// servers are remembered as breaking on minimised questions (relaxed only), or once the
+/// next step would reach it.
+#[derive(Debug)]
+pub struct Minimiser<'a> {
+    mode: Minimisation,
+    name: &'a [u8],
+    qtype: u16,
+    labels: usize,
+    /// The labels of the name asked last.
+    child: usize,
+    /// The minimising steps so far.
+    count: u8,
+}
+
+impl<'a> Minimiser<'a> {
+    /// The minimiser of a walk for `name`/`qtype`.
+    pub fn new(mode: Minimisation, name: &'a [u8], qtype: u16) -> Self {
+        Self {
+            mode,
+            name,
+            qtype,
+            labels: name::label_count(name),
+            child: 0,
+            count: 0,
+        }
+    }
+
+    /// The question for the servers of `zone`, whose minimisation `fallback` says broke;
+    /// the names `known` says exist without a cut are not asked again.
+    pub fn next(
+        &mut self,
+        zone: &[u8],
+        fallback: bool,
+        known: &dyn Fn(&[u8]) -> bool,
+    ) -> (&'a [u8], u16) {
+        self.child = self.child.max(name::label_count(zone));
+        while self.child + 1 < self.labels
+            && known(name::suffix(self.name, self.labels - self.child - 1))
+        {
+            self.child += 1;
+        }
+        let full = (self.name, self.qtype);
+        if self.mode == Minimisation::Off
+            || (fallback && self.mode == Minimisation::Relaxed)
+            || self.count >= MAX_MINIMISE
+            || self.child >= self.labels
+        {
+            return full;
+        }
+        let left = self.labels - self.child;
+        let add = if self.count < MINIMISE_ONE_LABEL {
+            1
+        } else {
+            left.div_ceil(usize::from(MAX_MINIMISE - self.count))
+        };
+        let child = self.child + add;
+        if child >= self.labels {
+            self.child = self.labels;
+            return full;
+        }
+        self.child = child;
+        self.count += 1;
+        (
+            name::suffix(self.name, self.labels - child),
+            minimised_type(self.qtype),
+        )
+    }
+
+    /// A referral to `zone`: the next step adds labels from it.
+    pub fn referred(&mut self, zone: &[u8]) {
+        self.child = name::label_count(zone);
+    }
+}
+// WP10.3: end.
 
 /// The CNAME links of a chain (a DNAME counts by the CNAME it stands for).
 fn links(chain: &[Rr]) -> usize {

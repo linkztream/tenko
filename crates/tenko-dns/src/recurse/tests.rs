@@ -81,6 +81,8 @@ const TRUNCATE: u8 = 14;
 const ELSEWHERE: u8 = 41;
 const ATTACKER: u8 = 66;
 const SILENT: u8 = 250;
+// WP10.3: the server that is not RFC 8020 clean.
+const BROKEN: u8 = 15;
 
 /// A zone at `apex` with its SOA and NS.
 fn zone(apex: &str, server: &str) -> MemZone {
@@ -149,7 +151,14 @@ fn lab() -> MemAuthority {
         )
         .record(name("ns.tc.quirk.example.test"), 3600, glue(TRUNCATE))
         // A delegation whose name server is outside the bailiwick.
-        .record(name("oob.example.test"), 3600, ns("ns.elsewhere.test"));
+        .record(name("oob.example.test"), 3600, ns("ns.elsewhere.test"))
+        // WP10.3: a server that answers NXDOMAIN for its empty non-terminals.
+        .record(
+            name("broken.example.test"),
+            3600,
+            ns("ns.broken.example.test"),
+        )
+        .record(name("ns.broken.example.test"), 3600, glue(BROKEN));
     // A chain of ten.
     for link in 1..=10 {
         let target = if link == 10 {
@@ -258,6 +267,20 @@ fn lab() -> MemAuthority {
                 ..Quirks::default()
             },
         )
+        .serve(
+            lab_ip(BROKEN),
+            zone("broken.example.test", "ns.broken.example.test")
+                .record(name("ns.broken.example.test"), 3600, glue(BROKEN))
+                .record(name("www.a.b.broken.example.test"), 300, a([192, 0, 2, 15]))
+                .record(name("www.c.broken.example.test"), 300, a([192, 0, 2, 16])),
+        )
+        .quirks(
+            lab_ip(BROKEN),
+            Quirks {
+                nxdomain_for_ent: true,
+                ..Quirks::default()
+            },
+        )
 }
 
 /// The lab's hints file.
@@ -352,8 +375,16 @@ struct Case {
     qname: &'static str,
     qtype: u16,
     expect: Expect,
-    queries: usize,
+    /// WP10.3: the queries sent with QNAME minimisation relaxed, strict and off (M40).
+    queries: [usize; 3],
 }
+
+// WP10.3: the modes of the case table, in the order of `Case::queries`.
+const MODES: [Minimisation; 3] = [
+    Minimisation::Relaxed,
+    Minimisation::Strict,
+    Minimisation::Off,
+];
 
 /// The cases and their query counts (M40).
 const CASES: &[Case] = &[
@@ -362,199 +393,232 @@ const CASES: &[Case] = &[
         qname: "www.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 3,
+        queries: [3, 3, 3],
     },
     Case {
         what: "a wildcard",
         qname: "any.wild.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 3,
+        queries: [4, 4, 3],
     },
     Case {
         what: "NXDOMAIN",
         qname: "nothing.example.test",
         qtype: types::A,
         expect: Expect::Nxdomain,
-        queries: 3,
+        queries: [3, 3, 3],
     },
     Case {
         what: "NODATA",
         qname: "www.example.test",
         qtype: types::AAAA,
         expect: Expect::Nodata,
-        queries: 3,
+        queries: [3, 3, 3],
     },
     Case {
         what: "a CNAME within the zone, asked again for the target",
         qname: "alias.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 4,
+        queries: [4, 4, 4],
     },
     Case {
         what: "a chain of two",
         qname: "short1.cname.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 5,
+        queries: [6, 6, 5],
     },
     Case {
         what: "a lame delegation (NS at BIND, which serves the parent)",
         qname: "www.lame.example.test",
         qtype: types::A,
         expect: Expect::Servfail(ExtendedError::NO_REACHABLE_AUTHORITY),
-        queries: 4,
+        queries: [4, 4, 4],
     },
     Case {
         what: "a delegation whose name servers point at each other without glue",
         qname: "www.loop.example.test",
         qtype: types::A,
         expect: Expect::Servfail(ExtendedError::NO_REACHABLE_AUTHORITY),
-        queries: 4,
+        queries: [4, 4, 4],
     },
     Case {
         what: "a CNAME loop",
         qname: "loop1.cname.example.test",
         qtype: types::A,
         expect: Expect::Servfail(ExtendedError::NO_REACHABLE_AUTHORITY),
-        queries: 4,
+        queries: [5, 5, 4],
     },
     Case {
         what: "a chain of ten, over the eight restarts",
         qname: "c1.cname.example.test",
         qtype: types::A,
         expect: Expect::Servfail(ExtendedError::NO_REACHABLE_AUTHORITY),
-        queries: 11,
+        queries: [12, 12, 11],
     },
     Case {
         what: "a TLD whose server does not answer",
         qname: "www.unreachable",
         qtype: types::A,
         expect: Expect::Servfail(ExtendedError::NO_REACHABLE_AUTHORITY),
-        queries: 4,
+        queries: [4, 4, 4],
     },
     Case {
         what: "a server that breaks 0x20, asked again in lower case",
         qname: "www.case.quirk.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 5,
+        queries: [6, 6, 5],
     },
     Case {
         what: "a server that answers FORMERR to EDNS, asked again without",
         qname: "www.noedns.quirk.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 5,
+        queries: [6, 6, 5],
     },
     Case {
         what: "a server that truncates everything, asked again over TCP",
         qname: "www.tc.quirk.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 5,
+        queries: [6, 6, 5],
     },
     Case {
         what: "a referral with out-of-bailiwick glue, the glue ignored",
         qname: "www.oob.example.test",
         qtype: types::A,
         expect: Expect::Answer,
-        queries: 6,
+        queries: [6, 6, 6],
     },
     Case {
         what: "an answer above 1,232 octets, over TCP",
         qname: "big.example.test",
         qtype: types::AAAA,
         expect: Expect::Answer,
-        queries: 4,
+        queries: [4, 4, 4],
     },
 ];
 
 #[tokio::test]
 async fn every_case_of_e36_ends_within_the_budget_with_its_query_count() {
     let mut report = Vec::new();
-    for case in CASES {
-        let lab = Arc::new(lab());
-        let engine = primed(&lab).await;
-        let qname = wire_name(case.qname);
-        let resolved = engine.resolve(question(&qname, case.qtype)).await;
-        let asked = lab.asked();
-        let sent = asked.len();
-        report.push(format!("{:>2} {}", sent, case.what));
-        assert_eq!(
-            sent,
-            case.queries,
-            "{}: {:?} {:#?}",
-            case.what,
-            resolved.outcome,
-            asked
-                .iter()
-                .map(|asked| (asked.server, asked.qname.as_str().to_owned(), asked.qtype))
-                .collect::<Vec<_>>()
-        );
-        let found = records(&resolved.message);
-        let header = wire::parse_header(&resolved.message).expect("header");
-        match case.expect {
-            Expect::Answer => {
-                assert_eq!(header.rcode, 0, "{}", case.what);
-                assert!(
-                    found
+    let mut wrong = Vec::new();
+    // WP10.3: every case under each minimisation mode.
+    for (mode_index, mode) in MODES.into_iter().enumerate() {
+        for case in CASES {
+            let lab = Arc::new(lab());
+            let mut settings = settings();
+            settings.recursion.minimisation = mode;
+            let engine = engine_with(&lab, &settings);
+            engine.prime().await.expect("primed");
+            lab.clear_log();
+            let qname = wire_name(case.qname);
+            let resolved = engine.resolve(question(&qname, case.qtype)).await;
+            let asked = lab.asked();
+            let sent = asked.len();
+            report.push(format!("{mode:?} {:>2} {}", sent, case.what));
+            if sent != case.queries[mode_index] {
+                wrong.push(format!(
+                    "{mode:?} {}: {sent} sent, {} expected: {:?}",
+                    case.what,
+                    case.queries[mode_index],
+                    asked
                         .iter()
-                        .any(|(section, _, rtype)| *section == 0 && *rtype == case.qtype),
-                    "{}: {found:?}",
-                    case.what
-                );
-                assert_eq!(resolved.outcome, Outcome::Answered, "{}", case.what);
+                        .map(|asked| (asked.server, asked.qname.as_str().to_owned(), asked.qtype))
+                        .collect::<Vec<_>>()
+                ));
             }
-            Expect::Nodata | Expect::Nxdomain => {
-                let rcode = if matches!(case.expect, Expect::Nxdomain) {
-                    3
-                } else {
-                    0
-                };
-                assert_eq!(header.rcode, rcode, "{}", case.what);
-                assert!(
-                    found
-                        .iter()
-                        .any(|(section, _, rtype)| *section == 1 && *rtype == types::SOA),
-                    "{}: the SOA for the negative cache",
-                    case.what
-                );
-                assert!(
-                    !found.iter().any(|(section, _, _)| *section == 0),
-                    "{}",
-                    case.what
-                );
-            }
-            Expect::Servfail(ede) => {
-                assert_eq!(header.rcode, 2, "{}", case.what);
-                assert_eq!(resolved.ede(), Some(ede), "{}", case.what);
-                // The failure is cached (RFC 9520): the second ask sends nothing.
-                lab.clear_log();
-                let again = engine.resolve(question(&qname, case.qtype)).await;
-                assert_eq!(lab.asked().len(), 0, "{}: cached", case.what);
-                assert!(
-                    matches!(again.outcome, Outcome::Failed { cached: true, .. }),
-                    "{}",
-                    case.what
-                );
-            }
+            check_case(case, &lab, &engine, &qname, &resolved).await;
+            assert!(
+                usize::from(resolved.subqueries) <= usize::from(WorkBudget::DEFAULT.queries),
+                "{}",
+                case.what
+            );
+            assert_eq!(
+                usize::from(resolved.subqueries),
+                sent,
+                "{}: the budget counts what was sent",
+                case.what
+            );
         }
-        assert!(
-            usize::from(resolved.subqueries) <= usize::from(WorkBudget::DEFAULT.queries),
-            "{}",
-            case.what
-        );
-        assert_eq!(sent, case.queries, "{}: {:#?}", case.what, lab.asked());
-        assert_eq!(
-            usize::from(resolved.subqueries),
-            case.queries,
-            "{}: the budget counts what was sent",
-            case.what
-        );
     }
-    println!("queries per case (M40):\n{}", report.join("\n"));
+    println!(
+        "queries per case (M40):
+{}",
+        report.join(
+            "
+"
+        )
+    );
+    assert!(
+        wrong.is_empty(),
+        "{}",
+        wrong.join(
+            "
+"
+        )
+    );
+}
+
+/// The outcome of one case.
+async fn check_case(
+    case: &Case,
+    lab: &Arc<MemAuthority>,
+    engine: &Lab,
+    qname: &[u8],
+    resolved: &Resolved,
+) {
+    let found = records(&resolved.message);
+    let header = wire::parse_header(&resolved.message).expect("header");
+    match case.expect {
+        Expect::Answer => {
+            assert_eq!(header.rcode, 0, "{}", case.what);
+            assert!(
+                found
+                    .iter()
+                    .any(|(section, _, rtype)| *section == 0 && *rtype == case.qtype),
+                "{}: {found:?}",
+                case.what
+            );
+            assert_eq!(resolved.outcome, Outcome::Answered, "{}", case.what);
+        }
+        Expect::Nodata | Expect::Nxdomain => {
+            let rcode = if matches!(case.expect, Expect::Nxdomain) {
+                3
+            } else {
+                0
+            };
+            assert_eq!(header.rcode, rcode, "{}", case.what);
+            assert!(
+                found
+                    .iter()
+                    .any(|(section, _, rtype)| *section == 1 && *rtype == types::SOA),
+                "{}: the SOA for the negative cache",
+                case.what
+            );
+            assert!(
+                !found.iter().any(|(section, _, _)| *section == 0),
+                "{}",
+                case.what
+            );
+        }
+        Expect::Servfail(ede) => {
+            assert_eq!(header.rcode, 2, "{}", case.what);
+            assert_eq!(resolved.ede(), Some(ede), "{}", case.what);
+            // The failure is cached (RFC 9520): the second ask sends nothing.
+            lab.clear_log();
+            let again = engine.resolve(question(qname, case.qtype)).await;
+            assert_eq!(lab.asked().len(), 0, "{}: cached", case.what);
+            assert!(
+                matches!(again.outcome, Outcome::Failed { cached: true, .. }),
+                "{}",
+                case.what
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -692,10 +756,30 @@ async fn a_warm_cache_asks_only_the_zone_and_the_budget_bounds_the_rest() {
     lab.clear_log();
     let other = wire_name("any.wild.example.test");
     let resolved = engine.resolve(question(&other, types::A)).await;
+    // WP10.3: the cut is known; minimised, its server is asked for `wild.example.test`
+    // first and then the name.
     assert_eq!(
         (resolved.rcode, lab.asked().len()),
-        (0, 1),
+        (0, 2),
         "the cut is known"
+    );
+    // WP10.3: `wild.example.test` is known to exist without a cut now: the next name
+    // under it costs one query.
+    lab.clear_log();
+    let next = wire_name("next.wild.example.test");
+    let resolved = engine.resolve(question(&next, types::A)).await;
+    assert_eq!((resolved.rcode, lab.asked().len()), (0, 1), "remembered");
+    // The flush of the infrastructure cache forgets it.
+    engine.flush_infra(Some(&name("example.test")));
+    engine.prime().await.expect("primed");
+    lab.clear_log();
+    let after = wire_name("after.wild.example.test");
+    engine.resolve(question(&after, types::A)).await;
+    assert!(
+        lab.asked()
+            .iter()
+            .any(|asked| asked.qname.as_str() == "wild.example.test"),
+        "asked again after the flush"
     );
 
     // Two queries allowed: the root and the TLD, then the bound.
@@ -878,3 +962,186 @@ fn cookies_are_per_server_and_the_extended_error_goes_into_the_opt_record() {
     mix_case(&mut name);
     assert!(name.eq_ignore_ascii_case(&wire_name("www.example.test")));
 }
+
+// WP10.3: QNAME minimisation (E35, M40).
+fn asked_of(lab: &MemAuthority, server: u8) -> Vec<String> {
+    lab.asked()
+        .iter()
+        .filter(|asked| asked.server == lab_ip(server))
+        .map(|asked| asked.qname.as_str().to_owned())
+        .collect()
+}
+
+async fn engine_in(lab: &Arc<MemAuthority>, mode: Minimisation) -> Lab {
+    let mut settings = settings();
+    settings.recursion.minimisation = mode;
+    let engine = engine_with(lab, &settings);
+    engine.prime().await.expect("primed");
+    lab.clear_log();
+    engine
+}
+
+#[tokio::test]
+async fn the_tld_sees_only_the_labels_minimisation_sends() {
+    // Three labels below the TLD.
+    let qname = wire_name("any.wild.example.test");
+    for (mode, root, tld, zone) in [
+        (
+            Minimisation::Relaxed,
+            vec!["test"],
+            vec!["example.test"],
+            vec!["wild.example.test", "any.wild.example.test"],
+        ),
+        (
+            Minimisation::Strict,
+            vec!["test"],
+            vec!["example.test"],
+            vec!["wild.example.test", "any.wild.example.test"],
+        ),
+        (
+            Minimisation::Off,
+            vec!["any.wild.example.test"],
+            vec!["any.wild.example.test"],
+            vec!["any.wild.example.test"],
+        ),
+    ] {
+        let lab = Arc::new(lab());
+        let engine = engine_in(&lab, mode).await;
+        let resolved = engine.resolve(question(&qname, types::A)).await;
+        assert_eq!(resolved.outcome, Outcome::Answered, "{mode:?}");
+        assert_eq!(asked_of(&lab, ROOT), root, "{mode:?}");
+        assert_eq!(asked_of(&lab, TLD), tld, "{mode:?}");
+        assert_eq!(asked_of(&lab, ZONE), zone, "{mode:?}");
+        // The original type, A here, on every minimised question.
+        assert!(lab.asked().iter().all(|asked| asked.qtype == types::A));
+        let expected = if mode == Minimisation::Off { 0 } else { 3 };
+        assert_eq!(engine.minimisation_counters(), [expected, 0, 0], "{mode:?}");
+    }
+}
+
+#[tokio::test]
+async fn relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_terminals() {
+    let qname = wire_name("www.a.b.broken.example.test");
+    let broken = name("broken.example.test");
+
+    // Relaxed: the NXDOMAIN for `b.broken.example.test` is asked again with the full name,
+    // which exists: the zone is asked with full names from now on.
+    let lab = Arc::new(lab());
+    let engine = engine_in(&lab, Minimisation::Relaxed).await;
+    let resolved = engine.resolve(question(&qname, types::A)).await;
+    assert_eq!(resolved.outcome, Outcome::Answered);
+    assert_eq!(
+        asked_of(&lab, BROKEN),
+        vec!["b.broken.example.test", "www.a.b.broken.example.test"]
+    );
+    assert_eq!(lab.asked().len(), 5);
+    assert_eq!(engine.minimisation_counters()[1..], [1, 1]);
+    let cut = engine
+        .infra()
+        .cut(&broken, Instant::now())
+        .expect("the cut");
+    assert!(cut.minimise_fallback.is_some(), "remembered");
+    lab.clear_log();
+    let other = wire_name("www.c.broken.example.test");
+    let resolved = engine.resolve(question(&other, types::A)).await;
+    assert_eq!(resolved.outcome, Outcome::Answered);
+    assert_eq!(asked_of(&lab, BROKEN), vec!["www.c.broken.example.test"]);
+    assert_eq!(lab.asked().len(), 1, "the full name at once");
+
+    // Strict: the NXDOMAIN stands (RFC 8020) and nothing falls back.
+    let lab = Arc::new(self::lab());
+    let engine = engine_in(&lab, Minimisation::Strict).await;
+    let resolved = engine.resolve(question(&qname, types::A)).await;
+    let header = wire::parse_header(&resolved.message).expect("header");
+    assert_eq!(header.rcode, 3);
+    assert_eq!(asked_of(&lab, BROKEN), vec!["b.broken.example.test"]);
+    assert_eq!(lab.asked().len(), 4);
+    assert_eq!(engine.minimisation_counters()[1..], [0, 0]);
+    let cut = engine
+        .infra()
+        .cut(&broken, Instant::now())
+        .expect("the cut");
+    assert!(cut.minimise_fallback.is_none());
+
+    // Off: the full name everywhere.
+    let lab = Arc::new(self::lab());
+    let engine = engine_in(&lab, Minimisation::Off).await;
+    let resolved = engine.resolve(question(&qname, types::A)).await;
+    assert_eq!(resolved.outcome, Outcome::Answered);
+    assert!(
+        lab.asked()
+            .iter()
+            .all(|asked| asked.qname.as_str() == "www.a.b.broken.example.test")
+    );
+    assert_eq!(lab.asked().len(), 4);
+}
+
+#[tokio::test]
+async fn a_clean_nxdomain_under_relaxed_minimisation_costs_one_query_and_no_fallback() {
+    let qname = wire_name("x.nothing.example.test");
+    let lab = Arc::new(lab());
+    let engine = engine_in(&lab, Minimisation::Relaxed).await;
+    let resolved = engine.resolve(question(&qname, types::A)).await;
+    let header = wire::parse_header(&resolved.message).expect("header");
+    assert_eq!(header.rcode, 3);
+    assert_eq!(
+        asked_of(&lab, ZONE),
+        vec!["nothing.example.test", "x.nothing.example.test"]
+    );
+    assert_eq!(engine.minimisation_counters()[1..], [1, 0]);
+    let cut = engine
+        .infra()
+        .cut(&name("example.test"), Instant::now())
+        .expect("the cut");
+    assert!(cut.minimise_fallback.is_none(), "the server is clean");
+
+    let lab = Arc::new(self::lab());
+    let engine = engine_in(&lab, Minimisation::Strict).await;
+    let resolved = engine.resolve(question(&qname, types::A)).await;
+    let header = wire::parse_header(&resolved.message).expect("header");
+    assert_eq!(header.rcode, 3);
+    assert_eq!(asked_of(&lab, ZONE), vec!["nothing.example.test"]);
+}
+
+#[test]
+fn the_minimiser_adds_one_label_four_times_then_more_and_stops_at_ten() {
+    let mut labels: Vec<String> = (0..20).map(|index| format!("l{index}")).collect();
+    labels.push("test".to_owned());
+    let qname = wire_name(&labels.join("."));
+    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::AAAA);
+    let root = DnsName::root().to_wire();
+    let mut steps = Vec::new();
+    loop {
+        let (asked, qtype) = minimiser.next(&root, false, &|_| false);
+        steps.push(name::label_count(asked));
+        assert_eq!(qtype, types::AAAA, "the original type");
+        if asked.len() == qname.len() {
+            break;
+        }
+    }
+    assert_eq!(steps, vec![1, 2, 3, 4, 7, 10, 13, 16, 19, 21]);
+    assert!(steps.len() - 1 <= usize::from(MAX_MINIMISE));
+
+    // A referral starts again from the delegated zone; the names known to exist are
+    // skipped; a fallback (relaxed) and the mode off ask the full name.
+    let qname = wire_name("a.b.c.example.test");
+    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::DS);
+    assert_eq!(
+        minimiser.next(&root, false, &|_| false),
+        (&wire_name("test")[..], types::A)
+    );
+    minimiser.referred(&wire_name("example.test"));
+    let known_name = wire_name("c.example.test");
+    let known = |name: &[u8]| name == known_name.as_slice();
+    let (asked, _) = minimiser.next(&wire_name("example.test"), false, &known);
+    assert_eq!(asked, wire_name("b.c.example.test"));
+    let mut minimiser = Minimiser::new(Minimisation::Relaxed, &qname, types::A);
+    assert_eq!(minimiser.next(&root, true, &|_| false).0, &qname[..]);
+    let mut minimiser = Minimiser::new(Minimisation::Strict, &qname, types::A);
+    assert_eq!(minimiser.next(&root, true, &|_| false).0, wire_name("test"));
+    let mut minimiser = Minimiser::new(Minimisation::Off, &qname, types::A);
+    assert_eq!(minimiser.next(&root, false, &|_| false).0, &qname[..]);
+    assert_eq!(minimised_type(types::ANY), types::A);
+    assert_eq!(minimised_type(types::AAAA), types::AAAA);
+}
+// WP10.3: end.

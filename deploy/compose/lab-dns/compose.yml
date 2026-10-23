@@ -235,6 +235,18 @@ services:
         ipv4_address: 203.0.113.18
   # WP10.1: end.
 
+  # WP10.3: a server that answers NXDOMAIN for its empty non-terminals (b and a.b of its
+  # zone, above www.a.b), which QNAME minimisation falls back for; it prints every question,
+  # the witness of the rows of E35 (denial.sh).
+  quirk-ent:
+    <<: *quirk
+    command: ["--quirk-zone", "ent.quirk.example.test", "--quirk-address", "203.0.113.21",
+              "--nxdomain-ent"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.21
+  # WP10.3: end.
+
   # delv: the client side's second validator. The BIND image idles as the `client` does;
   # `docker compose exec delv delv @203.0.113.3 ...` (or against the authority) validates
   # independently of Tenko with the lab root's trust anchor, which the round writes into

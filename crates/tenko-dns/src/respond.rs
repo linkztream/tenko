@@ -316,6 +316,14 @@ pub enum Intake {
         /// WP10.2: the entry's security state, for the query log (none when unvalidated).
         validation: Option<tenko_core::dns::SecurityState>,
     },
+    // WP10.3: an answer the denial cache synthesised (RFC 8198, RFC 8020).
+    /// The answer is in the output buffer, synthesised from the denial cache.
+    Synthesised {
+        /// Its RCODE.
+        rcode: u16,
+        /// The security state of the records it came from.
+        validation: Option<tenko_core::dns::SecurityState>,
+    },
 }
 
 /// The forwarder's intake (WP4.3, WP5.1): it runs the upstream exchange off the query path
@@ -517,6 +525,7 @@ impl<R: Resolver> Responder<R> {
                     None,
                     false,
                     None,
+                    false,
                     clock,
                     now,
                 );
@@ -604,6 +613,24 @@ impl<R: Resolver> Responder<R> {
                                 None,
                                 true,
                                 validation,
+                                false,
+                                clock,
+                                now,
+                            );
+                            return Reply::Send;
+                        }
+                        // WP10.3: logged with the resolution `denial`.
+                        Intake::Synthesised { rcode, validation } => {
+                            self.finish(
+                                batch,
+                                conn,
+                                Some(request),
+                                view,
+                                rcode,
+                                None,
+                                true,
+                                validation,
+                                true,
                                 clock,
                                 now,
                             );
@@ -684,6 +711,7 @@ impl<R: Resolver> Responder<R> {
             answer.blocked,
             false,
             None,
+            false,
             clock,
             now,
         );
@@ -751,6 +779,8 @@ impl<R: Resolver> Responder<R> {
         cached: bool,
         // WP10.2: a cache hit's security state.
         validation: Option<tenko_core::dns::SecurityState>,
+        // WP10.3: the denial cache synthesised the answer.
+        denial: bool,
         clock: &Clock,
         now: Instant,
     ) {
@@ -788,6 +818,8 @@ impl<R: Resolver> Responder<R> {
                 // WP10.1: how the worker found the answer.
                 resolution: Some(if blocked.is_some() {
                     crate::log::Resolution::Policy
+                } else if denial {
+                    crate::log::Resolution::Denial
                 } else if cached {
                     crate::log::Resolution::Cache
                 } else if rcode == crate::authoritative::rcode::REFUSED {

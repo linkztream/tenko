@@ -59,6 +59,12 @@
 //! to a referral as to any answer. The line `ready quirk ZONE on ADDR... flags ...` on
 //! standard output tells that the server answers.
 //!
+//! `--nxdomain-ent` (WP10.3) adds `www.a.b.ZONE` (`192.0.2.7`) and answers NXDOMAIN for
+//! its empty non-terminals `b.ZONE` and `a.b.ZONE`, as the servers do that QNAME
+//! minimisation falls back for (RFC 9156 section 3, not RFC 8020 clean); it prints one line
+//! `asked NAME TYPE` per query on standard output, the witness of the lab's minimisation
+//! rows.
+//!
 //! `--proxy ADDR` (WP10.2) turns the server into a forwarding proxy for the lab's
 //! forwarded rows: every query is asked of `ADDR` on port 53 over UDP and its answer
 //! relayed; with `--strip-dnssec` the RRSIG, NSEC and NSEC3 records are left out of it, as
@@ -234,8 +240,9 @@ fn image(names: u64) -> DnsData {
     zone.image
 }
 
-/// The image of quirk mode: the small zone of the module documentation.
-fn quirk_image(origin: &str, address: Ipv4Addr) -> DnsData {
+/// The image of quirk mode: the small zone of the module documentation, with
+/// `www.a.b.ZONE` when `ent` (`--nxdomain-ent`).
+fn quirk_image(origin: &str, address: Ipv4Addr, ent: bool) -> DnsData {
     let server = format!("ns.{origin}");
     let hostmaster = format!("hostmaster.{origin}");
     let mut zone = Builder::new(origin, &server, &hostmaster);
@@ -281,6 +288,16 @@ fn quirk_image(origin: &str, address: Ipv4Addr) -> DnsData {
             strings: vec![TextBytes::from_text("quirk")],
         },
     );
+    // WP10.3: a name below two empty non-terminals.
+    if ent {
+        zone.add(
+            name(&format!("www.a.b.{origin}")),
+            60,
+            &RecordData::A {
+                address: Ipv4Addr::new(192, 0, 2, 7),
+            },
+        );
+    }
     zone.image
 }
 
@@ -301,6 +318,9 @@ struct Quirks {
     proxy: Option<SocketAddr>,
     /// `--strip-dnssec`: the RRSIG, NSEC and NSEC3 records leave the proxied answer.
     strip_dnssec: bool,
+    // WP10.3: the server that is not RFC 8020 clean.
+    /// `--nxdomain-ent`: NXDOMAIN for the empty non-terminals, every query printed.
+    nxdomain_ent: bool,
 }
 
 impl Quirks {
@@ -328,6 +348,9 @@ impl Quirks {
         }
         if self.wrong_source {
             flags.push("wrong-source".to_string());
+        }
+        if self.nxdomain_ent {
+            flags.push("nxdomain-ent".to_string());
         }
         flags
     }
@@ -398,7 +421,7 @@ const USAGE: &str = "usage: authoritative [--listen ADDR]... [--workers N] [--na
                      [--metrics on|off] [--mode shared|reuseport] [--tcp on|off] [--pid-file PATH]\n       \
                      authoritative --quirk-zone ZONE --quirk-address IP [--listen ADDR]... \
                      [--no-edns] [--lower-case] [--truncate] [--delay-ms N] [--wrong-source] \
-                     [--referral CHILD=NSNAME]... [--glue NAME=ADDR]...";
+                     [--nxdomain-ent] [--referral CHILD=NSNAME]... [--glue NAME=ADDR]...";
 
 #[allow(
     clippy::too_many_lines,
@@ -447,6 +470,8 @@ fn parse() -> Result<Args, String> {
             "--lower-case" => quirks.lower_case = true,
             "--truncate" => quirks.truncate = true,
             "--wrong-source" => quirks.wrong_source = true,
+            // WP10.3: the server that is not RFC 8020 clean.
+            "--nxdomain-ent" => quirks.nxdomain_ent = true,
             // WP10.2: the stripping proxy.
             "--strip-dnssec" => quirks.strip_dnssec = true,
             "--proxy" => {
@@ -541,6 +566,7 @@ fn parse() -> Result<Args, String> {
                 (quirks.lower_case, "--lower-case"),
                 (quirks.truncate, "--truncate"),
                 (quirks.wrong_source, "--wrong-source"),
+                (quirks.nxdomain_ent, "--nxdomain-ent"),
                 (!quirks.delay.is_zero(), "--delay-ms"),
                 (!referrals.is_empty(), "--referral"),
                 (!glue.is_empty(), "--glue"),
@@ -639,6 +665,8 @@ type Engine = Arc<Setup>;
 /// What the loops of quirk mode share: the responder and the referrals.
 struct Setup {
     responder: Responder<Authoritative>,
+    // WP10.3: the empty non-terminals `--nxdomain-ent` denies, lower case, no final dot.
+    ents: Vec<String>,
     referrals: Referrals,
 }
 
@@ -807,6 +835,19 @@ fn has_opt(query: &[u8]) -> bool {
 
 /// FORMERR with the question of the query and no other section, no OPT record. `None` for
 /// a response or a message that is no query at all.
+// WP10.3: the witness line of `--nxdomain-ent`.
+/// The question of a query: its name in lower case without the final dot, and its type.
+fn question_of(query: &[u8]) -> Option<(String, u16)> {
+    let end = wire::questions_end(query, 1)?;
+    let name = tenko_dns::NameBuf::from_wire(query.get(wire::HEADER_LEN..end - 4)?).ok()?;
+    let labels: Vec<String> = name
+        .labels()
+        .map(|label| String::from_utf8_lossy(label).to_ascii_lowercase())
+        .collect();
+    let qtype = u16::from_be_bytes([query[end - 4], query[end - 3]]);
+    Some((labels.join("."), qtype))
+}
+
 fn formerr_with_question(query: &[u8]) -> Option<Vec<u8>> {
     let header = wire::parse_header(query)?;
     if header.qr {
@@ -935,6 +976,15 @@ fn quirk_answer(
         }
         scratch.out.clone()
     };
+    // WP10.3: the empty non-terminals denied, and the witness line.
+    if quirks.nxdomain_ent
+        && let Some((qname, qtype)) = question_of(query)
+    {
+        println!("asked {qname} {qtype}");
+        if responder.ents.contains(&qname) && out.len() > 3 {
+            out[3] = (out[3] & 0xf0) | 3;
+        }
+    }
     if quirks.lower_case {
         lower_question(&mut out);
     }
@@ -1057,7 +1107,11 @@ async fn tcp_connection(mut stream: TcpStream, conn: Conn, responder: Engine, qu
 }
 
 async fn run_quirk(args: Args, quirk: QuirkArgs) -> Result<(), String> {
-    let (mut feed, _writer) = MemFeed::new(quirk_image(&quirk.zone, quirk.address));
+    let (mut feed, _writer) = MemFeed::new(quirk_image(
+        &quirk.zone,
+        quirk.address,
+        quirk.quirks.nxdomain_ent,
+    ));
     let handle = catalog::initial(&mut feed)
         .await
         .map_err(|error| format!("the index: {error}"))?;
@@ -1065,6 +1119,12 @@ async fn run_quirk(args: Args, quirk: QuirkArgs) -> Result<(), String> {
     let responder: Engine = Arc::new(Setup {
         responder: Responder::new(Authoritative::new(handle), cookies).with_metrics(false),
         referrals: Referrals::new(&quirk.referrals, &quirk.glue),
+        ents: ["b", "a.b"]
+            .iter()
+            .map(|label| {
+                format!("{label}.{}", quirk.zone.trim_end_matches('.')).to_ascii_lowercase()
+            })
+            .collect(),
     });
     // Bind everything before anything runs, so that a port in use fails the start.
     let mut bound = Vec::new();

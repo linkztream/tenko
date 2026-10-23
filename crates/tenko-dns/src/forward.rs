@@ -90,6 +90,12 @@ use crate::{
     validate::{self, DnssecValidator, EngineFetch, NoFetch, UpstreamFetch},
 };
 // WP10.2: end.
+// WP10.3: the denial and failure caches.
+use crate::{
+    cache::{Denials, Failures, Verdict, denial::DenialSettings},
+    recursion::{DenialCache, FailureCache, FailureCause, denial::DenialKind},
+};
+// WP10.3: end.
 
 use crate::{
     // WP10.1: end.
@@ -105,7 +111,6 @@ use crate::{
     outbound::Question,
     pool::{Budget, MemberHealth, PoolKey, Pools, UpstreamSet, UpstreamSpec},
     recurse::{Engine, EngineSettings, Resolved, hints::Hints, net::NetAuthority},
-    recursion::MemFailures,
     respond::{ForwardQuery, ForwardSink, Intake, IntakeQuery, ReplyPath},
     upstream::UpstreamError,
     wire::{self, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
@@ -140,7 +145,8 @@ const HOUSEKEEPING: Duration = Duration::from_millis(200);
 /// The purge period.
 const PURGE: Duration = Duration::from_secs(60);
 
-// WP10.1: the most failures the recursive resolver keeps before it forgets them all.
+// WP10.3: the most failures the recursive resolver keeps without an answer cache to size
+// them by.
 const FAILURE_BOUND: usize = 100_000;
 
 const TYPE_A: u16 = 1;
@@ -312,6 +318,9 @@ struct ForwardCounters {
     misses: AtomicU64,
     stale: AtomicU64,
     prefetched: AtomicU64,
+    // WP10.3: the worker's answers from the failure and denial caches.
+    failure_hits: AtomicU64,
+    synthesised: [AtomicU64; 4],
 }
 
 // dns-visibility: the upstreams of one rule for the status.
@@ -354,6 +363,12 @@ pub struct ForwardStats {
     pub stale: u64,
     /// Entries prefetched.
     pub prefetched: u64,
+    // WP10.3: the worker's answers from the failure and denial caches.
+    /// Queries the worker answered SERVFAIL from the failure cache (RFC 9520).
+    pub failure_hits: u64,
+    /// Answers synthesised from the denial cache, by kind in the order of `DenialKind::ALL`
+    /// (`nxdomain`, `nodata`, `wildcard`, `nxdomain_cut`).
+    pub synthesised: [u64; 4],
 }
 
 impl ForwardStats {
@@ -411,12 +426,19 @@ struct Shared {
     forward_infra: MemInfra,
     strips: Mutex<BTreeSet<ForwardRuleId>>,
     signalled: Mutex<Option<Instant>>,
+    // WP10.3: the denial cache beside the answer cache, and the failure cache the worker
+    // reads and the engine fills.
+    denials: Option<Arc<Denials>>,
+    failures: Option<Arc<Failures>>,
 }
 
 /// The engine of `settings` and its infrastructure cache, with the hints of the file or
 /// the shipped ones (a file that cannot be read falls back to the shipped hints, loudly;
 /// the role checks the file before it starts).
-fn start_engine(settings: &EngineSettings) -> (Arc<Engine<NetAuthority>>, Arc<Infra>) {
+fn start_engine(
+    settings: &EngineSettings,
+    failures: Arc<Failures>,
+) -> (Arc<Engine<NetAuthority>>, Arc<Infra>) {
     let bounds = settings.recursion.infra;
     let servers = Arc::new(ServerTable::new(bounds.servers, bounds.ttl));
     let infra = Arc::new(Infra::new(bounds));
@@ -431,7 +453,7 @@ fn start_engine(settings: &EngineSettings) -> (Arc<Engine<NetAuthority>>, Arc<In
         NetAuthority::new(Arc::clone(&servers)),
         Arc::clone(&infra) as Arc<dyn crate::recursion::InfraCache>,
         servers,
-        Arc::new(MemFailures::new(settings.recursion.failure_max)),
+        failures,
         hints,
         settings,
     );
@@ -527,13 +549,34 @@ impl Forwarder {
             metrics::seal();
         }
         let (sender, receiver) = mpsc::channel(QUEUE);
+        // WP10.3: the failure cache, as large as the answer cache, and the denial cache
+        // beside the answer cache.
+        let failures = settings.recursion.as_ref().map(|recursion| {
+            let bound = settings
+                .cache
+                .as_ref()
+                .map_or(FAILURE_BOUND, |cache| cache.entries);
+            Arc::new(Failures::new(recursion.recursion.failure_max, bound))
+        });
+        let denials = settings.cache.as_ref().map(|_| {
+            let defaults = crate::recursion::RecursionSettings::default();
+            let recursion = settings
+                .recursion
+                .as_ref()
+                .map_or(&defaults, |engine| &engine.recursion);
+            Arc::new(Denials::new(DenialSettings {
+                aggressive: recursion.aggressive_nsec,
+                entries: recursion.denial_entries,
+                nsec3_iterations: recursion.caps.nsec3_insecure_above,
+            }))
+        });
         // WP10.1: the engine when recursion is on.
-        let (engine, infra) = match &settings.recursion {
-            Some(recursion) => {
-                let (engine, infra) = start_engine(recursion);
+        let (engine, infra) = match (&settings.recursion, &failures) {
+            (Some(recursion), Some(failures)) => {
+                let (engine, infra) = start_engine(recursion, Arc::clone(failures));
                 (Some(engine), Some(infra))
             }
-            None => (None, None),
+            _ => (None, None),
         };
         // WP10.2: the validator over the catalog's anchors.
         let validator = settings.validation.as_ref().map(|validation| {
@@ -565,6 +608,8 @@ impl Forwarder {
             forward_infra,
             strips: Mutex::new(BTreeSet::new()),
             signalled: Mutex::new(None),
+            denials,
+            failures,
         });
         let forwarder = Arc::new(Self {
             queue: sender,
@@ -601,11 +646,27 @@ impl Forwarder {
         if let Some(engine) = &self.shared.engine {
             engine.flush_failures(suffix.as_deref());
         }
+        // WP10.3: and the denial records of the zones under the suffix.
+        if let Some(denials) = &self.shared.denials {
+            denials.flush(suffix.as_deref());
+        }
         self.shared
             .cache
             .as_ref()
             .map(|cache| cache.flush(suffix.as_deref()))
     }
+
+    // WP10.3: the denial and failure caches.
+    /// The denial cache, when there is an answer cache.
+    pub fn denials(&self) -> Option<&Arc<Denials>> {
+        self.shared.denials.as_ref()
+    }
+
+    /// The failure cache, when recursion is on.
+    pub fn failures(&self) -> Option<&Arc<Failures>> {
+        self.shared.failures.as_ref()
+    }
+    // WP10.3: end.
 
     /// The counters.
     pub fn stats(&self) -> ForwardStats {
@@ -622,6 +683,8 @@ impl Forwarder {
             misses: read(&counters.misses),
             stale: read(&counters.stale),
             prefetched: read(&counters.prefetched),
+            failure_hits: read(&counters.failure_hits),
+            synthesised: [0, 1, 2, 3].map(|kind| read(&counters.synthesised[kind])),
         }
     }
 
@@ -815,16 +878,25 @@ impl Shared {
         {
             match validation {
                 Some(validation) if validation.state != SecurityState::Unvalidated => {
-                    cache.insert_with(
-                        key,
-                        &resolved.message,
-                        Instant::now(),
-                        None,
-                        &validation.verdict(self.failure_ttl()),
-                    );
+                    // WP10.3: a bogus answer is a failure of RFC 9520: held 5 s, doubling
+                    // on each repeat.
+                    let mut verdict = validation.verdict(self.failure_ttl());
+                    if validation.state == SecurityState::Bogus
+                        && let Some(failures) = &self.failures
+                    {
+                        let cause = FailureCause::Bogus(
+                            validation.ede.unwrap_or(ExtendedError::DNSSEC_BOGUS),
+                        );
+                        let hold = failures.record(key, cause, Instant::now());
+                        verdict.max_ttl =
+                            Some(u32::try_from(hold.as_secs()).unwrap_or(u32::MAX).max(1));
+                    }
+                    cache.insert_with(key, &resolved.message, Instant::now(), None, &verdict);
+                    self.keep_denials(view, &resolved.message, &verdict);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &resolved.message, Instant::now(), None);
+                    self.keep_denials(view, &resolved.message, &Verdict::UNVALIDATED);
                 }
                 _ => {}
             }
@@ -832,6 +904,18 @@ impl Shared {
         (resolved, validation)
     }
     // WP10.1: end.
+
+    // WP10.3: the denial cache's records come from what the answer cache keeps.
+    /// Keeps the denial records (or, unsigned, the NXDOMAIN of RFC 8020) of `message`.
+    fn keep_denials(&self, view: Option<ViewId>, message: &[u8], verdict: &Verdict) {
+        let Some(denials) = &self.denials else {
+            return;
+        };
+        if let Some(zone) = crate::cache::denial::zone_of(message) {
+            denials.insert(view, &zone, message, verdict, Instant::now());
+        }
+    }
+    // WP10.3: end.
 
     // WP10.2: validation.
     /// How long a bogus answer stays in the cache.
@@ -1219,16 +1303,14 @@ impl Shared {
         if let (Some(cache), Some(key)) = (&self.cache, &key) {
             match validation {
                 Some(validation) if validation.state != SecurityState::Unvalidated => {
-                    cache.insert_with(
-                        key,
-                        &answer,
-                        Instant::now(),
-                        rule,
-                        &validation.verdict(self.failure_ttl()),
-                    );
+                    let verdict = validation.verdict(self.failure_ttl());
+                    cache.insert_with(key, &answer, Instant::now(), rule, &verdict);
+                    // WP10.3: forwarded answers feed the denial cache too.
+                    self.keep_denials(key.view(), &answer, &verdict);
                 }
                 _ if !question.cd => {
                     cache.insert(key, &answer, Instant::now(), rule);
+                    self.keep_denials(key.view(), &answer, &Verdict::UNVALIDATED);
                 }
                 _ => {}
             }
@@ -1344,6 +1426,10 @@ impl ForwardSink for Forwarder {
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the query path in order: the access list, the route, the caches"
+    )]
     fn intake(&self, query: &IntakeQuery<'_>, out: &mut Vec<u8>) -> Intake {
         let shared = &self.shared;
         let catalog = shared.catalog.load();
@@ -1416,11 +1502,63 @@ impl ForwardSink for Forwarder {
                     validation: (state != SecurityState::Unvalidated).then_some(state),
                 }
             }
-            Hit::Expired | Hit::Miss => {
+            hit @ (Hit::Expired | Hit::Miss) => {
                 shared.count(|counters| &counters.misses);
                 if shared.settings.metrics {
                     metrics::CACHE_MISS_COUNTER.inc(view);
                 }
+                // WP10.3: a failure still held (RFC 9520), then what the denial cache
+                // proves (RFC 8198, RFC 8020), answered here without allocating.
+                if hit == Hit::Miss
+                    && let Some(failures) = &shared.failures
+                    && let Some(cause) = failures.lookup(&key, query.now)
+                    && !(request.cd && matches!(cause, FailureCause::Bogus(_)))
+                    && let Some(rcode) = crate::cache::failure::render(&client, cause.ede(), out)
+                {
+                    shared.count(|counters| &counters.failure_hits);
+                    if shared.settings.metrics {
+                        metrics::FAILURE_CACHE_HIT_COUNTER.inc();
+                    }
+                    return Intake::Answered {
+                        rcode: u16::from(rcode),
+                        validation: None,
+                    };
+                }
+                if let Some(denials) = &shared.denials
+                    && let Some(hit) =
+                        denials.answer(query.view, qname, request.qtype, &client, query.now, out)
+                {
+                    let kind = DenialKind::ALL
+                        .iter()
+                        .position(|kind| *kind == hit.kind)
+                        .unwrap_or(0);
+                    shared.counters.synthesised[kind].fetch_add(1, Ordering::Relaxed);
+                    if shared.settings.metrics {
+                        metrics::DENIAL_COUNTER.inc(u16::try_from(kind).unwrap_or(0));
+                    }
+                    // The RFC 8509 sentinel on a synthesised wildcard answer, as on a hit.
+                    let rcode = if hit.kind == DenialKind::Wildcard
+                        && shared.sentinel_refuses(
+                            qname,
+                            request.qtype,
+                            request.cd,
+                            SecurityState::Secure,
+                        ) {
+                        servfail_in_place(out, question_end);
+                        2
+                    } else {
+                        hit.rcode
+                    };
+                    return Intake::Synthesised {
+                        rcode: u16::from(rcode),
+                        validation: Some(if hit.kind == DenialKind::NxdomainCut {
+                            SecurityState::Insecure
+                        } else {
+                            SecurityState::Secure
+                        }),
+                    };
+                }
+                // WP10.3: end.
                 Intake::Forward
             }
         }
@@ -1520,8 +1658,12 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             if let Some(infra) = &shared.infra {
                 infra.purge(now);
             }
-            if let Some(engine) = &shared.engine {
-                engine.bound_failures(FAILURE_BOUND);
+            // WP10.3: the denial and failure caches' expired entries.
+            if let Some(denials) = &shared.denials {
+                denials.purge(now);
+            }
+            if let Some(failures) = &shared.failures {
+                failures.purge(now);
             }
             let catalog = shared.catalog.load_full();
             shared.pools.retain(|key| match key {

@@ -801,7 +801,7 @@ The rules for the AD zones and for any other suffix stay as they are. Answers al
 
 This section describes the recursive resolver of a node with the `dns` role: Tenko's own iterative engine, which answers a name outside the node's zones by asking the root servers, then the servers of each delegation down to the authority of the name, with no upstream resolver in between (DNS-03, DNS-08, DNS-21, WP10.1 of the recursion plan, [dns-recursion-plan.md](plans/dns-recursion-plan.md) sections 2.1, 2.2, 2.7 and 2.10 to 2.12; the decision is [ADR 0021](adr/0021-recursive-resolution-and-validation.md)). The code is `crates/tenko-dns/src/recurse.rs` and its modules (`message`, `net`, `hints`, `local`, `join`) and `crates/tenko-dns/src/infra.rs` (the infrastructure cache and the figures of the servers); the contracts they implement are `crates/tenko-dns/src/recursion`. The engine runs on the forwarder's task pool and allocates freely; steps 1 to 7 of section 1 stay allocation-free (ADR 0009). The conformance rows are in [CONFORMANCE.md](CONFORMANCE.md).
 
-What this slice delivers is resolution. Validation of DNSSEC signatures, QNAME minimisation and the denial cache are later packages of the same slice; section 10.16 lists what is not built.
+What this section describes is resolution. Validation of DNSSEC signatures is [dnssec.md](dnssec.md) section 12 (WP10.2); QNAME minimisation, the denial cache and the bounded failure cache are section 11 (WP10.3); section 10.16 lists what is not built.
 
 ### 10.1 What the resolver does, and in which order
 
@@ -861,7 +861,7 @@ One client query may cause at most the work of this table (REC-Q12). The bounds 
 
 The extended error 23 "Network Error" is for a step in which every attempt failed because the query could not be sent at all; a server that is only silent or lame is error 22.
 
-**The failure cache (RFC 9520).** A resolution that ends in SERVFAIL, whatever the cause, is remembered per view, name, type and class: for 5 seconds, then twice as long each time the same question fails again within the hold or as long again after it, up to `failure_cache_max_secs` (300). While a failure is remembered the question is answered SERVFAIL with the same extended error and no query is sent to an authority; it is counted in `failure_cache_hits` and `tenko_dns_failure_cache_hits_total` and not as a resolution. The cache of WP10.1 is the in-memory reference of the recursion contracts (`MemFailures`): it is looked up on the runtime, has no bound, never drops an expired entry from memory and is not emptied by the flush of section 3.5. The bounded cache, with the lookup on the worker, comes with WP10.3.
+**The failure cache (RFC 9520).** A resolution that ends in SERVFAIL, whatever the cause, is remembered per view, name, type and class: for 5 seconds, then twice as long each time the same question fails again within the hold or as long again after it, up to `failure_cache_max_secs` (300). While a failure is remembered the question is answered SERVFAIL with the same extended error and no query is sent to an authority; it is counted in `failure_cache_hits` and `tenko_dns_failure_cache_hits_total` and not as a resolution. Since WP10.3 the cache is bounded, looked up on the worker as well and flushed with the answer cache (section 11.4).
 
 ### 10.4 Server selection and timeouts
 
@@ -980,10 +980,10 @@ The role registers these families when the resolver is on (names as the metrics 
 | `tenko_dns_authority_queries_total` | `transport`: `udp`, `tcp`; `outcome`: `ok`, `referral`, `lame`, `timeout`, `unreachable`, `malformed`, `tc`, `badcookie` | Exchanges with authority servers. `malformed` includes the 0x20 mismatches and answers that do not parse; `tc` is the UDP leg of an exchange that went on over TCP | WP10.1 |
 | `tenko_dns_authority_rtt_seconds` | | Round-trip time of answered exchanges, in one histogram: the figures per server are in the listing of section 10.12, not in a label | WP10.1 |
 | `tenko_dns_infra_entries` | `kind`: `zone`, `server` | Entries of the infrastructure cache | WP10.1 |
-| `tenko_dns_failure_cache_hits_total` | | Questions answered from the failure cache | WP10.1 |
+| `tenko_dns_failure_cache_hits_total` | | Questions answered from the failure cache, by the worker (WP10.3) or the engine | WP10.1 |
 | `tenko_dns_priming_total` | `outcome`: `ok`, `failed` | Priming runs | WP10.1 |
 | `tenko_dns_validation_total`, `tenko_dns_validation_verifications_total` | `state`, `reason` | Validation outcomes and signature checks | WP10.2 |
-| `tenko_dns_denial_total` | `kind` | Answers synthesised from the denial cache | WP10.3; stays 0 until then |
+| `tenko_dns_denial_total` | `kind`: `nxdomain`, `nodata`, `wildcard`, `nxdomain_cut` | Answers synthesised from the denial cache (section 11.2) | WP10.3 |
 | `tenko_dns_trust_anchor_keys` | `zone`, `state` | Trust anchor keys by RFC 5011 state | WP10.2 |
 
 **The query log** (section 8) gains two fields. `resolution` says how the answer was found: `zone` (a zone of the node), `cache`, `denial` (WP10.3), `stale`, `forward` (a rule's upstream, a stub zone or the default forwarder), `recurse`, `local` (a locally served name, section 10.8), `policy` (a block list or an RPZ zone) or `refused`. `subqueries` is the number of queries the engine sent to authorities for the answer, and is left out of a JSON line when it is 0. The dnstap output (section 8.4) carries both in the `extra` field as `;resolution=<how>` and `;subqueries=<n>`. The reader, the API's lines and the Query log page show them. `validation` (the security state) and `ede` (the extended error code) are logged since WP10.2 and go into the dnstap `extra` field as `;validation=<state>` and `;ede=<code>`.
@@ -1004,11 +1004,11 @@ The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.t
 | `budget_ms` | 10,000 | WP10.1 | Wall clock per client query, 100 to 60,000 |
 | `infra_entries` | 1,000 (Home), 10,000 | WP10.1 | Zone cuts the infrastructure cache holds, 10 to 1,000,000; server addresses at twice that |
 | `infra_ttl_secs` | 900 | WP10.1 | How long a learnt lameness and a learnt need for lower case hold, 10 to 86,400 |
-| `failure_cache_max_secs` | 300 | WP10.1 | The longest a failure is remembered, 5 to 3,600 |
+| `failure_cache_max_secs` | 300 | WP10.1, WP10.3 | The longest a failure is remembered, 5 to 3,600 |
 | `fresh_port_per_query` | `true` | WP10.1 | A fresh source port for every exchange with an authority |
 | `local_zones_except` | none | WP10.1 | Locally served zones that are resolved all the same (section 10.8) |
-| `qname_minimisation` | `relaxed` | WP10.3 | `relaxed`, `strict` or `off`; read and checked, not used yet |
-| `aggressive_nsec`, `denial_entries` | `true`; 2,000 (Home), 20,000 | WP10.3 | The denial cache; read and checked, not used yet |
+| `qname_minimisation` | `relaxed` | WP10.3 | `relaxed`, `strict` or `off` (section 11.1) |
+| `aggressive_nsec`, `denial_entries` | `true`; 2,000 (Home), 20,000 | WP10.3 | The denial cache (section 11.2) |
 | `trust_anchor_signalling`, `key_sentinel` | on except under Hardened; `true` | WP10.2 | RFC 8145 (the node signals its root key tags once a day) and RFC 8509 (the sentinel names) |
 | `rfc5011_hold_down_secs` | not set | WP10.2 | The hold-downs of RFC 5011 in seconds, a test knob that the Lab profile only allows; the anchor service paces its refresh with it |
 
@@ -1018,26 +1018,28 @@ The attempts per server (3) and the fetch policy (3, 2, 1, 0) are fixed.
 
 The engine is tested against a scripted lab (`crates/tenko-dns/src/recurse/tests.rs`) whose zones are spread over servers of their own, so that every referral of the Internet happens: the root, the TLD `test`, `example.test` with its children, and the quirk servers. Each case of E36 starts from a primed engine with a cold infrastructure cache and records the queries sent to authorities; the table `CASES` holds the counts and the test `every_case_of_e36_ends_within_the_budget_with_its_query_count` checks them. A query is counted when it is sent to an authority server: the priming before the case is not counted, a sub-query for a name server's address is, and so is every retry of the fallback ladder (the retry without EDNS, the retry over TCP after a truncation, the retry in lower case after a 0x20 mismatch, every attempt after a timeout); a BADCOOKIE retry is not. In each failing case the resolution ends with SERVFAIL and the extended error 22, and asking the same question again sends nothing (the failure cache of section 10.3).
 
-| Case | Name asked | Answer | Queries |
-|---|---|---|---|
-| A name three labels down: root, TLD, zone | `www.example.test A` | NOERROR | 3 |
-| A wildcard | `any.wild.example.test A` | NOERROR | 3 |
-| NXDOMAIN | `nothing.example.test A` | NXDOMAIN | 3 |
-| NODATA | `www.example.test AAAA` | NOERROR, no data | 3 |
-| A CNAME within the zone, asked again for the target | `alias.example.test A` | NOERROR | 4 |
-| A chain of two CNAME records | `short1.cname.example.test A` | NOERROR | 5 |
-| A lame delegation (NS at BIND, which serves the parent) | `www.lame.example.test A` | SERVFAIL | 4 |
-| A delegation whose name servers point at each other without glue | `www.loop.example.test A` | SERVFAIL | 4 |
-| A CNAME loop | `loop1.cname.example.test A` | SERVFAIL | 4 |
-| A chain of ten CNAME records, over the eight links | `c1.cname.example.test A` | SERVFAIL | 11 |
-| A TLD whose server does not answer | `www.unreachable A` | SERVFAIL | 4 |
-| A server that breaks 0x20, asked again in lower case | `www.case.quirk.example.test A` | NOERROR | 5 |
-| A server that answers FORMERR to EDNS, asked again without | `www.noedns.quirk.example.test A` | NOERROR | 5 |
-| A server that truncates everything, asked again over TCP | `www.tc.quirk.example.test A` | NOERROR | 5 |
-| A referral with out-of-bailiwick glue, which is ignored | `www.oob.example.test A` | NOERROR | 6 |
-| An answer above 1,232 octets, over TCP | `big.example.test AAAA` | NOERROR | 4 |
+Since WP10.3 every case runs under the three modes of QNAME minimisation (section 11.1): relaxed (the default), strict and off.
 
-The counts follow from the walk. The plain cases are the root, the TLD and the zone (3). The scripted servers answer a CNAME on its own, without the record of its target, so each link costs one more query: 4 for one link, 5 for two, and the chain of ten stops at the ninth link (3 + 8 = 11). A server that holds the whole chain in one zone and answers it in one message is read in one query (`classify` follows a chain inside the zone). The lame delegation is those three queries plus one to BIND, whose negative answer carries an SOA of the parent. The unreachable TLD is the query to the root plus the three attempts at the silent server. The quirk cases add the one query the ladder repeats: without EDNS, over TCP, or in lower case. The out-of-bailiwick case has to look up the name server's address, because the glue is ignored: the three queries give the referral, the lookup takes two more (the TLD's referral and the answer of the server of `elsewhere.test`), and the zone's own server one: 6.
+| Case | Name asked | Answer | Queries, relaxed | Strict | Off |
+|---|---|---|---|---|---|
+| A name three labels down: root, TLD, zone | `www.example.test A` | NOERROR | 3 | 3 | 3 |
+| A wildcard | `any.wild.example.test A` | NOERROR | 4 | 4 | 3 |
+| NXDOMAIN | `nothing.example.test A` | NXDOMAIN | 3 | 3 | 3 |
+| NODATA | `www.example.test AAAA` | NOERROR, no data | 3 | 3 | 3 |
+| A CNAME within the zone, asked again for the target | `alias.example.test A` | NOERROR | 4 | 4 | 4 |
+| A chain of two CNAME records | `short1.cname.example.test A` | NOERROR | 6 | 6 | 5 |
+| A lame delegation (NS at BIND, which serves the parent) | `www.lame.example.test A` | SERVFAIL | 4 | 4 | 4 |
+| A delegation whose name servers point at each other without glue | `www.loop.example.test A` | SERVFAIL | 4 | 4 | 4 |
+| A CNAME loop | `loop1.cname.example.test A` | SERVFAIL | 5 | 5 | 4 |
+| A chain of ten CNAME records, over the eight links | `c1.cname.example.test A` | SERVFAIL | 12 | 12 | 11 |
+| A TLD whose server does not answer | `www.unreachable A` | SERVFAIL | 4 | 4 | 4 |
+| A server that breaks 0x20, asked again in lower case | `www.case.quirk.example.test A` | NOERROR | 6 | 6 | 5 |
+| A server that answers FORMERR to EDNS, asked again without | `www.noedns.quirk.example.test A` | NOERROR | 6 | 6 | 5 |
+| A server that truncates everything, asked again over TCP | `www.tc.quirk.example.test A` | NOERROR | 6 | 6 | 5 |
+| A referral with out-of-bailiwick glue, which is ignored | `www.oob.example.test A` | NOERROR | 6 | 6 | 6 |
+| An answer above 1,232 octets, over TCP | `big.example.test AAAA` | NOERROR | 4 | 4 | 4 |
+
+The counts follow from the walk; the off column is the walk of WP10.1. Minimisation costs one query wherever a label between a cut and the name is no cut: `wild.example.test` before `any.wild.example.test`, `cname.example.test` once per resolution of a chain (the engine remembers it), `quirk.example.test` before the quirk servers' zones. The scripted servers answer correctly for empty non-terminals, so strict and relaxed agree; the case of a server that does not (`www.a.b.broken.example.test`: relaxed 5 and the fallback remembered, strict 4 and NXDOMAIN, off 4) is the test `relaxed_minimisation_falls_back_for_a_server_that_denies_its_empty_non_terminals`. The plain cases are the root, the TLD and the zone (3). The scripted servers answer a CNAME on its own, without the record of its target, so each link costs one more query: 4 for one link, 5 for two, and the chain of ten stops at the ninth link (3 + 8 = 11). A server that holds the whole chain in one zone and answers it in one message is read in one query (`classify` follows a chain inside the zone). The lame delegation is those three queries plus one to BIND, whose negative answer carries an SOA of the parent. The unreachable TLD is the query to the root plus the three attempts at the silent server. The quirk cases add the one query the ladder repeats: without EDNS, over TCP, or in lower case. The out-of-bailiwick case has to look up the name server's address, because the glue is ignored: the three queries give the referral, the lookup takes two more (the TLD's referral and the answer of the server of `elsewhere.test`), and the zone's own server one: 6.
 
 The compose lab has the same cases against a root of its own, served by a second Tenko node (`deploy/compose/lab-dns`, the round `recursion`, [its README](../deploy/compose/lab-dns/README.md)). That node serves the root, the TLD and the zones under it from one address and answers from the deepest zone it holds, so a name of its own zones costs one query after priming; a delegation to another server costs one more. The round prints one line per case under the heading M40; the three runs of 2026-10-22 (Docker in WSL, the musl image) gave the same counts each time:
 
@@ -1059,8 +1061,104 @@ The times are dig's from the client container through `docker compose exec`, abo
 | What | Package | Today |
 |---|---|---|
 | The REVOKE bit of RFC 5011 in Tenko's own signer | later | The validator follows a revoked key (WP10.2), but the signer never sets the bit; the lab's round `rfc5011` therefore rolls a root that BIND's tools sign |
-| QNAME minimisation, the denial cache and the bounded failure cache | WP10.3 | Every server on the path is sent the full name, and no answer is synthesised from a cached denial. The failure cache is the in-memory reference of section 10.3 |
 | The command line and the rest of the UI | WP10.4 | No `tenko dns` command for the resolver. The API refuses a forwarding rule of mode `recurse` and a view's `resolution` (501), although the engine follows both when the rows exist. The Recursion page shows the status |
 | The measurements and the exit document | WP10.5 | No figure for throughput, memory or the cost of a fresh port per exchange |
 | Special-use names on the worker | later | Locally served names (section 10.8) are answered on the runtime, after the cache and the hand-over, and the answer is cached; the allocation-free path of ADR 0009 does not answer them first |
 | Other transports, other sources | not planned in this slice | Connection reuse and pipelining over TCP to authorities, encrypted transport to authorities (RFC 9539), a local copy of the root zone (RFC 8806), DNS64 and the client subnet option (RFC 7871) |
+
+## 11. QNAME minimisation and the denial cache
+
+This section describes what WP10.3 of the recursion plan added to the resolver of section 10: the minimising step of the engine (RFC 9156), the denial cache that answers names it can prove absent without asking anyone (RFC 8198, RFC 8020), and the bounded failure cache (RFC 9520) (DNS-34, DNS-03; [dns-recursion-plan.md](plans/dns-recursion-plan.md) sections 2.2, 2.6 and 2.10; REC-Q8 decided relaxed minimisation and the denial cache on in every profile). The code is `crates/tenko-dns/src/recurse.rs` (`Minimiser` and the walk), `crates/tenko-dns/src/cache/denial.rs` with its modules `order`, `store` and `synth`, and `crates/tenko-dns/src/cache/failure.rs`.
+
+### 11.1 QNAME minimisation
+
+Each step of the walk asks a cut's servers only for the labels they need: the cut's zone and one label more of the name, then one more, and so on (RFC 9156 section 3). The first four minimising steps add one label each; after them the remaining labels are spread so that at most ten steps of one walk are minimised, and the step that would reach the name asks the name itself. A minimised question carries the original type, or A for the types a server may refuse or answer from another zone at an intermediate name (DS, ANY, RRSIG, NSEC, NSEC3, OPT and the meta types), as section 2.1 of the RFC allows.
+
+| Answer to a minimised question | What the walk does |
+|---|---|
+| A referral | Moves down to the delegated zone, and minimises again from there |
+| An answer, NODATA, a CNAME | The name exists and is no cut: one label more of the same servers. The engine remembers the name for the infrastructure TTL (at most as many names as server addresses, the least recently used out, flushed with the infrastructure cache), so that the next walk through it, a restart for a CNAME target included, does not ask it again |
+| NXDOMAIN, relaxed | Asks the same servers for the full name. When that answer is no NXDOMAIN, the server answered NXDOMAIN for a name whose descendant exists (it is not RFC 8020 clean): the zone is asked with full names for the infrastructure TTL (`infra_ttl_secs`, the cut's `minimise_fallback` slot of section 10.10) |
+| A lame answer (REFUSED, SERVFAIL, FORMERR, an unusable answer), relaxed | The same: the full name of the same servers, without marking the server lame for the shorter question, and the fallback remembered when the full name works |
+| NXDOMAIN, strict | The name does not exist either (RFC 8020): the resolution ends with NXDOMAIN and nothing falls back |
+| A lame answer, strict | As for any question (section 10.2): the server is lame for the zone and the next one is asked |
+
+`off` sends the full name to every server. The cache is the same in every mode: the minimised answers fill the infrastructure cache (NS sets, glue, DS states), only the final answer goes into the answer cache, and a cache hit never depends on the mode. With minimisation the root sees `test` and the TLD sees `example.test` for the name `www.nsec3.example.test`; only the zone's own servers see the full name. The cost is one query per label between a cut and the name that is no cut, once per infrastructure TTL: a name two labels below its zone's apex costs one query more than without minimisation the first time, and a CNAME chain whose links share an empty non-terminal one query more in all (section 10.15 has the counts per mode). A server that serves a parent and its child zone and answers from the child without a referral (as BIND does, and the lab's authority) hides the cut, so the resolver stays at the parent's cut and minimises through the child's apex; the memory keeps that to one extra query per name between them per infrastructure TTL.
+
+### 11.2 The denial cache
+
+The denial cache (`Denials`) is a per-node store beside the answer cache, per view and zone:
+
+| What | From | Lifetime |
+|---|---|---|
+| The zone's SOA and its signatures | Every negative answer kept | Its TTL |
+| NSEC records in canonical order (RFC 4034 section 6.1: an order key per owner whose byte order is the canonical order) | The authority section of an answer the validator called `secure` | The smallest of the record's TTL, its signatures' TTLs and original TTLs, and the time left to their expiration (RFC 4035 section 4.5) |
+| NSEC3 records by hashed owner, under one salt and iteration count per zone (a change of the parameters starts the chain again) | As NSEC; a chain above the validator's insecure cap (100 iterations, RFC 9276) is not kept | As NSEC |
+| The wildcard RRsets a validated expansion showed (a signature with fewer labels than its owner, RFC 4035 section 5.3.4), under the wildcard's name | The answer section of a `secure` wildcard answer | As NSEC |
+| Names that do not exist in an unsigned zone (RFC 8020): the last name of the answer's CNAME chain, below the SOA's zone | An NXDOMAIN the validator called `insecure` or `indeterminate`, or that nobody validated | The negative TTL: the SOA's TTL, at most its MINIMUM |
+
+Nothing is kept from a bogus answer, and no NSEC or NSEC3 record is kept from an answer that is not `secure`. Forwarded answers fill the cache as the engine's do. The bound is `denial_entries` (2,000 under Home, 20,000 under the others), counted in records and names; past it the least recently used sixteenth goes.
+
+**The lookup on the worker.** For a query the answer cache has no fresh entry for, the worker looks for the closest enclosing zone the denial cache holds, under the store's read lock and without allocating, after the failure cache of section 11.4. In an unsigned zone, a cached NXDOMAIN of the name or of an ancestor below the apex answers it. In a signed zone the NSEC3 chain is tried first, then the NSEC records:
+
+| Proof | NSEC | NSEC3 |
+|---|---|---|
+| NXDOMAIN | The record that covers the name, the closest encloser (the longest suffix the name shares with the record's owner or its next name) and the record that covers the wildcard at the closest encloser | Down from the apex: the deepest ancestor that has a matching record is the closest encloser and the name one label below it the next closer; the matching record, the record that covers the next closer and the record that covers the wildcard (RFC 5155 section 8.3). At most 8 hashes per lookup, in the fixed buffers of `dnssec/chain.rs` |
+| NODATA | The record at the name without the type (and without CNAME); an empty non-terminal (the covering record's next name lies below the name) | The record matching the name without the type |
+| Wildcard NODATA | The covering record and the wildcard's record without the type | The encloser's match, the next closer's cover and the wildcard's match |
+| Wildcard answer | A cached expansion of the wildcard with the type answers under the name asked, with the record that covers the name | The same, with the record that covers the next closer |
+
+A record whose owner is a delegation (NS without SOA) or a DNAME above the name proves nothing below it, and an NSEC3 record with the opt-out flag proves no NXDOMAIN (RFC 8198 section 4.3). DS, ANY, RRSIG, NSEC, NSEC3, OPT and the meta types are never synthesised. A lookup that finds no proof falls through to the runtime as before.
+
+**The answer** is written into the worker's buffer: the client's id and question, RA, its RD and CD, the RCODE (3, or 0 for NODATA and the wildcard answer), AD when the records are secure and the client asked with AD or DO, the SOA in the authority section of a negative answer, and for a client with DO the NSEC or NSEC3 records of the proof with every signature (each record once). A wildcard answer carries the wildcard's records under the name asked (in the client's case), with their signatures for DO. Every TTL is the smallest left of the records used, and a negative answer's TTL is at most the SOA's MINIMUM. An answer that does not fit the client's limit is TC with the header and the question. The answer of RFC 8020 is NXDOMAIN with the SOA and AD clear. `tests/alloc.rs` binds the lookup and the synthesis for NSEC, NSEC3, the wildcard answer and RFC 8020, for clients with and without DO; a deliberate allocation in the synthesis makes it fail.
+
+`aggressive_nsec = false` turns the lookup off; the records are still kept, so that turning it on again needs no new answers. `dns.cache.flush` (section 3.5) empties the denial cache with the answer cache; with a suffix it removes the zones at or below the suffix and, in the zones above it, the records whose owners are at or below it.
+
+### 11.3 RFC 8020
+
+An NXDOMAIN means that nothing exists below the name. The resolver applies it twice: the strict minimisation of section 11.1 takes an NXDOMAIN of a shorter name as the answer, and the denial cache answers a name at or below a cached NXDOMAIN of an unsigned zone without asking. The exceptions: the denied name is the last name of the answer's CNAME chain, not the name asked; the zone's apex is never denied; a signed zone answers from its NSEC or NSEC3 records, which a validating client can check, and never from the bare NXDOMAIN; and the relaxed minimisation does not trust an NXDOMAIN of a shorter name, since some servers answer it for an empty non-terminal (section 11.1).
+
+### 11.4 The failure cache
+
+The failure cache of section 10.3 is now `Failures`: per view, name, type and class, a resolution that ends in SERVFAIL for a cause of the servers (no reachable authority, the work budget, a network error) or an answer the validator called bogus is held for 5 seconds, doubling on each repeat while the last hold or as long again runs, up to `failure_cache_max_secs` (300). A bogus answer's entry in the answer cache lives as long as its hold. A FORMERR of the client's question is answered before the engine and never cached. The worker looks the failure up after a miss of the answer cache, without allocating, and answers SERVFAIL with the stored extended error; a bogus failure is not answered there for a client with CD, which gets the data from the answer cache or the runtime. The engine looks it up again before it resolves. The failures are spread over shards by a hash of the key, each with its share of the bound (the answer cache's `entries`), and a full shard drops its least recently used sixteenth: the cache never empties itself wholesale. The flush of the answer cache flushes it, everything or at or below a suffix. `MemFailures`, the reference of the contracts, is bounded in the same way.
+
+### 11.5 Settings
+
+| Key of `[dns.recursion]` | Default | Meaning |
+|---|---|---|
+| `qname_minimisation` | `relaxed` in every profile | `relaxed`, `strict` (never falls back; what Hardened may choose) or `off` |
+| `aggressive_nsec` | `true` | The denial cache answers (RFC 8198, RFC 8020); `false` keeps filling it without answering from it |
+| `denial_entries` | 2,000 (Home), 20,000 | The denial cache's bound |
+| `failure_cache_max_secs` | 300 | The longest hold of a failure, 5 to 3,600 |
+
+A node whose resolver is off still keeps a denial cache beside its answer cache, bounded at 20,000 and filled from validated forwarded answers.
+
+### 11.6 Metrics, the query log and the status
+
+| What | Where |
+|---|---|
+| Answers synthesised, by kind: `nxdomain`, `nodata` (the wildcard NODATA included), `wildcard`, `nxdomain_cut` (RFC 8020) | `tenko_dns_denial_total{kind}` |
+| Questions answered from the failure cache, by the worker or the engine | `tenko_dns_failure_cache_hits_total` |
+| A synthesised answer in the query log | `resolution = denial`, with `validation` `secure` (`insecure` for RFC 8020) |
+| The counters since the role started: minimised queries, the retries with the full name, the zones remembered as asked whole, the synthesised answers by kind, the denial cache's entries and bound and whether it answers, the failure cache's hits and size | `ResolverCounters` of the node's `dns` role (`crates/tenko-dns/src/status.rs`, `DnsNode::resolver_counters`), for the recursion status |
+
+### 11.7 The lab rows of E35 and M42
+
+The round `recursion` of the compose lab (`deploy/compose/lab-dns/denial.sh`, [its README](../deploy/compose/lab-dns/README.md)) checks E35 against the lab root, with the authority node's query log and the quirk responder `quirk-ent` (a server that answers NXDOMAIN for its empty non-terminals and prints every question) as the witnesses:
+
+| Row | What |
+|---|---|
+| `den.qmin` | With the node's caches flushed, `www.nsec3.example.test` (three labels below the TLD) reaches the authority once, after the minimised questions `example.test` and `nsec3.example.test` (type A, which only minimisation asks of those names). The lab's authority serves the root, the TLD and the zones from one address without referrals, so these are all questions to the root's servers |
+| `den.qmin.fallback` | Relaxed: `quirk-ent` is asked `b.ent.quirk.example.test` (NXDOMAIN), then the full name, which answers; the next name of the zone goes out whole at once |
+| `den.nsec`, `den.nsec.nodata` | After `nothing.example.test` (NXDOMAIN) and `api.example.test AAAA` (NODATA), `nope.example.test` is NXDOMAIN and `api.example.test MX` is NODATA, both with AD, and the authority's log has no query for them |
+| `den.nsec3`, `den.nsec3.nodata` | The same in the NSEC3 zone (`b.nsec3.example.test`, `www.nsec3.example.test TXT`) |
+| `den.wildcard` | After `one.wild.example.test`, `two.wild.example.test` (in the range of the same NSEC record, after `host`) is answered from the wildcard with no query |
+| `den.rfc8020` | After `gone.insecure.example.test` (NXDOMAIN, unsigned), `x.gone.insecure.example.test` is NXDOMAIN with no query |
+| `den.delv.nxdomain`, `den.delv.nodata` | `delv` validates the synthesised NXDOMAIN and NODATA through the node |
+| `den.strict` | Strict (the node restarted): `quirk-ent` is asked `b.ent.quirk.example.test` only, and the answer is NXDOMAIN |
+| `den.off.aggressive` | `aggressive_nsec = false`: the second name reaches the authority |
+| `den.off`, `den.off.ent` | Off: `www.nsec3.example.test` is asked whole with no shorter question, and `quirk-ent` is asked the full name only |
+
+The round ran twice on 2026-10-23 (Docker in WSL, the musl image built from the WP10.3 tree): 144 of 144 rows PASS each time, the 14 rows above among them. The witnesses were the same in both runs: `www.nsec3.example.test` reached the authority once after one minimised question each for `example.test` and `nsec3.example.test`, and with minimisation off once with none; `quirk-ent` was asked `b.ent.quirk.example.test` and then the full name (relaxed), then `www.c.ent.quirk.example.test` whole, `b.ent.quirk.example.test` only (strict), the full name only (off); the six names of the denial rows reached the authority 0 times, and with `aggressive_nsec = false` once. The lab's M40 lines now include the minimised questions and the validator's DS and DNSKEY queries, so they are not comparable with the figures of section 10.15.
+
+M42 (the denial cache's effect) runs in the same round with `M42=1`: with the cache 1 to 5 authority queries per 1,000 random names under a covered NSEC or NSEC3 range, without it 1,001 to 1,005, under each minimisation mode; the procedure and the figures are in [bench/phase2-dns/results/2026-10-23-m42-denial.md](../bench/phase2-dns/results/2026-10-23-m42-denial.md).

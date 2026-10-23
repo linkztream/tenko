@@ -467,7 +467,58 @@ pub trait DnsNode: Send + Sync {
     /// Runs one command of the kinds of this module (blocking: reading the log reads
     /// files). `args` is the CBOR of the kind's arguments.
     fn execute(&self, kind: &str, args: &[u8]) -> CommandResult;
+
+    // WP10.3: the counters of minimisation and the denial and failure caches.
+    /// The counters of QNAME minimisation and the denial and failure caches since the role
+    /// started; `None` without a forwarder.
+    fn resolver_counters(&self) -> Option<ResolverCounters> {
+        None
+    }
 }
+
+// WP10.3: the counters of minimisation and the denial and failure caches.
+/// The counters of QNAME minimisation (RFC 9156), the denial cache (RFC 8198, RFC 8020)
+/// and the failure cache (RFC 9520) since the role started, for the recursion status.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolverCounters {
+    /// Queries sent to authorities with a minimised name.
+    #[serde(default)]
+    pub minimised: u64,
+    /// Minimised questions asked again with the full name (relaxed mode).
+    #[serde(default)]
+    pub minimise_retries: u64,
+    /// Zones remembered as asked with the full name for the infrastructure TTL.
+    #[serde(default)]
+    pub minimise_fallbacks: u64,
+    /// NXDOMAIN answers synthesised from NSEC or NSEC3 records.
+    #[serde(default)]
+    pub denial_nxdomain: u64,
+    /// NODATA answers synthesised.
+    #[serde(default)]
+    pub denial_nodata: u64,
+    /// Wildcard answers synthesised.
+    #[serde(default)]
+    pub denial_wildcard: u64,
+    /// NXDOMAIN answers for names below a cached NXDOMAIN (RFC 8020).
+    #[serde(default)]
+    pub denial_nxdomain_cut: u64,
+    /// Records and names the denial cache holds.
+    #[serde(default)]
+    pub denial_entries: u64,
+    /// The denial cache's bound.
+    #[serde(default)]
+    pub denial_bound: u64,
+    /// Whether the denial cache answers (`aggressive_nsec`).
+    #[serde(default)]
+    pub aggressive_nsec: bool,
+    /// Queries answered SERVFAIL from the failure cache, by the worker and the engine.
+    #[serde(default)]
+    pub failure_cache_hits: u64,
+    /// Failures the failure cache holds.
+    #[serde(default)]
+    pub failures_held: u64,
+}
+// WP10.3: end.
 
 /// The `dns` role of this process.
 pub struct LocalNode {
@@ -890,6 +941,37 @@ pub fn list_cache(cache: Option<&crate::cache::Cache>, args: &[u8]) -> CommandRe
 impl DnsNode for LocalNode {
     fn node(&self) -> NodeId {
         self.node
+    }
+
+    // WP10.3: the counters of minimisation and the denial and failure caches.
+    fn resolver_counters(&self) -> Option<ResolverCounters> {
+        use crate::recursion::{DenialCache as _, FailureCache as _};
+        let forwarder = self.forwarder.as_ref()?;
+        let stats = forwarder.stats();
+        let mut counters = ResolverCounters {
+            denial_nxdomain: stats.synthesised[0],
+            denial_nodata: stats.synthesised[1],
+            denial_wildcard: stats.synthesised[2],
+            denial_nxdomain_cut: stats.synthesised[3],
+            failure_cache_hits: stats.failure_hits,
+            ..ResolverCounters::default()
+        };
+        if let Some(engine) = forwarder.engine() {
+            let [minimised, retries, fallbacks] = engine.minimisation_counters();
+            counters.minimised = minimised;
+            counters.minimise_retries = retries;
+            counters.minimise_fallbacks = fallbacks;
+            counters.failure_cache_hits += engine.counters().failure_hits;
+        }
+        if let Some(denials) = forwarder.denials() {
+            counters.denial_entries = denials.len() as u64;
+            counters.denial_bound = denials.settings().entries as u64;
+            counters.aggressive_nsec = denials.settings().aggressive;
+        }
+        if let Some(failures) = forwarder.failures() {
+            counters.failures_held = failures.len() as u64;
+        }
+        Some(counters)
     }
 
     #[allow(clippy::too_many_lines, reason = "one status snapshot, field by field")]
