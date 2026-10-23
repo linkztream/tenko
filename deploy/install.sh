@@ -62,6 +62,7 @@ readonly UNIT=/etc/systemd/system/tenko.service
 readonly DROPIN_DIR=/etc/systemd/system/tenko.service.d
 readonly DROPIN_KEK=/etc/systemd/system/tenko.service.d/kek-file.conf
 readonly DROPIN_DATA=/etc/systemd/system/tenko.service.d/data-dir.conf
+readonly DROPIN_PROBE=/etc/systemd/system/tenko.service.d/probe.conf
 readonly RESOLVED_DROPIN=/etc/systemd/resolved.conf.d/tenko.conf
 readonly RESOLV_CONF=/etc/resolv.conf
 readonly RESOLV_MARK='# Written by the Tenko installer (--use-self)'
@@ -81,9 +82,14 @@ usage() {
 Usage: bash install.sh [options]          as root
 
 Answers (asked when --yes is not given; the default is in brackets):
-  --roles controller|controller,dns|controller,dhcp|controller,dns,dhcp   roles of the node
-                                      [controller,dns]; the dhcp role needs [dhcp] listen in
-                                      tenko.toml, see deploy/README.md, section "DHCP"
+  --roles controller[,dns][,dhcp][,probe]   roles of the node [controller,dns]; the dhcp role
+                                      needs [dhcp] listen in tenko.toml, see deploy/README.md,
+                                      section "DHCP". The probe role probes an address before
+                                      the dhcp role offers it (conflict detection) and runs the
+                                      discovery scans; with it the installer puts the drop-in
+                                      probe.conf (CAP_NET_RAW, for ARP and the raw scan
+                                      methods; ICMP needs nothing) next to the unit, and
+                                      --reconfigure --roles without it removes the drop-in
   --modules all|<list>|wizard         product modules: ipam,dns,dhcp,discovery; wizard leaves
                                       the choice to first-run setup [wizard]
   --profile home|standard|hardened|lab   security profile [home]
@@ -296,7 +302,15 @@ valid_hostname() {
     [[ ${#label} -le 63 && "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
   done
 }
-valid_roles() { [[ "$1" == "controller" || "$1" == "controller,dns" || "$1" == "controller,dhcp" || "$1" == "controller,dns,dhcp" ]]; } # WP7.5: the dhcp role
+# valid_roles: controller, then any of dns, dhcp and probe in the order given, each once.
+valid_roles() {
+  local role list=",$1,"
+  [[ "$1" =~ ^controller(,(dns|dhcp|probe)){0,3}$ ]] || return 1
+  for role in dns dhcp probe; do
+    [[ "${list/,${role},/,}" != *",${role},"* ]] || return 1
+  done
+  return 0
+}
 valid_modules() {
   local m IFS=,
   [[ "$1" == "wizard" || "$1" == "all" ]] && return 0
@@ -661,6 +675,15 @@ answers() {
       HOST_NAME="$kept"
     fi
   fi
+  # A kept configuration names the roles the unit serves: the probe drop-in follows them, as
+  # do the port checks and the closing lines.
+  if ((HAVE_CONFIG && !OPT_RECONFIGURE)) && [[ -f "$CONFIG" ]]; then
+    local kept_roles
+    kept_roles="$(sed -n 's/^roles = "\(.*\)"$/\1/p' "$CONFIG" | head -n 1)"
+    if [[ -n "$kept_roles" ]] && valid_roles "$kept_roles"; then
+      ROLES="$kept_roles"
+    fi
+  fi
   DNS_ADDRESS="${OPT_DNS_ADDRESS:-all}"
   FORWARDERS="${OPT_FORWARDERS:-${forwarders_default:-none}}"
   LANGUAGE="${OPT_LANGUAGE:-en}"
@@ -683,6 +706,17 @@ answers() {
       printf 'Not a choice: %s\n' "$ROLES" >"$TTY"
       SET_ROLES=0
     done
+    # The probe role goes with any choice of the menu, so it is its own question; the
+    # default follows the dhcp role, whose conflict detection needs it.
+    if ((!SET_ROLES)) && [[ "$ROLES" != *probe* ]]; then
+      local probe_default=no
+      [[ "$ROLES" == *dhcp* ]] && probe_default=yes
+      if ask_yes_no "Also run the probe role on this node?
+
+The probe role probes an address before the dhcp role offers it (conflict detection, on by default with the dhcp role) and runs the discovery scans. It needs CAP_NET_RAW for ARP and the raw scan methods, which the installer grants with the drop-in probe.conf; ICMP works without it." "$probe_default"; then
+        ROLES+=",probe"
+      fi
+    fi
     while true; do
       [[ -n "$OPT_MODULES" ]] || ask MODULES "Product modules: wizard (first-run setup asks), all, or a list of ipam,dns,dhcp,discovery" "$MODULES"
       valid_modules "$MODULES" && break
@@ -1570,6 +1604,55 @@ WantedBy=multi-user.target
 TENKO_UNIT_END
 }
 
+# The drop-in of deploy/systemd/probe.conf, unchanged: CAP_NET_RAW and the address families
+# of the raw scan methods, for the probe role (deploy/systemd/smoke.sh compares the
+# installed file with the one in the repository).
+probe_dropin_text() {
+  cat <<'TENKO_PROBE_END'
+# Drop-in for the probe role of Tenko DDI: lets the unit run `tenko serve --roles
+# controller,probe` (or roles = "controller,probe" in tenko.toml).
+#
+# Install (as root):
+#   install -d /etc/systemd/system/tenko.service.d
+#   install -m 0644 deploy/systemd/probe.conf /etc/systemd/system/tenko.service.d/probe.conf
+#   systemctl daemon-reload && systemctl restart tenko
+# Without systemd, `setcap cap_net_raw+ep` on the binary does the same for the capability
+# (repeat it after every update, because a replaced file loses it).
+# To remove it: delete the file, then `systemctl daemon-reload && systemctl restart tenko`.
+#
+# What it opens up, compared with the base unit (whose only capability is
+# CAP_NET_BIND_SERVICE, for the dns role on port 53, which stays):
+#   * CAP_NET_RAW, in the bounding set and as an ambient capability, so the unprivileged
+#     account `tenko` may open raw sockets. The scan methods that need them (arp_sweep,
+#     tcp_syn, os_fingerprint, lldp and dhcp_snoop; docs/scanning.md, section 9) run with
+#     it (WP3.14) and answer `unsupported` without it, so `tenko node scan status` reports
+#     "raw sockets: yes" once it is granted. The probe role works without it; grant it to
+#     use those methods.
+#   * AF_NETLINK: the `nd` method reads the IPv6 neighbor table with the `ip` command, which
+#     talks to the kernel over netlink, and the scanner lists interfaces.
+#   * AF_PACKET: layer-2 sockets for the raw methods above.
+# Everything else in the base unit stays: no new privileges, the system call filter, a
+# read-only system, and the state directory as the only writable place besides the log
+# directory.
+#
+# Listing only what is new is not enough for these three settings: the base unit sets the
+# first two to empty and gives the third a shorter list, so each is reset below and given
+# its full value.
+#
+# The ICMP echo of the scan method `icmp` uses an unprivileged datagram socket when
+# net.ipv4.ping_group_range admits the group `tenko`, and the `ping` command otherwise; it
+# needs no capability.
+
+[Service]
+AmbientCapabilities=
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+TENKO_PROBE_END
+}
+
 step_unit() {
   local changed=0
   [[ -d /etc/systemd/system ]] || run install -d -m 0755 /etc/systemd/system
@@ -1604,8 +1687,18 @@ step_unit() {
     run rm -f "$DROPIN_DATA"
     changed=1
   fi
+  # The probe role: its drop-in comes with the role and goes with it (--reconfigure --roles
+  # without probe), the way dhcp-direct.conf is left to the operator because it needs an
+  # interface the installer does not ask for.
+  if [[ "$ROLES" == *probe* ]]; then
+    [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
+    probe_dropin_text | put "$DROPIN_PROBE" 0644 root:root && changed=1
+  elif [[ -f "$DROPIN_PROBE" ]]; then
+    run rm -f "$DROPIN_PROBE"
+    changed=1
+  fi
   if ((changed)); then
-    if [[ -f "$DROPIN_KEK" || -f "$DROPIN_DATA" ]]; then
+    if [[ -f "$DROPIN_KEK" || -f "$DROPIN_DATA" || -f "$DROPIN_PROBE" ]]; then
       ok "Installed the unit ${UNIT} with drop-ins in ${DROPIN_DIR}"
     else
       ok "Installed the unit ${UNIT}"
@@ -1757,6 +1850,14 @@ summary() {
       "" "direct mode: an interface, and install deploy/systemd/dhcp-direct.conf as" \
       "" "/etc/systemd/system/tenko.service.d/dhcp-direct.conf); then restart the service." \
       "" "UDP 67 must be open on the host's firewall; 547 (DHCPv6) is not served yet."
+    if [[ "$ROLES" != *probe* ]]; then
+      printf '    %-14s %s\n' "" "Conflict detection (docs/dhcp.md, section 14.5) is off without the probe role:" \
+        "" "add probe to roles in ${CONFIG} and run this script again, which installs its drop-in."
+    fi
+  fi
+  if [[ "$ROLES" == *probe* ]]; then
+    printf '    %-14s %s\n' "Probe:" "${DROPIN_PROBE} grants CAP_NET_RAW (ARP for the dhcp role's conflict" \
+      "" "detection, the raw scan methods); --reconfigure --roles without probe removes it."
   fi
   case "$KEK_MODE" in
   sealed)
@@ -1798,6 +1899,7 @@ uninstall() {
   fi
   [[ -f "$DROPIN_KEK" ]] && run rm -f "$DROPIN_KEK"
   [[ -f "$DROPIN_DATA" ]] && run rm -f "$DROPIN_DATA"
+  [[ -f "$DROPIN_PROBE" ]] && run rm -f "$DROPIN_PROBE"
   [[ -d "$DROPIN_DIR" ]] && [[ -z "$(ls -A "$DROPIN_DIR")" ]] && run rmdir "$DROPIN_DIR"
   [[ -f "$UNIT" ]] && run rm -f "$UNIT"
   ((SYSTEMD)) && run systemctl daemon-reload

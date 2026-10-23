@@ -113,8 +113,8 @@ unit_checks() {
     for v in 192.0.2.1 -tenko "two words" tenko_1 ""; do expect "valid_hostname refuses '${v}'" 1 "$(valid_hostname "$v"; echo $?)"; done
     for v in /var/lib/tenko /srv/tenko-data /data/tenko; do expect "valid_data_dir ${v}" 0 "$(valid_data_dir "$v"; echo $?)"; done
     for v in / relative /home/user/tenko /tmp/x "/srv/with space" /srv/../etc; do expect "valid_data_dir refuses '${v}'" 1 "$(valid_data_dir "$v"; echo $?)"; done
-    for v in controller controller,dns; do expect "valid_roles ${v}" 0 "$(valid_roles "$v"; echo $?)"; done
-    for v in dns probe "controller, dns"; do expect "valid_roles refuses '${v}'" 1 "$(valid_roles "$v"; echo $?)"; done
+    for v in controller controller,dns controller,dhcp,probe controller,dns,dhcp,probe controller,probe,dns; do expect "valid_roles ${v}" 0 "$(valid_roles "$v"; echo $?)"; done
+    for v in dns probe "controller, dns" "controller," controller,dns,dns controller,scan; do expect "valid_roles refuses '${v}'" 1 "$(valid_roles "$v"; echo $?)"; done
     for v in wizard all ipam ipam,dns,discovery; do expect "valid_modules ${v}" 0 "$(valid_modules "$v"; echo $?)"; done
     for v in "" ipam,foo "ipam dns"; do expect "valid_modules refuses '${v}'" 1 "$(valid_modules "$v"; echo $?)"; done
     exit "$failures"

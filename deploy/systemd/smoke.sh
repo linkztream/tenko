@@ -22,14 +22,19 @@
 #      from a release source on the loopback interface, and waits for systemd to restart the
 #      service after exit status 12, for the new version to run and for its probation to end;
 #   8. installs deploy/systemd/probe.conf and runs the roles controller,probe;
-#   9. records `systemd-analyze security` (in $GITHUB_STEP_SUMMARY when set) and fails when
+#   9. runs deploy/install.sh unattended with --roles controller,dns,dhcp,probe (the installer
+#      puts the probe drop-in in place, identical to deploy/systemd/probe.conf, the process
+#      has CAP_NET_RAW and the log says which method the dhcp role probes an address with),
+#      then with --roles controller (the drop-in is removed);
+#  10. records `systemd-analyze security` (in $GITHUB_STEP_SUMMARY when set) and fails when
 #      the exposure is 2.5 or higher.
 # Each step prints "==> step". On failure the script prints the journal of the unit and the
 # tenko log and exits non-zero. Unless KEEP=1 is set it stops and disables the unit, removes
 # the drop-ins it added and stops the release source at the end; the data stays.
 #
 # Needs: bash, curl, openssl, python3, systemd 250 or later (systemd-creds, systemd-analyze,
-# journalctl). It reads JSON with python3, not jq.
+# journalctl), and what deploy/install.sh needs (ss of iproute2). It reads JSON with
+# python3, not jq.
 #
 # With SMOKE_LIB_ONLY=1 the file only defines its functions (for tests of the API helpers).
 
@@ -548,8 +553,62 @@ EOF
   info "drop-in removed; the controller runs as before"
 }
 
+# installer LOG ARGUMENTS...: deploy/install.sh unattended, with this binary, its output in
+# LOG (shown when it fails); the service must come up ready. The unit starts more often in
+# this smoke than StartLimitBurst= allows, so the counter is reset first.
+installer() {
+  local log="$1"
+  shift
+  systemctl reset-failed "$UNIT_NAME" 2> /dev/null || true
+  if ! bash "$REPO_DIR/deploy/install.sh" --yes --binary "$TENKO_BUILD" "$@" > "$log" 2>&1; then
+    cat "$log" >&2
+    die "deploy/install.sh $* failed"
+  fi
+  if ! grep -q 'The node is ready' "$log"; then
+    cat "$log" >&2
+    die "deploy/install.sh $* did not report the node ready"
+  fi
+  info "deploy/install.sh $*: $(grep -o 'The node is ready.*' "$log" | head -n 1)"
+}
+
+step_installer() {
+  step "9. deploy/install.sh with the probe role: its drop-in, CAP_NET_RAW and the dhcp role's probe"
+  local pid caps
+  # The dns role on the loopback address only: systemd-resolved of a hosted runner keeps
+  # 127.0.0.53:53. The dhcp role serves nothing without [dhcp] listen, but it starts and
+  # says which probe it has.
+  installer "$WORK_DIR/install-probe.log" --reconfigure --roles controller,dns,dhcp,probe \
+    --modules all --dns-address 127.0.0.1 --forwarders none
+  grep -qx 'roles = "controller,dns,dhcp,probe"' "$CONFIG_FILE" \
+    || die "$CONFIG_FILE does not say roles = \"controller,dns,dhcp,probe\""
+  [[ -f "$DROPIN_DIR/probe.conf" ]] || die "the installer did not put $DROPIN_DIR/probe.conf in place"
+  cmp -s "$REPO_DIR/deploy/systemd/probe.conf" "$DROPIN_DIR/probe.conf" \
+    || die "$DROPIN_DIR/probe.conf differs from deploy/systemd/probe.conf: the copy in install.sh is stale"
+  info "$DROPIN_DIR/probe.conf is in place, identical to deploy/systemd/probe.conf"
+  systemctl show -p AmbientCapabilities --value "$UNIT_NAME" | grep -qi cap_net_raw \
+    || die "AmbientCapabilities lacks cap_net_raw with the drop-in in place"
+  pid="$(svc MainPID)"
+  caps="$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status")"
+  (((16#$caps & 0x2000) != 0)) || die "CAP_NET_RAW (bit 13) is not in CapEff of the process (0x$caps)"
+  info "main pid $pid, CapEff=0x$caps: CAP_NET_RAW is in the effective set"
+  wait_for 30 "the log says which method the dhcp role probes an address with" \
+    bash -c "journalctl '_SYSTEMD_INVOCATION_ID=$(svc InvocationID)' --no-pager | grep -q 'the dhcp role probes an address'"
+  info "$(invocation_journal | grep -o 'the dhcp role probes an address.*' | head -n 1)"
+  if invocation_journal | grep -q 'conflict detection is off'; then
+    invocation_journal | grep 'conflict detection is off' >&2
+    die "the log says conflict detection is off although the probe role runs"
+  fi
+
+  installer "$WORK_DIR/install-controller.log" --reconfigure --roles controller --modules all
+  [[ ! -e "$DROPIN_DIR/probe.conf" ]] || die "$DROPIN_DIR/probe.conf is still there after --reconfigure --roles controller"
+  if systemctl show -p AmbientCapabilities --value "$UNIT_NAME" | grep -qi cap_net_raw; then
+    die "AmbientCapabilities still has cap_net_raw after the drop-in was removed"
+  fi
+  info "--reconfigure --roles controller removed the drop-in; the controller runs as before"
+}
+
 step_security() {
-  step "9. systemd-analyze security"
+  step "10. systemd-analyze security"
   local report="$WORK_DIR/security.txt" line score
   systemd-analyze security --no-pager "$UNIT_NAME.service" > "$report"
   cat "$report"
@@ -591,6 +650,7 @@ main() {
   step_stop_start
   step_upgrade
   step_probe
+  step_installer
   step_security
   printf '\n==> the systemd smoke passed\n'
 }

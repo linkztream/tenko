@@ -75,7 +75,7 @@ no simple pattern such as `1234`); the other profiles take a password.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--roles controller\|controller,dns\|controller,dhcp\|controller,dns,dhcp` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below) |
+| `--roles controller[,dns][,dhcp][,probe]` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below; with the probe role the installer puts the drop-in `systemd/probe.conf` in place, "The probe role" below) |
 | `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
 | `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)) |
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
@@ -497,7 +497,8 @@ procedure for upgrades and rollbacks, and the layout are described in
 
 **The probe role.** The base unit has no capability. To run the probe role next to the
 controller (`--roles controller,probe`, or `roles = "controller,probe"` in `tenko.toml`),
-install the drop-in `systemd/probe.conf`:
+install the drop-in `systemd/probe.conf` (`install.sh` does this itself when its roles
+include `probe`, and removes it when `--reconfigure --roles` drops the role):
 
 ```
 install -d /etc/systemd/system/tenko.service.d

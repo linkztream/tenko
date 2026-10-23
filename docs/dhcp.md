@@ -693,6 +693,8 @@ The role says once per start which it uses (`the dhcp role probes an address nev
 
 "On" means on when a `probe` role runs in the process and can use ICMP or ARP; the setting `conflict_detection` of `PUT /dhcp/settings` overrides the profile's default and takes effect without a restart. The profile's default is read when the role starts.
 
+An installation made by `deploy/install.sh` gets the role from the installer's question or from `--roles` (any combination of `controller` with `dns`, `dhcp` and `probe`), and the installer puts the drop-in `deploy/systemd/probe.conf` (`CAP_NET_RAW`, for ARP and the raw scan methods; ICMP needs nothing) in `/etc/systemd/system/tenko.service.d/` with the role and removes it when `--reconfigure --roles` drops the role. By hand: add `probe` to `roles` in `tenko.toml` and install the drop-in as that file (or run the installer again, which reads the kept roles and installs it), then restart the service.
+
 ### 14.6 DECLINE
 
 A DECLINE from the client that holds the address abandons it for `[dhcp.decline] hold_secs` (the engine, section 9.2): the row belongs to no client, so the allocator offers it to nobody, the decliner included, and the client gets another address on its next DISCOVER. The probe cache forgets the address, the abandoned row is the conflict observation (14.3, without a MAC address: the client does not say who answered it), and the role writes the audit record `dhcp.decline` with the scope, the address, the client's MAC address and the hold time (principal `system:dhcp`).
