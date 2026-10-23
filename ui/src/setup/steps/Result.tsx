@@ -209,7 +209,10 @@ export function Result() {
             )}
           </Show>
           <Show when={w.after.dns.status === "none"}>
-            <p class="wz-help ink">{t("setup.result.dns.none")}</p>
+            {/* WP10.4: recursion needs no rule. */}
+            <p class="wz-help ink" data-testid="setup-dns-none" data-resolve={w.state.dns.resolve}>
+              {w.state.dns.resolve === "recurse" ? t("setup.result.dns.recurse") : t("setup.result.dns.none")}
+            </p>
           </Show>
           <p class="wz-help ink">{t("setup.result.dns.config_help")}</p>
           <pre class="wz-dns-config mono" aria-labelledby="wz-dns-config-title" data-testid="setup-dns-config">

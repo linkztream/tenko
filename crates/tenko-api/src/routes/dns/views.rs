@@ -12,7 +12,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_auth::authz::anywhere;
-use tenko_core::{Action, ObjectKind, ObjectRef, dns::ViewId};
+use tenko_core::{
+    Action, ObjectKind, ObjectRef,
+    dns::{ResolutionMode, ViewId},
+};
 use tenko_dns::zone::{
     ZoneService,
     views::{NewView, ViewChange, ViewRow},
@@ -24,17 +27,22 @@ use crate::{
     extract::Ctx,
     list::{CursorScope, PageParams, encode_cursor},
     problem::{ApiError, ProblemDetails},
-    routes::{
-        auth::{ApiJson, if_match},
-        not_implemented,
-    },
+    routes::auth::{ApiJson, if_match},
     state::AppState,
 };
+
+// WP10.4: the profile's resolution beside the view's own.
+/// The resolution of a view without one of its own: recursion under every profile
+/// (REC-Q2). A node whose resolver is off forwards to `[dns] forwarders` instead.
+pub(super) const PROFILE_RESOLUTION: ResolutionMode = ResolutionMode::Recurse;
+// WP10.4: end.
 
 fn item(row: ViewRow) -> ViewItem {
     ViewItem {
         view: row.view,
         revision: row.revision,
+        // WP10.4: the profile's resolution beside the view's own.
+        profile_resolution: PROFILE_RESOLUTION,
     }
 }
 
@@ -104,15 +112,14 @@ pub(super) async fn list_dns_views(
                    scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` \
                    names an access list. `resolution` (`recurse`, `forward` or `refuse`) \
                    says how the view's clients get names outside the zones and the \
-                   forwarding rules; until the resolver is built, a value answers 501 and \
-                   writes nothing.",
+                   forwarding rules; absent, the view follows the profile's default \
+                   (`profile_resolution` in the answer).",
     request_body(content = ViewCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The view", body = ViewItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the view is invalid (`dns.view.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "`resolution` is set, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn create_dns_view(
@@ -126,11 +133,6 @@ pub(super) async fn create_dns_view(
         Action::Create,
         &anywhere(ObjectKind::DnsView),
     )?;
-    // WP10.0: the resolution of a view is not built yet.
-    if body.resolution.is_some() {
-        return Err(not_implemented("POST", "/dns/views"));
-    }
-    // WP10.0: end.
     let service = zones.get()?;
     let (view, written) = service
         .create_view(
@@ -141,6 +143,8 @@ pub(super) async fn create_dns_view(
                 scope_map: body.scope_map,
                 order: body.order,
                 recursion: body.recursion,
+                // WP10.4: the view's resolution.
+                resolution: body.resolution,
                 description: body.description,
             },
         )
@@ -192,8 +196,8 @@ pub(super) async fn get_dns_view(
                    moves the view and the others make room; `default_recursion` makes the \
                    view follow the profile's default; an empty `description` clears it. \
                    `resolution` sets how the view's clients get names outside the zones and \
-                   the forwarding rules and `default_resolution` clears it; until the \
-                   resolver is built, either answers 501 and changes nothing.",
+                   the forwarding rules and `default_resolution` clears it, so that the \
+                   view follows the profile's default again.",
     params(
         ("id" = String, Path, description = "View identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -205,8 +209,7 @@ pub(super) async fn get_dns_view(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such view (`dns.view.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 412, description = "The view changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "`resolution` or `default_resolution` is set, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 412, description = "The view changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn update_dns_view(
@@ -219,11 +222,6 @@ pub(super) async fn update_dns_view(
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ViewId>(&id)?;
     app.authorize(&cx.principal, Action::Update, &ObjectRef::from(id))?;
-    // WP10.0: the resolution of a view is not built yet.
-    if body.resolution.is_some() || body.default_resolution {
-        return Err(not_implemented("PATCH", "/dns/views/{id}"));
-    }
-    // WP10.0: end.
     let service = zones.get()?;
     let expect = if_match(&headers)?;
     let (_, written) = service
@@ -237,6 +235,9 @@ pub(super) async fn update_dns_view(
                 order: body.order,
                 recursion: body.recursion,
                 default_recursion: body.default_recursion,
+                // WP10.4: the view's resolution.
+                resolution: body.resolution,
+                default_resolution: body.default_resolution,
                 description: body.description,
             },
             expect,

@@ -13,6 +13,8 @@
 
 // WP8.7: the `dhcp` part of a sample.
 mod dhcp;
+// WP10.4: the recursive resolver's part of the DNS figures.
+mod recursion;
 
 use std::{collections::BTreeMap, time::Instant};
 
@@ -119,6 +121,8 @@ struct DnsTotals {
     /// Blocked queries by `list`.
     blocked: BTreeMap<String, u64>,
     log_dropped: u64,
+    // WP10.4: the recursive resolver's totals, while recursion is on.
+    recursion: Option<recursion::RecursionTotals>,
 }
 
 impl DnsTotals {
@@ -136,6 +140,8 @@ impl DnsTotals {
             upstream_rtt: histogram_total(snapshot, DNS_UPSTREAM_RTT, None),
             blocked: counter_by(snapshot, DNS_BLOCKED, "list"),
             log_dropped: counter_total(snapshot, DNS_LOG_DROPPED, None),
+            // WP10.4: the recursive resolver's totals, while recursion is on.
+            recursion: recursion::RecursionTotals::of(snapshot),
         })
     }
 }
@@ -163,6 +169,14 @@ fn dns_sample(
             }),
         ..MetricsDns::default()
     };
+    // WP10.4: the validation outcomes and the sub-queries per second.
+    dns.recursion = totals.recursion.as_ref().map(|current| {
+        let earlier = before.and_then(|(before, seconds)| {
+            before.recursion.as_ref().map(|earlier| (earlier, seconds))
+        });
+        recursion::recursion_sample(current, earlier)
+    });
+    // WP10.4: end.
     let Some((before, seconds)) = before else {
         return dns;
     };
@@ -416,6 +430,10 @@ fn add_dns(sum: &mut MetricsDns, dns: &MetricsDns) {
         total.doh = total.doh.saturating_add(connections.doh);
     }
     sum.log_dropped_per_second += dns.log_dropped_per_second;
+    // WP10.4: the recursive resolver's rates, summed.
+    if let Some(part) = &dns.recursion {
+        recursion::add_recursion(&mut sum.recursion, part);
+    }
 }
 
 fn max_of<T: PartialOrd>(a: Option<T>, b: Option<T>) -> Option<T> {
@@ -1199,6 +1217,8 @@ mod tests {
                 .collect(),
             connections: Some(MetricsDnsConnections { dot: 2, doh: 1 }),
             log_dropped_per_second: 0.5,
+            // WP10.4: the resolver's part has its tests in `sample/recursion.rs`.
+            recursion: None,
         };
         let mut one = sample(1, 1.0, None);
         one.dns = Some(dns(

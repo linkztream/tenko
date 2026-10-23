@@ -443,6 +443,19 @@ fn recursion_of(view: &Value, acls: &[Value]) -> String {
         .to_owned()
 }
 
+// WP10.4: the view's resolution, or the profile's it follows.
+/// The view's `resolution`, else `default (<the profile's>)`.
+fn resolution_of(view: &Value) -> String {
+    match text(view, &["resolution"]) {
+        "" => match text(view, &["profile_resolution"]) {
+            "" => "profile default".to_owned(),
+            profile => format!("profile default ({profile})"),
+        },
+        mode => mode.to_owned(),
+    }
+}
+// WP10.4: end.
+
 fn describe(view: &Value, zones: &[Value], acls: &[Value]) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "name         {}", text(view, &["name"]));
@@ -450,14 +463,7 @@ fn describe(view: &Value, zones: &[Value], acls: &[Value]) -> String {
     let _ = writeln!(out, "order        {}", number(view, &["order"]));
     let _ = writeln!(out, "recursion    {}", recursion_of(view, acls));
     // WP10.0
-    let _ = writeln!(
-        out,
-        "resolution   {}",
-        match text(view, &["resolution"]) {
-            "" => "profile default",
-            mode => mode,
-        }
-    );
+    let _ = writeln!(out, "resolution   {}", resolution_of(view));
     // WP10.0: end.
     let description = text(view, &["description"]);
     if !description.is_empty() {
@@ -499,12 +505,22 @@ async fn list(target: &Target) -> Result<Output, Failure> {
                 },
                 scopes_of(view, &zones).join(" "),
                 recursion_of(view, &acls),
+                // WP10.4: the view's resolution.
+                resolution_of(view),
                 text(view, &["id"]).to_owned(),
             ]
         })
         .collect();
     Ok(Output::text(table(
-        &["ORDER", "NAME", "RULES", "SCOPES", "RECURSION", "ID"],
+        &[
+            "ORDER",
+            "NAME",
+            "RULES",
+            "SCOPES",
+            "RECURSION",
+            "RESOLUTION",
+            "ID",
+        ],
         &rows,
     )))
 }
@@ -711,6 +727,16 @@ mod tests {
         assert!(text.contains("resolution   forward"), "{text}");
         let text = describe(&json!({ "name": "a" }), &[], &[]);
         assert!(text.contains("resolution   profile default"), "{text}");
+        // WP10.4: the profile's value is named when the answer carries it.
+        let text = describe(
+            &json!({ "name": "a", "profile_resolution": "recurse" }),
+            &[],
+            &[],
+        );
+        assert!(
+            text.contains("resolution   profile default (recurse)"),
+            "{text}"
+        );
     }
     // WP10.0: end.
 

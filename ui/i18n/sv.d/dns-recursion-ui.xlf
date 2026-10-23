@@ -1,0 +1,542 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dns-recursion-ui">
+      <unit id="dns.recursion.sub">
+        <notes><note category="description">Subtitle of the recursion page.</note></notes>
+        <segment><source>The recursive resolver of this server's node, the trust anchors it validates with and the zones exempted from validation for a while.</source><target>Den rekursiva resolvern på den här serverns nod, förtroendeankarna den validerar med och zonerna som tillfälligt är undantagna från validering.</target></segment>
+      </unit>
+      <unit id="dns.recursion.validation.title">
+        <notes><note category="description">Heading of the card with the DNSSEC validation counters on the recursion page.</note></notes>
+        <segment><source>Validation</source><target>Validering</target></segment>
+      </unit>
+      <unit id="dns.recursion.validation.keys">
+        <notes><note category="description">Label of the trust anchor keys the node validates with, each with its RFC 5011 state.</note></notes>
+        <segment><source>Anchor keys</source><target>Ankarnycklar</target></segment>
+      </unit>
+      <unit id="dns.recursion.validation.no_keys">
+        <segment><source>None reported</source><target>Inga rapporterade</target></segment>
+      </unit>
+      <unit id="dns.anchor.lede">
+        <notes><note category="description">Explanation above the trust anchors on the recursion page.</note></notes>
+        <segment><source>The resolver trusts the answers it can follow from one of these keys. The root's keys ship with the release and follow the root's key rollovers by RFC 5011; a private zone signed with its own keys needs an anchor of its own.</source><target>Resolvern litar på svar som den kan följa från någon av de här nycklarna. Rotens nycklar medföljer versionen och följer rotens nyckelbyten enligt RFC 5011; en privat zon som är signerad med egna nycklar behöver ett eget ankare.</target></segment>
+      </unit>
+      <unit id="dns.anchor.root">
+        <notes><note category="description">After the root zone's name `.` on its trust anchor card.</note></notes>
+        <segment><source>(the root)</source><target>(roten)</target></segment>
+      </unit>
+      <unit id="dns.anchor.keys_of">
+        <notes><note category="description">Caption of the table of a zone's anchor keys, for screen readers.</note></notes>
+        <segment><source>Keys of the trust anchor of {zone}</source><target>Nycklar i förtroendeankaret för {zone}</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.tag">
+        <segment><source>Key tag</source><target>Nyckeltagg</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.algorithm">
+        <segment><source>Algorithm</source><target>Algoritm</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.form">
+        <notes><note category="description">Column: whether the anchor key is a DS digest or a DNSKEY record.</note></notes>
+        <segment><source>Form</source><target>Form</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.state">
+        <notes><note category="description">Column: the RFC 5011 state of the anchor key.</note></notes>
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.source">
+        <segment><source>Source</source><target>Källa</target></segment>
+      </unit>
+      <unit id="dns.anchor.col.seen">
+        <notes><note category="description">Column: when the key was last seen in the zone's DNSKEY set.</note></notes>
+        <segment><source>Last seen</source><target>Senast sedd</target></segment>
+      </unit>
+      <unit id="dns.anchor.form.ds">
+        <segment><source>DS, digest type {digest}</source><target>DS, digesttyp {digest}</target></segment>
+      </unit>
+      <unit id="dns.anchor.form.dnskey">
+        <segment><source>DNSKEY</source><target>DNSKEY</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.start">
+        <notes><note category="description">RFC 5011 state: the key was just added.</note></notes>
+        <segment><source>Start</source><target>Start</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.add_pend">
+        <notes><note category="description">RFC 5011 state: a new key waits for the add hold-down (30 days) before it is trusted.</note></notes>
+        <segment><source>Add pending</source><target>Tillägg väntar</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.valid">
+        <notes><note category="description">RFC 5011 state: the key is trusted.</note></notes>
+        <segment><source>Valid</source><target>Giltig</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.missing">
+        <notes><note category="description">RFC 5011 state: a trusted key is no longer in the zone.</note></notes>
+        <segment><source>Missing</source><target>Saknas</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.revoked">
+        <notes><note category="description">RFC 5011 state: the zone revoked the key.</note></notes>
+        <segment><source>Revoked</source><target>Återkallad</target></segment>
+      </unit>
+      <unit id="dns.anchor.state.removed">
+        <notes><note category="description">RFC 5011 state: the key was removed after the remove hold-down.</note></notes>
+        <segment><source>Removed</source><target>Borttagen</target></segment>
+      </unit>
+      <unit id="dns.anchor.state_since">
+        <segment><source>In this state since {time}</source><target>I det här tillståndet sedan {time}</target></segment>
+      </unit>
+      <unit id="dns.anchor.source.shipped">
+        <notes><note category="description">Source of a key: the release that shipped it.</note></notes>
+        <segment><source>Shipped in {release}</source><target>Medföljde {release}</target></segment>
+      </unit>
+      <unit id="dns.anchor.source.operator">
+        <segment><source>Added by an operator</source><target>Tillagd av en operatör</target></segment>
+      </unit>
+      <unit id="dns.anchor.source.rfc5011">
+        <segment><source>Learned by RFC 5011</source><target>Inlärd via RFC 5011</target></segment>
+      </unit>
+      <unit id="dns.anchor.never_seen">
+        <segment><source>Not yet</source><target>Inte än</target></segment>
+      </unit>
+      <unit id="dns.anchor.last_query">
+        <notes><note category="description">When the zone's DNSKEY set was last asked for RFC 5011.</note></notes>
+        <segment><source>Last asked</source><target>Senast frågad</target></segment>
+      </unit>
+      <unit id="dns.anchor.next_query">
+        <segment><source>Next asked</source><target>Nästa fråga</target></segment>
+      </unit>
+      <unit id="dns.anchor.never">
+        <segment><source>Not yet</source><target>Inte än</target></segment>
+      </unit>
+      <unit id="dns.anchor.pending">
+        <segment><source>{count, plural, one {# new key waits for its hold-down before it is trusted.} other {# new keys wait for their hold-down before they are trusted.}}</source><target>{count, plural, one {# ny nyckel väntar på sin hold-down-tid innan den betros.} other {# nya nycklar väntar på sin hold-down-tid innan de betros.}}</target></segment>
+      </unit>
+      <unit id="dns.anchor.refresh">
+        <notes><note category="description">Button: run RFC 5011 for the zone now.</note></notes>
+        <segment><source>Refresh now</source><target>Uppdatera nu</target></segment>
+      </unit>
+      <unit id="dns.anchor.refresh_sent">
+        <segment><source>The trust anchor of {zone} is refreshed now</source><target>Förtroendeankaret för {zone} uppdateras nu</target></segment>
+      </unit>
+      <unit id="dns.anchor.refresh_failed">
+        <segment><source>The refresh could not be started</source><target>Uppdateringen kunde inte startas</target></segment>
+      </unit>
+      <unit id="dns.anchor.remove">
+        <segment><source>Remove</source><target>Ta bort</target></segment>
+      </unit>
+      <unit id="dns.anchor.remove_title">
+        <segment><source>Remove the trust anchor of {zone}?</source><target>Ta bort förtroendeankaret för {zone}?</target></segment>
+      </unit>
+      <unit id="dns.anchor.remove_body">
+        <segment><source>Answers under {zone} are no longer validated with these keys: they are insecure unless a chain from the root covers them.</source><target>Svar under {zone} valideras inte längre med de här nycklarna: de är osäkra om inte en kedja från roten täcker dem.</target></segment>
+      </unit>
+      <unit id="dns.anchor.remove_root_body">
+        <segment><source>Without a root anchor nothing can be validated: every answer is indeterminate until an anchor is added again.</source><target>Utan ett rotankare kan ingenting valideras: varje svar är obestämt tills ett ankare läggs till igen.</target></segment>
+      </unit>
+      <unit id="dns.anchor.remove_confirm">
+        <segment><source>Remove the anchor</source><target>Ta bort ankaret</target></segment>
+      </unit>
+      <unit id="dns.anchor.removed">
+        <segment><source>The trust anchor of {zone} was removed</source><target>Förtroendeankaret för {zone} togs bort</target></segment>
+      </unit>
+      <unit id="dns.anchor.add">
+        <segment><source>Add a trust anchor</source><target>Lägg till ett förtroendeankare</target></segment>
+      </unit>
+      <unit id="dns.anchor.add_title">
+        <segment><source>Add a trust anchor</source><target>Lägg till ett förtroendeankare</target></segment>
+      </unit>
+      <unit id="dns.anchor.added">
+        <segment><source>The trust anchor of {zone} was saved</source><target>Förtroendeankaret för {zone} sparades</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.zone">
+        <segment><source>Zone</source><target>Zon</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.zone_help">
+        <segment><source>The zone the key signs; `.` is the root. A key for a zone that has an anchor is added to it.</source><target>Zonen som nyckeln signerar; `.` är roten. En nyckel för en zon som redan har ett ankare läggs till i det.</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.form">
+        <segment><source>Form of the key</source><target>Nyckelns form</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.form_ds">
+        <segment><source>DS digest</source><target>DS-digest</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.form_dnskey">
+        <segment><source>DNSKEY record</source><target>DNSKEY-post</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.ds">
+        <segment><source>DS record data</source><target>Data för DS-posten</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.ds_help">
+        <segment><source>Key tag, algorithm, digest type and digest, as the zone's operator publishes them: 20326 8 2 E06D44B8…</source><target>Nyckeltagg, algoritm, digesttyp och digest, så som zonens operatör publicerar dem: 20326 8 2 E06D44B8…</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.dnskey">
+        <segment><source>DNSKEY record data</source><target>Data för DNSKEY-posten</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.dnskey_help">
+        <segment><source>Flags, protocol, algorithm and the public key in Base64: 257 3 13 mdsswUyr…</source><target>Flaggor, protokoll, algoritm och den publika nyckeln i Base64: 257 3 13 mdsswUyr…</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.replace_root">
+        <segment><source>Replace the root's keys</source><target>Ersätt rotens nycklar</target></segment>
+      </unit>
+      <unit id="dns.anchor.field.replace_root_help">
+        <segment><source>Lab profile only: the root's shipped keys give way to this one, for a lab root of its own.</source><target>Bara profilen Lab: rotens medföljande nycklar viker för den här, för en egen labbrot.</target></segment>
+      </unit>
+      <unit id="dns.anchor.check.zone">
+        <segment><source>Enter a zone name, or `.` for the root.</source><target>Ange ett zonnamn, eller `.` för roten.</target></segment>
+      </unit>
+      <unit id="dns.anchor.check.ds">
+        <segment><source>A DS record is four fields: key tag, algorithm, digest type and a hexadecimal digest.</source><target>En DS-post har fyra fält: nyckeltagg, algoritm, digesttyp och en hexadecimal digest.</target></segment>
+      </unit>
+      <unit id="dns.anchor.check.dnskey">
+        <segment><source>A DNSKEY record is four fields: flags, protocol, algorithm and a Base64 key.</source><target>En DNSKEY-post har fyra fält: flaggor, protokoll, algoritm och en Base64-nyckel.</target></segment>
+      </unit>
+      <unit id="dns.nta.lede">
+        <notes><note category="description">Explanation above the negative trust anchors.</note></notes>
+        <segment><source>A negative trust anchor treats a zone whose validation fails as insecure for a while, as RFC 7646 describes: for a zone whose operator broke its signatures, until they repair them. It lives at most seven days.</source><target>Ett negativt förtroendeankare behandlar en zon vars validering misslyckas som osäker en tid, så som RFC 7646 beskriver: för en zon vars operatör har förstört sina signaturer, tills de är lagade. Det lever högst sju dagar.</target></segment>
+      </unit>
+      <unit id="dns.nta.none">
+        <segment><source>No negative trust anchor: every signed zone is validated.</source><target>Inget negativt förtroendeankare: alla signerade zoner valideras.</target></segment>
+      </unit>
+      <unit id="dns.nta.col.zone">
+        <segment><source>Zone</source><target>Zon</target></segment>
+      </unit>
+      <unit id="dns.nta.col.expires">
+        <segment><source>Expires</source><target>Går ut</target></segment>
+      </unit>
+      <unit id="dns.nta.col.reason">
+        <segment><source>Reason</source><target>Orsak</target></segment>
+      </unit>
+      <unit id="dns.nta.col.created">
+        <segment><source>Created</source><target>Skapad</target></segment>
+      </unit>
+      <unit id="dns.nta.col.actions">
+        <segment><source>Actions</source><target>Åtgärder</target></segment>
+      </unit>
+      <unit id="dns.nta.expired">
+        <notes><note category="description">Tag of a negative trust anchor past its expiry, until the server removes it.</note></notes>
+        <segment><source>Expired</source><target>Utgånget</target></segment>
+      </unit>
+      <unit id="dns.nta.add">
+        <segment><source>Add a negative trust anchor</source><target>Lägg till ett negativt förtroendeankare</target></segment>
+      </unit>
+      <unit id="dns.nta.add_title">
+        <segment><source>Add a negative trust anchor</source><target>Lägg till ett negativt förtroendeankare</target></segment>
+      </unit>
+      <unit id="dns.nta.add_lede">
+        <segment><source>Names at or below the zone are answered insecure instead of failing validation until the anchor expires. Create one only for a zone you know is broken, and say why.</source><target>Namn på eller under zonen besvaras som osäkra i stället för att misslyckas med valideringen tills ankaret går ut. Skapa ett bara för en zon som du vet är trasig, och ange varför.</target></segment>
+      </unit>
+      <unit id="dns.nta.field.zone">
+        <segment><source>Zone</source><target>Zon</target></segment>
+      </unit>
+      <unit id="dns.nta.field.lifetime">
+        <segment><source>Lifetime</source><target>Livslängd</target></segment>
+      </unit>
+      <unit id="dns.nta.field.lifetime_help">
+        <segment><source>How long it lives from now, at most seven days: 30m, 12h, 2d, 1d12h.</source><target>Hur länge det lever från nu, högst sju dagar: 30m, 12h, 2d, 1d12h.</target></segment>
+      </unit>
+      <unit id="dns.nta.field.reason">
+        <segment><source>Reason</source><target>Orsak</target></segment>
+      </unit>
+      <unit id="dns.nta.field.reason_help">
+        <segment><source>Why the zone is exempted; recorded with the anchor and in the audit log.</source><target>Varför zonen undantas; sparas med ankaret och i granskningsloggen.</target></segment>
+      </unit>
+      <unit id="dns.nta.check.zone">
+        <segment><source>Enter the name of the zone.</source><target>Ange zonens namn.</target></segment>
+      </unit>
+      <unit id="dns.nta.check.root">
+        <segment><source>The root cannot be exempted from validation.</source><target>Roten kan inte undantas från validering.</target></segment>
+      </unit>
+      <unit id="dns.nta.check.lifetime">
+        <segment><source>Enter a lifetime of at most seven days, such as 12h or 2d.</source><target>Ange en livslängd på högst sju dagar, till exempel 12h eller 2d.</target></segment>
+      </unit>
+      <unit id="dns.nta.check.reason">
+        <segment><source>Say why the zone is exempted.</source><target>Ange varför zonen undantas.</target></segment>
+      </unit>
+      <unit id="dns.nta.check.reason_long">
+        <segment><source>At most {max} characters.</source><target>Högst {max} tecken.</target></segment>
+      </unit>
+      <unit id="dns.nta.created">
+        <segment><source>{zone} is exempted from validation until the anchor expires</source><target>{zone} är undantagen från validering tills ankaret går ut</target></segment>
+      </unit>
+      <unit id="dns.nta.delete">
+        <segment><source>Delete</source><target>Radera</target></segment>
+      </unit>
+      <unit id="dns.nta.delete_title">
+        <segment><source>Delete the negative trust anchor of {zone}?</source><target>Radera det negativa förtroendeankaret för {zone}?</target></segment>
+      </unit>
+      <unit id="dns.nta.delete_body">
+        <segment><source>Answers under {zone} are validated again at once; if the zone is still broken, they fail.</source><target>Svar under {zone} valideras på en gång igen; om zonen fortfarande är trasig misslyckas de.</target></segment>
+      </unit>
+      <unit id="dns.nta.delete_confirm">
+        <segment><source>Delete the anchor</source><target>Radera ankaret</target></segment>
+      </unit>
+      <unit id="dns.nta.deleted">
+        <segment><source>The negative trust anchor of {zone} was deleted</source><target>Det negativa förtroendeankaret för {zone} raderades</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.mode">
+        <notes><note category="description">Legend of the choice between forwarding to upstreams and recursing.</note></notes>
+        <segment><source>Mode</source><target>Läge</target></segment>
+      </unit>
+      <unit id="dns.fwd.mode.forward">
+        <segment><source>Forward to upstream resolvers</source><target>Vidarebefordra till uppströms resolvrar</target></segment>
+      </unit>
+      <unit id="dns.fwd.mode.recurse_help">
+        <segment><source>The names under the suffix are resolved by this server itself, asking the authorities of each zone; a recurse rule names no upstream and always validates. Use it as an exception under a root rule that forwards.</source><target>Namnen under suffixet slås upp av den här servern själv, som frågar varje zons auktoritativa servrar; en rekursionsregel anger ingen uppströmsserver och validerar alltid. Använd den som ett undantag under en rotregel som vidarebefordrar.</target></segment>
+      </unit>
+      <unit id="dns.fwd.mode.recurse_long">
+        <segment><source>Resolve from the root servers (recurse)</source><target>Slå upp från rotservrarna (rekursera)</target></segment>
+      </unit>
+      <unit id="dns.fwd.mode.recurse_upstreams">
+        <notes><note category="description">Upstreams column of a recurse rule.</note></notes>
+        <segment><source>The root servers and the authorities</source><target>Rotservrarna och de auktoritativa servrarna</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.validate">
+        <segment><source>Validate the answers with DNSSEC</source><target>Validera svaren med DNSSEC</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.validate_help">
+        <segment><source>On by default. Switch it off only for an upstream that strips the signatures, whose answers would otherwise fail validation.</source><target>På som standard. Stäng av det bara för en uppströmsserver som tar bort signaturerna och vars svar annars skulle misslyckas med valideringen.</target></segment>
+      </unit>
+      <unit id="dns.fwd.field.validate_off">
+        <segment><source>The upstreams' answers are relayed unvalidated.</source><target>Uppströmsservrarnas svar skickas vidare ovaliderade.</target></segment>
+      </unit>
+      <unit id="dns.fwd.unvalidated">
+        <notes><note category="description">Tag of a forwarding rule whose answers are not validated.</note></notes>
+        <segment><source>Not validated</source><target>Ej validerad</target></segment>
+      </unit>
+      <unit id="dns.fwd.preset.dot_title">
+        <segment><source>Forward everything to a DoT resolver</source><target>Vidarebefordra allt till en DoT-resolver</target></segment>
+      </unit>
+      <unit id="dns.fwd.preset.privacy">
+        <notes><note category="description">The privacy sentence beside the DoT preset (recursion plan section 2.8).</note></notes>
+        <segment><source>Recursion asks each zone's authorities, each of which sees only the names under its zone; forwarding sends every name to one resolver, which sees them all. DNS over TLS protects the path to that resolver, not what it sees.</source><target>Rekursion frågar varje zons auktoritativa servrar, som var och en bara ser namnen under sin zon; vidarebefordran skickar varje namn till en resolver, som ser dem alla. DNS över TLS skyddar vägen till den resolvern, inte vad den ser.</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.title">
+        <notes><note category="description">Heading of the block of how each view resolves names no zone and no rule covers.</note></notes>
+        <segment><source>Default resolution</source><target>Standarduppslagning</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.lede">
+        <segment><source>Names that no zone and no forwarding rule covers are resolved this way in each view: from the root servers, by the default forwarder of the configuration file, or refused.</source><target>Namn som ingen zon och ingen vidarebefordringsregel täcker slås upp på det här sättet i varje vy: från rotservrarna, av konfigurationsfilens standardvidarebefordrare, eller nekas.</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.root_rule">
+        <segment><source>A root rule covers every name of the views it applies in, so there the default resolution is not reached.</source><target>En rotregel täcker alla namn i de vyer där den gäller, så där nås inte standarduppslagningen.</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.col.view">
+        <segment><source>View</source><target>Vy</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.col.resolution">
+        <segment><source>Resolution</source><target>Uppslagning</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.default_view">
+        <segment><source>The implicit default view</source><target>Den implicita standardvyn</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.choice.default">
+        <notes><note category="description">{profile} is the profile's resolution, a word of dns.fwd.resolution.mode.</note></notes>
+        <segment><source>Profile default ({profile})</source><target>Profilens standard ({profile})</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.mode.recurse">
+        <notes><note category="description">Lower case: inside dns.fwd.resolution.choice.default.</note></notes>
+        <segment><source>recurse</source><target>rekursera</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.mode.forward">
+        <notes><note category="description">Lower case: inside dns.fwd.resolution.choice.default.</note></notes>
+        <segment><source>forward</source><target>vidarebefordra</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.mode.refuse">
+        <notes><note category="description">Lower case: inside dns.fwd.resolution.choice.default.</note></notes>
+        <segment><source>refuse</source><target>neka</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.of">
+        <segment><source>Resolution of the view {view}</source><target>Uppslagning i vyn {view}</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.saved">
+        <segment><source>The resolution of the view {view} was saved</source><target>Uppslagningen i vyn {view} sparades</target></segment>
+      </unit>
+      <unit id="dns.fwd.resolution.failed">
+        <segment><source>The resolution could not be saved</source><target>Uppslagningen kunde inte sparas</target></segment>
+      </unit>
+      <unit id="dns.infra.title">
+        <notes><note category="description">Heading of the section of the recursive resolver's knowledge of the authorities.</note></notes>
+        <segment><source>Infrastructure cache</source><target>Infrastrukturcache</target></segment>
+      </unit>
+      <unit id="dns.infra.lede">
+        <segment><source>What the recursive resolver knows about the authorities: per zone cut its name servers, their addresses, how fast they answered and what they can do. It holds no client data.</source><target>Vad den rekursiva resolvern vet om de auktoritativa servrarna: per zonavgränsning dess namnservrar, deras adresser, hur snabbt de svarade och vad de kan. Den innehåller inga klientdata.</target></segment>
+      </unit>
+      <unit id="dns.infra.suffix">
+        <segment><source>Zone</source><target>Zon</target></segment>
+      </unit>
+      <unit id="dns.infra.show">
+        <segment><source>Show the zone cuts</source><target>Visa zonavgränsningarna</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_all">
+        <segment><source>Flush everything</source><target>Töm allt</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_suffix">
+        <segment><source>Flush {suffix}</source><target>Töm {suffix}</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_title_all">
+        <segment><source>Flush the infrastructure cache?</source><target>Tömma infrastrukturcachen?</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_title_suffix">
+        <segment><source>Flush the zone cuts at or below {suffix}?</source><target>Tömma zonavgränsningarna på eller under {suffix}?</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_body_all">
+        <segment><source>Every zone cut and server address is forgotten; the root is primed again with the next query, and the first answers are slower.</source><target>Varje zonavgränsning och serveradress glöms bort; roten primas på nytt vid nästa fråga, och de första svaren går långsammare.</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_body_suffix">
+        <segment><source>The zone cuts at or below {suffix} are forgotten and learned again with the next query.</source><target>Zonavgränsningarna på eller under {suffix} glöms bort och lärs in igen vid nästa fråga.</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_confirm">
+        <segment><source>Flush</source><target>Töm</target></segment>
+      </unit>
+      <unit id="dns.infra.flush_failed">
+        <segment><source>The infrastructure cache could not be flushed</source><target>Infrastrukturcachen kunde inte tömmas</target></segment>
+      </unit>
+      <unit id="dns.infra.flushed_all">
+        <segment><source>{entries, plural, one {# entry} other {# entries}} removed; the root is primed again</source><target>{entries, plural, one {# post} other {# poster}} togs bort; roten primas på nytt</target></segment>
+      </unit>
+      <unit id="dns.infra.flushed_suffix">
+        <segment><source>{entries, plural, one {# entry} other {# entries}} at or below {suffix} removed</source><target>{entries, plural, one {# post} other {# poster}} på eller under {suffix} togs bort</target></segment>
+      </unit>
+      <unit id="dns.infra.off">
+        <segment><source>The resolver of this node is off, so it has no infrastructure cache. It is switched on with [dns.recursion] enabled in the configuration file.</source><target>Resolvern på den här noden är avstängd, så den har ingen infrastrukturcache. Den slås på med [dns.recursion] enabled i konfigurationsfilen.</target></segment>
+      </unit>
+      <unit id="dns.infra.empty">
+        <segment><source>The infrastructure cache is empty.</source><target>Infrastrukturcachen är tom.</target></segment>
+      </unit>
+      <unit id="dns.infra.empty_suffix">
+        <segment><source>No zone cut at or below {suffix}.</source><target>Ingen zonavgränsning på eller under {suffix}.</target></segment>
+      </unit>
+      <unit id="dns.infra.ds.secure">
+        <notes><note category="description">The delegation of the zone cut is signed (a DS exists).</note></notes>
+        <segment><source>Signed</source><target>Signerad</target></segment>
+      </unit>
+      <unit id="dns.infra.ds.insecure">
+        <segment><source>Unsigned</source><target>Osignerad</target></segment>
+      </unit>
+      <unit id="dns.infra.ds.bogus">
+        <segment><source>Bogus</source><target>Ogiltig</target></segment>
+      </unit>
+      <unit id="dns.infra.ds.unknown">
+        <segment><source>Not known yet</source><target>Inte känd än</target></segment>
+      </unit>
+      <unit id="dns.infra.no_addresses">
+        <segment><source>{servers, plural, one {# name server, no address known yet} other {# name servers, no address known yet}}</source><target>{servers, plural, one {# namnserver, ingen adress känd än} other {# namnservrar, ingen adress känd än}}</target></segment>
+      </unit>
+      <unit id="dns.infra.servers_of">
+        <segment><source>Name servers of {zone}</source><target>Namnservrar för {zone}</target></segment>
+      </unit>
+      <unit id="dns.infra.col.server">
+        <segment><source>Name server</source><target>Namnserver</target></segment>
+      </unit>
+      <unit id="dns.infra.col.address">
+        <segment><source>Address</source><target>Adress</target></segment>
+      </unit>
+      <unit id="dns.infra.col.origin">
+        <segment><source>Learned from</source><target>Inlärd från</target></segment>
+      </unit>
+      <unit id="dns.infra.col.srtt">
+        <segment><source>Smoothed RTT</source><target>Utjämnad RTT</target></segment>
+      </unit>
+      <unit id="dns.infra.col.p99">
+        <segment><source>p99</source><target>p99</target></segment>
+      </unit>
+      <unit id="dns.infra.col.failures">
+        <segment><source>Failures</source><target>Fel</target></segment>
+      </unit>
+      <unit id="dns.infra.col.capabilities">
+        <segment><source>Capabilities</source><target>Egenskaper</target></segment>
+      </unit>
+      <unit id="dns.infra.origin.hints">
+        <segment><source>Root hints</source><target>Rotledtrådar</target></segment>
+      </unit>
+      <unit id="dns.infra.origin.glue">
+        <segment><source>Glue</source><target>Glue</target></segment>
+      </unit>
+      <unit id="dns.infra.origin.sibling_glue">
+        <segment><source>Sibling glue</source><target>Syskonglue</target></segment>
+      </unit>
+      <unit id="dns.infra.origin.authoritative">
+        <segment><source>Authoritative answer</source><target>Auktoritativt svar</target></segment>
+      </unit>
+      <unit id="dns.infra.srtt_none">
+        <segment><source>Not asked</source><target>Inte tillfrågad</target></segment>
+      </unit>
+      <unit id="dns.infra.ms">
+        <segment><source>{ms} ms</source><target>{ms} ms</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.edns">
+        <segment><source>EDNS</source><target>EDNS</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.no_edns">
+        <segment><source>No EDNS</source><target>Ingen EDNS</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.tcp_only">
+        <segment><source>TCP only</source><target>Bara TCP</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.lower_case">
+        <notes><note category="description">The server breaks the 0x20 case randomisation, so it is asked in lower case.</note></notes>
+        <segment><source>Lower case only</source><target>Bara gemener</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.lame">
+        <notes><note category="description">The server does not serve the zone it is delegated.</note></notes>
+        <segment><source>Lame</source><target>Lame</target></segment>
+      </unit>
+      <unit id="dns.infra.capability.down">
+        <segment><source>Unreachable</source><target>Onåbar</target></segment>
+      </unit>
+      <unit id="dns.log.col.validation">
+        <segment><source>Validation</source><target>Validering</target></segment>
+      </unit>
+      <unit id="dns.log.col.ede">
+        <segment><source>Extended error</source><target>Utökat fel</target></segment>
+      </unit>
+      <unit id="dns.log.validation.secure">
+        <segment><source>Secure</source><target>Säker</target></segment>
+      </unit>
+      <unit id="dns.log.validation.insecure">
+        <segment><source>Insecure</source><target>Osäker</target></segment>
+      </unit>
+      <unit id="dns.log.validation.bogus">
+        <segment><source>Bogus</source><target>Ogiltig</target></segment>
+      </unit>
+      <unit id="dns.log.validation.indeterminate">
+        <segment><source>Indeterminate</source><target>Obestämd</target></segment>
+      </unit>
+      <unit id="dns.log.validation.unvalidated">
+        <segment><source>Not validated</source><target>Ej validerad</target></segment>
+      </unit>
+      <unit id="dns.log.ede">
+        <notes><note category="description">An extended DNS error: its number and its registry name (English, not translated).</note></notes>
+        <segment><source>{code} {name}</source><target>{code} {name}</target></segment>
+      </unit>
+      <unit id="dns.log.filter.validation">
+        <segment><source>Validation</source><target>Validering</target></segment>
+      </unit>
+      <unit id="dns.log.filter.validation_any">
+        <segment><source>Any state</source><target>Valfritt tillstånd</target></segment>
+      </unit>
+      <unit id="dns.log.filter.validation_help">
+        <segment><source>Narrows the page shown.</source><target>Avgränsar sidan som visas.</target></segment>
+      </unit>
+      <unit id="dns.log.empty_validation">
+        <segment><source>No query on this page has that validation state.</source><target>Ingen fråga på den här sidan har det valideringstillståndet.</target></segment>
+      </unit>
+      <unit id="errors.dns.trust_anchor.not_found">
+        <segment><source>No trust anchor for this zone.</source><target>Inget förtroendeankare för den här zonen.</target></segment>
+      </unit>
+      <unit id="errors.dns.trust_anchor.invalid">
+        <segment><source>The key is not a DS or DNSKEY record the resolver can use.</source><target>Nyckeln är inte en DS- eller DNSKEY-post som resolvern kan använda.</target></segment>
+      </unit>
+      <unit id="errors.dns.trust_anchor.root_protected">
+        <segment><source>The root's trust anchor can be replaced or removed under the Lab profile only.</source><target>Rotens förtroendeankare kan bara ersättas eller tas bort under profilen Lab.</target></segment>
+      </unit>
+      <unit id="errors.dns.nta.not_found">
+        <segment><source>No negative trust anchor with this identifier.</source><target>Inget negativt förtroendeankare med den här identifieraren.</target></segment>
+      </unit>
+      <unit id="errors.dns.nta.invalid">
+        <segment><source>The negative trust anchor is not valid: the root, no expiry under the Hardened profile, more than seven days, or no reason.</source><target>Det negativa förtroendeankaret är inte giltigt: roten, ingen utgång under profilen Hardened, mer än sju dagar, eller ingen orsak.</target></segment>
+      </unit>
+      <unit id="errors.dns.recursion.disabled">
+        <segment><source>The resolver of this node is off.</source><target>Resolvern på den här noden är avstängd.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -10,6 +10,11 @@
 //
 // dns-visibility: each upstream shows its state, its round-trip time on the node that answers
 // (the median of the last minute) and the upstream the next query goes to (`upstream_status`).
+//
+// WP10.4: a rule of mode `recurse` shows as such in place of a transport and upstreams; the
+// default resolution per view follows the rules (Resolution.tsx); the preset "Forward everything
+// to a DoT resolver" opens the root rule (or a new one) over DoT, with the privacy sentence of the
+// recursion plan's section 2.8 beside it.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Show } from "solid-js";
 import { createLiveQuery, latest } from "../../api/live";
@@ -28,6 +33,8 @@ import { dnsPaths } from "../paths";
 import { listForwarders, type ForwarderItem } from "./api";
 import { DeleteForwarderDialog, ForwarderDialog } from "./ForwarderDialog";
 import { isRoot, ruleOrder, upstreamEndpoint } from "./model";
+// WP10.4: the default resolution per view.
+import { DefaultResolution } from "./Resolution";
 // dns-visibility: the upstreams' figures.
 import { UpstreamBadge } from "./figures";
 import "../dns.css";
@@ -66,7 +73,7 @@ function Recursion() {
 }
 
 export default function ForwardersPage() {
-  const [dialog, setDialog] = createSignal<{ kind: "edit"; rule?: ForwarderItem } | { kind: "delete"; rule: ForwarderItem } | null>(null);
+  const [dialog, setDialog] = createSignal<{ kind: "edit"; rule?: ForwarderItem; preset?: "dot" } | { kind: "delete"; rule: ForwarderItem } | null>(null);
   const query = createLiveQuery({
     topics: ["dns"],
     fetch: async (signal) => {
@@ -108,11 +115,26 @@ export default function ForwardersPage() {
       id: "transport",
       header: () => t("dns.fwd.col.transport"),
       width: 150,
-      text: (r) => t(`dns.fwd.transport.${r.transport ?? "plain"}`),
+      // WP10.4: a recurse rule has no transport of its own.
+      text: (r) => (r.mode === "recurse" ? t("dns.fwd.mode.recurse") : t(`dns.fwd.transport.${r.transport ?? "plain"}`)),
       render: (r) => (
-        <span class="tag" data-testid="fwd-transport" data-kind={r.transport ?? "plain"}>
-          {t(`dns.fwd.transport.${r.transport ?? "plain"}`)}
-        </span>
+        <Show
+          when={r.mode !== "recurse"}
+          fallback={
+            <span class="tag accent" data-testid="fwd-transport" data-kind="recurse">
+              {t("dns.fwd.mode.recurse")}
+            </span>
+          }
+        >
+          <span class="tag" data-testid="fwd-transport" data-kind={r.transport ?? "plain"}>
+            {t(`dns.fwd.transport.${r.transport ?? "plain"}`)}
+          </span>
+          <Show when={r.validate === false}>
+            <span class="tag discrepancy" data-testid="fwd-unvalidated" title={t("dns.fwd.field.validate_off")}>
+              {t("dns.fwd.unvalidated")}
+            </span>
+          </Show>
+        </Show>
       ),
     },
     {
@@ -121,6 +143,12 @@ export default function ForwardersPage() {
       text: (r) => (r.upstreams ?? []).map((u) => upstreamEndpoint(u, r.transport ?? "plain")).join(", "),
       render: (r) => (
         <span class="dns-chips">
+          {/* WP10.4: a recurse rule asks the root servers. */}
+          <Show when={r.mode === "recurse"}>
+            <span class="muted" data-testid="fwd-recurse">
+              {t("dns.fwd.mode.recurse_upstreams")}
+            </span>
+          </Show>
           <For each={r.upstreams ?? []}>
             {(u, i) => (
               <span class="fwd-up" data-testid="fwd-upstream-cell" data-key={upstreamEndpoint(u, r.transport ?? "plain")}>
@@ -190,6 +218,20 @@ export default function ForwardersPage() {
             </Show>
           </div>
         </Show>
+        {/* WP10.4: the preset of a root rule over DoT, with the privacy sentence beside it. */}
+        <Show when={mayWriteDns()}>
+          <div class="note info dns-fwd-preset" data-testid="fwd-preset">
+            <span class="grow">{t("dns.fwd.preset.privacy")}</span>
+            <button
+              type="button"
+              class="btn sm"
+              data-testid="fwd-preset-dot"
+              onClick={() => setDialog({ kind: "edit", rule: rules()?.find((r) => isRoot(r) && !r.view), preset: "dot" })}
+            >
+              {t("dns.fwd.preset.dot")}
+            </button>
+          </div>
+        </Show>
         <div class="dns-list-body">
           <DataGrid
             id="dns-forwarders"
@@ -215,11 +257,13 @@ export default function ForwardersPage() {
           />
         </div>
         <Recursion />
+        {/* WP10.4: the default resolution per view. */}
+        <DefaultResolution hasRootRule={(rules() ?? []).some(isRoot)} />
       </Show>
       <Show when={dialog()} keyed>
         {(d) =>
           d.kind === "edit" ? (
-            <ForwarderDialog rule={d.rule} onClose={() => close(false)} onDone={() => close(true)} />
+            <ForwarderDialog rule={d.rule} preset={d.preset} onClose={() => close(false)} onDone={() => close(true)} />
           ) : (
             <DeleteForwarderDialog rule={d.rule} onClose={() => close(false)} onDone={() => close(true)} />
           )

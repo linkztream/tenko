@@ -9,7 +9,8 @@
 // area of fixed height (the sparkline or the bars, with a list under them where the tile has
 // one: the controllers, the RCODEs, the busiest lists) and a footer of two lines. A tile without
 // data draws the empty baseline of its chart, so it looks like a full one. The tiles come in two
-// groups, the controller's eight and, with the `dns` role, the DNS six; metrics.css sizes the
+// groups, the controller's eight and, with the `dns` role, the DNS six (eight with the resolver's
+// two of WP10.4, four to a row); metrics.css sizes the
 // columns so that every row of a group is full.
 //
 // Test ids: `metrics-tiles` (`data-state` the stream's connection state, `data-controllers`
@@ -58,6 +59,8 @@ import {
   tileValue,
   windowRatio,
   topLists,
+  // WP10.4
+  VALIDATION_STATES,
   type MetricsHistory,
   type RatioTile,
   type MetricsSample,
@@ -280,7 +283,8 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
         <Show when={dns()}>
           {(d) => (
             <>
-              <h3 class="metrics-group" data-testid="metrics-group-dns">
+              {/* WP10.4: with the resolver's two tiles the group has eight, laid out four to a row. */}
+              <h3 class="metrics-group" classList={{ "metrics-group-wide": d().recursion != null }} data-testid="metrics-group-dns">
                 {t("metrics.group.dns")}
               </h3>
               <Tile
@@ -356,6 +360,41 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 series={series("dns-upstreams")}
                 hint={d().upstreams.p99_ms != null ? t("metrics.dns.upstreams_hint", { p99: decimal(d().upstreams.p99_ms!) }) : t("metrics.dns.upstreams_idle")}
               />
+              {/* WP10.4: the resolver's sub-queries and validation outcomes, while it runs. */}
+              <Show when={d().recursion}>
+                {(r) => (
+                  <>
+                    <Tile
+                      name="dns-subqueries"
+                      title={t("metrics.dns.subqueries")}
+                      value={value("dns-subqueries")}
+                      unit={t("metrics.unit.per_second")}
+                      series={series("dns-subqueries")}
+                      hint={t("metrics.dns.subqueries_hint")}
+                    />
+                    <Tile
+                      name="dns-validation"
+                      title={t("metrics.dns.validation")}
+                      value={value("dns-validation")}
+                      unit={t("metrics.unit.per_second")}
+                      series={series("dns-validation")}
+                      hint={t("metrics.dns.validation_hint", { rate: decimal(r().validation.indeterminate) })}
+                    >
+                      <ul class="metrics-rows">
+                        <For each={VALIDATION_STATES}>
+                          {(state) => (
+                            <li data-testid="metrics-dns-validation" data-state={state} data-rate={r().validation[state]}>
+                              <span>{t(`metrics.dns.validation_${state}`)}</span>
+                              <span class="rate">{t("metrics.dns.rate", { rate: decimal(r().validation[state]) })}</span>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </Tile>
+                  </>
+                )}
+              </Show>
+              {/* WP10.4: end. */}
               <Tile
                 name="dns-encrypted"
                 title={t("metrics.dns.encrypted")}

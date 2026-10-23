@@ -85,6 +85,54 @@ export function toQuery(filters: LogFilters, cursor: string | undefined): LogQue
   return query;
 }
 
+// WP10.4: the validation state and the extended error of a line (recursion plan section 2.11).
+/** The validation states a line may carry, in the order the filter offers them. */
+export const VALIDATION_STATES = ["secure", "insecure", "bogus", "indeterminate", "unvalidated"] as const;
+export type ValidationState = (typeof VALIDATION_STATES)[number];
+
+/** The extended DNS errors of RFC 8914 by code, as the registry names them (protocol words, not translated). */
+const EDE_NAMES: Readonly<Record<number, string>> = {
+  0: "Other Error",
+  1: "Unsupported DNSKEY Algorithm",
+  2: "Unsupported DS Digest Type",
+  3: "Stale Answer",
+  4: "Forged Answer",
+  5: "DNSSEC Indeterminate",
+  6: "DNSSEC Bogus",
+  7: "Signature Expired",
+  8: "Signature Not Yet Valid",
+  9: "DNSKEY Missing",
+  10: "RRSIGs Missing",
+  11: "No Zone Key Bit Set",
+  12: "NSEC Missing",
+  13: "Cached Error",
+  14: "Not Ready",
+  15: "Blocked",
+  16: "Censored",
+  17: "Filtered",
+  18: "Prohibited",
+  19: "Stale NXDOMAIN Answer",
+  20: "Not Authoritative",
+  21: "Not Supported",
+  22: "No Reachable Authority",
+  23: "Network Error",
+  24: "Invalid Data",
+  25: "Signature Expired before Valid",
+  26: "Too Early",
+  27: "Unsupported NSEC3 Iterations Value",
+};
+
+/** The registry name of an extended error, or undefined for a code it does not name. */
+export function edeName(code: number): string | undefined {
+  return EDE_NAMES[code];
+}
+
+/** The lines of a page whose validation state is `state`; every line without a state. */
+export function byValidation<T extends { validation?: string | null }>(lines: readonly T[], state: ValidationState | ""): T[] {
+  return state === "" ? [...lines] : lines.filter((line) => line.validation === state);
+}
+// WP10.4: end.
+
 /** Whether any filter is set. */
 export function filtered(filters: LogFilters): boolean {
   return Object.values(filters).some((value) => value.trim() !== "");

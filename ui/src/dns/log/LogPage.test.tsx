@@ -287,3 +287,138 @@ describe("the resolution columns", () => {
   });
 });
 // WP10.1: end.
+
+// WP10.4: the validation state and the extended error of each line, and the filter on the page.
+function validatedLines() {
+  const line = (qname: string, extra: Record<string, unknown>) => ({
+    at: "2026-10-17T12:00:00.000Z",
+    transport: "udp",
+    qname,
+    type: "A",
+    rcode: 0,
+    cached: false,
+    duration_micros: 1_500,
+    client: "p:3f2a9c0d81b7e645",
+    ...extra,
+  });
+  return [
+    line("secure.example.test", { validation: "secure" }),
+    line("insecure.example.test", { validation: "insecure" }),
+    line("bogus.example.test", { validation: "bogus", ede: 6, rcode: 2 }),
+    line("indeterminate.example.test", { validation: "indeterminate" }),
+    line("unvalidated.example.test", { validation: "unvalidated" }),
+    line("secure2.example.test", { validation: "secure" }),
+    line("old.example.test", {}),
+    line("odd.example.test", { validation: "from_the_future", ede: 99 }),
+    line("stale.example.test", { validation: "secure", ede: 3 }),
+  ];
+}
+
+function serveValidatedLines(without?: string) {
+  server.use(
+    http.get("/api/v1/nodes/:id/dns/log", () =>
+      HttpResponse.json({ items: validatedLines().filter((l) => l.qname !== without), next_cursor: null, revision: 1 }),
+    ),
+  );
+}
+
+describe("the validation columns", () => {
+  it("shows the validation state and the extended error of each line, and nothing for a line without", async () => {
+    serveValidatedLines();
+    const view = open();
+    await loaded(9);
+    expect(screen.getByRole("columnheader", { name: "Validation" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Extended error" })).toBeTruthy();
+    const row = (qname: string) => lines().find((r) => r.dataset.key === qname)!;
+    const tag = (qname: string) => within(row(qname)).queryByTestId("dns-log-validation");
+    expect(tag("secure.example.test")?.dataset.state).toBe("secure");
+    expect(tag("secure.example.test")?.textContent).toBe("Secure");
+    expect(tag("insecure.example.test")?.textContent).toBe("Insecure");
+    expect(tag("indeterminate.example.test")?.textContent).toBe("Indeterminate");
+    expect(tag("unvalidated.example.test")?.textContent).toBe("Not validated");
+    expect(tag("bogus.example.test")?.className).toContain("conflict");
+    expect(tag("secure.example.test")?.className).not.toContain("conflict");
+    expect(col(row("old.example.test"), "validation")).toBe("");
+    expect(col(row("old.example.test"), "ede")).toBe("");
+    // A state this version does not know is shown as written.
+    expect(tag("odd.example.test")?.dataset.state).toBe("from_the_future");
+    expect(tag("odd.example.test")?.textContent).toBe("from_the_future");
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("names the extended error by the registry and shows a code it does not know as the number", async () => {
+    serveValidatedLines();
+    open();
+    await loaded(9);
+    const ede = screen.getAllByTestId("dns-log-ede");
+    expect(ede.map((e) => e.dataset.code)).toEqual(["6", "99", "3"]);
+    expect(ede[0]?.textContent).toBe("6 DNSSEC Bogus");
+    expect(ede[0]?.getAttribute("title")).toBe("DNSSEC Bogus");
+    expect(ede[1]?.textContent).toBe("99");
+    expect(ede[1]?.getAttribute("title")).toBeNull();
+    expect(ede[2]?.textContent).toBe("3 Stale Answer");
+  });
+
+  it("narrows the page shown to a validation state at once, and back to every line", async () => {
+    serveValidatedLines();
+    open();
+    await loaded(9);
+    expect(screen.getByTestId("field-validation").getAttribute("aria-describedby")).toBe("dns-log-validation-help");
+    expect([...(screen.getByTestId("field-validation") as HTMLSelectElement).options].map((o) => o.value)).toEqual([
+      "",
+      "secure",
+      "insecure",
+      "bogus",
+      "indeterminate",
+      "unvalidated",
+    ]);
+    filter("validation", "secure");
+    await waitFor(() => expect(names()).toEqual(["secure.example.test", "secure2.example.test", "stale.example.test"]));
+    filter("validation", "bogus");
+    await waitFor(() => expect(names()).toEqual(["bogus.example.test"]));
+    filter("validation", "");
+    await waitFor(() => expect(lines()).toHaveLength(9));
+  });
+
+  it("says no query on the page has the state when none does, and keeps the paging", async () => {
+    serveValidatedLines("bogus.example.test");
+    open();
+    await loaded(8);
+    filter("validation", "bogus");
+    const empty = await screen.findByTestId("dns-log-empty-validation");
+    expect(empty.textContent).toBe("No query on this page has that validation state.");
+    expect(screen.queryByTestId("dns-log-table")).toBeNull();
+    expect(screen.queryByTestId("dns-log-empty")).toBeNull();
+    expect(screen.getByTestId("dns-log-paging")).toBeTruthy();
+    filter("validation", "");
+    await loaded(8);
+    expect(screen.queryByTestId("dns-log-empty-validation")).toBeNull();
+  });
+
+  it("shows the mock node's validation states and finds nothing for a state it never logged", async () => {
+    open();
+    await loaded();
+    const states = screen.queryAllByTestId("dns-log-validation").map((tag) => tag.dataset.state);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every((state) => state === "secure" || state === "insecure" || state === "bogus")).toBe(true);
+    expect(screen.queryAllByTestId("dns-log-ede").every((tag) => tag.dataset.code === "6")).toBe(true);
+    filter("validation", "indeterminate");
+    expect(await screen.findByTestId("dns-log-empty-validation")).toBeTruthy();
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    serveValidatedLines();
+    open();
+    await loaded(9);
+    expect(screen.getByRole("columnheader", { name: "Validering" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Utökat fel" })).toBeTruthy();
+    const bogus = lines().find((r) => r.dataset.key === "bogus.example.test")!;
+    expect(within(bogus).getByTestId("dns-log-validation").textContent).toBe("Ogiltig");
+    const unvalidated = lines().find((r) => r.dataset.key === "unvalidated.example.test")!;
+    expect(within(unvalidated).getByTestId("dns-log-validation").textContent).toBe("Ej validerad");
+    expect(screen.getByText("Valfritt tillstånd")).toBeTruthy();
+    filter("validation", "indeterminate");
+    await waitFor(() => expect(names()).toEqual(["indeterminate.example.test"]));
+  });
+});

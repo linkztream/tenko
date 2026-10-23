@@ -14,7 +14,9 @@ import { expect, test } from "./support/fixtures";
 import { fakeMetricsStream, mockHistory } from "./support/metrics-mock";
 
 const CONTROLLER = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
-const DNS = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
+// WP10.4: the mock's samples carry the resolver's part, so the DNS group has its two tiles beside
+// the upstream tile and eight tiles, four to a row.
+const DNS = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-subqueries", "dns-validation", "dns-encrypted"];
 // WP8.7: the six DHCP tiles, three to a row like the DNS group.
 const DHCP = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"];
 
@@ -99,7 +101,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   const gap = await page.locator(".metrics-grid").evaluate((el) => parseFloat(getComputedStyle(el).columnGap));
   const groups = [
     { names: CONTROLLER, columns: 4 },
-    { names: DNS, columns: 3 },
+    { names: DNS, columns: 4 },
     { names: DHCP, columns: 3 },
   ];
   for (const group of groups) {

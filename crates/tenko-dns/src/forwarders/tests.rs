@@ -43,6 +43,7 @@ fn rule(suffix: &str) -> NewRule {
         view: None,
         description: Some("  lab  ".to_owned()),
         validate: None,
+        mode: None,
     }
 }
 

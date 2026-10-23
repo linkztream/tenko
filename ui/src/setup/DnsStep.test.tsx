@@ -1,7 +1,8 @@
-// The DNS step of the first-run wizard (P2-Q5): the upstreams, the well-known resolver that
-// offers DNS over TLS, the Home preset, the step that says it has nothing to set when DNS is not
-// part of the installation, the review row, and what finishing does with the upstreams (the root
-// forwarding rule and the [dns] section on the result step).
+// The DNS step of the first-run wizard (P2-Q5): the choice between resolving names itself
+// (the default) and forwarding them, the upstreams, the well-known resolver that offers DNS over
+// TLS, the Home preset, the step that says it has nothing to set when DNS is not part of the
+// installation, the review row, and what finishing does with the upstreams (the root forwarding
+// rule and the [dns] section on the result step; recursion writes no rule).
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,30 +116,90 @@ async function toDns(profile: "home" | "standard" = "home") {
   await heading("Where DNS asks next");
 }
 
-/** Types the Quad9 addresses and chooses DNS over TLS with the offered name. */
+/** Chooses to forward names to resolvers; the upstream fields appear. */
+function forward() {
+  fireEvent.click(control("setup-dns-resolve", "forward"));
+}
+
+async function toDnsForward(profile: "home" | "standard" = "home") {
+  await toDns(profile);
+  forward();
+}
+
+/** Chooses to forward, types the Quad9 addresses and chooses DNS over TLS with the offered name. */
 async function chooseQuad9Dot() {
+  forward();
   upstreams("9.9.9.9\n149.112.112.112");
   fireEvent.click(await screen.findByTestId("setup-dns-use-dot"));
 }
 
 describe("the DNS step of the wizard", () => {
-  it("starts with no upstream, plain DNS and the Home preset", async () => {
+  it("starts with the node resolving names itself, the privacy sentence and no upstream field", async () => {
     await toDns();
     expect(screen.getByTestId("setup-dns").dataset.state).toBe("wanted");
+    expect(control("setup-dns-resolve", "recurse").checked).toBe(true);
+    expect(control("setup-dns-resolve", "forward").checked).toBe(false);
+    expect(screen.getByTestId("setup-dns-privacy").textContent).toContain("Resolving yourself sends each name to the authorities of its zone");
+    expect(screen.queryByTestId("field-dns-upstreams")).toBeNull();
+    expect(screen.queryByTestId("setup-dns-transport")).toBeNull();
+    expect(screen.queryByTestId("field-dns-tls-name")).toBeNull();
+    expect(screen.queryByTestId("setup-dns-known")).toBeNull();
+    // The step can be left without a word about upstreams.
+    next();
+    await passDhcpLater();
+    const row = screen.getByTestId("setup-review-dns");
+    expect(row.dataset.count).toBe("0");
+    expect(row.dataset.resolve).toBe("recurse");
+    expect(row.textContent).toContain("Resolved by Tenko itself");
+  });
+
+  it("shows the upstream fields for forwarding, plain DNS first, and hides them again for recursion", async () => {
+    await toDnsForward();
+    expect(control("setup-dns-resolve", "forward").checked).toBe(true);
     expect(field("field-dns-upstreams").value).toBe("");
     expect(control("setup-dns-transport", "plain").checked).toBe(true);
     expect(control("setup-dns-transport", "dot").checked).toBe(false);
     expect(screen.queryByTestId("setup-dns-known")).toBeNull();
     expect(screen.queryByTestId("field-dns-tls-name")).toBeNull();
-    // The step can be left with no upstream at all.
+    // The privacy sentence stays under both choices.
+    expect(screen.getByTestId("setup-dns-privacy")).toBeTruthy();
+    fireEvent.click(control("setup-dns-resolve", "recurse"));
+    expect(screen.queryByTestId("field-dns-upstreams")).toBeNull();
+    expect(screen.queryAllByTestId("setup-dns-transport")).toHaveLength(0);
+  });
+
+  it("blocks forwarding without an upstream and lets the step go once one is typed", async () => {
+    await toDnsForward();
+    next();
+    expect(blocker()).toBe("Fix the upstreams: each is an IP address with an optional port.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Where DNS asks next");
+    expect(document.activeElement).toBe(field("field-dns-upstreams"));
+    upstreams("192.0.2.1");
+    expect(blocker()).toBe("");
+    next();
+    await passDhcpLater();
+    expect(screen.getByTestId("setup-review-dns").dataset.resolve).toBe("forward");
+    expect(screen.getByTestId("setup-review-dns").dataset.count).toBe("1");
+  });
+
+  it("lets recursion pass with upstreams typed earlier and ignores them", async () => {
+    const before = dnsResolverState().forwarders.length;
+    await toDnsForward();
+    upstreams("192.0.2.1");
+    fireEvent.click(control("setup-dns-resolve", "recurse"));
     next();
     await passDhcpLater();
     expect(screen.getByTestId("setup-review-dns").dataset.count).toBe("0");
-    expect(screen.getByTestId("setup-review-dns").textContent).toContain("None yet");
+    expect(screen.getByTestId("setup-review-dns").dataset.resolve).toBe("recurse");
+    next();
+    await heading("Setup complete");
+    expect((await screen.findByTestId("setup-dns-none")).dataset.resolve).toBe("recurse");
+    expect(dnsResolverState().forwarders).toHaveLength(before);
+    expect(screen.getByTestId("setup-dns-config").textContent).toContain("forwarders = []");
   });
 
   it("offers DNS over TLS for the addresses of a well-known resolver and fills its TLS name", async () => {
-    await toDns();
+    await toDnsForward();
     upstreams("9.9.9.9\n149.112.112.112");
     const known = await screen.findByTestId("setup-dns-known");
     expect(known.dataset.key).toBe("dns.quad9.net");
@@ -151,7 +212,7 @@ describe("the DNS step of the wizard", () => {
   });
 
   it("offers nothing for addresses that are not all those of one well-known resolver", async () => {
-    await toDns();
+    await toDnsForward();
     upstreams("9.9.9.9\n192.0.2.1");
     await waitFor(() => expect(field("field-dns-upstreams").value).toBe("9.9.9.9\n192.0.2.1"));
     expect(screen.queryByTestId("setup-dns-known")).toBeNull();
@@ -162,7 +223,7 @@ describe("the DNS step of the wizard", () => {
   });
 
   it("asks for the TLS name when the transport needs one", async () => {
-    await toDns();
+    await toDnsForward();
     upstreams("192.0.2.1");
     fireEvent.click(control("setup-dns-transport", "dot"));
     expect(field("field-dns-tls-name")).toBeTruthy();
@@ -176,7 +237,7 @@ describe("the DNS step of the wizard", () => {
   });
 
   it("blocks a bad upstream and stays on the step", async () => {
-    await toDns();
+    await toDnsForward();
     upstreams("192.0.2.1\nnot-an-address");
     next();
     expect(blocker()).toBe("Fix the upstreams: each is an IP address with an optional port.");
@@ -328,7 +389,7 @@ describe("the DNS step of the wizard", () => {
     expect(within(list).getAllByTestId("setup-dns-check").map((el) => el.dataset.key)).toEqual(["role", "port", "capability", "firewall", "tls_ports"]);
   });
 
-  it("creates no rule when no upstream was chosen", async () => {
+  it("creates no rule when the node resolves names itself and says so on the result step", async () => {
     const before = dnsResolverState().forwarders.length;
     await toDns();
     next();
@@ -337,6 +398,9 @@ describe("the DNS step of the wizard", () => {
     await heading("Setup complete");
     const result = await screen.findByTestId("setup-result-dns");
     expect(result.dataset.state).toBe("none");
+    const none = screen.getByTestId("setup-dns-none");
+    expect(none.dataset.resolve).toBe("recurse");
+    expect(none.textContent).toContain("Tenko resolves names itself; no forwarding rule was written.");
     expect(dnsResolverState().forwarders).toHaveLength(before);
     expect(screen.getByTestId("setup-dns-config").textContent).toContain("forwarders = []");
     expect(screen.queryByTestId("setup-dns-saved")).toBeNull();

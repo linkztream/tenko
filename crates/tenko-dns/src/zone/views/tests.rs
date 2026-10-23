@@ -84,6 +84,7 @@ fn view(name: &str, order: u32) -> NewView {
         scope_map: Vec::new(),
         order,
         recursion: None,
+        resolution: None,
         description: Some("  lab  ".to_owned()),
     }
 }
@@ -521,6 +522,7 @@ async fn the_recursion_list_is_in_use_and_a_view_of_a_rule_stays() {
                 view: Some(created.id),
                 description: None,
                 validate: None,
+                mode: None,
             },
         )
         .await

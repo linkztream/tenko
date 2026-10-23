@@ -141,9 +141,39 @@ function checkUpstreams(value: unknown, transport: S["ForwardTransport"]): S["Up
   });
 }
 
+// WP10.4: the rule's mode and validation.
+function modeOf(value: unknown): S["RuleMode"] {
+  if (value === undefined || value === null) return "forward";
+  if (value !== "forward" && value !== "recurse") return invalidRule("mode", "unknown mode");
+  return value;
+}
+
+function validateOf(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "boolean") return invalidRule("validate", "true or false");
+  return value;
+}
+
+/** The upstreams of a rule by its mode: a forward rule's are checked one by one, a recurse rule's are only carried to be refused. */
+function upstreamsOf(value: unknown, mode: S["RuleMode"], transport: S["ForwardTransport"]): S["Upstream"][] {
+  if (mode === "forward") return checkUpstreams(value, transport);
+  return Array.isArray(value) ? (value as S["Upstream"][]) : [];
+}
+// WP10.4: end.
+
 function checkRule(state: ResolverState, rule: MockForwarder): void {
   if (!validName(rule.suffix) || rule.suffix.includes("*")) invalidRule("suffix", "not a DNS name");
   const transport = rule.transport ?? "plain";
+  // WP10.4: a recurse rule asks the authorities directly and always validates.
+  if (rule.mode === "recurse") {
+    if ((rule.upstreams ?? []).length > 0) invalidRule("upstreams", "a recurse rule names no upstream");
+    if (transport !== "plain") invalidRule("transport", "a recurse rule asks the authorities directly");
+    if (rule.tls_name) invalidRule("tls_name", "a recurse rule names no certificate");
+    if (rule.validate === false) invalidRule("validate", "a recurse rule always validates");
+  } else if ((rule.upstreams ?? []).length === 0) {
+    invalidRule("upstreams", "a forward rule needs at least one upstream");
+  }
+  // WP10.4: end.
   if (transport !== "plain" && !rule.tls_name) invalidRule("tls_name", "DoT and DoH need tls_name");
   if (rule.view) invalidRule("view", "no such view");
   if (state.forwarders.some((other) => other.id !== rule.id && other.suffix === rule.suffix && (other.view ?? null) === (rule.view ?? null))) {
@@ -205,15 +235,16 @@ export function findForwarder(state: ResolverState, id: string): MockForwarder {
 }
 
 export function createForwarder(state: ResolverState, ctx: DnsContext, body: Record<string, unknown>): MockForwarder {
+  const mode = modeOf(body.mode);
   const transport = transportOf(body.transport);
   const rule: MockForwarder = {
     id: ctx.newId(),
     suffix: canonical(typeof body.suffix === "string" ? body.suffix : "") || ".",
-    // WP10.0: the Recurse mode and validate=false come with WP10.2 and WP10.4.
-    mode: "forward",
-    validate: true,
+    // WP10.4: the mode and the validation.
+    mode,
+    validate: validateOf(body.validate),
     transport,
-    upstreams: checkUpstreams(body.upstreams, transport),
+    upstreams: upstreamsOf(body.upstreams, mode, transport),
     tls_name: textOrNull(body.tls_name),
     view: typeof body.view === "string" ? body.view : null,
     description: textOrNull(body.description),
@@ -236,8 +267,14 @@ export function updateForwarder(
   if (typeof ifMatch === "number" && ifMatch !== current.revision) stale("forwarding rule");
   const next: MockForwarder = { ...current };
   if (typeof body.suffix === "string") next.suffix = canonical(body.suffix) || ".";
+  // WP10.4: the mode and the validation.
+  if (body.mode !== undefined && body.mode !== null) next.mode = modeOf(body.mode);
+  if (body.validate !== undefined && body.validate !== null) next.validate = validateOf(body.validate);
+  // WP10.4: end.
   if (body.transport !== undefined && body.transport !== null) next.transport = transportOf(body.transport);
-  if (body.upstreams !== undefined && body.upstreams !== null) next.upstreams = checkUpstreams(body.upstreams, next.transport ?? "plain");
+  if (body.upstreams !== undefined && body.upstreams !== null) {
+    next.upstreams = upstreamsOf(body.upstreams, next.mode ?? "forward", next.transport ?? "plain");
+  }
   if (body.tls_name !== undefined) next.tls_name = textOrNull(body.tls_name);
   if (body.description !== undefined) next.description = textOrNull(body.description);
   if (body.all_views === true) next.view = null;

@@ -22,7 +22,7 @@
         <segment><source>DNS is not part of this installation (the DNS module or the dns role is not chosen in the previous step), so there is nothing to set here.</source></segment>
       </unit>
       <unit id="setup.dns.lede">
-        <segment><source>Names outside the zones Tenko serves are sent to upstream resolvers. Tenko has none built in: choose the ones your network should use.</source></segment>
+        <segment><source>Names outside the zones Tenko serves are resolved by Tenko itself from the root servers, or forwarded to resolvers you choose.</source></segment>
       </unit>
       <unit id="setup.dns.upstreams">
         <segment><source>Upstream resolvers</source></segment>
@@ -31,7 +31,7 @@
         <segment><source>One address per line. Start with the resolvers your network uses now: they are in the DNS settings of your router or of a computer (ipconfig /all on Windows, resolvectl status on Linux, the network settings on macOS). The browser cannot read them for you.</source></segment>
       </unit>
       <unit id="setup.dns.upstreams_none">
-        <segment><source>Leave it empty to decide later: until a forwarder exists, names outside the zones are refused. Forwarders can be added on the DNS page at any time.</source></segment>
+        <segment><source>Enter at least one resolver; more can be added on the DNS page at any time.</source></segment>
       </unit>
       <unit id="setup.dns.transport">
         <segment><source>How Tenko asks them</source></segment>

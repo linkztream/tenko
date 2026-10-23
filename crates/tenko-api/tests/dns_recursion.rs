@@ -1,6 +1,7 @@
-//! The fields the recursive resolver adds to forwarding rules and views (WP10.0), through the
-//! router over the zone service on an in-memory store: the defaults show in the answers, and
-//! until WP10.1, WP10.2 and WP10.4 build them the other values answer 501 and write nothing.
+//! The fields the recursive resolver adds to forwarding rules and views (WP10.0, built by
+//! WP10.2 and WP10.4), through the router over the zone service on an in-memory store: the
+//! defaults show in the answers, a recurse rule and a view's resolution are written, and the
+//! reasons of `dns.forwarder.invalid` refuse a recurse rule with what it cannot have.
 //! The `node_routes` module (WP10.1) tests the status, the priming and the infrastructure
 //! cache of a node.
 
@@ -28,17 +29,11 @@ struct Reply {
 
 impl Reply {
     #[track_caller]
-    fn assert_not_implemented(&self, method: &str, path: &str) {
-        assert_eq!(self.status, StatusCode::NOT_IMPLEMENTED, "{}", self.body);
+    fn assert_invalid(&self, field: &str) {
+        assert_eq!(self.status, StatusCode::BAD_REQUEST, "{}", self.body);
         assert_eq!(self.content_type.as_deref(), Some(PROBLEM_JSON));
-        assert_eq!(self.body["code"], "sys.not_implemented", "{}", self.body);
-        assert_eq!(self.body["params"]["method"], method, "{}", self.body);
-        assert_eq!(
-            self.body["params"]["path"],
-            format!("{API}{path}"),
-            "{}",
-            self.body
-        );
+        assert_eq!(self.body["code"], "dns.forwarder.invalid", "{}", self.body);
+        assert_eq!(self.body["params"]["field"], field, "{}", self.body);
     }
 }
 
@@ -125,17 +120,20 @@ async fn a_rule_created_as_before_shows_the_defaults() {
 }
 
 #[tokio::test]
-async fn a_recurse_rule_answers_501_and_validate_false_is_written() {
+async fn a_recurse_rule_is_written_and_validate_false_is_written() {
     let router = app();
     // A recurse rule names no upstream: the field may be absent.
-    send(
+    let recurse = send(
         &router,
         "POST",
         "/dns/forwarders",
         Some(json!({"suffix": "example.net", "mode": "recurse"})),
     )
-    .await
-    .assert_not_implemented("POST", "/dns/forwarders");
+    .await;
+    assert_eq!(recurse.status, StatusCode::CREATED, "{}", recurse.body);
+    assert_eq!(recurse.body["mode"], "recurse");
+    assert_eq!(recurse.body["upstreams"], json!([]));
+    assert_eq!(recurse.body["validate"], true);
     // WP10.2 built the rule's escape from validation: `validate: false` is written.
     let unvalidated = send(
         &router,
@@ -155,13 +153,13 @@ async fn a_recurse_rule_answers_501_and_validate_false_is_written() {
         unvalidated.body
     );
     assert_eq!(unvalidated.body["validate"], false);
-    assert_eq!(items(&router, "/dns/forwarders").await.len(), 1);
+    assert_eq!(items(&router, "/dns/forwarders").await.len(), 2);
 
     let created = send(
         &router,
         "POST",
         "/dns/forwarders",
-        Some(json!({"suffix": "example.net", "upstreams": [{"address": "192.0.2.53"}]})),
+        Some(json!({"suffix": "example.org", "upstreams": [{"address": "192.0.2.53"}]})),
     )
     .await;
     assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
@@ -169,11 +167,32 @@ async fn a_recurse_rule_answers_501_and_validate_false_is_written() {
         "/dns/forwarders/{}",
         created.body["id"].as_str().expect("id")
     );
+    // Turning a forward rule to recurse keeps its upstreams unless the change drops them.
     send(&router, "PATCH", &path, Some(json!({"mode": "recurse"})))
         .await
-        .assert_not_implemented("PATCH", "/dns/forwarders/{id}");
+        .assert_invalid("upstreams");
     let got = send(&router, "GET", &path, None).await;
     assert_eq!(got.body, created.body);
+    let turned = send(
+        &router,
+        "PATCH",
+        &path,
+        Some(json!({"mode": "recurse", "upstreams": [], "tls_name": ""})),
+    )
+    .await;
+    assert_eq!(turned.status, StatusCode::OK, "{}", turned.body);
+    assert_eq!(turned.body["mode"], "recurse");
+    assert_eq!(turned.body["upstreams"], json!([]));
+    // And back, with upstreams again.
+    let back = send(
+        &router,
+        "PATCH",
+        &path,
+        Some(json!({"mode": "forward", "upstreams": [{"address": "192.0.2.54"}]})),
+    )
+    .await;
+    assert_eq!(back.status, StatusCode::OK, "{}", back.body);
+    assert_eq!(back.body["mode"], "forward");
     // WP10.2: the escape is patched in and out.
     let off = send(&router, "PATCH", &path, Some(json!({"validate": false}))).await;
     assert_eq!(off.status, StatusCode::OK, "{}", off.body);
@@ -193,38 +212,81 @@ async fn a_recurse_rule_answers_501_and_validate_false_is_written() {
 }
 
 #[tokio::test]
-async fn a_view_resolution_answers_501_and_writes_nothing() {
+async fn a_recurse_rule_is_refused_what_it_cannot_have() {
     let router = app();
-    send(
+    for (body, field) in [
+        (
+            json!({"suffix": "a.example.net", "mode": "recurse", "upstreams": [{"address": "192.0.2.53"}]}),
+            "upstreams",
+        ),
+        (
+            json!({"suffix": "b.example.net", "mode": "recurse", "transport": "dot"}),
+            "transport",
+        ),
+        (
+            json!({"suffix": "c.example.net", "mode": "recurse", "tls_name": "dns.example.net"}),
+            "tls_name",
+        ),
+        (
+            json!({"suffix": "d.example.net", "mode": "recurse", "validate": false}),
+            "validate",
+        ),
+        // A forward rule still needs its upstreams.
+        (
+            json!({"suffix": "e.example.net", "mode": "forward"}),
+            "upstreams",
+        ),
+    ] {
+        send(&router, "POST", "/dns/forwarders", Some(body))
+            .await
+            .assert_invalid(field);
+    }
+    assert_eq!(items(&router, "/dns/forwarders").await, Vec::<Value>::new());
+}
+
+#[tokio::test]
+async fn a_view_resolution_is_written_and_cleared() {
+    let router = app();
+    let recurse = send(
         &router,
         "POST",
         "/dns/views",
         Some(json!({"name": "lan", "order": 1, "resolution": "recurse"})),
     )
-    .await
-    .assert_not_implemented("POST", "/dns/views");
-    assert_eq!(items(&router, "/dns/views").await, Vec::<Value>::new());
+    .await;
+    assert_eq!(recurse.status, StatusCode::CREATED, "{}", recurse.body);
+    assert_eq!(recurse.body["resolution"], "recurse");
+    assert_eq!(recurse.body["profile_resolution"], "recurse");
 
     let created = send(
         &router,
         "POST",
         "/dns/views",
-        Some(json!({"name": "lan", "order": 1})),
+        Some(json!({"name": "guests", "order": 2})),
     )
     .await;
     assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
     assert!(created.body.get("resolution").is_none(), "{}", created.body);
+    assert_eq!(created.body["profile_resolution"], "recurse");
     let path = format!("/dns/views/{}", created.body["id"].as_str().expect("id"));
-    for patch in [
-        json!({"resolution": "refuse"}),
-        json!({"default_resolution": true}),
-    ] {
-        send(&router, "PATCH", &path, Some(patch))
-            .await
-            .assert_not_implemented("PATCH", "/dns/views/{id}");
+    for mode in ["refuse", "forward", "recurse"] {
+        let patched = send(&router, "PATCH", &path, Some(json!({"resolution": mode}))).await;
+        assert_eq!(patched.status, StatusCode::OK, "{}", patched.body);
+        assert_eq!(patched.body["resolution"], mode);
     }
-    let got = send(&router, "GET", &path, None).await;
-    assert_eq!(got.body, created.body);
+    let cleared = send(
+        &router,
+        "PATCH",
+        &path,
+        Some(json!({"default_resolution": true})),
+    )
+    .await;
+    assert_eq!(cleared.status, StatusCode::OK, "{}", cleared.body);
+    assert!(cleared.body.get("resolution").is_none(), "{}", cleared.body);
+    let listed = items(&router, "/dns/views").await;
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0]["resolution"], "recurse");
+    assert!(listed[1].get("resolution").is_none(), "{}", listed[1]);
 
     // `default_resolution: false` is the absent field.
     let patched = send(
@@ -236,6 +298,17 @@ async fn a_view_resolution_answers_501_and_writes_nothing() {
     .await;
     assert_eq!(patched.status, StatusCode::OK, "{}", patched.body);
     assert_eq!(patched.body["description"], "kept");
+    assert!(patched.body.get("resolution").is_none(), "{}", patched.body);
+
+    // A mode that does not exist is a malformed request.
+    let wrong = send(
+        &router,
+        "PATCH",
+        &path,
+        Some(json!({"resolution": "default"})),
+    )
+    .await;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST, "{}", wrong.body);
 }
 
 // WP10.1: the node routes of the recursive resolver (the status, the priming and the

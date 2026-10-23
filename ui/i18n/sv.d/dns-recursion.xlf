@@ -10,29 +10,13 @@
         <notes><note category="description">Entry of the DNS sub-navigation that leads to the recursive resolver.</note></notes>
         <segment><source>Recursion</source><target>Rekursion</target></segment>
       </unit>
-      <unit id="dns.recursion.coming.title">
-        <notes><note category="description">Heading of the recursion page while the recursive resolver is not built yet.</note></notes>
-        <segment><source>Coming with a later release</source><target>Kommer i en senare version</target></segment>
-      </unit>
-      <unit id="dns.recursion.coming.body">
-        <notes><note category="description">Explains on the recursion page that the recursive resolver is not available yet.</note></notes>
-        <segment><source>The management of the trust anchors and the negative trust anchors comes with a later release of this slice.</source><target>Hanteringen av förtroendeankare och negativa förtroendeankare kommer i en senare version av den här etappen.</target></segment>
-      </unit>
       <unit id="dns.recursion.trust_anchors.title">
         <notes><note category="description">Heading of the trust anchors, the keys that DNSSEC validation starts from.</note></notes>
         <segment><source>Trust anchors</source><target>Förtroendeankare</target></segment>
       </unit>
-      <unit id="dns.recursion.trust_anchors.unavailable">
-        <notes><note category="description">Empty state of the trust anchors while the server cannot list them yet.</note></notes>
-        <segment><source>The trust anchors are not available yet.</source><target>Förtroendeankarna är inte tillgängliga än.</target></segment>
-      </unit>
       <unit id="dns.recursion.trust_anchors.none">
         <notes><note category="description">Empty state of the trust anchors when the server lists none.</note></notes>
         <segment><source>There are no trust anchors.</source><target>Det finns inga förtroendeankare.</target></segment>
-      </unit>
-      <unit id="dns.recursion.trust_anchors.count">
-        <notes><note category="description">Number of zones with a trust anchor; {count} is a number.</note></notes>
-        <segment><source>{count, plural, one {# zone has a trust anchor.} other {# zones have a trust anchor.}}</source><target>{count, plural, one {# zon har ett förtroendeankare.} other {# zoner har ett förtroendeankare.}}</target></segment>
       </unit>
       <unit id="dns.recursion.ntas.title">
         <notes><note category="description">Heading of the negative trust anchors, names under which DNSSEC validation is switched off for a while.</note></notes>

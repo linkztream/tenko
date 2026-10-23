@@ -27,8 +27,8 @@ use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        AclId, DnsError, MatchRule, ScopeName, ScopeWeight, View, ViewId, Zone, ZoneId, audit,
-        codes,
+        AclId, DnsError, MatchRule, ResolutionMode, ScopeName, ScopeWeight, View, ViewId, Zone,
+        ZoneId, audit, codes,
         tables::{ACLS, FORWARDERS, VIEWS, ZONES},
     },
 };
@@ -61,6 +61,9 @@ pub struct NewView {
     pub order: u32,
     /// The recursion access list; the profile's default when `None`.
     pub recursion: Option<AclId>,
+    // WP10.4: the view's resolution.
+    /// How names no zone or rule covers are resolved; the profile's default when `None`.
+    pub resolution: Option<ResolutionMode>,
     /// Free text.
     pub description: Option<String>,
 }
@@ -80,6 +83,11 @@ pub struct ViewChange {
     pub recursion: Option<AclId>,
     /// Follow the profile's default (clears `recursion`).
     pub default_recursion: bool,
+    // WP10.4: the view's resolution.
+    /// The resolution of names no zone or rule covers.
+    pub resolution: Option<ResolutionMode>,
+    /// Follow the profile's default (clears `resolution`).
+    pub default_resolution: bool,
     /// Free text; an empty string clears it.
     pub description: Option<String>,
 }
@@ -296,8 +304,8 @@ impl ZoneService {
             scope_map: new.scope_map,
             order: new.order,
             recursion: new.recursion,
-            // WP10.0: the profile's default until WP10.4 takes the field from the request.
-            resolution: None,
+            // WP10.4: the resolution from the request; the profile's default when absent.
+            resolution: new.resolution,
             description: trimmed(new.description),
         };
         check_own(&view)?;
@@ -360,6 +368,12 @@ impl ZoneService {
                 view.recursion = None;
             } else if let Some(acl) = change.recursion {
                 view.recursion = Some(acl);
+            }
+            // WP10.4: the view's resolution.
+            if change.default_resolution {
+                view.resolution = None;
+            } else if let Some(mode) = change.resolution {
+                view.resolution = Some(mode);
             }
             if let Some(description) = &change.description {
                 view.description = trimmed(Some(description.clone()));

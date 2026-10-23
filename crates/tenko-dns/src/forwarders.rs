@@ -12,7 +12,8 @@ use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        DnsName, ForwardRule, ForwardRuleId, ForwardTransport, Upstream, ViewId, audit, codes,
+        DnsName, ForwardRule, ForwardRuleId, ForwardTransport, RuleMode, Upstream, ViewId, audit,
+        codes,
         tables::{FORWARDERS, VIEWS},
     },
 };
@@ -38,6 +39,9 @@ pub struct NewRule {
     // WP10.2: the rule's escape from validation.
     /// Validate the upstreams' answers (TGL-12); `None` is the default, on.
     pub validate: Option<bool>,
+    // WP10.4: the rule's mode.
+    /// `forward` to the upstreams or `recurse` from the root; `None` is `forward`.
+    pub mode: Option<RuleMode>,
 }
 
 /// Changes to a rule.
@@ -60,6 +64,9 @@ pub struct RuleChange {
     // WP10.2: the rule's escape from validation.
     /// Validate the upstreams' answers (TGL-12).
     pub validate: Option<bool>,
+    // WP10.4: the rule's mode.
+    /// `forward` or `recurse`.
+    pub mode: Option<RuleMode>,
 }
 
 /// A rule as read.
@@ -182,8 +189,8 @@ impl ZoneService {
             transport: new.transport,
             tls_name: trimmed(new.tls_name),
             view: new.view,
-            // WP10.0: a forward rule until WP10.4 takes the mode from the request.
-            mode: tenko_core::dns::RuleMode::Forward,
+            // WP10.4: the mode from the request, `forward` by default.
+            mode: new.mode.unwrap_or(RuleMode::Forward),
             // WP10.2: validation on unless the request switches it off.
             validate: new.validate.unwrap_or(true),
             description: trimmed(new.description),
@@ -252,6 +259,10 @@ impl ZoneService {
             // WP10.2: the rule's escape from validation.
             if let Some(validate) = change.validate {
                 rule.validate = validate;
+            }
+            // WP10.4: the rule's mode.
+            if let Some(mode) = change.mode {
+                rule.mode = mode;
             }
             if rule == before {
                 return Ok(Planned::nothing(rule));

@@ -2404,12 +2404,46 @@ async fn forwarder_list(target: &Target) -> Result<Output, Failure> {
     if target.json {
         return Ok(Output::json(&json!({ "items": items })));
     }
-    // dns-visibility: a row per upstream with its times and state on the node that
-    // answers; the rule's columns on its first row.
+    let rows = forwarder_rows(&items);
+    Ok(Output::text(table(
+        &[
+            "SUFFIX",
+            "TRANSPORT",
+            "UPSTREAM",
+            "STATE",
+            "RTT",
+            "EWMA",
+            "P50",
+            "P99",
+            "VIEW",
+            "ID",
+        ],
+        &rows,
+    )))
+}
+
+// dns-visibility: a row per upstream with its times and state on the node that answers;
+// the rule's columns on its first row.
+/// The rows of `tenko dns forwarder list`.
+fn forwarder_rows(items: &[Value]) -> Vec<Vec<String>> {
     let mut rows: Vec<Vec<String>> = Vec::new();
-    for rule in &items {
+    for rule in items {
         let view = text(rule, &["view"]);
         let view = if view.is_empty() { "all" } else { view };
+        // WP10.4: a recurse rule has no upstream; one row says where it asks.
+        if text(rule, &["mode"]) == "recurse" {
+            let mut row = vec![
+                text(rule, &["suffix"]).to_owned(),
+                "recurse".to_owned(),
+                "root servers".to_owned(),
+            ];
+            row.extend(upstream_columns(None));
+            row.push(view.to_owned());
+            row.push(text(rule, &["id"]).to_owned());
+            rows.push(row);
+            continue;
+        }
+        // WP10.4: end.
         let status = rule
             .get("upstream_status")
             .and_then(Value::as_array)
@@ -2435,21 +2469,7 @@ async fn forwarder_list(target: &Target) -> Result<Output, Failure> {
             rows.push(row);
         }
     }
-    Ok(Output::text(table(
-        &[
-            "SUFFIX",
-            "TRANSPORT",
-            "UPSTREAM",
-            "STATE",
-            "RTT",
-            "EWMA",
-            "P50",
-            "P99",
-            "VIEW",
-            "ID",
-        ],
-        &rows,
-    )))
+    rows
 }
 
 // dns-visibility: the figures of one upstream for the table.
@@ -3522,6 +3542,37 @@ mod tests {
             present_upstream(&json!({ "address": "192.0.2.1" })),
             "192.0.2.1"
         );
+    }
+
+    // WP10.4: a recurse rule is one row of the forwarder table.
+    #[test]
+    fn a_recurse_rule_is_one_row_of_the_forwarder_table() {
+        let rows = forwarder_rows(&[
+            json!({ "id": "r1", "suffix": ".", "mode": "forward", "transport": "dot",
+                    "upstreams": [{ "address": "192.0.2.1" }, { "address": "192.0.2.2" }] }),
+            json!({ "id": "r2", "suffix": "corp.example.test.", "mode": "recurse",
+                    "transport": "plain", "upstreams": [], "view": "v1" }),
+        ]);
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        assert_eq!(rows[0][..3], [".", "dot", "192.0.2.1"]);
+        assert_eq!(rows[1][..3], ["", "", "192.0.2.2"]);
+        assert_eq!(
+            rows[2],
+            [
+                "corp.example.test.",
+                "recurse",
+                "root servers",
+                "-",
+                "",
+                "",
+                "",
+                "",
+                "v1",
+                "r2"
+            ]
+        );
+        let text = describe_rule(&json!({ "suffix": "corp.example.test.", "mode": "recurse" }));
+        assert!(text.contains("mode         recurse"), "{text}");
     }
 
     const URL: &str = "https://lists.example.test/h";

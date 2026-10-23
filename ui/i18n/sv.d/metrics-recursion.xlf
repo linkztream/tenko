@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="metrics-recursion">
+      <unit id="metrics.dns.subqueries">
+        <notes><note category="description">Title of the tile of the queries the recursive resolver sends to authorities per second.</note></notes>
+        <segment><source>Sub-queries</source><target>Delfrågor</target></segment>
+      </unit>
+      <unit id="metrics.dns.subqueries_hint">
+        <segment><source>Queries to authorities, validation included</source><target>Frågor till auktoritativa servrar, validering inräknad</target></segment>
+      </unit>
+      <unit id="metrics.dns.validation">
+        <notes><note category="description">Title of the tile of the DNSSEC validation outcomes per second.</note></notes>
+        <segment><source>Validation</source><target>Validering</target></segment>
+      </unit>
+      <unit id="metrics.dns.validation_secure">
+        <segment><source>Secure</source><target>Säker</target></segment>
+      </unit>
+      <unit id="metrics.dns.validation_insecure">
+        <segment><source>Insecure</source><target>Osäker</target></segment>
+      </unit>
+      <unit id="metrics.dns.validation_bogus">
+        <segment><source>Bogus</source><target>Ogiltig</target></segment>
+      </unit>
+      <unit id="metrics.dns.validation_hint">
+        <segment><source>Indeterminate {rate}/s</source><target>Obestämd {rate}/s</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

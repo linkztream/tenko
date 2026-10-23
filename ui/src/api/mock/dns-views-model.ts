@@ -57,6 +57,7 @@ export function seedViews(ctx: DnsContext, dns: DnsState): ViewsState {
         rules: [{ test: "client_subnet", prefixes: ["192.0.2.0/24", "2001:db8:0:10::/64"] }],
         scope_map: [{ zone: DNS_IDS.zone.example, scope: "internal", weight: 1 }],
         recursion: null,
+        profile_resolution: "recurse",
         description: "The office network",
         revision,
       },
@@ -70,6 +71,7 @@ export function seedViews(ctx: DnsContext, dns: DnsState): ViewsState {
           { zone: DNS_IDS.zone.example, scope: "external", weight: 300 },
         ],
         recursion: null,
+        profile_resolution: "recurse",
         description: null,
         revision,
       },
@@ -87,6 +89,17 @@ export function findView(state: ViewsState, id: string): MockView {
 
 const TRANSPORTS = ["udp", "tcp", "dot", "doh"];
 const RTYPE = /^([A-Z][A-Z0-9-]{0,15}|TYPE\d{1,5})$/;
+
+// WP10.4: the resolution of a view.
+const RESOLUTIONS: readonly S["ResolutionMode"][] = ["recurse", "forward", "refuse"];
+
+function resolutionOf(value: unknown): S["ResolutionMode"] {
+  if (typeof value !== "string" || !RESOLUTIONS.includes(value as S["ResolutionMode"])) {
+    return invalid("resolution", "recurse, forward or refuse");
+  }
+  return value as S["ResolutionMode"];
+}
+// WP10.4: end.
 
 function list(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) return invalid("rules", "a rule lists at least one value");
@@ -170,6 +183,9 @@ export function createView(state: ViewsState, ctx: DnsContext, dns: DnsState, bo
     scope_map: Array.isArray(body.scope_map) ? (body.scope_map as S["ScopeWeight"][]) : [],
     order: body.order,
     recursion: typeof body.recursion === "string" ? body.recursion : null,
+    // WP10.4: a view without a resolution follows the profile's default.
+    ...(body.resolution !== undefined && body.resolution !== null ? { resolution: resolutionOf(body.resolution) } : {}),
+    profile_resolution: "recurse",
     description: textOrNull(body.description),
     revision: 0,
   };
@@ -198,6 +214,10 @@ export function updateView(
   if (Array.isArray(body.scope_map)) next.scope_map = body.scope_map as S["ScopeWeight"][];
   if (body.default_recursion === true) next.recursion = null;
   else if (typeof body.recursion === "string") next.recursion = body.recursion;
+  // WP10.4: `default_resolution` clears the view's own resolution.
+  if (body.default_resolution === true) delete next.resolution;
+  else if (body.resolution !== undefined && body.resolution !== null) next.resolution = resolutionOf(body.resolution);
+  // WP10.4: end.
   if (body.description !== undefined) next.description = textOrNull(body.description);
   checkView(state, dns, next);
   const position = typeof body.order === "number" ? body.order : listViews(state).findIndex((v) => v.id === id) + 1;

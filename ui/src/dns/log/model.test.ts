@@ -2,7 +2,7 @@
 // form makes, the client kinds and RCODE names; the mock's reader with its cursor and filters.
 import { describe, expect, it } from "vitest";
 import { logStatus, readLog, seedDnsLog, switchLog, DnsLogFailure } from "../../api/mock/dns-log-model";
-import { checkFilters, clientKind, NO_FILTERS, PAGE_SIZE, rcodeName, toQuery } from "./model";
+import { byValidation, checkFilters, clientKind, edeName, NO_FILTERS, PAGE_SIZE, rcodeName, toQuery, VALIDATION_STATES } from "./model";
 
 describe("the filter form", () => {
   it("accepts names, pseudonyms and addresses and refuses the rest", () => {
@@ -66,5 +66,57 @@ describe("the mock's query log", () => {
     expect(logStatus(state)).toBeUndefined();
     expect(() => readLog(state, {}, true, 1)).toThrow(DnsLogFailure);
     expect(() => switchLog(state, false)).toThrow(DnsLogFailure);
+  });
+});
+
+// WP10.4: the validation state and the extended error of a line.
+describe("the validation filter", () => {
+  const lines = [
+    { qname: "a.example.test", validation: "secure" },
+    { qname: "b.example.test", validation: "bogus" },
+    { qname: "c.example.test" },
+    { qname: "d.example.test", validation: null },
+    { qname: "e.example.test", validation: "secure" },
+    { qname: "f.example.test", validation: "unvalidated" },
+  ];
+
+  it("offers the states in the order a line is judged", () => {
+    expect([...VALIDATION_STATES]).toEqual(["secure", "insecure", "bogus", "indeterminate", "unvalidated"]);
+  });
+
+  it("keeps the lines of a state, in their order", () => {
+    expect(byValidation(lines, "secure").map((l) => l.qname)).toEqual(["a.example.test", "e.example.test"]);
+    expect(byValidation(lines, "bogus").map((l) => l.qname)).toEqual(["b.example.test"]);
+    expect(byValidation(lines, "unvalidated").map((l) => l.qname)).toEqual(["f.example.test"]);
+    expect(byValidation(lines, "insecure")).toEqual([]);
+  });
+
+  it("keeps every line, also those without a state, when no state is chosen, and returns a copy", () => {
+    const all = byValidation(lines, "");
+    expect(all).toEqual(lines);
+    expect(all).not.toBe(lines);
+  });
+
+  it("drops a line without a state as soon as a state is chosen", () => {
+    expect(byValidation(lines, "indeterminate")).toEqual([]);
+    const old: { qname: string; validation?: string }[] = [{ qname: "old.example.test" }];
+    expect(byValidation(old, "secure")).toEqual([]);
+  });
+});
+
+describe("edeName", () => {
+  it("names the extended DNS errors of RFC 8914 by their code", () => {
+    expect(edeName(0)).toBe("Other Error");
+    expect(edeName(6)).toBe("DNSSEC Bogus");
+    expect(edeName(7)).toBe("Signature Expired");
+    expect(edeName(9)).toBe("DNSKEY Missing");
+    expect(edeName(22)).toBe("No Reachable Authority");
+    expect(edeName(27)).toBe("Unsupported NSEC3 Iterations Value");
+  });
+
+  it("names nothing for a code the registry here does not know", () => {
+    expect(edeName(28)).toBeUndefined();
+    expect(edeName(99)).toBeUndefined();
+    expect(edeName(-1)).toBeUndefined();
   });
 });

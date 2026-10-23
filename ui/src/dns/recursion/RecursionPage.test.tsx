@@ -1,12 +1,13 @@
-// The recursion page of WP10.0: the title, that the recursive resolver comes with a later
-// release, the trust anchors read as an empty state while the server answers 501 (no error, no
-// toast), the list once the server answers, other failures as errors, in English and Swedish,
-// without accessibility violations.
-// WP10.1 adds the status block: the resolver of the node with its hints, priming, root servers,
+// The recursion page (WP10.4): the title and the tab of the DNS area, the status block, the
+// trust anchors and the negative trust anchors under it (their own tests are in
+// AnchorsSection.test.tsx and NtaSection.test.tsx), a failed read of the anchors shown as an
+// error, English and Swedish, without accessibility violations.
+// WP10.1 added the status block: the resolver of the node with its hints, priming, root servers,
 // infrastructure cache and counters, the "Prime now" button (not for a viewer), the warning for
 // what the node reports as wrong, the resolver that is off, the server without a node, a failed
-// read, and Swedish.
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+// read, and Swedish. WP10.4 adds the validation card: the four outcomes the validator counted
+// and the anchor keys the node validates with.
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { recursionStatus } from "../../api/mock/dns-recursion-model";
@@ -36,39 +37,43 @@ const open = () => renderRoute(RecursionPage, { url: "/dns/recursion", path: "/d
 const PROBLEM = { type: "about:blank", params: {} };
 
 describe("the recursion page", () => {
-  it("says the resolver comes later and shows the trust anchors as unavailable while the server answers 501", async () => {
+  it("shows the title, the tab and the status, the trust anchors and the negative trust anchors", async () => {
     const view = open();
     expect(screen.getByTestId("page-dns-recursion")).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Recursion");
-    expect(screen.getByTestId("dns-recursion-coming").textContent).toContain("comes with a later release");
-    const empty = await screen.findByTestId("dns-recursion-anchors-unavailable");
-    expect(empty.textContent).toBe("The trust anchors are not available yet.");
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByTestId("toast")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/^Recursion/);
     const tab = screen.getAllByTestId("dns-nav-link").find((link) => link.dataset.key === "recursion");
     expect(tab?.getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByTestId("dns-recursion-running")).toBeTruthy();
+    expect(screen.getByTestId("dns-recursion-validation")).toBeTruthy();
+    const anchors = screen.getByTestId("dns-recursion-anchors");
+    expect(within(anchors).getByRole("heading", { level: 2 }).textContent).toBe("Trust anchors");
+    await waitFor(() => expect(screen.getAllByTestId("dns-anchor")).toHaveLength(2));
+    const ntas = screen.getByTestId("dns-recursion-ntas");
+    expect(within(ntas).getByRole("heading", { level: 2 }).textContent).toBe("Negative trust anchors");
+    expect(await screen.findByTestId("dns-nta-none")).toBeTruthy();
+    // It is no placeholder any more: nothing says the resolver comes later.
+    expect(screen.queryByTestId("dns-recursion-coming")).toBeNull();
+    expect(screen.queryByTestId("dns-recursion-anchors-unavailable")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(await axeViolations(view.container)).toEqual([]);
   });
 
-  it("counts the zones that have a trust anchor once the server lists them", async () => {
-    server.use(
-      http.get("/api/v1/dns/trust-anchors", () =>
-        HttpResponse.json({ items: [{ zone: ".", keys: [], revision: 1 }, { zone: "example.test", keys: [], revision: 2 }], revision: 2, next_cursor: null }),
-      ),
-    );
+  it("counts the anchors the server lists", async () => {
     open();
-    const count = await screen.findByTestId("dns-recursion-anchors-count");
-    expect(count.textContent).toBe("2 zones have a trust anchor.");
-    expect(count.dataset.state).toBe("listed");
+    const list = await screen.findByTestId("dns-recursion-anchors-count");
+    expect(list.dataset.state).toBe("listed");
+    expect(list.dataset.count).toBe("2");
   });
 
   it("says there are none when the server lists none", async () => {
     server.use(http.get("/api/v1/dns/trust-anchors", () => HttpResponse.json({ items: [], revision: 1, next_cursor: null })));
     open();
-    expect((await screen.findByTestId("dns-recursion-anchors-count")).dataset.state).toBe("none");
+    const none = await screen.findByTestId("dns-recursion-anchors-count");
+    expect(none.dataset.state).toBe("none");
+    expect(none.textContent).toBe("There are no trust anchors.");
   });
 
-  it("shows another failure of the read as an error", async () => {
+  it("shows a failure of the read of the anchors as an error", async () => {
     server.use(
       http.get("/api/v1/dns/trust-anchors", () =>
         HttpResponse.json(
@@ -79,15 +84,19 @@ describe("the recursion page", () => {
     );
     open();
     await waitFor(() => expect(screen.getByTestId("dns-recursion-anchors").textContent).toContain("internal error"));
-    expect(screen.queryByTestId("dns-recursion-anchors-unavailable")).toBeNull();
+    expect(screen.queryByTestId("dns-recursion-anchors-count")).toBeNull();
+    // The anchors cannot be added to while they cannot be read; the rest of the page stays.
+    expect(screen.queryByTestId("dns-anchor-add")).toBeNull();
+    expect(await screen.findByTestId("dns-recursion-running")).toBeTruthy();
   });
 
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Rekursion");
-    expect(screen.getByText("Kommer i en senare version")).toBeTruthy();
-    expect((await screen.findByTestId("dns-recursion-anchors-unavailable")).textContent).toBe("Förtroendeankarna är inte tillgängliga än.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/^Rekursion/);
+    expect(await screen.findByText("Förtroendeankare")).toBeTruthy();
+    expect(screen.getByText("Negativa förtroendeankare")).toBeTruthy();
+    expect((await screen.findByTestId("dns-nta-none")).textContent).toContain("Inget negativt förtroendeankare");
   });
 });
 
@@ -223,3 +232,81 @@ describe("the status block", () => {
   });
 });
 // WP10.1: end.
+
+// WP10.4: the validation card.
+const counted = (key: string) => screen.getAllByTestId("dns-recursion-validation-count").find((el) => el.dataset.key === key);
+
+function validatingStatus() {
+  const body = recursionStatus(dnsRecursionState());
+  return {
+    ...body,
+    counters: { ...body.counters, secure: 12_034, insecure: 1_870, bogus: 7, indeterminate: 0 },
+    trust_anchors: [
+      { zone: ".", key_tag: 20326, state: "valid" },
+      { zone: ".", key_tag: 38696, state: "valid" },
+      { zone: ".", key_tag: 47000, state: "add_pend" },
+      { zone: "corp.example.test", key_tag: 3613, state: "revoked" },
+    ],
+  };
+}
+
+describe("the validation card", () => {
+  it("shows the four outcomes the validator counted, in their order", async () => {
+    server.use(http.get("/api/v1/nodes/:id/dns/recursion", () => HttpResponse.json(validatingStatus())));
+    const view = open();
+    const card = await screen.findByTestId("dns-recursion-validation");
+    expect(within(card).getByRole("heading", { level: 3 }).textContent).toBe("Validation");
+    expect(screen.getAllByTestId("dns-recursion-validation-count").map((el) => el.dataset.key)).toEqual(["secure", "insecure", "bogus", "indeterminate"]);
+    expect(counted("secure")?.textContent).toBe("12,034");
+    expect(counted("secure")?.dataset.value).toBe("12034");
+    expect(counted("insecure")?.textContent).toBe("1,870");
+    expect(counted("bogus")?.textContent).toBe("7");
+    expect(counted("indeterminate")?.textContent).toBe("0");
+    expect(within(card).getByText("Secure")).toBeTruthy();
+    expect(within(card).getByText("Indeterminate")).toBeTruthy();
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("lists the anchor keys the node validates with, each with its zone, tag and state", async () => {
+    server.use(http.get("/api/v1/nodes/:id/dns/recursion", () => HttpResponse.json(validatingStatus())));
+    open();
+    const keys = await screen.findAllByTestId("dns-recursion-key");
+    expect(keys.map((el) => [el.dataset.key, el.dataset.state])).toEqual([
+      ["20326", "valid"],
+      ["38696", "valid"],
+      ["47000", "add_pend"],
+      ["3613", "revoked"],
+    ]);
+    expect(keys.map((el) => el.textContent)).toEqual([". 20326 Valid", ". 38696 Valid", ". 47000 Add pending", "corp.example.test 3613 Revoked"]);
+    expect(screen.getByTestId("dns-recursion-validation-keys").dataset.count).toBe("4");
+  });
+
+  it("says no key was reported when the node reports none", async () => {
+    open();
+    await screen.findByTestId("dns-recursion-validation");
+    expect(screen.queryAllByTestId("dns-recursion-key")).toHaveLength(0);
+    const keys = screen.getByTestId("dns-recursion-validation-keys");
+    expect(keys.dataset.count).toBe("0");
+    expect(keys.textContent).toBe("None reported");
+    for (const key of ["secure", "insecure", "bogus", "indeterminate"]) expect(counted(key)?.textContent).toBe("0");
+  });
+
+  it("is not shown while the resolver is off", async () => {
+    dnsRecursionState().enabled = false;
+    open();
+    await screen.findByTestId("dns-recursion-off");
+    expect(screen.queryByTestId("dns-recursion-validation")).toBeNull();
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    server.use(http.get("/api/v1/nodes/:id/dns/recursion", () => HttpResponse.json(validatingStatus())));
+    open();
+    const card = await screen.findByTestId("dns-recursion-validation");
+    expect(within(card).getByRole("heading", { level: 3 }).textContent).toBe("Validering");
+    expect(within(card).getByText("Säker")).toBeTruthy();
+    expect(within(card).getByText("Obestämd")).toBeTruthy();
+    expect(screen.getAllByTestId("dns-recursion-key")[2]?.textContent).toBe(". 47000 Tillägg väntar");
+  });
+});
+// WP10.4: end.

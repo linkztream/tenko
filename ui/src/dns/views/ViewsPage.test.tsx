@@ -83,7 +83,7 @@ describe("the views", () => {
   });
 
   it("shows a view without rules as matching every query and a missing list as such", async () => {
-    dnsViewsState().views.push({ id: "0190d1c2-0000-7000-8000-00000000def0", name: "rest", order: 3, rules: [], scope_map: [], recursion: "0190d1c2-0000-7000-8000-0000000000aa", revision: 1 });
+    dnsViewsState().views.push({ id: "0190d1c2-0000-7000-8000-00000000def0", name: "rest", order: 3, rules: [], scope_map: [], recursion: "0190d1c2-0000-7000-8000-0000000000aa", profile_resolution: "recurse", revision: 1 });
     open();
     await waitFor(() => expect(names()).toEqual(["office", "encrypted clients", "rest"]));
     const rest = row("dns-views", "rest");

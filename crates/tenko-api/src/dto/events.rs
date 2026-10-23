@@ -428,7 +428,36 @@ pub struct MetricsDns {
     pub connections: Option<MetricsDnsConnections>,
     /// Query log entries dropped per second (the ring was full or the disk failed).
     pub log_dropped_per_second: f64,
+    // WP10.4: the recursive resolver's figures.
+    /// The recursive resolver: the validation outcomes and the queries it sent to
+    /// authorities; absent while recursion is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recursion: Option<MetricsDnsRecursion>,
 }
+
+/// The recursive resolver in a sample (recursion plan section 2.11).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsRecursion {
+    /// Queries sent to authorities per second (`tenko_dns_authority_queries_total`), the
+    /// validator's DS and DNSKEY queries included.
+    pub subqueries_per_second: f64,
+    /// Validation outcomes per second.
+    pub validation: MetricsDnsValidation,
+}
+
+/// DNSSEC validation outcomes per second, by state (`tenko_dns_validation_total`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsDnsValidation {
+    /// Answers proven secure.
+    pub secure: f64,
+    /// Answers proven insecure (no chain of trust, or a negative trust anchor).
+    pub insecure: f64,
+    /// Answers that failed validation (SERVFAIL unless the client set CD).
+    pub bogus: f64,
+    /// Answers no trust anchor covers.
+    pub indeterminate: f64,
+}
+// WP10.4: end.
 
 /// Queries answered per second by transport.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]

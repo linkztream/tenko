@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyHistory, pushSnapshot, ratioBuckets, windowRatio, type MetricsDns, type MetricsHistory, type MetricsSample } from "./metrics";
+import { emptyHistory, pushSnapshot, ratioBuckets, RECURSION_TILES, tileValue, VALIDATION_STATES, windowRatio, type MetricsDns, type MetricsHistory, type MetricsSample } from "./metrics";
 
 function dns(hits: number, misses: number, noerror = 0, nxdomain = 0): MetricsDns {
   return {
@@ -90,5 +90,42 @@ describe("ratioBuckets", () => {
     const buckets = ratioBuckets(historyOf([dns(0, 0, 3, 1)]), 5, 12, "dns-answers");
     expect(buckets[11]).toBe(0.75);
     expect(buckets[10]).toBeNull();
+  });
+});
+
+// WP10.4: the tiles of the recursive resolver.
+describe("tileValue of the recursion tiles", () => {
+  const recursion = { subqueries_per_second: 320, validation: { secure: 48, insecure: 31, bogus: 0.5, indeterminate: 1.25 } };
+
+  it("names the two tiles and the three outcomes the validation tile lists", () => {
+    expect([...RECURSION_TILES]).toEqual(["dns-subqueries", "dns-validation"]);
+    expect([...VALIDATION_STATES]).toEqual(["secure", "insecure", "bogus"]);
+  });
+
+  it("gives the sub-queries per second as they are", () => {
+    expect(tileValue("dns-subqueries", sample({ ...dns(0, 0), recursion }))).toBe(320);
+    expect(tileValue("dns-subqueries", sample({ ...dns(0, 0), recursion: { ...recursion, subqueries_per_second: 0 } }))).toBe(0);
+  });
+
+  it("gives the validation tile the sum of all four outcomes, the indeterminate ones included", () => {
+    expect(tileValue("dns-validation", sample({ ...dns(0, 0), recursion }))).toBe(80.75);
+    expect(tileValue("dns-validation", sample({ ...dns(0, 0), recursion: { ...recursion, validation: { secure: 0, insecure: 0, bogus: 0, indeterminate: 3 } } }))).toBe(3);
+    expect(tileValue("dns-validation", sample({ ...dns(0, 0), recursion: { ...recursion, validation: { secure: 0, insecure: 0, bogus: 0, indeterminate: 0 } } }))).toBe(0);
+  });
+
+  it("gives nothing without the resolver, without a DNS part or without a sample", () => {
+    expect(tileValue("dns-subqueries", sample(dns(1, 1)))).toBeNull();
+    expect(tileValue("dns-validation", sample(dns(1, 1)))).toBeNull();
+    expect(tileValue("dns-subqueries", sample({ ...dns(1, 1), recursion: null }))).toBeNull();
+    expect(tileValue("dns-validation", sample({ ...dns(1, 1), recursion: null }))).toBeNull();
+    expect(tileValue("dns-subqueries", sample(null))).toBeNull();
+    expect(tileValue("dns-validation", sample(null))).toBeNull();
+  });
+
+  it("leaves the other DNS tiles to their own values", () => {
+    const part = { ...dns(3, 1, 4, 0), recursion };
+    expect(tileValue("dns-queries", sample(part))).toBe(4);
+    expect(tileValue("dns-cache", sample(part))).toBe(75);
+    expect(tileValue("dns-upstreams", sample(part))).toBe(0);
   });
 });

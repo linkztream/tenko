@@ -104,6 +104,17 @@ function dnsPart(second: number): Dns {
     ],
     connections: { dot: 6 + (second % 5), doh: 3 },
     log_dropped_per_second: 0,
+    // WP10.4: the recursive resolver: sub-queries to authorities and the validation outcomes.
+    recursion: {
+      subqueries_per_second: round(wave(320, 0.3, 24, second, 2)),
+      validation: {
+        secure: round(wave(48, 0.35, 28, second, 6)),
+        insecure: round(wave(31, 0.3, 19, second, 1)),
+        bogus: second % 90 < 4 ? round(wave(0.6, 0.5, 5, second)) : 0,
+        indeterminate: round(wave(1.4, 0.8, 22, second, 8)),
+      },
+    },
+    // WP10.4: end.
   };
 }
 

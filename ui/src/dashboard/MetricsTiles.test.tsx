@@ -425,6 +425,136 @@ describe("DNS tiles", () => {
   });
 });
 
+// WP10.4: the tiles of the recursive resolver, beside the upstream tile while the sample's DNS
+// part carries `recursion`. A sample without it keeps the six DNS tiles above.
+const RECURSION_TILES = ["dns-subqueries", "dns-validation"];
+/** The DNS tiles of a sample that carries `recursion`: the two new ones follow the upstreams. */
+const DNS_TILES_WITH_RECURSION = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", ...RECURSION_TILES, "dns-encrypted"];
+
+function recursionPart(patch: Partial<NonNullable<MetricsDns["recursion"]>> = {}): NonNullable<MetricsDns["recursion"]> {
+  return {
+    subqueries_per_second: 320,
+    validation: { secure: 48, insecure: 31, bogus: 0.5, indeterminate: 1.25 },
+    ...patch,
+  };
+}
+
+describe("recursion tiles", () => {
+  it("are not shown while the sample's DNS part has no recursion, whether it is absent or null", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const without = sample(1, { dns: dnsPart() });
+    send(source, snapshot([without], without));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    for (const name of RECURSION_TILES) expect(screen.queryByTestId(`metrics-tile-${name}`)).toBeNull();
+    expect(screen.queryAllByTestId("metrics-dns-validation")).toHaveLength(0);
+    const nulled = sample(1, { dns: dnsPart({ recursion: null }) });
+    send(source, snapshot([nulled], nulled));
+    await waitFor(() => expect(tile("dns-queries").dataset.value).toBe("1250"));
+    for (const name of RECURSION_TILES) expect(screen.queryByTestId(`metrics-tile-${name}`)).toBeNull();
+    expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-dns']")].map((el) => el.getAttribute("data-testid"))).toEqual(
+      DNS_TILES.map((name) => `metrics-tile-${name}`),
+    );
+  });
+
+  it("follow the upstream tile with the sub-queries and the validation outcomes, before the encrypted connections", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    for (const rate of [200, 260, 320]) {
+      const own = sample(1, { dns: dnsPart({ recursion: recursionPart({ subqueries_per_second: rate }) }) });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("dns-subqueries").dataset.value).toBe("320"));
+    expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-']")].map((el) => el.getAttribute("data-testid"))).toEqual(
+      ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...DNS_TILES_WITH_RECURSION].map((name) => `metrics-tile-${name}`),
+    );
+    expect(tile("dns-subqueries").querySelector("h4")?.textContent).toBe("Sub-queries");
+    expect(tile("dns-subqueries").textContent).toContain("320");
+    expect(tile("dns-subqueries").textContent).toContain("/s");
+    expect(tile("dns-subqueries").textContent).toContain("Queries to authorities, validation included");
+    expect(screen.getByTestId("metrics-sparkline-dns-subqueries").dataset.points).toBe("3");
+    expect(screen.getByTestId("metrics-sparkline-dns-subqueries").querySelector("title")?.textContent).toContain("Sub-queries over the last minute");
+  });
+
+  it("show the outcomes validated per second in total, a row each for secure, insecure and bogus, and the indeterminate rate in the footer", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart({ recursion: recursionPart() }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-validation").dataset.value).toBe("80.75"));
+    expect(tile("dns-validation").querySelector("h4")?.textContent).toBe("Validation");
+    const rows = within(tile("dns-validation")).getAllByTestId("metrics-dns-validation");
+    expect(rows.map((row) => [row.dataset.state, row.dataset.rate])).toEqual([
+      ["secure", "48"],
+      ["insecure", "31"],
+      ["bogus", "0.5"],
+    ]);
+    expect(rows[0]?.textContent).toBe("Secure48/s");
+    expect(rows[1]?.textContent).toBe("Insecure31/s");
+    expect(rows[2]?.textContent).toBe("Bogus0.5/s");
+    expect(tile("dns-validation").textContent).toContain("Indeterminate 1.3/s");
+    // The list sits inside the chart area, as the lists of the other DNS tiles do.
+    expect(within(tile("dns-validation").querySelector<HTMLElement>(".metrics-chart")!).getAllByTestId("metrics-dns-validation")).toHaveLength(3);
+  });
+
+  it("show a resolver that has validated nothing as zero, not as missing", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, {
+      dns: dnsPart({ recursion: recursionPart({ subqueries_per_second: 0, validation: { secure: 0, insecure: 0, bogus: 0, indeterminate: 0 } }) }),
+    });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-validation").dataset.value).toBe("0"));
+    expect(tile("dns-subqueries").dataset.value).toBe("0");
+    expect(within(tile("dns-validation")).getAllByTestId("metrics-dns-validation").map((row) => row.dataset.rate)).toEqual(["0", "0", "0"]);
+    expect(tile("dns-validation").textContent).toContain("Indeterminate 0/s");
+  });
+
+  it("have the shape of the other tiles", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart({ recursion: recursionPart() }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-validation").dataset.value).toBe("80.75"));
+    for (const el of screen.getAllByTestId(/^metrics-tile-/)) expect(parts(el), el.dataset.testid).toEqual(SHAPE);
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("go when the resolver stops reporting", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const running = sample(1, { dns: dnsPart({ recursion: recursionPart() }) });
+    send(source, snapshot([running], running));
+    await waitFor(() => expect(tile("dns-subqueries").dataset.value).toBe("320"));
+    const stopped = sample(1, { dns: dnsPart() });
+    send(source, snapshot([stopped], stopped));
+    await waitFor(() => expect(screen.queryByTestId("metrics-tile-dns-subqueries")).toBeNull());
+    expect(screen.queryByTestId("metrics-tile-dns-validation")).toBeNull();
+    expect(tile("dns-upstreams")).toBeTruthy();
+  });
+
+  it("speak Swedish", async () => {
+    await setLocale("sv");
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { dns: dnsPart({ recursion: recursionPart() }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("dns-subqueries").dataset.value).toBe("320"));
+    expect(tile("dns-subqueries").querySelector("h4")?.textContent).toBe("Delfrågor");
+    expect(tile("dns-subqueries").textContent).toContain("Frågor till auktoritativa servrar, validering inräknad");
+    expect(tile("dns-validation").querySelector("h4")?.textContent).toBe("Validering");
+    expect(within(tile("dns-validation")).getAllByTestId("metrics-dns-validation").map((row) => row.querySelector("span")?.textContent)).toEqual([
+      "Säker",
+      "Osäker",
+      "Ogiltig",
+    ]);
+    expect(tile("dns-validation").textContent).toContain("Obestämd 1,3/s");
+  });
+});
+
 // WP8.7: the DHCP tiles.
 function dhcpPart(patch: Partial<MetricsDhcp> = {}): MetricsDhcp {
   return {

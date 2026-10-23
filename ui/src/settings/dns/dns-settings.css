@@ -9,3 +9,7 @@
 .dns-cache-form { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
 .dns-cache-actions, .dns-cache-paging { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
 .dns-cache-data { overflow-wrap: anywhere; }
+/* WP10.4: the infrastructure cache, a card per zone cut. */
+.dns-infra-cuts { display: grid; gap: var(--sp-4); }
+.dns-infra-zone { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-3); font-size: var(--fs-14); }
+.dns-infra-table .nowrap { white-space: nowrap; }

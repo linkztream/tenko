@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="setup-recursion">
+      <unit id="setup.dns.resolve">
+        <notes><note category="description">Heading of the choice between recursion and forwarding in the DNS step.</note></notes>
+        <segment><source>How names are resolved</source><target>Hur namn slås upp</target></segment>
+      </unit>
+      <unit id="setup.dns.resolve.recurse">
+        <segment><source>Resolve names yourself (recommended)</source><target>Slå upp namn själv (rekommenderas)</target></segment>
+      </unit>
+      <unit id="setup.dns.resolve.recurse_description">
+        <segment><source>Tenko asks the root servers and each zone's authorities itself and validates the answers with DNSSEC. No upstream to choose.</source><target>Tenko frågar rotservrarna och varje zons auktoritativa servrar själv och validerar svaren med DNSSEC. Ingen uppströmsserver att välja.</target></segment>
+      </unit>
+      <unit id="setup.dns.resolve.forward">
+        <segment><source>Forward to a resolver of your choice</source><target>Vidarebefordra till en resolver som du väljer</target></segment>
+      </unit>
+      <unit id="setup.dns.resolve.forward_description">
+        <segment><source>Every name outside your zones goes to the resolvers you enter below, over plain DNS, DNS over TLS or DNS over HTTPS.</source><target>Varje namn utanför dina zoner går till resolvrarna som du anger nedan, via vanlig DNS, DNS över TLS eller DNS över HTTPS.</target></segment>
+      </unit>
+      <unit id="setup.dns.privacy">
+        <notes><note category="description">The privacy sentence of the recursion plan's section 2.8 in the first-run wizard.</note></notes>
+        <segment><source>Resolving yourself sends each name to the authorities of its zone, each of which sees only its own names; forwarding sends every name to one resolver, which sees them all. Neither path to the authorities is encrypted today; DNS over TLS protects only the path to the resolver.</source><target>Att slå upp själv skickar varje namn till den zonens auktoritativa servrar, som var och en bara ser sina egna namn; vidarebefordran skickar varje namn till en resolver, som ser dem alla. Ingen av vägarna till de auktoritativa servrarna är krypterad i dag; DNS över TLS skyddar bara vägen till resolvern.</target></segment>
+      </unit>
+      <unit id="setup.done.dns_recurse">
+        <segment><source>Resolved by Tenko itself</source><target>Slås upp av Tenko själv</target></segment>
+      </unit>
+      <unit id="setup.result.dns.recurse">
+        <segment><source>Tenko resolves names itself; no forwarding rule was written. The forwarders page can add one at any time.</source><target>Tenko slår upp namn själv; ingen vidarebefordringsregel skrevs. Sidan för vidarebefordrare kan lägga till en när som helst.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

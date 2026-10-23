@@ -1716,7 +1716,7 @@ export interface paths {
         put?: never;
         /**
          * Create a forwarding rule
-         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until WP10.4 builds it, `mode: recurse` answers 501 and writes nothing.
+         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream, no transport and no `tls_name` and resolves the names under its suffix from the root servers; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers and stays on for a recurse rule.
          */
         post: operations["create_dns_forwarder"];
         delete?: never;
@@ -1748,7 +1748,7 @@ export interface paths {
         head?: never;
         /**
          * Change a forwarding rule
-         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until WP10.4 builds it, `mode: recurse` answers 501 and changes nothing.
+         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. A rule turned to `mode: recurse` drops its upstreams and its `tls_name` in the same change (`upstreams: []`, `tls_name: ""`, `transport: plain`).
          */
         patch: operations["update_dns_forwarder"];
         trace?: never;
@@ -2020,7 +2020,7 @@ export interface paths {
         put?: never;
         /**
          * Create a DNS view
-         * @description Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list. `resolution` (`recurse`, `forward` or `refuse`) says how the view's clients get names outside the zones and the forwarding rules; until the resolver is built, a value answers 501 and writes nothing.
+         * @description Scope: `dns.write`. The view goes to `order` (from 1) and the views from there move one down; a position past the end is the end. Every zone scope of `scope_map` must exist, weights are 1 to 1000, and `recursion` names an access list. `resolution` (`recurse`, `forward` or `refuse`) says how the view's clients get names outside the zones and the forwarding rules; absent, the view follows the profile's default (`profile_resolution` in the answer).
          */
         post: operations["create_dns_view"];
         delete?: never;
@@ -2052,7 +2052,7 @@ export interface paths {
         head?: never;
         /**
          * Change a DNS view
-         * @description Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it. `resolution` sets how the view's clients get names outside the zones and the forwarding rules and `default_resolution` clears it; until the resolver is built, either answers 501 and changes nothing.
+         * @description Scope: `dns.write`. `rules` and `scope_map` replace the view's; `order` moves the view and the others make room; `default_recursion` makes the view follow the profile's default; an empty `description` clears it. `resolution` sets how the view's clients get names outside the zones and the forwarding rules and `default_resolution` clears it, so that the view follows the profile's default again.
          */
         patch: operations["update_dns_view"];
         trace?: never;
@@ -10822,6 +10822,7 @@ export interface components {
             queries_per_second: number;
             /** @description Answers per second by RCODE. */
             rcodes: components["schemas"]["MetricsDnsRcodes"];
+            recursion?: components["schemas"]["MetricsDnsRecursion"] | null;
             /** @description Queries answered per second by transport. */
             transports: components["schemas"]["MetricsDnsTransports"];
             /** @description The exchanges with upstream resolvers. */
@@ -10906,6 +10907,17 @@ export interface components {
              */
             servfail: number;
         };
+        /** @description The recursive resolver in a sample (recursion plan section 2.11). */
+        MetricsDnsRecursion: {
+            /**
+             * Format: double
+             * @description Queries sent to authorities per second (`tenko_dns_authority_queries_total`), the
+             *     validator's DS and DNSKEY queries included.
+             */
+            subqueries_per_second: number;
+            /** @description Validation outcomes per second. */
+            validation: components["schemas"]["MetricsDnsValidation"];
+        };
         /** @description Queries answered per second by transport. */
         MetricsDnsTransports: {
             /**
@@ -10942,6 +10954,29 @@ export interface components {
              * @description Exchanges with upstreams per second, whatever their outcome.
              */
             queries_per_second: number;
+        };
+        /** @description DNSSEC validation outcomes per second, by state (`tenko_dns_validation_total`). */
+        MetricsDnsValidation: {
+            /**
+             * Format: double
+             * @description Answers that failed validation (SERVFAIL unless the client set CD).
+             */
+            bogus: number;
+            /**
+             * Format: double
+             * @description Answers no trust anchor covers.
+             */
+            indeterminate: number;
+            /**
+             * Format: double
+             * @description Answers proven insecure (no chain of trust, or a negative trust anchor).
+             */
+            insecure: number;
+            /**
+             * Format: double
+             * @description Answers proven secure.
+             */
+            secure: number;
         };
         /** @description The ingest of observations in a sample. */
         MetricsIngest: {
@@ -14186,6 +14221,11 @@ export interface components {
         Page_ViewItem: {
             /** @description The items of this page, at most `limit` of them. */
             items: (components["schemas"]["View"] & {
+                /**
+                 * @description The resolution the view follows when `resolution` is absent: the profile's default
+                 *     (`recurse` under every profile; a node whose resolver is off forwards instead).
+                 */
+                profile_resolution: components["schemas"]["ResolutionMode"];
                 /** @description The store revision of the row. */
                 revision: components["schemas"]["Revision"];
             })[];
@@ -19704,6 +19744,11 @@ export interface components {
         ViewId: string;
         /** @description A view as the API reads it. */
         ViewItem: components["schemas"]["View"] & {
+            /**
+             * @description The resolution the view follows when `resolution` is absent: the profile's default
+             *     (`recurse` under every profile; a node whose resolver is off forwards instead).
+             */
+            profile_resolution: components["schemas"]["ResolutionMode"];
             /** @description The store revision of the row. */
             revision: components["schemas"]["Revision"];
         };
@@ -19711,10 +19756,7 @@ export interface components {
         ViewPatch: {
             /** @description Follow the profile's default for recursion (clears `recursion`, WP6.4). */
             default_recursion?: boolean;
-            /**
-             * @description Follow the profile's default for the resolution (clears `resolution`). Until WP10.4
-             *     `true` answers 501.
-             */
+            /** @description Follow the profile's default for the resolution (clears `resolution`). */
             default_resolution?: boolean;
             /** @description Free text; an empty string clears it. */
             description?: string | null;
@@ -29060,15 +29102,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `mode` is `recurse`, which is not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     get_dns_forwarder: {
@@ -29265,15 +29298,6 @@ export interface operations {
             };
             /** @description The rule changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description `mode` is `recurse`, which is not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -30542,15 +30566,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `resolution` is set, which is not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     get_dns_view: {
@@ -30756,15 +30771,6 @@ export interface operations {
             };
             /** @description The view changed since it was read (`If-Match`) */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description `resolution` or `default_resolution` is set, which is not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

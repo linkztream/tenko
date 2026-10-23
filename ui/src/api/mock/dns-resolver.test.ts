@@ -404,3 +404,71 @@ describe("resolverStatus", () => {
     expect(status.problems).not.toBe(state.problems);
   });
 });
+
+// WP10.4: the mode and the validation of a forwarding rule.
+describe("forwarding rule mode and validation", () => {
+  const recurse = (over: Record<string, unknown> = {}) => ({ suffix: "rec.example.test", mode: "recurse", ...over });
+  const refused = (fn: () => unknown) => {
+    const f = failure(fn);
+    expect(f.status).toBe(400);
+    expect(f.code).toBe("dns.forwarder.invalid");
+    return f.params;
+  };
+
+  it("gives every rule both fields, the seed rule forwards and validates", () => {
+    expect(findForwarder(state, CORP)).toMatchObject({ mode: "forward", validate: true });
+    expect(createForwarder(state, ctx, ruleBody())).toMatchObject({ mode: "forward", validate: true });
+    expect(listForwarders(state).every((r) => r.mode === "forward" && r.validate === true)).toBe(true);
+  });
+
+  it("creates a forward rule that relays unvalidated and a recurse rule without upstreams", () => {
+    expect(createForwarder(state, ctx, ruleBody({ validate: false }))).toMatchObject({ mode: "forward", validate: false });
+    const rule = createForwarder(state, ctx, recurse());
+    expect(rule).toMatchObject({ mode: "recurse", validate: true, transport: "plain", tls_name: null, upstreams: [] });
+    expect(listForwarders(state).find((r) => r.id === rule.id)?.upstream_status).toEqual([]);
+  });
+
+  it("refuses a recurse rule that names upstreams, a transport, a TLS name or no validation", () => {
+    expect(refused(() => createForwarder(state, ctx, recurse({ upstreams: [{ address: "192.0.2.1" }] })))).toEqual({
+      field: "upstreams",
+      reason: "a recurse rule names no upstream",
+    });
+    expect(refused(() => createForwarder(state, ctx, recurse({ transport: "dot" })))).toMatchObject({ field: "transport" });
+    expect(refused(() => createForwarder(state, ctx, recurse({ tls_name: "dns.example.test" })))).toMatchObject({ field: "tls_name" });
+    expect(refused(() => createForwarder(state, ctx, recurse({ validate: false })))).toMatchObject({ field: "validate" });
+    expect(state.forwarders).toHaveLength(1);
+  });
+
+  it("refuses a forward rule without upstreams and an unknown mode", () => {
+    expect(refused(() => createForwarder(state, ctx, { suffix: "x.example.test", mode: "forward" }))).toMatchObject({ field: "upstreams" });
+    expect(refused(() => createForwarder(state, ctx, ruleBody({ mode: "iterate" })))).toMatchObject({ field: "mode" });
+    expect(refused(() => createForwarder(state, ctx, ruleBody({ validate: "no" })))).toMatchObject({ field: "validate" });
+  });
+
+  it("turns a forward rule into a recurse rule when the patch clears what a recurse rule may not have", () => {
+    const rule = createForwarder(state, ctx, ruleBody({ transport: "dot", tls_name: "dns.example.test" }));
+    // The mode alone leaves the upstreams, the transport and the TLS name in place.
+    expect(refused(() => updateForwarder(state, ctx, rule.id, { mode: "recurse" }, null))).toMatchObject({ field: "upstreams" });
+    expect(refused(() => updateForwarder(state, ctx, rule.id, { mode: "recurse", upstreams: [] }, null))).toMatchObject({ field: "transport" });
+    expect(refused(() => updateForwarder(state, ctx, rule.id, { mode: "recurse", upstreams: [], transport: "plain" }, null))).toMatchObject({
+      field: "tls_name",
+    });
+    const next = updateForwarder(state, ctx, rule.id, { mode: "recurse", upstreams: [], tls_name: "", transport: "plain" }, null);
+    expect(next).toMatchObject({ mode: "recurse", validate: true, upstreams: [], tls_name: null, transport: "plain" });
+    expect(findForwarder(state, rule.id)).toBe(next);
+  });
+
+  it("turns a recurse rule back into a forward rule only with upstreams, and keeps validate=false off a recurse rule", () => {
+    const rule = createForwarder(state, ctx, recurse());
+    expect(refused(() => updateForwarder(state, ctx, rule.id, { validate: false }, null))).toMatchObject({ field: "validate" });
+    expect(refused(() => updateForwarder(state, ctx, rule.id, { mode: "forward" }, null))).toMatchObject({ field: "upstreams" });
+    const back = updateForwarder(state, ctx, rule.id, { mode: "forward", upstreams: [{ address: "192.0.2.53" }], validate: false }, null);
+    expect(back).toMatchObject({ mode: "forward", validate: false, upstreams: [{ address: "192.0.2.53" }] });
+  });
+
+  it("changes validate on a forward rule and keeps the mode a patch leaves out", () => {
+    expect(updateForwarder(state, ctx, CORP, { validate: false }, null)).toMatchObject({ mode: "forward", validate: false });
+    expect(updateForwarder(state, ctx, CORP, { description: "x" }, null)).toMatchObject({ mode: "forward", validate: false });
+  });
+});
+// WP10.4: end.

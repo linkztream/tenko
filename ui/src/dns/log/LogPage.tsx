@@ -19,6 +19,8 @@ import { DnsNav } from "../DnsNav";
 import { DnsProblem, unavailable } from "../Parts";
 import { logNodes, nodeDns, readLog, switchLog, type QueryLogLine, type QueryLogStatus } from "./api";
 import { checkFilters, clientKind, filtered, NO_FILTERS, PAGE_SIZE, RCODES, rcodeName, toQuery, type FilterProblem, type LogFilters } from "./model";
+// WP10.4: the validation state and the extended error.
+import { byValidation, edeName, VALIDATION_STATES, type ValidationState } from "./model";
 import "../dns.css";
 import "./log.css";
 
@@ -69,6 +71,36 @@ function Resolution(props: { line: QueryLogLine }) {
 }
 // WP10.1: end.
 
+// WP10.4: the validation state of the answer and its extended error; a line written before
+// they were logged shows nothing, and a state this version does not know is shown as written.
+function Validation(props: { line: QueryLogLine }) {
+  const word = () => VALIDATION_STATES.find((known) => known === props.line.validation);
+  return (
+    <Show when={props.line.validation}>
+      {(raw) => (
+        <span class="tag" classList={{ conflict: raw() === "bogus" }} data-testid="dns-log-validation" data-state={raw()}>
+          <Show when={word()} fallback={raw()}>
+            {(known) => t(`dns.log.validation.${known()}`)}
+          </Show>
+        </span>
+      )}
+    </Show>
+  );
+}
+
+function Ede(props: { line: QueryLogLine }) {
+  return (
+    <Show when={props.line.ede}>
+      {(code) => (
+        <span class="mono" data-testid="dns-log-ede" data-code={code()} title={edeName(code())}>
+          {edeName(code()) ? t("dns.log.ede", { code: code(), name: edeName(code()) ?? "" }) : String(code())}
+        </span>
+      )}
+    </Show>
+  );
+}
+// WP10.4: end.
+
 function Client(props: { line: QueryLogLine }) {
   const kind = () => clientKind(props.line);
   return (
@@ -99,6 +131,9 @@ function Lines(props: { lines: QueryLogLine[] }) {
               {t("dns.log.col.subqueries")}
             </th>
             {/* WP10.1: end. */}
+            {/* WP10.4: the validation state and the extended error. */}
+            <th scope="col">{t("dns.log.col.validation")}</th>
+            <th scope="col">{t("dns.log.col.ede")}</th>
             <th scope="col" class="r">
               {t("dns.log.col.latency")}
             </th>
@@ -133,6 +168,13 @@ function Lines(props: { lines: QueryLogLine[] }) {
                   <Show when={line.subqueries}>{(count) => formatNumber(count())}</Show>
                 </td>
                 {/* WP10.1: end. */}
+                {/* WP10.4: the validation state and the extended error. */}
+                <td data-col="validation">
+                  <Validation line={line} />
+                </td>
+                <td data-col="ede" class="nowrap">
+                  <Ede line={line} />
+                </td>
                 <td data-col="latency" class="r nowrap">
                   {t("dns.log.latency", { ms: formatNumber(line.duration_micros / 1000, { maximumFractionDigits: 2 }) })}
                 </td>
@@ -164,6 +206,9 @@ export default function LogPage() {
   const [status, { refetch: refetchStatus }] = createResource(node, (id) => nodeDns(id));
   const log = () => (status.error ? undefined : status.latest?.query_log ?? undefined);
 
+  // WP10.4: the validation state the lines of the page shown are narrowed to (the node's log
+  // read has no such filter, so it applies to the page as read).
+  const [validation, setValidation] = createSignal<ValidationState | "">("");
   // The form as typed, and the filters of the pages shown.
   const [draft, setDraft] = createSignal<LogFilters>({ ...NO_FILTERS });
   const [applied, setApplied] = createSignal<LogFilters>({ ...NO_FILTERS });
@@ -356,6 +401,24 @@ export default function LogPage() {
                       <For each={RCODES}>{([code, name]) => <option value={String(code)}>{name}</option>}</For>
                     </select>
                   </div>
+                  {/* WP10.4: the validation state, applied to the page shown at once. */}
+                  <div class="field">
+                    <label for="dns-log-validation">{t("dns.log.filter.validation")}</label>
+                    <select
+                      id="dns-log-validation"
+                      class="select"
+                      value={validation()}
+                      aria-describedby="dns-log-validation-help"
+                      data-testid="field-validation"
+                      onChange={(event) => setValidation(event.currentTarget.value as ValidationState | "")}
+                    >
+                      <option value="">{t("dns.log.filter.validation_any")}</option>
+                      <For each={VALIDATION_STATES}>{(state) => <option value={state}>{t(`dns.log.validation.${state}`)}</option>}</For>
+                    </select>
+                    <span class="help" id="dns-log-validation-help">
+                      {t("dns.log.filter.validation_help")}
+                    </span>
+                  </div>
                   <div class="field">
                     <label for="dns-log-from">{t("dns.log.filter.from")}</label>
                     <input id="dns-log-from" type="datetime-local" class="input" value={draft().from} data-testid="field-from" onInput={field("from")} />
@@ -401,7 +464,17 @@ export default function LogPage() {
                         </div>
                       }
                     >
-                      <Lines lines={current().items} />
+                      {/* WP10.4: narrowed to the validation state chosen. */}
+                      <Show
+                        when={byValidation(current().items, validation()).length > 0}
+                        fallback={
+                          <div class="empty" data-testid="dns-log-empty-validation">
+                            <h3>{t("dns.log.empty_validation")}</h3>
+                          </div>
+                        }
+                      >
+                        <Lines lines={byValidation(current().items, validation())} />
+                      </Show>
                     </Show>
                   )}
                 </Show>

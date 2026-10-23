@@ -220,7 +220,8 @@ describe("dnsPreset and profileCacheEntries", () => {
 });
 
 function state(extra: Partial<DnsStepState> = {}): DnsStepState {
-  return { upstreams: "", transport: "plain", tlsName: "", ...dnsPreset("home"), touched: false, ...extra };
+  // WP10.4: these cases forward to the upstreams they type.
+  return { resolve: "forward", upstreams: "", transport: "plain", tlsName: "", ...dnsPreset("home"), touched: false, ...extra };
 }
 
 describe("dnsChoice", () => {

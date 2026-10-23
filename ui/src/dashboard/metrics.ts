@@ -93,7 +93,25 @@ function dhcpValue(name: DhcpTileName, dhcp: MetricsDhcp): number | null {
       return dhcp.ddns.written;
   }
 }
-export type TileName = (typeof TILES)[number] | DnsTileName | DhcpTileName;
+// WP10.4: the recursive resolver's tiles beside the upstream tile, while the sample's DNS part
+// has `recursion` (the resolver runs): the queries it sent to authorities per second, and the
+// validation outcomes per second (secure, insecure and bogus; indeterminate counts in the total).
+export const RECURSION_TILES = ["dns-subqueries", "dns-validation"] as const;
+export type RecursionTileName = (typeof RECURSION_TILES)[number];
+
+/** The validation outcomes a tile names, in their order. */
+export const VALIDATION_STATES = ["secure", "insecure", "bogus"] as const;
+
+function recursionValue(name: RecursionTileName, dns: MetricsDns): number | null {
+  const r = dns.recursion;
+  if (!r) return null;
+  if (name === "dns-subqueries") return r.subqueries_per_second;
+  const v = r.validation;
+  return v.secure + v.insecure + v.bogus + v.indeterminate;
+}
+// WP10.4: end.
+
+export type TileName = (typeof TILES)[number] | DnsTileName | DhcpTileName | RecursionTileName;
 
 /** The RCODEs of the answers tile, in the order they are listed. */
 export const RCODES = ["noerror", "nxdomain", "servfail", "refused", "other"] as const;
@@ -118,7 +136,8 @@ export function topLists(dns: MetricsDns): MetricsDns["blocked"] {
 }
 
 function isDnsTile(name: TileName): name is DnsTileName {
-  return name.startsWith("dns-");
+  // WP10.4: the recursion tiles are DNS tiles with values of their own.
+  return name.startsWith("dns-") && !(RECURSION_TILES as readonly string[]).includes(name);
 }
 
 function dnsValue(name: DnsTileName, dns: MetricsDns): number | null {
@@ -157,6 +176,8 @@ export function droppedBatches(sample: MetricsSample): number | null {
 /** The number a tile shows for a sample; null when the sample has none. */
 export function tileValue(name: TileName, sample: MetricsSample): number | null {
   if (isDnsTile(name)) return sample.dns ? dnsValue(name, sample.dns) : null;
+  // WP10.4: the recursion tiles.
+  if (name === "dns-subqueries" || name === "dns-validation") return sample.dns ? recursionValue(name, sample.dns) : null;
   // WP8.7: the DHCP tiles.
   if (isDhcpTile(name)) return sample.dhcp ? dhcpValue(name, sample.dhcp) : null;
   switch (name) {

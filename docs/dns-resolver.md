@@ -50,12 +50,14 @@ The rule for a name is the one with the longest suffix; at the same length a rul
 | Route | Operation | Scope |
 |---|---|---|
 | `GET /api/v1/dns/forwarders` | `list_dns_forwarders` | `dns.read`: the rules by suffix, the root first; paged with `cursor` and `limit` |
-| `POST /api/v1/dns/forwarders` | `create_dns_forwarder` | `dns.write`: `suffix`, `upstreams[]` (`address`, `port`, `path`), `transport`, `tls_name`, `view`, `description` |
+| `POST /api/v1/dns/forwarders` | `create_dns_forwarder` | `dns.write`: `suffix`, `upstreams[]` (`address`, `port`, `path`), `transport`, `tls_name`, `view`, `description`, `mode` (`forward`, the default, or `recurse`), `validate` (default `true`) |
 | `GET /api/v1/dns/forwarders/{id}` | `get_dns_forwarder` | `dns.read`, with the `ETag` of the row |
 | `PATCH /api/v1/dns/forwarders/{id}` | `update_dns_forwarder` | `dns.write`, `If-Match` optional; an empty `tls_name` or `description` clears it, `all_views: true` makes the rule apply in every view |
 | `DELETE /api/v1/dns/forwarders/{id}` | `delete_dns_forwarder` | `dns.write`, `If-Match` optional |
 
-Errors: `dns.forwarder.invalid` (400, parameters `field` and `reason`: no upstream or more than 16, a DoT or DoH rule without `tls_name`, a path on a plain or DoT upstream or one that does not start with `/`, port 0, a view that does not exist, a second rule for the same suffix and view), `dns.forwarder.not_found` (404), 412 for a stale `If-Match`. Each change is an inline job with its audit record (`dns.forwarder.create`, `dns.forwarder.update`, `dns.forwarder.delete`, the suffix in the context). The role's catalog follows the rows through the feed: a change answers queries from the next revision the node applies, with no restart.
+A rule of mode `recurse` names no upstream: the names under its suffix are resolved from the root servers (section 10), so a root rule that forwards can have a recursing exception for one suffix, and the other way round. `validate: false` relays a forwarding rule's answers unvalidated, the escape hatch for an upstream that strips the DNSSEC signatures (`docs/dnssec.md` section 12); a recurse rule always validates. Turning a rule to `recurse` drops its upstreams in the same change (`upstreams: []`, `tls_name: ""`, `transport: plain`).
+
+Errors: `dns.forwarder.invalid` (400, parameters `field` and `reason`: no upstream or more than 16 on a forwarding rule, a DoT or DoH rule without `tls_name`, a path on a plain or DoT upstream or one that does not start with `/`, port 0, a view that does not exist, a second rule for the same suffix and view; a recurse rule with upstreams, a transport other than plain, a `tls_name` or `validate: false`), `dns.forwarder.not_found` (404), 412 for a stale `If-Match`. Each change is an inline job with its audit record (`dns.forwarder.create`, `dns.forwarder.update`, `dns.forwarder.delete`, the suffix in the context). The role's catalog follows the rows through the feed: a change answers queries from the next revision the node applies, with no restart.
 
 The command line: `tenko dns forwarder list|create|get|update|delete`. A rule is named by its identifier or its suffix (when one rule has it):
 
@@ -66,8 +68,11 @@ tenko dns forwarder create example.net --transport dot --tls-name resolver.examp
 tenko dns forwarder create corp.example.test --transport doh --tls-name dns.example.test \
   --upstream 192.0.2.80:443/dns-query
 tenko dns forwarder update example.net --all-views
+tenko dns forwarder create corp.example.test --recurse
 tenko dns forwarder delete corp.example.test
 ```
+
+**The forwarders page** (`/dns/forwarders`) lists the rules by suffix with the root rule first; a recurse rule shows **Recurse** in place of a transport and upstreams, a forwarding rule whose answers are not validated is marked so. The rule editor chooses the mode (**Forward to upstream resolvers** or **Resolve from the root servers**); for forwarding it takes the transport, the upstreams, the TLS name and the **Validate the answers with DNSSEC** switch. The preset **Forward everything to a DoT resolver** opens the root rule (or a new one) over DoT, with the well-known resolvers of section 4.2 as buttons to fill it and the privacy sentence beside it: recursion asks each zone's authorities, each of which sees only its own names, forwarding sends every name to one resolver, and DoT protects the path to that resolver, not what it sees. Below the rules, **Default resolution** shows how each view resolves the names no zone and no rule covers: recurse, forward to `[dns] forwarders`, refuse, or the profile's default (recurse under every profile, REC-Q2), which is shown beside it; the implicit default view follows the profile. Each view's choice is stored as its `resolution` (`PATCH /api/v1/dns/views/{id}` with `resolution`, or `default_resolution: true`; the view's answer carries `profile_resolution`), and on the command line `tenko dns view update <name> --resolution recurse|forward|refuse|default`. A root rule covers every name of its views, so there the default resolution is never reached, which the block says.
 
 A rule for a name inside a zone the node serves is never used: the zone answers first.
 
@@ -815,7 +820,7 @@ The lookup order of section 1 has one more route and one more default. A query p
 
 A `forward` resolution with no default forwarder is answered REFUSED with the extended error "Not Authoritative" (20); `refuse` is REFUSED with "Prohibited" (18). `[dns] forwarders` is therefore used only where a view says `forward`, or on a node whose resolver is off; it is never a silent default beside the resolver.
 
-A rule's `mode` and a view's `resolution` are rows of the store and the engine follows them, but the API of this slice still answers 501 to a request that sets `mode` to `recurse` or sets a view's `resolution`; they are built with the API and the command line (WP10.4, section 10.16). Until then the rules of the store are all forwarding rules, the views have no resolution, and a node recurses for every name its rules and stub zones do not cover.
+A rule's `mode` and a view's `resolution` are rows of the store and the engine follows them; they are set through the API, the command line and the forwarders page (section 2.1). A view without a `resolution` follows the profile's default, which recurses, so a node recurses for every name its rules and stub zones do not cover unless a view or a rule says otherwise.
 
 The engine's answers go into the cache that forwarded answers go into, and are served from it as any other: positive answers for the smallest TTL of their records, NXDOMAIN and NODATA with the SOA for the negative TTL (section 3.1). A query with CD set is resolved but its answer is not cached, so that data one client asked for with CD never reaches the entry other clients share. A resolution that fails with SERVFAIL answers a stale entry when the cache holds one (section 3.3). The prefetch of section 3.4 asks the engine for an entry the engine made. The answers carry the authority's records as they came, RRSIG records included for a client that asked with DO; AA and AD are clear, and RA is set.
 
@@ -966,7 +971,26 @@ Four routes and three node commands (`dns.recursion.prime`, `dns.infra.list`, `d
 | `trust_anchors` | The keys of the trust anchors with their RFC 5011 state and source |
 | `problems` | `priming_failed`, `clock` (the root's DNSKEY signatures fail on time: OPS-09) and `trust_anchor_stale` (a zone without a trusted key left). The node's own status (`GET /api/v1/nodes/{id}/dns`) names `dns.recursion.priming_failed` in its `problems` too |
 
-**The listing** takes `suffix` (the zone cuts at or below it), `limit` (1 to 1,000, default 200) and `cursor` (the `next_cursor` of the previous page), and answers the zone cuts sorted by name. Each cut has `zone`, `ds` (`unknown`, `secure`, `insecure` or `bogus`), `ttl` (seconds left) and its `servers`; each server has `name` and `addresses`; each address has `address`, `origin` (`hints`, `sibling_glue`, `glue` or `authoritative`), `ttl`, `srtt_ms`, `p50_ms`, `p99_ms`, `failures`, `down` (in back-off), `edns` (`true`, `false`, or absent when not learnt yet), `tcp_only`, `lame` (for this cut's zone), `lower_case` (asked in lower case) and `unwanted`. A malformed `suffix`, `cursor` or `limit` answers 400 `sys.invalid_value` with the field. The Recursion page of the DNS area (`/dns/recursion`) shows the status; the command line and the rest of the page are WP10.4.
+**The listing** takes `suffix` (the zone cuts at or below it), `limit` (1 to 1,000, default 200) and `cursor` (the `next_cursor` of the previous page), and answers the zone cuts sorted by name. Each cut has `zone`, `ds` (`unknown`, `secure`, `insecure` or `bogus`), `ttl` (seconds left) and its `servers`; each server has `name` and `addresses`; each address has `address`, `origin` (`hints`, `sibling_glue`, `glue` or `authoritative`), `ttl`, `srtt_ms`, `p50_ms`, `p99_ms`, `failures`, `down` (in back-off), `edns` (`true`, `false`, or absent when not learnt yet), `tcp_only`, `lame` (for this cut's zone), `lower_case` (asked in lower case) and `unwanted`. A malformed `suffix`, `cursor` or `limit` answers 400 `sys.invalid_value` with the field.
+
+**The Recursion page** of the DNS area (`/dns/recursion`) shows the status first: the hints source and date, the last priming with a **Prime now** button, the root servers with their SRTT, the infrastructure cache's sizes, the counters, and the validation counters (secure, insecure, bogus, indeterminate) with the anchor keys and their states. Then the trust anchors, one card per zone (the root first): each key with its tag, algorithm, form (a DS digest type or a DNSKEY), RFC 5011 state and since when, its source (shipped in a release, added by an operator, learned by RFC 5011) and when it was last seen, the zone's last and next query, and for those who hold `dns.keys` **Refresh now** (RFC 5011 at once), **Remove** after a confirmation and **Add a trust anchor** (a zone and a DS or DNSKEY record). The root is replaced or removed under the Lab profile only; elsewhere its actions give `dns.trust_anchor.root_protected` as the reason. Last, the negative trust anchors with their expiry (how long from now; one past its expiry shows as expired until the list is read again: the server lists only the living ones, and the leader service deletes the row at its next pass, once a minute), reason and creation time, a form that asks for the zone, a lifetime of at most seven days (`12h`, `2d`) and the reason, and a delete action. Both lists follow the `dns` topic.
+
+**The infrastructure cache browse** is the section **Infrastructure cache** of the DNS settings page (`/settings/dns`), beside the cache listing of section 3.7. It reads nothing until asked, then shows a card per zone cut a page at a time (50), with the zone filter: whether the delegation is signed, how long the cut stays, and per name server and address where the address came from, its SRTT and p99, its failures and its capabilities (EDNS or none, TCP only, lower case only, lame, unreachable). **Flush** empties the cuts at or below the zone typed, or everything (the root is primed again with the next query), after a confirmation. A node whose resolver is off says so.
+
+**The query log page** shows the columns **Validation** and **Extended error** (the RFC 8914 code with its registry name) beside **Resolution** and **Sub-queries**, and narrows the page shown to one validation state. **The start page** shows, while the resolver runs, the tiles **Sub-queries** (queries sent to authorities per second, the validator's included) and **Validation** (secure, insecure and bogus answers per second, indeterminate in the hint) beside the upstream tile, from the `recursion` part of the `metrics` samples (`tenko_dns_authority_queries_total` and `tenko_dns_validation_total`).
+
+**The first-run wizard**'s DNS step asks first how names are resolved: **Resolve names yourself** (the default) or **Forward to a resolver of your choice**, with the privacy sentence of the forwarders page. Only the second asks for the upstreams (one at least), their transport and TLS name, and writes them as the root forwarding rule after setup; the first writes no rule and the generated `[dns]` section has `forwarders = []`.
+
+**The command line:**
+
+```text
+tenko dns recursion status <node>
+tenko dns recursion prime <node>
+tenko dns recursion infra <node> [--suffix example.test]
+tenko dns recursion flush-infra <node> [--suffix example.test]
+tenko dns trust-anchor list|add <zone> --ds <digest>|--dnskey <record> [--replace-root]|remove <zone>|refresh <zone>
+tenko dns nta list|add <zone> --expires <duration> --reason <text>|remove <id>
+```
 
 ### 10.13 Metrics and the query log
 
@@ -1062,6 +1086,7 @@ The times are dig's from the client container through `docker compose exec`, abo
 |---|---|---|
 | The REVOKE bit of RFC 5011 in Tenko's own signer | later | The validator follows a revoked key (WP10.2), but the signer never sets the bit; the lab's round `rfc5011` therefore rolls a root that BIND's tools sign |
 | The command line and the rest of the UI | WP10.4 | No `tenko dns` command for the resolver. The API refuses a forwarding rule of mode `recurse` and a view's `resolution` (501), although the engine follows both when the rows exist. The Recursion page shows the status |
+| QNAME minimisation, the denial cache and the bounded failure cache | WP10.3 | Every server on the path is sent the full name, and no answer is synthesised from a cached denial. The failure cache is the in-memory reference of section 10.3 |
 | The measurements and the exit document | WP10.5 | No figure for throughput, memory or the cost of a fresh port per exchange |
 | Special-use names on the worker | later | Locally served names (section 10.8) are answered on the runtime, after the cache and the hand-over, and the answer is cached; the allocation-free path of ADR 0009 does not answer them first |
 | Other transports, other sources | not planned in this slice | Connection reuse and pipelining over TCP to authorities, encrypted transport to authorities (RFC 9539), a local copy of the root zone (RFC 8806), DNS64 and the client subnet option (RFC 7871) |

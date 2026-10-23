@@ -110,12 +110,16 @@ export function Review() {
           </Row>
           <Show when={w.dnsWanted()}>
             <Row label={t("setup.done.dns")} change={{ step: stepIndex("dns"), item: t("setup.done.dns") }}>
-              <span data-testid="setup-review-dns" data-count={dnsChoice(w.state.dns, w.state.profile).upstreams.length}>
-                <Show when={dnsChoice(w.state.dns, w.state.profile).upstreams.length > 0} fallback={<span class="muted">{t("setup.done.dns_none")}</span>}>
+              <span data-testid="setup-review-dns" data-count={dnsChoice(w.state.dns, w.state.profile).upstreams.length} data-resolve={w.state.dns.resolve}>
+                {/* WP10.4: a node that resolves names itself has no upstream to show. */}
+                <Show
+                  when={dnsChoice(w.state.dns, w.state.profile).upstreams.length > 0}
+                  fallback={<span class="muted">{w.state.dns.resolve === "recurse" ? t("setup.done.dns_recurse") : t("setup.done.dns_none")}</span>}
+                >
                   <span class="mono">{dnsChoice(w.state.dns, w.state.profile).upstreams.map(upstreamText).join(", ")}</span>
                 </Show>
               </span>
-              <div class="wz-help">
+              <div class="wz-help" hidden={w.state.dns.resolve === "recurse"}>
                 {t(`setup.dns.transport.${w.state.dns.transport}`)}
                 <Show when={w.state.dns.transport !== "plain" && w.state.dns.tlsName.trim()}>{(name) => <span class="mono"> {name()}</span>}</Show>
               </div>

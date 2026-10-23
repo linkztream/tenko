@@ -22,7 +22,7 @@
         <segment><source>DNS is not part of this installation (the DNS module or the dns role is not chosen in the previous step), so there is nothing to set here.</source><target>DNS ingår inte i installationen (DNS-modulen eller dns-rollen är inte vald i föregående steg), så det finns inget att ställa in här.</target></segment>
       </unit>
       <unit id="setup.dns.lede">
-        <segment><source>Names outside the zones Tenko serves are sent to upstream resolvers. Tenko has none built in: choose the ones your network should use.</source><target>Namn utanför zonerna som Tenko besvarar skickas till uppströms resolvrar. Tenko har inga inbyggda: välj de som ditt nätverk ska använda.</target></segment>
+        <segment><source>Names outside the zones Tenko serves are resolved by Tenko itself from the root servers, or forwarded to resolvers you choose.</source><target>Namn utanför zonerna som Tenko besvarar slår Tenko upp själv från rotservrarna, eller skickar vidare till resolvrar som du väljer.</target></segment>
       </unit>
       <unit id="setup.dns.upstreams">
         <segment><source>Upstream resolvers</source><target>Uppströms resolvrar</target></segment>
@@ -31,7 +31,7 @@
         <segment><source>One address per line. Start with the resolvers your network uses now: they are in the DNS settings of your router or of a computer (ipconfig /all on Windows, resolvectl status on Linux, the network settings on macOS). The browser cannot read them for you.</source><target>En adress per rad. Börja med de resolvrar som nätverket använder nu: de finns i DNS-inställningarna i routern eller på en dator (ipconfig /all i Windows, resolvectl status i Linux, nätverksinställningarna i macOS). Webbläsaren kan inte läsa dem åt dig.</target></segment>
       </unit>
       <unit id="setup.dns.upstreams_none">
-        <segment><source>Leave it empty to decide later: until a forwarder exists, names outside the zones are refused. Forwarders can be added on the DNS page at any time.</source><target>Lämna tomt för att bestämma senare: tills det finns en vidarebefordrare nekas namn utanför zonerna. Vidarebefordrare kan läggas till på DNS-sidan när som helst.</target></segment>
+        <segment><source>Enter at least one resolver; more can be added on the DNS page at any time.</source><target>Ange minst en resolver; fler kan läggas till på DNS-sidan när som helst.</target></segment>
       </unit>
       <unit id="setup.dns.transport">
         <segment><source>How Tenko asks them</source><target>Hur Tenko frågar dem</target></segment>

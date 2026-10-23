@@ -984,7 +984,104 @@ const blocking = [
 ];
 // dns-visibility: end.
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking];
+// WP10.4: the trust anchors and the negative trust anchors of the recursive resolver. Reads need
+// `dns.read`, writes `dns.keys`; every write is audited and published on the `dns` topic, and a
+// list of the negative trust anchors first ends the ones whose expiry has passed (`dns.nta.expire`).
+import {
+  addAnchor,
+  ANCHORS_TARGET,
+  createNta,
+  deleteNta,
+  expireNtas,
+  getAnchor,
+  listAnchors,
+  listNtas,
+  refreshAnchor,
+  removeAnchor,
+  seedAnchors,
+  type AnchorsState,
+} from "./dns-anchors-model";
+
+const anchorsContext = {
+  now: () => Date.now(),
+  nextRevision: () => db.revision + 1,
+  newId: () => randomId(),
+  principal: () => principalNow(),
+};
+let anchors: AnchorsState = seedAnchors(anchorsContext);
+onMockReset(() => {
+  anchors = seedAnchors(anchorsContext);
+});
+
+/** The trust anchors and negative trust anchors of the mock, for tests that arrange or inspect them. */
+export function dnsAnchorsState(): AnchorsState {
+  return anchors;
+}
+
+/** The security profile the mock runs under (the root's protection and the expiry of a negative trust anchor depend on it). */
+const profileNow = () => db.settings.profile;
+
+const anchorTarget = [ANCHORS_TARGET];
+
+const anchorRoutes = [
+  route("get", "/api/v1/dns/trust-anchors", (ctx) => guard("dns.read", () => ok(paginate(listAnchors(anchors), ctx.url, db.revision)))),
+  route("post", "/api/v1/dns/trust-anchors", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.keys", () => {
+      const row = addAnchor(anchors, anchorsContext, body as Record<string, unknown>, profileNow());
+      write("dns.trust_anchor.add", anchorTarget, "dns.trust_anchor.changed", ["dns.trust_anchors"], { zone: row.zone });
+      return created(row, etag(row.revision));
+    });
+  }),
+  route("get", "/api/v1/dns/trust-anchors/{zone}", (ctx) =>
+    guard("dns.read", () => {
+      const row = getAnchor(anchors, ctx.params.zone);
+      return ok(row, etag(row.revision));
+    }),
+  ),
+  route("delete", "/api/v1/dns/trust-anchors/{zone}", (ctx) =>
+    guard("dns.keys", () => {
+      const row = removeAnchor(anchors, ctx.params.zone, profileNow());
+      write("dns.trust_anchor.remove", anchorTarget, "dns.trust_anchor.changed", ["dns.trust_anchors"], { zone: row.zone });
+      return noContent();
+    }),
+  ),
+  route("post", "/api/v1/dns/trust-anchors/{zone}/refresh", (ctx) =>
+    guard("dns.keys", () => {
+      const commandId = refreshAnchor(anchors, anchorsContext, ctx.params.zone);
+      const row = getAnchor(anchors, ctx.params.zone);
+      write("dns.trust_anchor.refresh", anchorTarget, "dns.trust_anchor.changed", ["dns.trust_anchors"], { zone: row.zone });
+      return new Reply(202, { command_id: commandId }) as never;
+    }),
+  ),
+  route("get", "/api/v1/dns/ntas", (ctx) =>
+    guard("dns.read", () => {
+      for (const gone of expireNtas(anchors, Date.now())) {
+        commit("dns", { objects: anchorTarget, tables: ["dns.ntas"], kind: "dns.nta.changed" });
+        appendAudit({ action: "dns.nta.expire", objects: anchorTarget, principal: { kind: "system", component: "dns" }, context: { zone: gone.zone } });
+      }
+      return ok(paginate(listNtas(anchors), ctx.url, db.revision));
+    }),
+  ),
+  route("post", "/api/v1/dns/ntas", async (ctx) => {
+    const body = await ctx.body();
+    return guard("dns.keys", () => {
+      const nta = createNta(anchors, anchorsContext, body as Record<string, unknown>, profileNow());
+      write("dns.nta.create", anchorTarget, "dns.nta.changed", ["dns.ntas"], { zone: nta.zone, expires_at: nta.expires_at });
+      return created(nta, etag(nta.revision));
+    });
+  }),
+  route("delete", "/api/v1/dns/ntas/{id}", (ctx) =>
+    guard("dns.keys", () => {
+      const nta = deleteNta(anchors, ctx.params.id);
+      write("dns.nta.delete", anchorTarget, "dns.nta.changed", ["dns.ntas"], { zone: nta.zone });
+      return noContent();
+    }),
+  ),
+];
+// WP10.4: end.
+
+export const dnsRoutes: HttpHandler[] = [...zones, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking, ...anchorRoutes];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

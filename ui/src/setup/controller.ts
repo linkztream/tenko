@@ -64,8 +64,15 @@ function scrollToTop(): void {
   document.body.scrollTop = 0;
 }
 
+// WP10.4: resolve names yourself (recursion, REC-Q2) or forward everything to a resolver.
+/** How the node gets names outside its zones: it resolves them itself, or forwards them. */
+export type DnsResolve = "recurse" | "forward";
+// WP10.4: end.
+
 /** The DNS step as typed: the upstreams, their transport and TLS name, and the preset's switches. */
 export interface DnsStepState {
+  /** WP10.4: recursion (the default) or forwarding to the upstreams below. */
+  resolve: DnsResolve;
   upstreams: string;
   transport: ForwardTransport;
   tlsName: string;
@@ -94,13 +101,14 @@ export function dnsPreset(profile: Profile): Pick<DnsStepState, "cache" | "cache
 }
 
 function initialDns(profile: Profile): DnsStepState {
-  return { upstreams: "", transport: "plain", tlsName: "", ...dnsPreset(profile), touched: false };
+  return { resolve: "recurse", upstreams: "", transport: "plain", tlsName: "", ...dnsPreset(profile), touched: false };
 }
 
 /** The choice of the DNS step as the generated configuration and the root rule take it. */
 export function dnsChoice(dns: DnsStepState, profile: Profile): DnsChoice {
   const checked = checkRule({ suffix: ".", upstreams: dns.upstreams, transport: dns.transport, tlsName: dns.tlsName });
-  const upstreams: Upstream[] = checked.ok ? checked.upstreams : [];
+  // WP10.4: a node that resolves names itself forwards nothing.
+  const upstreams: Upstream[] = checked.ok && dns.resolve === "forward" ? checked.upstreams : [];
   const entries = Number(dns.cacheEntries.trim());
   const bound = dns.cacheEntries.trim() === "" || entries === profileCacheEntries(profile) ? null : entries;
   return {
@@ -441,6 +449,8 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
     hasNetworks: networks().length > 0,
     dns: {
       wanted: dnsWanted(),
+      // WP10.4
+      resolve: state.dns.resolve,
       upstreams: state.dns.upstreams,
       transport: state.dns.transport,
       tlsName: state.dns.tlsName,
@@ -669,12 +679,13 @@ export function createWizard(options: { onClosed: () => void; onOpen: () => void
 
   /**
    * Stores the upstreams of the DNS step as the root forwarding rule (the default forwarder of
-   * the store, which wins over `[dns] forwarders` of the file), with the new session. A refusal
+   * the store, which wins over `[dns] forwarders` of the file), with the new session, when the
+   * person chose to forward (WP10.4; a node that resolves names itself needs no rule). A refusal
    * (the DNS module not running yet, a rule that exists) leaves the generated configuration and
    * the forwarders page as the way; the result step says which.
    */
   async function saveDns(): Promise<void> {
-    if (!dnsWanted() || splitUpstreams(state.dns.upstreams).length === 0) return;
+    if (!dnsWanted() || state.dns.resolve !== "forward" || splitUpstreams(state.dns.upstreams).length === 0) return;
     const choice = dnsChoice(state.dns, state.profile);
     if (choice.upstreams.length === 0) return;
     try {

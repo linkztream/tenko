@@ -105,6 +105,8 @@ export type DnsStepProblem = "upstreams" | "tls_name" | "entries";
 
 /** The upstreams of the DNS step and the cache bound as typed. */
 export interface DnsStepInput {
+  /** WP10.4: recursion needs no upstream; forwarding needs one at least. */
+  resolve?: "recurse" | "forward";
   upstreams: string;
   transport: ForwardTransport;
   tlsName: string;
@@ -121,12 +123,21 @@ export const MAX_CACHE_ENTRIES = 10_000_000;
  * No upstream at all is allowed: names outside the zones are then refused until a rule exists.
  */
 export function dnsStepProblem(input: DnsStepInput): DnsStepProblem | null {
+  // WP10.4: forwarding everything needs a resolver to forward to; recursion ignores the list.
+  if (input.resolve === "forward" && splitUpstreams(input.upstreams).length === 0) return "upstreams";
+  if (input.resolve === "recurse") return entriesProblem(input);
+  // WP10.4: end.
   if (splitUpstreams(input.upstreams).length > 0) {
     const checked = checkRule({ suffix: ".", upstreams: input.upstreams, transport: input.transport, tlsName: input.tlsName });
     if (!checked.ok) return checked.problems.some((p) => p.field === "upstreams") ? "upstreams" : "tls_name";
   } else if (needsTlsName(input.transport) && input.tlsName.trim() !== "" && !validTlsName(input.tlsName)) {
     return "tls_name";
   }
+  return entriesProblem(input);
+}
+
+/** A cache bound out of range. */
+function entriesProblem(input: DnsStepInput): DnsStepProblem | null {
   if (input.cache && input.cacheEntries.trim() !== "") {
     const n = Number(input.cacheEntries.trim());
     if (!/^\d+$/.test(input.cacheEntries.trim()) || n < 1 || n > MAX_CACHE_ENTRIES) return "entries";

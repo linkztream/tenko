@@ -13,6 +13,10 @@
 @container (inline-size >= 900px) {
   .metrics-grid > .metrics-tile { grid-column: span 3; }
   .metrics-grid > .metrics-group ~ .metrics-group ~ .metrics-tile { grid-column: span 4; }
+  /* WP10.4: the DNS group with the resolver's tiles has eight, four to a row; the DHCP six after it
+     stay three to a row. */
+  .metrics-grid > .metrics-group.metrics-group-wide ~ .metrics-tile { grid-column: span 3; }
+  .metrics-grid > .metrics-group.metrics-group-wide ~ .metrics-group ~ .metrics-tile { grid-column: span 4; }
 }
 .metrics-group { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--ink-3); }
 .metrics-group:not(:first-child) { margin-block-start: var(--sp-3); }

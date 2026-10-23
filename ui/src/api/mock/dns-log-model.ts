@@ -24,6 +24,9 @@ export interface LogEntry {
   resolution?: string;
   subqueries?: number;
   // WP10.1: end.
+  // WP10.4: the validation state and the extended error.
+  validation?: QueryLogLine["validation"];
+  ede?: number;
 }
 
 export interface DnsLogState {
@@ -84,6 +87,8 @@ export function seedDnsLog(): DnsLogState {
       duration_micros: 40 + ((n * 37) % 900),
       // WP10.1: a cached answer says so; the rest cycle through zone, recursion and forwarding.
       ...resolutionOf(n),
+      // WP10.4: every fifth query secure, every seventh bogus with EDE 6, the rest insecure.
+      ...(n % 7 === 3 ? { validation: "bogus" as const, ede: 6 } : { validation: n % 5 === 0 ? ("secure" as const) : ("insecure" as const) }),
     });
   }
   return { mode: "on", client: "pseudonym", entries, written: entries.length, dropped: 0 };
@@ -191,6 +196,9 @@ function lineOf(state: DnsLogState, entry: LogEntry, addresses: boolean): QueryL
   if (entry.resolution !== undefined) line.resolution = entry.resolution;
   if (entry.subqueries) line.subqueries = entry.subqueries;
   // WP10.1: end.
+  // WP10.4
+  if (entry.validation) line.validation = entry.validation;
+  if (entry.ede) line.ede = entry.ede;
   if (state.client === "pseudonym") line.client = entry.pseudonym;
   else if (state.client === "address" && addresses) line.client = entry.address;
   return line;

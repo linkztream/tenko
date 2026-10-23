@@ -5,6 +5,9 @@
 // round-trip times, the sizes of the infrastructure cache against their bounds, and the counters
 // since the role started. What the node reports as wrong (`priming_failed`) is a warning. A
 // node whose resolver is off says so and where to switch it on.
+//
+// WP10.4: the validation counters (secure, insecure, bogus, indeterminate since the role
+// started) as a card of their own, and the anchor keys the node validates with by state.
 import { createResource, createSignal, For, Match, Show, Switch } from "solid-js";
 import { errorMessage } from "../../api/problem";
 import { ErrorNotice, Notice } from "../../components/Notice";
@@ -122,6 +125,47 @@ function Infra(props: { status: RecursionStatus }) {
   );
 }
 
+// WP10.4: what the validator decided since the role started.
+const VALIDATION = ["secure", "insecure", "bogus", "indeterminate"] as const;
+
+function Validation(props: { status: RecursionStatus }) {
+  const keys = () => props.status.trust_anchors;
+  return (
+    <section class="card page-section" data-testid="dns-recursion-validation" aria-labelledby="dns-recursion-validation-title">
+      <h3 id="dns-recursion-validation-title">{t("dns.recursion.validation.title")}</h3>
+      <dl class="kv">
+        <For each={VALIDATION}>
+          {(state) => (
+            <>
+              <dt>{t(`dns.sec.${state}`)}</dt>
+              <dd data-testid="dns-recursion-validation-count" data-key={state} data-value={props.status.counters[state]}>
+                {formatNumber(props.status.counters[state])}
+              </dd>
+            </>
+          )}
+        </For>
+        <dt>{t("dns.recursion.validation.keys")}</dt>
+        <dd data-testid="dns-recursion-validation-keys" data-count={keys().length}>
+          <Show when={keys().length > 0} fallback={<span class="muted">{t("dns.recursion.validation.no_keys")}</span>}>
+            <span class="dns-chips">
+              <For each={keys()}>
+                {(key) => (
+                  <span class="tag mono" data-testid="dns-recursion-key" data-key={key.key_tag} data-state={key.state}>
+                    {key.zone} {key.key_tag} {t(`dns.anchor.state.${key.state}`)}
+                  </span>
+                )}
+              </For>
+            </span>
+          </Show>
+        </dd>
+      </dl>
+      {/* WP10.4: the denial cache's counters (WP10.3) are not in the status at this base; their
+          figures go here when `counters` carries them. */}
+    </section>
+  );
+}
+// WP10.4: end.
+
 function Counters(props: { status: RecursionStatus }) {
   const rows = () => {
     const c = props.status.counters;
@@ -230,6 +274,8 @@ export function RecursionStatusBlock() {
                 <Facts status={shown()} />
                 <Infra status={shown()} />
                 <Counters status={shown()} />
+                {/* WP10.4: the validation counters. */}
+                <Validation status={shown()} />
               </div>
               <Roots status={shown()} />
             </Show>

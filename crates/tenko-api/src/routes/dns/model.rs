@@ -476,6 +476,10 @@ pub struct ViewItem {
     pub view: View,
     /// The store revision of the row.
     pub revision: Revision,
+    // WP10.4: the profile's resolution beside the view's own.
+    /// The resolution the view follows when `resolution` is absent: the profile's default
+    /// (`recurse` under every profile; a node whose resolver is off forwards instead).
+    pub profile_resolution: ResolutionMode,
 }
 
 /// `POST /dns/views`.
@@ -498,7 +502,7 @@ pub struct ViewCreate {
     pub recursion: Option<AclId>,
     // WP10.0: how the view resolves names outside the zones and the rules.
     /// How the view's clients get names outside the zones and the forwarding rules; the
-    /// profile's default when absent. Until WP10.4 a value answers 501.
+    /// profile's default when absent.
     #[serde(default)]
     pub resolution: Option<ResolutionMode>,
     // WP10.0: end.
@@ -529,12 +533,10 @@ pub struct ViewPatch {
     #[serde(default)]
     pub default_recursion: bool,
     // WP10.0: how the view resolves names outside the zones and the rules.
-    /// How the view's clients get names outside the zones and the forwarding rules. Until
-    /// WP10.4 a value answers 501.
+    /// How the view's clients get names outside the zones and the forwarding rules.
     #[serde(default)]
     pub resolution: Option<ResolutionMode>,
-    /// Follow the profile's default for the resolution (clears `resolution`). Until WP10.4
-    /// `true` answers 501.
+    /// Follow the profile's default for the resolution (clears `resolution`).
     #[serde(default)]
     pub default_resolution: bool,
     // WP10.0: end.
@@ -568,7 +570,8 @@ pub struct ForwarderCreate {
     #[serde(default)]
     pub upstreams: Vec<Upstream>,
     /// Forward to the upstreams (the default) or resolve the names under the suffix
-    /// iteratively. Until WP10.1 `recurse` answers 501.
+    /// iteratively from the root servers (`recurse`: no upstreams, no transport, no
+    /// `tls_name`, validation on).
     #[serde(default)]
     pub mode: Option<RuleMode>,
     /// Validate the upstreams' answers with DNSSEC (the default); `false` relays them
@@ -600,8 +603,8 @@ pub struct ForwarderPatch {
     #[serde(default)]
     pub upstreams: Option<Vec<Upstream>>,
     // WP10.0: the rule's mode and validation.
-    /// Forward to the upstreams or resolve the names under the suffix iteratively. Until
-    /// WP10.1 `recurse` answers 501.
+    /// Forward to the upstreams or resolve the names under the suffix iteratively. A rule
+    /// turned to `recurse` must drop its upstreams in the same change (`upstreams: []`).
     #[serde(default)]
     pub mode: Option<RuleMode>,
     /// Validate the upstreams' answers with DNSSEC; `false` relays them unvalidated.

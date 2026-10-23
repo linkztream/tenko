@@ -6,9 +6,11 @@
 // - Under the Lab profile over plain HTTP: the Lab warning needs an acknowledgement, a
 //   passkey added on the result step (virtual platform authenticator) brings the recovery
 //   codes, which must be confirmed before the application opens; there is no CA root.
-// - The DNS step (P2-Q5, WP5.5): under Home the upstream is entered and DNS over TLS taken from
-//   the well-known resolver offer; the review shows it and the result step shows whether it was
-//   stored as the default forwarder with the generated [dns] section. Under Lab it is left empty.
+// - The DNS step (P2-Q5, WP5.5, WP10.4): it starts on "resolve names yourself" with the privacy
+//   sentence; under Home the person chooses to forward, enters the upstream and takes DNS over TLS
+//   from the well-known resolver offer; the review shows it and the result step shows whether it
+//   was stored as the default forwarder with the generated [dns] section. Under Lab the node
+//   resolves names itself: no upstream, no rule.
 // - The DHCP step (WP8.6): under Home the first scope is filled in (the network, the proposed
 //   pool, the router, this server's address as the DNS server, relay mode), Continue waits for the
 //   confirmation that no other DHCP server answers, the review shows the network, and the result
@@ -66,7 +68,12 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
   await next(page, card, "dns");
 
   await expect(page.getByTestId("setup-dns")).toHaveAttribute("data-state", "wanted");
+  // WP10.4: recursion is the default (REC-Q2), with the privacy sentence beside the choice.
+  await expect(withKey(page, "setup-dns-resolve", "recurse")).toBeChecked();
+  await expect(page.getByTestId("setup-dns-privacy")).toBeVisible();
+  await expect(page.getByTestId("field-dns-upstreams")).toHaveCount(0);
   if (profile === "home") {
+    await withKey(page, "setup-dns-resolve", "forward").check();
     // No upstream is preset (P2-Q5); a well-known public resolver gets the DoT offer.
     await expect(page.getByTestId("field-dns-upstreams")).toHaveValue("");
     await page.getByTestId("field-dns-upstreams").fill("9.9.9.9");
@@ -112,6 +119,7 @@ async function completeWizard(page: Page, token: string, profile: "home" | "lab"
     await expect(page.getByTestId("setup-dns-config")).toContainText('tls_name = "dns.quad9.net"');
   } else {
     await expect(dns).toHaveAttribute("data-state", "none");
+    await expect(page.getByTestId("setup-dns-none")).toHaveAttribute("data-resolve", "recurse");
     await expect(page.getByTestId("setup-dns-config")).toContainText("forwarders = []");
   }
   // WP8.6: the first scope is written through the configuration routes after setup, and the

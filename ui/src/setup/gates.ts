@@ -118,6 +118,8 @@ export interface GateInput {
   /** The DNS step: whether it applies (the module and the role are chosen) and what it holds. */
   dns: {
     wanted: boolean;
+    // WP10.4: resolve names yourself or forward them.
+    resolve?: "recurse" | "forward";
     upstreams: string;
     transport: ForwardTransport;
     tlsName: string;

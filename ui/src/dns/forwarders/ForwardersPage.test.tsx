@@ -1,7 +1,8 @@
 // The forwarders page: the rules by suffix, the notice while no default forwarder exists, create
 // (with the offer of DNS over TLS for a well-known resolver), the local checks and the refusals
 // of the server, edit with the revision, delete, what a viewer sees, and the states of the
-// service (not built, switched off, problems the node reports).
+// service (not built, switched off, problems the node reports). WP10.4: the rows of a recurse
+// rule and of a rule whose answers are not validated, and the preset of a root rule over DoT.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dnsResolverState } from "../../api/mock/routes-dns";
@@ -108,6 +109,9 @@ describe("the forwarding rules", () => {
       upstreams: [{ address: "192.0.2.53" }, { address: "2001:db8::53", port: 8853 }],
       tls_name: "dns.example.test",
       description: null,
+      // WP10.4: a rule created by the form forwards and validates unless told otherwise.
+      mode: "forward",
+      validate: true,
     });
     await waitFor(() => expect(keys()).toEqual([".", "corp.example.test"]));
     const root = row("dns-forwarders", ".");
@@ -282,6 +286,152 @@ describe("the forwarding rules", () => {
     fireEvent.click(within(dialog).getByTestId("confirm-cancel"));
     await waitFor(() => expect(screen.queryByTestId("dialog-forwarder-delete")).toBeNull());
     expect(dnsResolverState().forwarders).toHaveLength(2);
+  });
+});
+
+// WP10.4: how a rule's mode shows in the list, and the preset.
+const RECURSE_RULE = {
+  id: "0190d1c2-0000-7000-8000-00000000dc10",
+  suffix: "lab.example.test",
+  mode: "recurse" as const,
+  validate: true,
+  transport: "plain" as const,
+  upstreams: [],
+  tls_name: null,
+  view: null,
+  description: null,
+  revision: 1,
+};
+
+describe("the mode of a rule in the list", () => {
+  it("shows a recurse rule as such, with no upstream and no transport word", async () => {
+    dnsResolverState().forwarders.push({ ...RECURSE_RULE });
+    const view = open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test", "lab.example.test"]));
+    const lab = row("dns-forwarders", "lab.example.test");
+    const transport = within(lab).getByTestId("fwd-transport");
+    expect(transport.dataset.kind).toBe("recurse");
+    expect(transport.textContent).toBe("Recurse");
+    expect(within(lab).getByTestId("fwd-recurse").textContent).toBe("The root servers and the authorities");
+    expect(within(lab).queryAllByTestId("fwd-upstream")).toHaveLength(0);
+    expect(within(lab).queryByTestId("fwd-unvalidated")).toBeNull();
+    // A forwarding rule keeps its transport and shows no recurse text.
+    const corp = row("dns-forwarders", "corp.example.test");
+    expect(within(corp).getByTestId("fwd-transport").dataset.kind).toBe("plain");
+    expect(within(corp).queryByTestId("fwd-recurse")).toBeNull();
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("marks a forwarding rule whose answers are not validated", async () => {
+    const corp = dnsResolverState().forwarders[0];
+    if (!corp) throw new Error("no seeded rule");
+    corp.validate = false;
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    const tag = within(row("dns-forwarders", "corp.example.test")).getByTestId("fwd-unvalidated");
+    expect(tag.textContent).toBe("Not validated");
+    expect(tag.getAttribute("title")).toBe("The upstreams' answers are relayed unvalidated.");
+  });
+
+  it("marks no validated rule", async () => {
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    expect(screen.queryByTestId("fwd-unvalidated")).toBeNull();
+  });
+});
+
+describe("the preset of a root rule over DNS over TLS", () => {
+  it("opens the form titled for the preset with the privacy sentence and the resolvers to pick from", async () => {
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    expect(screen.getByTestId("fwd-preset").textContent).toContain("Recursion asks each zone's authorities");
+    fireEvent.click(screen.getByTestId("fwd-preset-dot"));
+    const dialog = await screen.findByTestId("dialog-forwarder-form");
+    expect(within(dialog).getByRole("heading", { level: 2 }).textContent).toBe("Forward everything to a DoT resolver");
+    expect(within(dialog).getByTestId("fwd-preset-privacy").textContent).toContain("DNS over TLS protects the path to that resolver");
+    expect(within(dialog).getAllByTestId("fwd-preset-resolver").map((b) => b.dataset.key)).toEqual(["dns.quad9.net", "cloudflare-dns.com", "dns.google"]);
+    expect((within(dialog).getByTestId("field-suffix") as HTMLInputElement).value).toBe(".");
+    expect((within(dialog).getByTestId("field-transport-dot") as HTMLInputElement).checked).toBe(true);
+    // The preset is a forwarding rule: the mode cannot be changed.
+    expect((within(dialog).getByTestId("field-mode-forward") as HTMLInputElement).checked).toBe(true);
+    expect((within(dialog).getByTestId("field-mode-recurse") as HTMLInputElement).disabled).toBe(true);
+    expect(await axeViolations(dialog)).toEqual([]);
+  });
+
+  it("fills the upstreams, the TLS name and the transport from a resolver and creates the root rule", async () => {
+    const writes = recordWrites();
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    fireEvent.click(screen.getByTestId("fwd-preset-dot"));
+    const dialog = await screen.findByTestId("dialog-forwarder-form");
+    const quad9 = within(dialog)
+      .getAllByTestId("fwd-preset-resolver")
+      .find((b) => b.dataset.key === "dns.quad9.net");
+    if (!quad9) throw new Error("no Quad9 button");
+    fireEvent.click(quad9);
+    expect((within(dialog).getByTestId("field-upstreams") as HTMLTextAreaElement).value).toBe("9.9.9.9\n149.112.112.112");
+    expect((within(dialog).getByTestId("field-tls_name") as HTMLInputElement).value).toBe("dns.quad9.net");
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(keys()).toEqual([".", "corp.example.test"]));
+    expect(writes().find((w) => w.method === "POST")?.body).toEqual({
+      suffix: ".",
+      transport: "dot",
+      upstreams: [{ address: "9.9.9.9" }, { address: "149.112.112.112" }],
+      tls_name: "dns.quad9.net",
+      description: null,
+      mode: "forward",
+      validate: true,
+    });
+    expect(within(row("dns-forwarders", ".")).getByTestId("fwd-transport").dataset.kind).toBe("dot");
+  });
+
+  it("changes the root rule that exists instead of creating a second one", async () => {
+    dnsResolverState().forwarders.push({
+      id: "0190d1c2-0000-7000-8000-00000000dc02",
+      suffix: ".",
+      mode: "forward",
+      validate: true,
+      transport: "plain",
+      upstreams: [{ address: "192.0.2.53" }],
+      tls_name: null,
+      view: null,
+      description: null,
+      revision: 1,
+    });
+    const writes = recordWrites();
+    open();
+    await waitFor(() => expect(keys()).toEqual([".", "corp.example.test"]));
+    fireEvent.click(screen.getByTestId("fwd-preset-dot"));
+    const dialog = await screen.findByTestId("dialog-forwarder-form");
+    expect((within(dialog).getByTestId("field-upstreams") as HTMLTextAreaElement).value).toBe("192.0.2.53");
+    const cloudflare = within(dialog)
+      .getAllByTestId("fwd-preset-resolver")
+      .find((b) => b.dataset.key === "cloudflare-dns.com");
+    if (!cloudflare) throw new Error("no Cloudflare button");
+    fireEvent.click(cloudflare);
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-forwarder-form")).toBeNull());
+    expect(writes().map((w) => w.method)).toEqual(["PATCH"]);
+    expect(dnsResolverState().forwarders.filter((r) => r.suffix === ".")).toHaveLength(1);
+    expect(dnsResolverState().forwarders.find((r) => r.suffix === ".")).toMatchObject({ transport: "dot", tls_name: "cloudflare-dns.com" });
+  });
+
+  it("is not offered to a viewer", async () => {
+    await signInWithRoles(["viewer"]);
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    expect(screen.queryByTestId("fwd-preset")).toBeNull();
+    expect(screen.queryByTestId("fwd-preset-dot")).toBeNull();
+  });
+
+  it("speaks Swedish", async () => {
+    await setLocale("sv");
+    open();
+    await waitFor(() => expect(keys()).toEqual(["corp.example.test"]));
+    expect(screen.getByTestId("fwd-preset-dot").textContent).toBe("Vidarebefordra allt till en DoT-resolver");
+    fireEvent.click(screen.getByTestId("fwd-preset-dot"));
+    const dialog = await screen.findByTestId("dialog-forwarder-form");
+    expect(within(dialog).getByTestId("fwd-preset-privacy").textContent).toContain("Rekursion frågar varje zons auktoritativa servrar");
   });
 });
 

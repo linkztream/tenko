@@ -8,3 +8,11 @@
 .rec-grid h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-14); }
 .rec-problems { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-5); }
 .rec-table .nowrap { white-space: nowrap; }
+/* WP10.4: the trust anchors (a card per zone) and the negative trust anchors. */
+.rec-anchors, .rec-ntas { display: grid; gap: var(--sp-4); }
+.rec-anchor-list { display: grid; gap: var(--sp-4); }
+.rec-anchor { display: grid; gap: var(--sp-3); }
+.rec-anchor-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.rec-anchor-head h3 { margin: 0; font-size: var(--fs-14); }
+.rec-anchor-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.rec-anchor-times { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); }
