@@ -12,7 +12,7 @@ use std::{
 };
 
 use tenko_core::{
-    Timestamp,
+    Revision, Timestamp,
     dns::{
         AnchorData, AnchorKey, AnchorSource, AnchorState, DnsName, DnssecAlgorithm, ExtendedError,
         KeyRole, NegativeTrustAnchor, NtaId, RecordData, Rtype, SecurityState, TrustAnchor,
@@ -21,15 +21,18 @@ use tenko_core::{
 };
 
 use crate::{
+    anchors::CatalogAnchors,
+    catalog::Catalog,
     dnssec::{
         canonical::{RrsigHead, rrsig_labels, signed_data},
         crypto::{self, KeyPair},
     },
+    feed::{Change, Delta, DnsData},
     recurse::{Engine, EngineSettings, Question, hints},
     recursion::{
         Authority, AuthorityError, AuthorityQuery, BogusReason, ChainContext, DsState, Exchange,
         InfraCache, MemAnchors, MemAuthority, MemFailures, MemZone, Outbound, RecursionSettings,
-        Validation, ValidationCaps, Validator,
+        TrustAnchors, Validation, ValidationCaps, Validator,
     },
     tree::canonical_cmp,
     validate::{DnssecValidator, EngineFetch, NoFetch},
@@ -540,6 +543,17 @@ async fn harness(keys: &LabKeys, variant: Variant) -> Harness {
 impl Harness {
     /// Resolves and validates `qname`/`qtype`; `cd` refuses the walk's sub-queries.
     async fn ask(&self, qname: &str, qtype: u16, cd: bool) -> (Validation, u16) {
+        self.ask_with(&self.anchors, qname, qtype, cd).await
+    }
+
+    /// [`Harness::ask`] with other anchors than the harness's own.
+    async fn ask_with(
+        &self,
+        anchors: &dyn TrustAnchors,
+        qname: &str,
+        qtype: u16,
+        cd: bool,
+    ) -> (Validation, u16) {
         let wire = name(qname).to_wire();
         let resolved = self
             .engine
@@ -565,7 +579,7 @@ impl Harness {
                 qtype,
                 zone: &root,
                 cd: true,
-                anchors: &self.anchors,
+                anchors,
                 infra: self.infra.as_ref(),
                 fetch: &NoFetch,
                 now: SystemTime::now(),
@@ -578,7 +592,7 @@ impl Harness {
                 qtype,
                 zone: &root,
                 cd: false,
-                anchors: &self.anchors,
+                anchors,
                 infra: self.infra.as_ref(),
                 fetch: &fetch,
                 now: SystemTime::now(),
@@ -795,6 +809,56 @@ async fn anchors_decide_indeterminate_negative_and_private_zones() {
     assert_eq!(validation.state, SecurityState::Insecure, "{validation:?}");
     // The anchors' generation moved: the key table starts over.
     assert!(lab.validator.report().key_sets >= 1);
+}
+
+#[tokio::test]
+async fn a_deleted_negative_trust_anchor_is_validated_again() {
+    // The node's path: the rows in the catalog, a delta from the feed, the anchors'
+    // refresh, the next query.
+    let keys = LabKeys::new();
+    let lab = harness(&keys, Variant::default()).await;
+    let now = Timestamp::now();
+    let nta = NegativeTrustAnchor {
+        id: NtaId::generate(),
+        zone: name("bogus.example.test"),
+        expires_at: now.checked_add(Duration::from_secs(3600)).expect("expiry"),
+        reason: "a test".to_owned(),
+        created_by: tenko_core::Principal::system(tenko_core::SystemComponent::Dns),
+        created_at: now,
+    };
+    let mut data = DnsData::at(Revision(1));
+    data.trust_anchors
+        .insert(DnsName::root(), root_anchor(&keys));
+    data.ntas.insert(nta.id, nta.clone());
+    let catalog = Catalog::build(&data);
+    let anchors = CatalogAnchors::new();
+    assert_eq!(anchors.refresh(&catalog), Some(vec![nta.zone.clone()]));
+    let (validation, _) = lab
+        .ask_with(&anchors, "www.bogus.example.test", A, false)
+        .await;
+    assert_eq!(validation.state, SecurityState::Insecure, "{validation:?}");
+    let (validation, _) = lab.ask_with(&anchors, "www.example.test", A, false).await;
+    assert_eq!(validation.state, SecurityState::Secure, "{validation:?}");
+
+    // Deleted: the delta names the row, the refresh names the zone for the cache flush,
+    // and the next query is bogus again without any other flush.
+    let catalog = catalog
+        .apply(&Delta {
+            from: Revision(1),
+            to: Revision(2),
+            changes: vec![Change::Nta(nta.id, None)],
+        })
+        .expect("delta");
+    let generation = anchors.generation();
+    assert_eq!(anchors.refresh(&catalog), Some(vec![nta.zone.clone()]));
+    assert!(anchors.generation() > generation);
+    assert_eq!(anchors.active_ntas(now), Vec::new());
+    let (validation, _) = lab
+        .ask_with(&anchors, "www.bogus.example.test", A, false)
+        .await;
+    assert_eq!(validation.state, SecurityState::Bogus, "{validation:?}");
+    assert_eq!(validation.ede, Some(ExtendedError::DNSKEY_MISSING));
+    assert_eq!(anchors.refresh(&catalog), None, "nothing changed since");
 }
 
 #[tokio::test]

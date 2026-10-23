@@ -304,7 +304,7 @@ The validation rows (E33, WP10.2; `validation.sh`) follow. Each `val.*` row with
 | `val.bogus.ds` | A DS that matches no key | `www.bogus.example.test`: SERVFAIL, EDE 9; `delv` fails |
 | `val.bogus.sig` | A spoiled signature | `www.badsig.example.test`: SERVFAIL, EDE 6 |
 | `val.bogus.expired` | An expired signature | `www.expired.example.test`: SERVFAIL, EDE 7 |
-| `val.cd.data`, `val.cd.bogus` | The bogus names give their data with CD | `+cd`: NOERROR with the address |
+| `val.cd`, `val.cd.data`, `val.cd.bogus` | The bogus names give their data with CD | `+cd`: NOERROR with the address |
 | `val.keytrap` | The KeyTrap zone is answered within the caps in under 50 ms (M38) | `www.keytrap.example.test`: SERVFAIL with EDE 6 (the caps stopped the search) or NOERROR (the real key came first), in under 50 ms |
 | `val.keytrap.metric` | The cap is counted | `tenko_dns_validation_total{state="bogus",reason="cap"}` above 0 in `GET /metrics` |
 | `val.sentinel` | RFC 8509 | `root-key-sentinel-is-ta-<tag>.wild.example.test` answers, `not-ta-<tag>` and an unknown tag are SERVFAIL, from the cache too |
@@ -325,12 +325,12 @@ The round `rfc5011` (`ROUNDS=rfc5011`; `validation.sh`) rolls the lab root's KSK
 | `r11.start`, `r11.anchor.valid` | With the first KSK's DS as the anchor, `www.example.test` is secure and the service has refreshed the row (`valid`) |
 | `r11.publish`, `r11.pending.warning` | A second KSK published and signing the DNSKEY set enters `add_pend` within 45 s, and `GET /system/status` warns `dns.trust_anchor.pending` |
 | `r11.hold_down`, `r11.old.valid`, `r11.secure.mid` | After the hold-down the new key is `valid` while the old one still is, and names stay secure |
-| `r11.revoked`, `r11.secure.after`, `r11.delv` | The old KSK revoked (`dnssec-revoke`) is `revoked` within 45 s, names are secure with the new anchor alone, `delv` validates with the new DS |
-| `r11.removed` | After the remove hold-down the old key is `removed`, then forgotten |
+| `r11.revoked`, `r11.secure.after` | The old KSK revoked (`dnssec-revoke`) is `revoked` within 45 s, and names are secure with the new anchor alone |
+| `r11.removed`, `r11.delv` | After the remove hold-down the old key is `removed`, then forgotten; `delv` validates with the new KSK's DS as its anchor |
 | `r11.audit`, `r11.never.failed` | Every state change is audited as `dns.trust_anchor.state` (`add_pend`, `valid`, `revoked`, `removed`), and the node's bogus counter stayed at 0 |
-| `r11.restore.*` | A node started from a backup taken before the roll (a copy of its data volume made after the new key was seen as pending) starts with the old key valid and the new one pending, makes the new one valid and the old one revoked on its own, and answers secure |
+| `r11.restore.*` | A node started from a backup taken before the roll (a copy of its data volume made after the new key was seen as pending) starts from the backup's rows (the new key learned before the backup, pending or already past its hold-down), makes the new one valid and the old one revoked on its own, and answers secure |
 
-The round prints the heading `E34: the roll` with the timeline (seconds from the first refresh to each state change, M41's roll half) and keeps it in the summary.
+The round prints the heading `E34: the roll` with the timeline (seconds from the first refresh to each state change as the rows saw it, then as the audit records it, M41's roll half) and keeps it in the summary.
 
 To look at the lab afterwards, `KEEP=1` leaves it running (see above); the node under test answers on `203.0.113.3:5300`, and the logs of the authority and the quirk servers are one command away:
 

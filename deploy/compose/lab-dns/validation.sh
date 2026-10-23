@@ -332,6 +332,18 @@ system_lacks() {
     python3 -c "import json,sys; d=json.load(open('$work/api.out')); codes=[w['code'] for w in d.get('warnings', [])]; sys.exit(1 if '$1' in codes else 0)"
 }
 
+# bogus_zone_is <state>: www.bogus.example.test has <state> on the wire. A check that
+# `within` or `row` runs is a function of this shell: a `bash -c` would have neither the
+# other functions nor the lab's variables.
+bogus_zone_is() { [[ "$(state_of "$(dig_val www.bogus.example.test A 2>&1)")" == "$1" ]]; }
+# nta_report: what the node says about negative trust anchors, for a failed row's log.
+nta_report() {
+  printf 'the node answers: %s\n' "$(dig_val www.bogus.example.test A 2>&1 | grep -E '^;; (->>|flags)' | tr '\n' ' ')"
+  system_warns dns.nta.active || true
+  on tenko && api GET /dns/ntas || true
+  printf '\n'
+}
+
 # The rows of E33: every state with delv agreeing, the forwarded answers through BIND.
 validation_rows() {
   local rule_id out nta_id
@@ -351,7 +363,7 @@ validation_rows() {
   val_row val.bogus.ds "a DS that matches no key (DNSKEY Missing)" www.bogus.example.test A bogus 9
   val_row val.bogus.sig "a spoiled signature (DNSSEC Bogus)" www.badsig.example.test A bogus 6
   val_row val.bogus.expired "an expired signature (Signature Expired)" www.expired.example.test A bogus 7
-  row val.cd "the same bogus names give their data with CD" bash -c "$(declare -f cd_gives_data dig_val dig_client rcode_of a_address compose); cd_gives_data www.bogus.example.test 192.0.2.6 2>/dev/null || true; true" >/dev/null 2>&1 || true
+  row val.cd "www.bogus.example.test with CD is NOERROR with its data" cd_gives_data www.bogus.example.test 192.0.2.60
   row val.cd.data "www.expired.example.test with CD is NOERROR with its data" cd_gives_data www.expired.example.test 192.0.2.70
   row val.cd.bogus "www.badsig.example.test with CD is NOERROR with its data" cd_gives_data www.badsig.example.test 192.0.2.80
   row val.keytrap "the KeyTrap zone is answered within the caps in under 50 ms (M38)" keytrap_row
@@ -366,11 +378,13 @@ validation_rows() {
     fail "validation: the negative trust anchor could not be created ($api_status: $(cat "$work/api.out"))"
   nta_id="$(field "d['id']" <"$work/api.out")"
   flush_cache
-  row val.nta "a negative trust anchor makes the bogus zone insecure" within 20 bash -c "$(declare -f dig_val dig_client state_of rcode_of has_ad); [[ \"\$(state_of \"\$(dig_val www.bogus.example.test A 2>&1)\")\" == insecure ]]"
+  row val.nta "a negative trust anchor makes the bogus zone insecure" within 20 bogus_zone_is insecure
+  [[ "${summary[-1]}" != FAIL* ]] || nta_report >&2
   row val.nta.warning "the negative trust anchor shows in the warnings of GET /system/status" system_warns dns.nta.active
   api DELETE "/dns/ntas/$nta_id" >/dev/null || fail "validation: the negative trust anchor could not be deleted"
   flush_cache
-  row val.nta.gone "without it the zone is bogus again" within 20 bash -c "$(declare -f dig_val dig_client state_of rcode_of has_ad); [[ \"\$(state_of \"\$(dig_val www.bogus.example.test A 2>&1)\")\" == bogus ]]"
+  row val.nta.gone "without it the zone is bogus again" within 20 bogus_zone_is bogus
+  [[ "${summary[-1]}" != FAIL* ]] || nta_report >&2
   # Forwarded answers: a rule to the recursive BIND, validated through it; then the
   # stripping upstream, then the rule's escape.
   on tenko
@@ -476,6 +490,9 @@ sign_root() {
 # ksk_tag <n>: the key tag of the n-th root KSK file by creation order.
 ksk_file() { ls -tr "$work/zones/keys"/K.+013+*.key 2>/dev/null | xargs -r grep -l " 257 3 13 \| 385 3 13 " | sed -n "${1}p"; }
 tag_of_file() { basename "$1" | sed -n 's/.*+013+0*\([0-9]*\)\.key/\1/p'; }
+# key_file <tag>: the root key file of <tag> (dnssec-revoke replaces a revoked key's file
+# with one under the new tag, which changes the order ksk_file counts in).
+key_file() { printf '%s/zones/keys/K.+013+%05d.key' "$work" "$1"; }
 anchor_state() {
   # anchor_state <tag>: the state of the root anchor key <tag> in the node's status.
   node_status >/dev/null && python3 -c "
@@ -487,15 +504,56 @@ for a in d.get('trust_anchors') or []:
 print('absent'); sys.exit(0)"
 }
 anchor_is() { [[ "$(anchor_state "$1")" == "$2" ]]; }
+anchors_are() { anchor_is "$1" "$2" && anchor_is "$3" "$4"; }
+anchor_gone() {
+  local state
+  state="$(anchor_state "$1")"
+  [[ "$state" == removed || "$state" == absent ]]
+}
+never_bogus() {
+  node_status >/dev/null && python3 -c "
+import json
+d = json.load(open('$work/recursion.json'))
+print(d['counters'])
+raise SystemExit(0 if d['counters']['bogus'] == 0 else 1)"
+}
 secure_now() { [[ "$(state_of "$(dig_val www.example.test A 2>&1)")" == secure ]]; }
 audit_states() {
   on tenko && api GET "/audit?action=dns.trust_anchor.state&limit=100" >/dev/null &&
     python3 -c "
 import json, sys
 d = json.load(open('$work/api.out'))
-states = sorted({(e.get('context') or {}).get('state') for e in d.get('items', [])} - {None})
+states = sorted({((e.get('draft') or {}).get('details') or {}).get('context', {}).get('state') for e in d.get('items', [])} - {None})
 print(states)
 sys.exit(0 if all(s in states for s in ['add_pend', 'valid', 'revoked', 'removed']) else 1)"
+}
+# learned_before <tag> <unix seconds>: the root row (GET /dns/trust-anchors) holds the key
+# <tag> as RFC 5011 learned it before <unix seconds>, pending or already Valid.
+learned_before() {
+  on tenko && api GET /dns/trust-anchors >/dev/null &&
+    python3 -c "
+import calendar, json, sys, time
+d = json.load(open('$work/api.out'))
+seconds = lambda text: calendar.timegm(time.strptime(text[:19], '%Y-%m-%dT%H:%M:%S'))
+for row in d.get('items', []):
+    for key in row['keys'] if row['zone'] == '.' else []:
+        if key['key_tag'] == $1:
+            print(key['state'], key['source'], key['added_at'])
+            sys.exit(0 if key['state'] in ('add_pend', 'valid') and seconds(key['added_at']) < $2 else 1)
+print('absent')
+sys.exit(1)"
+}
+# audit_timeline <unix seconds>: the audited state changes of the root's keys, in lab
+# seconds after <unix seconds>.
+audit_timeline() {
+  on tenko && api GET "/audit?action=dns.trust_anchor.state&order=asc&limit=100" >/dev/null &&
+    python3 -c "
+import calendar, json, time
+d = json.load(open('$work/api.out'))
+seconds = lambda text: calendar.timegm(time.strptime(text[:19], '%Y-%m-%dT%H:%M:%S'))
+for e in d.get('items', []):
+    c = ((e.get('draft') or {}).get('details') or {}).get('context', {})
+    print('T+%3ds  audit: key %s %s' % (seconds(e['at']) - $1, c.get('key_tag'), c.get('state')))"
 }
 volume_name() { echo "${COMPOSE_PROJECT_NAME:-tenkodnslab}_$1"; }
 copy_volume() {
@@ -503,12 +561,20 @@ copy_volume() {
   docker volume create "$2" >/dev/null
   docker run --rm --entrypoint sh -v "$1:/from" -v "$2:/to" "${BIND_IMAGE:-internetsystemsconsortium/bind9:9.20}" -c 'rm -rf /to/* && cp -a /from/. /to/'
 }
+# fresh_service <service> <volume>: the service's container and data volume removed, so
+# that it starts as a new installation (an earlier round of the same run set it up).
+fresh_service() {
+  compose rm -sf "$1" >/dev/null 2>&1 || true
+  docker volume rm "$(volume_name "$2")" >/dev/null 2>&1 || true
+}
 
 rfc5011() {
-  local name file signing id parent ds_a tag_a tag_b t0 t1 t2 t3 t4 timeline
+  local name file signing id parent ds_a tag_a tag_b t0 t1 t2 t3 t4 backup_at timeline
   declare -A zone_ids=()
   timeline=()
   step "round rfc5011: a roll of the lab root's KSK followed by RFC 5011 (hold-down 20 s)"
+  fresh_service authority authority-data
+  fresh_service tenko tenko-data
   write_authority_config
   compose --profile recursion up -d --no-build authority client bind delv
   retry "$wait_secs" "the authority to become healthy" healthy authority
@@ -563,6 +629,7 @@ rfc5011() {
   row r11.pending.warning "the pending key shows as dns.trust_anchor.pending" system_warns dns.trust_anchor.pending
   # A backup of the node before the roll: a copy of its data volume while it is stopped.
   compose stop tenko >/dev/null 2>&1
+  backup_at="$(date +%s)"
   copy_volume "$(volume_name tenko-data)" "$(volume_name tenko-backup)"
   compose start tenko >/dev/null 2>&1
   retry "$wait_secs" "tenko to be healthy again" healthy tenko
@@ -574,19 +641,20 @@ rfc5011() {
 
   # The old KSK is revoked (the REVOKE bit, self-signed) and leaves the row after the
   # remove hold-down.
-  bind_sh "dnssec-revoke -K keys -r $(ksk_file 1 | sed "s#$work/zones/keys/##; s/\.key\$//") >/dev/null"
+  bind_sh "dnssec-revoke -K keys -r $(key_file "$tag_a" | sed "s#$work/zones/keys/##; s/\.key\$//") >/dev/null"
   sign_root
   row r11.revoked "the old KSK $tag_a is Revoked when the zone revokes it" within 45 anchor_is "$tag_a" revoked
   t3="$(date +%s)"
   timeline+=("$(printf 'T+%3ds  KSK %s revoked, seen as Revoked' $((t3 - t0)) "$tag_a")")
   row r11.secure.after "www.example.test is secure with the new anchor only" secure_now
-  write_delv_anchor "$(bind_sh "dnssec-dsfromkey -2 $(ksk_file 2 | sed "s#$work/zones/##")" | awk '{print $4, $5, $6, $7}')"
-  row r11.delv "delv validates with the new KSK as its anchor" test "$(delv_verdict "$tenko_ip" "$dns_port" www.example.test A)" == secure
-  row r11.removed "after the remove hold-down the old key is Removed, then forgotten" within 60 bash -c "$(declare -f anchor_state node_status on api field); s=\$(anchor_state $tag_a); [[ \"\$s\" == removed || \"\$s\" == absent ]]"
+  row r11.removed "after the remove hold-down the old key is Removed, then forgotten" within 60 anchor_gone "$tag_a"
   t4="$(date +%s)"
   timeline+=("$(printf 'T+%3ds  KSK %s Removed' $((t4 - t0)) "$tag_a")")
+  write_delv_anchor "$(bind_sh "dnssec-dsfromkey -2 $(key_file "$tag_b" | sed "s#$work/zones/##")" | awk '{print $4, $5, $6, $7}')"
+  row r11.delv "delv validates with the new KSK as its anchor" test "$(delv_verdict "$tenko_ip" "$dns_port" www.example.test A)" == secure
   row r11.audit "every state change is audited as dns.trust_anchor.state" audit_states
-  row r11.never.failed "validation never failed during the roll (the bogus counter is 0 for the root)" bash -c "$(declare -f node_status on api); node_status >/dev/null; python3 -c \"import json; d=json.load(open('$work/recursion.json')); print(d['counters']); raise SystemExit(0 if d['counters']['bogus'] == 0 else 1)\""
+  mapfile -t -O "${#timeline[@]}" timeline < <(audit_timeline "$t0")
+  row r11.never.failed "validation never failed during the roll (the bogus counter is 0 for the root)" never_bogus
 
   # A node started from the backup follows the roll on start.
   compose stop tenko >/dev/null 2>&1
@@ -594,8 +662,8 @@ rfc5011() {
   compose start tenko >/dev/null 2>&1
   retry "$wait_secs" "the restored node to be healthy" healthy tenko
   node_cookie="$(curl -sS -o /dev/null -w '' "http://$tenko_ip:8443/api/v1/system/status" >/dev/null; printf '%s' "$node_cookie")"
-  row r11.restore.old "the restored node starts with $tag_a valid and $tag_b pending" within 30 anchor_is "$tag_b" add_pend
-  row r11.restore.follow "the restored node makes $tag_b Valid and $tag_a Revoked without an operator" within 90 bash -c "$(declare -f anchor_is anchor_state node_status on api field); anchor_is $tag_b valid && anchor_is $tag_a revoked"
+  row r11.restore.old "the restored node starts from the backup: $tag_b is the key it had learned before" within 30 learned_before "$tag_b" "$backup_at"
+  row r11.restore.follow "the restored node makes $tag_b Valid and $tag_a Revoked without an operator" within 90 anchors_are "$tag_b" valid "$tag_a" revoked
   row r11.restore.secure "www.example.test is secure on the restored node" within 30 secure_now
   docker volume rm "$(volume_name tenko-backup)" >/dev/null 2>&1 || true
   printf '\n==> E34: the roll\n'
