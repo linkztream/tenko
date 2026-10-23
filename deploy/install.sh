@@ -1842,6 +1842,7 @@ summary() {
   elif ((OPT_NO_START)); then
     printf '    %-14s %s\n' "Setup:" "after the first start: runuser -u tenko -- tenko setup token --config ${CONFIG}"
   fi
+  printf '    %-14s %s\n' "Next:" "docs/QUICKSTART.md in the repository: the roles, a first network, the firewall ports."
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
   ((USE_SELF_DONE)) && printf '    %-14s %s\n' "Host resolver:" "127.0.0.1 (Tenko; --uninstall restores the previous one)"
   # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.

@@ -8,6 +8,8 @@ enterprise deployment. It ships as one Rust binary that runs any combination of 
 roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and `probe`
 (network discovery). The web UI is a SolidJS application embedded in the binary.
 
+New here? [`docs/QUICKSTART.md`](docs/QUICKSTART.md) goes from nothing to a running node with a first network in a few minutes.
+
 **Status:** pre-alpha, Phase 0 (foundation and spikes). Nothing here is ready for use.
 
 > **Pre-release.** Tenko DDI is under development towards its first release. There is
