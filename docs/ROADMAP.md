@@ -6,6 +6,33 @@ The reference home-lab environment (three LANs plus a DMZ, Active Directory, a s
 
 Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). Its Phase column is authoritative. Requirement IDs cited in this document are pointers, not a complete list per phase. Architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), migration design and runbooks in [MIGRATION.md](MIGRATION.md), and per-RFC targets in [CONFORMANCE.md](CONFORMANCE.md).
 
+## Where we are (2026-10-23)
+
+| Phase | State | Where to read |
+|---|---|---|
+| 0 Foundation and spikes | Complete | `bench/`, ADR 0002 |
+| 1 Platform and IPAM | Complete | [phase-1-status.md](plans/phase-1-status.md), [phase-1-exit.md](plans/phase-1-exit.md) |
+| 2 DNS | Complete, two measurements carried over (M23 idle memory, deviations 145 and 146) | [phase-2-status.md](plans/phase-2-status.md), [phase-2-exit.md](plans/phase-2-exit.md) |
+| 3 DHCP | In progress: the DHCPv4 engine, the `dhcp` role, reservations from intent, DDNS, classes and policies, conflict detection, the UI and the Kea export (DHCPv4) are merged; DHCPv6 (WP9.1, WP9.2, WP9.4) and the exit (WP9.5) are open | [phase-3-plan.md](plans/phase-3-plan.md), [phase-3-status.md](plans/phase-3-status.md) |
+| Recursion (Slice 10, beside Phase 3) | In progress: the contracts and the iterative engine with the lab root are merged; validation (WP10.2) is being built; WP10.3 to WP10.5 are open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
+| 4 AD integration and migration | Not started | [MIGRATION.md](MIGRATION.md) |
+| 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
+
+The latest release is on the [releases page](https://github.com/linkztream/tenko/releases); [QUICKSTART.md](QUICKSTART.md) gets a node running. The status documents list every work package with its state; a package marked in progress has a builder, so ask in an issue before starting on one.
+
+### Help wanted
+
+Packages that stand on their own and are free to take, with where their specification lives:
+
+- **DHCPv6**: WP9.1 (the codec and the server: IA_NA, relay, RFC 6939, RFC 4704), then WP9.2 (IA_PD and the RA check) and WP9.4 (the UI): [phase-3-plan.md](plans/phase-3-plan.md) section 4, `docs/dhcp.md`, `docs/dhcp-contracts.md`.
+- **Recursion after WP10.2**: WP10.3 (QNAME minimisation, the denial cache, RFC 8020 and RFC 9520) and WP10.4 (the API, the CLI and the UI): [dns-recursion-plan.md](plans/dns-recursion-plan.md) section 4. RFC 5011 key revocation in Tenko's own signer is a small package of its own once WP10.2 lands.
+- **Migration connectors** that need no AD: BIND (MIG-09), OPNsense (MIG-10), dnsmasq and Pi-hole (MIG-11), Kea and ISC dhcpd (MIG-12), NetBox and phpIPAM (MIG-13): [MIGRATION.md](MIGRATION.md) and the IR in `docs/dhcp-contracts.md` section 11; the Kea export in `crates/tenko-dhcp/src/export/` is the mirror image of MIG-12.
+- **Measurements that fail their threshold**: M23, idle memory of the musl binary with the home zones and a full cache, 100.05 MiB against 100 MB ([phase-2-exit.md](plans/phase-2-exit.md), deviation 145); M31, the DDNS answer latency from DHCP, p99 699 ms against 250 ms (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`). Each needs a profile first and a measured fix second.
+- **Sign-in with OIDC** (IAM-11, Phase 5, but self-contained): a design note as an ADR first, then the provider flow, the group claim mapping onto the roles and the UI.
+- **Smaller**: the UI test suite is flaky under a loaded machine (one failure in about 4,300 tests per full gate; a worker-count or timing fix with evidence); the weekly lab workflows run on hosted runners since 2026-10-22 and their first runs need watching.
+
+To take one: open an issue with the feature-request form naming the package, and you get the package's brief there (the plan section, the files it owns, what done looks like, the checks). Then the rules of [CONTRIBUTING.md](../CONTRIBUTING.md): one branch per package, Conventional Commits in English, the checks before the pull request, a result file behind every performance claim, the Contributor License Agreement, and never a real network's names or addresses in the repository.
+
 ## Overview
 
 | Phase | Name | Theme | Exit gate |
