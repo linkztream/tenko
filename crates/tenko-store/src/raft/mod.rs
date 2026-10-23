@@ -2025,6 +2025,10 @@ impl Store for RaftStore {
         self.inner.sm.register_index(index)
     }
 
+    fn max_batch_bytes(&self) -> usize {
+        self.inner.config.coalescer.max_batch_bytes
+    }
+
     fn status(&self) -> StoreStatus {
         let inner = &self.inner;
         let meta = inner.sm.meta();

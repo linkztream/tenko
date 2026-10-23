@@ -1,6 +1,12 @@
 //! Writing the reconciler's candidates into `ipam.proposals`: open what is new, refresh
 //! what is unchanged, supersede what changed, expire what no longer holds, and leave
 //! closed what a person rejected with the same evidence.
+//!
+//! The writes come out as [`Item`]s, one per subject key, each complete in itself (the
+//! proposal row, the open-key row, a forgotten rejection and the audit records), in key
+//! order. The reconciler writes them in batches under the store's limit; because no item
+//! depends on another, any prefix of them leaves the tables consistent and the next run
+//! completes the rest.
 
 use std::collections::BTreeSet;
 
@@ -11,7 +17,7 @@ use tenko_core::{
     codec::canonical_sha256,
     ipam::Stamp,
 };
-use tenko_store::WriteBatch;
+use tenko_store::{Mutation, Precondition, WriteBatch};
 
 use super::model::{
     IntentProposal, IntentProposalKind, IntentProposalState, OPEN_KEYS, PROPOSALS, REJECTIONS,
@@ -57,7 +63,7 @@ pub(crate) fn fingerprint(candidate: &Candidate) -> IpamResult<Digest> {
     Ok(Digest(canonical_sha256(&input)?))
 }
 
-/// Counts of one sync.
+/// Counts of one sync, or of one item of it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct SyncCounts {
     pub opened: u32,
@@ -66,6 +72,84 @@ pub(crate) struct SyncCounts {
     pub expired: u32,
     pub suppressed: u32,
     pub unchanged: u32,
+    /// Last sightings of intent objects (the reconciler's own items).
+    pub sightings: u32,
+}
+
+impl SyncCounts {
+    /// Adds `other` to these counts.
+    pub(crate) fn add(&mut self, other: SyncCounts) {
+        self.opened += other.opened;
+        self.refreshed += other.refreshed;
+        self.superseded += other.superseded;
+        self.expired += other.expired;
+        self.suppressed += other.suppressed;
+        self.unchanged += other.unchanged;
+        self.sightings += other.sightings;
+    }
+
+    /// The proposal rows written: opened, refreshed, superseded and expired.
+    pub(crate) fn proposals(&self) -> u32 {
+        self.opened + self.refreshed + self.superseded + self.expired
+    }
+}
+
+/// One independent write of a run: the rows of one subject key (a proposal opened,
+/// refreshed, superseded or expired, with its open-key row, a forgotten rejection and the
+/// audit records) or one last sighting, with what it counts as and its payload size
+/// ([`WriteBatch::payload_size`] of the item alone, which counts the audit records a little
+/// over what they take in a larger batch, so a sum of items never underestimates a batch).
+pub(crate) struct Item {
+    /// The subject key of a proposal item; `None` for a sighting.
+    pub key: Option<String>,
+    /// What the item counts as.
+    pub counts: SyncCounts,
+    /// The item's payload size.
+    pub size: usize,
+    mutations: Vec<Mutation>,
+    preconditions: Vec<Precondition>,
+    audit: Vec<AuditDraft>,
+}
+
+impl Item {
+    /// An item from the writes collected in `batch`.
+    pub(crate) fn new(key: Option<String>, counts: SyncCounts, batch: WriteBatch) -> Self {
+        let size = batch.payload_size();
+        Self {
+            key,
+            counts,
+            size,
+            mutations: batch.mutations,
+            preconditions: batch.preconditions,
+            audit: batch.audit,
+        }
+    }
+
+    /// Copies the item's writes into `batch`.
+    pub(crate) fn add_to(&self, batch: &mut WriteBatch) {
+        batch.mutations.extend(self.mutations.iter().cloned());
+        batch
+            .preconditions
+            .extend(self.preconditions.iter().cloned());
+        batch.audit.extend(self.audit.iter().cloned());
+    }
+}
+
+/// What a sync found: the writes as items in subject-key order, and what it leaves as it
+/// is.
+#[derive(Default)]
+pub(crate) struct SyncPlan {
+    /// The writes.
+    pub items: Vec<Item>,
+    /// Open proposals left as they were.
+    pub unchanged: u32,
+    /// Subjects not opened again because a person rejected the same evidence.
+    pub suppressed: u32,
+}
+
+/// An empty batch for the writes of one item.
+pub(crate) fn scratch(now: Timestamp) -> WriteBatch {
+    WriteBatch::new(Principal::system(SystemComponent::Reconciler), now)
 }
 
 /// How much later evidence must be before an unchanged open proposal is rewritten.
@@ -112,15 +196,17 @@ fn new_proposal(candidate: &Candidate, fingerprint: Digest, now: Timestamp) -> I
     }
 }
 
-/// Adds the proposal writes of `candidates` to `batch` and counts them.
+/// The proposal writes of `candidates` as items, in subject-key order, with the counts of
+/// what stays as it is. `written` holds the subject keys an earlier pass of the same run
+/// committed; a proposal of such a key that is now unchanged is not counted again.
 pub(crate) fn sync(
     snapshot: &Snapshot,
     candidates: &[Candidate],
     config: &SyncConfig,
-    batch: &mut WriteBatch,
-) -> IpamResult<SyncCounts> {
+    written: &BTreeSet<String>,
+) -> IpamResult<SyncPlan> {
     let now = snapshot.now;
-    let mut counts = SyncCounts::default();
+    let mut plan = SyncPlan::default();
     let mut keys: BTreeSet<&str> = BTreeSet::new();
     for candidate in candidates {
         if !keys.insert(candidate.key.as_str()) {
@@ -132,9 +218,11 @@ pub(crate) fn sync(
             && let Some((rejection, _)) = snapshot.rejections.get(&candidate.key)
             && rejection.fingerprint == fingerprint
         {
-            counts.suppressed += 1;
+            plan.suppressed += 1;
             continue;
         }
+        let mut batch = scratch(now);
+        let mut counts = SyncCounts::default();
         match open {
             Some((current, _)) if current.fingerprint == fingerprint => {
                 let newer = candidate
@@ -154,7 +242,9 @@ pub(crate) fn sync(
                     .unwrap_or_default()
                     > current.sightings();
                 if !(newer || more_sightings) {
-                    counts.unchanged += 1;
+                    if !written.contains(&candidate.key) {
+                        plan.unchanged += 1;
+                    }
                     continue;
                 }
                 let mut refreshed = current.clone();
@@ -204,19 +294,22 @@ pub(crate) fn sync(
                 counts.opened += 1;
             }
         }
+        plan.items
+            .push(Item::new(Some(candidate.key.clone()), counts, batch));
     }
-    counts.expired = expire(snapshot, &keys, batch)?;
-    Ok(counts)
+    expire(snapshot, &keys, &mut plan)?;
+    plan.items.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(plan)
 }
 
-/// Expires the open proposals whose key no candidate has; returns how many.
-fn expire(snapshot: &Snapshot, keys: &BTreeSet<&str>, batch: &mut WriteBatch) -> IpamResult<u32> {
+/// Adds an item expiring each open proposal whose key no candidate has.
+fn expire(snapshot: &Snapshot, keys: &BTreeSet<&str>, plan: &mut SyncPlan) -> IpamResult<()> {
     let now = snapshot.now;
-    let mut expired = 0;
     for (key, (current, key_revision)) in &snapshot.open {
         if keys.contains(key.as_str()) {
             continue;
         }
+        let mut batch = scratch(now);
         let mut old = current.clone();
         old.state = IntentProposalState::Expired;
         old.decided = Some(reconciler_stamp(now));
@@ -228,7 +321,11 @@ fn expire(snapshot: &Snapshot, keys: &BTreeSet<&str>, batch: &mut WriteBatch) ->
         batch.delete_typed(&OPEN_KEYS, key);
         batch.expect_typed(&OPEN_KEYS, key, Some(*key_revision));
         batch.audit(audit(actions::EXPIRE, &old));
-        expired += 1;
+        let counts = SyncCounts {
+            expired: 1,
+            ..SyncCounts::default()
+        };
+        plan.items.push(Item::new(Some(key.clone()), counts, batch));
     }
-    Ok(expired)
+    Ok(())
 }

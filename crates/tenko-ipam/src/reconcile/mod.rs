@@ -8,8 +8,12 @@
 //! 2. The last sightings of addresses and interfaces of intent are brought up to date from
 //!    the current facts (`ipam.obs.last_seen`, at most once per refresh interval).
 //! 3. The rules ([`rules`]) say which proposals should be open; [`crate::proposals`]
-//!    opens, refreshes, supersedes and expires accordingly. Steps 2 and 3 commit as one
-//!    batch (`system:reconciler`), which a concurrent writer makes the run repeat.
+//!    opens, refreshes, supersedes and expires accordingly. Steps 2 and 3 are written as
+//!    `system:reconciler` in batches under the store's limit (one when it all fits), in
+//!    subject-key order, each fenced with the leader epoch; the last batch carries the
+//!    run's audit record (`ipam.reconcile.run`). A batch that fails is tried once more as
+//!    two halves, and what still fails is counted on the report as unwritten for the next
+//!    run to write. A concurrent writer makes the run read again and write what is left.
 //! 4. Open proposals that an adoption policy covers are applied, each in its own inline
 //!    job as `system:reconciler`.
 //! 5. Move jobs waiting at their observation step are confirmed when a current fact shows
@@ -52,18 +56,19 @@ pub(crate) mod snapshot;
 pub mod view;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    ObjectRef, Principal, RequestCtx, Revision, SystemComponent, Timestamp,
+    ObjectRef, RequestCtx, Revision, SystemComponent, Timestamp,
+    audit::{AuditAction, AuditDraft},
     cluster::{LEADER_EPOCH, LeaderService},
     observe::{Observation, Observed},
 };
-use tenko_store::{ReadConsistency, StoreError, WriteBatch, fence};
+use tenko_store::{ReadConsistency, StoreError, fence};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -87,13 +92,18 @@ use crate::{
         adoption,
         decide::{self, Applier},
         model::ADOPTION,
-        sync::{self, SyncConfig},
+        sync::{self, Item, SyncConfig, SyncCounts},
     },
     service::IpamService,
 };
 
 /// The name of the leader service that runs the reconciler.
 pub const LEADER_SERVICE: &str = "ipam.reconcile";
+
+/// The audit action of a run that wrote something: its context says how many batches it
+/// took, how many proposal rows and sightings it wrote, and how many items it could not
+/// write.
+pub const RUN_ACTION: &str = "ipam.reconcile.run";
 
 /// `tenko_ipam_ingest_batches_total`: observation batches [`Reconciler::ingest`] wrote on
 /// this controller. The server registers the family with its metrics registry.
@@ -181,9 +191,20 @@ pub struct ReconcileReport {
     /// off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<crate::dns::DnsActuation>,
-    /// The revision of the proposal write; `null` when nothing changed.
+    /// The revision of the proposal write (its last batch); `null` when nothing changed.
     #[schema(value_type = Option<u64>)]
     pub revision: Option<Revision>,
+    /// Batches the proposal write took: one when it fits the store's batch limit, more
+    /// when it does not; 0 when nothing changed.
+    #[serde(default)]
+    pub batches: u32,
+    /// Proposal writes and sightings not written: those of a batch that failed and failed
+    /// again as two halves. The next run writes them.
+    #[serde(default)]
+    pub unwritten: u32,
+    /// The error code of the last batch that failed; `null` when every batch was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
 }
 
 impl ReconcileReport {
@@ -203,8 +224,49 @@ impl ReconcileReport {
             moves_confirmed: 0,
             dns: None,
             revision: None,
+            batches: 0,
+            unwritten: 0,
+            failure: None,
         }
     }
+}
+
+/// What the batches of one run wrote so far, kept across the passes of a run that read
+/// again after a failed precondition: the keys an earlier pass committed are not counted
+/// again by the next.
+#[derive(Debug, Default)]
+struct Written {
+    batches: u32,
+    counts: SyncCounts,
+    revision: Option<Revision>,
+    keys: BTreeSet<String>,
+    unwritten: u32,
+    failure: Option<String>,
+}
+
+/// How writing a run's items ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Every batch was tried; what failed twice is counted as unwritten.
+    Done,
+    /// A batch lost a race with another writer: what was committed stays, the run reads
+    /// again.
+    Contended,
+}
+
+/// The size budget of one batch: three quarters of the store's limit, the rest a margin
+/// for the fence, the item sizes' rounding and the run's audit record.
+fn batch_budget(max_batch_bytes: usize) -> usize {
+    max_batch_bytes / 4 * 3
+}
+
+/// The run's audit record.
+fn run_record(batches: u32, counts: SyncCounts, unwritten: u32) -> AuditDraft {
+    AuditDraft::success(AuditAction::from_static(RUN_ACTION), Vec::new())
+        .with_context("batches", batches.to_string())
+        .with_context("proposals", counts.proposals().to_string())
+        .with_context("sightings", counts.sightings.to_string())
+        .with_context("unwritten", unwritten.to_string())
 }
 
 /// The reconciler of one controller. Shared as `Arc<Reconciler>`; the API reaches it as a
@@ -540,7 +602,8 @@ impl Reconciler {
             ..crate::dns::PlanOptions::default()
         };
         let attempts = config.max_attempts.max(1);
-        let mut committed = None;
+        let mut written = Written::default();
+        let mut left = (0, 0);
         for attempt in 0..attempts {
             let consistency = if attempt == 0 {
                 ReadConsistency::Local
@@ -564,11 +627,7 @@ impl Reconciler {
                 None => Vec::new(),
             };
             drop(view);
-            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Reconciler), now);
-            if let Some(epoch) = epoch {
-                batch.preconditions.push(fence(epoch));
-            }
-            let sightings = Self::sightings(&snapshot, &mut batch, &mut report, &config)?;
+            let (mut items, sightings) = Self::sightings(&snapshot, now, &config)?;
             let candidates = rules::candidates(
                 &snapshot,
                 &sightings,
@@ -577,46 +636,55 @@ impl Reconciler {
                 },
                 &dns_findings,
             );
-            let counts = sync::sync(
+            let mut plan = sync::sync(
                 &snapshot,
                 &candidates,
                 &SyncConfig {
                     refresh: config.observe.refresh,
                 },
-                &mut batch,
+                &written.keys,
             )?;
-            if batch.mutations.is_empty() {
-                report.unchanged = counts.unchanged;
-                report.suppressed = counts.suppressed;
+            left = (plan.unchanged, plan.suppressed);
+            // The sightings first (a key of `None`), then the proposals in key order.
+            items.append(&mut plan.items);
+            if items.is_empty() {
                 break;
             }
-            match self.ipam.store().propose(batch).await {
-                Ok(done) => {
-                    report.opened = counts.opened;
-                    report.refreshed = counts.refreshed;
-                    report.unchanged = counts.unchanged;
-                    report.superseded = counts.superseded;
-                    report.expired = counts.expired;
-                    report.suppressed = counts.suppressed;
-                    report.revision = Some(done.revision);
-                    committed = Some(done.revision);
-                    break;
-                }
-                Err(StoreError::PreconditionFailed(_)) => {
+            match self.write_items(items, now, epoch, &mut written).await? {
+                Outcome::Done => break,
+                Outcome::Contended => {
                     if let Some(epoch) = epoch
                         && self.deposed(epoch).await
                     {
                         return Err(deposed());
                     }
                     if attempt + 1 >= attempts {
+                        tracing::warn!(
+                            batches = written.batches,
+                            "reconcile write kept losing races; what was committed stays"
+                        );
                         return Err(IpamError::contended(attempts));
                     }
-                    report.sightings = 0;
-                    tracing::debug!(attempt, "reconcile write stale; running again");
+                    tracing::debug!(
+                        attempt,
+                        batches = written.batches,
+                        "reconcile write stale; running again"
+                    );
                 }
-                Err(error) => return Err(error.into()),
             }
         }
+        report.opened = written.counts.opened;
+        report.refreshed = written.counts.refreshed;
+        report.superseded = written.counts.superseded;
+        report.expired = written.counts.expired;
+        report.sightings = written.counts.sightings;
+        report.unchanged = left.0;
+        report.suppressed = left.1;
+        report.revision = written.revision;
+        report.batches = written.batches;
+        report.unwritten = written.unwritten;
+        report.failure = written.failure;
+        let committed = written.revision;
         if config.adopt {
             self.adopt(committed, now, &mut report).await?;
         }
@@ -699,14 +767,152 @@ impl Reconciler {
         Ok(actuation)
     }
 
-    /// Brings the last sightings of addresses and interfaces up to date in `batch` and
-    /// returns them as they will be.
+    /// Writes `items` in batches under the store's budget, in order, each fenced with
+    /// `epoch`; the last batch carries the run's audit record. A batch that fails is tried
+    /// once more as two halves, and what still fails is counted as unwritten while the run
+    /// goes on. A failed precondition stops the writing: what was committed stays, and the
+    /// run reads again.
+    async fn write_items(
+        &self,
+        items: Vec<Item>,
+        now: Timestamp,
+        epoch: Option<u64>,
+        written: &mut Written,
+    ) -> IpamResult<Outcome> {
+        let budget = batch_budget(self.ipam.store().max_batch_bytes());
+        let mut groups: Vec<Vec<Item>> = Vec::new();
+        let mut current: Vec<Item> = Vec::new();
+        let mut size = 0;
+        for item in items {
+            if !current.is_empty() && size + item.size > budget {
+                groups.push(std::mem::take(&mut current));
+                size = 0;
+            }
+            size += item.size;
+            current.push(item);
+        }
+        if !current.is_empty() {
+            groups.push(current);
+        }
+        let total = groups.len();
+        for (index, group) in groups.into_iter().enumerate() {
+            let last = index + 1 == total;
+            if self.commit_group(group, now, epoch, written, last).await? == Outcome::Contended {
+                return Ok(Outcome::Contended);
+            }
+        }
+        Ok(Outcome::Done)
+    }
+
+    /// Commits one group of items; on a failure other than a precondition, once more as
+    /// two halves.
+    async fn commit_group(
+        &self,
+        group: Vec<Item>,
+        now: Timestamp,
+        epoch: Option<u64>,
+        written: &mut Written,
+        last: bool,
+    ) -> IpamResult<Outcome> {
+        let error = match self.commit(&group, now, epoch, written, last).await {
+            Ok(()) => return Ok(Outcome::Done),
+            Err(StoreError::PreconditionFailed(_)) => return Ok(Outcome::Contended),
+            Err(error) => error,
+        };
+        tracing::warn!(
+            items = group.len(),
+            error = %tenko_core::Coded::code(&error),
+            "a batch of the reconcile run failed; trying it as two halves"
+        );
+        if group.len() < 2 {
+            written.unwritten += 1;
+            written.failure = Some(tenko_core::Coded::code(&error).to_owned());
+            if last {
+                self.record_alone(now, epoch, written).await;
+            }
+            return Ok(Outcome::Done);
+        }
+        let mut head = group;
+        let tail = head.split_off(head.len() / 2);
+        for (half, half_last) in [(head, false), (tail, last)] {
+            match self.commit(&half, now, epoch, written, half_last).await {
+                Ok(()) => {}
+                Err(StoreError::PreconditionFailed(_)) => return Ok(Outcome::Contended),
+                Err(error) => {
+                    tracing::warn!(
+                        items = half.len(),
+                        error = %tenko_core::Coded::code(&error),
+                        "half of a batch of the reconcile run failed again; left for the next run"
+                    );
+                    written.unwritten += u32::try_from(half.len()).unwrap_or(u32::MAX);
+                    written.failure = Some(tenko_core::Coded::code(&error).to_owned());
+                    if half_last {
+                        self.record_alone(now, epoch, written).await;
+                    }
+                }
+            }
+        }
+        Ok(Outcome::Done)
+    }
+
+    /// Commits `items` as one fenced batch, with the run's record when it is the last, and
+    /// counts them as written.
+    async fn commit(
+        &self,
+        items: &[Item],
+        now: Timestamp,
+        epoch: Option<u64>,
+        written: &mut Written,
+        last: bool,
+    ) -> Result<(), StoreError> {
+        let mut batch = sync::scratch(now);
+        if let Some(epoch) = epoch {
+            batch.preconditions.push(fence(epoch));
+        }
+        let mut counts = SyncCounts::default();
+        for item in items {
+            item.add_to(&mut batch);
+            counts.add(item.counts);
+        }
+        if last {
+            let mut total = written.counts;
+            total.add(counts);
+            batch.audit(run_record(written.batches + 1, total, written.unwritten));
+        }
+        let done = self.ipam.store().propose(batch).await?;
+        written.batches += 1;
+        written.counts.add(counts);
+        written.revision = Some(done.revision);
+        written
+            .keys
+            .extend(items.iter().filter_map(|item| item.key.clone()));
+        Ok(())
+    }
+
+    /// Writes the run's record on its own when the batch that should have carried it
+    /// failed; a failure here is logged.
+    async fn record_alone(&self, now: Timestamp, epoch: Option<u64>, written: &Written) {
+        let mut batch = sync::scratch(now);
+        if let Some(epoch) = epoch {
+            batch.preconditions.push(fence(epoch));
+        }
+        batch.audit(run_record(
+            written.batches,
+            written.counts,
+            written.unwritten,
+        ));
+        if let Err(error) = self.ipam.store().propose(batch).await {
+            tracing::warn!(error = %tenko_core::Coded::code(&error), "the reconcile run's audit record was not written");
+        }
+    }
+
+    /// Brings the last sightings of addresses and interfaces up to date, one item each in
+    /// object order, and returns them as they will be.
     fn sightings(
         snapshot: &Snapshot,
-        batch: &mut WriteBatch,
-        report: &mut ReconcileReport,
+        now: Timestamp,
         config: &ReconcilerConfig,
-    ) -> IpamResult<BTreeMap<ObjectRef, IntentSighting>> {
+    ) -> IpamResult<(Vec<Item>, BTreeMap<ObjectRef, IntentSighting>)> {
         let intent = &snapshot.intent;
         let mut newest: BTreeMap<ObjectRef, IntentSighting> = BTreeMap::new();
         let mut offer = |object: ObjectRef, sighting: IntentSighting| {
@@ -743,6 +949,7 @@ impl Reconciler {
             .iter()
             .map(|(object, (sighting, _))| (*object, sighting.clone()))
             .collect();
+        let mut items = Vec::new();
         for (object, sighting) in newest {
             let stored = snapshot.sightings.get(&object);
             let due = stored.is_none_or(|(current, _)| {
@@ -751,12 +958,17 @@ impl Reconciler {
             if !due {
                 continue;
             }
+            let mut batch = sync::scratch(now);
             batch.put_typed(&LAST_SEEN, &object, &sighting)?;
             batch.expect_typed(&LAST_SEEN, &object, stored.map(|(_, revision)| *revision));
-            report.sightings += 1;
+            let counts = SyncCounts {
+                sightings: 1,
+                ..SyncCounts::default()
+            };
+            items.push(Item::new(None, counts, batch));
             merged.insert(object, sighting);
         }
-        Ok(merged)
+        Ok((items, merged))
     }
 
     /// Applies the open proposals that an adoption policy covers.

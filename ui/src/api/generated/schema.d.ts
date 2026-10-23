@@ -15416,12 +15416,20 @@ export interface components {
             adoption_failures: number;
             /** @description When the run started. */
             at: components["schemas"]["Timestamp"];
+            /**
+             * Format: int32
+             * @description Batches the proposal write took: one when it fits the store's batch limit, more
+             *     when it does not; 0 when nothing changed.
+             */
+            batches?: number;
             dns?: components["schemas"]["DnsActuation"] | null;
             /**
              * Format: int32
              * @description Proposals whose observation no longer holds.
              */
             expired: number;
+            /** @description The error code of the last batch that failed; `null` when every batch was written. */
+            failure?: string | null;
             /**
              * Format: int32
              * @description Move jobs whose observation step was confirmed.
@@ -15439,7 +15447,7 @@ export interface components {
             refreshed: number;
             /**
              * Format: int64
-             * @description The revision of the proposal write; `null` when nothing changed.
+             * @description The revision of the proposal write (its last batch); `null` when nothing changed.
              */
             revision?: number | null;
             /**
@@ -15462,6 +15470,12 @@ export interface components {
              * @description Open proposals left as they were.
              */
             unchanged: number;
+            /**
+             * Format: int32
+             * @description Proposal writes and sightings not written: those of a batch that failed and failed
+             *     again as two halves. The next run writes them.
+             */
+            unwritten?: number;
         };
         /** @description One row of the view: what each truth says about an address, the finding and who wins. */
         ReconcileRow: {
@@ -38582,7 +38596,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description What the run did: proposals opened, refreshed, superseded, expired and adopted, and the revision of its write */
+            /** @description What the run did: proposals opened, refreshed, superseded, expired and adopted, the revision of its write, how many batches the write took, and what a batch that failed twice left for the next run (`unwritten`, `failure`) */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -24629,7 +24629,7 @@
         "operationId": "reconcile_proposals",
         "responses": {
           "200": {
-            "description": "What the run did: proposals opened, refreshed, superseded, expired and adopted, and the revision of its write",
+            "description": "What the run did: proposals opened, refreshed, superseded, expired and adopted, the revision of its write, how many batches the write took, and what a batch that failed twice left for the next run (`unwritten`, `failure`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -61322,6 +61322,12 @@
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the run started."
           },
+          "batches": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Batches the proposal write took: one when it fits the store's batch limit, more\nwhen it does not; 0 when nothing changed.",
+            "minimum": 0
+          },
           "dns": {
             "oneOf": [
               {
@@ -61338,6 +61344,13 @@
             "format": "int32",
             "description": "Proposals whose observation no longer holds.",
             "minimum": 0
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The error code of the last batch that failed; `null` when every batch was written."
           },
           "moves_confirmed": {
             "type": "integer",
@@ -61363,7 +61376,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "The revision of the proposal write; `null` when nothing changed.",
+            "description": "The revision of the proposal write (its last batch); `null` when nothing changed.",
             "minimum": 0
           },
           "sightings": {
@@ -61388,6 +61401,12 @@
             "type": "integer",
             "format": "int32",
             "description": "Open proposals left as they were.",
+            "minimum": 0
+          },
+          "unwritten": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Proposal writes and sightings not written: those of a batch that failed and failed\nagain as two halves. The next run writes them.",
             "minimum": 0
           }
         }

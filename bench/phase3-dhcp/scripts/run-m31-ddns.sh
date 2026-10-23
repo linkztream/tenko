@@ -34,7 +34,10 @@
 #    holds. Between runs it waits for the DDNS queue to empty.
 # 5. After the runs: the node's RSS (Windows: the working set; Linux: VmRSS), the counters
 #    `tenko_dhcp_ddns` and `tenko_dhcp_ddns_queue` and the count of
-#    `tenko_dhcp_exchange_duration_seconds` from the metrics listener, into the meta file.
+#    `tenko_dhcp_exchange_duration_seconds` from the metrics listener, into the meta file;
+#    then one reconciler run on demand (`POST /proposals/reconcile`), whose report says how
+#    many discovered-host proposals the leases' facts opened, in how many batches, and what
+#    it could not write, with the time the run took, into the meta file.
 # 6. The results: the load tool's JSON lines in the out file; the summary lines echoed.
 #
 # Usage: run-m31-ddns.sh [--server-binary PATH] [--load PATH] [options]
@@ -57,8 +60,12 @@
 #   --allow-dynamic       do not refuse a dynamically linked binary on Linux
 #   --out FILE            result file (default bench/phase3-dhcp/results/raw/m31-<stamp>.jsonl)
 #   --print-plan          print this text and exit
-# Experiments, from the environment: ROLES (default controller,dns,dhcp) and
-# RECONCILER_DEBOUNCE (the IPAM reconciler's debounce in seconds, 0 to 300).
+# Experiments, from the environment: ROLES (default controller,dns,dhcp), RECONCILER_DEBOUNCE
+# (the IPAM reconciler's debounce in seconds, 0 to 300) and RECONCILE_AT (seconds into the
+# first run at which the reconciler runs on demand, `RECONCILE_AT="30 50"`, so that its
+# proposal batches land inside the load; each run's report goes to the meta file). The
+# periodic run cannot be moved into a 60-second run: the default interval of 300 s is read
+# before the wait that a changed setting applies after.
 set -u
 export LC_ALL=C
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -173,7 +180,7 @@ COOKIE=""
 # status in $API_STATUS; true for a 2xx status.
 api() {
   local method="$1" path="$2" body="${3:-}"
-  local args=(-sS -o "$WORK/api.out" -w '%{http_code}' -X "$method" -H "Origin: $URL"
+  local args=(-sS -o "${API_OUT:-$WORK/api.out}" -w '%{http_code}' -X "$method" -H "Origin: $URL"
     -H "Idempotency-Key: m31-$RANDOM-$RANDOM-$RANDOM")
   [ -n "$COOKIE" ] && args+=(-H "Cookie: $COOKIE")
   [ -n "$body" ] && args+=(-H "Content-Type: application/json" --data "$body")
@@ -183,7 +190,7 @@ api() {
 # The first "id" of the JSON in $WORK/api.out.
 first_id() { grep -o '"id": *"[^"]*"' "$WORK/api.out" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'; }
 # A number out of a result line: json_num KEY LINE.
-json_num() { printf '%s' "$2" | sed -n "s/.*\"$1\": \([^,}]*\).*/\1/p"; }
+json_num() { printf '%s' "$2" | sed -n "s/.*\"$1\": *\([^,}]*\).*/\1/p"; }
 # The value of a metrics line whose name (with labels) starts with $1, summed.
 metric_sum() {
   curl -sS "http://$LOOPBACK:$METRICS_PORT/metrics" 2>/dev/null |
@@ -301,7 +308,31 @@ settle() {
   sleep 2
 }
 
+# A reconciler run on demand: reconcile_note LABEL; its report (or refusal) into the meta
+# file. The leases' facts become discovered-host proposals, written in batches under the
+# store's limit (the Slice 8 follow-ups; `docs/reconciliation.md` 3.2).
+reconcile_note() {
+  local label="$1" started=$SECONDS line
+  if API_OUT="$WORK/reconcile-$label.out" api POST /proposals/reconcile; then
+    line="$(tr -d '\n' < "$WORK/reconcile-$label.out")"
+    note "reconcile $label: $((SECONDS - started)) s, opened $(json_num opened "$line"), refreshed $(json_num refreshed "$line"), \
+unchanged $(json_num unchanged "$line"), superseded $(json_num superseded "$line"), expired $(json_num expired "$line"), \
+batches $(json_num batches "$line"), unwritten $(json_num unwritten "$line"), revision $(json_num revision "$line")"
+  else
+    note "reconcile $label: refused ($API_STATUS): $(cat "$WORK/reconcile-$label.out")"
+  fi
+}
+
 # 4. The runs.
+RECONCILE_PIDS=()
+if [ -n "${RECONCILE_AT:-}" ]; then
+  # An experiment: the reconciler on demand inside the first run.
+  note "reconciler: runs on demand at $RECONCILE_AT s into the first run (an experiment)"
+  for at in $RECONCILE_AT; do
+    ( sleep "$at"; reconcile_note "at ${at} s" ) &
+    RECONCILE_PIDS+=("$!")
+  done
+fi
 for repeat in $(seq 1 "$REPEATS"); do
   letter="$(printf "\\$(printf '%03o' $((96 + repeat)))")"
   prefix="m31$letter"
@@ -326,6 +357,9 @@ curl -sS "http://$LOOPBACK:$METRICS_PORT/metrics" > "${OUT%.jsonl}.metrics.txt" 
 curl -sS "http://$LOOPBACK:$METRICS_PORT/metrics" 2>/dev/null |
   grep -E '^(tenko_dhcp_ddns|tenko_dhcp_exchange_duration_seconds_count)' | while read -r line; do note "metric: $line"; done
 note "metric sum: tenko_dhcp_exchange_duration_seconds_count $(metric_sum tenko_dhcp_exchange_duration_seconds_count)"
+for pid in ${RECONCILE_PIDS[@]+"${RECONCILE_PIDS[@]}"}; do wait "$pid"; done
+reconcile_note "after the runs"
+note "reconcile runs that failed in the server log: $(grep -c 'reconcile run failed' "${OUT%.jsonl}.server.log" 2>/dev/null), batch_too_large lines: $(grep -c batch_too_large "${OUT%.jsonl}.server.log" 2>/dev/null)"
 
 # 6. The results.
 note "results: $OUT"

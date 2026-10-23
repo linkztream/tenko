@@ -372,6 +372,8 @@ async fn reject_proposal(
 }
 
 /// Runs the reconciler once, now, instead of waiting for its interval.
+// The Slice 8 follow-ups (the proposal batches): the report says how many batches the write
+// took and what a failed batch left for the next run.
 #[utoipa::path(
     post,
     path = "/proposals/reconcile",
@@ -379,7 +381,7 @@ async fn reject_proposal(
     operation_id = "reconcile_proposals",
     summary = "Run the reconciler now",
     responses(
-        (status = 200, description = "What the run did: proposals opened, refreshed, superseded, expired and adopted, and the revision of its write", body = ReconcileReport),
+        (status = 200, description = "What the run did: proposals opened, refreshed, superseded, expired and adopted, the revision of its write, how many batches the write took, and what a batch that failed twice left for the next run (`unwritten`, `failure`)", body = ReconcileReport),
         (status = 400, description = "A parameter is unknown (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal may not decide proposals", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The reconciler does not run on this server (`ipam.reconciler.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")

@@ -881,6 +881,10 @@ impl Store for MemStore {
         self.inner.propose(&batch)
     }
 
+    fn max_batch_bytes(&self) -> usize {
+        self.inner.config.coalescer.max_batch_bytes
+    }
+
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
         self.inner.check_running()?;
         if let ReadConsistency::AtLeast(target) = consistency {

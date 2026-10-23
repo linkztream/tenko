@@ -158,12 +158,12 @@ The settings are the same on every controller: they live in the store (`ipam.rec
 
 1. It reads one consistent view: the live intent, every fact, the open proposals, the remembered rejections, the adoption policies and the last sightings.
 2. It brings the last sightings of addresses and interfaces up to date from the current facts.
-3. It evaluates the rules (section 4) and writes the proposals accordingly: it opens new proposals, refreshes unchanged ones, supersedes changed ones and expires those that no longer hold. Steps 2 and 3 commit as one batch by `system:reconciler`. A run that finds nothing to change writes nothing.
+3. It evaluates the rules (section 4) and writes the proposals accordingly: it opens new proposals, refreshes unchanged ones, supersedes changed ones and expires those that no longer hold. Steps 2 and 3 are written by `system:reconciler` in batches under the store's batch limit (`max_batch_bytes`, 16 MiB by default, read from the store): the sightings and then the proposals in subject-key order, each proposal's rows complete in one batch, so that any prefix of the batches leaves the tables consistent and the next run writes what is left. A run that fits writes one batch; a run that opens tens of thousands of discovered hosts (a DHCP server's unknown clients) writes several, each filled to three quarters of the limit. Every batch carries the leader's epoch, and the last one the run's audit record `ipam.reconcile.run` (the batches, the proposal rows and sightings written, the items not written). A batch the store refuses is tried once more as two halves; what fails again is counted on the report as `unwritten` with the error code, the run goes on with the next batch, and the next run writes those items. A run that finds nothing to change writes nothing.
 4. It applies the open proposals that an adoption policy covers (section 6), each in its own inline job.
 5. With the DNS module, the DNS actuator writes the records of the intent and keeps the reverse zones (section 10). Its findings joined the rules of step 3, from the same view; the DNS records were ingested as observations before step 1.
 6. It completes the observation step of move jobs when a current fact shows the device at its new address (section 7).
 
-The answer of a run, `ReconcileReport`, counts `opened`, `refreshed`, `unchanged`, `superseded`, `expired`, `suppressed` (subjects not opened again because a person rejected the same evidence), `adopted`, `adoption_failures`, `sightings` (last sightings written) and `moves_confirmed`, carries the revision of the proposal write, and with the DNS actuator `dns`: `zones_created`, `zones_adopted`, `rrsets_changed`, `batches`, the `failures` (zone, code, detail) and the `revision` of its last write.
+The answer of a run, `ReconcileReport`, counts `opened`, `refreshed`, `unchanged`, `superseded`, `expired`, `suppressed` (subjects not opened again because a person rejected the same evidence), `adopted`, `adoption_failures`, `sightings` (last sightings written) and `moves_confirmed`, carries the `revision` of the proposal write (its last batch), `batches` (how many the write took; 0 when nothing changed), `unwritten` (proposal writes and sightings a batch failed twice on, for the next run) and `failure` (the error code of the last failed batch), and with the DNS actuator `dns`: `zones_created`, `zones_adopted`, `rrsets_changed`, `batches`, the `failures` (zone, code, detail) and the `revision` of its last write.
 
 ### 3.3 Where an observed address belongs
 
@@ -180,7 +180,7 @@ The VRF comes from the source when the source names one, as probe `address` fact
 ### 3.4 Concurrency
 
 - Runs never overlap on one controller; a run waits for the one before it.
-- Every row a run reads carries its revision as a precondition of the write: the proposals, the open-key rows, the remembered rejections and the sightings. When a concurrent writer invalidates the batch, the run reads again with linearizable consistency and repeats, up to `max_attempts`, then fails with `ipam.contended`. At most one proposal per subject key is open, because opening one expects the open-key row to be absent or unchanged.
+- Every row a run reads carries its revision as a precondition of the write: the proposals, the open-key rows, the remembered rejections and the sightings. When a concurrent writer invalidates a batch, the batches before it stay, and the run reads again with linearizable consistency and repeats for what is left, up to `max_attempts`, then fails with `ipam.contended`; a proposal an earlier pass of the run wrote is counted once. At most one proposal per subject key is open, because opening one expects the open-key row to be absent or unchanged.
 - In a cluster only the leader runs the loop (section 3.1). A run on demand on another controller and the leader's run are kept apart by the same preconditions; the leader's writes also carry its epoch.
 
 ## 4. Proposals
@@ -311,6 +311,7 @@ The commands are planned as the approving person with the same planner and check
 |---|---|---|
 | `ipam.observation.ingest` | An ingest wrote something; records the source and the counts | `system:reconciler` |
 | `ipam.observation.purge` | Retention deleted facts or stale sightings | `system:reconciler` |
+| `ipam.reconcile.run` | A run wrote something; records `batches`, `proposals` (rows written), `sightings` and `unwritten` (section 3.2) | `system:reconciler` |
 | `ipam.proposal.open` | A proposal was opened | `system:reconciler` |
 | `ipam.proposal.supersede` | A proposal was replaced by a newer one | `system:reconciler` |
 | `ipam.proposal.expire` | A proposal expired | `system:reconciler` |

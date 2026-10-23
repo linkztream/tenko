@@ -1136,6 +1136,16 @@ pub trait Store: Send + Sync + 'static {
     /// `tenko serve` starts leader-only work on `is_self` and stops it when that ends.
     /// `MemStore` is always the leader.
     fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>>;
+
+    // The reconciler's proposal batches (the Slice 8 follow-ups): the limit a writer splits
+    // its work under.
+    /// The payload limit of one batch ([`WriteBatch::payload_size`]), the store's
+    /// `max_batch_bytes` ([`CoalescerConfig`]); a writer with more than that splits its
+    /// work into batches below it. A store that wraps another and does not say reports the
+    /// default limit.
+    fn max_batch_bytes(&self) -> usize {
+        CoalescerConfig::default().max_batch_bytes
+    }
 }
 
 impl fmt::Display for Change {
