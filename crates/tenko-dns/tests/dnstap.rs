@@ -180,6 +180,8 @@ fn write(dir: &Path, client: ClientField) -> Vec<u8> {
             // WP10.1: the resolution of the log line.
             resolution: None,
             subqueries: 0,
+            validation: None,
+            ede: None,
         });
     }
     writer.stop();

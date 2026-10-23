@@ -35,6 +35,9 @@ pub struct NewRule {
     pub view: Option<ViewId>,
     /// Free text.
     pub description: Option<String>,
+    // WP10.2: the rule's escape from validation.
+    /// Validate the upstreams' answers (TGL-12); `None` is the default, on.
+    pub validate: Option<bool>,
 }
 
 /// Changes to a rule.
@@ -54,6 +57,9 @@ pub struct RuleChange {
     pub all_views: bool,
     /// Free text; an empty string clears it.
     pub description: Option<String>,
+    // WP10.2: the rule's escape from validation.
+    /// Validate the upstreams' answers (TGL-12).
+    pub validate: Option<bool>,
 }
 
 /// A rule as read.
@@ -176,10 +182,10 @@ impl ZoneService {
             transport: new.transport,
             tls_name: trimmed(new.tls_name),
             view: new.view,
-            // WP10.0: a forward rule that validates until WP10.4 takes the fields from the
-            // request.
+            // WP10.0: a forward rule until WP10.4 takes the mode from the request.
             mode: tenko_core::dns::RuleMode::Forward,
-            validate: true,
+            // WP10.2: validation on unless the request switches it off.
+            validate: new.validate.unwrap_or(true),
             description: trimmed(new.description),
         };
         let (rule, written) = self
@@ -242,6 +248,10 @@ impl ZoneService {
             }
             if let Some(description) = &change.description {
                 rule.description = trimmed(Some(description.clone()));
+            }
+            // WP10.2: the rule's escape from validation.
+            if let Some(validate) = change.validate {
+                rule.validate = validate;
             }
             if rule == before {
                 return Ok(Planned::nothing(rule));

@@ -1,0 +1,7 @@
+; badsig.example.test: signed per run, then the signature of www is spoiled (WP10.2), so
+; that www is bogus with extended error 6 "DNSSEC Bogus" while the apex stays secure.
+$ORIGIN badsig.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+www     IN A    192.0.2.80

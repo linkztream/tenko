@@ -208,6 +208,7 @@ pub const DNS_LAG_WARNING: u64 = 1_000;
 
 /// The warnings of the `dns` role of this node: not answering, or far behind the store.
 pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarning> {
+    use tenko_core::dns::{AnchorState, findings};
     let mut params = std::collections::BTreeMap::new();
     params.insert("node".to_owned(), role.node.to_string());
     if !role.serving {
@@ -228,7 +229,89 @@ pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarni
             params,
         }];
     }
-    Vec::new()
+    // WP10.2: the validator's findings (recursion plan section 2.3): the clock, stale and
+    // pending anchors, the negative trust anchors in force, the rules whose upstream
+    // strips the DNSSEC records.
+    let mut warnings = Vec::new();
+    let node = |extra: &[(&str, String)]| {
+        let mut params = params.clone();
+        for (key, value) in extra {
+            params.insert((*key).to_owned(), value.clone());
+        }
+        params
+    };
+    if role
+        .validation
+        .as_ref()
+        .is_some_and(|report| report.clock_wrong)
+    {
+        warnings.push(StatusWarning {
+            code: findings::VALIDATION_CLOCK.to_owned(),
+            detail: "the root's DNSKEY set fails as expired or not yet valid: the clock is \
+                     probably wrong (OPS-09); validation stays on"
+                .to_owned(),
+            params: node(&[]),
+        });
+    }
+    for anchor in &role.trust_anchors {
+        if anchor.trusted().next().is_none() {
+            warnings.push(StatusWarning {
+                code: findings::TRUST_ANCHOR_STALE.to_owned(),
+                detail: format!(
+                    "every trust anchor key of {} is revoked or pending: the zone cannot be \
+                     validated; add the current anchor",
+                    anchor.zone
+                ),
+                params: node(&[("zone", anchor.zone.to_string())]),
+            });
+        }
+        for key in anchor
+            .keys
+            .iter()
+            .filter(|key| key.state == AnchorState::AddPend)
+        {
+            warnings.push(StatusWarning {
+                code: findings::TRUST_ANCHOR_PENDING.to_owned(),
+                detail: format!(
+                    "key {} of {} waits for its add hold-down (RFC 5011)",
+                    key.key_tag, anchor.zone
+                ),
+                params: node(&[
+                    ("zone", anchor.zone.to_string()),
+                    ("key_tag", key.key_tag.to_string()),
+                ]),
+            });
+        }
+    }
+    for nta in &role.active_ntas {
+        warnings.push(StatusWarning {
+            code: findings::NTA_ACTIVE.to_owned(),
+            detail: format!(
+                "names under {} are insecure instead of bogus until {}: {}",
+                nta.zone,
+                nta.expires_at.to_rfc3339(),
+                nta.reason
+            ),
+            params: node(&[
+                ("zone", nta.zone.to_string()),
+                ("id", nta.id.to_string()),
+                ("expires_at", nta.expires_at.to_rfc3339()),
+            ]),
+        });
+    }
+    for (rule, suffix) in &role.stripping_rules {
+        warnings.push(StatusWarning {
+            code: findings::FORWARDER_STRIPS_DNSSEC.to_owned(),
+            detail: format!(
+                "the upstream of forwarding rule {suffix} answers without the DNSSEC records \
+                 of a secure zone, so its answers are bogus; set validate = false on the rule \
+                 or change the upstream"
+            ),
+            params: node(&[("rule", rule.to_string()), ("suffix", suffix.clone())]),
+        });
+    }
+    warnings
+    // WP10.2: end.
 }
 
 // WP7.5: the health rows of the dhcp role.

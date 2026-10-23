@@ -216,6 +216,13 @@ pub struct LogLine {
     /// Queries the recursive resolver sent to authorities for the answer.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub subqueries: u16,
+    // WP10.2: the validation state and the extended error.
+    /// The DNSSEC state of the answer; absent when nothing validated it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<tenko_core::dns::SecurityState>,
+    /// The extended error code the answer carried (RFC 8914); absent for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ede: Option<u16>,
 }
 
 // WP10.1: the default of `subqueries` is left out of a line.

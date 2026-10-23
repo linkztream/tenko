@@ -82,6 +82,11 @@ pub struct QueryLogEntry<'a> {
     pub resolution: Option<Resolution>,
     /// Queries the recursive resolver sent to authorities for it.
     pub subqueries: u16,
+    // WP10.2: the validator's state and the extended error (recursion plan section 2.11).
+    /// The DNSSEC state of the answer; `None` when nothing validated it.
+    pub validation: Option<tenko_core::dns::SecurityState>,
+    /// The extended error code the answer carried (RFC 8914); `None` for none.
+    pub ede: Option<u16>,
 }
 
 /// Where the query path hands its log entries.

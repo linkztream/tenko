@@ -542,6 +542,7 @@ fn nsec_for(zone: &MemZone, name: &DnsName) -> Vec<(DnsName, u32, RecordData)> {
 }
 
 /// The answer of a server with `zones` to `qname`/`qtype`.
+#[allow(clippy::too_many_lines, reason = "one answer with its denial records")]
 fn build(zones: &[MemZone], qname: &DnsName, qtype: u16, dnssec: bool) -> Built {
     let Some(zone) = zones
         .iter()
@@ -602,7 +603,15 @@ fn build(zones: &[MemZone], qname: &DnsName, qtype: u16, dnssec: bool) -> Built 
     if zone.exists(qname) {
         soa(&mut built);
         if dnssec {
-            built.sections[1].extend(rrset(zone, qname, Rtype::NSEC, true, qname));
+            let matching = rrset(zone, qname, Rtype::NSEC, true, qname);
+            if matching.is_empty() {
+                // WP10.2: an empty non-terminal has no NSEC of its own; the covering
+                // record (whose next name lies below it) is the proof, as an authoritative
+                // server answers.
+                built.sections[1].extend(nsec_for(zone, qname));
+            } else {
+                built.sections[1].extend(matching);
+            }
         }
         return built;
     }
@@ -614,10 +623,11 @@ fn build(zones: &[MemZone], qname: &DnsName, qtype: u16, dnssec: bool) -> Built 
         }
         encloser = candidate.parent();
     }
-    if let Some(wildcard) = encloser.and_then(|encloser| encloser.child("*").ok())
-        && zone.exists(&wildcard)
+    let wildcard = encloser.and_then(|encloser| encloser.child("*").ok());
+    if let Some(wildcard) = &wildcard
+        && zone.exists(wildcard)
     {
-        let answer = rrset(zone, &wildcard, rtype, dnssec, qname);
+        let answer = rrset(zone, wildcard, rtype, dnssec, qname);
         if answer.is_empty() {
             soa(&mut built);
         } else {
@@ -632,6 +642,15 @@ fn build(zones: &[MemZone], qname: &DnsName, qtype: u16, dnssec: bool) -> Built 
     soa(&mut built);
     if dnssec {
         built.sections[1].extend(nsec_for(zone, qname));
+        // WP10.2: the name error's proof also denies the wildcard at the closest encloser
+        // (RFC 4035 section 3.1.3.2), as an authoritative server answers.
+        if let Some(wildcard) = &wildcard {
+            for record in nsec_for(zone, wildcard) {
+                if !built.sections[1].contains(&record) {
+                    built.sections[1].push(record);
+                }
+            }
+        }
     }
     built
 }

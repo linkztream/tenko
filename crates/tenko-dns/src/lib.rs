@@ -70,6 +70,9 @@ pub mod recursion;
 // WP10.1: the iterative engine and the infrastructure cache.
 pub mod infra;
 pub mod recurse;
+// WP10.2: the validator and the trust anchors.
+pub mod anchors;
+pub mod validate;
 
 pub use codec::{AnswerBuf, Codec, CodecError, DomainCodec, Request};
 pub use feed::{DnsData, MemFeed, ZoneFeed};

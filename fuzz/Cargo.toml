@@ -277,3 +277,33 @@ test = false
 doc = false
 bench = false
 # WP10.1: end.
+
+# WP10.2: the validator's targets (marked block).
+[[bin]]
+name = "dns_dnskey_ds"
+path = "fuzz_targets/dns_dnskey_ds.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_rrsig"
+path = "fuzz_targets/dns_rrsig.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_nsec3_proof"
+path = "fuzz_targets/dns_nsec3_proof.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_trust_anchor_xml"
+path = "fuzz_targets/dns_trust_anchor_xml.rs"
+test = false
+doc = false
+bench = false
+# WP10.2: end.

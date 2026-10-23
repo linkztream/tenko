@@ -919,11 +919,20 @@ impl<A: Authority> Engine<A> {
     fn delegation_records(&self, found: &Found) -> (Vec<Rr>, Vec<Rr>) {
         let mut authority = found.authority.clone();
         let mut additional = Vec::new();
-        let Some(cut) = found
-            .cut
-            .as_ref()
-            .filter(|_| self.delegation.load(Ordering::Relaxed))
-        else {
+        // WP10.2: a negative answer carries the delegation only when it is the SOA's zone
+        // (RFC 2308 section 2.2): a resolver reading it, delv among them, refuses an NS of
+        // another zone beside the SOA. The last cut of a walk that ended at a server
+        // authoritative for a child as well is an ancestor, not the zone.
+        let soa_owner = found
+            .authority
+            .iter()
+            .find(|rr| rr.rtype == types::SOA)
+            .map(|rr| rr.owner.as_slice());
+        let negative = found.rcode != 0 || soa_owner.is_some();
+        let Some(cut) = found.cut.as_ref().filter(|cut| {
+            self.delegation.load(Ordering::Relaxed)
+                && (!negative || soa_owner == Some(cut.zone.to_wire().as_slice()))
+        }) else {
             return (authority, additional);
         };
         let now = Instant::now();
@@ -991,7 +1000,8 @@ impl<A: Authority> Engine<A> {
                 }
                 match self.walk(&name, qtype, depth, work).await {
                     Err(cause) => return Err(Failed { cause, chain }),
-                    Ok((Step::Answer { records }, cut)) => {
+                    // WP10.2: a positive answer keeps its denial records for the validator.
+                    Ok((Step::Answer { records, denials }, cut)) => {
                         chain.extend(records);
                         if links(&chain) > usize::from(work.budget.restarts) {
                             // A chain longer than the budget, even in one answer.
@@ -1003,7 +1013,7 @@ impl<A: Authority> Engine<A> {
                         return Ok(Found {
                             rcode: 0,
                             answer: chain,
-                            authority: Vec::new(),
+                            authority: denials,
                             cut: Some(cut),
                         });
                     }

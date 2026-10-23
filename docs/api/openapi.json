@@ -11288,7 +11288,7 @@
           "dns"
         ],
         "summary": "Create a forwarding rule",
-        "description": "Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and write nothing.",
+        "description": "Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until WP10.4 builds it, `mode: recurse` answers 501 and writes nothing.",
         "operationId": "create_dns_forwarder",
         "requestBody": {
           "content": {
@@ -11342,7 +11342,7 @@
             }
           },
           "501": {
-            "description": "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)",
+            "description": "`mode` is `recurse`, which is not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11517,7 +11517,7 @@
           "dns"
         ],
         "summary": "Change a forwarding rule",
-        "description": "Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and change nothing.",
+        "description": "Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until WP10.4 builds it, `mode: recurse` answers 501 and changes nothing.",
         "operationId": "update_dns_forwarder",
         "parameters": [
           {
@@ -11614,7 +11614,7 @@
             }
           },
           "501": {
-            "description": "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)",
+            "description": "`mode` is `recurse`, which is not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12592,16 +12592,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -12655,16 +12645,6 @@
           },
           "403": {
             "description": "The principal lacks the scope `dns.keys`, or a token tries to create one",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12731,16 +12711,6 @@
           },
           "404": {
             "description": "No such negative trust anchor (`dns.nta.not_found`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12833,16 +12803,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -12906,16 +12866,6 @@
           },
           "409": {
             "description": "The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12996,16 +12946,6 @@
                 }
               }
             }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
           }
         }
       },
@@ -13073,16 +13013,6 @@
           },
           "409": {
             "description": "The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13166,16 +13096,6 @@
           },
           "409": {
             "description": "The resolver is off (`dns.recursion.disabled`)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Not built yet (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21515,7 +21435,7 @@
           "dns"
         ],
         "summary": "Get the recursive resolver of a node",
-        "description": "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.",
+        "description": "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.",
         "operationId": "get_node_dns_recursion",
         "parameters": [
           {
@@ -42845,7 +42765,7 @@
               "boolean",
               "null"
             ],
-            "description": "Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`\nanswers 501."
+            "description": "Validate the upstreams' answers with DNSSEC (the default); `false` relays them\nunvalidated (TGL-12)."
           },
           "view": {
             "oneOf": [
@@ -42961,7 +42881,7 @@
               "boolean",
               "null"
             ],
-            "description": "Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501."
+            "description": "Validate the upstreams' answers with DNSSEC; `false` relays them unvalidated."
           },
           "view": {
             "oneOf": [
@@ -44217,6 +44137,12 @@
             "description": "The most server addresses the cache holds.",
             "minimum": 0
           },
+          "max_validated_zones": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The most such zones.",
+            "minimum": 0
+          },
           "max_zones": {
             "type": "integer",
             "format": "int64",
@@ -44233,6 +44159,12 @@
             "type": "integer",
             "format": "int64",
             "description": "Authority server addresses held.",
+            "minimum": 0
+          },
+          "validated_zones": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Zones whose validated key sets the validator holds beside the cuts; 0 with\nvalidation off.",
             "minimum": 0
           },
           "zones": {
@@ -56689,6 +56621,15 @@
                   "description": "Microseconds from arrival to answer.",
                   "minimum": 0
                 },
+                "ede": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "The extended DNS error code the answer carried (RFC 8914); absent for none.",
+                  "minimum": 0
+                },
                 "qname": {
                   "type": "string",
                   "description": "The query name."
@@ -56719,6 +56660,17 @@
                 "type": {
                   "$ref": "#/components/schemas/Rtype",
                   "description": "The query type."
+                },
+                "validation": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SecurityState",
+                      "description": "The DNSSEC state of the answer: `secure`, `insecure`, `bogus`, `indeterminate` or\n`unvalidated`; absent when nothing validated it."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "view": {
                   "oneOf": [
@@ -60537,6 +60489,15 @@
             "description": "Microseconds from arrival to answer.",
             "minimum": 0
           },
+          "ede": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The extended DNS error code the answer carried (RFC 8914); absent for none.",
+            "minimum": 0
+          },
           "qname": {
             "type": "string",
             "description": "The query name."
@@ -60567,6 +60528,17 @@
           "type": {
             "$ref": "#/components/schemas/Rtype",
             "description": "The query type."
+          },
+          "validation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecurityState",
+                "description": "The DNSSEC state of the answer: `secure`, `insecure`, `bogus`, `indeterminate` or\n`unvalidated`; absent when nothing validated it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "view": {
             "oneOf": [
@@ -62628,7 +62600,7 @@
           "bogus": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `bogus`. Counted from WP10.2; 0 until then.",
+            "description": "Answers validated `bogus`.",
             "minimum": 0
           },
           "budget": {
@@ -62670,13 +62642,13 @@
           "indeterminate": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0\nuntil then.",
+            "description": "Answers for which no trust anchor applied (`indeterminate`).",
             "minimum": 0
           },
           "insecure": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `insecure`. Counted from WP10.2; 0 until then.",
+            "description": "Answers validated `insecure`.",
             "minimum": 0
           },
           "joined": {
@@ -62706,7 +62678,7 @@
           "secure": {
             "type": "integer",
             "format": "int64",
-            "description": "Answers validated `secure`. Counted from WP10.2; 0 until then.",
+            "description": "Answers validated `secure`.",
             "minimum": 0
           },
           "servfail": {
@@ -62796,7 +62768,7 @@
             "items": {
               "type": "string"
             },
-            "description": "What is wrong now: `priming_failed` (and, from WP10.2, `clock` and\n`trust_anchor_stale`)."
+            "description": "What is wrong now: `priming_failed`, `clock` (the root's DNSKEY signatures fail\non time) and `trust_anchor_stale` (a zone without a trusted key left)."
           },
           "root_expires_secs": {
             "type": [
@@ -62819,7 +62791,7 @@
             "items": {
               "$ref": "#/components/schemas/AnchorKeyState"
             },
-            "description": "The keys of the trust anchors with their state. Empty until WP10.2."
+            "description": "The keys of the trust anchors with their RFC 5011 state and source."
           }
         }
       },

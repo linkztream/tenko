@@ -978,10 +978,11 @@ pub enum QnameMinimisation {
 }
 
 /// `[dns.recursion]`: the iterative resolver of this node (DNS-03, recursion plan section
-/// 3.4). Read and validated at start; nothing consumes the keys until WP10.1 builds the
-/// engine (the infrastructure and denial bounds, the budgets, the transport policy) and
-/// WP10.2 the validation keys. The keys that are not set follow the security profile in
-/// force when the role starts. Every bound is checked by `tenko config check`.
+/// 3.4). Read and validated at start; the `dns` role maps the keys onto the engine's
+/// settings (the infrastructure and denial bounds, the budgets, the transport policy) and
+/// the validator's (`validate`, the signalling, the hold-down). The keys that are not set
+/// follow the security profile in force when the role starts. Every bound is checked by
+/// `tenko config check`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[allow(
@@ -1045,6 +1046,12 @@ pub struct DnsRecursionSection {
     /// default): 30 days. The Lab profile only, to test key rollovers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rfc5011_hold_down_secs: Option<u64>,
+    // WP10.2: validation on or off (TGL-12).
+    /// Validate answers with DNSSEC (TGL-12; default on). `false` is allowed under the Lab
+    /// profile only; the other profiles always validate, and a forwarding rule's
+    /// `validate = false` is the escape for one upstream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validate: Option<bool>,
 }
 
 impl Default for DnsRecursionSection {
@@ -1069,6 +1076,7 @@ impl Default for DnsRecursionSection {
             fresh_port_per_query: true,
             local_zones_except: Vec::new(),
             rfc5011_hold_down_secs: None,
+            validate: None,
         }
     }
 }
@@ -1103,6 +1111,13 @@ impl DnsRecursionSection {
     pub fn trust_anchor_signalling_for(&self, profile: Profile) -> bool {
         self.trust_anchor_signalling
             .unwrap_or(profile != Profile::Hardened)
+    }
+
+    // WP10.2: validation under the profile.
+    /// Whether answers are validated under `profile` (TGL-12): on unless the Lab profile
+    /// switched it off.
+    pub fn validate_for(&self, profile: Profile) -> bool {
+        self.validate.unwrap_or(true) || profile != Profile::Lab
     }
 
     /// The bounds of every key, independent of the profile.
@@ -1180,12 +1195,21 @@ impl DnsRecursionSection {
         Ok(())
     }
 
-    /// The keys that depend on the profile: the RFC 5011 hold-down is a Lab knob.
+    /// The keys that depend on the profile: the RFC 5011 hold-down is a Lab knob, and so
+    /// is validation off (TGL-12).
     fn check_profile(&self, profile: Profile) -> Result<(), ConfigError> {
         if self.rfc5011_hold_down_secs.is_some() && profile != Profile::Lab {
             return Err(ConfigError::invalid(format!(
                 "dns.recursion.rfc5011_hold_down_secs is allowed under the Lab profile only; \
                  the profile is `{}`",
+                profile.as_str()
+            )));
+        }
+        // WP10.2: validation off is a Lab knob.
+        if self.validate == Some(false) && profile != Profile::Lab {
+            return Err(ConfigError::invalid(format!(
+                "dns.recursion.validate = false is allowed under the Lab profile only; the \
+                 profile is `{}` (TGL-12)",
                 profile.as_str()
             )));
         }
@@ -1369,6 +1393,29 @@ mod recursion_tests {
             "[profile]\nname = \"lab\"\n[dns.recursion]\nrfc5011_hold_down_secs = 0\n",
             "rfc5011_hold_down_secs must be between",
         );
+    }
+
+    // WP10.2: validation off is a Lab knob (TGL-12).
+    #[test]
+    fn validation_off_is_a_lab_knob() {
+        for (name, profile) in [
+            ("home", Profile::Home),
+            ("standard", Profile::Standard),
+            ("hardened", Profile::Hardened),
+        ] {
+            refused(
+                &format!("[profile]\nname = \"{name}\"\n[dns.recursion]\nvalidate = false\n"),
+                "Lab profile only",
+            );
+            let on = recursion(&format!(
+                "[profile]\nname = \"{name}\"\n[dns.recursion]\nvalidate = true\n"
+            ));
+            assert!(on.validate_for(profile));
+        }
+        let lab = recursion("[profile]\nname = \"lab\"\n[dns.recursion]\nvalidate = false\n");
+        assert!(!lab.validate_for(Profile::Lab));
+        assert!(recursion("[profile]\nname = \"lab\"\n").validate_for(Profile::Lab));
+        assert!(DnsRecursionSection::default().validate_for(Profile::Hardened));
     }
 
     #[test]

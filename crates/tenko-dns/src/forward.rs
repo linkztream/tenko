@@ -77,6 +77,19 @@ use tokio_util::sync::CancellationToken;
 
 // WP10.1: the recursive resolver.
 use tenko_core::dns::ResolutionMode;
+// WP10.2: the validator and the trust anchors.
+use std::collections::BTreeSet;
+
+use tenko_core::dns::{ExtendedError, SecurityState};
+
+use crate::{
+    anchors::CatalogAnchors,
+    recursion::{
+        ChainContext, InfraCache, KeyFetch, MemInfra, Validation, ValidationCaps, Validator as _,
+    },
+    validate::{self, DnssecValidator, EngineFetch, NoFetch, UpstreamFetch},
+};
+// WP10.2: end.
 
 use crate::{
     // WP10.1: end.
@@ -239,7 +252,35 @@ pub struct ForwardSettings {
     /// The recursive resolver; `None` runs none (every name then needs a rule, a stub zone
     /// or `upstreams`).
     pub recursion: Option<EngineSettings>,
+    // WP10.2: the validator.
+    /// DNSSEC validation of the engine's and the upstreams' answers (TGL-12); `None`
+    /// leaves every answer unvalidated (the Lab profile may).
+    pub validation: Option<ValidationSettings>,
 }
+
+// WP10.2: the validator's settings.
+/// How the forwarder validates (recursion plan section 2.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationSettings {
+    /// The cost caps.
+    pub caps: ValidationCaps,
+    /// The most zones whose key sets the validator keeps (the infrastructure cache's
+    /// bound on cuts, per profile).
+    pub key_sets: usize,
+    /// How long a bogus answer stays in the cache, in seconds (RFC 9520).
+    pub failure_ttl: u32,
+}
+
+impl Default for ValidationSettings {
+    fn default() -> Self {
+        Self {
+            caps: ValidationCaps::DEFAULT,
+            key_sets: 10_000,
+            failure_ttl: 60,
+        }
+    }
+}
+// WP10.2: end.
 
 impl Default for ForwardSettings {
     fn default() -> Self {
@@ -253,6 +294,7 @@ impl Default for ForwardSettings {
             stale_budget: DEFAULT_STALE_BUDGET,
             upstream_ca: None,
             recursion: None,
+            validation: None,
         }
     }
 }
@@ -361,6 +403,14 @@ struct Shared {
     engine: Option<Arc<Engine<NetAuthority>>>,
     infra: Option<Arc<Infra>>,
     audit: std::sync::OnceLock<Arc<dyn TransferAudit>>,
+    // WP10.2: the validator, the anchors it reads, the key sets of forwarded zones when
+    // no engine runs, the rules whose upstream strips the DNSSEC records, and the time of
+    // the last RFC 8145 signalling query.
+    validator: Option<Arc<DnssecValidator>>,
+    anchors: Arc<CatalogAnchors>,
+    forward_infra: MemInfra,
+    strips: Mutex<BTreeSet<ForwardRuleId>>,
+    signalled: Mutex<Option<Instant>>,
 }
 
 /// The engine of `settings` and its infrastructure cache, with the hints of the file or
@@ -485,6 +535,18 @@ impl Forwarder {
             }
             None => (None, None),
         };
+        // WP10.2: the validator over the catalog's anchors.
+        let validator = settings.validation.as_ref().map(|validation| {
+            Arc::new(DnssecValidator::new(
+                validation.caps,
+                validation.key_sets,
+                settings.metrics,
+            ))
+        });
+        let anchors = Arc::new(CatalogAnchors::new());
+        anchors.refresh(&catalog.load());
+        let forward_infra = MemInfra::new(crate::recursion::InfraBounds::HOME);
+        // WP10.2: end.
         let shared = Arc::new(Shared {
             cache: settings.cache.map(Cache::new),
             pools: Pools::new(settings.upstream_ca.clone()),
@@ -498,6 +560,11 @@ impl Forwarder {
             engine,
             infra,
             audit: std::sync::OnceLock::new(),
+            validator,
+            anchors,
+            forward_infra,
+            strips: Mutex::new(BTreeSet::new()),
+            signalled: Mutex::new(None),
         });
         let forwarder = Arc::new(Self {
             queue: sender,
@@ -660,6 +727,30 @@ impl Forwarder {
         let _ = self.shared.audit.set(audit);
     }
     // WP10.1: end.
+
+    // WP10.2: the validator and the anchors for the status, the node commands and the role.
+    /// The validator, when validation is on.
+    pub fn validator(&self) -> Option<&Arc<DnssecValidator>> {
+        self.shared.validator.as_ref()
+    }
+
+    /// The trust anchors as the validator reads them.
+    pub fn anchors(&self) -> &Arc<CatalogAnchors> {
+        &self.shared.anchors
+    }
+
+    /// The forwarding rules whose upstream answered without the DNSSEC records a secure
+    /// zone has (`dns.forwarder.strips_dnssec`), since the last secure answer of each.
+    pub fn stripping_rules(&self) -> Vec<ForwardRuleId> {
+        self.shared
+            .strips
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect()
+    }
+    // WP10.2: end.
 }
 
 impl Shared {
@@ -688,14 +779,15 @@ impl Shared {
             }
     }
 
-    /// Resolves `question` with the engine and puts the answer into the cache under `key`.
+    /// Resolves `question` with the engine, validates the answer (WP10.2) and puts it into
+    /// the cache under `key`.
     async fn recurse(
         &self,
-        engine: &Engine<NetAuthority>,
+        engine: &Arc<Engine<NetAuthority>>,
         question: &OwnedQuestion,
         key: Option<&CacheKey>,
         view: Option<ViewId>,
-    ) -> Arc<Resolved> {
+    ) -> (Arc<Resolved>, Option<Validation>) {
         let resolved = engine
             .resolve(crate::recurse::Question {
                 qname: &question.qname,
@@ -704,15 +796,170 @@ impl Shared {
                 view,
             })
             .await;
+        // WP10.2: the validator's verdict decides the entry's state; a query with CD never
+        // waits for a sub-query, and its answer is cached only when the walk could judge
+        // it from what it holds.
+        let validation = match (&self.validator, resolved.outcome) {
+            (Some(validator), crate::recurse::Outcome::Answered) => {
+                let fetch = EngineFetch::new(Arc::clone(engine));
+                let fetch: &dyn KeyFetch = if question.cd { &NoFetch } else { &fetch };
+                Some(
+                    self.validate(validator, &resolved.message, question, fetch)
+                        .await,
+                )
+            }
+            _ => None,
+        };
         if resolved.cacheable()
-            && !question.cd
             && let (Some(cache), Some(key)) = (&self.cache, key)
         {
-            cache.insert(key, &resolved.message, Instant::now(), None);
+            match validation {
+                Some(validation) if validation.state != SecurityState::Unvalidated => {
+                    cache.insert_with(
+                        key,
+                        &resolved.message,
+                        Instant::now(),
+                        None,
+                        &validation.verdict(self.failure_ttl()),
+                    );
+                }
+                _ if !question.cd => {
+                    cache.insert(key, &resolved.message, Instant::now(), None);
+                }
+                _ => {}
+            }
         }
-        resolved
+        (resolved, validation)
     }
     // WP10.1: end.
+
+    // WP10.2: validation.
+    /// How long a bogus answer stays in the cache.
+    fn failure_ttl(&self) -> u32 {
+        self.settings
+            .validation
+            .as_ref()
+            .map_or(60, |validation| validation.failure_ttl)
+    }
+
+    /// Validates `message`, the answer to `question`, with `fetch` for the chain's
+    /// sub-queries.
+    async fn validate(
+        &self,
+        validator: &DnssecValidator,
+        message: &[u8],
+        question: &OwnedQuestion,
+        fetch: &dyn KeyFetch,
+    ) -> Validation {
+        let Ok((qname, _)) = DnsName::from_wire(&question.qname) else {
+            return Validation::UNVALIDATED;
+        };
+        let root = DnsName::root();
+        let infra: &dyn InfraCache = match &self.infra {
+            Some(infra) => infra.as_ref(),
+            None => &self.forward_infra,
+        };
+        let context = ChainContext {
+            qname: &qname,
+            qtype: question.qtype,
+            zone: &root,
+            cd: question.cd,
+            anchors: self.anchors.as_ref(),
+            infra,
+            fetch,
+            now: validate::now(),
+            caps: validator.caps(),
+        };
+        validator.validate(message, &context).await
+    }
+
+    /// Remembers whether `rule`'s upstream strips the DNSSEC records: an answer bogus
+    /// for missing signatures marks it, a secure answer clears it.
+    fn note_strips(&self, rule: Option<ForwardRuleId>, validation: Option<Validation>) {
+        let (Some(rule), Some(validation)) = (rule, validation) else {
+            return;
+        };
+        let mut strips = self.strips.lock().unwrap_or_else(PoisonError::into_inner);
+        match validation.state {
+            SecurityState::Bogus
+                if validation.reason == Some(crate::recursion::BogusReason::MissingRrsig) =>
+            {
+                if strips.insert(rule) {
+                    tracing::warn!(%rule, "the rule's upstream answers without the DNSSEC records of a secure zone (dns.forwarder.strips_dnssec)");
+                }
+            }
+            SecurityState::Secure => {
+                strips.remove(&rule);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the RFC 8509 sentinel says a secure A or AAAA answer for `request` is not
+    /// to be given: the first label names a root key tag the node does not trust (`is-ta`)
+    /// or does trust (`not-ta`). Only with validation on, the sentinel on, and no CD.
+    fn sentinel_refuses(&self, qname: &[u8], qtype: u16, cd: bool, state: SecurityState) -> bool {
+        if self.validator.is_none()
+            || cd
+            || state != SecurityState::Secure
+            || !(qtype == TYPE_A || qtype == TYPE_AAAA)
+            || !self
+                .settings
+                .recursion
+                .as_ref()
+                .is_some_and(|recursion| recursion.recursion.key_sentinel)
+        {
+            return false;
+        }
+        match validate::sentinel(qname) {
+            Some(validate::Sentinel::IsTrustAnchor(tag)) => !self.anchors.has_root_tag(tag),
+            Some(validate::Sentinel::NotTrustAnchor(tag)) => self.anchors.has_root_tag(tag),
+            None => false,
+        }
+    }
+
+    /// Sends the RFC 8145 signalling query (`_ta-<tags>.` NULL to the root) once a day
+    /// when it is on and the root has trusted keys.
+    fn signal_if_due(self: &Arc<Self>, engine: &Arc<Engine<NetAuthority>>) {
+        if self.validator.is_none()
+            || !self
+                .settings
+                .recursion
+                .as_ref()
+                .is_some_and(|recursion| recursion.recursion.signalling)
+        {
+            return;
+        }
+        let now = Instant::now();
+        let Some(name) = validate::signalling_name(&self.anchors.root_tags()) else {
+            // No trusted root key yet: tried again at the next tick.
+            return;
+        };
+        {
+            let mut signalled = self
+                .signalled
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if signalled.is_some_and(|at| now.duration_since(at) < validate::SIGNALLING_PERIOD) {
+                return;
+            }
+            *signalled = Some(now);
+        }
+        let engine = Arc::clone(engine);
+        tokio::spawn(async move {
+            let qname = name.to_wire();
+            let resolved = engine
+                .resolve(crate::recurse::Question {
+                    qname: &qname,
+                    qtype: 10,
+                    qclass: CLASS_IN,
+                    view: None,
+                })
+                .await;
+            tracing::debug!(name = %name, outcome = ?resolved.outcome, "the trust anchor signalling query was sent (RFC 8145)");
+        });
+    }
+    // WP10.2: end.
 
     fn recursion_allowed(&self, catalog: &Catalog, view: Option<ViewId>, client: IpAddr) -> bool {
         let client = client.to_canonical();
@@ -943,18 +1190,50 @@ impl Shared {
         question: OwnedQuestion,
         key: Option<CacheKey>,
         rule: Option<ForwardRuleId>,
-    ) -> Result<Vec<u8>, UpstreamError> {
+    ) -> Result<(Vec<u8>, Option<Validation>), UpstreamError> {
         let mut answer = Vec::new();
         set.query(&question.as_question(), self.budget(), &mut answer)
             .await?;
+        // WP10.2: the answer is validated as a validating forwarder does, the chain's
+        // sub-queries asked of the same upstream, unless the rule says `validate = false`.
+        let validates = rule
+            .and_then(|id| {
+                self.catalog
+                    .load()
+                    .forward_rule(id)
+                    .map(|rule| rule.validate)
+            })
+            .unwrap_or(true);
+        let validation = match &self.validator {
+            Some(validator) if validates => {
+                let upstream = UpstreamFetch::new(Arc::clone(&set), self.budget());
+                let fetch: &dyn KeyFetch = if question.cd { &NoFetch } else { &upstream };
+                Some(self.validate(validator, &answer, &question, fetch).await)
+            }
+            _ => None,
+        };
+        self.note_strips(rule, validation);
         // WP10.0: an answer asked with CD may be data the upstream would not vouch for; it
-        // goes to its client and not into the entry other clients share.
-        if !question.cd
-            && let (Some(cache), Some(key)) = (&self.cache, &key)
-        {
-            cache.insert(key, &answer, Instant::now(), rule);
+        // goes to its client and not into the entry other clients share, unless the
+        // validator could judge it (WP10.2).
+        if let (Some(cache), Some(key)) = (&self.cache, &key) {
+            match validation {
+                Some(validation) if validation.state != SecurityState::Unvalidated => {
+                    cache.insert_with(
+                        key,
+                        &answer,
+                        Instant::now(),
+                        rule,
+                        &validation.verdict(self.failure_ttl()),
+                    );
+                }
+                _ if !question.cd => {
+                    cache.insert(key, &answer, Instant::now(), rule);
+                }
+                _ => {}
+            }
         }
-        Ok(answer)
+        Ok((answer, validation))
     }
 
     fn count(&self, counter: fn(&ForwardCounters) -> &AtomicU64) {
@@ -1117,13 +1396,24 @@ impl ForwardSink for Forwarder {
         };
         let view = metrics::view_index(query.view.is_some());
         match cache.answer(&key, query.now, &client, out) {
-            Hit::Fresh { rcode, .. } => {
+            Hit::Fresh { rcode, state } => {
+                // WP10.2: the RFC 8509 sentinel on a hit: SERVFAIL in place, nothing
+                // allocated.
+                let rcode = if rcode == 0
+                    && shared.sentinel_refuses(qname, request.qtype, request.cd, state)
+                {
+                    servfail_in_place(out, question_end);
+                    2
+                } else {
+                    rcode
+                };
                 shared.count(|counters| &counters.hits);
                 if shared.settings.metrics {
                     metrics::CACHE_HIT_COUNTER.inc(view);
                 }
                 Intake::Answered {
                     rcode: u16::from(rcode),
+                    validation: (state != SecurityState::Unvalidated).then_some(state),
                 }
             }
             Hit::Expired | Hit::Miss => {
@@ -1182,6 +1472,34 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
         if let Some(engine) = &shared.engine {
             recursion_housekeeping(&shared, engine, &mut priming);
         }
+        // WP10.2: the anchors follow the rows, the key table's gauge is set, and the
+        // signalling query goes once a day.
+        if let Some(nta_zones) = shared.anchors.refresh(&shared.catalog.load()) {
+            // The zone states made under the old anchors (the key table and the DS slots
+            // of the infrastructure cache) are forgotten, and so are the answers cached
+            // under a negative trust anchor that came or went.
+            if let Some(validator) = &shared.validator {
+                validator.flush(None);
+            }
+            if let Some(infra) = &shared.infra {
+                infra.flush(None);
+            }
+            shared.forward_infra.flush(None);
+            if let Some(cache) = &shared.cache {
+                for zone in &nta_zones {
+                    cache.flush(Some(&zone.to_wire()));
+                }
+            }
+        }
+        if let Some(engine) = &shared.engine {
+            shared.signal_if_due(engine);
+        }
+        if shared.settings.metrics
+            && let Some(validator) = &shared.validator
+        {
+            #[allow(clippy::cast_precision_loss, reason = "a gauge of entries")]
+            metrics::VALIDATION_KEY_SET_GAUGE.set(validator.report().key_sets as f64);
+        }
         if let Some(cache) = &shared.cache {
             for (key, rule) in cache.take_prefetch() {
                 tokio::spawn(prefetch(Arc::clone(&shared), key, rule));
@@ -1192,6 +1510,10 @@ async fn housekeeping(shared: Arc<Shared>, stop: CancellationToken) {
             purge_at = now + PURGE;
             if let Some(cache) = &shared.cache {
                 cache.purge(now);
+            }
+            // WP10.2: the validator's key sets past their time.
+            if let Some(validator) = &shared.validator {
+                validator.purge(now);
             }
             // WP10.1: the infrastructure cache's expired entries and the failure cache's
             // bound.
@@ -1291,7 +1613,7 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
             cd: false,
             dnssec_ok: true,
         };
-        let resolved = shared
+        let (resolved, _) = shared
             .recurse(&engine, &question, Some(&key), key.view())
             .await;
         if resolved.cacheable() {
@@ -1329,9 +1651,10 @@ async fn prefetch(shared: Arc<Shared>, key: CacheKey, rule: Option<ForwardRuleId
 
 /// How a forwarded query was answered.
 enum Outcome {
-    Upstream(Vec<u8>),
+    // WP10.2: the answers carry the validator's verdict.
+    Upstream(Vec<u8>, Option<Validation>),
     // WP10.1: the engine's answer, a failure with its extended error included.
-    Recursed(Arc<Resolved>),
+    Recursed(Arc<Resolved>, Option<Validation>),
     Stale,
     Failed,
 }
@@ -1379,13 +1702,13 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         .clone()
         .filter(|_| shared.recurses(&catalog, &route, query.view));
     let outcome = if let Some(engine) = engine {
-        let resolved = shared
+        let (resolved, validation) = shared
             .recurse(&engine, &question, key.as_ref(), query.view)
             .await;
         if u16::from(resolved.rcode) == rcode::SERVFAIL && has_stale(Instant::now()) {
             Outcome::Stale
         } else {
-            Outcome::Recursed(resolved)
+            Outcome::Recursed(resolved, validation)
         }
     } else {
         match shared.set_for(&route).await {
@@ -1407,17 +1730,17 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
                         tokio::spawn(Arc::clone(shared).fetch(set, question, key.clone(), rule_id));
                     tokio::select! {
                         joined = &mut task => match joined {
-                            Ok(Ok(answer)) => Outcome::Upstream(answer),
+                            Ok(Ok((answer, validation))) => Outcome::Upstream(answer, validation),
                             _ => Outcome::Stale,
                         },
                         // The upstream query goes on and refreshes the entry when it answers.
                         () = tokio::time::sleep(shared.settings.stale_budget) => Outcome::Stale,
                     }
-                } else if let Ok(answer) = Arc::clone(shared)
+                } else if let Ok((answer, validation)) = Arc::clone(shared)
                     .fetch(set, question, key.clone(), rule_id)
                     .await
                 {
-                    Outcome::Upstream(answer)
+                    Outcome::Upstream(answer, validation)
                 } else {
                     shared.count(|counters| &counters.timeouts);
                     // An entry may have come in from another query meanwhile.
@@ -1453,7 +1776,7 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
     let mut cached = false;
     // WP10.1: how the answer was found, and the engine's queries for it.
     let (mut resolution, subqueries) = match &outcome {
-        Outcome::Recursed(resolved) => (
+        Outcome::Recursed(resolved, _) => (
             if resolved.outcome == crate::recurse::Outcome::Local {
                 crate::log::Resolution::Local
             } else {
@@ -1463,12 +1786,43 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
         ),
         _ => (crate::log::Resolution::Forward, 0),
     };
+    // WP10.2: the validator's state and extended error render the answer; the RFC 8509
+    // sentinel may refuse a secure A or AAAA answer; the log gets both.
+    let validation = match &outcome {
+        Outcome::Upstream(_, validation) | Outcome::Recursed(_, validation) => *validation,
+        Outcome::Stale | Outcome::Failed => None,
+    };
+    let (state, validation_ede) = validation
+        .map_or((SecurityState::Unvalidated, None), |validation| {
+            (validation.state, validation.ede)
+        });
+    let log_ede: Option<u16> = match &outcome {
+        Outcome::Recursed(resolved, _) => validation_ede
+            .or_else(|| resolved.ede())
+            .map(ExtendedError::code),
+        Outcome::Upstream(..) => validation_ede.map(ExtendedError::code),
+        Outcome::Stale | Outcome::Failed => None,
+    };
+    let sentinel_refused =
+        shared.sentinel_refuses(request.qname.as_wire(), request.qtype, request.cd, state);
+    // WP10.2: end.
     let written = match outcome {
-        Outcome::Upstream(answer) => cache::relay(&answer, &client, &mut out),
+        Outcome::Upstream(answer, _) => {
+            if sentinel_refused {
+                None
+            } else {
+                cache::relay_with(&answer, &client, &mut out, state, validation_ede)
+            }
+        }
         // WP10.1: the engine's answer, with the extended error of a failure.
-        Outcome::Recursed(resolved) => {
-            let written = cache::relay(&resolved.message, &client, &mut out);
+        Outcome::Recursed(resolved, _) => {
+            let written = if sentinel_refused {
+                None
+            } else {
+                cache::relay_with(&resolved.message, &client, &mut out, state, validation_ede)
+            };
             if written.is_some()
+                && validation_ede.is_none()
                 && let Some(ede) = resolved.ede()
             {
                 crate::recurse::add_ede(&mut out, ede);
@@ -1542,9 +1896,25 @@ async fn handle(shared: &Arc<Shared>, submitted: Submitted) {
             // WP10.1: the resolution and the engine's queries.
             resolution: Some(resolution),
             subqueries,
+            // WP10.2: the validation state and the extended error.
+            validation: validation.map(|validation| validation.state),
+            ede: log_ede,
         });
     }
 }
+
+// WP10.2: the sentinel's refusal of a rendered hit.
+/// Turns the rendered answer `out` (the client's header and question first) into SERVFAIL
+/// with no records, in place.
+fn servfail_in_place(out: &mut Vec<u8>, question_end: usize) {
+    if out.len() < question_end.max(HEADER_LEN) {
+        return;
+    }
+    out[3] = (out[3] & 0xf0) | 2;
+    out[6..12].copy_from_slice(&[0, 0, 0, 0, 0, 0]);
+    out.truncate(question_end);
+}
+// WP10.2: end.
 
 /// A header-and-question answer to the client's message with `code` (SERVFAIL).
 fn short_answer(message: &[u8], code: u16) -> Option<Vec<u8>> {

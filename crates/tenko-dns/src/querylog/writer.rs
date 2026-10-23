@@ -310,6 +310,9 @@ impl Writer {
             // WP10.1: the resolution and the engine's queries.
             resolution: slot.resolution,
             subqueries: slot.subqueries,
+            // WP10.2: the validation state and the extended error.
+            validation: slot.validation,
+            ede: slot.ede,
         }
     }
 
@@ -353,6 +356,8 @@ impl Writer {
             slot.cached,
             slot.resolution,
             slot.subqueries,
+            slot.validation,
+            slot.ede,
         ));
         self.message.clear();
         dnstap::build_message(&mut self.message, slot.qname(), slot.qtype, None);

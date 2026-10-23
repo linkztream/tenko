@@ -125,7 +125,7 @@ async fn a_rule_created_as_before_shows_the_defaults() {
 }
 
 #[tokio::test]
-async fn a_recurse_rule_and_validate_false_answer_501_and_write_nothing() {
+async fn a_recurse_rule_answers_501_and_validate_false_is_written() {
     let router = app();
     // A recurse rule names no upstream: the field may be absent.
     send(
@@ -136,19 +136,26 @@ async fn a_recurse_rule_and_validate_false_answer_501_and_write_nothing() {
     )
     .await
     .assert_not_implemented("POST", "/dns/forwarders");
-    send(
+    // WP10.2 built the rule's escape from validation: `validate: false` is written.
+    let unvalidated = send(
         &router,
         "POST",
         "/dns/forwarders",
         Some(json!({
-            "suffix": "example.net",
+            "suffix": "unvalidated.example.net",
             "validate": false,
             "upstreams": [{"address": "192.0.2.53"}]
         })),
     )
-    .await
-    .assert_not_implemented("POST", "/dns/forwarders");
-    assert_eq!(items(&router, "/dns/forwarders").await, Vec::<Value>::new());
+    .await;
+    assert_eq!(
+        unvalidated.status,
+        StatusCode::CREATED,
+        "{}",
+        unvalidated.body
+    );
+    assert_eq!(unvalidated.body["validate"], false);
+    assert_eq!(items(&router, "/dns/forwarders").await.len(), 1);
 
     let created = send(
         &router,
@@ -162,13 +169,15 @@ async fn a_recurse_rule_and_validate_false_answer_501_and_write_nothing() {
         "/dns/forwarders/{}",
         created.body["id"].as_str().expect("id")
     );
-    for patch in [json!({"mode": "recurse"}), json!({"validate": false})] {
-        send(&router, "PATCH", &path, Some(patch))
-            .await
-            .assert_not_implemented("PATCH", "/dns/forwarders/{id}");
-    }
+    send(&router, "PATCH", &path, Some(json!({"mode": "recurse"})))
+        .await
+        .assert_not_implemented("PATCH", "/dns/forwarders/{id}");
     let got = send(&router, "GET", &path, None).await;
     assert_eq!(got.body, created.body);
+    // WP10.2: the escape is patched in and out.
+    let off = send(&router, "PATCH", &path, Some(json!({"validate": false}))).await;
+    assert_eq!(off.status, StatusCode::OK, "{}", off.body);
+    assert_eq!(off.body["validate"], false);
 
     // The defaults are accepted in a patch.
     let patched = send(
@@ -338,6 +347,10 @@ mod node_routes {
         fn status(&self) -> DnsStatus {
             DnsStatus {
                 recursion: self.report.clone(),
+                validation: None,
+                trust_anchors: Vec::new(),
+                stripping_rules: Vec::new(),
+                active_ntas: Vec::new(),
                 node: NODE,
                 serving: true,
                 revision: Revision(0),
@@ -665,7 +678,7 @@ mod node_routes {
         assert!(roots[1].get("srtt_ms").is_none(), "{body}");
         assert_eq!(
             body["infra"],
-            json!({"zones": 3, "max_zones": 10_000, "servers": 5, "max_servers": 50_000, "names": 4})
+            json!({"zones": 3, "max_zones": 10_000, "servers": 5, "max_servers": 50_000, "names": 4, "validated_zones": 0, "max_validated_zones": 0})
         );
         assert_eq!(
             body["budget"],

@@ -2,7 +2,7 @@
 //! [`Infra`], the [`InfraCache`] the engine ([`crate::recurse`]) runs on, and
 //! [`ServerTable`], the bookkeeping of every authority server address it asked.
 //!
-//! - **Zone cuts.** Per cut the NS set with its TTL, the DS state slot WP10.2 fills and the
+//! - **Zone cuts.** Per cut the NS set with its TTL, the DS state the validator fills and the
 //!   minimisation fallback slot of WP10.3; at most `cuts` of them (1,000 under the Home
 //!   profile, 10,000 under the others).
 //! - **Name servers.** Per name-server name its A and AAAA addresses with their TTLs and

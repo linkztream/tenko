@@ -412,6 +412,8 @@ fn forward_settings(
         upstream_ca,
         // WP10.1: set by `recursion_settings` at the start.
         recursion: None,
+        // WP10.2: set at the start too.
+        validation: None,
     }
 }
 
@@ -437,6 +439,8 @@ fn recursion_settings(
     let defaults = RecursionSettings::default();
     let recursion = RecursionSettings {
         enabled: true,
+        // WP10.2: TGL-12.
+        validate: keys.validate_for(profile),
         outbound: match keys.outbound {
             crate::config::RecursionOutbound::Auto => Outbound::Auto,
             crate::config::RecursionOutbound::V4 => Outbound::V4,
@@ -839,6 +843,14 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     // WP10.1: the recursive resolver beside the forwarder, its flushes audited.
     let mut settings = forward_settings(section, profile, upstream_ca);
     settings.recursion = recursion_settings(section, profile)?;
+    // WP10.2: the validator (TGL-12) with the profile's bound on key sets, and the
+    // resolver the leader's trust anchor service asks in process, with the Lab hold-down.
+    if section.recursion.validate_for(profile) {
+        settings.validation = Some(tenko_dns::forward::ValidationSettings {
+            key_sets: section.recursion.infra_entries_for(profile),
+            ..tenko_dns::forward::ValidationSettings::default()
+        });
+    }
     let (forwarder, forward_task) = Forwarder::start(
         settings,
         handle.clone(),
@@ -849,6 +861,22 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
     forwarder.set_audit(Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(
         &store,
     ))));
+    if let Some(engine) = forwarder.engine() {
+        let caps = forwarder
+            .validator()
+            .map_or(tenko_dns::recursion::ValidationCaps::DEFAULT, |validator| {
+                validator.caps()
+            });
+        super::leader::ANCHOR_WIRING.set_resolver(
+            Arc::new(tenko_dns::anchors::NodeResolver::new(
+                Arc::clone(engine),
+                Arc::clone(forwarder.anchors()) as Arc<dyn tenko_dns::recursion::TrustAnchors>,
+                caps,
+            )),
+            section.recursion.rfc5011_hold_down_secs,
+        );
+    }
+    // WP10.2: end.
     // WP10.1: end.
     let (limiter, limits_line) = limiter(section, profile, &recursion)?;
     let recursion_task = tokio::spawn(follow_recursion(

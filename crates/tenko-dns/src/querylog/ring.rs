@@ -23,6 +23,9 @@ pub(crate) struct Slot {
     // WP10.1: how the answer was found and the engine's queries.
     pub(crate) resolution: Option<crate::log::Resolution>,
     pub(crate) subqueries: u16,
+    // WP10.2: the validation state and the extended error.
+    pub(crate) validation: Option<tenko_core::dns::SecurityState>,
+    pub(crate) ede: Option<u16>,
 }
 
 impl Slot {
@@ -40,6 +43,8 @@ impl Slot {
         duration_micros: 0,
         resolution: None,
         subqueries: 0,
+        validation: None,
+        ede: None,
     };
 
     fn fill(&mut self, entry: &QueryLogEntry<'_>) {
@@ -57,6 +62,8 @@ impl Slot {
         self.duration_micros = entry.duration_micros;
         self.resolution = entry.resolution;
         self.subqueries = entry.subqueries;
+        self.validation = entry.validation;
+        self.ede = entry.ede;
     }
 
     /// The query name in wire form.

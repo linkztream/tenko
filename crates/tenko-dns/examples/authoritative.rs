@@ -58,6 +58,11 @@
 //! be glue outside the bailiwick that a resolver must ignore. The other misbehaviours apply
 //! to a referral as to any answer. The line `ready quirk ZONE on ADDR... flags ...` on
 //! standard output tells that the server answers.
+//!
+//! `--proxy ADDR` (WP10.2) turns the server into a forwarding proxy for the lab's
+//! forwarded rows: every query is asked of `ADDR` on port 53 over UDP and its answer
+//! relayed; with `--strip-dnssec` the RRSIG, NSEC and NSEC3 records are left out of it, as
+//! an upstream that strips the DNSSEC records answers (`dns.forwarder.strips_dnssec`).
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -291,12 +296,24 @@ struct Quirks {
     truncate: bool,
     delay: Duration,
     wrong_source: bool,
+    // WP10.2: the stripping proxy.
+    /// `--proxy ADDR`: every query is asked of this server instead of the zone.
+    proxy: Option<SocketAddr>,
+    /// `--strip-dnssec`: the RRSIG, NSEC and NSEC3 records leave the proxied answer.
+    strip_dnssec: bool,
 }
 
 impl Quirks {
     /// The switches that are on, as the ready line prints them.
     fn flags(&self) -> Vec<String> {
         let mut flags = Vec::new();
+        // WP10.2: the stripping proxy.
+        if let Some(proxy) = self.proxy {
+            flags.push(format!("proxy={proxy}"));
+        }
+        if self.strip_dnssec {
+            flags.push("strip-dnssec".to_string());
+        }
         if self.no_edns {
             flags.push("no-edns".to_string());
         }
@@ -430,6 +447,14 @@ fn parse() -> Result<Args, String> {
             "--lower-case" => quirks.lower_case = true,
             "--truncate" => quirks.truncate = true,
             "--wrong-source" => quirks.wrong_source = true,
+            // WP10.2: the stripping proxy.
+            "--strip-dnssec" => quirks.strip_dnssec = true,
+            "--proxy" => {
+                let address: IpAddr = value()?
+                    .parse()
+                    .map_err(|error| format!("--proxy: {error}"))?;
+                quirks.proxy = Some(SocketAddr::new(address, 53));
+            }
             "--referral" => referrals.push(pair(&flag, &value()?)?),
             "--glue" => {
                 let (name, address) = pair(&flag, &value()?)?;
@@ -831,6 +856,52 @@ fn truncated(answer: &[u8], query: &[u8]) -> Vec<u8> {
     out
 }
 
+// WP10.2: the stripping proxy of the lab's forwarded rows (`dns.forwarder.strips_dnssec`).
+/// Asks `upstream` the query over UDP (two seconds) and returns its answer; with `strip`,
+/// the RRSIG, NSEC and NSEC3 records of every section are left out, as an upstream that
+/// strips the DNSSEC records answers. `None` when the upstream does not answer.
+fn proxy_answer(upstream: SocketAddr, query: &[u8], strip: bool) -> Option<Vec<u8>> {
+    use tenko_dns::recurse::message::{Composed, Rr, compose, parse};
+    let socket = std::net::UdpSocket::bind(if upstream.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    })
+    .ok()?;
+    socket.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    socket.send_to(query, upstream).ok()?;
+    let mut buffer = vec![0u8; 4096];
+    let (len, from) = socket.recv_from(&mut buffer).ok()?;
+    if from != upstream {
+        return None;
+    }
+    buffer.truncate(len);
+    if !strip {
+        return Some(buffer);
+    }
+    let parsed = parse(&buffer)?;
+    let keep = |rr: &&Rr| !matches!(rr.rtype, 46 | 47 | 50);
+    let answer: Vec<Rr> = parsed.answer.iter().filter(keep).cloned().collect();
+    let authority: Vec<Rr> = parsed.authority.iter().filter(keep).cloned().collect();
+    let additional: Vec<Rr> = parsed.additional.iter().filter(keep).cloned().collect();
+    let mut out = compose(&Composed {
+        qname: &parsed.qname,
+        qtype: parsed.qtype,
+        qclass: 1,
+        rcode: u8::try_from(parsed.rcode & 0x0f).unwrap_or(2),
+        answer: &answer,
+        authority: &authority,
+        additional: &additional,
+    });
+    // The client's id, the AA bit and the question as asked.
+    out[..2].copy_from_slice(&query[..2]);
+    if parsed.aa {
+        out[2] |= 0x04;
+    }
+    Some(out)
+}
+// WP10.2: end.
+
 /// The answer to one query message with the misbehaviours applied, or `None` when the
 /// responder drops it.
 fn quirk_answer(
@@ -843,6 +914,10 @@ fn quirk_answer(
 ) -> Option<Vec<u8>> {
     if quirks.no_edns && has_opt(query) {
         return formerr_with_question(query);
+    }
+    // WP10.2: a proxied query never reaches the zone.
+    if let Some(upstream) = quirks.proxy {
+        return proxy_answer(upstream, query, quirks.strip_dnssec);
     }
     let referral = responder
         .referrals

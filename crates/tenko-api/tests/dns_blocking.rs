@@ -138,6 +138,8 @@ async fn lab(node_update: bool, log_on: bool) -> Lab {
             // WP10.1: the resolution of the log line.
             resolution: None,
             subqueries: 0,
+            validation: None,
+            ede: None,
         });
     }
     writer.stop();

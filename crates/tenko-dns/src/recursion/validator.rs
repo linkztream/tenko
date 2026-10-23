@@ -1,8 +1,9 @@
 //! The validator's contract ([`Validator`], recursion plan section 2.3): an answer plus
 //! the chain context in, a [`SecurityState`] and the extended error out. It sits on the
 //! runtime between the authority's (or the upstream's) answer and the cache insert; the
-//! worker never validates. WP10.2 builds it over `dnssec::canonical`, `dnssec::crypto`
-//! and `dnssec::chain` (REC-Q4: Tenko's own code). [`Unvalidating`] is the reference for
+//! worker never validates. `validate::DnssecValidator` implements it over
+//! `dnssec::crypto` and the proofs of `validate::nsec` and `validate::nsec3` (REC-Q4:
+//! Tenko's own code). [`Unvalidating`] is the reference for
 //! validation off (the Lab profile may switch it off, TGL-12).
 
 use std::{future::Future, time::SystemTime};

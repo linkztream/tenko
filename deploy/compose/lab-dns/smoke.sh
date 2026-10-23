@@ -114,6 +114,9 @@ compose() { docker compose -f "$compose_file" "$@"; }
 # WP10.1: the round recursion.
 # shellcheck source=deploy/compose/lab-dns/recursion.sh
 source "$here/recursion.sh"
+# WP10.2: the validation rows of the round recursion (E33) and the round rfc5011 (E34).
+# shellcheck source=deploy/compose/lab-dns/validation.sh
+source "$here/validation.sh"
 
 # retry <seconds> <description> <command...>: runs the command every 2 seconds until it
 # succeeds or the time is up.
@@ -329,6 +332,11 @@ upd_secret="$(head -c 32 /dev/urandom | base64)"
 mkdir -p "$work/bind" "$work/zones"
 printf 'key "%s" { algorithm hmac-sha256; secret "%s"; };\n' "$xfr_key" "$xfr_secret" >"$work/bind/keys.conf"
 chmod 0444 "$work/bind/keys.conf"
+# WP10.2: the zones BIND signs for the recursion round; empty until the round writes it.
+printf '// WP10.2: no BIND-signed zones in this round.\n' >"$work/bind/recursion.conf"
+chmod 0644 "$work/bind/recursion.conf"
+mkdir -p "$work/delv"
+chmod 0755 "$work/delv"
 cp "$here"/zones/*.zone "$work/zones/"
 chmod 0777 "$work/zones"
 chmod 0666 "$work"/zones/*.zone
@@ -802,6 +810,11 @@ for transport in $rounds; do
   # WP10.1: the recursive resolver against the lab root.
   if [[ "$transport" == recursion ]]; then
     recursion
+    continue
+  fi
+  # WP10.2: the RFC 5011 roll of the lab root's KSK.
+  if [[ "$transport" == rfc5011 ]]; then
+    rfc5011
     continue
   fi
   round "$transport"

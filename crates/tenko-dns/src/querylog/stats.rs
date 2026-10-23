@@ -333,6 +333,9 @@ mod tests {
                 // WP10.1: the resolution of the log line.
                 resolution: None,
                 subqueries: 0,
+                // WP10.2: the validation state and the extended error.
+                validation: None,
+                ede: None,
             });
         }
         writer.stop();

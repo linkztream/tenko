@@ -17,8 +17,9 @@ use std::{
 use tenko_core::{
     Revision,
     dns::{
-        Acl, AclId, BlockList, BlockListId, ForwardRule, ForwardRuleId, JournalEntry, KeyMeta,
-        KeyName, ListVersion, RrSet, RrSetKey, ScopeName, View, ViewId, Zone, ZoneId,
+        Acl, AclId, BlockList, BlockListId, DnsName, ForwardRule, ForwardRuleId, JournalEntry,
+        KeyMeta, KeyName, ListVersion, NegativeTrustAnchor, NtaId, RrSet, RrSetKey, ScopeName,
+        TrustAnchor, View, ViewId, Zone, ZoneId,
     },
 };
 use tokio::sync::mpsc;
@@ -47,6 +48,12 @@ pub struct DnsData {
     pub list_versions: BTreeMap<(BlockListId, u64), ListVersion>,
     /// `dns.journal`.
     pub journal: BTreeMap<(ZoneId, ScopeName, Revision), JournalEntry>,
+    // WP10.2: the trust anchors and negative trust anchors of the validator.
+    /// `dns.trust_anchors`.
+    pub trust_anchors: BTreeMap<DnsName, TrustAnchor>,
+    /// `dns.ntas`.
+    pub ntas: BTreeMap<NtaId, NegativeTrustAnchor>,
+    // WP10.2: end.
 }
 
 /// One changed row: its key and its value after the change, or `None` when it is gone.
@@ -74,6 +81,12 @@ pub enum Change {
     ListVersion((BlockListId, u64), Option<ListVersion>),
     /// A journal entry.
     Journal((ZoneId, ScopeName, Revision), Option<JournalEntry>),
+    // WP10.2: the validator's rows.
+    /// A trust anchor row.
+    TrustAnchor(DnsName, Option<TrustAnchor>),
+    /// A negative trust anchor.
+    Nta(NtaId, Option<NegativeTrustAnchor>),
+    // WP10.2: end.
 }
 
 fn set<K: Ord + Clone, V: Clone>(map: &mut BTreeMap<K, V>, key: &K, value: Option<&V>) {
@@ -108,6 +121,9 @@ impl DnsData {
             Change::List(key, value) => set(&mut self.lists, key, value.as_ref()),
             Change::ListVersion(key, value) => set(&mut self.list_versions, key, value.as_ref()),
             Change::Journal(key, value) => set(&mut self.journal, key, value.as_ref()),
+            // WP10.2: the validator's rows.
+            Change::TrustAnchor(key, value) => set(&mut self.trust_anchors, key, value.as_ref()),
+            Change::Nta(key, value) => set(&mut self.ntas, key, value.as_ref()),
         }
     }
 

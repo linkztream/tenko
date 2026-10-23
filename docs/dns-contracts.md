@@ -240,7 +240,7 @@ The contracts of Slice 10 ([dns-recursion-plan.md](plans/dns-recursion-plan.md) 
 
 **Tables** (no format bump, additive): `dns.trust_anchors` (key: the zone, `DnsName`; value `TrustAnchor`), `dns.ntas` (key `NtaId`; value `NegativeTrustAnchor`), `dns.ntas.by_zone` (key (`DnsName`, `NtaId`); value `()`), all three in `tables::NODE_TABLES`, so in the `dns` role's `Subset::role_tables`. `dns.views` and `dns.forwarders` rows gain their fields with defaults; Phase 2 rows decode unchanged.
 
-**Routes** (`crates/tenko-api/src/routes/dns/recursion.rs`; every one answers 501 `sys.not_implemented` after its checks until WP10.2 and WP10.4 build it):
+**Routes** (`crates/tenko-api/src/routes/dns/recursion.rs`; the node routes built by WP10.1, the trust anchors and the negative trust anchors by WP10.2):
 
 | Endpoint | Check | Body and answer |
 |---|---|---|
@@ -255,7 +255,7 @@ The contracts of Slice 10 ([dns-recursion-plan.md](plans/dns-recursion-plan.md) 
 | `GET /nodes/{id}/dns/infra` | Read on the node and `zone` | `InfraParams { suffix, limit, cursor }`, `Page<InfraCutItem>` |
 | `POST /nodes/{id}/dns/infra/flush` | Update on the node, Execute on `zone` | `InfraFlushParams { suffix }`, `InfraFlushed { entries }` |
 
-A path spells the root `root` (a URL turns the segment `.` into a dot segment); a zone named `root` is written `root.`. `ForwarderCreate` and `ForwarderPatch` gain `mode` and `validate` (`upstreams` defaults to none), `ViewCreate` and `ViewPatch` gain `resolution` (and `default_resolution` on the patch); a request that sets them to anything but the defaults answers 501 until WP10.1 and WP10.4. `DnsCacheEntry` of `GET /nodes/{id}/dns/cache` loses `dnssec_ok` and `checking_disabled` and gains `state`, `ede` and `signature_expiry`.
+A path spells the root `root` (a URL turns the segment `.` into a dot segment); a zone named `root` is written `root.`. `ForwarderCreate` and `ForwarderPatch` gain `mode` and `validate` (`upstreams` defaults to none), `ViewCreate` and `ViewPatch` gain `resolution` (and `default_resolution` on the patch); `validate: false` is written (WP10.2); a request that sets `mode` to `recurse` or a view's `resolution` answers 501 until WP10.4. `DnsCacheEntry` of `GET /nodes/{id}/dns/cache` loses `dnssec_ok` and `checking_disabled` and gains `state`, `ede` and `signature_expiry`.
 
 **Error codes**: `dns.trust_anchor.not_found` (404, `zone`), `dns.trust_anchor.invalid` (400, `field`, `reason`), `dns.trust_anchor.root_protected` (409, `zone`: removing or replacing the root's anchor outside Lab), `dns.nta.not_found` (404, `id`), `dns.nta.invalid` (400, `field`, `reason`: the root, no expiry under Hardened, over seven days, no reason), `dns.recursion.disabled` (409, `node`); `dns.forwarder.invalid` gains the reasons of a recurse rule.
 

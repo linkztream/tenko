@@ -1,0 +1,12 @@
+; bind.example.test: the independent signer of E33 (WP10.2). Signed per run by BIND's
+; dnssec-keygen and dnssec-signzone in the bind container (recursion round, validation.sh);
+; its DS goes into example.test on the authority node. The name server is bind.example.test
+; itself, at 203.0.113.2.
+$ORIGIN bind.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+@       IN A    203.0.113.2
+www     IN A    192.0.2.50
+txt     IN TXT  "signed by BIND"
+*.wild  IN A    192.0.2.51

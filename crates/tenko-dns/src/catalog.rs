@@ -28,8 +28,8 @@ use ipnet::IpNet;
 use tenko_core::{
     Revision,
     dns::{
-        Acl, AclId, ForwardRule, ForwardRuleId, MatchRule, QueryTransport, Rtype, ScopeName, View,
-        ViewId, Zone, ZoneId, ZoneKind,
+        Acl, AclId, DnsName, ForwardRule, ForwardRuleId, MatchRule, NegativeTrustAnchor, NtaId,
+        QueryTransport, Rtype, ScopeName, TrustAnchor, View, ViewId, Zone, ZoneId, ZoneKind,
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -310,6 +310,10 @@ pub struct Catalog {
     stub_rows: BTreeMap<ZoneId, Zone>,
     acl_rows: BTreeMap<AclId, Acl>,
     policy: PolicyData,
+    // WP10.2: the validator's rows and the revision they last changed at.
+    anchor_rows: BTreeMap<DnsName, TrustAnchor>,
+    nta_rows: BTreeMap<NtaId, NegativeTrustAnchor>,
+    anchors_revision: Revision,
 }
 
 /// The stub zones of a set of zone rows.
@@ -333,6 +337,10 @@ impl Catalog {
             stub_rows: stubs(&data.zones),
             acl_rows: data.acls.clone(),
             policy: PolicyData::build(data),
+            // WP10.2: the validator's rows.
+            anchor_rows: data.trust_anchors.clone(),
+            nta_rows: data.ntas.clone(),
+            anchors_revision: data.revision,
         }
     }
 
@@ -352,10 +360,30 @@ impl Catalog {
             stub_rows: self.stub_rows.clone(),
             acl_rows: self.acl_rows.clone(),
             policy: self.policy.apply(&delta.changes),
+            // WP10.2: the validator's rows.
+            anchor_rows: self.anchor_rows.clone(),
+            nta_rows: self.nta_rows.clone(),
+            anchors_revision: self.anchors_revision,
         };
         let (mut views, mut forwarders) = (false, false);
         for change in &delta.changes {
             match change {
+                // WP10.2: the validator's rows.
+                Change::TrustAnchor(zone, anchor) => {
+                    next.anchors_revision = delta.to;
+                    match anchor {
+                        Some(anchor) => next.anchor_rows.insert(zone.clone(), anchor.clone()),
+                        None => next.anchor_rows.remove(zone),
+                    };
+                }
+                Change::Nta(id, nta) => {
+                    next.anchors_revision = delta.to;
+                    match nta {
+                        Some(nta) => next.nta_rows.insert(*id, nta.clone()),
+                        None => next.nta_rows.remove(id),
+                    };
+                }
+                // WP10.2: end.
                 Change::View(id, view) => {
                     views = true;
                     match view {
@@ -395,6 +423,23 @@ impl Catalog {
         }
         Ok(next)
     }
+
+    // WP10.2: the validator's rows.
+    /// The trust anchor rows by zone.
+    pub fn trust_anchors(&self) -> &BTreeMap<DnsName, TrustAnchor> {
+        &self.anchor_rows
+    }
+
+    /// The negative trust anchor rows.
+    pub fn ntas(&self) -> &BTreeMap<NtaId, NegativeTrustAnchor> {
+        &self.nta_rows
+    }
+
+    /// The revision at which the trust anchor or negative trust anchor rows last changed.
+    pub fn anchors_revision(&self) -> Revision {
+        self.anchors_revision
+    }
+    // WP10.2: end.
 
     /// The revision of the rows the catalog was built from.
     pub fn revision(&self) -> Revision {

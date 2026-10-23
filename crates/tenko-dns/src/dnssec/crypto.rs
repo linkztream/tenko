@@ -5,13 +5,21 @@
 //! A private key is kept as PKCS#8 in the vault and loaded into a [`KeyPair`] when the
 //! signer needs it. ECDSA signatures are the fixed 64-octet form `r || s` that RFC 6605
 //! puts in the RRSIG; the DNSKEY holds the public point without its leading 0x04.
+//!
+//! The validator (WP10.2, RFC 8624) verifies more than the signer signs: RSA with SHA-1
+//! (5 and 7), SHA-256 (8) and SHA-512 (10), ECDSA P-384 with SHA-384 (14), and the DS
+//! digests SHA-1 (1) and SHA-384 (4) beside SHA-256; see [`verify`], [`ds_matches`] and
+//! [`supported_algorithm`].
 
 use aws_lc_rs::{
     digest,
     rand::SystemRandom,
     signature::{
-        ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING, ED25519, EcdsaKeyPair,
-        Ed25519KeyPair, KeyPair as _, UnparsedPublicKey,
+        ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED, ED25519,
+        EcdsaKeyPair, EcdsaVerificationAlgorithm, Ed25519KeyPair, KeyPair as _,
+        RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+        RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
+        RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY, RsaPublicKeyComponents, UnparsedPublicKey,
     },
 };
 use tenko_core::{
@@ -152,24 +160,108 @@ pub fn algorithm_of(number: u8) -> Option<DnssecAlgorithm> {
     }
 }
 
+// WP10.2: the validator's algorithms (RFC 8624 section 3.1) and DS digests (section 3.3).
+/// Whether the validator verifies signatures of algorithm `number`: RSASHA1 (5),
+/// RSASHA1-NSEC3-SHA1 (7), RSASHA256 (8), RSASHA512 (10), ECDSAP256SHA256 (13),
+/// ECDSAP384SHA384 (14) and ED25519 (15). ED448 (16) and the GOST algorithms (12, 23) are
+/// not supported, so a zone signed with them alone is insecure; RSAMD5 (1) and DSA (3, 6)
+/// are refused as RFC 8624 says they must be.
+pub const fn supported_algorithm(number: u8) -> bool {
+    matches!(number, 5 | 7 | 8 | 10 | 13 | 14 | 15)
+}
+
+/// Whether the validator computes DS digests of `digest_type`: SHA-1 (1), SHA-256 (2) and
+/// SHA-384 (4). GOST (3) is not supported.
+pub const fn supported_digest(digest_type: u8) -> bool {
+    matches!(digest_type, 1 | 2 | 4)
+}
+
+/// The public key of an RSA DNSKEY (RFC 3110 section 2): the exponent's length in one
+/// octet, or in the two that follow a zero octet, then the exponent and the modulus.
+fn rsa_components(public_key: &[u8]) -> Option<(&[u8], &[u8])> {
+    let (len, rest) = match *public_key {
+        [0, high, low, ref rest @ ..] => (usize::from(u16::from_be_bytes([high, low])), rest),
+        [len, ref rest @ ..] => (usize::from(len), rest),
+        [] => return None,
+    };
+    if len == 0 || rest.len() <= len {
+        return None;
+    }
+    Some(rest.split_at(len))
+}
+
 /// Whether `signature` over `message` verifies with the DNSKEY public key `public_key` of
-/// algorithm `number`. Unknown algorithms never verify.
+/// algorithm `number` ([`supported_algorithm`]). Unknown and unsupported algorithms never
+/// verify; RSA keys below 1,024 bits are refused by the crypto (RFC 8624 section 3.1 asks
+/// for at least that).
 pub fn verify(number: u8, public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
-    match algorithm_of(number) {
-        Some(DnssecAlgorithm::EcdsaP256Sha256) => {
-            let mut point = Vec::with_capacity(public_key.len() + 1);
+    match number {
+        5 | 7 | 8 | 10 => {
+            let Some((e, n)) = rsa_components(public_key) else {
+                return false;
+            };
+            let parameters = match number {
+                5 | 7 => &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+                8 => &RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
+                _ => &RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY,
+            };
+            RsaPublicKeyComponents { n, e }
+                .verify(parameters, message, signature)
+                .is_ok()
+        }
+        13 | 14 => {
+            let (parameters, len): (&'static EcdsaVerificationAlgorithm, usize) = if number == 13 {
+                (&ECDSA_P256_SHA256_FIXED, 64)
+            } else {
+                (&ECDSA_P384_SHA384_FIXED, 96)
+            };
+            if public_key.len() != len {
+                return false;
+            }
+            let mut point = Vec::with_capacity(len + 1);
             point.push(4);
             point.extend_from_slice(public_key);
-            UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
+            UnparsedPublicKey::new(parameters, point)
                 .verify(message, signature)
                 .is_ok()
         }
-        Some(DnssecAlgorithm::Ed25519) => UnparsedPublicKey::new(&ED25519, public_key)
+        15 => UnparsedPublicKey::new(&ED25519, public_key)
             .verify(message, signature)
             .is_ok(),
-        None => false,
+        _ => false,
     }
 }
+
+/// The DS digest of `digest_type` over the owner (lowercase wire form) and the DNSKEY
+/// record data (RFC 4034 section 5.1.4); `None` for an unsupported type.
+pub fn ds_digest(digest_type: u8, owner_wire: &[u8], dnskey_rdata: &[u8]) -> Option<Vec<u8>> {
+    let algorithm = match digest_type {
+        1 => &digest::SHA1_FOR_LEGACY_USE_ONLY,
+        2 => &digest::SHA256,
+        4 => &digest::SHA384,
+        _ => return None,
+    };
+    let mut context = digest::Context::new(algorithm);
+    context.update(owner_wire);
+    context.update(dnskey_rdata);
+    Some(context.finish().as_ref().to_vec())
+}
+
+/// Whether the DS record data `ds_rdata` (key tag, algorithm, digest type, digest) is the
+/// DS of the DNSKEY record data `dnskey_rdata` at `owner_wire`: the tag, the algorithm and
+/// the digest agree. An unsupported digest type never matches.
+pub fn ds_matches(owner_wire: &[u8], dnskey_rdata: &[u8], ds_rdata: &[u8]) -> bool {
+    let [tag_high, tag_low, algorithm, digest_type, digest @ ..] = ds_rdata else {
+        return false;
+    };
+    if dnskey_rdata.get(3) != Some(algorithm)
+        || key_tag(dnskey_rdata) != u16::from_be_bytes([*tag_high, *tag_low])
+    {
+        return false;
+    }
+    ds_digest(*digest_type, owner_wire, dnskey_rdata).is_some_and(|computed| computed == digest)
+}
+// WP10.2: end.
 
 /// The DNSKEY flags of a key role.
 pub fn flags_of(role: KeyRole) -> u16 {

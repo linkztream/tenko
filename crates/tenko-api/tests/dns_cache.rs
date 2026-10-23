@@ -41,6 +41,10 @@ impl DnsNode for CacheNode {
         DnsStatus {
             // WP10.1: no recursive resolver in this test.
             recursion: None,
+            validation: None,
+            trust_anchors: Vec::new(),
+            stripping_rules: Vec::new(),
+            active_ntas: Vec::new(),
             node: NODE,
             serving: true,
             revision: Revision(0),

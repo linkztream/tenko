@@ -1716,7 +1716,7 @@ export interface paths {
         put?: never;
         /**
          * Create a forwarding rule
-         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and write nothing.
+         * @description Scope: `dns.write`. One rule per suffix and view; DoT and DoH upstreams need `tls_name`, the name in their certificates. `mode` is `forward` (the default) or `recurse`, a rule that names no upstream; `validate` (default `true`) switches DNSSEC validation of the upstreams' answers. Until WP10.4 builds it, `mode: recurse` answers 501 and writes nothing.
          */
         post: operations["create_dns_forwarder"];
         delete?: never;
@@ -1748,7 +1748,7 @@ export interface paths {
         head?: never;
         /**
          * Change a forwarding rule
-         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until the resolver is built, `mode: recurse` and `validate: false` answer 501 and change nothing.
+         * @description Scope: `dns.write`. An empty `tls_name` or `description` clears it; `all_views` makes the rule apply in every view. Until WP10.4 builds it, `mode: recurse` answers 501 and changes nothing.
          */
         patch: operations["update_dns_forwarder"];
         trace?: never;
@@ -3331,7 +3331,7 @@ export interface paths {
         };
         /**
          * Get the recursive resolver of a node
-         * @description Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.
+         * @description Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.
          */
         get: operations["get_node_dns_recursion"];
         put?: never;
@@ -8375,8 +8375,8 @@ export interface components {
             /** @description The upstreams, 1 to 16; none for a rule of mode `recurse`. */
             upstreams?: components["schemas"]["Upstream"][];
             /**
-             * @description Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`
-             *     answers 501.
+             * @description Validate the upstreams' answers with DNSSEC (the default); `false` relays them
+             *     unvalidated (TGL-12).
              */
             validate?: boolean | null;
             view?: components["schemas"]["ViewId"] | null;
@@ -8404,7 +8404,7 @@ export interface components {
             transport?: components["schemas"]["ForwardTransport"] | null;
             /** @description The upstreams. */
             upstreams?: components["schemas"]["Upstream"][] | null;
-            /** @description Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501. */
+            /** @description Validate the upstreams' answers with DNSSEC; `false` relays them unvalidated. */
             validate?: boolean | null;
             view?: components["schemas"]["ViewId"] | null;
         };
@@ -8896,6 +8896,11 @@ export interface components {
             max_servers: number;
             /**
              * Format: int64
+             * @description The most such zones.
+             */
+            max_validated_zones?: number;
+            /**
+             * Format: int64
              * @description The most zone cuts the cache holds; the least recently used go first.
              */
             max_zones: number;
@@ -8909,6 +8914,12 @@ export interface components {
              * @description Authority server addresses held.
              */
             servers: number;
+            /**
+             * Format: int64
+             * @description Zones whose validated key sets the validator holds beside the cuts; 0 with
+             *     validation off.
+             */
+            validated_zones?: number;
             /**
              * Format: int64
              * @description Zone cuts held.
@@ -13680,6 +13691,11 @@ export interface components {
                  * @description Microseconds from arrival to answer.
                  */
                 duration_micros: number;
+                /**
+                 * Format: int32
+                 * @description The extended DNS error code the answer carried (RFC 8914); absent for none.
+                 */
+                ede?: number | null;
                 /** @description The query name. */
                 qname: string;
                 /**
@@ -13702,6 +13718,7 @@ export interface components {
                 transport: components["schemas"]["QueryTransport"];
                 /** @description The query type. */
                 type: components["schemas"]["Rtype"];
+                validation?: components["schemas"]["SecurityState"] | null;
                 view?: components["schemas"]["ViewId"] | null;
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
@@ -15102,6 +15119,11 @@ export interface components {
              * @description Microseconds from arrival to answer.
              */
             duration_micros: number;
+            /**
+             * Format: int32
+             * @description The extended DNS error code the answer carried (RFC 8914); absent for none.
+             */
+            ede?: number | null;
             /** @description The query name. */
             qname: string;
             /**
@@ -15124,6 +15146,7 @@ export interface components {
             transport: components["schemas"]["QueryTransport"];
             /** @description The query type. */
             type: components["schemas"]["Rtype"];
+            validation?: components["schemas"]["SecurityState"] | null;
             view?: components["schemas"]["ViewId"] | null;
         };
         /**
@@ -15971,7 +15994,7 @@ export interface components {
             answered: number;
             /**
              * Format: int64
-             * @description Answers validated `bogus`. Counted from WP10.2; 0 until then.
+             * @description Answers validated `bogus`.
              */
             bogus: number;
             /**
@@ -16006,13 +16029,12 @@ export interface components {
             failure_cache_hits: number;
             /**
              * Format: int64
-             * @description Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0
-             *     until then.
+             * @description Answers for which no trust anchor applied (`indeterminate`).
              */
             indeterminate: number;
             /**
              * Format: int64
-             * @description Answers validated `insecure`. Counted from WP10.2; 0 until then.
+             * @description Answers validated `insecure`.
              */
             insecure: number;
             /**
@@ -16037,7 +16059,7 @@ export interface components {
             primings_ok: number;
             /**
              * Format: int64
-             * @description Answers validated `secure`. Counted from WP10.2; 0 until then.
+             * @description Answers validated `secure`.
              */
             secure: number;
             /**
@@ -16083,8 +16105,8 @@ export interface components {
             infra: components["schemas"]["InfraSizes"];
             last_priming?: components["schemas"]["PrimingItem"] | null;
             /**
-             * @description What is wrong now: `priming_failed` (and, from WP10.2, `clock` and
-             *     `trust_anchor_stale`).
+             * @description What is wrong now: `priming_failed`, `clock` (the root's DNSKEY signatures fail
+             *     on time) and `trust_anchor_stale` (a zone without a trusted key left).
              */
             problems: string[];
             /**
@@ -16095,7 +16117,7 @@ export interface components {
             root_expires_secs?: number | null;
             /** @description The root servers in use with their smoothed round-trip times. */
             root_servers: components["schemas"]["RootServerItem"][];
-            /** @description The keys of the trust anchors with their state. Empty until WP10.2. */
+            /** @description The keys of the trust anchors with their RFC 5011 state and source. */
             trust_anchors: components["schemas"]["AnchorKeyState"][];
         };
         /**
@@ -28968,7 +28990,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`) */
+            /** @description `mode` is `recurse`, which is not built yet (`sys.not_implemented`) */
             501: {
                 headers: {
                     [name: string]: unknown;
@@ -29180,7 +29202,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description `mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`) */
+            /** @description `mode` is `recurse`, which is not built yet (`sys.not_implemented`) */
             501: {
                 headers: {
                     [name: string]: unknown;
@@ -29930,15 +29952,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     create_dns_nta: {
@@ -29983,15 +29996,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.keys`, or a token tries to create one */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -30056,15 +30060,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     list_dns_trust_anchors: {
@@ -30112,15 +30107,6 @@ export interface operations {
             };
             /** @description The principal lacks the scope `dns.read` */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -30188,15 +30174,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     get_dns_trust_anchor: {
@@ -30249,15 +30226,6 @@ export interface operations {
             };
             /** @description No trust anchor for the zone (`dns.trust_anchor.not_found`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -30331,15 +30299,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     refresh_dns_trust_anchor: {
@@ -30401,15 +30360,6 @@ export interface operations {
             };
             /** @description The resolver is off (`dns.recursion.disabled`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

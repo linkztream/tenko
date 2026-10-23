@@ -1628,7 +1628,10 @@ impl ForwardSink for Cached {
     fn intake(&self, _query: &IntakeQuery<'_>, out: &mut Vec<u8>) -> Intake {
         out.clear();
         out.extend_from_slice(&self.answer);
-        Intake::Answered { rcode: 0 }
+        Intake::Answered {
+            rcode: 0,
+            validation: None,
+        }
     }
 }
 
@@ -1685,7 +1688,8 @@ async fn the_sink_rewrites_a_blocked_cache_hit_and_leaves_a_clean_one_unchanged(
     assert_eq!(
         intake,
         Intake::Answered {
-            rcode: rcode::NXDOMAIN
+            rcode: rcode::NXDOMAIN,
+            validation: None,
         }
     );
     let answer = decode(&out);
@@ -1702,7 +1706,10 @@ async fn the_sink_rewrites_a_blocked_cache_hit_and_leaves_a_clean_one_unchanged(
     let mut out = Vec::new();
     assert_eq!(
         intake_through(&sink, "www.example.org", &mut out),
-        Intake::Answered { rcode: 0 }
+        Intake::Answered {
+            rcode: 0,
+            validation: None,
+        }
     );
     assert_eq!(out, clean);
 }
@@ -1726,7 +1733,10 @@ async fn the_sink_without_a_policy_hands_over_the_cache_hit_unchanged() {
     let mut out = Vec::new();
     assert_eq!(
         intake_through(&sink, "www.example.org", &mut out),
-        Intake::Answered { rcode: 0 }
+        Intake::Answered {
+            rcode: 0,
+            validation: None,
+        }
     );
     assert_eq!(out, bytes);
 }

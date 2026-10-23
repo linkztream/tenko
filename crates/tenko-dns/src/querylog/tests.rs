@@ -33,6 +33,8 @@ fn entry(qname: &[u8], client: IpAddr, at_micros: u64) -> QueryLogEntry<'_> {
         // WP10.1: the resolution of the log line.
         resolution: None,
         subqueries: 0,
+        validation: None,
+        ede: None,
     }
 }
 

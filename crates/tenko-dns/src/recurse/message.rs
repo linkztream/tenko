@@ -333,6 +333,10 @@ pub enum Step {
     Answer {
         /// The records.
         records: Vec<Rr>,
+        // WP10.2: the proof of a wildcard answer travels in the authority section.
+        /// The NSEC and NSEC3 records of the authority section within the zone, with
+        /// their signatures (the proof of a wildcard expansion, RFC 4035 section 3.1.3.3).
+        denials: Vec<Rr>,
     },
     /// A CNAME (or a DNAME's synthesised CNAME) to an alias the server did not answer:
     /// the records of the chain so far and the name to go on with.
@@ -394,6 +398,7 @@ const MAX_WALK: usize = 16;
 
 /// Reads `parsed`, the answer of a server asked as an authority of `zone` for
 /// `qname`/`qtype` (all names lowercase wire form); see the module documentation.
+#[allow(clippy::too_many_lines, reason = "one answer, section by section")]
 pub fn classify(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Step {
     match parsed.rcode {
         0 | 3 => {}
@@ -420,7 +425,17 @@ pub fn classify(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Step 
                 return Step::Lame("a non-authoritative answer");
             }
             records.extend(found);
-            return Step::Answer { records };
+            // WP10.2: the denial records of the zone, for the validator's wildcard proof.
+            let denials = parsed
+                .authority
+                .iter()
+                .filter(|rr| within(&rr.owner, zone))
+                .filter(|rr| {
+                    matches!(rr.rtype, NSEC | NSEC3) || matches!(rr.covered(), Some(NSEC | NSEC3))
+                })
+                .cloned()
+                .collect();
+            return Step::Answer { records, denials };
         }
         if qtype != CNAME
             && let Some(cname) = parsed
@@ -431,6 +446,23 @@ pub fn classify(parsed: &Parsed, zone: &[u8], qname: &[u8], qtype: u16) -> Step 
             let Some(target) = cname.target() else {
                 return Step::Lame("a CNAME that does not parse");
             };
+            // WP10.2: the DNAME this CNAME was synthesised from, when the server put both
+            // in the answer (RFC 6672 section 3.3), travels with it for the validator.
+            if let Some(dname) = parsed.answer.iter().find(|rr| {
+                rr.rtype == DNAME
+                    && rr.owner != name
+                    && within(&name, &rr.owner)
+                    && within(&rr.owner, zone)
+                    && rr
+                        .target()
+                        .and_then(|to| substitute(&name, &rr.owner, &to))
+                        .is_some_and(|to| to == target)
+            }) && !records
+                .iter()
+                .any(|rr| rr.owner == dname.owner && rr.rtype == DNAME)
+            {
+                records.extend(rrset_at(&parsed.answer, &dname.owner, DNAME));
+            }
             records.extend(rrset_at(&parsed.answer, &name, CNAME));
             if seen.contains(&target) {
                 // A loop inside the answer: the caller sees the repeat and stops.

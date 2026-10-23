@@ -2,8 +2,10 @@
 //! recursive resolver's trust anchors, negative trust anchors, status, priming and
 //! infrastructure cache (recursion plan section 3.4; WP10.0 declares the commands).
 //!
-//! Until WP10.2 and WP10.4 build the routes behind them, every command answers the 501
-//! `sys.not_implemented` problem details and prints them as any other API error.
+//! The routes behind the trust anchor, negative trust anchor, status, priming and
+//! infrastructure cache commands are built (WP10.1, WP10.2); a command whose route is
+//! still to come answers the 501 `sys.not_implemented` problem details, printed as any
+//! other API error.
 //!
 //! # Routes
 //!

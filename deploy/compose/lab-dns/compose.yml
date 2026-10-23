@@ -237,22 +237,58 @@ services:
 
   # delv: the client side's second validator. The BIND image idles as the `client` does;
   # `docker compose exec delv delv @203.0.113.3 ...` (or against the authority) validates
-  # independently of Tenko with the lab root's trust anchor, which WP10.2 puts into
-  # /lab/root.key (E33).
+  # independently of Tenko with the lab root's trust anchor, which the round writes into
+  # LAB_DIR/delv/root.key (E33, WP10.2).
   delv:
     image: ${BIND_IMAGE:-internetsystemsconsortium/bind9:9.20}
     profiles: ["recursion"]
     entrypoint: ["sleep", "infinity"]
     restart: "no"
     stop_grace_period: 1s
+    volumes:
+      - "${LAB_DIR:?set LAB_DIR}/delv:/lab:ro"
     networks:
       lab:
         ipv4_address: 203.0.113.12
 
-  # The bind service above is unchanged here; WP10.2 gives it bind.example.test (signed by
-  # BIND with its own keys, the DS in example.test), optout.example.test and
-  # expired.example.test (made per run with dnssec-keygen and dnssec-signzone).
+  # The bind service above also serves, in the recursion round, the zones it signs with its
+  # own keys per run (bind.example.test, optout.example.test and its unsigned child,
+  # expired.example.test, badsig.example.test, keytrap.example.test; validation.sh):
+  # named.conf includes LAB_DIR/bind/recursion.conf, and the signed files are in
+  # LAB_DIR/zones.
   # WP10.0: end.
+
+  # WP10.2: the upstreams of the forwarded rows (recursion plan section 2.3).
+  #
+  # bind-resolver: BIND as a recursive resolver with validation off, resolving from the lab
+  # root (recursion/bind-resolver.conf, the lab root's hints): the upstream of a forwarding
+  # rule whose answers Tenko validates, and the second validator's path for them.
+  bind-resolver:
+    image: ${BIND_IMAGE:-internetsystemsconsortium/bind9:9.20}
+    profiles: ["recursion"]
+    command: ["-g", "-c", "/etc/bind/named.conf"]
+    restart: "no"
+    expose:
+      - "53/tcp"
+      - "53/udp"
+    volumes:
+      - "./recursion/bind-resolver.conf:/etc/bind/named.conf:ro"
+      - "./recursion/root.hints:/etc/bind/root.hints:ro"
+    networks:
+      lab:
+        ipv4_address: 203.0.113.20
+
+  # quirk-strip: the quirk responder as a proxy in front of bind-resolver that strips the
+  # RRSIG, NSEC and NSEC3 records from every answer: the upstream that makes a rule's
+  # answers bogus and sets dns.forwarder.strips_dnssec.
+  quirk-strip:
+    <<: *quirk
+    command: ["--quirk-zone", "strip.quirk.example.test", "--quirk-address", "203.0.113.19",
+              "--proxy", "203.0.113.20", "--strip-dnssec"]
+    networks:
+      lab:
+        ipv4_address: 203.0.113.19
+  # WP10.2: end.
 
 networks:
   lab:

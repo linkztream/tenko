@@ -304,6 +304,17 @@ pub struct DnsStatus {
     /// The recursive resolver, when it runs: priming, the root, the infrastructure cache,
     /// the counters and the budget.
     pub recursion: Option<crate::recurse::RecursionReport>,
+    // WP10.2: the validator and the trust anchors.
+    /// The validator, when validation is on: the key table, the counters, the clock.
+    pub validation: Option<crate::validate::ValidatorReport>,
+    /// The trust anchor rows the validator reads, with their key states.
+    pub trust_anchors: Vec<std::sync::Arc<tenko_core::dns::TrustAnchor>>,
+    /// The forwarding rules whose upstream strips the DNSSEC records
+    /// (`dns.forwarder.strips_dnssec`), each with its suffix.
+    pub stripping_rules: Vec<(tenko_core::dns::ForwardRuleId, String)>,
+    /// The negative trust anchors in force (`dns.nta.active`).
+    pub active_ntas: Vec<tenko_core::dns::NegativeTrustAnchor>,
+    // WP10.2: end.
 }
 
 /// The counters `dns.stats` reports.
@@ -690,7 +701,15 @@ impl LocalNode {
             Some(Ok(suffix)) => Some(suffix),
             Some(Err(error)) => return CommandResult::rejected(format!("the suffix: {error}")),
         };
-        let removed = engine.flush_infra(suffix.as_ref());
+        let mut removed = engine.flush_infra(suffix.as_ref());
+        // WP10.2: the validator's key sets go with the cuts.
+        if let Some(validator) = self
+            .forwarder
+            .as_ref()
+            .and_then(|forwarder| forwarder.validator())
+        {
+            removed += validator.flush(suffix.as_ref().map(DnsName::to_wire).as_deref());
+        }
         let removed = u64::try_from(removed).unwrap_or(u64::MAX);
         let detail = match &suffix {
             None => format!("{removed} infrastructure entr(ies) removed; the root is primed again"),
@@ -873,6 +892,7 @@ impl DnsNode for LocalNode {
         self.node
     }
 
+    #[allow(clippy::too_many_lines, reason = "one status snapshot, field by field")]
     fn status(&self) -> DnsStatus {
         let catalog = self.catalog.load();
         let stats = catalog.index().stats();
@@ -940,7 +960,60 @@ impl DnsNode for LocalNode {
             problems.extend(forwarder.recursion_problems());
         }
         // WP10.1: the recursive resolver and its problems.
-        let recursion = self.recursion_report(&mut problems);
+        let mut recursion = self.recursion_report(&mut problems);
+        // WP10.2: the validator's clock finding, the stale anchors, the stripping rules.
+        let validation = self
+            .forwarder
+            .as_ref()
+            .and_then(|forwarder| forwarder.validator())
+            .map(|validator| validator.report());
+        let trust_anchors = self
+            .forwarder
+            .as_ref()
+            .map(|forwarder| forwarder.anchors().rows())
+            .unwrap_or_default();
+        let stripping_rules: Vec<(tenko_core::dns::ForwardRuleId, String)> = self
+            .forwarder
+            .as_ref()
+            .map(|forwarder| forwarder.stripping_rules())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| {
+                let suffix = catalog
+                    .forward_rule(id)
+                    .map(|rule| rule.suffix.to_string())
+                    .unwrap_or_default();
+                (id, suffix)
+            })
+            .collect();
+        let active_ntas = self
+            .forwarder
+            .as_ref()
+            .map(|forwarder| forwarder.anchors().active_ntas(Timestamp::now()))
+            .unwrap_or_default();
+        if let Some(recursion) = &mut recursion {
+            if validation.as_ref().is_some_and(|report| report.clock_wrong) {
+                recursion.problems.push("clock".to_owned());
+                problems.push(
+                    "validation: the root's DNSKEY set fails as expired or not yet valid; \
+                     the clock is probably wrong (dns.validation.clock)"
+                        .to_owned(),
+                );
+            }
+            if trust_anchors
+                .iter()
+                .find(|anchor| anchor.zone.is_root())
+                .is_some_and(|anchor| anchor.trusted().next().is_none())
+            {
+                recursion.problems.push("trust_anchor_stale".to_owned());
+                problems.push(
+                    "validation: every root trust anchor key is revoked or pending; the \
+                     root cannot be validated (dns.trust_anchor.stale)"
+                        .to_owned(),
+                );
+            }
+        }
+        // WP10.2: end.
         DnsStatus {
             node: self.node,
             serving,
@@ -969,6 +1042,11 @@ impl DnsNode for LocalNode {
             blocking_paused: crate::policy::pause::state(),
             // dns-visibility: end.
             recursion,
+            // WP10.2: the validator and the anchors.
+            validation,
+            trust_anchors,
+            stripping_rules,
+            active_ntas,
         }
     }
 

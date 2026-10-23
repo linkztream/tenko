@@ -55,6 +55,13 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+// WP10.2: what the `dns` role wires into the trust anchor service.
+/// The resolver and the hold-down the leader's trust anchor service uses, set by the
+/// `dns` role of this process when it starts.
+pub(crate) static ANCHOR_WIRING: std::sync::LazyLock<Arc<tenko_dns::anchors::AnchorWiring>> =
+    std::sync::LazyLock::new(|| Arc::new(tenko_dns::anchors::AnchorWiring::new()));
+// WP10.2: end.
+
 /// Event kind of a change of office.
 pub(crate) const OFFICE_EVENT: &str = "cluster.leader";
 /// Event kind of a change of a leader service.
@@ -316,7 +323,22 @@ pub(crate) fn spawn(
     events: Option<EventHub>,
     config: SupervisorConfig,
 ) -> SupervisorHandle {
-    let services = registry.take();
+    let mut services = registry.take();
+    // WP10.2: the trust anchor service (RFC 5011) and the expiry of negative trust
+    // anchors, `dns.trust_anchors`, over the store; the `dns` role wires the resolver it
+    // asks into `ANCHOR_WIRING` when it starts.
+    services.push(
+        tenko_dns::anchors::AnchorService::new(
+            Arc::clone(&store),
+            tenko_dns::anchors::AnchorServiceConfig {
+                release: env!("CARGO_PKG_VERSION").to_owned(),
+                ..tenko_dns::anchors::AnchorServiceConfig::default()
+            },
+            Arc::clone(&ANCHOR_WIRING),
+        )
+        .leader_service(),
+    );
+    // WP10.2: end.
     let names: Vec<&'static str> = services.iter().map(|service| service.name()).collect();
     view.registered(&names);
     tracing::info!(services = ?names, "leader supervisor started");

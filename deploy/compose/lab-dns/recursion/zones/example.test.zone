@@ -16,6 +16,13 @@ bogus                NS a.root.test.
 ; A lame delegation: BIND serves example.test, not lame.example.test.
 lame                 NS bind.example.test.
 bind                 A  203.0.113.2
+; WP10.2: the zones BIND signs with its own keys (validation.sh), served by BIND at the
+; glue above; their DS records are published per run.
+bind                 NS bind.example.test.
+optout               NS bind.example.test.
+expired              NS bind.example.test.
+badsig               NS bind.example.test.
+keytrap              NS bind.example.test.
 ; Each the other's name server, no glue.
 loop                 NS ns.loop2.example.test.
 loop2                NS ns.loop.example.test.

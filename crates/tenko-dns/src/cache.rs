@@ -282,7 +282,7 @@ pub struct Verdict {
 }
 
 impl Verdict {
-    /// An answer nobody validated (validation off, or the forwarder before WP10.2).
+    /// An answer nobody validated (validation off, or a rule with `validate = false`).
     pub const UNVALIDATED: Self = Self {
         state: SecurityState::Unvalidated,
         ede: None,
@@ -1200,10 +1200,25 @@ fn render(
 /// Relays an upstream answer `message` to `client` into `out`: the client's id, question
 /// and flags as for a cache hit, the upstream's records with their TTLs (without the
 /// DNSSEC records for a client without DO), the upstream's OPT record replaced by this
-/// node's. The answer is rendered as `unvalidated` (WP10.2 validates forwarded answers).
+/// node's. The answer is rendered as `unvalidated`; [`relay_with`] takes the validator's
+/// state and extended error instead.
 /// Returns the RCODE, or `None` when `message` does not parse or its question differs from
 /// the client's in length.
 pub fn relay(message: &[u8], client: &Client<'_>, out: &mut Vec<u8>) -> Option<u8> {
+    relay_with(message, client, out, SecurityState::Unvalidated, None)
+}
+
+// WP10.2: a fresh answer rendered by the validator's state, as a hit is.
+/// [`relay`] with the answer's validation `state` and extended error `ede` (recursion
+/// plan section 2.3): SERVFAIL for a bogus answer unless the client set CD, AD for a
+/// secure one, the DNSSEC records for DO clients only.
+pub fn relay_with(
+    message: &[u8],
+    client: &Client<'_>,
+    out: &mut Vec<u8>,
+    state: SecurityState,
+    ede: Option<ExtendedError>,
+) -> Option<u8> {
     let header = wire::parse_header(message)?;
     let question_end = wire::questions_end(message, 1)?;
     if header.qdcount != 1 {
@@ -1221,8 +1236,8 @@ pub fn relay(message: &[u8], client: &Client<'_>, out: &mut Vec<u8>) -> Option<u
             ttls: &[],
             skips: &[],
             strip_safe: false,
-            state: SecurityState::Unvalidated,
-            ede: None,
+            state,
+            ede,
         };
         return render(&stored, client, out, false, |ttl| ttl);
     }
@@ -1235,12 +1250,13 @@ pub fn relay(message: &[u8], client: &Client<'_>, out: &mut Vec<u8>) -> Option<u
         ttls: &[],
         skips: &layout.skips,
         strip_safe: layout.strip_safe,
-        state: SecurityState::Unvalidated,
-        ede: None,
+        state,
+        ede,
     };
     // No OPT record from the upstream: none of ours either.
     render(&stored, client, out, layout.opt, |ttl| ttl)
 }
+// WP10.2: end.
 
 /// Appends the OPT record of an answer, with the client's cookie and the extended error
 /// (RFC 8914, no text), and counts it.

@@ -212,7 +212,14 @@ async fn a_service_registered_after_the_start_does_not_run() {
     })
     .await;
     assert_eq!(late.runs.load(Ordering::SeqCst), 0);
-    assert_eq!(view.status().services.len(), 1);
+    // WP10.2: the supervisor adds the trust anchor service to what was registered.
+    let names: Vec<String> = view
+        .status()
+        .services
+        .iter()
+        .map(|service| service.name.clone())
+        .collect();
+    assert_eq!(names, ["test.early", "dns.trust_anchors"]);
     handle.stop(WAIT).await;
 }
 

@@ -571,8 +571,8 @@ pub struct ForwarderCreate {
     /// iteratively. Until WP10.1 `recurse` answers 501.
     #[serde(default)]
     pub mode: Option<RuleMode>,
-    /// Validate the upstreams' answers with DNSSEC (the default). Until WP10.2 `false`
-    /// answers 501.
+    /// Validate the upstreams' answers with DNSSEC (the default); `false` relays them
+    /// unvalidated (TGL-12).
     #[serde(default)]
     pub validate: Option<bool>,
     // WP10.0: end.
@@ -604,7 +604,7 @@ pub struct ForwarderPatch {
     /// WP10.1 `recurse` answers 501.
     #[serde(default)]
     pub mode: Option<RuleMode>,
-    /// Validate the upstreams' answers with DNSSEC. Until WP10.2 `false` answers 501.
+    /// Validate the upstreams' answers with DNSSEC; `false` relays them unvalidated.
     #[serde(default)]
     pub validate: Option<bool>,
     // WP10.0: end.
@@ -1008,6 +1008,15 @@ pub struct QueryLogLine {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub subqueries: u16,
     // WP10.1: end.
+    // WP10.2: the validation state and the extended error.
+    /// The DNSSEC state of the answer: `secure`, `insecure`, `bogus`, `indeterminate` or
+    /// `unvalidated`; absent when nothing validated it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<SecurityState>,
+    /// The extended DNS error code the answer carried (RFC 8914); absent for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ede: Option<u16>,
+    // WP10.2: end.
 }
 
 // WP10.1: the default of `subqueries` is left out of a line.
@@ -1452,6 +1461,14 @@ pub struct InfraSizes {
     pub max_servers: u64,
     /// Server names held.
     pub names: u64,
+    // WP10.2: the validator's key sets.
+    /// Zones whose validated key sets the validator holds beside the cuts; 0 with
+    /// validation off.
+    #[serde(default)]
+    pub validated_zones: u64,
+    /// The most such zones.
+    #[serde(default)]
+    pub max_validated_zones: u64,
 }
 
 /// What a node's resolver did since the role started.
@@ -1490,14 +1507,13 @@ pub struct RecursionCounters {
     pub unwanted: u64,
     /// Flushes of the answer cache that an excess of unwanted answers caused.
     pub unwanted_flushes: u64,
-    /// Answers validated `secure`. Counted from WP10.2; 0 until then.
+    /// Answers validated `secure`.
     pub secure: u64,
-    /// Answers validated `insecure`. Counted from WP10.2; 0 until then.
+    /// Answers validated `insecure`.
     pub insecure: u64,
-    /// Answers validated `bogus`. Counted from WP10.2; 0 until then.
+    /// Answers validated `bogus`.
     pub bogus: u64,
-    /// Answers for which no trust anchor applied (`indeterminate`). Counted from WP10.2; 0
-    /// until then.
+    /// Answers for which no trust anchor applied (`indeterminate`).
     pub indeterminate: u64,
 }
 
@@ -1551,10 +1567,10 @@ pub struct RecursionStatus {
     pub budget: RecursionBudget,
     /// The counters since the role started.
     pub counters: RecursionCounters,
-    /// The keys of the trust anchors with their state. Empty until WP10.2.
+    /// The keys of the trust anchors with their RFC 5011 state and source.
     pub trust_anchors: Vec<AnchorKeyState>,
-    /// What is wrong now: `priming_failed` (and, from WP10.2, `clock` and
-    /// `trust_anchor_stale`).
+    /// What is wrong now: `priming_failed`, `clock` (the root's DNSKEY signatures fail
+    /// on time) and `trust_anchor_stale` (a zone without a trusted key left).
     pub problems: Vec<String>,
 }
 

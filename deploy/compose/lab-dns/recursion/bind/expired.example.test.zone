@@ -1,0 +1,7 @@
+; expired.example.test: signed per run with an expiration in the past (WP10.2), so that
+; every answer is bogus with extended error 7 "Signature Expired".
+$ORIGIN expired.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+www     IN A    192.0.2.70

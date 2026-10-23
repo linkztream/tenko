@@ -243,8 +243,16 @@ pub const TRUST_ANCHOR_KEYS: Desc = Desc::gauge(
 )
 .labels(&["zone", "state"]);
 
+// WP10.2: the validator's key table.
+/// Zones whose validated key sets the validator holds beside the infrastructure cache's
+/// cuts; computed at the scrape.
+pub const VALIDATION_KEY_SETS: Desc = Desc::gauge(
+    "tenko_dns_validation_key_sets",
+    "Zones with a validated DNSKEY set in the validator's table",
+);
+
 /// The families of the recursive resolver, for the contracts document.
-pub const RECURSION_ALL: [&Desc; 12] = [
+pub const RECURSION_ALL: [&Desc; 13] = [
     &RECURSION,
     &RECURSION_DURATION,
     &RECURSION_SUBQUERIES,
@@ -252,6 +260,7 @@ pub const RECURSION_ALL: [&Desc; 12] = [
     &AUTHORITY_RTT,
     &VALIDATION,
     &VALIDATION_VERIFICATIONS,
+    &VALIDATION_KEY_SETS,
     &INFRA_ENTRIES,
     &DENIAL,
     &FAILURE_CACHE_HITS,
@@ -355,6 +364,10 @@ pub fn validation_index(
 /// [`VALIDATION_VERIFICATIONS`].
 pub static VALIDATION_VERIFICATION_COUNTER: Counter = Counter::new(VALIDATION_VERIFICATIONS);
 
+// WP10.2: the validator's key table.
+/// [`VALIDATION_KEY_SETS`], set by the forwarder's housekeeping.
+pub static VALIDATION_KEY_SET_GAUGE: Gauge = Gauge::new(VALIDATION_KEY_SETS);
+
 /// [`INFRA_ENTRIES`] by kind (`zone`, `server`), set from the cache's sizes before a
 /// scrape (lazy: the cache is read only then).
 pub static INFRA_ENTRY_GAUGE: GaugeVec = GaugeVec::fixed(INFRA_ENTRIES, &[&["zone"], &["server"]]);
@@ -393,6 +406,8 @@ pub fn register_recursion(registry: &Registry) {
     registry.register(&AUTHORITY_LATENCY);
     registry.register(&VALIDATION_COUNTER);
     registry.register(&VALIDATION_VERIFICATION_COUNTER);
+    // WP10.2: the key table's gauge.
+    registry.register(&VALIDATION_KEY_SET_GAUGE);
     registry.register(&INFRA_ENTRY_GAUGE);
     registry.register(&DENIAL_COUNTER);
     registry.register(&FAILURE_CACHE_HIT_COUNTER);

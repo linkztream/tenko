@@ -42,6 +42,7 @@ fn rule(suffix: &str) -> NewRule {
         tls_name: None,
         view: None,
         description: Some("  lab  ".to_owned()),
+        validate: None,
     }
 }
 

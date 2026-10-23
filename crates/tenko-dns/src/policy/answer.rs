@@ -327,6 +327,9 @@ impl ForwardSink for PolicySink {
         };
         out.clear();
         out.extend_from_slice(&written.buf[..written.len]);
-        Intake::Answered { rcode }
+        Intake::Answered {
+            rcode,
+            validation: None,
+        }
     }
 }

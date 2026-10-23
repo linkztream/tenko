@@ -59,7 +59,7 @@ fuzz_target!(|data: &[u8]| {
             }
             return;
         }
-        Step::Answer { records } => {
+        Step::Answer { records, .. } => {
             check_within(records, zone, "an answer");
             (0, records, &[])
         }

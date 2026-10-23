@@ -204,9 +204,9 @@ the entry of `forwarders` by its address, `transport = "dot"` and `tls_name`, an
 `upstream_ca` so that the system's root certificates apply; that needs a route out, which
 the lab network does not have.
 
-## The recursion round (WP10.1)
+## The recursion round (WP10.1, WP10.2)
 
-The round `recursion` checks the recursive resolver of [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10 against a root of the lab's own, so that no check touches the real root servers ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md) section 2.12). It runs the rows of E36 (priming at start and again, the work budget, and the cases that fail) and E41 (the RPZ triggers NSDNAME and NSIP on a delegation the resolver followed). The rows of E35 (QNAME minimisation and the denial cache) come with WP10.3, those of E33 and E34 (validation and the root key roll) with WP10.2.
+The round `recursion` checks the recursive resolver of [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10 against a root of the lab's own, so that no check touches the real root servers ([docs/plans/dns-recursion-plan.md](../../../docs/plans/dns-recursion-plan.md) section 2.12). It runs the rows of E36 (priming at start and again, the work budget, and the cases that fail), E41 (the RPZ triggers NSDNAME and NSIP on a delegation the resolver followed) and E33 (validation: every state with `delv` agreeing, the KeyTrap zone, the forwarded answers; `validation.sh`, WP10.2). The rows of E35 (QNAME minimisation and the denial cache) come with WP10.3; the roll of E34 is the round `rfc5011` below.
 
 Like the rounds `xfr` and `update` it needs `curl` and `python3` on the host and a host that reaches the lab network `203.0.113.0/24` (a Linux Docker host). It runs best alone:
 
@@ -222,11 +222,13 @@ IMAGE=tenko:lab QUIRK_IMAGE=tenko-quirk:lab ROUNDS=recursion bash deploy/compose
 | Service | What | Reached at |
 |---|---|---|
 | `authority` | A second Tenko node (`--roles controller,dns`, the Lab profile, its own data volume `authority-data`, configuration `LAB_DIR/authority/authority.toml`: DNS on port 53, `[dns.recursion] enabled = false`, the query log on with addresses as the witness). The round sets it up through its API and creates the lab root `.` (NS `a.root.test`, glue `203.0.113.10`), the TLD `test`, `example.test` and its children `nsec3`, `wild`, `dname`, `cname`, `big`, `insecure` and `bogus`, with their records from `recursion/zones/`. The zones are signed online (NSEC; NSEC3 with zero iterations for `nsec3.example.test`; `insecure.example.test` unsigned) and the DS records are published in the parents; the DS of `bogus.example.test` has a digest that matches no key. It also holds the delegations of the failure cases: `lame.example.test` to `bind.example.test` (BIND serves `example.test`, not this zone), `loop.example.test` and `loop2.example.test` (each the other's name server, no glue), the TLD `unreachable` to `203.0.113.250` (where nothing answers) and the six zones under `quirk.example.test`, delegated with glue | `203.0.113.10:53` |
-| `bind` | As in the other rounds; here the target of the lame delegation | `203.0.113.2` |
+| `bind` | As in the other rounds; here the target of the lame delegation, and (WP10.2) the server of the zones it signs with its own keys per run: `bind.example.test` (the independent signer of E33, NSEC), `optout.example.test` (NSEC3 with opt-out) and its unsigned child `child.optout.example.test`, `expired.example.test` (signed with an expiration in the past), `badsig.example.test` (the signature of `www` spoiled after signing) and `keytrap.example.test` (sixty-four DNSKEY records whose key tag collides with the zone-signing key's). `validation.sh` writes the zone files from `recursion/bind/`, generates the keys and signs with `dnssec-keygen` and `dnssec-signzone` in the container (`LAB_DIR/zones`, `named.conf` includes `LAB_DIR/bind/recursion.conf`), restarts BIND and publishes the DS records in `example.test` on the authority | `203.0.113.2` |
+| `bind-resolver` | WP10.2: BIND as a recursive resolver with validation off, resolving from the lab root (`recursion/bind-resolver.conf`): the upstream of the forwarding rule whose answers the node validates (the forwarded rows), and `delv`'s path for them | `203.0.113.20` |
+| `quirk-strip` | WP10.2: the quirk responder as a proxy in front of `bind-resolver` (`--proxy 203.0.113.20 --strip-dnssec`) that leaves the RRSIG, NSEC and NSEC3 records out of every answer: the upstream that makes a rule's answers bogus and sets `dns.forwarder.strips_dnssec` | `203.0.113.19` |
 | `quirk-noedns`, `quirk-case`, `quirk-tc`, `quirk-slow`, `quirk-spoof`, `quirk-oob`, `quirk-sub` | The quirk responders: the engine's example authoritative server in quirk mode, one container per misbehaviour, each authoritative for one zone (the SOA and NS at the apex, `www` with `192.0.2.7` and `2001:db8::7`, REFUSED outside). Flags and zones below | `203.0.113.11`, `.13`, `.14`, `.15`, `.16`, `.17`, `.18` |
 | `tenko` | The node under test, with `--roles controller,dns`. Its configuration is below | `203.0.113.3:5300` |
 | `client` | `dig`, as in the other rounds | `docker compose exec client dig ...` |
-| `delv` | The BIND image idling, for `delv` against the lab root's trust anchor when WP10.2 validates; unused in this round | `203.0.113.12` |
+| `delv` | The BIND image idling: the second validator of E33. `validation.sh` writes the lab root's DS into `LAB_DIR/delv/root.key` (a `trust-anchors` statement) and runs `delv @<server> -a /lab/root.key +root=.` for every validation row, through the node under test or through `bind-resolver` for the forwarded rows; `delv` asks with CD and validates by itself, and its verdict (`fully validated`, `unsigned answer`, `resolution failed`) must agree with the state Tenko reports | `203.0.113.12` |
 
 | Quirk service | Address | Zone | Flags | What it does |
 |---|---|---|---|---|
@@ -253,7 +255,7 @@ timeout_ms = 1000
 prefetch = false
 ```
 
-Validation is off until WP10.2: the zones are signed and their DS records published so that the validation rows can be added to this round, but today the rows check resolution only, and no answer carries AD. The other rounds forward through `[dns] forwarders` and therefore write `[dns.recursion] enabled = false`, as described above.
+Validation is on (the default of every profile). Once the node is up, the round adds the lab root's DS as its trust anchor through `POST /dns/trust-anchors` with `replace_root` (the route of `tenko dns trust-anchor add . --ds <ds> --replace-root`, allowed under the Lab profile only), which replaces the shipped root anchor the leader service wrote at start; the same DS is `delv`'s anchor. The other rounds forward through `[dns] forwarders` and therefore write `[dns.recursion] enabled = false`, as described above.
 
 ### The rows
 
@@ -288,7 +290,47 @@ The round prints one `PASS` or `FAIL` line per row and fails the smoke when a ro
 | `rec.rpz.nsip` | The RPZ trigger NSIP matches (E41) | A trigger for `203.0.113.14/32`: `other.tc.quirk.example.test` is NXDOMAIN with EDE 15 within 30 s |
 | `rec.rpz.pass` | A name whose delegation no trigger names still resolves | `www.wild.example.test` is NOERROR |
 
-After the rows the round prints the heading `M40: the queries sent per case` and one line per case: the row, the queries sent (the difference of `subqueries` before and after), the milliseconds, the RCODE and the extended error. The lines are in the summary at the end as well. They are the lab's figures of M40; the counts of the same cases in the scripted lab of the engine's tests are in [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10.15.
+The validation rows (E33, WP10.2; `validation.sh`) follow. Each `val.*` row with a state asks the node with `+dnssec` and reads the state off the wire (AD set: secure; AD clear: insecure; SERVFAIL with its extended error: bogus), then asks `delv` for the same name through the same server and requires the same verdict.
+
+| Row | What is checked | How |
+|---|---|---|
+| `val.secure.nsec`, `val.secure.nsec3` | Tenko-signed names over NSEC and NSEC3 are secure | `www.example.test`, `www.nsec3.example.test`: AD; `delv` fully validated |
+| `val.secure.bind` | A name signed by BIND, the independent signer | `www.bind.example.test`: AD |
+| `val.wildcard`, `val.wildcard.bind` | A wildcard expansion with its proof | `any.wild.example.test`, `any.wild.bind.example.test`: AD |
+| `val.nodata` | NODATA with the type bitmap | `www.example.test AAAA`: NOERROR, AD |
+| `val.nxdomain.nsec`, `val.nxdomain.nsec3` | NXDOMAIN proven by NSEC and by NSEC3 | `nothing.example.test`, `nothing.nsec3.example.test`: NXDOMAIN, AD |
+| `val.optout.zone`, `val.optout.child` | An opt-out zone's own name is secure, an unsigned delegation in its span is insecure | `www.optout.example.test`: AD; `www.child.optout.example.test`: no AD, `delv` unsigned answer |
+| `val.insecure` | The unsigned zone | `www.insecure.example.test`: no AD |
+| `val.bogus.ds` | A DS that matches no key | `www.bogus.example.test`: SERVFAIL, EDE 9; `delv` fails |
+| `val.bogus.sig` | A spoiled signature | `www.badsig.example.test`: SERVFAIL, EDE 6 |
+| `val.bogus.expired` | An expired signature | `www.expired.example.test`: SERVFAIL, EDE 7 |
+| `val.cd.data`, `val.cd.bogus` | The bogus names give their data with CD | `+cd`: NOERROR with the address |
+| `val.keytrap` | The KeyTrap zone is answered within the caps in under 50 ms (M38) | `www.keytrap.example.test`: SERVFAIL with EDE 6 (the caps stopped the search) or NOERROR (the real key came first), in under 50 ms |
+| `val.keytrap.metric` | The cap is counted | `tenko_dns_validation_total{state="bogus",reason="cap"}` above 0 in `GET /metrics` |
+| `val.sentinel` | RFC 8509 | `root-key-sentinel-is-ta-<tag>.wild.example.test` answers, `not-ta-<tag>` and an unknown tag are SERVFAIL, from the cache too |
+| `val.log`, `val.status` | The query log and the status carry the state | `GET /nodes/{id}/dns/log` shows `validation` `secure`; the status shows the anchor `valid`, outcomes in every state and key sets held |
+| `val.signalling` | RFC 8145 | The lab root's query log saw `_ta-<tags>` |
+| `val.nta`, `val.nta.warning`, `val.nta.gone` | A negative trust anchor (RFC 7646) | `POST /dns/ntas` for `bogus.example.test` makes it insecure and a warning `dns.nta.active`; deleted, it is bogus again |
+| `val.forward.secure`, `val.forward.log`, `val.forward.bogus` | Forwarded answers validated through BIND as upstream | A rule for `example.test` to `bind-resolver`: `www.example.test` AD with `resolution` `forward` in the log, `www.bogus.example.test` SERVFAIL EDE 9; `delv` through `bind-resolver` agrees |
+| `val.forward.strips`, `val.forward.finding`, `val.forward.escape` | An upstream that strips the DNSSEC records, its finding and the rule's escape | The rule pointed at `quirk-strip`: SERVFAIL EDE 10 and `dns.forwarder.strips_dnssec` in `GET /system/status`; with `validate: false` on the rule, NOERROR without AD |
+
+After the rows the round prints the heading `E33: the states with delv` (one line per validation row with Tenko's state, `delv`'s verdict and the extended error) and `M40: the queries sent per case` with one line per case: the row, the queries sent (the difference of `subqueries` before and after), the milliseconds, the RCODE and the extended error. The lines are in the summary at the end as well. They are the lab's figures of M40; the counts of the same cases in the scripted lab of the engine's tests are in [docs/dns-resolver.md](../../../docs/dns-resolver.md) section 10.15.
+
+## The RFC 5011 round (WP10.2)
+
+The round `rfc5011` (`ROUNDS=rfc5011`; `validation.sh`) rolls the lab root's KSK and watches the node follow it without an operator (E34). The lab root is created on the authority in `imported` mode and signed per step with BIND's tools in the `bind` container (`dnssec-keygen`, `dnssec-signzone`, `dnssec-revoke`; the zone file holds the DS of `test`, which Tenko signs online as in the round `recursion`), so that the REVOKE bit of RFC 5011 is real; the node under test runs with `[dns.recursion] rfc5011_hold_down_secs = 20`, which makes the hold-downs seconds and the service's refresh pace with them (Lab only).
+
+| Row | What is checked |
+|---|---|
+| `r11.start`, `r11.anchor.valid` | With the first KSK's DS as the anchor, `www.example.test` is secure and the service has refreshed the row (`valid`) |
+| `r11.publish`, `r11.pending.warning` | A second KSK published and signing the DNSKEY set enters `add_pend` within 45 s, and `GET /system/status` warns `dns.trust_anchor.pending` |
+| `r11.hold_down`, `r11.old.valid`, `r11.secure.mid` | After the hold-down the new key is `valid` while the old one still is, and names stay secure |
+| `r11.revoked`, `r11.secure.after`, `r11.delv` | The old KSK revoked (`dnssec-revoke`) is `revoked` within 45 s, names are secure with the new anchor alone, `delv` validates with the new DS |
+| `r11.removed` | After the remove hold-down the old key is `removed`, then forgotten |
+| `r11.audit`, `r11.never.failed` | Every state change is audited as `dns.trust_anchor.state` (`add_pend`, `valid`, `revoked`, `removed`), and the node's bogus counter stayed at 0 |
+| `r11.restore.*` | A node started from a backup taken before the roll (a copy of its data volume made after the new key was seen as pending) starts with the old key valid and the new one pending, makes the new one valid and the old one revoked on its own, and answers secure |
+
+The round prints the heading `E34: the roll` with the timeline (seconds from the first refresh to each state change, M41's roll half) and keeps it in the summary.
 
 To look at the lab afterwards, `KEEP=1` leaves it running (see above); the node under test answers on `203.0.113.3:5300`, and the logs of the authority and the quirk servers are one command away:
 
@@ -304,9 +346,8 @@ docker compose --profile recursion down --volumes
 
 It does not measure throughput or latency (the benchmarks under [bench/](../../../bench/)
 do), and a 5 second TTL is not what a zone has. One upstream means no
-upstream health memory, no round robin and no failover between transports. BIND does not
-sign the zone, and no round exercises DNSSEC validation yet (the zones of the recursion round
-are signed for the rounds WP10.2 adds), and nothing here talks to the root servers or to an
+upstream health memory, no round robin and no failover between transports. BIND signs only the
+zones of the validation rows, and nothing here talks to the root servers or to an
 authority outside the lab. The certificate is the lab's and
 valid for two days. A host with a resolver of its own and Tenko on port 53 is a deployment
 matter, [deploy/README.md](../../README.md).

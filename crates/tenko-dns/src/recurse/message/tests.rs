@@ -700,7 +700,8 @@ fn an_authoritative_answer_keeps_the_rrset_and_its_signature() {
     assert_eq!(
         step(&msg),
         Step::Answer {
-            records: rrs(&[&a, &sig])
+            records: rrs(&[&a, &sig]),
+            denials: Vec::new()
         },
         "only the RRset asked and its signature"
     );
@@ -737,7 +738,8 @@ fn a_cname_chain_within_the_zone_ends_in_the_answer() {
     assert_eq!(
         step(&msg),
         Step::Answer {
-            records: rrs(&[&first, &first_sig, &second, &end, &end_sig])
+            records: rrs(&[&first, &first_sig, &second, &end, &end_sig]),
+            denials: Vec::new()
         },
         "the CNAMEs in chain order, then the RRset asked"
     );
@@ -754,7 +756,8 @@ fn a_cname_asked_for_is_the_answer() {
     assert_eq!(
         classify_as(&msg, ZONE, QNAME, CNAME),
         Step::Answer {
-            records: rrs(&[&cname])
+            records: rrs(&[&cname]),
+            denials: Vec::new()
         }
     );
 }
@@ -854,7 +857,13 @@ fn a_dname_at_an_ancestor_gives_a_synthesised_cname_with_the_dnames_ttl() {
     let mut records = rrs(&[&dname, &sig]);
     records.push(synthesised);
     records.push(end.rr());
-    assert_eq!(classify_as(&msg, ZONE, qname, A), Step::Answer { records });
+    assert_eq!(
+        classify_as(&msg, ZONE, qname, A),
+        Step::Answer {
+            records,
+            denials: Vec::new()
+        }
+    );
 }
 
 #[test]
@@ -973,7 +982,8 @@ fn the_names_of_an_answer_are_read_without_regard_to_case() {
     assert_eq!(
         step(&msg),
         Step::Answer {
-            records: rrs(&[&a])
+            records: rrs(&[&a]),
+            denials: Vec::new()
         }
     );
 }
@@ -1266,7 +1276,8 @@ fn the_parent_answers_a_ds_query_for_a_child_from_its_own_data() {
     assert_eq!(
         classify_as(&positive, ZONE, qname, DS_TYPE),
         Step::Answer {
-            records: rrs(&[&ds, &sig])
+            records: rrs(&[&ds, &sig]),
+            denials: Vec::new()
         }
     );
     let soa = soa_rec(ZONE, 60);

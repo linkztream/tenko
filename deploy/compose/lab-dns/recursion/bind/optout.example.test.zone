@@ -1,0 +1,9 @@
+; optout.example.test: NSEC3 with the opt-out flag (WP10.2). Signed per run with
+; dnssec-signzone -3 - -A; the unsigned delegation child.optout.example.test has no DS and
+; lies in an opt-out span, so it is insecure, not bogus.
+$ORIGIN optout.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+www     IN A    192.0.2.60
+child   IN NS   bind.example.test.

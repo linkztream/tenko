@@ -1,0 +1,8 @@
+; keytrap.example.test: the KeyTrap-style zone of M38 (WP10.2). validation.sh appends many
+; DNSKEY records whose key tag collides with the zone-signing key's before BIND signs it,
+; so that a validator without caps would try every one; Tenko answers within its caps.
+$ORIGIN keytrap.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+www     IN A    192.0.2.90

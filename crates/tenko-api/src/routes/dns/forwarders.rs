@@ -73,17 +73,17 @@ fn figures(slot: Option<&Slot>) -> HashMap<ForwardRuleId, Vec<UpstreamFigures>> 
 }
 // dns-visibility: end.
 
-// WP10.0: the rule's mode and validation answer 501 until WP10.1 (recurse) and WP10.2
-// (validate = false) build them; `forward` and `validate = true` are the defaults.
-/// Refuses a request that sets `mode` to `recurse` or `validate` to `false` with 501
-/// `sys.not_implemented`, before anything is written.
+// WP10.0: the rule's mode answers 501 until WP10.4 builds it; `forward` is the default.
+// WP10.2 built `validate = false` (the rule's escape from validation, TGL-12).
+/// Refuses a request that sets `mode` to `recurse` with 501 `sys.not_implemented`, before
+/// anything is written.
 fn refuse_unbuilt(
     mode: Option<RuleMode>,
-    validate: Option<bool>,
+    _validate: Option<bool>,
     method: &str,
     path: &str,
 ) -> Result<(), ApiError> {
-    if mode == Some(RuleMode::Recurse) || validate == Some(false) {
+    if mode == Some(RuleMode::Recurse) {
         return Err(not_implemented(method, path));
     }
     Ok(())
@@ -165,15 +165,14 @@ pub(super) async fn list_dns_forwarders(
                    need `tls_name`, the name in their certificates. `mode` is `forward` \
                    (the default) or `recurse`, a rule that names no upstream; `validate` \
                    (default `true`) switches DNSSEC validation of the upstreams' answers. \
-                   Until the resolver is built, `mode: recurse` and `validate: false` answer \
-                   501 and write nothing.",
+                   Until WP10.4 builds it, `mode: recurse` answers 501 and writes nothing.",
     request_body(content = ForwarderCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The rule", body = ForwarderItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the rule is invalid (`dns.forwarder.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 501, description = "`mode` is `recurse`, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn create_dns_forwarder(
@@ -201,6 +200,8 @@ pub(super) async fn create_dns_forwarder(
                 tls_name: body.tls_name,
                 view: body.view,
                 description: body.description,
+                // WP10.2: the rule's escape from validation.
+                validate: body.validate,
             },
         )
         .await?;
@@ -253,9 +254,7 @@ pub(super) async fn get_dns_forwarder(
     operation_id = "update_dns_forwarder",
     summary = "Change a forwarding rule",
     description = "Scope: `dns.write`. An empty `tls_name` or `description` clears it; \
-                   `all_views` makes the rule apply in every view. Until the resolver is \
-                   built, `mode: recurse` and `validate: false` answer 501 and change \
-                   nothing.",
+                   `all_views` makes the rule apply in every view. Until WP10.4 builds it, `mode: recurse` answers 501 and changes nothing.",
     params(
         ("id" = String, Path, description = "Forwarding rule identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -268,7 +267,7 @@ pub(super) async fn get_dns_forwarder(
         (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such rule (`dns.forwarder.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The rule changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "`mode` is `recurse` or `validate` is `false`, which are not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 501, description = "`mode` is `recurse`, which is not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn update_dns_forwarder(
@@ -298,6 +297,8 @@ pub(super) async fn update_dns_forwarder(
                 view: body.view,
                 all_views: body.all_views,
                 description: body.description,
+                // WP10.2: the rule's escape from validation.
+                validate: body.validate,
             },
             expect,
         )

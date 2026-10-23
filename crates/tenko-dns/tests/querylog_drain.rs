@@ -46,6 +46,8 @@ fn every_entry_is_written_or_counted_and_recording_never_waits() {
                         // WP10.1: the resolution of the log line.
                         resolution: None,
                         subqueries: 0,
+                        validation: None,
+                        ede: None,
                     });
                     slowest = slowest.max(started.elapsed());
                 }

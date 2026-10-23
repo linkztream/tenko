@@ -4,11 +4,12 @@
 # node (`authority`), with the quirk responders beside it. smoke.sh sources this file and
 # runs `recursion` for ROUNDS=recursion; README.md lists the rows.
 #
-# Validation is off until WP10.2: the zones are signed (NSEC, NSEC3 where said) and their DS
-# records published in the parents so that WP10.2 validates against them, but this round
-# checks resolution only: E36 (priming, the work budget and the failure cases) and E41 (the
-# RPZ triggers NSDNAME and NSIP on the delegation the resolver followed). E35's rows come
-# with WP10.3, E33's and E34's with WP10.2.
+# The zones are signed (NSEC, NSEC3 where said) and their DS records published in the
+# parents; the round checks resolution first: E36 (priming, the work budget and the failure
+# cases) and E41 (the RPZ triggers NSDNAME and NSIP on the delegation the resolver
+# followed), then the validation rows of E33 (validation.sh, WP10.2: every state with delv
+# agreeing, the KeyTrap zone, the forwarded answers). E35's rows come with WP10.3; E34's
+# roll is the round rfc5011 (validation.sh).
 #
 # Witnesses: the node's own counters (GET /nodes/{id}/dns/recursion: the queries sent to
 # authorities before and after each case, M40), the answers as dig prints them (RCODE and
@@ -98,8 +99,8 @@ TOML
 write_recursion_config() {
   rm -f "$work/tenko.toml"
   cat >"$work/tenko.toml" <<TOML
-# The configuration of the round "recursion" (written by smoke.sh). Validation is off until
-# WP10.2 builds the validator: the engine of WP10.1 resolves without it.
+# The configuration of the round "recursion" (written by smoke.sh). Validation is on (the
+# default); the lab root's DS replaces the shipped root anchor once the node is up (WP10.2).
 roles = "controller,dns"
 modules = ["ipam", "dns"]
 
@@ -287,14 +288,14 @@ recursion() {
   local name file signing id parent
   declare -A zone_ids=()
   m40=()
-  step "round recursion: iterative resolution from the lab root (validation off until WP10.2)"
+  step "round recursion: iterative resolution from the lab root, then validation (E33)"
   if [[ -z "${QUIRK_IMAGE:-}" ]]; then
     export QUIRK_IMAGE=tenko-quirk:lab
     docker build -f "$here/quirk.Dockerfile" -t "$QUIRK_IMAGE" "$repo"
   fi
   write_authority_config
   compose --profile recursion up -d --no-build authority quirk-noedns quirk-case quirk-tc \
-    quirk-slow quirk-spoof quirk-oob quirk-sub client bind
+    quirk-slow quirk-spoof quirk-oob quirk-sub quirk-strip client bind bind-resolver delv
   retry "$wait_secs" "the authority to become healthy" healthy authority
   auth_cookie="$(setup_node authority "$authority_ip" a.root.test)"
   [[ -n "$auth_cookie" ]] || fail "recursion: the authority's setup did not sign in: $(cat "$work/api.out")"
@@ -325,6 +326,8 @@ recursion() {
     fi
   done
   ok "recursion: lab root" "the authority serves . test example.test and ${#recursion_zones[@]} zones, signed"
+  # WP10.2: the zones BIND signs with its own keys, delegated from example.test.
+  bind_zones_setup
 
   write_recursion_config
   compose up -d --no-build --force-recreate tenko
@@ -334,6 +337,8 @@ recursion() {
   on tenko
   node_id="$(api GET /system/status >/dev/null && field "d['node']['id']" <"$work/api.out")"
   [[ -n "$node_id" ]] || fail "recursion: no node id"
+  # WP10.2: the lab root's DS as the node's trust anchor and delv's.
+  anchor_setup
 
   row rec.prime.file "primed from the hints file at start, under 100 ms (M41)" within 30 priming_ok
   node_status >/dev/null || true
@@ -368,6 +373,9 @@ recursion() {
   row rec.rpz.nsdname "NSDNAME ns.case.quirk.example.test blocks a name of its zone" within 30 blocked_by other.case.quirk.example.test
   row rec.rpz.nsip "NSIP 203.0.113.14/32 blocks a name of the zone it serves" within 30 blocked_by other.tc.quirk.example.test
   row rec.rpz.pass "a name whose delegation no trigger names still resolves" not_blocked www.wild.example.test
+
+  # WP10.2: the validation rows (E33).
+  validation_rows
 
   printf '\n==> M40: the queries sent per case\n'
   printf '%s\n' "${m40[@]}"

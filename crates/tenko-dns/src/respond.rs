@@ -313,6 +313,8 @@ pub enum Intake {
     Answered {
         /// Its RCODE.
         rcode: u16,
+        /// WP10.2: the entry's security state, for the query log (none when unvalidated).
+        validation: Option<tenko_core::dns::SecurityState>,
     },
 }
 
@@ -514,6 +516,7 @@ impl<R: Resolver> Responder<R> {
                     rcode::FORMERR,
                     None,
                     false,
+                    None,
                     clock,
                     now,
                 );
@@ -590,7 +593,7 @@ impl<R: Resolver> Responder<R> {
                     };
                     match sink.intake(&intake, out) {
                         Intake::Forward => return Reply::Forward { view, rule },
-                        Intake::Answered { rcode } => {
+                        Intake::Answered { rcode, validation } => {
                             // dns-visibility: the cache answered; no list blocked it.
                             self.finish(
                                 batch,
@@ -600,6 +603,7 @@ impl<R: Resolver> Responder<R> {
                                 rcode,
                                 None,
                                 true,
+                                validation,
                                 clock,
                                 now,
                             );
@@ -679,6 +683,7 @@ impl<R: Resolver> Responder<R> {
             answer.rcode,
             answer.blocked,
             false,
+            None,
             clock,
             now,
         );
@@ -744,6 +749,8 @@ impl<R: Resolver> Responder<R> {
         // dns-visibility: the list that blocked the query.
         blocked: Option<BlockListId>,
         cached: bool,
+        // WP10.2: a cache hit's security state.
+        validation: Option<tenko_core::dns::SecurityState>,
         clock: &Clock,
         now: Instant,
     ) {
@@ -789,6 +796,8 @@ impl<R: Resolver> Responder<R> {
                     crate::log::Resolution::Zone
                 }),
                 subqueries: 0,
+                validation,
+                ede: None,
             });
         }
     }

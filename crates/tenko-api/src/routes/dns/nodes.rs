@@ -365,6 +365,9 @@ pub(super) fn line_dto(line: LogLine, addresses: bool) -> QueryLogLine {
         // WP10.1: how the answer was found and what the resolver asked for it.
         resolution: line.resolution.map(|how| how.as_str().to_owned()),
         subqueries: line.subqueries,
+        // WP10.2: the validation state and the extended error.
+        validation: line.validation,
+        ede: line.ede,
     }
 }
 

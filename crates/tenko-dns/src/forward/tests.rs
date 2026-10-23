@@ -472,7 +472,10 @@ async fn the_second_query_is_answered_from_the_cache_on_the_query_path() {
     peer.ask(&forwarder, message.clone()).await;
     assert_eq!(
         intake(&forwarder, &message, "127.0.0.1:4000", None, &mut out),
-        Intake::Answered { rcode: 0 }
+        Intake::Answered {
+            rcode: 0,
+            validation: None,
+        }
     );
     let header = wire::parse_header(&out).expect("header");
     assert_eq!((header.id, header.ancount), (19, 1));

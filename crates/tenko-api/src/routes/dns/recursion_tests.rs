@@ -1,6 +1,6 @@
-//! Route tests of the recursive resolver's routes: each trust anchor operation (a stub of
-//! WP10.0 until WP10.2) checks the scope of its action on the right kind and answers 501, a
-//! viewer is refused, and a malformed path answers 400 before anything else. The node routes
+//! Route tests of the recursive resolver's routes: each trust anchor operation checks the
+//! scope of its action on the right kind before it reaches the DNS module (off here: 409
+//! `dns.module.disabled`), a viewer is refused, and a malformed path answers 400 before anything else. The node routes
 //! (WP10.1) check the node and then the zone kind before they look for the role; the
 //! mapping of the resolver's report is tested here, the routes over a role in
 //! `tests/dns_recursion.rs`.
@@ -39,7 +39,6 @@ use crate::{
 };
 
 const NTA: &str = "0190d1c2-0000-7000-8000-000000000001";
-const STUB: &str = "sys.not_implemented";
 
 fn router(state: AppState) -> Router {
     let (router, _) = OpenApiRouter::<AppState>::new()
@@ -58,11 +57,24 @@ fn with_policy(read: bool, write: bool) -> (Router, Arc<Policy>) {
 }
 
 async fn send(router: &Router, method: &str, path: &str) -> Reply {
-    let request = Request::builder()
+    // WP10.2: the creates take a body, so that authorization is what answers.
+    let body = match (method, path) {
+        ("POST", "/dns/trust-anchors") => Some(
+            r#"{"zone": "example.test", "ds": "1 13 2 0000000000000000000000000000000000000000000000000000000000000000"}"#,
+        ),
+        ("POST", "/dns/ntas") => Some(r#"{"zone": "example.test", "reason": "a test"}"#),
+        _ => None,
+    };
+    let builder = Request::builder()
         .method(method)
-        .uri(format!("{API_BASE}{path}"))
-        .body(Body::empty())
-        .expect("request");
+        .uri(format!("{API_BASE}{path}"));
+    let request = match body {
+        Some(body) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body)),
+        None => builder.body(Body::empty()),
+    }
+    .expect("request");
     let response = router.clone().oneshot(request).await.expect("response");
     let status = response.status();
     let content_type = response
@@ -176,7 +188,9 @@ fn node_operations() -> Vec<(&'static str, &'static str, Action, Action)> {
 async fn a_caller_with_the_scope_reaches_the_stub_on_the_right_kind() {
     let (router, policy) = with_policy(true, true);
     for (method, path, _, _) in operations() {
-        send(&router, method, &path).await.assert_problem(501, STUB);
+        send(&router, method, &path)
+            .await
+            .assert_problem(409, "dns.module.disabled");
     }
     let expected: Vec<(Action, ObjectKind)> = operations()
         .into_iter()
@@ -193,7 +207,7 @@ async fn a_viewer_is_refused_the_changes_and_may_read() {
     for (method, path, action, _) in operations() {
         let reply = send(&router, method, &path).await;
         if action == Action::Read {
-            reply.assert_problem(501, STUB);
+            reply.assert_problem(409, "dns.module.disabled");
         } else {
             reply.assert_problem(403, "auth.forbidden");
         }
@@ -309,7 +323,7 @@ fn report() -> RecursionReport {
 
 #[test]
 fn a_resolver_that_is_off_reads_as_empty() {
-    let status = recursion_dto(None);
+    let status = recursion_dto(None, None, &[]);
     assert!(!status.enabled);
     assert!(status.root_servers.is_empty() && status.problems.is_empty());
     assert!(status.last_priming.is_none() && status.root_expires_secs.is_none());
@@ -320,7 +334,7 @@ fn a_resolver_that_is_off_reads_as_empty() {
 
 #[test]
 fn the_report_maps_field_by_field() {
-    let status = recursion_dto(Some(report()));
+    let status = recursion_dto(Some(report()), None, &[]);
     assert!(status.enabled);
     let priming = status.last_priming.expect("priming");
     assert_eq!(priming.outcome, "failed");
@@ -380,6 +394,8 @@ fn a_log_line_carries_the_resolution_and_the_sub_queries() {
         duration_micros: 30,
         resolution,
         subqueries,
+        validation: None,
+        ede: None,
     };
     let recursed =
         serde_json::to_value(line_dto(line(Some(Resolution::Recurse), 5), false)).expect("JSON");

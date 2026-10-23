@@ -3,18 +3,18 @@
 //! cache.
 //!
 //! Area: dns. Owner: WP10.0 (the contracts); WP10.1 built the node routes (the status, the
-//! priming and the infrastructure cache); the trust anchors and the negative trust anchors
-//! (the service behind them) are built by WP10.2. Requirements: DNS-03, DNS-13, OPS-09.
+//! priming and the infrastructure cache); WP10.2 built the trust anchors and the negative
+//! trust anchors (and the service behind them). Requirements: DNS-03, DNS-13, OPS-09.
 //!
 //! Every operation is declared with its request and answer types so that the OpenAPI
 //! document, the typed client of the UI and the mock server have them. The node routes run
 //! in the node's `dns` role like the cache routes do (`nodes.rs`): the status is the role's
 //! report, the priming and the infrastructure cache are node commands (`dns.recursion.prime`,
-//! `dns.infra.list`, `dns.infra.flush`) recorded in the node's commands. Until WP10.2 builds
-//! them, the trust anchor operations check the caller's scope (and the interactive session
-//! where the table says so, which the authorizer enforces by refusing a token) and answer
-//! `501` with `sys.not_implemented`. A path segment that does not parse answers 400 before
-//! any authorization.
+//! `dns.infra.list`, `dns.infra.flush`) recorded in the node's commands. The trust anchor
+//! operations check the caller's scope (and the interactive session where the table says
+//! so, which the authorizer enforces by refusing a token) and then act on the store's rows
+//! (`tenko_dns::anchors::rows`). A path segment that does not parse answers 400 before any
+//! authorization.
 //!
 //! | Endpoint | Scope | Purpose |
 //! |---|---|---|
@@ -80,18 +80,50 @@ use super::{
     DnsCommandAccepted, InfraAddressItem, InfraCutItem, InfraFlushParams, InfraFlushed,
     InfraParams, InfraServerItem, InfraSizes, NtaCreate, NtaItem, PrimingItem, RecursionCounters,
     RecursionStatus, RootServerItem, TrustAnchorAdd, TrustAnchorItem, Zones, invalid,
-    model::RecursionBudget,
+    model::{AnchorKeyState, RecursionBudget},
     nodes::{Registry, Slot, command_failed, execute, local_role, record},
-    parse_id, parse_node,
+    parse_id, parse_node, with_etag,
 };
 use crate::{
     dto::Page,
     extract::Ctx,
-    list::PageParams,
+    list::{CursorScope, PageParams, encode_cursor},
     problem::{ApiError, ProblemDetails},
-    routes::not_implemented,
+    routes::auth::ApiJson,
     state::AppState,
 };
+// WP10.2: the rows behind the trust anchor and negative trust anchor routes.
+use tenko_auth::settings::Profile;
+use tenko_dns::{
+    anchors::text,
+    validate::ValidatorReport,
+    zone::{ZoneError, ZoneService},
+};
+use tenko_store::ReadViewExt as _;
+
+/// The security profile in force, from the settings row (Standard before setup).
+async fn profile(service: &ZoneService) -> Result<Profile, ApiError> {
+    let view = service.view(None).await?;
+    Ok(view
+        .as_ref()
+        .get_typed(&tenko_auth::model::SETTINGS, &())?
+        .map_or(Profile::Standard, |(settings, _)| settings.profile))
+}
+
+fn anchor_item(row: tenko_dns::anchors::rows::AnchorRow) -> TrustAnchorItem {
+    TrustAnchorItem {
+        anchor: row.anchor,
+        revision: row.revision,
+    }
+}
+
+fn nta_item(row: tenko_dns::anchors::rows::NtaRow) -> NtaItem {
+    NtaItem {
+        nta: row.nta,
+        revision: row.revision,
+    }
+}
+// WP10.2: end.
 
 /// Zone cuts per page of the infrastructure cache when the request names no limit.
 const DEFAULT_PAGE: u32 = 200;
@@ -133,16 +165,37 @@ pub(super) fn routes() -> OpenApiRouter<AppState> {
         (status = 200, description = "A page of trust anchors by zone", body = Page<TrustAnchorItem>),
         (status = 400, description = "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn list_dns_trust_anchors(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
+    Query(page): Query<PageParams>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/dns/trust-anchors"))
+    let service = zones.get()?;
+    let limit = page.limit()?;
+    let scope = CursorScope::new("dns.trust_anchors");
+    let after: Option<String> = page.cursor(scope)?;
+    let view = page.read(service.store().as_ref()).await?;
+    let mut items = Vec::new();
+    let mut next = None;
+    for row in ZoneService::trust_anchors(view.as_ref())? {
+        let position = row.anchor.zone.to_string();
+        if after.as_ref().is_some_and(|after| position <= *after) {
+            continue;
+        }
+        if items.len() == limit {
+            next = items
+                .last()
+                .map(|item: &TrustAnchorItem| encode_cursor(scope, &item.anchor.zone.to_string()));
+            break;
+        }
+        items.push(anchor_item(row));
+    }
+    Ok(Json(Page::new(items, next, view.revision())).into_response())
 }
 
 #[utoipa::path(
@@ -158,16 +211,33 @@ async fn list_dns_trust_anchors(
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the key is invalid (`dns.trust_anchor.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn add_dns_trust_anchor(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
+    ApiJson(body): ApiJson<TrustAnchorAdd>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("POST", "/dns/trust-anchors"))
+    let service = zones.get()?;
+    let key = match (body.ds, body.dnskey) {
+        (Some(ds), None) => text::ds_key(text::parse_ds(&ds).map_err(ZoneError::from)?, cx.now),
+        (None, Some(dnskey)) => text::dnskey_key(
+            text::parse_dnskey(&dnskey).map_err(ZoneError::from)?,
+            cx.now,
+        ),
+        _ => return Err(invalid("ds", "exactly one of ds and dnskey is given")),
+    };
+    let lab = profile(&service).await? == Profile::Lab;
+    let (anchor, written) = service
+        .add_trust_anchor(&cx, body.zone, key, body.replace_root, lab)
+        .await?;
+    let view = service.view(Some(written.revision)).await?;
+    let row = ZoneService::trust_anchor(view.as_ref(), &anchor.zone)?;
+    let revision = row.revision;
+    Ok(with_etag(StatusCode::CREATED, &anchor_item(row), revision))
 }
 
 #[utoipa::path(
@@ -183,18 +253,22 @@ async fn add_dns_trust_anchor(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No trust anchor for the zone (`dns.trust_anchor.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No trust anchor for the zone (`dns.trust_anchor.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn get_dns_trust_anchor(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
     Path(zone): Path<String>,
 ) -> Result<Response, ApiError> {
-    parse_zone(&zone)?;
+    let zone = parse_zone(&zone)?;
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/dns/trust-anchors/{zone}"))
+    let service = zones.get()?;
+    let view = service.view(None).await?;
+    let row = ZoneService::trust_anchor(view.as_ref(), &zone)?;
+    let revision = row.revision;
+    Ok(with_etag(StatusCode::OK, &anchor_item(row), revision))
 }
 
 #[utoipa::path(
@@ -211,18 +285,21 @@ async fn get_dns_trust_anchor(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No trust anchor for the zone (`dns.trust_anchor.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn remove_dns_trust_anchor(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
     Path(zone): Path<String>,
 ) -> Result<Response, ApiError> {
-    parse_zone(&zone)?;
+    let zone = parse_zone(&zone)?;
     app.authorize(&cx.principal, Action::Delete, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("DELETE", "/dns/trust-anchors/{zone}"))
+    let service = zones.get()?;
+    let lab = profile(&service).await? == Profile::Lab;
+    service.remove_trust_anchor(&cx, &zone, None, lab).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 #[utoipa::path(
@@ -239,22 +316,30 @@ async fn remove_dns_trust_anchor(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No trust anchor for the zone (`dns.trust_anchor.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The resolver is off (`dns.recursion.disabled`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn refresh_dns_trust_anchor(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
     Path(zone): Path<String>,
 ) -> Result<Response, ApiError> {
-    parse_zone(&zone)?;
+    let zone = parse_zone(&zone)?;
     app.authorize(
         &cx.principal,
         Action::Execute,
         &anywhere(ObjectKind::DnsKey),
     )?;
-    Err(not_implemented("POST", "/dns/trust-anchors/{zone}/refresh"))
+    let service = zones.get()?;
+    let written = service.refresh_trust_anchor(&cx, &zone).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(DnsCommandAccepted {
+            command_id: written.job.uuid(),
+        }),
+    )
+        .into_response())
 }
 
 #[utoipa::path(
@@ -269,13 +354,37 @@ async fn refresh_dns_trust_anchor(
         (status = 200, description = "A page of negative trust anchors by zone", body = Page<NtaItem>),
         (status = 400, description = "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
-async fn list_dns_ntas(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
+async fn list_dns_ntas(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    zones: Zones,
+    Query(page): Query<PageParams>,
+) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
-    Err(not_implemented("GET", "/dns/ntas"))
+    let service = zones.get()?;
+    let limit = page.limit()?;
+    let scope = CursorScope::new("dns.ntas");
+    let after: Option<(String, NtaId)> = page.cursor(scope)?;
+    let view = page.read(service.store().as_ref()).await?;
+    let mut items = Vec::new();
+    let mut next = None;
+    for row in ZoneService::ntas(view.as_ref(), cx.now)? {
+        let position = (row.nta.zone.to_string(), row.nta.id);
+        if after.as_ref().is_some_and(|after| position <= *after) {
+            continue;
+        }
+        if items.len() == limit {
+            next = items.last().map(|item: &NtaItem| {
+                encode_cursor(scope, &(item.nta.zone.to_string(), item.nta.id))
+            });
+            break;
+        }
+        items.push(nta_item(row));
+    }
+    Ok(Json(Page::new(items, next, view.revision())).into_response())
 }
 
 #[utoipa::path(
@@ -290,13 +399,27 @@ async fn list_dns_ntas(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Resp
         (status = 201, description = "The negative trust anchor", body = NtaItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the anchor is invalid (`dns.nta.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to create one", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to create one", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
-async fn create_dns_nta(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Response, ApiError> {
+async fn create_dns_nta(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    zones: Zones,
+    ApiJson(body): ApiJson<NtaCreate>,
+) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("POST", "/dns/ntas"))
+    let service = zones.get()?;
+    let hardened = profile(&service).await? == Profile::Hardened;
+    let (nta, written) = service
+        .create_nta(&cx, body.zone, body.expires_at, body.reason, hardened)
+        .await?;
+    let revision = written.revision;
+    Ok(with_etag(
+        StatusCode::CREATED,
+        &NtaItem { nta, revision },
+        revision,
+    ))
 }
 
 #[utoipa::path(
@@ -312,18 +435,20 @@ async fn create_dns_nta(State(app): State<AppState>, Ctx(cx): Ctx) -> Result<Res
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to delete one", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such negative trust anchor (`dns.nta.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such negative trust anchor (`dns.nta.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn delete_dns_nta(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    zones: Zones,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    parse_id::<NtaId>(&id)?;
+    let id = parse_id::<NtaId>(&id)?;
     app.authorize(&cx.principal, Action::Delete, &anywhere(ObjectKind::DnsKey))?;
-    Err(not_implemented("DELETE", "/dns/ntas/{id}"))
+    let service = zones.get()?;
+    service.delete_nta(&cx, id).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // WP10.1: the node routes.
@@ -382,8 +507,25 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-/// The DTO of a node's resolver; a node without one reads as off with empty and zero fields.
-pub(super) fn recursion_dto(report: Option<RecursionReport>) -> RecursionStatus {
+/// The DTO of a node's resolver; a node without one reads as off with empty and zero
+/// fields. `validation` is the validator's report when validation is on, `anchors` the
+/// trust anchor rows the node reads (WP10.2).
+pub(super) fn recursion_dto(
+    report: Option<RecursionReport>,
+    validation: Option<&ValidatorReport>,
+    anchors: &[std::sync::Arc<tenko_core::dns::TrustAnchor>],
+) -> RecursionStatus {
+    // WP10.2: the keys of the anchors with their states.
+    let trust_anchors: Vec<AnchorKeyState> = anchors
+        .iter()
+        .flat_map(|anchor| {
+            anchor.keys.iter().map(|key| AnchorKeyState {
+                zone: anchor.zone.clone(),
+                key_tag: key.key_tag,
+                state: key.state,
+            })
+        })
+        .collect();
     let Some(report) = report else {
         return RecursionStatus {
             enabled: false,
@@ -395,12 +537,16 @@ pub(super) fn recursion_dto(report: Option<RecursionReport>) -> RecursionStatus 
             infra: InfraSizes::default(),
             budget: RecursionBudget::default(),
             counters: RecursionCounters::default(),
-            trust_anchors: Vec::new(),
+            trust_anchors,
             problems: Vec::new(),
         };
     };
     let counters = report.counters;
     let (max_zones, max_servers) = report.infra_bounds;
+    // WP10.2: the validator's figures.
+    let validated = validation.map(|report| report.counters).unwrap_or_default();
+    let (key_sets, key_sets_bound) =
+        validation.map_or((0, 0), |report| (report.key_sets, report.key_sets_bound));
     RecursionStatus {
         enabled: true,
         hints_source: report.hints_source,
@@ -426,6 +572,9 @@ pub(super) fn recursion_dto(report: Option<RecursionReport>) -> RecursionStatus 
             servers: count(report.infra.servers),
             max_servers: count(max_servers),
             names: count(report.infra.names),
+            // WP10.2: the validator's key sets.
+            validated_zones: count(key_sets),
+            max_validated_zones: count(key_sets_bound),
         },
         budget: RecursionBudget {
             queries: u32::from(report.budget.queries),
@@ -451,14 +600,13 @@ pub(super) fn recursion_dto(report: Option<RecursionReport>) -> RecursionStatus 
             primings_failed: counters.primings_failed,
             unwanted: counters.unwanted,
             unwanted_flushes: counters.unwanted_flushes,
-            // WP10.2 validates; until then nothing is counted.
-            secure: 0,
-            insecure: 0,
-            bogus: 0,
-            indeterminate: 0,
+            // WP10.2: the validator's outcomes.
+            secure: validated.secure,
+            insecure: validated.insecure,
+            bogus: validated.bogus,
+            indeterminate: validated.indeterminate,
         },
-        // WP10.2 holds the trust anchors; until then none is reported.
-        trust_anchors: Vec::new(),
+        trust_anchors,
         problems: report.problems,
     }
 }
@@ -520,7 +668,7 @@ fn name_param(field: &str, raw: Option<String>) -> Result<Option<String>, ApiErr
     tag = "dns",
     operation_id = "get_node_dns_recursion",
     summary = "Get the recursive resolver of a node",
-    description = "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The trust anchor keys and the validation counters are filled from WP10.2; until then they are empty and zero.",
+    description = "Scope: `dns.read`. Whether the resolver runs (`enabled`; a node whose resolver is off answers with empty and zero fields), the source and date of the root hints, the last priming with its outcome and duration, the root servers with their smoothed round-trip times, the sizes of the infrastructure cache against their bounds, the work budget in force, the counters since the role started, and what is wrong (`priming_failed`). The counters include the validation outcomes (`secure`, `insecure`, `bogus`, `indeterminate`); `trust_anchors` lists the anchor keys with their RFC 5011 state; `problems` adds `clock` and `trust_anchor_stale`.",
     params(("id" = u64, Path, description = "Node id")),
     responses(
         (status = 200, description = "The resolver's status", body = RecursionStatus),
@@ -542,7 +690,14 @@ async fn get_node_dns_recursion(
     app.authorize(&cx.principal, Action::Read, &ObjectRef::node(node))?;
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Zone))?;
     let role = local_role(&app, slot, registry, node).await?;
-    Ok(Json(recursion_dto(role.status().recursion)).into_response())
+    // WP10.2: with the validator's report and the anchors.
+    let status = role.status();
+    Ok(Json(recursion_dto(
+        status.recursion,
+        status.validation.as_ref(),
+        &status.trust_anchors,
+    ))
+    .into_response())
 }
 
 #[utoipa::path(

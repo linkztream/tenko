@@ -931,7 +931,7 @@ The infrastructure cache (`tenko_dns::infra`) holds what the engine learns about
 
 | Per | What it holds |
 |---|---|
-| Zone cut | The zone, its name servers' names, when the NS set expires (the referral's smallest TTL, at most one day; the root's from the priming), a slot for the DS state that WP10.2 fills (`unknown` until then) and a slot for the minimisation fallback of WP10.3 |
+| Zone cut | The zone, its name servers' names, when the NS set expires (the referral's smallest TTL, at most one day; the root's from the priming), the DS state the validator fills (`unknown`, `secure` with the keys, `insecure` or `bogus`; [dnssec.md](dnssec.md) section 12) and a slot for the minimisation fallback of WP10.3 |
 | Name server | Its A and AAAA addresses with their TTLs and origins (section 10.2) |
 | Server address | What the resolver learnt: whether it takes EDNS (unknown, yes, no), TCP-only, the server cookie, the zones it is lame for, each until a time, the time of its last failure, and the mark that the address is unreachable. Beside them, the figures of section 10.4 (SRTT, p50 and p99, failures and back-off), the 0x20 strikes, the unwanted answers of the hour and the TCP hour they cause |
 
@@ -962,11 +962,11 @@ Four routes and three node commands (`dns.recursion.prime`, `dns.infra.list`, `d
 | `root_servers` | The root servers in use: `name`, `address` and `srtt_ms` |
 | `infra` | `zones` and `servers` against `max_zones` and `max_servers`, and `names` |
 | `budget` | The work budget in force: `queries`, `restarts`, `depth`, `attempts`, `wall_ms` |
-| `counters` | Since the role started: `answered`, `servfail`, `budget` (the queries, restarts or depth bound), `timeout` (the wall clock bound), `local`, `failure_cache_hits`, `joined`, `subqueries` (queries sent to authorities), `budget_queries`, `budget_restarts`, `budget_depth`, `budget_time`, `primings_ok`, `primings_failed`, `unwanted`, `unwanted_flushes`; and `secure`, `insecure`, `bogus`, `indeterminate`, which stay 0 until WP10.2 |
-| `trust_anchors` | Empty until WP10.2 |
-| `problems` | `priming_failed`, and from WP10.2 `clock` and `trust_anchor_stale`. The node's own status (`GET /api/v1/nodes/{id}/dns`) names `dns.recursion.priming_failed` in its `problems` too |
+| `counters` | Since the role started: `answered`, `servfail`, `budget` (the queries, restarts or depth bound), `timeout` (the wall clock bound), `local`, `failure_cache_hits`, `joined`, `subqueries` (queries sent to authorities), `budget_queries`, `budget_restarts`, `budget_depth`, `budget_time`, `primings_ok`, `primings_failed`, `unwanted`, `unwanted_flushes`; and the validation outcomes `secure`, `insecure`, `bogus`, `indeterminate` |
+| `trust_anchors` | The keys of the trust anchors with their RFC 5011 state and source |
+| `problems` | `priming_failed`, `clock` (the root's DNSKEY signatures fail on time: OPS-09) and `trust_anchor_stale` (a zone without a trusted key left). The node's own status (`GET /api/v1/nodes/{id}/dns`) names `dns.recursion.priming_failed` in its `problems` too |
 
-**The listing** takes `suffix` (the zone cuts at or below it), `limit` (1 to 1,000, default 200) and `cursor` (the `next_cursor` of the previous page), and answers the zone cuts sorted by name. Each cut has `zone`, `ds` (`unknown` until WP10.2), `ttl` (seconds left) and its `servers`; each server has `name` and `addresses`; each address has `address`, `origin` (`hints`, `sibling_glue`, `glue` or `authoritative`), `ttl`, `srtt_ms`, `p50_ms`, `p99_ms`, `failures`, `down` (in back-off), `edns` (`true`, `false`, or absent when not learnt yet), `tcp_only`, `lame` (for this cut's zone), `lower_case` (asked in lower case) and `unwanted`. A malformed `suffix`, `cursor` or `limit` answers 400 `sys.invalid_value` with the field. The Recursion page of the DNS area (`/dns/recursion`) shows the status; the command line and the rest of the page are WP10.4.
+**The listing** takes `suffix` (the zone cuts at or below it), `limit` (1 to 1,000, default 200) and `cursor` (the `next_cursor` of the previous page), and answers the zone cuts sorted by name. Each cut has `zone`, `ds` (`unknown`, `secure`, `insecure` or `bogus`), `ttl` (seconds left) and its `servers`; each server has `name` and `addresses`; each address has `address`, `origin` (`hints`, `sibling_glue`, `glue` or `authoritative`), `ttl`, `srtt_ms`, `p50_ms`, `p99_ms`, `failures`, `down` (in back-off), `edns` (`true`, `false`, or absent when not learnt yet), `tcp_only`, `lame` (for this cut's zone), `lower_case` (asked in lower case) and `unwanted`. A malformed `suffix`, `cursor` or `limit` answers 400 `sys.invalid_value` with the field. The Recursion page of the DNS area (`/dns/recursion`) shows the status; the command line and the rest of the page are WP10.4.
 
 ### 10.13 Metrics and the query log
 
@@ -982,11 +982,11 @@ The role registers these families when the resolver is on (names as the metrics 
 | `tenko_dns_infra_entries` | `kind`: `zone`, `server` | Entries of the infrastructure cache | WP10.1 |
 | `tenko_dns_failure_cache_hits_total` | | Questions answered from the failure cache | WP10.1 |
 | `tenko_dns_priming_total` | `outcome`: `ok`, `failed` | Priming runs | WP10.1 |
-| `tenko_dns_validation_total`, `tenko_dns_validation_verifications_total` | `state`, `reason` | Validation outcomes and signature checks | WP10.2; they stay 0 until then |
+| `tenko_dns_validation_total`, `tenko_dns_validation_verifications_total` | `state`, `reason` | Validation outcomes and signature checks | WP10.2 |
 | `tenko_dns_denial_total` | `kind` | Answers synthesised from the denial cache | WP10.3; stays 0 until then |
 | `tenko_dns_trust_anchor_keys` | `zone`, `state` | Trust anchor keys by RFC 5011 state | WP10.2 |
 
-**The query log** (section 8) gains two fields. `resolution` says how the answer was found: `zone` (a zone of the node), `cache`, `denial` (WP10.3), `stale`, `forward` (a rule's upstream, a stub zone or the default forwarder), `recurse`, `local` (a locally served name, section 10.8), `policy` (a block list or an RPZ zone) or `refused`. `subqueries` is the number of queries the engine sent to authorities for the answer, and is left out of a JSON line when it is 0. The dnstap output (section 8.4) carries both in the `extra` field as `;resolution=<how>` and `;subqueries=<n>`. The reader, the API's lines and the Query log page show them. The validation state and the extended error are logged from WP10.2.
+**The query log** (section 8) gains two fields. `resolution` says how the answer was found: `zone` (a zone of the node), `cache`, `denial` (WP10.3), `stale`, `forward` (a rule's upstream, a stub zone or the default forwarder), `recurse`, `local` (a locally served name, section 10.8), `policy` (a block list or an RPZ zone) or `refused`. `subqueries` is the number of queries the engine sent to authorities for the answer, and is left out of a JSON line when it is 0. The dnstap output (section 8.4) carries both in the `extra` field as `;resolution=<how>` and `;subqueries=<n>`. The reader, the API's lines and the Query log page show them. `validation` (the security state) and `ede` (the extended error code) are logged since WP10.2 and go into the dnstap `extra` field as `;validation=<state>` and `;ede=<code>`.
 
 ### 10.14 Settings: `[dns.recursion]`
 
@@ -1009,8 +1009,8 @@ The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.t
 | `local_zones_except` | none | WP10.1 | Locally served zones that are resolved all the same (section 10.8) |
 | `qname_minimisation` | `relaxed` | WP10.3 | `relaxed`, `strict` or `off`; read and checked, not used yet |
 | `aggressive_nsec`, `denial_entries` | `true`; 2,000 (Home), 20,000 | WP10.3 | The denial cache; read and checked, not used yet |
-| `trust_anchor_signalling`, `key_sentinel` | on except under Hardened; `true` | WP10.2 | RFC 8145 and RFC 8509; read and checked, not used yet |
-| `rfc5011_hold_down_secs` | not set | WP10.2 | The hold-downs of RFC 5011 in seconds, a test knob that the Lab profile only allows; not used yet |
+| `trust_anchor_signalling`, `key_sentinel` | on except under Hardened; `true` | WP10.2 | RFC 8145 (the node signals its root key tags once a day) and RFC 8509 (the sentinel names) |
+| `rfc5011_hold_down_secs` | not set | WP10.2 | The hold-downs of RFC 5011 in seconds, a test knob that the Lab profile only allows; the anchor service paces its refresh with it |
 
 The attempts per server (3) and the fetch policy (3, 2, 1, 0) are fixed.
 
@@ -1058,7 +1058,7 @@ The times are dig's from the client container through `docker compose exec`, abo
 
 | What | Package | Today |
 |---|---|---|
-| DNSSEC validation, the trust anchors, RFC 5011 and negative trust anchors | WP10.2 | The resolver does not check signatures: AD is never set, every answer is treated as unvalidated, and a client with DO gets the signatures the authority sent. The validation keys of section 10.14, the counters `secure`, `insecure`, `bogus` and `indeterminate`, the families `tenko_dns_validation_*`, the `ds` of a zone cut and the `trust_anchors` of the status are in place and empty. `/dns/trust-anchors` and `/dns/ntas` answer 501 |
+| The REVOKE bit of RFC 5011 in Tenko's own signer | later | The validator follows a revoked key (WP10.2), but the signer never sets the bit; the lab's round `rfc5011` therefore rolls a root that BIND's tools sign |
 | QNAME minimisation, the denial cache and the bounded failure cache | WP10.3 | Every server on the path is sent the full name, and no answer is synthesised from a cached denial. The failure cache is the in-memory reference of section 10.3 |
 | The command line and the rest of the UI | WP10.4 | No `tenko dns` command for the resolver. The API refuses a forwarding rule of mode `recurse` and a view's `resolution` (501), although the engine follows both when the rows exist. The Recursion page shows the status |
 | The measurements and the exit document | WP10.5 | No figure for throughput, memory or the cost of a fresh port per exchange |

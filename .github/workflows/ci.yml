@@ -335,6 +335,14 @@ jobs:
       # (the static musl binary) and needs openssl, curl and python3 on the runner.
       - name: DNS compose lab smoke
         run: bash deploy/compose/lab-dns/smoke.sh
+      # WP10.2: the recursion rounds (E33, E34, E36, E41) against the lab root, with the
+      # image of the quirk responders built once here; the first run leaves it for the
+      # second.
+      - name: DNS compose lab smoke, the recursion rounds
+        run: |
+          docker build -f deploy/compose/lab-dns/quirk.Dockerfile -t tenko-quirk:lab .
+          IMAGE=tenko:lab QUIRK_IMAGE=tenko-quirk:lab ROUNDS="recursion rfc5011" bash deploy/compose/lab-dns/smoke.sh
+      # WP10.2: end.
 
   # WP7.6: the weekly DHCP lab (deploy/compose/lab-dhcp). Four client networks behind ISC's
   # dhcrelay, relayed to one node built from deploy/Dockerfile (the static musl binary) with

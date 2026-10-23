@@ -38,8 +38,8 @@ use tenko_core::{
     Revision, TableName,
     codec::KeyCodec,
     dns::tables::{
-        ACLS, FORWARDERS, JOURNAL, KEYS_META, LIST_VERSIONS, LISTS, NODE_TABLES, RRSETS, VIEWS,
-        ZONES,
+        ACLS, FORWARDERS, JOURNAL, KEYS_META, LIST_VERSIONS, LISTS, NODE_TABLES, NTAS, RRSETS,
+        TRUST_ANCHORS, VIEWS, ZONES,
     },
     table::TableDef,
 };
@@ -201,6 +201,13 @@ fn decode(rows: &[RawRow]) -> Result<Vec<Change>, StoreError> {
         } else if table == JOURNAL.name() {
             let (key, value) = decode_row(&JOURNAL, row)?;
             Change::Journal(key, value)
+        // WP10.2: the validator's rows (the index `dns.ntas.by_zone` is skipped).
+        } else if table == TRUST_ANCHORS.name() {
+            let (key, value) = decode_row(&TRUST_ANCHORS, row)?;
+            Change::TrustAnchor(key, value)
+        } else if table == NTAS.name() {
+            let (key, value) = decode_row(&NTAS, row)?;
+            Change::Nta(key, value)
         } else {
             continue;
         };
@@ -266,6 +273,13 @@ pub fn read_image(view: &dyn ReadView) -> Result<DnsData, StoreError> {
     })?;
     scan_all(view, &JOURNAL, |key, value| {
         data.journal.insert(key, value);
+    })?;
+    // WP10.2: the validator's rows.
+    scan_all(view, &TRUST_ANCHORS, |key, value| {
+        data.trust_anchors.insert(key, value);
+    })?;
+    scan_all(view, &NTAS, |key, value| {
+        data.ntas.insert(key, value);
     })?;
     Ok(data)
 }

@@ -1,0 +1,6 @@
+; child.optout.example.test: an unsigned zone under an opt-out span (WP10.2), served by BIND.
+$ORIGIN child.optout.example.test.
+$TTL 300
+@       IN SOA  bind.example.test. hostmaster.example.test. 1 3600 600 86400 60
+@       IN NS   bind.example.test.
+www     IN A    192.0.2.61

@@ -523,13 +523,16 @@ pub fn address_octets(address: IpAddr) -> Vec<u8> {
     }
 }
 
-/// The `extra` field Tenko writes: `tenko;client=...`, `;cached`, and (WP10.1)
-/// `;resolution=<how>` and `;subqueries=<n>` when the recursive resolver sent any.
+/// The `extra` field Tenko writes: `tenko;client=...`, `;cached`, (WP10.1)
+/// `;resolution=<how>` and `;subqueries=<n>` when the recursive resolver sent any, and
+/// (WP10.2) `;validation=<state>` and `;ede=<code>` when the answer had them.
 pub fn extra(
     client: ClientField,
     cached: bool,
     resolution: Option<crate::log::Resolution>,
     subqueries: u16,
+    validation: Option<tenko_core::dns::SecurityState>,
+    ede: Option<u16>,
 ) -> Vec<u8> {
     let mut out = format!("tenko;client={}", client.as_str());
     if cached {
@@ -541,6 +544,14 @@ pub fn extra(
     }
     if subqueries > 0 {
         let _ = std::fmt::Write::write_fmt(&mut out, format_args!(";subqueries={subqueries}"));
+    }
+    // WP10.2: the validation state and the extended error.
+    if let Some(validation) = validation {
+        out.push_str(";validation=");
+        out.push_str(validation.as_str());
+    }
+    if let Some(ede) = ede {
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!(";ede={ede}"));
     }
     out.into_bytes()
 }
@@ -616,5 +627,13 @@ pub fn line_of(dnstap: &Dnstap) -> Option<LogLine> {
             .split(';')
             .find_map(|part| part.strip_prefix("subqueries=")?.parse().ok())
             .unwrap_or(0),
+        // WP10.2: the validation state and the extended error from the `extra` field.
+        validation: extra.split(';').find_map(|part| {
+            let value = part.strip_prefix("validation=")?;
+            serde_json::from_value(serde_json::Value::String(value.to_owned())).ok()
+        }),
+        ede: extra
+            .split(';')
+            .find_map(|part| part.strip_prefix("ede=")?.parse().ok()),
     })
 }
