@@ -22,6 +22,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The dependency `tokio` is 1.54.1: earlier versions let `AsyncFd::new` take a descriptor without owning it, which the I/O safety rules forbid (RUSTSEC-2026-0386).
 - A dialog of the web UI never reaches past the window: the panel is capped to the viewport's height, scrolls as a whole and keeps its title pinned at the top and its buttons at the bottom, so Cancel and the primary button of a tall form (a connector's configuration, a DHCP scope, a scoped personal token) stay in reach on a laptop screen; before, a tall dialog grew past the bottom edge and its buttons could only be reached by tabbing blind.
 - The dependency `ctutils` (constant-time helpers under the Argon2 password hashing) is 0.4.5: versions before 0.4.4 could generate a branch on a secret value in their mask generation (RUSTSEC-2026-0385).
 - A live view that reads again after its own write no longer loads a second time when the event of that write arrives a moment later: the rows were rebuilt once more about 150 ms after the change, which lost a drag started in between (the order of the DNS views).
