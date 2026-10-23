@@ -612,3 +612,36 @@ test("a secret reference reaches the plugin, which reports it by a tag and never
   }
   expect(JSON.stringify(log)).not.toContain(value);
 });
+
+// The form is taller than a laptop window: the panel ends inside a 700 px window and scrolls,
+// and its submit button is in view at every scroll position (pinned, with the title), where
+// before the panel reached past the bottom of the window and the buttons with it.
+test("the connector form keeps its submit button in view in a 700 px window and scrolls the fields", async ({ page, signedIn }) => {
+  void signedIn;
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.goto("/connectors");
+  await page.getByTestId("connectors-create").click();
+  const form = page.getByTestId("dialog-connector-form");
+  await expect(form).toBeVisible();
+  const panel = form.locator("xpath=..");
+  const submit = form.getByTestId("form-submit");
+  const top = form.getByTestId("field-plugin");
+  const box = await panel.boundingBox();
+  expect(box, "the panel is laid out").not.toBeNull();
+  expect((box?.y ?? 0) + (box?.height ?? 0), "the panel ends inside the window").toBeLessThanOrEqual(700);
+  await expect(top).toBeInViewport();
+  await expect(submit).toBeInViewport();
+  // The panel scrolls (the form is taller than what fits); the button stays while the fields go.
+  const overflow = await panel.evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(overflow, "the panel scrolls").toBeGreaterThan(0);
+  await panel.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(top).not.toBeInViewport();
+  await expect(submit).toBeInViewport();
+  await panel.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await expect(top).toBeInViewport();
+  await expect(submit).toBeInViewport();
+});

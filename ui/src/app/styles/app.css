@@ -47,19 +47,54 @@
 .acct .row.items { padding: var(--sp-2) 0; }
 .acct .select { width: 100%; }
 
-/* Dialogs (confirmations); the palette and the sheet use their own classes. */
+/*
+ * Dialogs (confirmations and forms); the palette and the sheet use their own classes.
+ * The panel never reaches past the viewport: its height is capped to the dynamic viewport
+ * less its offset from the top and the page gutter, and it scrolls as a whole. The title is
+ * pinned at the top and the actions at the bottom while the rest scrolls between them, so
+ * Cancel and the primary button stay in reach however tall the form and however low the
+ * window. Both may sit at any depth (inside a form or a wrapper); a panel that fits does not
+ * scroll and keeps its layout. A domain stylesheet sets the width, and --dialog-top when
+ * its panel opens higher; the cap follows. Never a max-height or an overflow of its own.
+ */
 .dialog {
-  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ top: 16vh; transform: translateX(-50%);
-  width: min(480px, calc(100vw - 32px));
+  --dialog-top: 16dvh;
+  --dialog-gutter: var(--sp-6);
+  position: absolute; left: 50%; /* physical: centred with translateX(-50%) */ inset-block-start: var(--dialog-top); transform: translateX(-50%);
+  width: min(480px, calc(100vw - 2 * var(--dialog-gutter)));
+  max-height: calc(100dvh - var(--dialog-top) - var(--dialog-gutter));
+  overflow: auto; overscroll-behavior: contain;
   display: grid; gap: var(--sp-5);
-  padding: var(--sp-7) var(--sp-8);
+  padding-inline: var(--sp-8);
   border: 1px solid var(--line-strong); border-radius: var(--r-4);
   background: var(--surface); box-shadow: var(--shadow-drag);
 }
+/* The block padding is a spacer item at each end (a spacer and a gap make the padding), not
+ * padding: browsers differ on whether a sticky inset counts from the scrollport's padding
+ * edge or from its content edge, and with no block padding they agree. */
+.dialog::before, .dialog::after { content: ""; block-size: calc(var(--sp-7) - var(--sp-5)); }
 .dialog:focus { outline: none; }
 .dialog-title { font-size: var(--fs-16); }
 .dialog-body { color: var(--ink-2); line-height: var(--lh-text); display: grid; gap: var(--sp-4); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+/* The pinned title and actions stay where they rest, a padding's distance from the panel's
+ * edge, and each covers the band beyond it, so the content scrolls under them and never
+ * shows there. */
+.dialog .dialog-title, .dialog .dialog-actions { position: sticky; z-index: 1; background: var(--surface); }
+.dialog .dialog-title { inset-block-start: var(--sp-7); }
+.dialog .dialog-actions { inset-block-end: var(--sp-7); }
+.dialog .dialog-title::before, .dialog .dialog-actions:last-child::after { content: ""; position: absolute; inset-inline: 0; block-size: var(--sp-7); background: var(--surface); }
+.dialog .dialog-title::before { inset-block-end: 100%; }
+.dialog .dialog-actions:last-child::after { inset-block-start: 100%; }
+/* A hairline where content has scrolled under the title or has yet to scroll out from under
+ * the actions (browsers with scroll-driven animations; the others show none). */
+@supports (animation-timeline: scroll()) {
+  .dialog { scroll-timeline: --dialog-scroll block; }
+  .dialog .dialog-title { animation: dialog-pinned-start linear both; animation-timeline: --dialog-scroll; animation-range: 0 var(--sp-5); }
+  .dialog .dialog-actions:last-child { animation: dialog-pinned-end linear both; animation-timeline: --dialog-scroll; animation-range: calc(100% - var(--sp-5)) 100%; }
+  @keyframes dialog-pinned-start { from { box-shadow: 0 1px 0 transparent; } to { box-shadow: 0 1px 0 var(--line); } }
+  @keyframes dialog-pinned-end { from { box-shadow: 0 -1px 0 var(--line); } to { box-shadow: 0 -1px 0 transparent; } }
+}
 /* "Report a bug": the diagnostics as the issue will carry them, scrolling inside the dialog. */
 .report-text { max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-12); line-height: var(--lh-text); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); color: var(--ink); }
 .report-note { font-size: var(--fs-12); color: var(--ink-3); }

@@ -155,6 +155,9 @@ export default defineConfig(({ command, mode }) => {
     test: {
       environment: "jsdom",
       include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
+      // Stylesheets are empty modules under test, except the shared one, which the dialog
+      // test reads as text (`?raw`) to check its rules against the rendered panel.
+      css: { include: [/app[/]styles[/]app[.]css/] },
       setupFiles: ["src/app/testing/setup.ts"],
       restoreMocks: true,
       // Solid and its libraries go through Vite (with the browser condition, the DOM build);

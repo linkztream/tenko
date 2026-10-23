@@ -1,6 +1,6 @@
 /* The VLAN provision dialog (ProvisionDialog.tsx) and the prefix list of a VLAN
    (PrefixesDialog.tsx). Token roles only; state is always carried by a word as well. */
-.dialog.provision-dialog { width: min(760px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; top: 8vh; }
+.dialog.provision-dialog { --dialog-top: 8dvh; width: min(760px, calc(100vw - 32px)); }
 .provision-form, .provision-preview { display: grid; gap: var(--sp-5); min-width: 0; }
 .provision-form .input, .provision-form .select { width: 100%; }
 .provision-prefix { display: grid; gap: var(--sp-3); }
@@ -35,7 +35,7 @@
 }
 
 /* The prefixes of a VLAN */
-.dialog.prefixes-dialog { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
+.dialog.prefixes-dialog { --dialog-top: 10dvh; width: min(640px, calc(100vw - 32px)); }
 .prefixes-body { display: grid; gap: var(--sp-5); min-width: 0; }
 .vlan-prefix-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
 .vlan-prefix { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line); min-width: 0; }

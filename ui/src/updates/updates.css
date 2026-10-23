@@ -38,7 +38,7 @@
 .note ul { margin: var(--sp-3) 0 0; padding-inline-start: var(--sp-8); }
 
 /* The what-is-new dialog. */
-.dialog.upd-whatsnew { width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.dialog.upd-whatsnew { width: min(640px, calc(100vw - 32px)); }
 .upd-whatsnew .upd-notes { display: grid; gap: var(--sp-5); }
 .upd-confirm-action { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
 

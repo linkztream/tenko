@@ -46,7 +46,7 @@
 [dir="rtl"] .scans-back-icon { transform: none; }
 
 /* The dialogs. */
-.dialog.scans-dialog { width: min(520px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; }
+.dialog.scans-dialog { width: min(520px, calc(100vw - 32px)); }
 .scans-form { display: grid; gap: var(--sp-4); }
 .scans-form textarea.input { resize: vertical; }
 .scans-kinds { display: grid; gap: var(--sp-3); margin: 0; padding: 0; border: 0; min-inline-size: 0; }

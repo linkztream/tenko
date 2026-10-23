@@ -46,7 +46,7 @@
 .proposal-reason { white-space: pre-wrap; }
 
 /* ---------- Dialogs ---------- */
-.dialog.discovery-dialog { width: min(560px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.dialog.discovery-dialog { width: min(560px, calc(100vw - 32px)); }
 .discovery-form { display: grid; gap: var(--sp-4); }
 .discovery-form textarea.input { resize: vertical; }
 .report-kv { grid-template-columns: minmax(0, 1fr) auto; }

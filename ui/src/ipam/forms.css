@@ -1,6 +1,6 @@
 /* The IPAM forms (PrefixForm, RangeForm, AddressForm, the next free dialogs) and the shared
    pieces under them: tags input, custom fields, history and delete dialogs. Token roles only. */
-.dialog.form-dialog { width: min(640px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; top: 8vh; }
+.dialog.form-dialog { --dialog-top: 8dvh; width: min(640px, calc(100vw - 32px)); }
 .form-frame { display: grid; gap: var(--sp-5); min-width: 0; }
 .form-fields { display: grid; gap: var(--sp-5); min-width: 0; }
 .form-fields .input, .form-fields .select { width: 100%; }
@@ -54,4 +54,4 @@ fieldset.field-group > legend { padding: 0; font-size: var(--fs-12); font-weight
 .history-changes del { color: var(--ink-3); text-decoration: line-through; }
 .history-changes ins { text-decoration: none; color: var(--ink); }
 .history-more { justify-self: start; }
-.dialog.history-dialog { width: min(760px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
+.dialog.history-dialog { --dialog-top: 10dvh; width: min(760px, calc(100vw - 32px)); }

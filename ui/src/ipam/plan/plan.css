@@ -1,5 +1,5 @@
 /* The plan preview (PlanPreview.tsx) and its dialog. */
-.dialog.plan-dialog { width: min(760px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; top: 10vh; }
+.dialog.plan-dialog { --dialog-top: 10dvh; width: min(760px, calc(100vw - 32px)); }
 .plan-dialog-body { display: grid; gap: var(--sp-5); }
 .plan { display: grid; gap: var(--sp-4); }
 .plan-summary { margin: 0; padding-inline-start: var(--sp-6); color: var(--ink-2); }

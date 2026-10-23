@@ -30,7 +30,7 @@
 .dns-modes legend { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-2); }
 .dns-zonefile { min-height: 180px; width: 100%; }
 
-.dialog.dns-dialog { width: min(720px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; }
+.dialog.dns-dialog { width: min(720px, calc(100vw - 32px)); }
 .dns-diff td { vertical-align: top; }
 .tag.dns-diff-add { background: var(--ok-wash); color: var(--ok-ink); }
 .tag.dns-diff-change { background: var(--accent-wash); color: var(--accent); }

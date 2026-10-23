@@ -34,7 +34,7 @@
 .tag.cluster-digest.differs { background: var(--conflict-wash); color: var(--conflict); }
 
 /* The dialogs and their previews. */
-.dialog.cluster-dialog { width: min(560px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; }
+.dialog.cluster-dialog { width: min(560px, calc(100vw - 32px)); }
 .cluster-preview { display: grid; gap: var(--sp-5); }
 .cluster-figures {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-5);
