@@ -1,6 +1,6 @@
 [package]
 name = "tenko-store"
-version = "0.0.3"
+version = "0.0.4"
 description = "Replicated store: contract, in-memory store, conformance suite and the openraft-over-redb store"
 edition.workspace = true
 rust-version.workspace = true

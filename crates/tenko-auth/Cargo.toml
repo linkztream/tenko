@@ -1,6 +1,6 @@
 [package]
 name = "tenko-auth"
-version = "0.0.3"
+version = "0.0.4"
 description = "Local authentication, password policy presets, TOTP, passkeys, sessions, personal tokens, roles and security settings"
 edition.workspace = true
 rust-version.workspace = true

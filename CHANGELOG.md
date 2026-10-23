@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-10-23
+
 ### Added
 
 - A node's roles can be changed from the web UI, the API and the command line (OPS-01): the nodes page has a roles editor in each node's panel and for the controller that serves the page, `GET`/`PUT /api/v1/nodes/{id}/roles` read and store the node's role set (audited as `nodes.roles`, with `If-Match`), and `tenko node roles show|set <id> --roles a,b,c` does the same from a shell. The stored set (`nodes.roles`, seeded from `roles` of `tenko.toml` at a controller's first start and synced to every node) decides at the next start unless `--roles` on the command line pins the roles; a node under a service manager restarts itself with exit status 12 to apply a change, otherwise `GET /system/status` warns `node.roles.restart_required`. The controller role follows the cluster membership and is never taken from the last controller; a role whose raw methods need a drop-in the node lacks (`probe.conf`, `dhcp-direct.conf`) is the finding `node.roles.privileges`, and the dns role leaving a host whose resolver the installer pointed at the node (`--use-self`) is `node.roles.dns_resolver`. See `docs/cluster.md` section 13.
