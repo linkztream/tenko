@@ -43,6 +43,34 @@ export const PROJECT = "tenko";
 /** A manifest with more releases than this is refused. */
 export const MAX_RELEASES = 1000;
 
+/**
+ * The bounds an installation applies to a release's texts when it reads the manifest
+ * (`crates/tenko-api/src/dto/release.rs`: MAX_NOTES_BYTES and MAX_ACTION_BYTES). A longer text
+ * makes the whole manifest invalid for every installation, so the generator cuts the text at
+ * a line boundary and says where the rest is.
+ */
+export const MAX_NOTES_BYTES = 64 * 1024;
+export const MAX_ACTION_BYTES = 16 * 1024;
+const CUT_MARK = "\n\n(The notes continue in CHANGELOG.md of the repository.)";
+
+/**
+ * Returns `text` unchanged when it fits in `maxBytes` (UTF-8), else the longest prefix that
+ * ends at a line boundary and still fits together with the cut mark.
+ *
+ * @param {string} text
+ * @param {number} maxBytes
+ * @returns {string}
+ */
+export function boundText(text, maxBytes) {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  const room = maxBytes - Buffer.byteLength(CUT_MARK, "utf8");
+  let cut = Buffer.from(text, "utf8").subarray(0, room).toString("utf8");
+  if (cut.endsWith("�")) cut = cut.slice(0, -1);
+  const lastLine = cut.lastIndexOf("\n");
+  if (lastLine > 0) cut = cut.slice(0, lastLine);
+  return cut.trimEnd() + CUT_MARK;
+}
+
 /** The inputs are wrong; the message says how. */
 export class ManifestError extends Error {
   /** @param {string} message */
@@ -238,10 +266,10 @@ export async function buildRelease({ version, changelogText, assetsDir, baseUrl,
   const release = {
     version,
     date: /** @type {string} */ (section.date),
-    notes: section.body,
+    notes: boundText(section.body, MAX_NOTES_BYTES),
     security: section.security,
     requires_action: section.requiresAction,
-    ...(section.requiresAction ? { action: section.action } : {}),
+    ...(section.requiresAction ? { action: boundText(section.action, MAX_ACTION_BYTES) } : {}),
     ...(format === undefined ? {} : { format }),
     ...(image === undefined ? {} : { image }),
     assets,

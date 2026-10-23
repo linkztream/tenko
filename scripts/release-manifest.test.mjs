@@ -23,6 +23,8 @@ import {
   hashFile,
   installerOf,
   mergeManifest,
+  boundText,
+  MAX_NOTES_BYTES,
 } from "./release-manifest.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -701,5 +703,27 @@ describe("command line", () => {
   test("a missing assets directory exits 1", () => {
     const r = cli(["--version", "0.2.0", "--assets", path.join(os.tmpdir(), "tenko-no-such-dir"), "--base-url", BASE_URL, "--changelog", path.join(here, "..", "CHANGELOG.md")]);
     assert.equal(r.status, 1);
+  });
+});
+
+describe("boundText", () => {
+  test("leaves a text within the bound alone", () => {
+    assert.equal(boundText("### Added\n\n- One.", MAX_NOTES_BYTES), "### Added\n\n- One.");
+  });
+
+  test("cuts a longer text at a line boundary and says where the rest is", () => {
+    const line = "- An entry of some length to fill the notes.\n";
+    const text = line.repeat(3000);
+    const bounded = boundText(text, MAX_NOTES_BYTES);
+    assert.ok(Buffer.byteLength(bounded, "utf8") <= MAX_NOTES_BYTES);
+    assert.match(bounded, /\.\n\n\(The notes continue in CHANGELOG\.md of the repository\.\)$/);
+    assert.ok(bounded.startsWith(line));
+  });
+
+  test("never splits a multi-byte character", () => {
+    const text = "- ".concat("å".repeat(70000));
+    const bounded = boundText(text, MAX_NOTES_BYTES);
+    assert.ok(Buffer.byteLength(bounded, "utf8") <= MAX_NOTES_BYTES);
+    assert.ok(!bounded.includes("�"));
   });
 });
