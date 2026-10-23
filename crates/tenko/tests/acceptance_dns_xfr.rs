@@ -232,19 +232,21 @@ fn zones_transfer_between_two_nodes_with_tsig_notify_ixfr_and_catalogs() {
         udp(secondary.dns, "www.example.test", TYPE_A)
             .is_some_and(|answer| holds(&answer, [192, 0, 2, 10]))
     });
-    let status = secondary
-        .api
-        .get(&format!("/dns/zones/{copy_id}/transfer"))
-        .expect(200);
     let served = primary
         .api
         .get(&format!("/dns/zones/{zone_id}"))
         .expect(200);
-    assert_eq!(status["serial"], served["soa_serial"], "{status}");
-    assert!(
-        status["primaries"][0]["last_success"].is_string(),
-        "{status}"
-    );
+    // The copy answers queries before the transfer's status row is written, so the row is
+    // waited for like the answer was.
+    let mut status = Value::Null;
+    wait_until(Duration::from_secs(15), "the transfer status", || {
+        status = secondary
+            .api
+            .get(&format!("/dns/zones/{copy_id}/transfer"))
+            .expect(200);
+        status["serial"] == served["soa_serial"]
+            && status["primaries"][0]["last_success"].is_string()
+    });
     assert!(status["next_refresh"].is_string(), "{status}");
 
     // A change on the primary: NOTIFY, then IXFR with the change only.
