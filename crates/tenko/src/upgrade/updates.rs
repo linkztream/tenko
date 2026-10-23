@@ -1117,7 +1117,10 @@ mod tests {
             .iter()
             .find(|section| section.version.as_ref() == Some(&running))
             .expect("CHANGELOG.md has the running version's section");
-        assert!(own.entries > 0, "the running version's section lists changes");
+        assert!(
+            own.entries > 0,
+            "the running version's section lists changes"
+        );
     }
 
     #[tokio::test]

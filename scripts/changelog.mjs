@@ -397,6 +397,27 @@ function runGit(args, cwd) {
   return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+const CHANGELOG_NONE = /^changelog:[ \t]*none[ \t]*$/im;
+
+/**
+ * The short ids of the commits in `base..head` whose message has a line "Changelog: none".
+ * @param {string} base
+ * @param {string} head
+ * @param {string} cwd
+ * @returns {string[]}
+ */
+function commitsMarkedNone(base, head, cwd) {
+  const r = runGit(["log", "--format=%h%x00%B%x1e", `${base}..${head}`], cwd);
+  if (r.status !== 0) return [];
+  return r.stdout
+    .split("\x1e")
+    .map((record) => record.replace(/^\n/, ""))
+    .filter((record) => record !== "")
+    .map((record) => record.split("\0"))
+    .filter(([, body]) => CHANGELOG_NONE.test(body ?? ""))
+    .map(([id]) => id.trim());
+}
+
 /**
  * The text of `file` at `ref`, `""` when the file does not exist there.
  * @param {string} ref
@@ -455,6 +476,19 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
       productPaths: [],
     };
   }
+  // A commit whose message has a line "Changelog: none" changes nothing a user can see (a
+  // test inside a source file, a comment): the push's form of the pull request label
+  // "no-changelog". The commits that carry it are named in the result.
+  const marked = commitsMarkedNone(base, head, cwd);
+  if (marked.length > 0) {
+    const noun = marked.length === 1 ? "commit" : "commits";
+    const verb = marked.length === 1 ? "says" : "say";
+    return {
+      ok: true,
+      message: `changelog check skipped: ${noun} ${marked.join(", ")} ${verb} "Changelog: none" (${paths(product.length)} changed)`,
+      productPaths: product,
+    };
+  }
 
   const baseText = showAt(base, file, cwd);
   let headText;
@@ -497,7 +531,7 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
       "Changed product paths:",
       ...listed,
       `What to do: add an entry under "## [Unreleased]" in ${file}, in the matching subsection (Added, Changed, Deprecated, Removed, Fixed, Security or Action required), written for a user of the product.`,
-      'A pull request that changes nothing a user can see carries the label "no-changelog", which skips this check.',
+      'A pull request that changes nothing a user can see carries the label "no-changelog", which skips this check; a push does the same with a line "Changelog: none" in the commit message.',
     ].join("\n"),
     productPaths: product,
   };

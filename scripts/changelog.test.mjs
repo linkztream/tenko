@@ -902,6 +902,28 @@ describe("check", { skip: gitAvailable ? false : "git is not available" }, () =>
     });
   });
 
+  test('a commit whose message says "Changelog: none" skips the check and is named', () => {
+    withRepo((repo, base) => {
+      repo.write("crates/tenko/src/lib.rs", "// v2: a test inside the source file\n");
+      const marked = repo.commit("test(tenko): a test inside lib.rs\n\nChangelog: none\n");
+      const r = repo.check(["--base", base]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /changelog check skipped: commit [0-9a-f]+ says "Changelog: none" \(1 product path changed\)/);
+      assert.match(r.stdout, new RegExp(marked.slice(0, 7)));
+    });
+  });
+
+  test("the marker counts only on a line of its own", () => {
+    withRepo((repo, base) => {
+      repo.write("crates/tenko/src/lib.rs", "// v2\n");
+      repo.commit("feat: something, changelog: none of this is done yet");
+      const r = repo.check(["--base", base]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /CHANGELOG\.md was not updated/);
+      assert.match(r.stderr, /Changelog: none/);
+    });
+  });
+
   test("an entry added in an earlier commit of the range counts", () => {
     withRepo((repo, base) => {
       repo.write("CHANGELOG.md", CHANGELOG_V2);

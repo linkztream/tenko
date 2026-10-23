@@ -56,6 +56,10 @@ Read before changing anything substantial:
   claim in a pull request links to a result file.
 - Every RFC behaviour that is implemented or deliberately skipped is recorded in
   `docs/CONFORMANCE.md`.
+- A change under `crates/` or `ui/src/` comes with an entry under `## [Unreleased]` in
+  `CHANGELOG.md` (`node scripts/changelog.mjs check --base origin/main`). A change nothing a
+  user can see, such as a test inside a source file, carries the pull request label
+  `no-changelog` or, on a push, a line `Changelog: none` in its commit message.
 
 ## Licensing and the Contributor License Agreement
 
