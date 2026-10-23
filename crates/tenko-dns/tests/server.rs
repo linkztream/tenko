@@ -143,12 +143,24 @@ async fn udp_and_tcp_answer_and_the_server_stops() {
             .expect("an answer over IPv6");
         assert_eq!(answer.answers.len(), 1);
     }
-    let layout = server.layout();
+    // A worker counts an answer after it has left, so the client can hold both
+    // answers a moment before the counters say so: they are waited for, briefly.
+    let began = std::time::Instant::now();
+    let layout = loop {
+        let layout = server.layout();
+        let received: u64 = layout.udp.iter().map(|worker| worker.received).sum();
+        let sent: u64 = layout.udp.iter().map(|worker| worker.sent).sum();
+        if received >= 2 && sent == received {
+            break layout;
+        }
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(5),
+            "the workers' counters did not settle: {layout:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
     assert_eq!(layout.workers_per_address, 2);
     assert_eq!(layout.udp.len(), 2 * udp.len());
-    let received: u64 = layout.udp.iter().map(|worker| worker.received).sum();
-    let sent: u64 = layout.udp.iter().map(|worker| worker.sent).sum();
-    assert!(received >= 2 && sent == received, "{layout:?}");
 
     let tcp_v4 = tcp[0];
     tokio::task::spawn_blocking(move || {
