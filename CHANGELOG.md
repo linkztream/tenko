@@ -21,6 +21,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The dependency `ctutils` (constant-time helpers under the Argon2 password hashing) is 0.4.5: versions before 0.4.4 could generate a branch on a secret value in their mask generation (RUSTSEC-2026-0385).
 - A live view that reads again after its own write no longer loads a second time when the event of that write arrives a moment later: the rows were rebuilt once more about 150 ms after the change, which lost a drag started in between (the order of the DNS views).
 
 - The IPAM reconciler writes its proposals in batches under the store's batch limit (read from the store, three quarters of 16 MiB each by default), in subject-key order and each fenced with the leader's epoch, so a run that opens tens of thousands of discovered-host proposals, as a DHCP server's unknown clients make it, no longer fails as a whole with `sys.store.batch_too_large` and loses them all. A batch the store refuses is tried again as two halves, what still fails is reported on the run (`unwritten`, `failure`) and written by the next run, the report says how many `batches` the write took, and the run's audit record `ipam.reconcile.run` counts them (see `docs/reconciliation.md` section 3.2).
