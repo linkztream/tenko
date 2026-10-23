@@ -1,6 +1,6 @@
 # Observability: metrics and traces
 
-This document describes the metrics and the traces of a Tenko DDI controller: where the metrics are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, the live metrics of the start page, and the OpenTelemetry traces exported over OTLP with their span catalogue. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
+This document describes the metrics and the traces of a Tenko DDI controller: where the metrics are served, who may read them, how the gauges are computed, every series with its labels, how to scrape them with Prometheus, what they cost, the live metrics of the start page, and the OpenTelemetry traces exported over OTLP with their span catalogue, and the diagnostics a bug report carries. It is for administrators who monitor Tenko and for reviewers. Requirements are cited by ID and defined in [REQUIREMENTS.md](REQUIREMENTS.md) (OPS-05, OPS-20, OPS-21); the endpoint is in the [OpenAPI document](api/openapi.json). Where this document and the code disagree, the code is right and the document has a defect.
 
 Contents:
 
@@ -12,7 +12,8 @@ Contents:
 6. [Cost](#6-cost)
 7. [Dashboard](#7-dashboard)
 8. [Traces](#8-traces)
-9. [Not covered yet](#9-not-covered-yet)
+9. [Diagnostics for bug reports](#9-diagnostics-for-bug-reports)
+10. [Not covered yet](#10-not-covered-yet)
 
 ## 1. Where the metrics are served
 
@@ -304,7 +305,37 @@ Span attributes never carry request or response bodies, headers, cookies, tokens
 
 Spans are created with the `tracing` macros. Without the endpoint the layer is absent: each span is a disabled callsite check, nothing is allocated and nothing runs (M9 in `bench/phase1-server/results/2026-10-15-m9-idle-rss.md`: the idle working set of the branch was 0.48 MiB below `main`, within the noise of the pair). With the endpoint, a sampled span is built in the request's task and handed to the batch processor's queue; an unsampled one is not recorded. The quick check `crates/tenko/tests/serve_telemetry_cost.rs` (ignored by default; `cargo nextest run -p tenko --test serve_telemetry_cost --run-ignored only --no-capture`) sends 2,000 `GET /api/v1/prefixes` from one client in sequence to a fresh debug build with the endpoint set (the test collector on loopback, every trace sampled) and without it. Windows workstation, 2026-10-15, four pairs: the server's CPU time over the 2,000 reads was 734 to 828 ms without traces and 750 to 938 ms with them (means 800 and 836 ms, about 18 µs per request, inside the spread of the pairs), and the p99 of `tenko_http_request_duration_seconds{class="prefixes"}` was 0.25 to 0.26 ms without and 0.25 to 0.41 ms with traces (the buckets are 250 and 500 µs wide there). The collector received 2,001 request spans per run.
 
-## 9. Not covered yet
+## 9. Diagnostics for bug reports
+
+"Report a bug" in the account menu of the web UI and `tenko system diagnostics` show the same document, `GET /api/v1/system/diagnostics`: what a bug report needs about the node, redacted by the node before it answers. The product holds no GitHub token and the node sends nothing anywhere. The dialog shows the text in full, then either opens the repository's new-issue page in a new tab with the bug-report template's fields prefilled from the document (the issue is filed under the person's own GitHub account, in their browser) or copies the text to the clipboard. The diagnostics go into the template's log field, cut at 6,000 characters at a line boundary with a note to paste the rest. Under the Hardened profile the dialog offers the copy only and says why: an installation under that profile opens no outbound link from the interface (TGL-30 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md)).
+
+Any signed-in principal that may read `GET /api/v1/system/status` may read the document, with a session or a personal API token (the CLI signs in with a token). Every read is an audit record `sys.diagnostics` on the system object, and the document is answered only after the record committed.
+
+The document (`SystemDiagnostics` in the OpenAPI document) carries:
+
+| Field | Content |
+|---|---|
+| `version`, `api_version` | The version the server runs as (as `GET /system/status`) and the version of the API crate it was built from |
+| `os`, `arch` | The operating system family and the processor architecture of the node (`linux x86_64`) |
+| `profile` | The security profile of the installation |
+| `roles`, `modules` | The roles the node runs and the product modules of the installation |
+| `uptime_seconds` | Seconds since the API started |
+| `findings` | The active health findings of `GET /system/status`: the code and a severity (`info`, `warning`, `error`), never the detail text or the parameters, which may name zones, nodes and addresses |
+| `log` | The last 20 lines of the node's own log at warn level or above, redacted; the server keeps the last 200 such lines in memory, in the text format of the console, whatever `[log] level` says |
+| `text` | The whole document as text, the same in the dialog, on the clipboard, in the CLI and in the issue |
+
+**What is redacted.** Every line of the log goes through the redaction before it leaves the node, with placeholders from the documentation ranges and `example.test`, numbered in order of first appearance within one document, so that the same address is the same placeholder on every line and a story stays readable:
+
+- IPv4 addresses in every notation (plain, with a prefix length, with a port) become `192.0.2.N`, then `198.51.100.N` and `203.0.113.N` when a document names more than 254.
+- IPv6 addresses (plain, with a prefix length, in brackets with a port, with a scope id) become `2001:db8::N`.
+- MAC addresses in the colon, dash and dotted notations become `00-00-5e-00-00-NN`.
+- Zones of the catalog become `zone-N.example.test`, and a host under one of them `host-M.zone-N.example.test`.
+- Other host names that end with a known suffix (the private-use and local suffixes such as `.local`, `.lan`, `.home.arpa` and `.internal`, and the common public top-level domains) become `host-N.example.test`, inside URLs too.
+- The login names of the installation's accounts, as whole words, become `user-N`.
+
+Left as they are: loopback, unspecified, broadcast and multicast addresses, the documentation ranges themselves, the reserved names of RFC 2606 and RFC 6761 (`example.com`, `.example`, `.test`, `.invalid`, `localhost`), and `github.com`. The redaction is a pure function over text (`tenko_api::redact`), given the zone names and the account names at construction; it reads no store and no clock. It is a safety net for the log lines, not a guarantee for free text: the issue template still asks the reporter to read what they paste, and the dialog shows the text for that reason.
+
+## 10. Not covered yet
 
 - **Exporters in plugin processes.** A plugin receives the trace context of every call (section 8.3) but the SDK exports no spans; a plugin that wants to continue the trace installs a tracer of its own.
 - **Inbound context from a proxy.** The API ignores a `traceparent` it receives; every request starts a trace.

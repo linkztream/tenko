@@ -242,6 +242,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/events", "events"),
     // system
     ("GET", "/system/ca-root", "get_ca_root"),
+    ("GET", "/system/diagnostics", "system_diagnostics"),
     ("GET", "/system/updates", "get_updates"),
     ("POST", "/system/updates/check", "check_updates"),
     ("PUT", "/system/updates/manifest", "put_update_manifest"),

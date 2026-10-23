@@ -60,6 +60,9 @@
 .dialog-title { font-size: var(--fs-16); }
 .dialog-body { color: var(--ink-2); line-height: var(--lh-text); display: grid; gap: var(--sp-4); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-3); }
+/* "Report a bug": the diagnostics as the issue will carry them, scrolling inside the dialog. */
+.report-text { max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-12); line-height: var(--lh-text); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface-2); color: var(--ink); }
+.report-note { font-size: var(--fs-12); color: var(--ink-3); }
 .palette:focus, .sheet:focus { outline: none; }
 .sheet-note { margin-top: var(--sp-7); font-size: var(--fs-12); }
 .palette-empty { padding: var(--sp-8); }

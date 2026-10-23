@@ -378,3 +378,56 @@ pub struct StatusWarning {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, String>,
 }
+
+/// How serious a health finding is, as `GET /system/diagnostics` reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSeverity {
+    /// Nothing to act on: a state worth knowing when reading a report.
+    Info,
+    /// An administrator should look at it.
+    Warning,
+    /// A role or a service does not do its work.
+    Error,
+}
+
+/// One active health finding of `GET /system/status`, reduced to what a bug report may
+/// carry in public: the code and the severity, never the detail text or the parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DiagnosticFinding {
+    /// The stable code of the warning, for example `dns.role.lagging`.
+    pub code: String,
+    /// How serious it is.
+    pub severity: FindingSeverity,
+}
+
+/// `GET /system/diagnostics`: what a bug report needs about this node, redacted before it
+/// leaves it. Every IP address, MAC address, host name, zone name and account name in the
+/// log lines is a numbered placeholder from the documentation ranges and `example.test`,
+/// the same placeholder for the same value within one document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SystemDiagnostics {
+    /// The version this server runs as (what `GET /system/status` reports).
+    pub version: String,
+    /// The version of the API crate the binary was built from.
+    pub api_version: String,
+    /// The operating system family of the node (`linux`, `windows`, `macos`).
+    pub os: String,
+    /// The processor architecture (`x86_64`, `aarch64`).
+    pub arch: String,
+    /// The security profile of the installation (`home`, `standard`, `hardened`, `lab`).
+    pub profile: String,
+    /// The roles this node runs.
+    pub roles: Vec<String>,
+    /// The product modules this installation runs.
+    pub modules: crate::modules::ModuleSet,
+    /// Seconds since the API state was built.
+    pub uptime_seconds: u64,
+    /// The active health findings: code and severity only.
+    pub findings: Vec<DiagnosticFinding>,
+    /// The last lines of the node's own log at warn level or above, redacted; at most 20.
+    pub log: Vec<String>,
+    /// The whole document as text, the same for the UI, the CLI and the issue: what the
+    /// fields above say, rendered line by line.
+    pub text: String,
+}

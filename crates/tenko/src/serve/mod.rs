@@ -1739,6 +1739,11 @@ async fn start(
                 .insert(tenko_api::routes::system::RunningVersion::new(
                     crate::upgrade::running_version().to_string(),
                 ));
+            // The last warnings and errors of this process, for the bug-report diagnostics
+            // (`GET /system/diagnostics`); kept by the subscriber that `logging` installed.
+            if let Some(tail) = logging::log_tail() {
+                server.extensions.insert(tail);
+            }
             if let Some((pem, fingerprint)) = &tls.ca_root {
                 server.extensions.insert(Arc::new(CaRootSource::new(
                     tls.service.clone(),

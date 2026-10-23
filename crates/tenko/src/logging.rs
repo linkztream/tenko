@@ -25,6 +25,8 @@ use tracing_subscriber::{
     util::SubscriberInitExt as _,
 };
 
+use tenko_api::routes::system::diagnostics::LogTail;
+
 use crate::config::{LogFormat, LogSection};
 
 /// A layer of the server's subscriber.
@@ -94,10 +96,37 @@ pub fn init_server_with(
     if let Some(event_log) = layers.event_log {
         all.push(event_log);
     }
+    let tail = Arc::new(LogTail::new(
+        tenko_api::routes::system::diagnostics::LOG_TAIL_CAPACITY,
+    ));
+    all.push(tail_layer(Arc::clone(&tail)));
     tracing_subscriber::registry()
         .with(all)
         .try_init()
-        .map_err(|error| anyhow::anyhow!("logging: {error}"))
+        .map_err(|error| anyhow::anyhow!("logging: {error}"))?;
+    let _ = LOG_TAIL.set(tail);
+    Ok(())
+}
+
+/// The tail of the server's log that `GET /system/diagnostics` shows (bug reports): the
+/// last lines at warn level or above, whatever the configured level says. Set by
+/// [`init_server_with`] together with the subscriber; `None` before it ran (the client
+/// commands, tests that install no server subscriber).
+static LOG_TAIL: std::sync::OnceLock<Arc<LogTail>> = std::sync::OnceLock::new();
+
+/// The log tail of this process, once the server subscriber is installed.
+pub fn log_tail() -> Option<Arc<LogTail>> {
+    LOG_TAIL.get().cloned()
+}
+
+/// The text layer that keeps the last warnings and errors in `tail`: the same text format
+/// as the console, without colour, at warn level or above.
+pub fn tail_layer(tail: Arc<LogTail>) -> BoxedLayer {
+    tracing_subscriber::fmt::layer()
+        .with_writer(tail)
+        .with_ansi(false)
+        .with_filter(tracing_subscriber::filter::LevelFilter::WARN)
+        .boxed()
 }
 
 /// Installs the subscriber of the client commands: warnings and errors to standard error.

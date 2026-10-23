@@ -36,6 +36,9 @@ pub mod import;
 pub mod ipam; // WP8.2
 pub mod login;
 pub mod prefix;
+// Bug-report diagnostics: `tenko system diagnostics`.
+pub mod system;
+// End of the bug-report diagnostics block.
 
 use std::{
     fmt::Write as _,

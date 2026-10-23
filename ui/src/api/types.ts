@@ -156,6 +156,7 @@ export type SetupResult = SessionInfo & { ca_fingerprint?: string | null };
 // System status, jobs and search (shell)
 
 export type SystemStatus = S["SystemStatus"];
+export type SystemDiagnostics = S["SystemDiagnostics"];
 export type JobState = S["JobState"];
 export type JobSummary = S["JobSummary"];
 export type SearchHit = S["SearchHit"];

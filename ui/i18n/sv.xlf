@@ -478,6 +478,34 @@
       <unit id="shell.account.sign_out">
         <segment><source>Sign out</source><target>Logga ut</target></segment>
       </unit>
+      <unit id="shell.report.title">
+        <notes><note category="description">Entry in the account menu and title of the dialog that files a bug report.</note></notes>
+        <segment><source>Report a bug</source><target>Rapportera ett fel</target></segment>
+      </unit>
+      <unit id="shell.report.intro">
+        <segment><source>A report is filed on GitHub with the diagnostics below. The node has replaced every address, host name, zone name and account name with a placeholder; read the text before you send it, because everything in an issue is public.</source><target>En rapport lämnas på GitHub med diagnostiken nedan. Noden har ersatt varje adress, värdnamn, zonnamn och kontonamn med en platshållare; läs texten innan du skickar den, eftersom allt i ett ärende är offentligt.</target></segment>
+      </unit>
+      <unit id="shell.report.account">
+        <segment><source>GitHub opens in a new tab and the issue is filed under your own GitHub account, in your browser. Nothing is sent by this node.</source><target>GitHub öppnas i en ny flik och ärendet lämnas under ditt eget GitHub-konto, i din webbläsare. Ingenting skickas av den här noden.</target></segment>
+      </unit>
+      <unit id="shell.report.hardened">
+        <segment><source>Under the Hardened profile the interface opens no link to another site. Copy the diagnostics and paste them into a new issue on the project's GitHub page.</source><target>Under profilen Härdad öppnar gränssnittet ingen länk till en annan plats. Kopiera diagnostiken och klistra in den i ett nytt ärende på projektets GitHub-sida.</target></segment>
+      </unit>
+      <unit id="shell.report.open">
+        <segment><source>Open on GitHub</source><target>Öppna på GitHub</target></segment>
+      </unit>
+      <unit id="shell.report.copy">
+        <segment><source>Copy diagnostics</source><target>Kopiera diagnostiken</target></segment>
+      </unit>
+      <unit id="shell.report.copy_failed">
+        <segment><source>The diagnostics could not be copied. Select the text and copy it yourself.</source><target>Diagnostiken kunde inte kopieras. Markera texten och kopiera den själv.</target></segment>
+      </unit>
+      <unit id="shell.report.loading">
+        <segment><source>Collecting the diagnostics…</source><target>Samlar in diagnostiken…</target></segment>
+      </unit>
+      <unit id="shell.report.failed">
+        <segment><source>The diagnostics could not be read: {detail}</source><target>Diagnostiken kunde inte läsas: {detail}</target></segment>
+      </unit>
       <unit id="shell.banner.lab_title">
         <segment><source>Lab profile active.</source><target>Labbprofilen är aktiv.</target></segment>
       </unit>

@@ -6030,6 +6030,15 @@ export type MessageKey =
   | "shell.palette.searching"
   | "shell.placeholder.body"
   | "shell.placeholder.title"
+  | "shell.report.account"
+  | "shell.report.copy"
+  | "shell.report.copy_failed"
+  | "shell.report.failed"
+  | "shell.report.hardened"
+  | "shell.report.intro"
+  | "shell.report.loading"
+  | "shell.report.open"
+  | "shell.report.title"
   | "shell.search.empty"
   | "shell.search.kind.address"
   | "shell.search.kind.host"
@@ -7509,6 +7518,7 @@ export interface MessageArgs {
   "shell.palette.no_match": { query: string | number };
   "shell.palette.search_all": { query: string | number };
   "shell.placeholder.title": { area: string | number };
+  "shell.report.failed": { detail: string | number };
   "shell.search.results": { count: number; query: string | number };
   "shell.status.alarms": { count: number };
   "shell.status.critical": { count: number };
@@ -13618,6 +13628,15 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.palette.searching",
   "shell.placeholder.body",
   "shell.placeholder.title",
+  "shell.report.account",
+  "shell.report.copy",
+  "shell.report.copy_failed",
+  "shell.report.failed",
+  "shell.report.hardened",
+  "shell.report.intro",
+  "shell.report.loading",
+  "shell.report.open",
+  "shell.report.title",
   "shell.search.empty",
   "shell.search.kind.address",
   "shell.search.kind.host",

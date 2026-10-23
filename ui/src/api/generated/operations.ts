@@ -335,6 +335,7 @@ export const apiOperations = [
   { id: "update_backup_settings", method: "put", path: "/api/v1/system/backups/settings", tags: ["backup"], summary: "Change the backup schedule, target and recipient" },
   { id: "set_break_glass", method: "put", path: "/api/v1/system/break-glass", tags: ["users"], summary: "Configure break-glass access; needs fresh authentication" },
   { id: "get_ca_root", method: "get", path: "/api/v1/system/ca-root", tags: ["system"], summary: "Download the root certificate of the internal CA as PEM" },
+  { id: "system_diagnostics", method: "get", path: "/api/v1/system/diagnostics", tags: ["system"], summary: "Get the diagnostics of a bug report: version, platform, profile, roles, modules, uptime, findings and the redacted log tail" },
   { id: "get_kek_status", method: "get", path: "/api/v1/system/kek", tags: ["kek"], summary: "Get the key-encryption key status of this controller and the installation" },
   { id: "rotate_kek", method: "post", path: "/api/v1/system/kek/rotate", tags: ["kek"], summary: "Start an online rotation of the key-encryption key" },
   { id: "get_modules", method: "get", path: "/api/v1/system/modules", tags: ["system"], summary: "Get the product modules this installation runs" },

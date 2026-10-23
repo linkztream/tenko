@@ -15,12 +15,13 @@ import { availableLocales, storeLocale, t } from "../i18n";
 
 /**
  * The account menu (avatar, top right): theme, row density, "Emphasize host part",
- * language, security and sign-in, keyboard shortcuts and sign out.
+ * language, security and sign-in, keyboard shortcuts, "Report a bug" and sign out.
  */
 export function AccountMenu(props: {
   anchor: HTMLElement;
   onClose: () => void;
   onShortcuts: () => void;
+  onBugReport: () => void;
   onSignOut: () => void;
 }) {
   let menu!: HTMLDivElement;
@@ -138,6 +139,10 @@ export function AccountMenu(props: {
             <Icon name="info" />
             {t("shell.keys.title")}
             <Kbd keys={["?"]} />
+          </button>
+          <button type="button" class="item" onClick={() => props.onBugReport()} data-testid="account-bug-report">
+            <Icon name="alert" />
+            {t("shell.report.title")}
           </button>
           <button type="button" class="item" onClick={() => props.onSignOut()} data-testid="account-sign-out">
             <Icon name="user" />

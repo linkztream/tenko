@@ -53,6 +53,7 @@ pub mod dto;
 pub mod i18n;
 pub mod modules;
 pub mod problem;
+pub mod redact;
 
 #[cfg(feature = "server")]
 pub mod extract;

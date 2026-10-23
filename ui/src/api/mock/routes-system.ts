@@ -1,8 +1,9 @@
 // First-run setup, health and system status. Jobs live in routes-jobs.ts; search is served
 // with the IPAM routes.
 import { http, type HttpHandler } from "msw";
-import type { NodeRole, SetupResult, SetupState, SystemStatus, TlsMode } from "../types";
+import type { NodeRole, SetupResult, SetupState, SystemDiagnostics, SystemStatus, TlsMode } from "../types";
 import { NODE_ROLES, PROFILES } from "../types";
+import { appendAudit } from "./audit-store";
 import { passwordStrength, requireSession, sessionInfo, startSession } from "./auth";
 import { commit, db, isAdmin, type MockUser } from "./db";
 import { MOCK_CA_FINGERPRINT, MOCK_VERSION } from "./fixtures";
@@ -213,4 +214,71 @@ const caRoot = http.get("/api/v1/system/ca-root", () => {
   });
 });
 
-export const systemRoutes: HttpHandler[] = [getSetup, completeSetup, health, ready, systemStatus, caRoot];
+// ---------------------------------------------------------------------------------
+// Diagnostics for a bug report: the fields of the document and the text the UI shows, with
+// the placeholders the server's redaction leaves (RFC 5737, RFC 3849, example.test).
+
+/** The log lines of the mock node, already redacted as the server does it. */
+const MOCK_LOG_TAIL = [
+  "2026-10-23T09:58:12.104Z  WARN tenko_dns::zone: zone zone-1.example.test: transfer from 192.0.2.1 refused (TSIG unknown key)",
+  "2026-10-23T10:02:40.511Z  WARN tenko_dhcp::lease: 192.0.2.2 declined by 00-00-5e-00-00-01; the address is held for 10 minutes",
+  "2026-10-23T10:05:01.000Z ERROR tenko_api::routes::backup: scheduled backup failed: the target directory is not writable",
+];
+
+/** The text of the document, as `GET /system/diagnostics` renders it. */
+export function renderDiagnostics(document: Omit<SystemDiagnostics, "text">): string {
+  const lines = [
+    "Tenko DDI diagnostics",
+    "Redacted before leaving the node: addresses, host names, zone names and account names are placeholders (RFC 5737, RFC 3849, RFC 7042, example.test), numbered in order of first appearance.",
+    "",
+    `version: ${document.version} (API ${document.api_version})`,
+    `platform: ${document.os} ${document.arch}`,
+    `profile: ${document.profile}`,
+    `roles: ${document.roles.length > 0 ? document.roles.join(", ") : "none"}`,
+    `modules: ${document.modules.length > 0 ? document.modules.join(", ") : "none"}`,
+    `uptime: ${uptimeText(document.uptime_seconds)} (${document.uptime_seconds} s)`,
+  ];
+  if (document.findings.length === 0) lines.push("findings: none");
+  else {
+    lines.push(`findings: ${document.findings.length}`);
+    for (const finding of document.findings) lines.push(`  ${finding.severity.padEnd(8)} ${finding.code}`);
+  }
+  if (document.log.length === 0) lines.push("log: no line at warn level or above since the start");
+  else {
+    lines.push(`log: last ${document.log.length} line(s) at warn level or above, redacted`);
+    for (const line of document.log) lines.push(`  ${line}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function uptimeText(seconds: number): string {
+  const days = Math.floor(seconds / 86_400);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clock = `${pad(Math.floor((seconds % 86_400) / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+const systemDiagnostics = route("get", "/api/v1/system/diagnostics", () => {
+  requireSession();
+  const findings: SystemDiagnostics["findings"] = [];
+  if (db.installation.tls.mode === "plain") findings.push({ code: "sys.tls.plain_http", severity: "warning" });
+  for (const warning of [...modulesWarnings(), ...clusterWarnings(), ...dataFormatWarnings()]) {
+    findings.push({ code: warning.code, severity: "warning" });
+  }
+  const document: Omit<SystemDiagnostics, "text"> = {
+    version: MOCK_VERSION,
+    api_version: MOCK_VERSION,
+    os: "linux",
+    arch: "x86_64",
+    profile: db.settings.profile,
+    roles: [...db.installation.roles],
+    modules: statusModules(),
+    uptime_seconds: Math.max(0, Math.floor((Date.now() - db.startedAt) / 1000)),
+    findings,
+    log: [...MOCK_LOG_TAIL],
+  };
+  appendAudit({ action: "sys.diagnostics", objects: [{ kind: "system", id: "00000000-0000-0000-0000-000000000000" }] });
+  return ok<SystemDiagnostics>({ ...document, text: renderDiagnostics(document) });
+});
+
+export const systemRoutes: HttpHandler[] = [getSetup, completeSetup, health, ready, systemStatus, systemDiagnostics, caRoot];

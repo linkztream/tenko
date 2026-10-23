@@ -52,11 +52,13 @@ use crate::{
     state::AppState,
 };
 
+pub mod diagnostics;
 pub mod modules;
 pub mod updates;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .merge(diagnostics::routes())
         .merge(modules::routes())
         .merge(updates::routes())
         .routes(routes!(health))
@@ -529,7 +531,34 @@ async fn system_status(
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
-    let mut status = status_of(&state, ctx.now);
+    Ok(Json(
+        assemble(
+            &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam,
+        )
+        .await,
+    ))
+}
+
+/// The status document with every part the server binary provides: what
+/// `GET /system/status` answers, and what `GET /system/diagnostics` reads its findings
+/// from.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one source per part of the status, each optional"
+)]
+pub(crate) async fn assemble(
+    state: &AppState,
+    now: Timestamp,
+    running: Option<Extension<RunningVersion>>,
+    leader: Option<Extension<LeaderSource>>,
+    backup: Option<Extension<Arc<dyn super::backup::BackupService>>>,
+    format: Option<Extension<DataFormatSource>>,
+    dns: Option<Extension<super::dns::DnsNodeSlot>>,
+    zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
+    dhcp: Option<Extension<super::dhcp::DhcpNodeSlot>>,
+    ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
+) -> SystemStatus {
+    let mut status = status_of(state, now);
     status.version = running_version(running.as_ref());
     if let Some(Extension(source)) = leader {
         let leader = source.current();
@@ -558,7 +587,7 @@ async fn system_status(
     // conflict rows of the reconciliation view; never resolved automatically.
     if let Some(Extension(ipam)) = ipam
         && let Ok(view) = ipam.view(None).await
-        && let Ok(conflicts) = tenko_ipam::reconcile::view::lease_conflicts(view.as_ref(), ctx.now)
+        && let Ok(conflicts) = tenko_ipam::reconcile::view::lease_conflicts(view.as_ref(), now)
     {
         status.warnings.extend(lease_conflict_warning(&conflicts));
     }
@@ -566,7 +595,7 @@ async fn system_status(
     // WP6.3: the clock and expiry findings of signed zones (OPS-09), each naming its zone.
     if let Some(Extension(zones)) = zones
         && let Ok(view) = zones.view(None).await
-        && let Ok(findings) = tenko_dns::dnssec::health::all(view.as_ref(), ctx.now)
+        && let Ok(findings) = tenko_dns::dnssec::health::all(view.as_ref(), now)
     {
         status
             .warnings
@@ -576,7 +605,7 @@ async fn system_status(
                 params: finding.params,
             }));
     }
-    Ok(Json(status))
+    status
 }
 
 /// Downloads the root certificate of the internal CA (TLS mode a), for installation on

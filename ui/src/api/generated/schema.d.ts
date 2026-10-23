@@ -4485,6 +4485,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the diagnostics of a bug report: version, platform, profile, roles, modules, uptime, findings and the redacted log tail */
+        get: operations["system_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/kek": {
         parameters: {
             query?: never;
@@ -7436,6 +7453,16 @@ export interface components {
             history_days?: number | null;
             lease?: components["schemas"]["LeaseTimes"] | null;
         };
+        /**
+         * @description One active health finding of `GET /system/status`, reduced to what a bug report may
+         *     carry in public: the code and the severity, never the detail text or the parameters.
+         */
+        DiagnosticFinding: {
+            /** @description The stable code of the warning, for example `dns.role.lagging`. */
+            code: string;
+            /** @description How serious it is. */
+            severity: components["schemas"]["FindingSeverity"];
+        };
         /** @description The counts of one fact type. */
         DiffCounts: {
             /**
@@ -8261,6 +8288,11 @@ export interface components {
          * @enum {string}
          */
         FilterKind: "allow" | "deny";
+        /**
+         * @description How serious a health finding is, as `GET /system/diagnostics` reports it.
+         * @enum {string}
+         */
+        FindingSeverity: "info" | "warning" | "error";
         /**
          * @description What a request says about the client's system (DHCP-14, plan section 2.8): the parameter
          *     request list in the client's order, the vendor class and which identifying options it
@@ -18268,6 +18300,42 @@ export interface components {
          * @enum {string}
          */
         SystemComponent: "setup" | "api" | "auth" | "vault" | "store" | "ipam" | "import" | "jobs" | "reconciler" | "connector" | "scan" | "cluster" | "audit_export" | "backup" | "languages" | "leader" | "dns" | "dhcp";
+        /**
+         * @description `GET /system/diagnostics`: what a bug report needs about this node, redacted before it
+         *     leaves it. Every IP address, MAC address, host name, zone name and account name in the
+         *     log lines is a numbered placeholder from the documentation ranges and `example.test`,
+         *     the same placeholder for the same value within one document.
+         */
+        SystemDiagnostics: {
+            /** @description The version of the API crate the binary was built from. */
+            api_version: string;
+            /** @description The processor architecture (`x86_64`, `aarch64`). */
+            arch: string;
+            /** @description The active health findings: code and severity only. */
+            findings: components["schemas"]["DiagnosticFinding"][];
+            /** @description The last lines of the node's own log at warn level or above, redacted; at most 20. */
+            log: string[];
+            /** @description The product modules this installation runs. */
+            modules: components["schemas"]["ModuleSet"];
+            /** @description The operating system family of the node (`linux`, `windows`, `macos`). */
+            os: string;
+            /** @description The security profile of the installation (`home`, `standard`, `hardened`, `lab`). */
+            profile: string;
+            /** @description The roles this node runs. */
+            roles: string[];
+            /**
+             * @description The whole document as text, the same for the UI, the CLI and the issue: what the
+             *     fields above say, rendered line by line.
+             */
+            text: string;
+            /**
+             * Format: int64
+             * @description Seconds since the API state was built.
+             */
+            uptime_seconds: number;
+            /** @description The version this server runs as (what `GET /system/status` reports). */
+            version: string;
+        };
         /** @description Body of `GET /system/status`. */
         SystemStatus: {
             backup?: components["schemas"]["BackupSummaryView"] | null;
@@ -42278,6 +42346,44 @@ export interface operations {
             };
             /** @description The listener does not use the internal CA (`tls.no_internal_ca`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    system_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The diagnostics of this node, redacted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemDiagnostics"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

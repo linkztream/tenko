@@ -9,6 +9,7 @@ import { ModuleGate } from "../updates/ModuleGate";
 import { areaEnabled, loadModules, moduleRunning, resetModules, RESTART_WARNING } from "../updates/modules";
 import { UPDATES_PATH } from "../updates/paths";
 import { AccountMenu } from "./AccountMenu";
+import { BugReportDialog } from "./BugReport";
 import { AREAS } from "./areas";
 import { ClusterBanner } from "./ClusterBanner";
 import { CommandPalette } from "./CommandPalette";
@@ -34,6 +35,7 @@ export function Shell(props: { children?: JSX.Element }) {
   const location = useLocation();
   const [palette, setPalette] = createSignal<string | null>(null);
   const [sheet, setSheet] = createSignal(false);
+  const [report, setReport] = createSignal(false);
   const [account, setAccount] = createSignal<HTMLElement | null>(null);
   const [notes, setNotes] = createSignal(false);
   const status = createShellStatus();
@@ -220,6 +222,9 @@ export function Shell(props: { children?: JSX.Element }) {
       <Show when={sheet()}>
         <KeySheet onClose={() => setSheet(false)} />
       </Show>
+      <Show when={report()}>
+        <BugReportDialog onClose={() => setReport(false)} />
+      </Show>
       <WhatsNew open={notes()} onClose={() => setNotes(false)} />
       <Show when={account()}>
         {(anchor) => (
@@ -229,6 +234,10 @@ export function Shell(props: { children?: JSX.Element }) {
             onShortcuts={() => {
               setAccount(null);
               setSheet(true);
+            }}
+            onBugReport={() => {
+              setAccount(null);
+              setReport(true);
             }}
             onSignOut={() => void doSignOut()}
           />

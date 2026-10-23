@@ -180,6 +180,14 @@ pub enum Command {
     /// Ask a node whether it is ready (container health checks); no sign-in needed.
     Health(client::health::HealthArgs),
 
+    // Bug-report diagnostics.
+    /// The system of a node: the diagnostics of a bug report.
+    System {
+        /// The `system` subcommand to run.
+        #[command(subcommand)]
+        action: client::system::SystemCommand,
+    },
+
     /// Breached-password corpus commands.
     Hibp {
         /// The `hibp` subcommand to run.
@@ -301,6 +309,7 @@ impl Command {
             Command::Plugin { action } => action.name(),
             Command::Node { action } => action.name(),
             Command::Openapi => "openapi",
+            Command::System { action } => action.name(), // Bug-report diagnostics.
         }
     }
 }
@@ -403,6 +412,7 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
             logging::init_client();
             client::block_on(name, args.client.json, out, err, client::health::run(args))
         }
+        Command::System { action } => system(action, name, out, err), // Bug-report diagnostics.
         Command::Import(args) => {
             logging::init_client();
             client::block_on(name, args.client.json, out, err, client::import::run(args))
@@ -414,6 +424,20 @@ pub fn execute(cli: &Cli, out: &mut impl Write, err: &mut impl Write) -> u8 {
         Command::Audit { action } => audit(action, name, out, err),
     }
 }
+
+// Bug-report diagnostics.
+/// `tenko system diagnostics`: the redacted diagnostics of a bug report.
+fn system(
+    action: &client::system::SystemCommand,
+    name: &str,
+    out: &mut impl Write,
+    err: &mut impl Write,
+) -> u8 {
+    logging::init_client();
+    let json = action.client().json;
+    client::block_on(name, json, out, err, client::system::run(action))
+}
+// End of the bug-report diagnostics block.
 
 /// `tenko audit verify|export`. `verify --file` checks a file on this machine and needs no
 /// server, so it does not set up the client logging.

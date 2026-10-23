@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-24 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-30 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -62,6 +62,7 @@ Reading the matrix:
 | TGL-27 | Trust anchor signalling (RFC 8145) | On | On | Off | On | 3 (Slice 10) | DNS-13 |
 | TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
 | TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
+| TGL-30 | Bug report link from the web UI to GitHub ("Report a bug": the new-issue page prefilled with the redacted diagnostics, filed under the person's own account) | On | On | Off: the dialog copies the diagnostics to the clipboard only, no outbound link from the interface | On | 3 | OPS-05 |
 
 Notes:
 

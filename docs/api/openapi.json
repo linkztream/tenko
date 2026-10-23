@@ -29653,6 +29653,55 @@
         }
       }
     },
+    "/api/v1/system/diagnostics": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get the diagnostics of a bug report: version, platform, profile, roles, modules, uptime, findings and the redacted log tail",
+        "operationId": "system_diagnostics",
+        "responses": {
+          "200": {
+            "description": "The diagnostics of this node, redacted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemDiagnostics"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "token": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/kek": {
       "get": {
         "tags": [
@@ -40605,6 +40654,24 @@
           }
         }
       },
+      "DiagnosticFinding": {
+        "type": "object",
+        "description": "One active health finding of `GET /system/status`, reduced to what a bug report may\ncarry in public: the code and the severity, never the detail text or the parameters.",
+        "required": [
+          "code",
+          "severity"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The stable code of the warning, for example `dns.role.lagging`."
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FindingSeverity",
+            "description": "How serious it is."
+          }
+        }
+      },
       "DiffCounts": {
         "type": "object",
         "description": "The counts of one fact type.",
@@ -42575,6 +42642,15 @@
         "enum": [
           "allow",
           "deny"
+        ]
+      },
+      "FindingSeverity": {
+        "type": "string",
+        "description": "How serious a health finding is, as `GET /system/diagnostics` reports it.",
+        "enum": [
+          "info",
+          "warning",
+          "error"
         ]
       },
       "Fingerprint": {
@@ -67674,6 +67750,80 @@
           "dns",
           "dhcp"
         ]
+      },
+      "SystemDiagnostics": {
+        "type": "object",
+        "description": "`GET /system/diagnostics`: what a bug report needs about this node, redacted before it\nleaves it. Every IP address, MAC address, host name, zone name and account name in the\nlog lines is a numbered placeholder from the documentation ranges and `example.test`,\nthe same placeholder for the same value within one document.",
+        "required": [
+          "version",
+          "api_version",
+          "os",
+          "arch",
+          "profile",
+          "roles",
+          "modules",
+          "uptime_seconds",
+          "findings",
+          "log",
+          "text"
+        ],
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "description": "The version of the API crate the binary was built from."
+          },
+          "arch": {
+            "type": "string",
+            "description": "The processor architecture (`x86_64`, `aarch64`)."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticFinding"
+            },
+            "description": "The active health findings: code and severity only."
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The last lines of the node's own log at warn level or above, redacted; at most 20."
+          },
+          "modules": {
+            "$ref": "#/components/schemas/ModuleSet",
+            "description": "The product modules this installation runs."
+          },
+          "os": {
+            "type": "string",
+            "description": "The operating system family of the node (`linux`, `windows`, `macos`)."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The security profile of the installation (`home`, `standard`, `hardened`, `lab`)."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles this node runs."
+          },
+          "text": {
+            "type": "string",
+            "description": "The whole document as text, the same for the UI, the CLI and the issue: what the\nfields above say, rendered line by line."
+          },
+          "uptime_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the API state was built.",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "The version this server runs as (what `GET /system/status` reports)."
+          }
+        }
       },
       "SystemStatus": {
         "type": "object",
