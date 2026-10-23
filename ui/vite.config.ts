@@ -70,6 +70,8 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
     "errors.cluster.protocol.",
     "errors.cluster.ca.",
     "errors.cluster.single",
+    // node-roles: the error texts of the roles of a node.
+    "errors.node.roles.",
   ],
   // The topology map (WP2.7).
   topology: ["topology."],

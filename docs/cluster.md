@@ -20,7 +20,8 @@ Contents:
 10. [Audit actions](#10-audit-actions)
 11. [Error codes](#11-error-codes)
 12. [The controller cluster](#12-the-controller-cluster)
-13. [What comes next](#13-what-comes-next)
+13. [Changing a node's roles](#13-changing-a-nodes-roles)
+14. [What comes next](#14-what-comes-next)
 
 ## 1. Enrolment
 
@@ -332,6 +333,8 @@ Two keys of the `[node]` section matter to a cluster of controllers. `id` is the
 | `DELETE /api/v1/cluster/members/{id}` | `remove_cluster_member` | `delete` on the node: administrators |
 | `POST /api/v1/cluster/step-down` | `step_down_cluster_leader` | `update` on nodes: administrators |
 | `GET /api/v1/cluster/digests` | `get_cluster_digests` | `read` on nodes. `?revision=` names the revision (section 12.7) |
+| `GET /api/v1/nodes/{id}/roles` | `get_node_roles` | `read` on the node (section 13) |
+| `PUT /api/v1/nodes/{id}/roles` | `put_node_roles` | `update` on the node: administrators (section 13) |
 
 The edits (creating and deleting a token, enrolment, renewal, revocation) run as inline jobs of the kind `cluster.edit`, with the step `cluster.write`; a promotion or removal of a controller is a job of the same kind with the step `cluster.member`. The change, the job record and the audit record commit as one write. Changes of the tables of the `cluster` namespace are events of the `cluster` topic of the event stream. Like every event they carry references, not bodies, so a client fetches again what it shows.
 
@@ -351,6 +354,7 @@ The edits (creating and deleting a token, enrolment, renewal, revocation) run as
 | `cluster.member.promote` | Learners became voters, by the leader or by an administrator; records the voters afterwards, `force` and a replaced voter | The administrator, or the cluster component for an automatic promotion |
 | `cluster.member.remove` | A controller left the cluster; its certificates were revoked | The administrator |
 | `cluster.member.step_down` | The leader handed leadership over; records the new leader | The administrator |
+| `nodes.roles` | A node's stored role set was changed; records the old and the new set (section 13) | The administrator |
 | `vault.kek.transfer` | A controller handed the key encryption keys to a joining controller (`purpose` `join`) or to a member that lacked generations (`purpose` `fetch`); records the generation ids, never the keys | The cluster component |
 
 The certificate authority itself writes `cluster.ca.create` and `cluster.tls.issue`.
@@ -401,6 +405,13 @@ A code is stable. The API answers with the HTTP status; on the cluster port the 
 | `cluster.member.starting` | 503 | The controller is still starting |
 | `cluster.member.step_down_timeout` | 504 | Leadership did not move in time; the leader keeps leading |
 | `cluster.single` | 409 | The controller is not part of a cluster of controllers |
+| `node.roles.pinned` | 409 | `--roles` on the node's command line pins its roles (section 13.1) |
+| `node.roles.last_controller` | 409 | The last controller keeps the controller role |
+| `node.roles.controller` | 409 | The controller role follows the cluster membership |
+| `node.roles.unsupported` | 422 | A node without the controller role runs the probe role only until Phase 5 |
+| `node.roles.empty` | 422 | A node runs at least one role |
+| `node.roles.revision_mismatch` | 412 | The roles changed since they were read |
+| `node.roles.store` | 503 | The store cannot be read or written |
 | `cluster.port.starting` | 503 | A member's node services are not ready yet; the node retries |
 | `cluster.peer.not_controller` | 403 | A caller of `Raft` or `Cluster` has no `controller` role |
 | `cluster.peer.impersonation` | 403 | A Raft message speaks for another node than its sender |
@@ -589,7 +600,76 @@ The cluster lab runs real controllers against each other: separate `tenko serve`
 
 What the lab shows is the behaviour of the software: elections, forwarding, catch-up from the log and from a snapshot, the quorum gate, the queue, the event stream and the probes across real processes and a real proxy. What it cannot show waits for three VMs in WP3.8: a power cut (M2), a 1 Gbit link and separate disks (M4), and the UI over two hosts (M7).
 
-## 13. What comes next
+## 13. Changing a node's roles
+
+A node's roles (`controller`, `dns`, `dhcp`, `probe`) are chosen at install time with `roles` in `tenko.toml`, and can be changed afterwards from the web UI, the API and the command line, the way the installation's modules are ([upgrades.md](upgrades.md), the module switch). The change applies at the node's next start, which the node runs itself under a service manager.
+
+### 13.1 Which roles a start runs
+
+Each node has a stored role set: one row of the table `nodes.roles`, keyed by its node id. `tenko serve` decides its roles once, at start:
+
+1. **`--roles` on the command line pins them.** The stored set is not used, `PUT` refuses a change with `node.roles.pinned`, and the web UI shows the roles read-only. The installer's unit gives no `--roles`; a supervisor or a script that passes it keeps the roles in its own hands.
+2. **Otherwise the stored set decides** over `roles` of the file (and `TENKO_ROLES`). A controller reads it from its store; a node without the controller role reads the row it received from the controllers through the configuration stream ([node-sync.md](node-sync.md), section 2.1), which every node receives whatever its roles. The `controller` role is always the file's: it follows the cluster membership.
+3. **Without a stored set, the file's `roles` apply**, and a controller writes them as its stored set at its first start (origin `seed`), so the editor starts from what the node runs. A node without the controller role shows the roles of its enrolment until a set is stored for it.
+
+The start log names the source: `roles controller,dns (the node's stored set)`, `(set in tenko.toml)` or `(pinned by --roles)`. `roles` stays required in the file: it is what a node runs before it has a stored set, and what it falls back to when the set cannot be read.
+
+### 13.2 What a change may do
+
+| Change | Answer |
+|---|---|
+| Any combination of `dns`, `dhcp` and `probe` on a controller | Stored |
+| Taking `controller` from the last controller of the cluster | 409 `node.roles.last_controller` |
+| Taking `controller` from another controller, or giving it to a node | 409 `node.roles.controller`: a controller joins with a controller enrolment token (section 12.1) and leaves with `DELETE /cluster/members/{id}` (section 12.3) |
+| `dns` or `dhcp` on a node without the controller role, or no `probe` on it | 422 `node.roles.unsupported`: until Phase 5 such a node runs the probe role only, the same rule as `tenko serve` at start |
+| No role at all | 422 `node.roles.empty` |
+| A stale `If-Match` | 412 `node.roles.revision_mismatch` |
+
+A change is audited as `nodes.roles` with the old and the new set. The same set again writes nothing.
+
+### 13.3 The restart
+
+Every controller follows its own row in the store, so a change made through any controller reaches the node it names. When the row changes the roles the controller runs:
+
+- **Under a service manager** (`TENKO_SUPERVISED=1` in the unit of `deploy/systemd/`, or the Windows service) the controller stops two seconds later with exit status 12, after the answer of the request has left, and the service manager starts it again with the new roles (`SuccessExitStatus=12` and `RestartForceExitStatus=12`; [upgrades.md](upgrades.md)). The answer says `restart: scheduled`, and the web UI follows the node until it answers again with the new roles.
+- **Without one** it keeps running, logs `the roles of this node changed; restart tenko serve to apply them`, and `GET /system/status` carries the warning `node.roles.restart_required` with `configured` and `running`. The answer says `restart: required`.
+
+A node without the controller role does the same when the row reaches it: under a service manager it stops with exit status 12, otherwise it logs the line. The answer for such a node, and for another controller, says `restart: on_node`.
+
+### 13.4 Privileges stay the operator's
+
+A role switched on does not grant itself privileges: port 53 is in the base unit, and the raw methods need `CAP_NET_RAW` and `AF_PACKET`, which the systemd drop-ins grant and `deploy/install.sh --roles` (or `--reconfigure --roles`) puts in place with the role:
+
+| Role | Needs | Drop-in |
+|---|---|---|
+| `probe` | ARP and the raw scan methods ([dhcp.md](dhcp.md) section 14.5, [scanning.md](scanning.md)) | `deploy/systemd/probe.conf` |
+| `dhcp` with a listener in direct mode (`[dhcp] listen` with `mode = "direct"`) | Broadcast replies on the link | `deploy/systemd/dhcp-direct.conf` |
+
+A controller that runs such a role on Linux without `CAP_NET_RAW` in its effective set carries the status warning `node.roles.privileges` (parameters `roles` and `dropins`), and the answers of `/nodes/{id}/roles` carry the same finding when the stored set has such a role, so the web UI shows it under the editor before the restart. The finding refuses nothing: install the drop-in and restart the service.
+
+The `dns` role leaving a node whose host resolver the installer pointed at it (`--use-self`, recorded as `use_self` in `/etc/tenko/installer.state`) is the finding `node.roles.dns_resolver`: without the role the host resolves no names. Run the installer with `--reconfigure` and without `--use-self` first, or keep the role.
+
+Only the node itself can tell its privileges and its installer's state, so these findings are those of the controller that answers, for its own node.
+
+### 13.5 The web UI, the API and the command line
+
+The node's panel on the nodes page, and the section "This controller" for the controller that serves the page, show the four roles as switches: the `controller` switch is read-only, a node without the controller role offers `probe` only, and a pin shows as a note with the editor read-only. Saving asks first, because the node restarts, then shows the node's state until it is back.
+
+| Endpoint | Operation id | Authorization |
+|---|---|---|
+| `GET /api/v1/nodes/{id}/roles` | `get_node_roles` | `read` on the node. Returns an `ETag` once a set is stored |
+| `PUT /api/v1/nodes/{id}/roles` | `put_node_roles` | `update` on the node: administrators. Body `{"roles": ["controller", "dns"]}`, `If-Match` optional |
+
+The answer has `configured` (the stored set, else what the node runs), `running` (for the controller that answers), `stored`, `origin`, `revision`, `pinned`, `controller`, `restart` (`none`, `scheduled`, `required` or `on_node`) and `findings`.
+
+```sh
+tenko node roles show 1
+tenko node roles set 1 --roles controller,dns,dhcp
+```
+
+`set` reads the roles first and sends their revision as `If-Match`, so a change made meanwhile is refused instead of overwritten. Both take `--json`.
+
+## 14. What comes next
 
 - **Slice 3.** Configuration flows from the controllers to `dns` and `dhcp` nodes as resumable deltas with a bandwidth cap (OPS-28). The update check joins the leader services of section 12.8, where the reconciler loop and the connector polling schedule run since the Slice 2 follow-ups.
 - **The cluster on three machines.** The measurements of section 12.10 move to three VMs (WP3.8): M2 power cuts, M4 with 6 M record sets over 1 Gbit, M7 over two hosts, and the final runs of M1, M3 and M12.

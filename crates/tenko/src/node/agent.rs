@@ -34,6 +34,16 @@ use crate::{
 /// How long the node process may take to stop.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
+// node-roles: the stored role set of a node without the controller role.
+/// `resolved` with the roles of this start: the stored set in the configuration the node
+/// received, unless `--roles` pins the roles ([`crate::node_roles`]).
+fn with_stored_roles(mut resolved: Resolved) -> Resolved {
+    let config_dir = NodePaths::new(&resolved.data_dir).config();
+    resolved.roles = crate::node_roles::at_node_start(&resolved, &config_dir);
+    resolved
+}
+// node-roles: end.
+
 /// Why the node cannot run, with its exit status; `None` when it can.
 fn refusal(resolved: &Resolved) -> Option<(u8, String)> {
     let paths = NodePaths::new(&resolved.data_dir);
@@ -62,6 +72,8 @@ fn refusal(resolved: &Resolved) -> Option<(u8, String)> {
 /// signal (or the end of standard input with `stop_on_eof`) and returns the exit status, 3
 /// when the node is not enrolled or its credentials do not load.
 pub fn command(resolved: Resolved, stop_on_eof: bool, err: &mut impl Write) -> u8 {
+    // node-roles: the stored role set the node received decides over the file's.
+    let resolved = with_stored_roles(resolved);
     if let Some((status, message)) = refusal(&resolved) {
         let _ = writeln!(err, "tenko serve: {message}");
         return status;
@@ -96,6 +108,8 @@ pub fn serve(
     shutdown: impl FnOnce() -> Shutdown + Send + 'static,
     hooks: Hooks,
 ) -> u8 {
+    // node-roles: the stored role set the node received decides over the file's.
+    let resolved = with_stored_roles(resolved);
     if let Some((status, message)) = refusal(&resolved) {
         tracing::error!("{message}");
         return status;
@@ -163,6 +177,17 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
         version()
     );
     let (stop, stopped) = watch::channel(false);
+    // node-roles: a changed stored role set restarts the node under a service manager.
+    let restart = crate::upgrade::restart::Restart::new();
+    let roles_task = tokio::spawn(crate::node_roles::follow_on_node(
+        agent.config(),
+        resolved.roles,
+        resolved.roles,
+        resolved.roles_pinned,
+        restart.clone(),
+        stopped.clone(),
+    ));
+    // node-roles: end.
     let scanner = crate::node::scan::start_on_node(&resolved, &agent, stopped.clone());
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));
     {
@@ -184,8 +209,12 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
             elapsed: started.elapsed(),
         });
     }
-    shutdown.await;
-    tracing::info!("shutdown requested");
+    // node-roles: a restart request ends the process like a shutdown, with exit status 12.
+    tokio::select! {
+        () = shutdown => tracing::info!("shutdown requested"),
+        reason = restart.requested() => tracing::info!(%reason, "stopping for a restart"),
+    }
+    // node-roles: end.
     if let Some(stopping) = stopping {
         stopping();
     }
@@ -201,6 +230,13 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     if tokio::time::timeout(STOP_TIMEOUT, task).await.is_err() {
         tracing::warn!("the node process did not stop in time");
     }
+    // node-roles: exit status 12 asks the service manager to start the node again.
+    let _ = tokio::time::timeout(STOP_TIMEOUT, roles_task).await;
+    if let Some(reason) = restart.reason() {
+        tracing::info!(%reason, "tenko node stopped for a restart (exit status 12)");
+        return exit::RESTART;
+    }
+    // node-roles: end.
     tracing::info!("tenko node stopped");
     exit::OK
 }

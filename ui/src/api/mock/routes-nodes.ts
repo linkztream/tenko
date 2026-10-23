@@ -306,4 +306,100 @@ const enrol = route("post", "/api/v1/nodes/enrol", async (ctx) => {
   return created(answer, NO_STORE);
 });
 
-export const nodeRoutes: HttpHandler[] = [listNodes, listEnrolments, createEnrolment, deleteEnrolment, enrol, getNode, revokeNode];
+// ---------------------------------------------------------------------------------
+// node-roles: the roles of a node (docs/cluster.md, "Changing a node's roles"). The node of the
+// mock controller is node 1, which runs the installation's roles; a change of its roles
+// "restarts" it at once, so the next read runs them. Enrolled nodes run the probe role only.
+
+/** The node id of the mock controller (`GET /system/status`). */
+const OWN_NODE = 1;
+const ROLE_ORDER = ["controller", "dns", "dhcp", "probe"] as const;
+
+interface StoredRoles {
+  roles: string[];
+  revision: number;
+  changedAt: string;
+}
+
+/** The stored sets, per nodes state, so a reset of the mock forgets them. */
+const storedRolesOf = new WeakMap<object, Map<number, StoredRoles>>();
+
+function storedRoles(): Map<number, StoredRoles> {
+  const state = nodesState();
+  let stored = storedRolesOf.get(state);
+  if (!stored) {
+    stored = new Map();
+    storedRolesOf.set(state, stored);
+  }
+  return stored;
+}
+
+function canonicalRoles(roles: readonly string[]): string[] {
+  return ROLE_ORDER.filter((role) => roles.includes(role));
+}
+
+function rolesView(id: number): S["NodeRoles"] {
+  const own = id === OWN_NODE;
+  const running = own ? canonicalRoles(db.installation.roles) : canonicalRoles(findNode(id).roles);
+  const stored = storedRoles().get(id);
+  const configured = stored?.roles ?? running;
+  const same = configured.join(",") === running.join(",");
+  return {
+    node: id,
+    configured,
+    running: own ? running : null,
+    stored: stored !== undefined,
+    origin: stored ? "api" : null,
+    changed_at: stored?.changedAt ?? null,
+    revision: stored?.revision ?? null,
+    pinned: false,
+    controller: own,
+    restart: own ? (same ? "none" : "scheduled") : "on_node",
+    findings: [],
+  };
+}
+
+function rolesProblem(code: string, status: number, detail: string): Problem {
+  return new Problem(code, { status, detail });
+}
+
+const getNodeRoles = route("get", "/api/v1/nodes/{id}/roles", (ctx) => {
+  requireSession();
+  const view = rolesView(parseNodeId(ctx.params.id));
+  return ok(view, view.revision ? { ETag: `"${view.revision}"` } : undefined);
+});
+
+const putNodeRoles = route("put", "/api/v1/nodes/{id}/roles", async (ctx) => {
+  requireAdmin();
+  const id = parseNodeId(ctx.params.id);
+  const before = rolesView(id);
+  const body = await ctx.body();
+  const wanted = Array.isArray(body.roles) ? body.roles.map(String) : [];
+  const unknown = wanted.find((role) => !(ROLE_ORDER as readonly string[]).includes(role));
+  if (unknown) throw invalidRequest(`unknown role ${unknown}`, "roles");
+  const roles = canonicalRoles(wanted);
+  if (roles.length === 0) throw rolesProblem("node.roles.empty", 422, "a node runs at least one role");
+  if (before.controller && !roles.includes("controller")) {
+    throw rolesProblem("node.roles.last_controller", 409, "this node is the last controller of the cluster; it keeps the controller role");
+  }
+  if (!before.controller && roles.includes("controller")) {
+    throw rolesProblem("node.roles.controller", 409, "the controller role follows the cluster membership");
+  }
+  if (!before.controller && roles.join(",") !== "probe") {
+    throw rolesProblem("node.roles.unsupported", 422, "a node without the controller role runs the probe role and no other");
+  }
+  const expected = ctx.ifMatch();
+  if (typeof expected === "number" && expected !== (before.revision ?? 0)) {
+    throw rolesProblem("node.roles.revision_mismatch", 412, "the roles of the node changed since they were read");
+  }
+  db.revision += 1;
+  storedRoles().set(id, { roles, revision: db.revision, changedAt: iso(Date.now()) });
+  appendAudit({ action: "nodes.roles", objects: [nodeRef(id)], context: { roles: roles.join(",") } });
+  const answer = rolesView(id);
+  // The mock controller restarts at once: the next read runs the new set.
+  if (id === OWN_NODE) db.installation.roles = roles as typeof db.installation.roles;
+  return ok(answer, { ETag: `"${answer.revision ?? 0}"` });
+});
+// node-roles: end.
+
+export const nodeRoutes: HttpHandler[] = [listNodes, listEnrolments, createEnrolment, deleteEnrolment, enrol, getNode, revokeNode, getNodeRoles, putNodeRoles];

@@ -43,3 +43,16 @@ export function createEnrolment(body: NewEnrolment): Promise<CreatedEnrolment> {
 export function deleteEnrolment(id: string): Promise<undefined> {
   return api.delete("/api/v1/nodes/enrolments/{id}", { path: { id }, ifMatch: ANY_REVISION }) as Promise<undefined>;
 }
+
+// node-roles: the roles of a node (docs/operations.md, "Changing a node's roles").
+export type NodeRoles = S["NodeRoles"];
+
+export function getNodeRoles(id: number | string, signal?: AbortSignal): Promise<NodeRoles> {
+  return api.get("/api/v1/nodes/{id}/roles", { path: { id }, signal });
+}
+
+/** Sets the roles a node runs from its next start; `revision` is the one read (`If-Match`). */
+export function putNodeRoles(id: number | string, roles: string[], revision?: number | null): Promise<NodeRoles> {
+  return api.put("/api/v1/nodes/{id}/roles", { path: { id }, body: { roles }, ifMatch: revision ?? undefined });
+}
+// node-roles: end.

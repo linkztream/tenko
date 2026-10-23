@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --check`
 
-86 Phase 1 requirements; 66 named by at least one test, 20 not; 0 named by no test, measurement or document.
+86 Phase 1 requirements; 67 named by at least one test, 19 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -70,7 +70,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 | IPAM-20 | Must | `crates/tenko-ipam/tests/topology.rs` | - | `crates/tenko-api/src/routes/mod.rs`<br>`crates/tenko-api/src/routes/topology.rs`<br>`crates/tenko-connect/src/network.rs`<br>`crates/tenko-core/src/observe.rs`<br>`crates/tenko-ipam/src/lib.rs`<br>and 13 more |
 | IPAM-23 | Must | `crates/tenko-ipam/tests/reconcile_view.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs` | - | `crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-core/src/observe.rs`<br>and 18 more |
 | MIG-14 | Must | `crates/tenko/tests/acceptance_import.rs`<br>`ui/e2e/import.spec.ts` | - | `crates/tenko-api/src/routes/export.rs`<br>`crates/tenko-api/src/routes/import.rs`<br>`crates/tenko-ipam/src/export/mod.rs`<br>`crates/tenko-ipam/src/import/vocab.rs`<br>`crates/tenko/src/client/export.rs`<br>and 5 more |
-| OPS-01 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/plans/phase-1-execution.md`<br>`docs/plans/slice-3-plan.md`<br>`docs/upgrades.md` |
+| OPS-01 | Must | `crates/tenko/tests/node_roles.rs` | - | `crates/tenko-api/src/routes/node_roles.rs`<br>`crates/tenko-cluster/src/node_sync/roles.rs`<br>`crates/tenko/src/node_roles.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/plans/phase-1-execution.md`<br>and 2 more |
 | OPS-02 | Must | - | - | `crates/tenko-dhcp/src/feed.rs`<br>`crates/tenko-dns/src/catalog.rs`<br>`crates/tenko-dns/src/feed.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/adr/0002-storage-and-replication.md`<br>and 9 more |
 | OPS-03 | Must | `crates/tenko/tests/acceptance_cluster.rs`<br>`crates/tenko/tests/acceptance_cluster.rs::e9_a_cluster_loses_its_leader_under_load_and_goes_on_without_losing_a_write`<br>`crates/tenko/tests/acceptance_deployment.rs`<br>`crates/tenko/tests/cluster_support/scenarios.rs`<br>`ui/e2e/cluster-membership.spec.ts`<br>and 1 more | - | `crates/tenko-api/src/routes/cluster.rs`<br>`crates/tenko-cluster/src/admin.rs`<br>`crates/tenko-cluster/src/peers/mod.rs`<br>`crates/tenko/src/cluster/admin.rs`<br>`crates/tenko/src/cluster/join.rs`<br>and 9 more |
 | OPS-04 | Must | `crates/tenko/tests/acceptance_cluster.rs`<br>`crates/tenko/tests/acceptance_cluster.rs::e9_a_cluster_loses_its_leader_under_load_and_goes_on_without_losing_a_write`<br>`crates/tenko/tests/cluster_support/scenarios.rs`<br>`ui/e2e/nodes.spec.ts` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/routes/cluster.rs`<br>`crates/tenko-api/src/routes/nodes.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>and 15 more |
@@ -134,7 +134,6 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - IPAM-01 (Must)
 - IPAM-04 (Must)
 - IPAM-10 (Must)
-- OPS-01 (Must)
 - OPS-02 (Must)
 - OPS-19 (Must)
 - SCAN-01 (Must)

@@ -9,6 +9,7 @@
 //! | [`token`] | `tenko node enrol-token`: a token from a controller, for scripts |
 //! | [`inject`] | `tenko node inject`: queue a batch of observations from a file (diagnostics) |
 //! | [`scan`] | the scanner of the probe role and `tenko node scan` |
+//! | [`crate::client::node_roles`] | `tenko node roles show|set`: the roles of a node through the API |
 //!
 //! docs/cluster.md describes the ceremony, certificates, revocation and the ports.
 
@@ -46,6 +47,10 @@ pub enum NodeCommand {
     Inject(inject::InjectArgs),
     /// The scanner of this probe: status, a run on demand, the kill switch.
     Scan(scan::ScanArgs),
+    // node-roles: the roles of a node through the API.
+    /// The roles of a node: show them, or set the ones it runs from its next start
+    /// (administrators).
+    Roles(client::node_roles::RolesArgs),
 }
 
 impl NodeCommand {
@@ -58,6 +63,8 @@ impl NodeCommand {
             NodeCommand::EnrolToken(_) => "node enrol-token",
             NodeCommand::Inject(_) => "node inject",
             NodeCommand::Scan(args) => args.action.name(),
+            // node-roles: the roles of a node.
+            NodeCommand::Roles(args) => args.action.name(),
         }
     }
 
@@ -69,6 +76,8 @@ impl NodeCommand {
             NodeCommand::EnrolToken(args) => args.client.json,
             NodeCommand::Inject(args) => args.node.json,
             NodeCommand::Scan(args) => args.action.json(),
+            // node-roles: the roles of a node.
+            NodeCommand::Roles(args) => args.action.client().json,
         }
     }
 }
@@ -126,6 +135,10 @@ pub fn command(action: &NodeCommand, out: &mut impl Write, err: &mut impl Write)
             client::block_on(name, json, out, err, async { inject::run(args) })
         }
         NodeCommand::Scan(args) => client::block_on(name, json, out, err, scan::cli::run(args)),
+        // node-roles: the roles of a node.
+        NodeCommand::Roles(args) => {
+            client::block_on(name, json, out, err, client::node_roles::run(args))
+        }
     }
 }
 

@@ -59,7 +59,8 @@ describe("the node operations of the document", () => {
   );
 
   it("are all answered, each after the session check except the public enrolment", async () => {
-    expect(OPERATIONS.length).toBe(7);
+    // node-roles: GET and PUT /nodes/{id}/roles.
+    expect(OPERATIONS.length).toBe(9);
     for (const operation of OPERATIONS) {
       const path = operation.path.replace("{id}", operation.path.includes("enrolments") ? NODE_IDS.token : String(NODE_IDS.dmz));
       const json = operation.method === "get" || operation.method === "delete" ? undefined : {};

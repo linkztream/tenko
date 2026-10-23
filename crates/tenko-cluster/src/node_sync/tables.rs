@@ -6,6 +6,7 @@
 //! | `cluster.ingest_cursors` | node id | [`IngestCursor`] | the `Observations` service |
 //! | `scan.run_results` | (command id, batch sequence) | [`RunResult`] | the `Observations` service, for batches tagged with a command |
 //! | `scan.probe_config` | node id | the probe configuration (`tenko_scan::control`) | the API, a node's offer |
+//! | `nodes.roles` | node id | [`NodeRolesRecord`](super::roles::NodeRolesRecord) | the API, a controller's first start |
 //!
 //! The configuration of a node is the set of rows keyed by its node id in the tables of
 //! [`CONFIG_TABLES`] whose role it has. Each such row is a CBOR map; a field `secrets`
@@ -51,14 +52,26 @@ pub const CONFIG_TABLES: [ConfigTable; 1] = [ConfigTable {
     role: Role::Probe,
 }];
 
-/// The configuration tables a node with `roles` receives.
+// node-roles: the stored role set of a node reaches it whatever its roles.
+/// The configuration tables every node receives its own row of, whatever its roles: the
+/// stored role set ([`super::roles::NODE_ROLES`]).
+pub const EVERY_NODE_TABLES: [TableName; 1] = [TableName::from_static("nodes.roles")];
+
+/// The configuration tables a node with `roles` receives: those of [`EVERY_NODE_TABLES`]
+/// and those of [`CONFIG_TABLES`] whose role it has.
 pub fn tables_for(roles: &[Role]) -> Vec<TableName> {
-    CONFIG_TABLES
+    EVERY_NODE_TABLES
         .iter()
-        .filter(|table| roles.contains(&table.role))
-        .map(|table| table.table.clone())
+        .cloned()
+        .chain(
+            CONFIG_TABLES
+                .iter()
+                .filter(|table| roles.contains(&table.role))
+                .map(|table| table.table.clone()),
+        )
         .collect()
 }
+// node-roles: end.
 
 /// Tables whose every row a node with the role receives, whatever its key: the data a data
 /// plane serves rather than its own configuration. The `dns` role receives every `dns.*`

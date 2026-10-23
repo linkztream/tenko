@@ -21599,6 +21599,224 @@
         }
       }
     },
+    "/api/v1/nodes/{id}/roles": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Get a node's roles",
+        "operationId": "get_node_roles",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The roles, with `ETag` once a set is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeRoles"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to read nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`node.roles.store`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "Set a node's roles",
+        "operationId": "put_node_roles",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision read, as `\"12\"`; the write fails with 412 `node.roles.revision_mismatch` when the roles changed since",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeRolesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The stored roles, with `ETag`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeRoles"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON, names an unknown role, or a header is malformed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed to change nodes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such node (`cluster.node.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`--roles` pins the roles (`node.roles.pinned`), the last controller keeps its role (`node.roles.last_controller`), or the controller role follows the cluster membership (`node.roles.controller`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The roles changed since they were read (`node.roles.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No role (`node.roles.empty`), or roles a node without the controller role does not run (`node.roles.unsupported`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`node.roles.store`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/nodes/{id}/scan-config": {
       "get": {
         "tags": [
@@ -51386,6 +51604,111 @@
           "device"
         ]
       },
+      "NodeRoles": {
+        "type": "object",
+        "description": "The roles of a node: the answer of `GET` and `PUT /nodes/{id}/roles`.",
+        "required": [
+          "node",
+          "configured",
+          "stored",
+          "pinned",
+          "controller",
+          "restart",
+          "findings"
+        ],
+        "properties": {
+          "changed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the stored set was written."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "configured": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles the node runs from its next start: the stored set, else the roles it has\nnow."
+          },
+          "controller": {
+            "type": "boolean",
+            "description": "Whether the node is a controller (a member of the controller cluster)."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusWarning"
+            },
+            "description": "What the node should know about the set, which does not refuse it:\n`node.roles.privileges`, `node.roles.dns_resolver`."
+          },
+          "node": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The node id.",
+            "minimum": 0
+          },
+          "origin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the stored set came from: `seed` (the node's `tenko.toml` at its first start)\nor `api`."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Whether `--roles` on the command line pins the node's roles; the stored set is then\nnot used and cannot be changed."
+          },
+          "restart": {
+            "$ref": "#/components/schemas/RoleRestart",
+            "description": "How the node applies the stored set."
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the stored set, also the `ETag`.",
+            "minimum": 0
+          },
+          "running": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles the node runs now; known for the node of the controller that answers."
+          },
+          "stored": {
+            "type": "boolean",
+            "description": "Whether a set is stored for the node."
+          }
+        }
+      },
+      "NodeRolesRequest": {
+        "type": "object",
+        "description": "The body of `PUT /nodes/{id}/roles`.",
+        "required": [
+          "roles"
+        ],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The roles: any of `controller`, `dns`, `dhcp` and `probe`."
+          }
+        },
+        "additionalProperties": false
+      },
       "NodeStatus": {
         "type": "object",
         "description": "Identity and roles of the node.",
@@ -63520,6 +63843,16 @@
             ]
           }
         }
+      },
+      "RoleRestart": {
+        "type": "string",
+        "description": "How a node applies its stored set.",
+        "enum": [
+          "none",
+          "scheduled",
+          "required",
+          "on_node"
+        ]
       },
       "RoleUsage": {
         "type": "object",

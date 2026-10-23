@@ -35,6 +35,9 @@ pub mod hibp;
 pub mod import;
 pub mod ipam; // WP8.2
 pub mod login;
+// node-roles: `tenko node roles show|set`.
+pub mod node_roles;
+// node-roles: end.
 pub mod prefix;
 // Bug-report diagnostics: `tenko system diagnostics`.
 pub mod system;

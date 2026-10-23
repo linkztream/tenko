@@ -17,6 +17,8 @@ import { formatBytes } from "./format";
 import { formatDateTime, formatNumber, t } from "../i18n";
 import { nodeScanPath } from "../scans/model";
 import { certificateState, linkIcon, linkState, linkWord, roleWord } from "./model";
+// node-roles: the roles editor.
+import { RolesEditor } from "./RolesEditor";
 
 export function LinkBadge(props: { node: Pick<NodeView, "connected" | "protocol"> }) {
   const s = () => linkState(props.node);
@@ -191,6 +193,8 @@ export function NodePanel(props: { id: string; onClose: () => void; onRevoked: (
                   <p class="muted">{t("nodes.panel.renewal_due")}</p>
                 </Show>
               </section>
+              {/* node-roles: the roles the node runs from its next start. */}
+              <RolesEditor id={n().id} />
               <Show when={n().roles.includes("probe")}>
                 <section class="section" aria-labelledby="node-scan">
                   <h3 id="node-scan">{t("nodes.scan.panel.title")}</h3>

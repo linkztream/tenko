@@ -254,6 +254,8 @@ export const apiOperations = [
   { id: "stop_node_dns_log", method: "post", path: "/api/v1/nodes/{id}/dns/log/stop", tags: ["dns"], summary: "Stop a node's DNS query log" },
   { id: "get_node_dns_recursion", method: "get", path: "/api/v1/nodes/{id}/dns/recursion", tags: ["dns"], summary: "Get the recursive resolver of a node" },
   { id: "prime_node_dns_recursion", method: "post", path: "/api/v1/nodes/{id}/dns/recursion/prime", tags: ["dns"], summary: "Prime a node's resolver now" },
+  { id: "get_node_roles", method: "get", path: "/api/v1/nodes/{id}/roles", tags: ["nodes"], summary: "Get a node's roles" },
+  { id: "put_node_roles", method: "put", path: "/api/v1/nodes/{id}/roles", tags: ["nodes"], summary: "Set a node's roles" },
   { id: "get_scan_config", method: "get", path: "/api/v1/nodes/{id}/scan-config", tags: ["scans"], summary: "Get a probe's scan configuration" },
   { id: "update_scan_config", method: "put", path: "/api/v1/nodes/{id}/scan-config", tags: ["scans"], summary: "Replace a probe's scan configuration" },
   { id: "resume_node_scans", method: "post", path: "/api/v1/nodes/{id}/scan/resume", tags: ["scans"], summary: "Resume a probe's scans" },

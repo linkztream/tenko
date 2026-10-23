@@ -26,6 +26,7 @@
 //! | [`observations`] | observations of connectors and probes, per source and across sources | WP2.4 |
 //! | [`proposals`] | proposals, decisions, reconcile runs, adoption policies | WP2.4 |
 //! | [`nodes`] | cluster nodes: enrolment tokens, enrolment, registry, revocation | WP2.2 |
+//! | [`node_roles`] | the roles of a node, stored and applied by a restart (node-roles) | node-roles |
 //! | [`secrets`] | operator secrets, reveal, host credentials | WP2.1 |
 //! | [`remote`] | RDP file and SSH URI of a host (API-11) | WP2.1 |
 //! | [`vlans`] | VLAN provisioning through network controllers, the prefixes of a VLAN | WP2.7 |
@@ -89,6 +90,8 @@ pub mod jobs;
 pub mod kek;
 pub mod metrics;
 pub mod moves;
+// node-roles: the stored role set of a node.
+pub mod node_roles;
 pub mod nodes;
 pub mod observations;
 pub mod prefixes;
@@ -221,6 +224,8 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(guardrails::routes())
         .merge(secrets::routes())
         .merge(nodes::routes())
+        // node-roles: the stored role set of a node.
+        .merge(node_roles::routes())
         .merge(cluster::routes())
         .merge(access::routes())
         .merge(audit_export::routes())

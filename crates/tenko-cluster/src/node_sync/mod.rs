@@ -13,6 +13,7 @@
 //! | [`cursors`] | the last ingested batch of each node, shared by every controller |
 //! | [`secrets`] | the secrets a node's configuration names, resolved with audit |
 //! | [`local`] | the node side: the configuration on the node's disk, applied atomically |
+//! | [`roles`] | the stored role set of each node, which every node receives (node-roles) |
 //!
 //! [`NodeSync`] bundles what the services need on a controller: the store, the vault (for
 //! node secrets) and the bandwidth cap. The `nodes` start step hands it to the node
@@ -26,6 +27,8 @@ pub mod cursors;
 pub mod local;
 pub mod payload;
 pub mod rate;
+// node-roles: the stored role set of each node.
+pub mod roles;
 pub mod secrets;
 pub mod source;
 pub mod tables;

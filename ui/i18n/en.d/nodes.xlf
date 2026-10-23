@@ -750,6 +750,158 @@
         <notes><note category="description">Where in a comma separated list the problem is: the entry numbers; the arguments are the count and the numbers.</note></notes>
         <segment><source>{count, plural, one {See entry {positions}.} other {See entries {positions}.}}</source></segment>
       </unit>
+      <unit id="nodes.roles.title">
+        <notes><note category="description">Heading of the roles editor of a node.</note></notes>
+        <segment><source>Roles</source></segment>
+      </unit>
+      <unit id="nodes.roles.legend">
+        <notes><note category="description">Accessible name of the group of role switches of a node.</note></notes>
+        <segment><source>Roles of the node</source></segment>
+      </unit>
+      <unit id="nodes.roles.hint.controller">
+        <notes><note category="description">Help under the controller role switch.</note></notes>
+        <segment><source>Holds the store and serves the API and the web interface.</source></segment>
+      </unit>
+      <unit id="nodes.roles.hint.dns">
+        <notes><note category="description">Help under the dns role switch.</note></notes>
+        <segment><source>Answers DNS queries.</source></segment>
+      </unit>
+      <unit id="nodes.roles.hint.dhcp">
+        <notes><note category="description">Help under the dhcp role switch.</note></notes>
+        <segment><source>Hands out DHCP leases.</source></segment>
+      </unit>
+      <unit id="nodes.roles.hint.probe">
+        <notes><note category="description">Help under the probe role switch.</note></notes>
+        <segment><source>Scans networks; its raw methods need extra privileges.</source></segment>
+      </unit>
+      <unit id="nodes.roles.lock.pinned">
+        <notes><note category="description">Help under a role switch that the command line of the node pins.</note></notes>
+        <segment><source>Set with --roles on the node's command line.</source></segment>
+      </unit>
+      <unit id="nodes.roles.lock.membership">
+        <notes><note category="description">Help under the controller role switch, which cannot be changed here.</note></notes>
+        <segment><source>Follows the cluster membership: a controller joins with a controller token and leaves from the cluster page.</source></segment>
+      </unit>
+      <unit id="nodes.roles.lock.controller_only">
+        <notes><note category="description">Help under the dns or dhcp switch of a node without the controller role.</note></notes>
+        <segment><source>Runs in a controller's process; a node of its own comes later.</source></segment>
+      </unit>
+      <unit id="nodes.roles.pinned">
+        <notes><note category="description">Note when the roles of the node are pinned by its command line; the argument is the role list as typed.</note></notes>
+        <segment><source>--roles {roles} on the command line of the node decides its roles. Change them there.</source></segment>
+      </unit>
+      <unit id="nodes.roles.running">
+        <notes><note category="description">The roles the node runs now; the argument is a list of role names.</note></notes>
+        <segment><source>Running now: {roles}</source></segment>
+      </unit>
+      <unit id="nodes.roles.save">
+        <notes><note category="description">Button that saves the roles of a node.</note></notes>
+        <segment><source>Save roles</source></segment>
+      </unit>
+      <unit id="nodes.roles.reset">
+        <notes><note category="description">Button that discards the unsaved role changes.</note></notes>
+        <segment><source>Discard changes</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm_title">
+        <notes><note category="description">Title of the dialog that confirms a change of the roles of a node.</note></notes>
+        <segment><source>Change the roles of the node?</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm_on">
+        <notes><note category="description">Line of the confirmation: the roles switched on; the argument is a list of role names.</note></notes>
+        <segment><source>Switched on: {roles}</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm_off">
+        <notes><note category="description">Line of the confirmation: the roles switched off; the argument is a list of role names.</note></notes>
+        <segment><source>Switched off: {roles}</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm_restart">
+        <notes><note category="description">Line of the confirmation for the node that serves the page: it restarts.</note></notes>
+        <segment><source>The node restarts to apply the change: its services stop for a moment, and this page follows it until it is back.</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm_on_node">
+        <notes><note category="description">Line of the confirmation for another node: it restarts when it receives the change.</note></notes>
+        <segment><source>The node applies the change when it receives it and restarts itself.</source></segment>
+      </unit>
+      <unit id="nodes.roles.confirm">
+        <notes><note category="description">Confirm button of the role change.</note></notes>
+        <segment><source>Change and restart</source></segment>
+      </unit>
+      <unit id="nodes.roles.saved">
+        <notes><note category="description">Toast after the roles of a node were saved.</note></notes>
+        <segment><source>Roles saved</source></segment>
+      </unit>
+      <unit id="nodes.roles.save_failed">
+        <notes><note category="description">Toast when the roles of a node could not be saved.</note></notes>
+        <segment><source>The roles could not be saved</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.waiting">
+        <notes><note category="description">Status while the node restarts after a role change.</note></notes>
+        <segment><source>The node is restarting…</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.down">
+        <notes><note category="description">Status while the restarting node does not answer.</note></notes>
+        <segment><source>The node is restarting; waiting for it to answer again.</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.back">
+        <notes><note category="description">Status once the node runs the new roles; the argument is a list of role names.</note></notes>
+        <segment><source>The node is back and runs {roles}.</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.late">
+        <notes><note category="description">Status when the node has not come back with the new roles in time.</note></notes>
+        <segment><source>The node has not come back with the new roles yet. Check the service on the host.</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.required">
+        <notes><note category="description">Note when the node has no service manager that restarts it.</note></notes>
+        <segment><source>The node has no service manager that restarts it: restart tenko serve on the host to apply the change.</source></segment>
+      </unit>
+      <unit id="nodes.roles.restart.on_node">
+        <notes><note category="description">Note after a change of another node's roles.</note></notes>
+        <segment><source>The node applies the change when it receives it.</source></segment>
+      </unit>
+      <unit id="nodes.roles.finding.privileges">
+        <notes><note category="description">Warning: roles need a systemd drop-in the node lacks; the arguments are role names and drop-in file names.</note></notes>
+        <segment><source>The role(s) {roles} need raw sockets this node does not have. Install the systemd drop-in(s) {dropins} (deploy/install.sh --reconfigure --roles does) and restart the service.</source></segment>
+      </unit>
+      <unit id="nodes.roles.finding.dns_resolver">
+        <notes><note category="description">Warning: the dns role leaves a node that is its host's resolver; the argument is the installer's state file.</note></notes>
+        <segment><source>The installer pointed this host's resolver at the node (recorded in {file}). Without the dns role the host resolves no names: run the installer with --reconfigure and without --use-self first, or keep the dns role.</source></segment>
+      </unit>
+      <unit id="nodes.roles.self_title">
+        <notes><note category="description">Heading of the section with the roles of the controller that serves the page.</note></notes>
+        <segment><source>This controller</source></segment>
+      </unit>
+      <unit id="nodes.roles.self_hint">
+        <notes><note category="description">Aside of the section of this controller; the argument is its node id.</note></notes>
+        <segment><source>node {id}, the controller that serves this page</source></segment>
+      </unit>
+      <unit id="errors.node.roles.pinned">
+        <notes><note category="description">Error: --roles on the node's command line pins its roles.</note></notes>
+        <segment><source>--roles on the node's command line decides its roles; change them there.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.last_controller">
+        <notes><note category="description">Error: the last controller keeps the controller role.</note></notes>
+        <segment><source>This node is the last controller of the cluster; it keeps the controller role.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.controller">
+        <notes><note category="description">Error: the controller role follows the cluster membership.</note></notes>
+        <segment><source>The controller role follows the cluster membership: a controller joins with a controller token and leaves from the cluster page.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.unsupported">
+        <notes><note category="description">Error: a node without the controller role runs only the probe role.</note></notes>
+        <segment><source>A node without the controller role runs the probe role and no other for now.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.empty">
+        <notes><note category="description">Error: a node needs at least one role.</note></notes>
+        <segment><source>A node runs at least one role.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.revision_mismatch">
+        <notes><note category="description">Error: the roles of the node changed since they were read.</note></notes>
+        <segment><source>The roles of the node were changed in the meantime. Reload them and try again.</source></segment>
+      </unit>
+      <unit id="errors.node.roles.store">
+        <notes><note category="description">Error: the store could not be read or written.</note></notes>
+        <segment><source>The store is unavailable. Try again later.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

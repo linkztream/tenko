@@ -268,6 +268,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/nodes/enrolments", "list_enrolments"),
     ("POST", "/nodes/enrolments", "create_enrolment"),
     ("DELETE", "/nodes/enrolments/{id}", "delete_enrolment"),
+    // node-roles: the stored role set of a node.
+    ("GET", "/nodes/{id}/roles", "get_node_roles"),
+    ("PUT", "/nodes/{id}/roles", "put_node_roles"),
     // cluster
     ("GET", "/cluster/members", "list_cluster_members"),
     (

@@ -343,7 +343,7 @@ The data plane survives the control plane. At home, all roles run in one process
 
 | ID | Requirement | Phase | Priority |
 |---|---|---|---|
-| OPS-01 | One statically linked binary runs any combination of roles: `controller`, `dns`, `dhcp`, `probe` (ADR 0004). | 1 | Must |
+| OPS-01 | One statically linked binary runs any combination of roles: `controller`, `dns`, `dhcp`, `probe` (ADR 0004). Note: a node's roles are changed from the web UI, `PUT /api/v1/nodes/{id}/roles` and `tenko node roles set`; the stored set decides at the next start unless `--roles` pins them, and the node restarts itself under a service manager ([cluster.md](cluster.md#13-changing-a-nodes-roles)). | 1 | Must |
 | OPS-02 | The data plane never depends on the control plane: each DNS and DHCP node keeps a durable local copy of zones, leases and configuration and keeps answering when the database, UI or controllers are down, with no database round trip in the DHCP DORA path or the DNS query path. | 1 | Must |
 | OPS-03 | The controller store runs single-node and as a 3-node cluster, and the cluster survives the loss of a controller. | 1 | Must |
 | OPS-04 | Node-to-node communication over gRPC with mTLS, an internal CA and enrollment tokens. The same mechanism serves Docker, LXC and native installs. | 1 | Must |

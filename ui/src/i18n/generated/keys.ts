@@ -3192,6 +3192,13 @@ export type MessageKey =
   | "errors.node.config.revision_mismatch"
   | "errors.node.config.secret"
   | "errors.node.config.vault_unavailable"
+  | "errors.node.roles.controller"
+  | "errors.node.roles.empty"
+  | "errors.node.roles.last_controller"
+  | "errors.node.roles.pinned"
+  | "errors.node.roles.revision_mismatch"
+  | "errors.node.roles.store"
+  | "errors.node.roles.unsupported"
   | "errors.queue.changed"
   | "errors.queue.full"
   | "errors.queue.io"
@@ -4751,6 +4758,37 @@ export type MessageKey =
   | "nodes.revoke.failed"
   | "nodes.revoke.hint"
   | "nodes.revoke.title"
+  | "nodes.roles.confirm"
+  | "nodes.roles.confirm_off"
+  | "nodes.roles.confirm_on"
+  | "nodes.roles.confirm_on_node"
+  | "nodes.roles.confirm_restart"
+  | "nodes.roles.confirm_title"
+  | "nodes.roles.finding.dns_resolver"
+  | "nodes.roles.finding.privileges"
+  | "nodes.roles.hint.controller"
+  | "nodes.roles.hint.dhcp"
+  | "nodes.roles.hint.dns"
+  | "nodes.roles.hint.probe"
+  | "nodes.roles.legend"
+  | "nodes.roles.lock.controller_only"
+  | "nodes.roles.lock.membership"
+  | "nodes.roles.lock.pinned"
+  | "nodes.roles.pinned"
+  | "nodes.roles.reset"
+  | "nodes.roles.restart.back"
+  | "nodes.roles.restart.down"
+  | "nodes.roles.restart.late"
+  | "nodes.roles.restart.on_node"
+  | "nodes.roles.restart.required"
+  | "nodes.roles.restart.waiting"
+  | "nodes.roles.running"
+  | "nodes.roles.save"
+  | "nodes.roles.save_failed"
+  | "nodes.roles.saved"
+  | "nodes.roles.self_hint"
+  | "nodes.roles.self_title"
+  | "nodes.roles.title"
   | "nodes.scan.applied.active"
   | "nodes.scan.applied.applied_at"
   | "nodes.scan.applied.error"
@@ -7337,6 +7375,14 @@ export interface MessageArgs {
   "nodes.revoke.confirm_title": { name: string | number };
   "nodes.revoke.done": { name: string | number };
   "nodes.revoke.failed": { name: string | number };
+  "nodes.roles.confirm_off": { roles: string | number };
+  "nodes.roles.confirm_on": { roles: string | number };
+  "nodes.roles.finding.dns_resolver": { file: string | number };
+  "nodes.roles.finding.privileges": { dropins: string | number; roles: string | number };
+  "nodes.roles.pinned": { roles: string | number };
+  "nodes.roles.restart.back": { roles: string | number };
+  "nodes.roles.running": { roles: string | number };
+  "nodes.roles.self_hint": { id: string | number };
   "nodes.scan.applied.error": { error: string | number };
   "nodes.scan.back": { name: string | number };
   "nodes.scan.devices.error": { column: string | number; error: string | number; n: string | number };
@@ -10790,6 +10836,13 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.node.config.revision_mismatch",
   "errors.node.config.secret",
   "errors.node.config.vault_unavailable",
+  "errors.node.roles.controller",
+  "errors.node.roles.empty",
+  "errors.node.roles.last_controller",
+  "errors.node.roles.pinned",
+  "errors.node.roles.revision_mismatch",
+  "errors.node.roles.store",
+  "errors.node.roles.unsupported",
   "errors.queue.changed",
   "errors.queue.full",
   "errors.queue.io",
@@ -12349,6 +12402,37 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.revoke.failed",
   "nodes.revoke.hint",
   "nodes.revoke.title",
+  "nodes.roles.confirm",
+  "nodes.roles.confirm_off",
+  "nodes.roles.confirm_on",
+  "nodes.roles.confirm_on_node",
+  "nodes.roles.confirm_restart",
+  "nodes.roles.confirm_title",
+  "nodes.roles.finding.dns_resolver",
+  "nodes.roles.finding.privileges",
+  "nodes.roles.hint.controller",
+  "nodes.roles.hint.dhcp",
+  "nodes.roles.hint.dns",
+  "nodes.roles.hint.probe",
+  "nodes.roles.legend",
+  "nodes.roles.lock.controller_only",
+  "nodes.roles.lock.membership",
+  "nodes.roles.lock.pinned",
+  "nodes.roles.pinned",
+  "nodes.roles.reset",
+  "nodes.roles.restart.back",
+  "nodes.roles.restart.down",
+  "nodes.roles.restart.late",
+  "nodes.roles.restart.on_node",
+  "nodes.roles.restart.required",
+  "nodes.roles.restart.waiting",
+  "nodes.roles.running",
+  "nodes.roles.save",
+  "nodes.roles.save_failed",
+  "nodes.roles.saved",
+  "nodes.roles.self_hint",
+  "nodes.roles.self_title",
+  "nodes.roles.title",
   "nodes.scan.applied.active",
   "nodes.scan.applied.applied_at",
   "nodes.scan.applied.error",

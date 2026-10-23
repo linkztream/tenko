@@ -47,8 +47,9 @@ The configuration of a node is the set of rows keyed by its node id in the confi
 | Table | Role | Contents |
 |---|---|---|
 | `scan.probe_config` | `probe` | The scan configuration of the probe, one row per node (section 4.3 and [scanning.md](scanning.md#75-configuration-from-the-controller)) |
+| `nodes.roles` | Every node | The node's stored role set, which decides its roles at its next start unless `--roles` pins them ([cluster.md](cluster.md#13-changing-a-nodes-roles)). A changed row makes the node restart under a service manager |
 
-A node with the roles `dns` or `dhcp` has no configuration table yet: its subset is empty and its stream carries empty messages. Those roles add their tables to the same list.
+The roles `dns` and `dhcp` have no configuration table of their own yet: a node with them receives its row of `nodes.roles` and nothing else. Those roles add their tables to the same list.
 
 A row is a CBOR map. A field `secrets` in it names the vault secrets the node may fetch (section 6); other fields are ignored by that mechanism.
 

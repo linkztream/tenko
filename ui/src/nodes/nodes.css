@@ -13,6 +13,10 @@
 }
 .nodes-grid { position: relative; display: flex; flex-direction: column; min-height: 200px; max-height: 60vh; }
 .nodes-tokens { padding: 0 var(--sp-6); }
+/* node-roles: the roles of this controller, and the editor in the panel. */
+.nodes-self { padding: 0 var(--sp-6); }
+.nodes-self .node-roles { max-inline-size: 640px; padding: 0; }
+.node-roles .check-row[data-locked="membership"], .node-roles .check-row[data-locked="controller_only"] { cursor: default; }
 .node-name { color: var(--ink); font-weight: var(--fw-medium); }
 .grid tr.node-mismatch td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--conflict); }
 .grid tr.current td { background: var(--accent-wash); }

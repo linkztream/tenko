@@ -433,9 +433,17 @@ mod tests {
         let subset = Subset::new(NodeId(1001), &[Role::Probe]);
         assert!(!subset.is_empty());
         assert_eq!(subset.role_tables(), []);
-        // A dns node has no configuration rows yet; its tables are declared for Phase 5.
+        // A dns node has no configuration rows of its role yet; its tables are declared for
+        // Phase 5.
         let dns = Subset::new(NodeId(1001), &[Role::Dns]);
-        assert!(dns.is_empty());
+        // node-roles: every node receives its stored role set.
+        assert!(!dns.is_empty());
+        assert!(dns.contains(
+            &TableName::from_static("nodes.roles"),
+            &encode_key(&1001u64)
+        ));
+        assert!(!dns.contains(&PROBE_CONFIG, &encode_key(&1001u64)));
+        // node-roles: end.
         let tables: Vec<&str> = dns.role_tables().iter().map(TableName::as_str).collect();
         // WP10.0: the trust anchors, the negative trust anchors and their index.
         assert_eq!(tables.len(), 12);

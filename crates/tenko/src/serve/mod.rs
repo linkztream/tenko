@@ -413,9 +413,12 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
 ///
 /// The [`ConfigError`] of the first problem.
 pub fn load(args: &ServeArgs) -> Result<Resolved, ConfigError> {
-    config::load(&args.sources(), std::env::vars())?
+    let mut resolved = config::load(&args.sources(), std::env::vars())?
         .config
-        .resolve()
+        .resolve()?;
+    // node-roles: `--roles` pins the roles; the stored role set of the node is then not used.
+    resolved.roles_pinned = args.roles.is_some();
+    Ok(resolved)
 }
 
 /// Reports roles this build does not run. Returns the exit status when the node has nothing
@@ -1094,6 +1097,28 @@ async fn start(
         );
     }
     let ipam_on = modules.contains(crate::modules::Module::Ipam);
+    // node-roles: the node's stored role set decides over the file's, unless `--roles` pins
+    // the roles; the controller role stays the file's (crate::node_roles).
+    let file_roles = resolved.roles;
+    let stored_roles = if resolved.roles_pinned {
+        None
+    } else {
+        crate::node_roles::stored(store_dyn.as_ref(), resolved.node_id)
+            .await
+            .map_err(|error| StartError::coded("store", &error))?
+    };
+    let with_roles = Resolved {
+        roles: crate::node_roles::effective(file_roles, resolved.roles_pinned, stored_roles),
+        ..resolved.clone()
+    };
+    tracing::info!(
+        "{}",
+        crate::node_roles::describe(with_roles.roles, resolved.roles_pinned, stored_roles)
+    );
+    let resolved = &with_roles;
+    let mut role_task = None;
+    let roles_stop = running.stop.subscribe();
+    // node-roles: end.
 
     let (mut cluster_peers, ring) = steps
         .run(
@@ -1729,6 +1754,24 @@ async fn start(
                     restart.clone(),
                 ));
             server.extensions.insert(module_switch);
+            // node-roles: the role switch of this node: the routes of /nodes/{id}/roles, the
+            // seed of the stored set and the follower that restarts on a change.
+            let (role_service, task) = crate::node_roles::start(crate::node_roles::Parts {
+                store: Arc::clone(&store_dyn),
+                state: state.clone(),
+                own: tenko_api::routes::node_roles::OwnNode {
+                    id: resolved.node_id,
+                    running: resolved.roles,
+                    pinned: resolved.roles_pinned,
+                },
+                file: file_roles,
+                host: crate::node_roles::ServeHost::of(resolved),
+                restart: restart.clone(),
+                stop: roles_stop,
+            });
+            server.extensions.insert(role_service);
+            role_task = Some(task);
+            // node-roles: end.
             if let Some(updates) = &updates {
                 let service: Arc<dyn tenko_api::routes::system::updates::UpdateService> =
                     Arc::new(updates.clone());
@@ -1840,6 +1883,8 @@ async fn start(
         })
         .await?;
     running.tasks.extend(metrics_tasks);
+    // node-roles: the follower of the stored role set stops with the server.
+    running.tasks.extend(role_task);
     let (api_tls, tls_policy) = (tls.service.clone(), tls.policy);
     let dns_role = steps
         .run("dns", async {

@@ -3086,6 +3086,11 @@ pub struct Resolved {
     pub data_dir: PathBuf,
     /// Roles.
     pub roles: RoleSet,
+    // node-roles: the pin of the roles.
+    /// Whether `--roles` on the command line gave the roles: they then pin the set, and the
+    /// stored role set of the node (`nodes.roles`) is not used. Set by `tenko serve`.
+    pub roles_pinned: bool,
+    // node-roles: end.
     /// Node id.
     pub node_id: NodeId,
     /// Listen addresses.
@@ -3271,6 +3276,8 @@ impl Config {
             config: self.clone(),
             data_dir,
             roles,
+            // node-roles: the file alone never pins the roles.
+            roles_pinned: false,
             node_id: NodeId(self.node.id),
             listen,
             tls,

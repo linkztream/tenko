@@ -33,13 +33,15 @@ use crate::{
 /// | `import` | import and export (WP1.5) |
 /// | `ipam` | the IPAM domain (WP1.4) |
 /// | `jobs` | the job engine (WP1.6) |
+/// | `nodes` | the stored role set of each node (node-roles) |
 /// | `scan` | discovery probes (WP2.3) |
 /// | `sys` | store, API platform and shared codes (WP1.0, WP1.1, WP1.7) |
 /// | `vault` | the vault (WP1.3) |
 // WP7.0: `dhcp` added for Phase 3.
-pub const NAMESPACES: [&str; 13] = [
+// node-roles: `nodes` added for the stored role sets.
+pub const NAMESPACES: [&str; 14] = [
     "auth", "backup", "cluster", "connect", "dhcp", "dns", "i18n", "import", "ipam", "jobs",
-    "scan", "sys", "vault",
+    "nodes", "scan", "sys", "vault",
 ];
 
 /// Maximum length of a namespaced name in bytes.

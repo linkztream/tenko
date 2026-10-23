@@ -36,6 +36,8 @@ pub mod kek;
 pub mod logging;
 pub mod modules;
 pub mod node;
+// node-roles: the role switch of a node.
+pub mod node_roles;
 pub mod platform;
 pub mod plugin;
 pub mod serve;

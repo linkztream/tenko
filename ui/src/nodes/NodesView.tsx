@@ -29,6 +29,8 @@ import { useCommands } from "../shell/commands";
 import { EnrolDialog } from "./EnrolDialog";
 import { linkState, linkWord, roleWord, tokenStateWord } from "./model";
 import { CertificateText, LinkBadge, NodePanel } from "./NodePanel";
+// node-roles: the roles of this controller.
+import { RolesEditor } from "./RolesEditor";
 import "./nodes.css";
 
 /** The status warning of nodes with a refused handshake (docs/cluster.md, section 5). */
@@ -219,6 +221,18 @@ export default function NodesView() {
             />
           </div>
 
+          {/* node-roles: the roles of the controller that serves this page, which the node list does not show. */}
+          <Show when={system()?.node.id}>
+            {(id) => (
+              <section class="page-section nodes-self" aria-labelledby="nodes-self" data-testid="nodes-self">
+                <h2 id="nodes-self">
+                  {t("nodes.roles.self_title")}
+                  <span class="aside">{t("nodes.roles.self_hint", { id: id() })}</span>
+                </h2>
+                <RolesEditor id={id()} bare />
+              </section>
+            )}
+          </Show>
           <Show when={admin()}>
             <section class="page-section nodes-tokens" aria-labelledby="nodes-tokens" data-testid="nodes-tokens">
               <h2 id="nodes-tokens">
