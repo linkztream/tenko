@@ -1,8 +1,10 @@
 // Keeps a fetched value current with server-sent events: the pattern every live view
 // uses. Subscribe first, then fetch; an event of a subscribed topic that is newer than
-// the fetched revision (and relevant, if a filter is given) schedules a refetch; a reset
-// refetches at once. Rows never jump under the cursor because the view decides how to
-// apply the new value (see design/README.md, "Live updates via SSE").
+// the fetched revision (and relevant, if a filter is given) schedules a refetch, which is
+// dropped if a read in the meantime reached that revision (a view that refetches after its
+// own write already has the event's change, and a second load would rebuild its rows under
+// the user's hands); a reset refetches at once. Rows never jump under the cursor because
+// the view decides how to apply the new value (see design/README.md, "Live updates via SSE").
 import { createResource, onCleanup, type Resource } from "solid-js";
 import { events as defaultStream, type ApiEvent, type EventStream, type Topic } from "./events";
 
@@ -62,16 +64,28 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
   // aborts the older one and only its answer is applied.
   const reload = () => void refetch(false);
 
-  const schedule = () => {
+  // The newest revision among the events behind the scheduled reload; null once one of them
+  // had no revision (a system event), which no read satisfies.
+  let behind: number | null | undefined;
+
+  const schedule = (eventRevision: number | undefined) => {
+    if (eventRevision === undefined) behind = null;
+    else if (behind !== null) behind = behind === undefined ? eventRevision : Math.max(behind, eventRevision);
     clearTimeout(timer);
-    timer = setTimeout(reload, options.debounceMs ?? 150);
+    timer = setTimeout(() => {
+      const wanted = behind;
+      behind = undefined;
+      // A read since the events (the view's own refetch after its write) reached their revision.
+      if (typeof wanted === "number" && revision !== undefined && wanted <= revision) return;
+      reload();
+    }, options.debounceMs ?? 150);
   };
 
   const offs = options.topics.flatMap((topic) => [
     stream.subscribe(topic, (event) => {
       if (event.revision !== undefined && revision !== undefined && event.revision <= revision) return;
       if (options.relevant && !options.relevant(event)) return;
-      schedule();
+      schedule(event.revision);
     }),
     stream.onReset(topic, reload),
   ]);

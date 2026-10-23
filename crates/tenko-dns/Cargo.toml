@@ -70,5 +70,11 @@ tenko-vault = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 time = { workspace = true }
 
+# The no-allocation test is its own harness: the counting allocator counts every thread, and
+# libtest's main thread allocates right after it has spawned the test thread (see the file).
+[[test]]
+name = "alloc"
+harness = false
+
 [lints]
 workspace = true

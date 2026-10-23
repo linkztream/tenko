@@ -19,6 +19,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - `docs/QUICKSTART.md`: the shortest path from nothing to a running node with a first network (the installer, the four roles, a prefix with its zones, a scope with DDNS and scanning, the firewall ports), linked from the README and the installer's summary.
 - "Report a bug" in the account menu of the web UI and `tenko system diagnostics`: `GET /api/v1/system/diagnostics` answers what a bug report needs about the node (version, platform, security profile, roles, modules, uptime, the active health findings as code and severity, and the last 20 log lines at warn level or above), with every IP address, MAC address, host name, zone name and account name replaced by a numbered placeholder from the documentation ranges and `example.test` before it leaves the node; every read is audited as `sys.diagnostics`. The dialog shows the text in full, then opens the repository's new-issue page in a new tab with the bug-report template prefilled, under the person's own GitHub account (the product holds no GitHub token and the node sends nothing), or copies the text to the clipboard; under the Hardened profile it offers the copy only (TGL-30).
 
+### Fixed
+
+- A live view that reads again after its own write no longer loads a second time when the event of that write arrives a moment later: the rows were rebuilt once more about 150 ms after the change, which lost a drag started in between (the order of the DNS views).
+
 ## [0.0.3] - 2026-10-22
 
 ### Added

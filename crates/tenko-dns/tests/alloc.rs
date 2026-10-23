@@ -11,11 +11,23 @@
 //! the counter sees an allocation, so a pass means something.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
-//! the measured sections one after another: no other test of the binary runs beside them.
+//! the measured sections one after another, and the binary is its own harness (`harness =
+//! false` in Cargo.toml): libtest's main thread allocates right after it has spawned the test
+//! thread (the map and the queue of running tests, the context and the waker of the channel
+//! it then waits on: four allocations, 900 bytes), and on a loaded machine that lands in the
+//! first measured section once in thousands of runs. With no harness the measuring thread is
+//! the only one. The binary speaks what nextest and `cargo test` send: `--list --format
+//! terse` names the test, `--exact <name>` or a name filter and `--nocapture` run it.
+//!
+//! A failure names the calls after which the counter moved and what they added; with
+//! `TENKO_ALLOC_BACKTRACE=1` it also prints a backtrace of the measuring thread at the first.
 
-use std::{alloc::System, hint::black_box, net::Ipv4Addr, sync::Arc, time::Instant};
+use std::{
+    alloc::System, backtrace::Backtrace, fmt::Write as _, hint::black_box, net::Ipv4Addr,
+    sync::Arc, time::Instant,
+};
 
-use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
+use stats_alloc::{INSTRUMENTED_SYSTEM, Region, Stats, StatsAlloc};
 use tenko_core::{
     Revision,
     dns::{
@@ -48,29 +60,150 @@ use tenko_dns::{
 #[global_allocator]
 static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 
+/// Set to anything but empty or `0`, a failure also prints a backtrace of the measuring
+/// thread at the first step after which the counter had moved.
+const BACKTRACE_VAR: &str = "TENKO_ALLOC_BACKTRACE";
+
+/// How many steps a tally keeps.
+const KEPT_STEPS: usize = 8;
+
+/// Where the measured rounds allocated: the first steps of the measured closure after which
+/// the counter had moved, each with the allocations (reallocations counted) and the bytes it
+/// added. A closure names its steps with [`Tally::step`] after each call of the path it
+/// measures, so a failure names the call and not only the total.
+struct Tally {
+    last: Stats,
+    seen: [Option<(&'static str, usize, usize)>; KEPT_STEPS],
+    count: usize,
+    want_backtrace: bool,
+    backtrace: Option<Backtrace>,
+}
+
+impl Tally {
+    fn new(want_backtrace: bool) -> Self {
+        Self {
+            last: GLOBAL.stats(),
+            seen: [None; KEPT_STEPS],
+            count: 0,
+            want_backtrace,
+            backtrace: None,
+        }
+    }
+
+    /// Forgets what the warm-up round did and starts from the counter as it is now.
+    fn reset(&mut self) {
+        self.seen = [None; KEPT_STEPS];
+        self.count = 0;
+        self.backtrace = None;
+        self.last = GLOBAL.stats();
+    }
+
+    /// Records `name` when the counter moved since the previous step.
+    fn step(&mut self, name: &'static str) {
+        let now = GLOBAL.stats();
+        let allocations = (now.allocations - self.last.allocations)
+            + (now.reallocations - self.last.reallocations);
+        if allocations == 0 {
+            return;
+        }
+        let bytes = now.bytes_allocated - self.last.bytes_allocated;
+        if let Some(slot) = self.seen.get_mut(self.count) {
+            *slot = Some((name, allocations, bytes));
+        }
+        self.count += 1;
+        if self.want_backtrace && self.backtrace.is_none() {
+            // Capturing allocates: only once a failure is a fact, after the record above.
+            self.backtrace = Some(Backtrace::force_capture());
+        }
+        self.last = GLOBAL.stats();
+    }
+}
+
+/// What [`measure`] saw: the counts over the measured rounds and the steps they moved after.
+struct Measured {
+    allocations: usize,
+    reallocations: usize,
+    bytes: usize,
+    tally: Tally,
+}
+
+impl Measured {
+    /// Fails with `what` and where the counter moved unless nothing was allocated.
+    fn assert_none(&self, what: &str) {
+        if (self.allocations, self.reallocations, self.bytes) == (0, 0, 0) {
+            return;
+        }
+        panic!(
+            "{what}: (allocations, reallocations, bytes) = ({}, {}, {}), expected (0, 0, 0)\n{}",
+            self.allocations,
+            self.reallocations,
+            self.bytes,
+            self.report()
+        );
+    }
+
+    fn report(&self) -> String {
+        let mut out = String::new();
+        for (name, allocations, bytes) in self.tally.seen.iter().flatten() {
+            let _ = writeln!(
+                out,
+                "  after `{name}`: {allocations} allocation(s), {bytes} bytes"
+            );
+        }
+        if self.tally.count > KEPT_STEPS {
+            let _ = writeln!(out, "  and {} more step(s)", self.tally.count - KEPT_STEPS);
+        }
+        match &self.tally.backtrace {
+            Some(backtrace) => {
+                let _ = writeln!(
+                    out,
+                    "  the measuring thread at the first (the counts above include what \
+                     capturing it allocated):\n{backtrace}"
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "  set {BACKTRACE_VAR}=1 for a backtrace of the measuring thread at the first"
+                );
+            }
+        }
+        out
+    }
+}
+
 /// Runs `f` `rounds` times after one warm-up round and returns the allocations, the
-/// reallocations and the bytes allocated during the measured rounds.
-fn measure(rounds: usize, mut f: impl FnMut()) -> (usize, usize, usize) {
-    f();
+/// reallocations and the bytes allocated during the measured rounds, with the steps they
+/// followed.
+fn measure(rounds: usize, mut f: impl FnMut(&mut Tally)) -> Measured {
+    let want_backtrace = std::env::var_os(BACKTRACE_VAR).is_some_and(|v| !v.is_empty() && v != "0");
+    let mut tally = Tally::new(want_backtrace);
+    f(&mut tally);
+    tally.reset();
     let region = Region::new(GLOBAL);
     for _ in 0..rounds {
-        f();
+        f(&mut tally);
     }
     let stats = region.change();
-    (
-        stats.allocations,
-        stats.reallocations,
-        stats.bytes_allocated,
-    )
+    Measured {
+        allocations: stats.allocations,
+        reallocations: stats.reallocations,
+        bytes: stats.bytes_allocated,
+        tally,
+    }
 }
 
 fn the_counter_sees_a_deliberate_allocation() {
-    let (allocations, _, bytes) = measure(10, || {
+    let measured = measure(10, |t| {
         let v: Vec<u8> = black_box(Vec::with_capacity(64));
         black_box(&v);
+        t.step("Vec::with_capacity");
     });
-    assert_eq!(allocations, 10);
-    assert!(bytes >= 640);
+    assert_eq!(measured.allocations, 10);
+    assert!(measured.bytes >= 640);
+    // And the tally names the step, so a failure's report means something too.
+    assert_eq!(measured.tally.count, 10);
+    assert_eq!(measured.tally.seen[0], Some(("Vec::with_capacity", 1, 64)));
 }
 
 fn soa_rdata() -> Vec<u8> {
@@ -120,9 +253,10 @@ fn parse_and_build_do_not_allocate() {
     let soa = soa_rdata();
     let mut cookie = [0u8; 24];
     cookie[0] = 1;
-    let (allocations, reallocations, bytes) = measure(1000, || {
+    let measured = measure(1000, |t| {
         for query in &queries {
             let parsed = codec.parse(query, &mut request).expect("parse");
+            t.step("parse");
             answer.clear();
             answer.authoritative = true;
             answer
@@ -146,20 +280,20 @@ fn parse_and_build_do_not_allocate() {
                     &[192, 0, 2, 53],
                 )
                 .expect("push");
+            t.step("push");
             answer.set_cookie(&cookie).expect("cookie");
+            t.step("set_cookie");
             answer.set_extended_error(15, "blocked").expect("ede");
+            t.step("set_extended_error");
             let limit = request.max_udp_len();
             codec
                 .build(&parsed, &request, &answer, limit, &mut out)
                 .expect("build");
+            t.step("build");
             black_box(&out);
         }
     });
-    assert_eq!(
-        (allocations, reallocations, bytes),
-        (0, 0, 0),
-        "the codec allocated on the query path"
-    );
+    measured.assert_none("the codec allocated on the query path");
 }
 
 fn truncation_and_formerr_do_not_allocate() {
@@ -168,26 +302,31 @@ fn truncation_and_formerr_do_not_allocate() {
     let mut request = Request::default();
     let mut out = Vec::with_capacity(MAX_MESSAGE_LEN);
     let mut answer = AnswerBuf::with_capacity(128, 16_384);
-    let (allocations, reallocations, _) = measure(200, || {
+    let measured = measure(200, |t| {
         answer.clear();
         for last in 0..100u8 {
             answer
                 .push(Section::Answer, Owner::Qname, 1, 300, &[192, 0, 2, last])
                 .expect("push");
         }
+        t.step("push");
         let parsed = codec.parse(&queries[1], &mut request).expect("parse");
+        t.step("parse");
         let outcome = codec
             .build(&parsed, &request, &answer, 512, &mut out)
             .expect("build");
         assert!(outcome.truncated);
+        t.step("build (truncated)");
         let mut broken = [0u8; 20];
         broken[..12].copy_from_slice(&queries[1][..12]);
         // A 63-octet label that runs past the end.
         broken[12] = 63;
         assert!(codec.parse(&broken, &mut request).is_err());
+        t.step("parse (malformed)");
         assert!(wire::write_formerr(&broken, &mut out));
+        t.step("write_formerr");
     });
-    assert_eq!((allocations, reallocations), (0, 0));
+    measured.assert_none("truncation or FORMERR allocated");
 }
 
 fn stamp() -> Stamp {
@@ -270,17 +409,14 @@ fn index_lookups_do_not_allocate() {
     .iter()
     .map(|text| NameBuf::from_dns_name(&DnsName::new(text).expect("name")))
     .collect();
-    let (allocations, reallocations, _) = measure(1000, || {
+    let measured = measure(1000, |t| {
         for name in &names {
             let lookup = index.lookup(&DefaultScopes, name.as_wire(), tenko_core::dns::Rtype::A);
             black_box(matches!(lookup, Lookup::Answer { .. }));
+            t.step("lookup");
         }
     });
-    assert_eq!(
-        (allocations, reallocations),
-        (0, 0),
-        "the index allocated on the query path"
-    );
+    measured.assert_none("the index allocated on the query path");
 }
 
 fn zone_row() -> Zone {
@@ -444,18 +580,15 @@ fn the_full_query_path_does_not_allocate() {
         local: "192.0.2.53:53".parse().expect("local"),
         transport: QueryTransport::Udp,
     };
-    let (allocations, reallocations, bytes) = measure(500, || {
+    let measured = measure(500, |t| {
         for query in &queries {
             let reply = responder.respond(query, &conn, &clock, Instant::now(), &mut scratch);
             assert_eq!(reply, Reply::Send);
             black_box(&scratch.out);
+            t.step("respond");
         }
     });
-    assert_eq!(
-        (allocations, reallocations, bytes),
-        (0, 0, 0),
-        "the full query path allocated"
-    );
+    measured.assert_none("the full query path allocated");
 }
 
 /// An upstream's answer to `www.example.org` A: one record, TTL 300.
@@ -557,23 +690,21 @@ fn the_cache_hit_path_does_not_allocate() {
     };
     let mut scratch = Scratch::new();
     let clock = Clock::now();
-    let (allocations, reallocations, bytes) = measure(500, || {
+    let measured = measure(500, |t| {
         for query in &hits {
             let reply = responder.respond(query, &inside, &clock, Instant::now(), &mut scratch);
             assert_eq!(reply, Reply::Send, "a cache hit");
             assert_eq!(scratch.out[3] & 0x0f, 0);
             black_box(&scratch.out);
+            t.step("respond (cache hit)");
         }
         let reply = responder.respond(&hits[0], &outside, &clock, Instant::now(), &mut scratch);
         assert_eq!(reply, Reply::Send, "refused");
         assert_eq!(scratch.out[3] & 0x0f, 5);
         black_box(&scratch.out);
+        t.step("respond (recursion refused)");
     });
-    assert_eq!(
-        (allocations, reallocations, bytes),
-        (0, 0, 0),
-        "the cache hit path allocated"
-    );
+    measured.assert_none("the cache hit path allocated");
     assert!(forwarder.stats().hits >= 1_500);
 
     // WP10.0 (E40): the rendering by state and flags on the same path: a secure hit for a
@@ -620,7 +751,7 @@ fn the_cache_hit_path_does_not_allocate() {
         (ask(13, "bogus.example.org", true, false), 2, 0, false),
         (ask(14, "bogus.example.org", true, true), 0, 2, false),
     ];
-    let (allocations, reallocations, bytes) = measure(500, || {
+    let measured = measure(500, |t| {
         for (query, rcode, answers, ad) in &cases {
             let reply = responder.respond(query, &inside, &clock, Instant::now(), &mut scratch);
             assert_eq!(reply, Reply::Send, "a cache hit");
@@ -630,13 +761,10 @@ fn the_cache_hit_path_does_not_allocate() {
                 (*rcode, *answers, *ad)
             );
             black_box(&scratch.out);
+            t.step("respond (validated hit)");
         }
     });
-    assert_eq!(
-        (allocations, reallocations, bytes),
-        (0, 0, 0),
-        "the rendering by state and flags allocated"
-    );
+    measured.assert_none("the rendering by state and flags allocated");
     // WP10.0: end.
     stop.cancel();
 }
@@ -839,22 +967,20 @@ fn the_policy_and_the_limiter_do_not_allocate() {
     let mut scratch = Scratch::new();
     let clock = Clock::now();
     let mut rewritten = 0u32;
-    let (allocations, reallocations, bytes) = measure(500, || {
+    let measured = measure(500, |t| {
         for query in queries.iter().chain(&hits) {
             let reply = responder.respond(query, &client, &clock, Instant::now(), &mut scratch);
             black_box((reply, &scratch.out));
+            t.step("respond (policy, limiter)");
         }
         // The cache hit of www.example.org: its address is in the IP trigger.
         let reply = responder.respond(&hits[0], &client, &clock, Instant::now(), &mut scratch);
         if reply == Reply::Send && scratch.out[3] & 0x0f == 3 {
             rewritten += 1;
         }
+        t.step("respond (cache hit rewritten)");
     });
-    assert_eq!(
-        (allocations, reallocations, bytes),
-        (0, 0, 0),
-        "the policy or the limiter allocated"
-    );
+    measured.assert_none("the policy or the limiter allocated");
     assert!(rewritten > 0, "the cache hit was rewritten to NXDOMAIN");
     // The flood was limited, and the policy blocked.
     let counts = tenko_dns::status::RateCounts::read();
@@ -864,7 +990,8 @@ fn the_policy_and_the_limiter_do_not_allocate() {
     stop.cancel();
 }
 
-#[test]
+const TEST_NAME: &str = "the_query_path_allocates_nothing";
+
 fn the_query_path_allocates_nothing() {
     // First: a pass of the checks below means something.
     the_counter_sees_a_deliberate_allocation();
@@ -875,6 +1002,63 @@ fn the_query_path_allocates_nothing() {
     the_cache_hit_path_does_not_allocate();
     the_policy_and_the_limiter_do_not_allocate();
     tsig_verify_and_sign_do_not_allocate();
+}
+
+/// The flags of libtest that take the next argument as their value.
+const VALUED_FLAGS: [&str; 7] = [
+    "--color",
+    "--format",
+    "--logfile",
+    "--shuffle-seed",
+    "--skip",
+    "--test-threads",
+    "-Z",
+];
+
+/// The harness: the test runs on the main thread, the only one of the process. `--list`
+/// names the test (none with `--ignored`); a name that is not this test's, exact with
+/// `--exact` or as a substring, runs nothing, like libtest.
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--list") {
+        if !args.iter().any(|arg| arg == "--ignored") {
+            println!("{TEST_NAME}: test");
+        }
+        return;
+    }
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut filters = Vec::new();
+    let mut after_valued = false;
+    for arg in &args {
+        if after_valued {
+            after_valued = false;
+        } else if arg.starts_with('-') {
+            after_valued = VALUED_FLAGS.contains(&arg.as_str());
+        } else {
+            filters.push(arg.as_str());
+        }
+    }
+    let selected = filters.is_empty()
+        || filters.iter().any(|filter| {
+            if exact {
+                *filter == TEST_NAME
+            } else {
+                TEST_NAME.contains(filter)
+            }
+        });
+    if !selected {
+        println!(
+            "\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; \
+             1 filtered out\n"
+        );
+        return;
+    }
+    println!("\nrunning 1 test");
+    the_query_path_allocates_nothing();
+    println!(
+        "test {TEST_NAME} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; \
+         0 filtered out\n"
+    );
 }
 
 /// TSIG on the transfer path (WP6.1): once the key is in the keyring, verifying a signed
@@ -901,19 +1085,18 @@ fn tsig_verify_and_sign_do_not_allocate() {
         MAX_MESSAGE_LEN
     ));
     let mut answer = Vec::with_capacity(4096);
-    let (allocations, reallocations, _) = measure(1000, || {
+    let measured = measure(1000, |t| {
         let tsig = find(black_box(&request)).expect("parse").expect("signed");
+        t.step("find");
         let verified = verify_request(&ring, &request, &tsig, now).expect("verifies");
+        t.step("verify_request");
         answer.clear();
         answer.extend_from_slice(&request[..tsig.record_start]);
         answer[2] |= 0x80;
         let mut signer = Signer::answer(verified.key, verified.mac);
         assert!(signer.sign(&mut answer, now, 0, &[], MAX_MESSAGE_LEN));
         black_box(&answer);
+        t.step("sign");
     });
-    assert_eq!(
-        (allocations, reallocations),
-        (0, 0),
-        "TSIG verify and sign allocated"
-    );
+    measured.assert_none("TSIG verify and sign allocated");
 }

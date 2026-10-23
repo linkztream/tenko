@@ -82,6 +82,49 @@ describe("createLiveQuery", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(fetch).toHaveBeenCalledTimes(3);
   });
+
+  it("drops a scheduled refetch once a read in the meantime reached the event's revision", async () => {
+    let revision = 100;
+    const fetch = vi.fn(async () => ({ value: revision, revision }));
+    let q!: LiveQuery<number>;
+    const dispose = createRoot((d) => {
+      q = createLiveQuery({ topics: ["dns"], fetch, stream });
+      return d;
+    });
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    const src = FakeSource.last!;
+
+    // The view writes: the event of its write arrives first, then the view refetches on the
+    // write's answer and reads the revision the event named. The debounced reload is dropped.
+    revision = 101;
+    src.emit("dns", { topic: "dns", revision: 101, objects: [{ kind: "dns_view", id: "v1" }] }, "101");
+    q.refetch();
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(q.revision()).toBe(101);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // An event newer than the read still reloads.
+    src.emit("dns", { topic: "dns", revision: 102, objects: [{ kind: "dns_view", id: "v2" }] }, "102");
+    await vi.advanceTimersByTimeAsync(150);
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(3);
+
+    // An event without a revision in the burst reloads whatever was read since.
+    revision = 103;
+    src.emit("dns", { topic: "dns", revision: 103, objects: [{ kind: "dns_view", id: "v1" }] }, "103");
+    src.emit("dns", { topic: "dns", objects: [] }, "");
+    q.refetch();
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(150);
+    await settle();
+    expect(fetch).toHaveBeenCalledTimes(5);
+    dispose();
+  });
 });
 
 describe("latest", () => {

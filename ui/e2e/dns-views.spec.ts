@@ -106,8 +106,11 @@ test("creates two views, reorders them and shows their rules and scopes", async 
   await expect(view(page, "everyone").getByTestId("view-order")).toHaveAttribute("data-key", "1");
   await rowAction(page, view(page, "office"), "up");
   await expect.poll(() => order(page)).toEqual(["office", "everyone"]);
-  // And by dragging the second onto the first.
+  // And by dragging the second onto the first. The drop's request is awaited on its own, so a
+  // drag that never reached the drop fails here, by name, and not as an order that stayed.
+  const dropped = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().includes("/api/v1/dns/views/"));
   await view(page, "everyone").getByTestId("view-drag").dragTo(view(page, "office").getByTestId("view-order"));
+  expect((await dropped).status(), "the drop's change was accepted").toBe(200);
   await expect.poll(() => order(page)).toEqual(["everyone", "office"]);
 
   // The server kept the order and the rules.
