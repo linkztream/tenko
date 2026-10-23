@@ -10,11 +10,11 @@ roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and 
 
 New here? [`docs/QUICKSTART.md`](docs/QUICKSTART.md) goes from nothing to a running node with a first network in a few minutes.
 
-**Status:** pre-alpha, Phase 0 (foundation and spikes). Nothing here is ready for use.
+**Status:** pre-alpha. Phases 0 to 2 (platform, IPAM, DNS) are complete and Phase 3 (DHCP) and the recursive resolver are in progress; the latest release is on the [releases page](https://github.com/linkztream/tenko/releases) and [`docs/ROADMAP.md`](docs/ROADMAP.md) says where the work stands and what is free to take.
 
-> **Pre-release.** Tenko DDI is under development towards its first release. There is
-> no tagged release yet, and the data-directory format, the configuration and the API may
-> still change between commits. The binaries and installers that the release workflow
+> **Pre-release.** Tenko DDI is under development; every release so far is a pre-release,
+> and the data-directory format, the configuration and the API may still change between
+> versions (an update migrates the data directory where it can, and says when it cannot). The binaries and installers that the release workflow
 > produces are unsigned until a signing certificate exists
 > ([`deploy/windows/README.md`](deploy/windows/README.md) says what that means when you
 > install). Running it in production is at your own risk; please report what breaks.
