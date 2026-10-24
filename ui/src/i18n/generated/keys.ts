@@ -2196,6 +2196,8 @@ export type MessageKey =
   | "dns.cache.col.ttl"
   | "dns.cache.col.type"
   | "dns.cache.col.view"
+  | "dns.cache.data_less"
+  | "dns.cache.data_more"
   | "dns.cache.ede"
   | "dns.cache.ede_hint"
   | "dns.cache.empty"
@@ -10151,6 +10153,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.col.ttl",
   "dns.cache.col.type",
   "dns.cache.col.view",
+  "dns.cache.data_less",
+  "dns.cache.data_more",
   "dns.cache.ede",
   "dns.cache.ede_hint",
   "dns.cache.empty",

@@ -133,6 +133,14 @@
         <notes><note category="description">Hint of the data of an RRSIG row.</note></notes>
         <segment><source>The expiry of the signature, in UTC</source><target>När signaturen går ut, i UTC</target></segment>
       </unit>
+      <unit id="dns.cache.data_more">
+        <notes><note category="description">Button that opens the clamped data of one row to its full height.</note></notes>
+        <segment><source>Show all</source><target>Visa allt</target></segment>
+      </unit>
+      <unit id="dns.cache.data_less">
+        <notes><note category="description">Button that clamps the opened data of one row again.</note></notes>
+        <segment><source>Show less</source><target>Visa mindre</target></segment>
+      </unit>
       <unit id="dns.cache.more">
         <notes><note category="description">Button that shows more folders or rows; {count} is a number.</note></notes>
         <segment><source>Show {count} more</source><target>Visa {count} till</target></segment>

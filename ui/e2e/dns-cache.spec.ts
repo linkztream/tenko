@@ -128,3 +128,42 @@ test("keeps the node when switching between the query log and the cache", async 
   await expect(page.getByTestId("page-dns-log")).toBeVisible();
   await expect(node).toHaveValue("1");
 });
+
+// One long value must not take over the page: the data cell is clamped to three lines until its
+// button opens it, and the table stays inside a 360 px viewport.
+test("clamps a long value in the data column until its button is pressed", async ({ page, signedIn }) => {
+  void signedIn;
+  await FakeResolver.install(page);
+  const cache = await FakeCache.install(page);
+  cache.state.entries.push({
+    name: "long.example.test",
+    type: "TXT",
+    rcode: 0,
+    ttl: 300,
+    stale: false,
+    hits: 1,
+    state: "unvalidated",
+    records: [{ type: "TXT", strings: ["v=long ".padEnd(4000, "0123456789abcdef")] }],
+  });
+  await openCache(page);
+  const section = page.getByTestId("dns-cache");
+  await section.getByTestId("field-cache-suffix").fill("long.example.test");
+  await section.getByTestId("dns-cache-show").click();
+  const row = section.locator('[data-testid="dns-cache-row"][data-type="TXT"]');
+  await expect(row).toHaveCount(1);
+  const toggle = row.getByTestId("dns-cache-data-toggle");
+  await expect(toggle).toHaveText("Show all");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect((await row.boundingBox())?.height ?? Infinity).toBeLessThan(200);
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  expect((await row.boundingBox())?.height ?? Infinity).toBeLessThan(200);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+
+  await toggle.click();
+  await expect(toggle).toHaveText("Show less");
+  expect((await row.boundingBox())?.height ?? 0).toBeGreaterThan(200);
+  await toggle.click();
+  await expect(toggle).toHaveText("Show all");
+  expect((await row.boundingBox())?.height ?? Infinity).toBeLessThan(200);
+});

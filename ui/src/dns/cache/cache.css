@@ -4,7 +4,14 @@
 .dns-cache-lede { margin: 0; font-size: var(--fs-12); max-inline-size: 80ch; }
 .dns-cache-form { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
 .dns-cache-actions, .dns-cache-paging, .dns-cache-more { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
-.dns-cache-data { overflow-wrap: anywhere; }
+.dns-cache-data { overflow-wrap: anywhere; max-inline-size: 48ch; min-inline-size: 0; }
+/* Three lines at most; the button after the text opens the one cell. */
+.dns-cache-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.dns-cache-text.open { display: block; -webkit-line-clamp: unset; }
+.dns-cache-toggle { margin-block-start: var(--sp-2); }
 /* The tree of names beside the records of the folder selected; the tree goes above the table
  * once both no longer fit side by side. The tree's rows are the shared .tree and .tnode. */
 .dns-cache-browser { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }

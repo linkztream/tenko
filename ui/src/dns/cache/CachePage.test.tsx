@@ -436,4 +436,51 @@ describe("the cache page", () => {
     await waitFor(() => expect(rows().length).toBe(7));
     expect(await axeViolations(container)).toEqual([]);
   });
+
+  describe("the clamped data cell", () => {
+    // jsdom has no layout: the heights the browser would report are stood in for.
+    const heights = { scroll: 0, client: 0 };
+    let scroll: PropertyDescriptor | undefined;
+    let client: PropertyDescriptor | undefined;
+    beforeEach(() => {
+      scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+      client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => heights.scroll });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => heights.client });
+    });
+    afterEach(() => {
+      if (scroll) Object.defineProperty(HTMLElement.prototype, "scrollHeight", scroll);
+      if (client) Object.defineProperty(HTMLElement.prototype, "clientHeight", client);
+    });
+
+    it("clamps a value taller than three lines, with a button that opens and closes that cell", async () => {
+      heights.scroll = 400;
+      heights.client = 60;
+      await shown();
+      toggleFolder("org");
+      selectFolder("example.org");
+      const [first] = rows();
+      const toggle = await within(first as HTMLElement).findByTestId("dns-cache-data-toggle");
+      expect(toggle.textContent).toBe("Show all");
+      expect(toggle.tagName).toBe("BUTTON");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      const cell = within(first as HTMLElement).getByTestId("dns-cache-data");
+      expect(cell.getAttribute("title")).toBe("NODATA");
+      expect(cell.querySelector(".dns-cache-text")?.textContent).toBe("NODATA");
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Show less");
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(cell.querySelector(".dns-cache-text")?.classList.contains("open")).toBe(true);
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Show all");
+      expect(cell.querySelector(".dns-cache-text")?.classList.contains("open")).toBe(false);
+    });
+
+    it("shows no button on a value that fits", async () => {
+      heights.scroll = 20;
+      heights.client = 20;
+      await shown();
+      expect(screen.queryAllByTestId("dns-cache-data-toggle")).toHaveLength(0);
+    });
+  });
 });

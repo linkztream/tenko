@@ -15,7 +15,7 @@
 // or goes to its first folder, Left closes it or goes to its parent, Home and End jump, Enter
 // on a "show more" shows more. A folder row of the right pane opens its folder on a double click
 // or Enter.
-import { createMemo, createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, createUniqueId, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { ApiError, errorMessage } from "../../api/problem";
 import { ConfirmDialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
@@ -99,6 +99,51 @@ function Name(props: { label: string | null }) {
   );
 }
 
+/** The data of a row, clamped to three lines so one long value cannot take over the page. Whether
+ * it is clamped is read from the rendered height, never from the length of the text; only then
+ * does the button that opens the cell show. The full text stays in the DOM for assistive
+ * technology and in the cell's title. */
+function DataCell(props: { text: string; hint?: string }) {
+  const id = createUniqueId();
+  let box: HTMLDivElement | undefined;
+  const [open, setOpen] = createSignal(false);
+  const [clamped, setClamped] = createSignal(false);
+  const measure = () => {
+    if (box && !open()) setClamped(box.scrollHeight > box.clientHeight);
+  };
+  onMount(() => {
+    measure();
+    if (typeof ResizeObserver !== "undefined" && box) {
+      const observer = new ResizeObserver(measure);
+      observer.observe(box);
+      onCleanup(() => observer.disconnect());
+    }
+  });
+  createEffect(() => {
+    void props.text;
+    queueMicrotask(measure);
+  });
+  return (
+    <td class="mono dns-cache-data" data-testid="dns-cache-data" title={props.hint ?? props.text}>
+      <div id={id} ref={box} class="dns-cache-text" classList={{ open: open() }}>
+        {props.text}
+      </div>
+      <Show when={clamped() || open()}>
+        <button
+          type="button"
+          class="btn ghost sm dns-cache-toggle"
+          data-testid="dns-cache-data-toggle"
+          aria-expanded={open()}
+          aria-controls={id}
+          onClick={() => setOpen(!open())}
+        >
+          {open() ? t("dns.cache.data_less") : t("dns.cache.data_more")}
+        </button>
+      </Show>
+    </td>
+  );
+}
+
 function EntryRow(props: { entry: DnsCacheEntry; label: string | null }) {
   return (
     <tr
@@ -129,9 +174,7 @@ function EntryRow(props: { entry: DnsCacheEntry; label: string | null }) {
         </Show>
       </td>
       <td class="r">{formatNumber(props.entry.hits)}</td>
-      <td class="mono dns-cache-data" data-testid="dns-cache-data">
-        {entryData(props.entry)}
-      </td>
+      <DataCell text={entryData(props.entry)} />
     </tr>
   );
 }
@@ -155,13 +198,14 @@ function SignatureRow(props: { entry: DnsCacheEntry; record: Rrsig; label: strin
       <td />
       <td />
       <td />
-      <td class="mono dns-cache-data" data-testid="dns-cache-data" title={t("dns.cache.signature_hint")}>
-        {t("dns.cache.signature", {
+      <DataCell
+        hint={t("dns.cache.signature_hint")}
+        text={t("dns.cache.signature", {
           type: props.record.type_covered,
           signer: props.record.signer,
           time: utcMinute(rrsigTime(props.record.expiration)),
         })}
-      </td>
+      />
     </tr>
   );
 }
