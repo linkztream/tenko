@@ -25,7 +25,7 @@ pub struct Readiness {
 }
 
 /// Body of `GET /system/status`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct SystemStatus {
     /// Version of the server.
     pub version: String,
@@ -73,6 +73,35 @@ pub struct SystemStatus {
     /// predate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_format: Option<DataFormatStatus>,
+    /// The host under this node (OPS-20): CPU, memory and the file system of the data
+    /// directory, as last read (at most five seconds ago). Absent when nothing could be read.
+    /// `node.disk.low` in `warnings` says the file system is running out of room.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostStatus>,
+}
+
+/// The host under the node, for `GET /system/status`. A figure that could not be read is absent;
+/// CPU and memory are read on Linux only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct HostStatus {
+    /// The share of the CPU's time that was busy since the previous reading, 0 to 100; absent
+    /// when there was no earlier reading to compare with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<f64>,
+    /// Physical memory in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_total: Option<u64>,
+    /// Memory a program can use without swapping, in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available: Option<u64>,
+    /// The size of the file system of the data directory in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_total: Option<u64>,
+    /// The space available to the node on that file system in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_available: Option<u64>,
+    /// When the node read these figures.
+    pub sampled_at: Timestamp,
 }
 
 /// The data-directory format of the installation, for `GET /system/status`.

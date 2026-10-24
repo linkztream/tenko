@@ -28,6 +28,13 @@
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` (without a number while the role serves neither DoT nor DoH).
 //
+// OPS-20: while the cluster's sample has `host` (the node read its CPU, memory or disk) the three host
+// tiles follow the controller's under `metrics-group-host`: `metrics-tile-host-cpu` (the busy share
+// of the CPU since the last reading, the 60 s sparkline), `-host-memory` (the share in use, the GiB
+// in the hint) and `-host-disk` (the GiB available on the data directory's file system, the total in
+// the hint). A figure the node did not read shows no number. While the status warns `node.disk.low`
+// the disk tile has `data-state="low"` and the line `metrics-host-disk-low`.
+//
 // WP8.7: while the cluster's sample has `dhcp` (a controller runs the `dhcp` role) the six DHCP
 // tiles follow under `metrics-group-dhcp`: `metrics-tile-dhcp-leases` (leases granted per second,
 // the 60 s sparkline), `-dhcp-ack` (the REQUEST to ACK p99), `-dhcp-active` (active leases, the
@@ -50,7 +57,10 @@ import {
   DDNS_OUTCOMES,
   droppedBatches,
   emptyHistory,
+  // OPS-20: the host tiles' figures.
+  GIB,
   lagOf,
+  memoryUsed,
   pushSnapshot,
   ratioBuckets,
   RCODES,
@@ -88,6 +98,8 @@ function Tile(props: {
   note?: JSX.Element;
   /** A list under the chart, inside the chart area: the chart gives it the room it needs. */
   children?: JSX.Element;
+  /** The tile shows a condition the status warns about (the disk tile while `node.disk.low` is active): the warning style. */
+  low?: boolean;
 }) {
   const values = () =>
     formatList(
@@ -100,7 +112,13 @@ function Tile(props: {
       "unit",
     );
   return (
-    <section class="card tile metrics-tile" data-testid={`metrics-tile-${props.name}`} data-value={props.value ?? undefined}>
+    <section
+      class="card tile metrics-tile"
+      classList={{ "metrics-low": props.low }}
+      data-testid={`metrics-tile-${props.name}`}
+      data-value={props.value ?? undefined}
+      data-state={props.low ? "low" : undefined}
+    >
       <h4>{props.title}</h4>
       <div class="tile-value">
         <Si value={props.value ?? null} />
@@ -134,7 +152,13 @@ function Tile(props: {
   );
 }
 
-export default function MetricsTiles(props: { streamOptions?: EventStreamOptions }) {
+/** The GiB of a byte count with one decimal. */
+function gib(bytes: number | null | undefined): string {
+  return formatNumber((bytes ?? 0) / GIB, { maximumFractionDigits: 1 });
+}
+
+/** `diskLow` is the status warning `node.disk.low` of this node: the disk tile turns to the warning style. */
+export default function MetricsTiles(props: { streamOptions?: EventStreamOptions; diskLow?: boolean }) {
   const [history, setHistory] = createSignal<MetricsHistory>(emptyHistory());
   const [stream, setStream] = createSignal<EventStream>();
 
@@ -165,6 +189,8 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   const dns = () => cluster()?.dns ?? undefined;
   // WP8.7: the `dhcp` part of the cluster's sample.
   const dhcp = () => cluster()?.dhcp ?? undefined;
+  // OPS-20: the `host` part of the cluster's sample.
+  const host = () => cluster()?.host ?? undefined;
   const rows = createMemo(() => latest()?.nodes ?? []);
 
   return (
@@ -280,6 +306,52 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
             return drops == null ? t("metrics.tile.nodes_hint_unknown", { nodes }) : t("metrics.tile.nodes_hint", { nodes, drops });
           })()}
         />
+        {/* OPS-20: the host's CPU, memory and disk, while a controller reports them. */}
+        <Show when={host()}>
+          {(h) => (
+            <>
+              <h3 class="metrics-group" data-testid="metrics-group-host">
+                {t("metrics.group.host")}
+              </h3>
+              <Tile
+                name="host-cpu"
+                title={t("metrics.host.cpu")}
+                value={value("host-cpu")}
+                unit={t("metrics.unit.percent")}
+                series={series("host-cpu")}
+                hint={h().cpu_percent != null ? t("metrics.host.cpu_hint") : t("metrics.host.cpu_none")}
+              />
+              <Tile
+                name="host-memory"
+                title={t("metrics.host.memory")}
+                value={value("host-memory")}
+                unit={t("metrics.unit.percent")}
+                series={series("host-memory")}
+                hint={
+                  memoryUsed(h()) != null
+                    ? t("metrics.host.memory_hint", { used: gib(memoryUsed(h())), total: gib(h().memory_total) })
+                    : t("metrics.host.memory_none")
+                }
+              />
+              <Tile
+                name="host-disk"
+                title={t("metrics.host.disk")}
+                value={value("host-disk")}
+                unit={t("metrics.host.unit_gib")}
+                series={series("host-disk")}
+                low={props.diskLow}
+                hint={h().disk_total != null ? t("metrics.host.disk_hint", { total: gib(h().disk_total) }) : t("metrics.host.disk_none")}
+                note={
+                  <Show when={props.diskLow}>
+                    <p class="metrics-warn" data-testid="metrics-host-disk-low">
+                      {t("metrics.host.disk_low")}
+                    </p>
+                  </Show>
+                }
+              />
+            </>
+          )}
+        </Show>
         <Show when={dns()}>
           {(d) => (
             <>

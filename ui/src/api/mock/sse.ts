@@ -206,9 +206,18 @@ function samplerSecond(): number {
   return Math.floor((Date.now() - (samplerStart ?? 0)) / 1000);
 }
 
+// OPS-20: whether the samples carry the `host` part. The server always sends it; the mock leaves it out
+// until the dev mock turns it on, so the tests that count the tiles keep their numbers.
+let hostMetrics = false;
+
+/** Makes the mock's samples carry the host's CPU, memory and disk (the dev mock; a test that shows the host tiles). */
+export function setMockHostMetrics(on: boolean): void {
+  hostMetrics = on;
+}
+
 function metricsOptions() {
   // WP8.7: the `dhcp` part with the `dhcp` role.
-  return { dns: db.installation.roles.includes("dns"), dhcp: db.installation.roles.includes("dhcp") };
+  return { dns: db.installation.roles.includes("dns"), dhcp: db.installation.roles.includes("dhcp"), host: hostMetrics };
 }
 
 function metricsHistoryFrames(): string {

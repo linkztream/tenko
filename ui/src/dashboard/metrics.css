@@ -59,5 +59,8 @@
 .metrics-pool-bar { flex: 1 1 auto; min-inline-size: 24px; block-size: 6px; border-radius: 3px; background: var(--line); overflow: hidden; align-self: center; }
 .metrics-pool-bar > span { display: block; block-size: 100%; background: var(--accent); }
 .metrics-warn { color: var(--warn-ink); }
+/* The disk tile while the status warns node.disk.low: the value and the border take the warning ink. */
+.metrics-tile.metrics-low { border-color: color-mix(in srgb, var(--discrepancy-mark) 60%, var(--line)); }
+.metrics-tile.metrics-low .tile-value { color: var(--warn-ink); }
 .metrics-warn[data-state="idle"] { visibility: hidden; }
 .metrics-raft li[data-state="stale"], .metrics-raft li[data-state="unsupported"] { color: var(--ink-3); }

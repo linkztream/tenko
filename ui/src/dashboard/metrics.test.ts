@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { emptyHistory, pushSnapshot, ratioBuckets, RECURSION_TILES, tileValue, VALIDATION_STATES, windowRatio, type MetricsDns, type MetricsHistory, type MetricsSample } from "./metrics";
+import {
+  emptyHistory,
+  GIB,
+  HOST_TILES,
+  memoryPercent,
+  memoryUsed,
+  pushSnapshot,
+  ratioBuckets,
+  RECURSION_TILES,
+  tileValue,
+  VALIDATION_STATES,
+  windowRatio,
+  type MetricsDns,
+  type MetricsHistory,
+  type MetricsHost,
+  type MetricsSample,
+} from "./metrics";
 
 function dns(hits: number, misses: number, noerror = 0, nxdomain = 0): MetricsDns {
   return {
@@ -127,5 +143,47 @@ describe("tileValue of the recursion tiles", () => {
     expect(tileValue("dns-queries", sample(part))).toBe(4);
     expect(tileValue("dns-cache", sample(part))).toBe(75);
     expect(tileValue("dns-upstreams", sample(part))).toBe(0);
+  });
+});
+
+// OPS-20: the tiles of the host.
+describe("tileValue of the host tiles", () => {
+  const host: MetricsHost = {
+    cpu_percent: 37.5,
+    memory_total: 16 * GIB,
+    memory_available: 4 * GIB,
+    disk_total: 512 * GIB,
+    disk_available: 128 * GIB,
+  };
+  const withHost = (part: MetricsHost | null): MetricsSample => ({ ...sample(null), host: part });
+
+  it("names the three tiles", () => {
+    expect([...HOST_TILES]).toEqual(["host-cpu", "host-memory", "host-disk"]);
+  });
+
+  it("gives the CPU share, the memory in use as a share and the disk space available in GiB", () => {
+    expect(tileValue("host-cpu", withHost(host))).toBe(37.5);
+    expect(tileValue("host-memory", withHost(host))).toBe(75);
+    expect(tileValue("host-disk", withHost(host))).toBe(128);
+    expect(memoryUsed(host)).toBe(12 * GIB);
+    expect(memoryPercent(host)).toBe(75);
+  });
+
+  it("gives nothing for a figure the node did not read, and nothing without a host part", () => {
+    const windows: MetricsHost = { disk_total: 100 * GIB, disk_available: 50 * GIB };
+    expect(tileValue("host-cpu", withHost(windows))).toBeNull();
+    expect(tileValue("host-memory", withHost(windows))).toBeNull();
+    expect(tileValue("host-disk", withHost(windows))).toBe(50);
+    expect(memoryUsed(windows)).toBeNull();
+    expect(tileValue("host-disk", withHost({ cpu_percent: 1 }))).toBeNull();
+    for (const name of HOST_TILES) {
+      expect(tileValue(name, withHost(null))).toBeNull();
+      expect(tileValue(name, sample(null))).toBeNull();
+    }
+  });
+
+  it("never reports a negative memory use or divides by a zero total", () => {
+    expect(memoryUsed({ memory_total: 4, memory_available: 9 })).toBe(0);
+    expect(memoryPercent({ memory_total: 0, memory_available: 0 })).toBeNull();
   });
 });

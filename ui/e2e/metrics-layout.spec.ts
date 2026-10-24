@@ -14,6 +14,8 @@ import { expect, test } from "./support/fixtures";
 import { fakeMetricsStream, mockHistory } from "./support/metrics-mock";
 
 const CONTROLLER = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
+// OPS-20: the host's three tiles, a group of their own after the controller's, three to a row.
+const HOST = ["host-cpu", "host-memory", "host-disk"];
 // WP10.4: the mock's samples carry the resolver's part, so the DNS group has its two tiles beside
 // the upstream tile and eight tiles, four to a row.
 const DNS = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-subqueries", "dns-validation", "dns-encrypted"];
@@ -73,8 +75,8 @@ function overlaps(a: Box, b: Box): boolean {
 async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promise<void> {
   // Tall enough for every tile, so the screenshot shows them all.
   await page.setViewportSize({ width, height: 1600 });
-  // WP8.7: a controller with the `dhcp` role too, so the DHCP group is checked as well.
-  await fakeMetricsStream(page, mockHistory(30, true, true));
+  // WP8.7: a controller with the `dhcp` role too, so the DHCP group is checked as well, and the host part.
+  await fakeMetricsStream(page, mockHistory(30, true, true, true));
   await page.goto("/");
   const root = page.getByTestId("metrics-tiles");
   await expect(root).toHaveAttribute("data-controllers", "1");
@@ -83,7 +85,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
 
   const { tiles, grid } = await tileBoxes(page);
   await expect(page.getByTestId("metrics-tile-dhcp-pools").getByTestId("metrics-dhcp-pool")).toHaveCount(3);
-  expect(tiles.map((t) => t.name)).toEqual([...CONTROLLER, ...DNS, ...DHCP]);
+  expect(tiles.map((t) => t.name)).toEqual([...CONTROLLER, ...HOST, ...DNS, ...DHCP]);
 
   // One height for every tile, and nothing in a tile cut off at its bottom or out of its chart area.
   const height = tiles[0]!.height;
@@ -101,6 +103,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   const gap = await page.locator(".metrics-grid").evaluate((el) => parseFloat(getComputedStyle(el).columnGap));
   const groups = [
     { names: CONTROLLER, columns: 4 },
+    { names: HOST, columns: 3 },
     { names: DNS, columns: 4 },
     { names: DHCP, columns: 3 },
   ];

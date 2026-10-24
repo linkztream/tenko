@@ -8633,6 +8633,40 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /**
+         * @description The host under the node, for `GET /system/status`. A figure that could not be read is absent;
+         *     CPU and memory are read on Linux only.
+         */
+        HostStatus: {
+            /**
+             * Format: double
+             * @description The share of the CPU's time that was busy since the previous reading, 0 to 100; absent
+             *     when there was no earlier reading to compare with.
+             */
+            cpu_percent?: number | null;
+            /**
+             * Format: int64
+             * @description The space available to the node on that file system in bytes.
+             */
+            disk_available?: number | null;
+            /**
+             * Format: int64
+             * @description The size of the file system of the data directory in bytes.
+             */
+            disk_total?: number | null;
+            /**
+             * Format: int64
+             * @description Memory a program can use without swapping, in bytes.
+             */
+            memory_available?: number | null;
+            /**
+             * Format: int64
+             * @description Physical memory in bytes.
+             */
+            memory_total?: number | null;
+            /** @description When the node read these figures. */
+            sampled_at: components["schemas"]["Timestamp"];
+        };
         /** @description What an address row shows of a host. */
         HostSummary: {
             /** @description Identifier. */
@@ -10978,6 +11012,40 @@ export interface components {
              */
             secure: number;
         };
+        /**
+         * @description The host in a sample (OPS-20): the latest reading of the machine under the controller. It is
+         *     read every five seconds, so consecutive samples repeat it. A figure that could not be read is
+         *     absent. The cluster's sample holds, for each figure, the controller that is worst off: the
+         *     busiest CPU, the smallest share of memory and of disk available.
+         */
+        MetricsHost: {
+            /**
+             * Format: double
+             * @description The share of the CPU's time that was busy since the previous reading, 0 to 100; absent in
+             *     the first reading and where the CPU is not read (Windows).
+             */
+            cpu_percent?: number | null;
+            /**
+             * Format: int64
+             * @description The space available on that file system in bytes.
+             */
+            disk_available?: number | null;
+            /**
+             * Format: int64
+             * @description The size of the file system of the data directory in bytes.
+             */
+            disk_total?: number | null;
+            /**
+             * Format: int64
+             * @description Memory a program can use without swapping, in bytes.
+             */
+            memory_available?: number | null;
+            /**
+             * Format: int64
+             * @description Physical memory in bytes; absent where memory is not read (Windows).
+             */
+            memory_total?: number | null;
+        };
         /** @description The ingest of observations in a sample. */
         MetricsIngest: {
             /**
@@ -11063,6 +11131,7 @@ export interface components {
             at: components["schemas"]["Timestamp"];
             dhcp?: components["schemas"]["MetricsDhcp"] | null;
             dns?: components["schemas"]["MetricsDns"] | null;
+            host?: components["schemas"]["MetricsHost"] | null;
             /** @description The observations the reconciler ingests. */
             ingest: components["schemas"]["MetricsIngest"];
             /**
@@ -18487,6 +18556,7 @@ export interface components {
             backup?: components["schemas"]["BackupSummaryView"] | null;
             cluster?: components["schemas"]["ClusterStatus"] | null;
             data_format?: components["schemas"]["DataFormatStatus"] | null;
+            host?: components["schemas"]["HostStatus"] | null;
             kek?: components["schemas"]["KekSummaryView"] | null;
             leader?: components["schemas"]["LeaderStatus"] | null;
             /**

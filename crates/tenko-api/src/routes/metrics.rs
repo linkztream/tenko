@@ -21,7 +21,7 @@ use axum::{
 use tenko_auth::authz::METRICS_OBJECT;
 use tenko_core::{
     Action, Principal, Timestamp,
-    metrics::{Desc, Gauge, Registry, Snapshot, Value, encode},
+    metrics::{Desc, Gauge, GaugeVec, Registry, Snapshot, Value, encode},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -65,6 +65,34 @@ static TLS_EXPIRY: Gauge = Gauge::new(
     .unit("seconds"),
 );
 
+// The host under the node (OPS-20): set from the latest reading of `state.host()`, which is at
+// most five seconds old, by every refresh; a figure that cannot be read is unset.
+static HOST_CPU: Gauge = Gauge::new(
+    Desc::gauge(
+        "tenko_host_cpu_busy_ratio",
+        "The share of the host's CPU time that was busy since the previous reading, 0 to 1; read on Linux only.",
+    )
+    .unit("ratio"),
+);
+static HOST_MEMORY: GaugeVec = GaugeVec::fixed(
+    Desc::gauge(
+        "tenko_host_memory_bytes",
+        "The host's physical memory: its total and what a program can use without swapping; read on Linux only.",
+    )
+    .labels(&["kind"])
+    .unit("bytes"),
+    &[&["total"], &["available"]],
+);
+static HOST_DISK: GaugeVec = GaugeVec::fixed(
+    Desc::gauge(
+        "tenko_host_disk_bytes",
+        "The file system of the data directory: its size and the space available to the node.",
+    )
+    .labels(&["kind"])
+    .unit("bytes"),
+    &[&["total"], &["available"]],
+);
+
 /// Computed at scrape time.
 static BUILD_INFO: Desc = Desc::gauge(
     "tenko_build_info",
@@ -83,6 +111,9 @@ pub(crate) fn register(registry: &Registry) {
     registry.register(&STORE_JOURNAL);
     registry.register(&STORE_DATA_BYTES);
     registry.register(&TLS_EXPIRY);
+    registry.register(&HOST_CPU);
+    registry.register(&HOST_MEMORY);
+    registry.register(&HOST_DISK);
 }
 
 /// Sets the gauges of this crate from the state: the event hub, the store status and the
@@ -117,6 +148,37 @@ pub fn refresh_live_gauges(state: &AppState) {
     AUDIT_HEAD.set(as_gauge(store.audit_head.get()));
     STORE_JOURNAL.set(as_gauge(store.journal_len));
     STORE_DATA_BYTES.set(as_gauge(store.data_bytes));
+    refresh_host_gauges(state);
+}
+
+/// Sets the gauges of the host from its latest reading (taken again when older than five
+/// seconds, so this is cheap to call every second).
+fn refresh_host_gauges(state: &AppState) {
+    let host = state.host().current();
+    set_or_unset(
+        &HOST_CPU,
+        host.and_then(|host| host.cpu_percent)
+            .map(|percent| f64::from(percent) / 100.0),
+    );
+    let kinds = [
+        (&HOST_MEMORY, 0, host.and_then(|host| host.memory_total)),
+        (&HOST_MEMORY, 1, host.and_then(|host| host.memory_available)),
+        (&HOST_DISK, 0, host.and_then(|host| host.disk_total)),
+        (&HOST_DISK, 1, host.and_then(|host| host.disk_available)),
+    ];
+    for (family, series, bytes) in kinds {
+        match bytes {
+            Some(bytes) => family.set(series, as_gauge(bytes)),
+            None => family.unset(series),
+        }
+    }
+}
+
+fn set_or_unset(gauge: &Gauge, value: Option<f64>) {
+    match value {
+        Some(value) => gauge.set(value),
+        None => gauge.unset(),
+    }
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -276,5 +338,72 @@ mod tests {
         assert!(after.contains("# UNIT tenko_store_data_bytes bytes\n"));
         // No listener runs, so no certificate expiry.
         assert!(!after.contains("\ntenko_tls_certificate_expiry_seconds "));
+    }
+
+    #[test]
+    fn the_host_gauges_carry_the_latest_reading_and_leave_out_what_was_not_read() {
+        let state = AppState::default();
+        let before = render_metrics(&state);
+        assert!(before.contains(
+            "# TYPE tenko_host_cpu_busy_ratio gauge
+"
+        ));
+        assert!(
+            !before.contains(
+                "
+tenko_host_disk_bytes{"
+            ),
+            "{before}"
+        );
+
+        state.host().set_data_dir(std::env::temp_dir());
+        refresh_live_gauges(&state);
+        let text = render_metrics(&state);
+        tenko_core::metrics::check(&text).unwrap_or_else(|error| {
+            panic!(
+                "{error}
+{text}"
+            )
+        });
+        assert!(text.contains(
+            "# UNIT tenko_host_disk_bytes bytes
+"
+        ));
+        assert!(text.contains(
+            "# UNIT tenko_host_cpu_busy_ratio ratio
+"
+        ));
+        assert!(
+            text.contains(
+                "
+tenko_host_disk_bytes{kind=\"total\"} "
+            ),
+            "{text}"
+        );
+        assert!(text.contains(
+            "
+tenko_host_disk_bytes{kind=\"available\"} "
+        ));
+        // The first reading has no CPU share to compare with.
+        assert!(!text.contains(
+            "
+tenko_host_cpu_busy_ratio "
+        ));
+        #[cfg(target_os = "linux")]
+        {
+            assert!(text.contains(
+                "
+tenko_host_memory_bytes{kind=\"total\"} "
+            ));
+            assert!(text.contains(
+                "
+tenko_host_memory_bytes{kind=\"available\"} "
+            ));
+        }
+        #[cfg(not(target_os = "linux"))]
+        assert!(!text.contains(
+            "
+tenko_host_memory_bytes{"
+        ));
     }
 }

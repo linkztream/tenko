@@ -9,6 +9,8 @@ export type MetricsSample = S["MetricsSample"];
 export type MetricsDns = S["MetricsDns"];
 // WP8.7: the `dhcp` part of a sample.
 export type MetricsDhcp = S["MetricsDhcp"];
+// OPS-20: the `host` part of a sample.
+export type MetricsHost = S["MetricsHost"];
 
 /** The `kind` of the events of the `metrics` topic. */
 export const SNAPSHOT_KIND = "metrics.snapshot";
@@ -111,7 +113,45 @@ function recursionValue(name: RecursionTileName, dns: MetricsDns): number | null
 }
 // WP10.4: end.
 
-export type TileName = (typeof TILES)[number] | DnsTileName | DhcpTileName | RecursionTileName;
+// OPS-20: the host's tiles, in a group after the controller's while the sample has `host`: the busy
+// share of the CPU, the memory in use and the space available on the data directory's file system.
+export const HOST_TILES = ["host-cpu", "host-memory", "host-disk"] as const;
+export type HostTileName = (typeof HOST_TILES)[number];
+
+/** The code of the status warning that the disk tile turns to the warning style for. */
+export const DISK_LOW_WARNING = "node.disk.low";
+
+/** Bytes in a GiB, the unit of the memory and disk tiles. */
+export const GIB = 1024 ** 3;
+
+/** The memory in use in bytes: the total less what a program can use without swapping; null if either is unknown. */
+export function memoryUsed(host: MetricsHost): number | null {
+  if (host.memory_total == null || host.memory_available == null) return null;
+  return Math.max(0, host.memory_total - host.memory_available);
+}
+
+/** The memory in use as a share of the total, in percent; null when it is not known or the total is zero. */
+export function memoryPercent(host: MetricsHost): number | null {
+  const used = memoryUsed(host);
+  return used == null || !host.memory_total ? null : (used * 100) / host.memory_total;
+}
+
+function isHostTile(name: TileName): name is HostTileName {
+  return name.startsWith("host-");
+}
+
+function hostValue(name: HostTileName, host: MetricsHost): number | null {
+  switch (name) {
+    case "host-cpu":
+      return host.cpu_percent ?? null;
+    case "host-memory":
+      return memoryPercent(host);
+    case "host-disk":
+      return host.disk_available == null ? null : host.disk_available / GIB;
+  }
+}
+
+export type TileName = (typeof TILES)[number] | DnsTileName | DhcpTileName | RecursionTileName | HostTileName;
 
 /** The RCODEs of the answers tile, in the order they are listed. */
 export const RCODES = ["noerror", "nxdomain", "servfail", "refused", "other"] as const;
@@ -180,6 +220,8 @@ export function tileValue(name: TileName, sample: MetricsSample): number | null 
   if (name === "dns-subqueries" || name === "dns-validation") return sample.dns ? recursionValue(name, sample.dns) : null;
   // WP8.7: the DHCP tiles.
   if (isDhcpTile(name)) return sample.dhcp ? dhcpValue(name, sample.dhcp) : null;
+  // OPS-20: the host tiles.
+  if (isHostTile(name)) return sample.host ? hostValue(name, sample.host) : null;
   switch (name) {
     case "requests":
       return sample.api.requests_per_second;

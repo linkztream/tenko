@@ -1679,6 +1679,8 @@ async fn start(
             );
             state.auth = Some(Arc::clone(&auth) as Arc<dyn tenko_core::Authenticator>);
             state.authorizer = Some(auth.authorizer());
+            // The file system whose free space the start page, the status and the metrics show.
+            state.host().set_data_dir(resolved.data_dir.clone());
             // Scoped principals receive only the events and references they may read.
             state
                 .events()

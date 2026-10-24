@@ -66,8 +66,8 @@ export function dnsPart(patch: Partial<MetricsDns> = {}): MetricsDns {
  * `dns` is false: the samples of the dev mock (src/api/mock/metrics-model.ts), whose figures
  * move, so every sparkline and bar chart draws.
  */
-export function mockHistory(count: number, dns = true, dhcp = false): MetricsSnapshot[] {
-  return mockMetricsHistory(count, count, { dns, dhcp });
+export function mockHistory(count: number, dns = true, dhcp = false, host = false): MetricsSnapshot[] {
+  return mockMetricsHistory(count, count, { dns, dhcp, host });
 }
 
 // WP8.7: the `dhcp` part of a sample.

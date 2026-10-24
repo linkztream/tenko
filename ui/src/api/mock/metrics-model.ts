@@ -19,6 +19,22 @@ export interface MockMetricsOptions {
   // WP8.7: the `dhcp` role.
   /** Whether the controller runs the `dhcp` role. */
   dhcp?: boolean;
+  // OPS-20: the `host` part.
+  /** Whether the samples carry the host's CPU, memory and disk (the server always sends them). */
+  host?: boolean;
+}
+
+// OPS-20: the `host` part of a sample: a busy CPU around a fifth, 6 of 16 GiB of memory in use and
+// 180 of 512 GiB of disk available.
+function hostPart(second: number): S["MetricsHost"] {
+  const gib = 1024 ** 3;
+  return {
+    cpu_percent: Math.min(100, round(wave(22, 0.5, 31, second), 1)),
+    memory_total: 16 * gib,
+    memory_available: Math.round((16 - wave(6.4, 0.08, 120, second)) * gib),
+    disk_total: 512 * gib,
+    disk_available: 180 * gib,
+  };
 }
 
 // WP8.7: the `dhcp` part of a sample: about 40 leases a second, four scopes, DDNS on.
@@ -137,6 +153,8 @@ export function mockMetricsSnapshot(second: number, options: MockMetricsOptions,
     dns: options.dns ? dnsPart(second) : null,
     // WP8.7: the `dhcp` part.
     dhcp: options.dhcp ? dhcpPart(second) : null,
+    // OPS-20: the `host` part.
+    host: options.host ? hostPart(second) : null,
   });
   return { cluster: own(null), nodes: [own(node)] };
 }

@@ -44,10 +44,11 @@ use uuid::Uuid;
 
 use crate::{
     dto::system::{
-        DataFormatStatus, Health, LeaderServiceState, LeaderStatus, NodeStatus, Readiness,
-        StatusWarning, StoreSummary, SystemStatus, UiStatus,
+        DataFormatStatus, Health, HostStatus, LeaderServiceState, LeaderStatus, NodeStatus,
+        Readiness, StatusWarning, StoreSummary, SystemStatus, UiStatus,
     },
     extract::Ctx,
+    host::{HostSample, low_disk_limit},
     problem::{ApiError, ProblemDetails, codes},
     state::AppState,
 };
@@ -474,6 +475,46 @@ pub const CLOCK_SKEW: &str = "cluster.clock_skew";
 /// The clock skew between controllers that is tolerated, in milliseconds (R35).
 pub const CLOCK_SKEW_TOLERANCE_MS: i64 = 5_000;
 
+/// Warning code of a data directory whose file system is running out of room.
+pub const DISK_LOW: &str = "node.disk.low";
+
+/// `node.disk.low`: the file system of the data directory has less than
+/// [`LOW_DISK_SHARE`](crate::host::LOW_DISK_SHARE) percent or less than one GiB available,
+/// whichever is more. `None` while it has room, or when the size could not be read; the warning
+/// is computed from the latest reading on every status request, so it clears when space is back.
+pub fn disk_low_warning(
+    host: &HostSample,
+    path: Option<&std::path::Path>,
+) -> Option<StatusWarning> {
+    let (total, available) = (host.disk_total?, host.disk_available?);
+    if !host.disk_is_low() {
+        return None;
+    }
+    let path = path
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("available".to_owned(), available.to_string());
+    params.insert("total".to_owned(), total.to_string());
+    params.insert("limit".to_owned(), low_disk_limit(total).to_string());
+    params.insert("path".to_owned(), path.clone());
+    Some(StatusWarning {
+        code: DISK_LOW.to_owned(),
+        detail: format!(
+            "the file system of the data directory {path} has {} of {} available",
+            gib(available),
+            gib(total)
+        ),
+        params,
+    })
+}
+
+/// Bytes in GiB with one decimal, for the English text of a finding.
+#[allow(clippy::cast_precision_loss)]
+fn gib(bytes: u64) -> String {
+    format!("{:.1} GiB", bytes as f64 / f64::from(1_u32 << 30))
+}
+
 /// The warnings of the leader-only work: one per service that gave up, and one when this
 /// controller's clock differs from the leader's by more than [`CLOCK_SKEW_TOLERANCE_MS`].
 pub fn leader_warnings(leader: &LeaderStatus) -> Vec<StatusWarning> {
@@ -760,6 +801,10 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         .kek()
         .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
     warnings.extend(kek_warnings);
+    let host = platform.host.current();
+    if let Some(host) = &host {
+        warnings.extend(disk_low_warning(host, platform.host.data_dir().as_deref()));
+    }
     if ui.stub {
         warnings.push(crate::dto::system::StatusWarning {
             code: "sys.ui.stub".to_owned(),
@@ -800,6 +845,14 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         leader: None,
         backup: None,
         data_format: None,
+        host: host.map(|host| HostStatus {
+            cpu_percent: host.cpu_percent.map(f64::from),
+            memory_total: host.memory_total,
+            memory_available: host.memory_available,
+            disk_total: host.disk_total,
+            disk_available: host.disk_available,
+            sampled_at: host.sampled_at,
+        }),
     }
 }
 
@@ -1064,5 +1117,63 @@ mod tests {
         let json = serde_json::to_value(source.current()).expect("JSON");
         assert_eq!(json["pending"]["blocked_by"][0]["node"], 1002);
         assert_eq!(json["stored"], 2);
+    }
+
+    #[test]
+    fn a_data_directory_short_of_room_is_a_warning_that_clears_with_the_space() {
+        let gib = 1_u64 << 30;
+        let host = |available| HostSample {
+            cpu_percent: None,
+            memory_total: None,
+            memory_available: None,
+            disk_total: Some(50 * gib),
+            disk_available: Some(available),
+            sampled_at: Timestamp::now(),
+        };
+        let path = std::path::Path::new("/srv/tenko-data");
+        let low = disk_low_warning(&host(4 * gib), Some(path)).expect("4 of 50 GiB is low");
+        assert_eq!(low.code, DISK_LOW);
+        assert_eq!(low.params["available"], (4 * gib).to_string());
+        assert_eq!(low.params["total"], (50 * gib).to_string());
+        assert_eq!(low.params["limit"], (5 * gib).to_string());
+        assert_eq!(low.params["path"], path.display().to_string());
+        assert!(low.detail.contains("4.0 GiB of 50.0 GiB"), "{}", low.detail);
+        assert_eq!(disk_low_warning(&host(5 * gib), Some(path)), None);
+        assert_eq!(
+            disk_low_warning(&HostSample::blank(Timestamp::now()), None),
+            None
+        );
+    }
+
+    #[test]
+    fn the_status_carries_the_host_and_its_disk_finding() {
+        let state = AppState::default();
+        state.host().set_data_dir(std::env::temp_dir());
+        let status = status_of(&state, Timestamp::now());
+        let host = status
+            .host
+            .as_ref()
+            .expect("the data directory's file system is read");
+        assert!(host.disk_total.is_some_and(|total| total > 0));
+        assert!(host.disk_available.is_some());
+        let json = serde_json::to_value(&status).expect("json");
+        assert!(json["host"]["disk_total"].is_u64());
+        assert!(json["host"]["sampled_at"].is_string());
+        assert!(
+            json["host"].get("cpu_percent").is_none(),
+            "no earlier reading"
+        );
+        // Whether this machine's temp directory is short of room decides the finding.
+        let low = status
+            .warnings
+            .iter()
+            .any(|warning| warning.code == DISK_LOW);
+        assert_eq!(
+            low,
+            state
+                .host()
+                .current()
+                .is_some_and(|host| host.disk_is_low())
+        );
     }
 }

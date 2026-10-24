@@ -31,6 +31,7 @@ import { jobTitle } from "../jobs/words";
 import { createShellStatus } from "../shell/status";
 import { storeRoleLabel } from "../shell/TopBar";
 import { moduleRunning } from "../updates/modules";
+import { DISK_LOW_WARNING } from "./metrics";
 import { OperationsTiles } from "./OperationsTiles";
 import "./dashboard.css";
 
@@ -215,7 +216,7 @@ export default function Dashboard() {
         </div>
 
         <Show when={isAdmin()}>
-          <MetricsTiles />
+          <MetricsTiles diskLow={s()?.warnings.some((w) => w.code === DISK_LOW_WARNING) ?? false} />
         </Show>
 
         <div class="dash-grid">

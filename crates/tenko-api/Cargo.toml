@@ -16,6 +16,7 @@ server = [
   "dep:arc-swap",
   "dep:aws-lc-rs",
   "dep:axum",
+  "dep:fs4",
   "dep:futures",
   "dep:hyper",
   "dep:hyper-util",
@@ -59,6 +60,9 @@ arc-swap = { workspace = true, optional = true }
 # The keyed fingerprints of the idempotency middleware (HMAC-SHA-256, random key).
 aws-lc-rs = { workspace = true, optional = true }
 axum = { workspace = true, optional = true, features = ["http2"] }
+# The size and free space of the data directory's file system (`host`); already in the graph through
+# the `tenko` binary (MIT or Apache-2.0).
+fs4 = { version = "1.1.0", optional = true }
 futures = { workspace = true, optional = true }
 hyper = { version = "1.12.0", optional = true, features = ["http1", "http2", "server"] }
 hyper-util = { version = "0.1.21", optional = true, features = ["http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio"] }

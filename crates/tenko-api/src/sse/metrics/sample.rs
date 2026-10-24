@@ -7,12 +7,17 @@
 //! Prometheus' `histogram_quantile` does), so a quantile in the `+Inf` bucket reads as the
 //! highest bound. Everything else is the gauge value of the newer snapshot.
 //!
+//! The host part ([`MetricsHost`](crate::dto::events::MetricsHost)) is the latest reading of
+//! the host monitor, set in the `tenko_host_*` gauges, and no rate.
+//!
 //! The DNS part ([`MetricsDns`]) is there while the registry holds the query counter of the
 //! `dns` role (`tenko_dns_queries_total`, registered when the role starts); the families of
 //! the encrypted transports and of the block lists are read when they are registered.
 
 // WP8.7: the `dhcp` part of a sample.
 mod dhcp;
+// OPS-20: the host's CPU, memory and disk.
+mod host;
 // WP10.4: the recursive resolver's part of the DNS figures.
 mod recursion;
 
@@ -288,6 +293,8 @@ impl SampleBuilder {
             });
             dhcp::dhcp_sample(snapshot, current, before)
         });
+        // OPS-20: the host's latest reading.
+        sample.host = host::host_sample(snapshot);
         if let Some((then, before)) = previous {
             let interval = now.saturating_duration_since(then);
             sample.interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
@@ -376,6 +383,10 @@ pub fn cluster_sum(samples: &[MetricsSample], at: Timestamp) -> MetricsSample {
         // WP8.7: the `dhcp` parts.
         if let Some(part) = &sample.dhcp {
             dhcp::add_dhcp(sum.dhcp.get_or_insert_with(Default::default), part);
+        }
+        // OPS-20: the host under the worst-off controller.
+        if let Some(part) = &sample.host {
+            host::add_host(&mut sum.host, part);
         }
     }
     if let Some(dns) = &mut sum.dns {

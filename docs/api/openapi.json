@@ -43749,6 +43749,63 @@
         },
         "additionalProperties": false
       },
+      "HostStatus": {
+        "type": "object",
+        "description": "The host under the node, for `GET /system/status`. A figure that could not be read is absent;\nCPU and memory are read on Linux only.",
+        "required": [
+          "sampled_at"
+        ],
+        "properties": {
+          "cpu_percent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share of the CPU's time that was busy since the previous reading, 0 to 100; absent\nwhen there was no earlier reading to compare with."
+          },
+          "disk_available": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The space available to the node on that file system in bytes.",
+            "minimum": 0
+          },
+          "disk_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The size of the file system of the data directory in bytes.",
+            "minimum": 0
+          },
+          "memory_available": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Memory a program can use without swapping, in bytes.",
+            "minimum": 0
+          },
+          "memory_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Physical memory in bytes.",
+            "minimum": 0
+          },
+          "sampled_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the node read these figures."
+          }
+        }
+      },
       "HostSummary": {
         "type": "object",
         "description": "What an address row shows of a host.",
@@ -49784,6 +49841,56 @@
           }
         }
       },
+      "MetricsHost": {
+        "type": "object",
+        "description": "The host in a sample (OPS-20): the latest reading of the machine under the controller. It is\nread every five seconds, so consecutive samples repeat it. A figure that could not be read is\nabsent. The cluster's sample holds, for each figure, the controller that is worst off: the\nbusiest CPU, the smallest share of memory and of disk available.",
+        "properties": {
+          "cpu_percent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share of the CPU's time that was busy since the previous reading, 0 to 100; absent in\nthe first reading and where the CPU is not read (Windows)."
+          },
+          "disk_available": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The space available on that file system in bytes.",
+            "minimum": 0
+          },
+          "disk_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The size of the file system of the data directory in bytes.",
+            "minimum": 0
+          },
+          "memory_available": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Memory a program can use without swapping, in bytes.",
+            "minimum": 0
+          },
+          "memory_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Physical memory in bytes; absent where memory is not read (Windows).",
+            "minimum": 0
+          }
+        }
+      },
       "MetricsIngest": {
         "type": "object",
         "description": "The ingest of observations in a sample.",
@@ -49944,6 +50051,17 @@
               {
                 "$ref": "#/components/schemas/MetricsDns",
                 "description": "The `dns` role of the controller's process; absent when the process does not run it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsHost",
+                "description": "The host under the controller: CPU, memory and the file system of the data directory,\nas the node last read them (every five seconds); absent when none could be read."
               },
               {
                 "type": "null"
@@ -68278,6 +68396,17 @@
               {
                 "$ref": "#/components/schemas/DataFormatStatus",
                 "description": "The data-directory format (OPS-08, OPS-23): the format of the stored data, the\nnewest one this controller's binary knows, and a migration that waits until every\nvoter of the cluster runs a binary that knows its format; absent on servers that\npredate it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostStatus",
+                "description": "The host under this node (OPS-20): CPU, memory and the file system of the data\ndirectory, as last read (at most five seconds ago). Absent when nothing could be read.\n`node.disk.low` in `warnings` says the file system is running out of room."
               },
               {
                 "type": "null"

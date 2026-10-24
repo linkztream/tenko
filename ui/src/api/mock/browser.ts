@@ -18,7 +18,7 @@ import type { Topic } from "../events";
 import { DEFAULT_SCENARIO, MOCK_SCENARIOS, isMockScenario, resetMockDb, type MockScenario } from "./db";
 import { FetchEventSource } from "./event-source";
 import { handlers } from "./handlers";
-import { emitMockControl, emitMockEvent, startJobTicker, startMetricsSampler, type EmitData } from "./sse";
+import { emitMockControl, emitMockEvent, setMockHostMetrics, startJobTicker, startMetricsSampler, type EmitData } from "./sse";
 
 const QUERY_KEY = "mock-scenario";
 const STORAGE_KEY = "tenko-mock-scenario";
@@ -101,6 +101,7 @@ export async function startMockWorker(): Promise<void> {
     await startInPage();
   }
   startJobTicker();
+  setMockHostMetrics(true);
   startMetricsSampler();
   window.tenkoMock = {
     reset(scenario: MockScenario = DEFAULT_SCENARIO): void {

@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
-import type { MetricsDhcp, MetricsDns, MetricsSample, MetricsSnapshot } from "./metrics";
+import { GIB, type MetricsDhcp, type MetricsDns, type MetricsHost, type MetricsSample, type MetricsSnapshot } from "./metrics";
 import MetricsTiles from "./MetricsTiles";
 
 /** A stand-in for EventSource that the tests feed. */
@@ -62,8 +62,8 @@ function send(source: FakeSource, value: MetricsSnapshot) {
   source.emit("metrics", { topic: "metrics", kind: "metrics.snapshot", metrics: value });
 }
 
-function mount() {
-  return render(() => <MetricsTiles streamOptions={{ createEventSource: (url) => new FakeSource(url) as unknown as EventSource }} />);
+function mount(props: { diskLow?: boolean } = {}) {
+  return render(() => <MetricsTiles diskLow={props.diskLow} streamOptions={{ createEventSource: (url) => new FakeSource(url) as unknown as EventSource }} />);
 }
 
 const tile = (name: string) => screen.getByTestId(`metrics-tile-${name}`);
@@ -655,5 +655,93 @@ describe("DHCP tiles", () => {
     expect(tile("dhcp-leases").textContent).toContain("Beviljade lån");
     expect(tile("dhcp-pools").textContent).toContain("Fullaste poolen");
     expect(tile("dhcp-ddns").textContent).toContain("Skrivna DDNS-namn");
+  });
+});
+
+// OPS-20: the host tiles.
+function hostPart(patch: Partial<MetricsHost> = {}): MetricsHost {
+  return {
+    cpu_percent: 25,
+    memory_total: 16 * GIB,
+    memory_available: 4 * GIB,
+    disk_total: 100 * GIB,
+    disk_available: 62.5 * GIB,
+    ...patch,
+  };
+}
+
+const HOST_TILES = ["host-cpu", "host-memory", "host-disk"];
+
+describe("host tiles", () => {
+  it("are not shown while the samples carry no host part", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1);
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("requests").dataset.value).toBe("12.5"));
+    for (const name of HOST_TILES) expect(screen.queryByTestId(`metrics-tile-${name}`)).toBeNull();
+    expect(screen.queryByTestId("metrics-group-host")).toBeNull();
+  });
+
+  it("follow the controller's tiles with the CPU share, the memory in use and the disk space available", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    for (const cpu of [10, 40, 25]) {
+      const own = sample(1, { dns: dnsPart(), host: hostPart({ cpu_percent: cpu }) });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("host-cpu").dataset.value).toBe("25"));
+    expect([...screen.getByTestId("metrics-tiles").querySelectorAll("[data-testid^='metrics-tile-']")].map((el) => el.getAttribute("data-testid"))).toEqual(
+      ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes", ...HOST_TILES, ...DNS_TILES].map((name) => `metrics-tile-${name}`),
+    );
+    expect(screen.getByTestId("metrics-group-host").textContent).toBe("Host");
+    expect(screen.getByTestId("metrics-sparkline-host-cpu").dataset.points).toBe("3");
+    expect(tile("host-memory").dataset.value).toBe("75");
+    expect(tile("host-memory").textContent).toContain("12 of 16 GiB in use");
+    expect(tile("host-disk").dataset.value).toBe("62.5");
+    expect(tile("host-disk").textContent).toContain("Available of 100 GiB on the data directory's file system");
+    expect(tile("host-disk").dataset.state).toBeUndefined();
+    expect(screen.queryByTestId("metrics-host-disk-low")).toBeNull();
+    for (const name of HOST_TILES) expect(parts(tile(name))).toEqual(SHAPE);
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("show no number for a figure the node did not read, as on Windows, and say so", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { host: { disk_total: 100 * GIB, disk_available: 40 * GIB } });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("host-disk").dataset.value).toBe("40"));
+    expect(tile("host-cpu").dataset.value).toBeUndefined();
+    expect(tile("host-cpu").textContent).toContain("Not read yet, or not read on this host");
+    expect(tile("host-memory").dataset.value).toBeUndefined();
+    expect(tile("host-memory").textContent).toContain("Not read on this host");
+  });
+
+  it("turn the disk tile to the warning style while the status warns that the disk is low", async () => {
+    mount({ diskLow: true });
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { host: hostPart({ disk_available: 4 * GIB }) });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("host-disk").dataset.value).toBe("4"));
+    expect(tile("host-disk").dataset.state).toBe("low");
+    expect(tile("host-disk").classList.contains("metrics-low")).toBe(true);
+    expect(screen.getByTestId("metrics-host-disk-low").textContent).toBe("Low on space: free some room");
+    expect(tile("host-cpu").dataset.state).toBeUndefined();
+    expect(await axeViolations(screen.getByTestId("metrics-tiles"))).toEqual([]);
+  });
+
+  it("speak Swedish", async () => {
+    await setLocale("sv");
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const own = sample(1, { host: hostPart() });
+    send(FakeSource.last(), snapshot([own], own));
+    await waitFor(() => expect(tile("host-cpu").dataset.value).toBe("25"));
+    expect(screen.getByTestId("metrics-group-host").textContent).toBe("Värd");
+    expect(tile("host-cpu").textContent).toContain("Värdens CPU");
+    expect(tile("host-memory").textContent).toContain("12 av 16 GiB används");
+    expect(tile("host-disk").textContent).toContain("Ledigt diskutrymme");
   });
 });

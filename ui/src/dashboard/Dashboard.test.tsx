@@ -1,7 +1,10 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import { IPAM_IDS } from "../api/mock/ipam/api";
+import { server } from "../api/mock/node";
+import { mockMetricsSnapshot } from "../api/mock/metrics-model";
 import type { TreeNode } from "../api/types";
 import { paths } from "../app/paths";
 import { axeViolations } from "../app/testing/axe";
@@ -127,5 +130,64 @@ describe("alarm status", () => {
     await waitFor(() => expect(link.classList.contains("crit")).toBe(true), { timeout: 3000 });
     expect(link.textContent).toMatch(/critical/i);
     expect(await axeViolations(link.parentElement as HTMLElement)).toEqual([]);
+  });
+});
+
+// OPS-20: the host tiles of the start page follow the status's disk warning.
+/** A stand-in for EventSource whose `metrics` stream sends one sample with the host part and nothing else. */
+class HostSamples {
+  onopen: ((e: Event) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+  private listeners = new Map<string, ((e: Event) => void)[]>();
+
+  constructor(readonly url: string) {
+    setTimeout(() => {
+      this.onopen?.(new Event("open"));
+      if (!url.includes("topics=metrics")) return;
+      const snapshot = mockMetricsSnapshot(1, { dns: false, host: true });
+      const event = new MessageEvent("metrics", { data: JSON.stringify({ topic: "metrics", kind: "metrics.snapshot", metrics: snapshot }) });
+      for (const fn of this.listeners.get("metrics") ?? []) fn(event);
+    }, 20);
+  }
+  addEventListener(type: string, fn: (e: Event) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  close() {}
+}
+
+describe("host tiles", () => {
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", HostSamples);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function warn(low: boolean) {
+    const status = await api.get("/api/v1/system/status");
+    const warnings = low ? [...status.warnings, { code: "node.disk.low", detail: "the data directory is short of room", params: {} }] : status.warnings;
+    server.use(http.get("/api/v1/system/status", () => HttpResponse.json({ ...status, warnings })));
+  }
+
+  it("turn the disk tile to the warning style while the status warns node.disk.low", async () => {
+    await warn(true);
+    renderRoute(Dashboard, { url: "/" });
+    const disk = await screen.findByTestId("metrics-tile-host-disk", undefined, { timeout: 5000 });
+    expect(disk.dataset.value).toBe("180");
+    expect(screen.getByTestId("metrics-tile-host-cpu").dataset.value).not.toBeUndefined();
+    expect(screen.getByTestId("metrics-tile-host-memory").dataset.value).not.toBeUndefined();
+    await waitFor(() => expect(disk.dataset.state).toBe("low"), { timeout: 3000 });
+    expect(screen.getByTestId("metrics-host-disk-low")).toBeTruthy();
+  });
+
+  it("leave the disk tile in the normal style while the status has no warning", async () => {
+    await warn(false);
+    renderRoute(Dashboard, { url: "/" });
+    const disk = await screen.findByTestId("metrics-tile-host-disk", undefined, { timeout: 5000 });
+    expect(disk.dataset.value).toBe("180");
+    await waitFor(() => expect(screen.getByTestId("dashboard-nodes")).toBeTruthy());
+    expect(disk.dataset.state).toBeUndefined();
+    expect(screen.queryByTestId("metrics-host-disk-low")).toBeNull();
   });
 });

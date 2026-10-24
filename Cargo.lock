@@ -3204,6 +3204,7 @@ dependencies = [
  "brotli",
  "bytes",
  "flate2",
+ "fs4",
  "futures",
  "hyper",
  "hyper-util",

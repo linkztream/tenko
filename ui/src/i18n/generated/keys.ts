@@ -4727,6 +4727,18 @@ export type MessageKey =
   | "metrics.group.controller"
   | "metrics.group.dhcp"
   | "metrics.group.dns"
+  | "metrics.group.host"
+  | "metrics.host.cpu"
+  | "metrics.host.cpu_hint"
+  | "metrics.host.cpu_none"
+  | "metrics.host.disk"
+  | "metrics.host.disk_hint"
+  | "metrics.host.disk_low"
+  | "metrics.host.disk_none"
+  | "metrics.host.memory"
+  | "metrics.host.memory_hint"
+  | "metrics.host.memory_none"
+  | "metrics.host.unit_gib"
   | "metrics.raft.lag"
   | "metrics.raft.node"
   | "metrics.raft.stale"
@@ -7525,6 +7537,8 @@ export interface MessageArgs {
   "metrics.dns.rate": { rate: string | number };
   "metrics.dns.upstreams_hint": { p99: string | number };
   "metrics.dns.validation_hint": { rate: string | number };
+  "metrics.host.disk_hint": { total: string | number };
+  "metrics.host.memory_hint": { total: string | number; used: string | number };
   "metrics.raft.lag": { entries: number };
   "metrics.raft.node": { node: string | number };
   "metrics.sparkline": { name: string | number; values: string | number };
@@ -12595,6 +12609,18 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.group.controller",
   "metrics.group.dhcp",
   "metrics.group.dns",
+  "metrics.group.host",
+  "metrics.host.cpu",
+  "metrics.host.cpu_hint",
+  "metrics.host.cpu_none",
+  "metrics.host.disk",
+  "metrics.host.disk_hint",
+  "metrics.host.disk_low",
+  "metrics.host.disk_none",
+  "metrics.host.memory",
+  "metrics.host.memory_hint",
+  "metrics.host.memory_none",
+  "metrics.host.unit_gib",
   "metrics.raft.lag",
   "metrics.raft.node",
   "metrics.raft.stale",

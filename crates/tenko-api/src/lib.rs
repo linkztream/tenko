@@ -58,6 +58,8 @@ pub mod redact;
 #[cfg(feature = "server")]
 pub mod extract;
 #[cfg(feature = "server")]
+pub mod host;
+#[cfg(feature = "server")]
 pub mod list;
 #[cfg(feature = "server")]
 pub mod middleware;

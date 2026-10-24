@@ -284,6 +284,10 @@ pub struct MetricsSample {
     /// The `dhcp` role of the controller's process; absent when the process does not run it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dhcp: Option<MetricsDhcp>,
+    /// The host under the controller: CPU, memory and the file system of the data directory,
+    /// as the node last read them (every five seconds); absent when none could be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<MetricsHost>,
 }
 
 impl MetricsSample {
@@ -305,6 +309,7 @@ impl MetricsSample {
             dns: None,
             // WP8.7: the `dhcp` role's part.
             dhcp: None,
+            host: None,
         }
     }
 }
@@ -533,6 +538,30 @@ pub struct MetricsDnsConnections {
 }
 
 // WP8.7: the `dhcp` role in a sample (OPS-20, the DHCP tiles of the start page).
+/// The host in a sample (OPS-20): the latest reading of the machine under the controller. It is
+/// read every five seconds, so consecutive samples repeat it. A figure that could not be read is
+/// absent. The cluster's sample holds, for each figure, the controller that is worst off: the
+/// busiest CPU, the smallest share of memory and of disk available.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct MetricsHost {
+    /// The share of the CPU's time that was busy since the previous reading, 0 to 100; absent in
+    /// the first reading and where the CPU is not read (Windows).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<f64>,
+    /// Physical memory in bytes; absent where memory is not read (Windows).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_total: Option<u64>,
+    /// Memory a program can use without swapping, in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_available: Option<u64>,
+    /// The size of the file system of the data directory in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_total: Option<u64>,
+    /// The space available on that file system in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_available: Option<u64>,
+}
+
 /// The `dhcp` role in a sample (OPS-20): the leases it granted, the time from a REQUEST to its
 /// ACK, the leases it holds, the fullest pools, the NAKs and DECLINEs and the DDNS outcomes over
 /// the interval.

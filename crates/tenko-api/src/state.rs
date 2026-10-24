@@ -95,6 +95,8 @@ pub(crate) struct Platform {
     pub(crate) cluster: Mutex<Option<ClusterStatus>>,
     /// The key-encryption key service of the server binary, for the status fragment.
     pub(crate) kek: ArcSwapOption<tenko_vault::distribution::KekAdmin>,
+    /// The host's CPU, memory and free disk space (OPS-20).
+    pub(crate) host: crate::host::HostMonitor,
 }
 
 impl Default for AppState {
@@ -143,6 +145,7 @@ impl AppState {
                 notices: Mutex::new(BTreeMap::new()),
                 cluster: Mutex::new(None),
                 kek: ArcSwapOption::empty(),
+                host: crate::host::HostMonitor::default(),
             }),
             store,
         }
@@ -173,6 +176,12 @@ impl AppState {
     /// The product modules this installation runs (OPS-25).
     pub fn modules(&self) -> ModuleSet {
         self.platform.modules
+    }
+
+    /// The host's CPU, memory and free disk space; the server binary names the data
+    /// directory whose file system it measures ([`HostMonitor::set_data_dir`]).
+    pub fn host(&self) -> &crate::host::HostMonitor {
+        &self.platform.host
     }
 
     /// The metrics registry that `GET /metrics` encodes. The server binary registers its own

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="metrics-host">
+      <unit id="metrics.group.host">
+        <notes><note category="description">Heading of the group of live metrics tiles with the host the node runs on: CPU, memory and disk.</note></notes>
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="metrics.host.cpu">
+        <notes><note category="description">Title of the tile with the share of the host's CPU time that was busy.</note></notes>
+        <segment><source>Host CPU</source><target>Värdens CPU</target></segment>
+      </unit>
+      <unit id="metrics.host.cpu_hint">
+        <notes><note category="description">Hint under the host CPU tile: what the percentage is.</note></notes>
+        <segment><source>Busy share since the last reading, taken every five seconds</source><target>Upptagen andel sedan förra avläsningen, som görs var femte sekund</target></segment>
+      </unit>
+      <unit id="metrics.host.cpu_none">
+        <notes><note category="description">Hint under the host CPU tile while it has no figure: before the second reading, or on a host where the CPU is not read.</note></notes>
+        <segment><source>Not read yet, or not read on this host</source><target>Inte avläst än, eller inte avläst på den här värden</target></segment>
+      </unit>
+      <unit id="metrics.host.memory">
+        <notes><note category="description">Title of the tile with the share of the host's memory that is in use.</note></notes>
+        <segment><source>Host memory</source><target>Värdens minne</target></segment>
+      </unit>
+      <unit id="metrics.host.memory_hint">
+        <notes><note category="description">Hint under the host memory tile: the memory in use and the total, in GiB.</note></notes>
+        <segment><source>{used} of {total} GiB in use</source><target>{used} av {total} GiB används</target></segment>
+      </unit>
+      <unit id="metrics.host.memory_none">
+        <notes><note category="description">Hint under the host memory tile on a host where the memory is not read.</note></notes>
+        <segment><source>Not read on this host</source><target>Inte avläst på den här värden</target></segment>
+      </unit>
+      <unit id="metrics.host.disk">
+        <notes><note category="description">Title of the tile with the free space on the file system of the data directory.</note></notes>
+        <segment><source>Free disk space</source><target>Ledigt diskutrymme</target></segment>
+      </unit>
+      <unit id="metrics.host.unit_gib">
+        <notes><note category="description">Unit after a size in gibibytes.</note></notes>
+        <segment><source>GiB</source><target>GiB</target></segment>
+      </unit>
+      <unit id="metrics.host.disk_hint">
+        <notes><note category="description">Hint under the free disk space tile: the size of the file system in GiB.</note></notes>
+        <segment><source>Available of {total} GiB on the data directory's file system</source><target>Tillgängligt av {total} GiB på datakatalogens filsystem</target></segment>
+      </unit>
+      <unit id="metrics.host.disk_none">
+        <notes><note category="description">Hint under the free disk space tile when the file system could not be read.</note></notes>
+        <segment><source>The data directory's file system could not be read</source><target>Datakatalogens filsystem kunde inte avläsas</target></segment>
+      </unit>
+      <unit id="metrics.host.disk_low">
+        <notes><note category="description">Warning line of the free disk space tile while the status warns that the data directory's file system is running out of room.</note></notes>
+        <segment><source>Low on space: free some room</source><target>Lågt utrymme: frigör plats</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

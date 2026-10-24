@@ -39,6 +39,8 @@ import { dhcpPart, dnsPart, fakeMetricsStream, refuseMetricsStream, sample, type
 
 const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
 const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
+// OPS-20: the host's tiles, which the real server's samples always carry.
+const HOST_TILES = ["host-cpu", "host-memory", "host-disk"];
 // WP8.7: the DHCP tiles.
 const DHCP_TILES = ["dhcp-leases", "dhcp-ack", "dhcp-active", "dhcp-pools", "dhcp-naks", "dhcp-ddns"];
 
@@ -63,6 +65,11 @@ test("an administrator sees the live metrics, with a new sample every second", a
     expect(Number.isFinite(Number(value)), `${name}: ${value}`).toBe(true);
     await expect(page.getByTestId(`metrics-sparkline-${name}`)).toBeAttached();
   }
+  // The host tiles follow the controller's. The disk figure is read on every platform; the CPU and
+  // the memory only on Linux (the CPU from the second reading), so they may show no number.
+  for (const name of HOST_TILES) await expect(page.getByTestId(`metrics-sparkline-${name}`)).toBeAttached();
+  const disk = await page.getByTestId("metrics-tile-host-disk").getAttribute("data-value");
+  expect(Number.isFinite(Number(disk)) && Number(disk) > 0, `disk: ${disk}`).toBe(true);
   const row = page.getByTestId("metrics-raft-node");
   await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-role", "leader");
@@ -102,7 +109,7 @@ test("the tiles hold nothing to focus and pass axe", async ({ page, signedIn }) 
   void signedIn;
   await openWithSample(page);
   expect(await axeViolations(page, "[data-testid='metrics-tiles']")).toEqual([]);
-  expect(await page.getByTestId("metrics-tiles").locator("svg[aria-hidden='true']").count()).toBe(TILES.length);
+  expect(await page.getByTestId("metrics-tiles").locator("svg[aria-hidden='true']").count()).toBe(TILES.length + HOST_TILES.length);
   // Tab through the page: the focus never lands inside the tiles, and it reaches the links of
   // the cards below them.
   await page.getByTestId("page-dashboard").click({ position: { x: 1, y: 1 } });
