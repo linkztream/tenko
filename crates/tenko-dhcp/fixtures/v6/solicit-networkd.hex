@@ -1,0 +1,27 @@
+# A SOLICIT as systemd-networkd sends it, reconstructed by hand: a DUID-EN client identifier
+# with systemd's enterprise number 43793 and an 8-octet identifier, an IA_NA with an IAID,
+# Rapid Commit, an option request for 23, 24, 56, 31 and 82, elapsed time, and a Client FQDN
+# (RFC 4704) with the S flag and the partial name "laptop" without a root label.
+#
+# msg-type SOLICIT, transaction id 0x0b17c9
+01 0b 17 c9
+# option 1, client identifier, 14 octets: DUID-EN (type 2), enterprise 43793, 8 octets
+00 01 00 0e
+00 02 00 00 ab 11
+a1 b2 c3 d4 e5 f6 07 18
+# option 3, IA_NA, 12 octets: IAID 2, T1 0, T2 0
+00 03 00 0c
+00 00 00 02
+00 00 00 00
+00 00 00 00
+# option 14, rapid commit, empty
+00 0e 00 00
+# option 6, option request, 10 octets: 23, 24, 56, 31, 82
+00 06 00 0a
+00 17 00 18 00 38 00 1f 00 52
+# option 8, elapsed time 0
+00 08 00 02 00 00
+# option 39, client FQDN, 8 octets: flags S (0x01), the name "laptop" (partial)
+00 27 00 08
+01
+06 6c 61 70 74 6f 70

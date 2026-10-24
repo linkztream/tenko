@@ -1,8 +1,11 @@
 //! `[dhcp]`: the node-local settings of the `dhcp` role (WP7.5, `docs/dhcp-contracts.md`
 //! section 9, `docs/dhcp.md` section 10). The replicated settings of the service (lease
 //! times, options, the history days of the installation) are `dhcp.settings` in the store.
+//!
+//! WP9.1: a `listen` entry with an IPv6 address is a DHCPv6 listener on `[dhcp.v6] port`
+//! (547); `[dhcp.v6]` holds the DHCPv6 ports and the server's DUID.
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, SocketAddrV6};
 
 use serde::{Deserialize, Deserializer, Serialize, de};
 
@@ -22,8 +25,9 @@ pub enum DhcpListenMode {
 /// One entry of `[dhcp] listen`: a table, or an address alone for relay mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DhcpListen {
-    /// The interface's IPv4 unicast address.
-    pub address: Ipv4Addr,
+    /// The interface's unicast address: IPv4 for DHCPv4 on `port`, IPv6 for DHCPv6 on
+    /// `[dhcp.v6] port` (WP9.1).
+    pub address: IpAddr,
     /// Relay (default) or direct.
     pub mode: DhcpListenMode,
     /// The interface of a direct listener (Linux binds to it with `SO_BINDTODEVICE` and
@@ -59,10 +63,10 @@ enum ListenEntry {
     Table(ListenTable),
 }
 
-fn address<E: de::Error>(text: &str) -> Result<Ipv4Addr, E> {
+fn address<E: de::Error>(text: &str) -> Result<IpAddr, E> {
     text.trim().parse().map_err(|_| {
         E::custom(format!(
-            "dhcp.listen: `{text}` is not an IPv4 address such as 192.0.2.10"
+            "dhcp.listen: `{text}` is not an IP address such as 192.0.2.10 or 2001:db8::10"
         ))
     })
 }
@@ -165,6 +169,54 @@ pub struct DhcpHistorySection {
     pub days: Option<u32>,
 }
 
+// WP9.1: the DHCPv6 side of the role.
+/// `[dhcp.v6]`: the DHCPv6 listeners' ports and the server's identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DhcpV6Section {
+    /// The DHCPv6 server port (default 547).
+    pub port: u16,
+    /// The port replies to relay agents go to (default 547).
+    pub relay_port: u16,
+    /// The port replies to clients go to (default 546).
+    pub client_port: u16,
+    /// The server's DUID in hexadecimal (option 2, RFC 8415 section 11), 3 to 130 octets;
+    /// unset: a DUID-UUID derived from the node identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_duid: Option<String>,
+}
+
+impl Default for DhcpV6Section {
+    fn default() -> Self {
+        Self {
+            port: 547,
+            relay_port: 547,
+            client_port: 546,
+            server_duid: None,
+        }
+    }
+}
+
+impl DhcpV6Section {
+    /// The configured server DUID as octets, when it is set and valid.
+    pub fn server_duid_octets(&self) -> Option<Vec<u8>> {
+        let text: String = self
+            .server_duid
+            .as_deref()?
+            .chars()
+            .filter(|c| !matches!(c, ':' | '-' | ' '))
+            .collect();
+        if !text.len().is_multiple_of(2) {
+            return None;
+        }
+        let octets: Option<Vec<u8>> = (0..text.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(text.get(at..at + 2)?, 16).ok())
+            .collect();
+        octets.filter(|octets| (3..=130).contains(&octets.len()))
+    }
+}
+
 /// `[dhcp]`: the `dhcp` role of this node.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -197,6 +249,9 @@ pub struct DhcpSection {
     pub proxy: Vec<Ipv4Addr>,
     /// The proxy DHCP port (default 4011, the PXE boot server port).
     pub proxy_port: u16,
+    // WP9.1: the DHCPv6 ports and the server's DUID.
+    /// DHCPv6.
+    pub v6: DhcpV6Section,
 }
 
 impl Default for DhcpSection {
@@ -214,6 +269,7 @@ impl Default for DhcpSection {
             history: DhcpHistorySection::default(),
             proxy: Vec::new(),
             proxy_port: 4011,
+            v6: DhcpV6Section::default(),
         }
     }
 }
@@ -230,9 +286,13 @@ impl DhcpSection {
         }
     }
 
-    /// The socket address of a listener.
-    pub fn socket_addr(&self, listen: &DhcpListen) -> SocketAddrV4 {
-        SocketAddrV4::new(listen.address, self.port)
+    /// The socket address of a listener: the DHCPv4 port for an IPv4 address, the
+    /// DHCPv6 port for an IPv6 one.
+    pub fn socket_addr(&self, listen: &DhcpListen) -> std::net::SocketAddr {
+        match listen.address {
+            IpAddr::V4(address) => SocketAddrV4::new(address, self.port).into(),
+            IpAddr::V6(address) => SocketAddrV6::new(address, self.v6.port, 0, 0).into(),
+        }
     }
 
     // WP8.4: the proxy DHCP listeners.
@@ -257,7 +317,11 @@ impl DhcpSection {
                 format!("dhcp.proxy[{index}]: {address} is listed twice"),
             )?;
             check(
-                self.proxy_port != self.port || !self.listen.iter().any(|l| l.address == *address),
+                self.proxy_port != self.port
+                    || !self
+                        .listen
+                        .iter()
+                        .any(|l| l.address == IpAddr::V4(*address)),
                 format!(
                     "dhcp.proxy[{index}]: {address} listens on dhcp.port already; give \
                      dhcp.proxy_port another port (4011)"
@@ -280,8 +344,9 @@ impl DhcpSection {
         }
         for (index, listen) in self.listen.iter().enumerate() {
             let address = listen.address;
+            let broadcast = matches!(address, IpAddr::V4(v4) if v4.is_broadcast());
             check(
-                !address.is_unspecified() && !address.is_broadcast() && !address.is_multicast(),
+                !address.is_unspecified() && !broadcast && !address.is_multicast(),
                 &format!(
                     "dhcp.listen[{index}]: {address} is not a unicast address; name the \
                      interface's address"
@@ -360,6 +425,15 @@ impl DhcpSection {
                 .days
                 .is_none_or(|days| (1..=3_650).contains(&days)),
             "dhcp.history.days must be between 1 and 3650",
+        )?;
+        // WP9.1: the DHCPv6 ports and DUID.
+        check(
+            self.v6.port > 0 && self.v6.relay_port > 0 && self.v6.client_port > 0,
+            "dhcp.v6.port, dhcp.v6.relay_port and dhcp.v6.client_port must be between 1 and 65535",
+        )?;
+        check(
+            self.v6.server_duid.is_none() || self.v6.server_duid_octets().is_some(),
+            "dhcp.v6.server_duid must be 3 to 130 octets in hexadecimal",
         )
     }
 }
@@ -423,7 +497,10 @@ mod tests {
         for (text, key) in [
             ("listen = [\"0.0.0.0\"]", "dhcp.listen[0]"),
             ("listen = [\"192.0.2.300\"]", "dhcp.listen"),
-            ("listen = [\"2001:db8::1\"]", "dhcp.listen"),
+            // WP9.1: an IPv6 address is a DHCPv6 listener; a multicast one is not.
+            ("listen = [\"ff02::1:2\"]", "dhcp.listen[0]"),
+            ("[v6]\nserver_duid = \"0001\"", "dhcp.v6.server_duid"),
+            ("[v6]\nport = 0", "dhcp.v6.port"),
             (
                 "listen = [{ address = \"192.0.2.1\", interface = \"eth0\" }]",
                 "interface is for direct mode",

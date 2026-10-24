@@ -31,6 +31,7 @@ use crate::{
         MetricsSnapshot,
         metrics::{DROP_LABELS, OUTCOME_LABELS, STEP_LABELS, TYPE_LABELS},
     },
+    v6::engine::{Metrics6Snapshot, metrics::TYPE_LABELS as TYPE_LABELS6},
 };
 
 static SOURCE: RwLock<Option<Arc<LocalNode>>> = RwLock::new(None);
@@ -56,6 +57,11 @@ fn engine() -> MetricsSnapshot {
     source().map(|node| node.stats().engine).unwrap_or_default()
 }
 
+// WP9.1: the DHCPv6 engine's counters, the series of `family="v6"`.
+fn engine6() -> Metrics6Snapshot {
+    source().map(|node| node.metrics6()).unwrap_or_default()
+}
+
 /// Cumulative buckets of a per-bucket count.
 fn cumulative(counts: &[u64; EXCHANGE_BUCKETS_US.len() + 1], sum: u64) -> HistogramValue {
     let mut total = 0;
@@ -74,7 +80,7 @@ fn cumulative(counts: &[u64; EXCHANGE_BUCKETS_US.len() + 1], sum: u64) -> Histog
 /// One family read from the engine's counters.
 struct EngineFamily {
     desc: &'static Desc,
-    read: fn(&MetricsSnapshot, &mut Vec<Series>),
+    read: fn(&MetricsSnapshot, &Metrics6Snapshot, &mut Vec<Series>),
 }
 
 impl Collect for EngineFamily {
@@ -83,11 +89,11 @@ impl Collect for EngineFamily {
     }
 
     fn collect(&self, out: &mut Vec<Series>) {
-        (self.read)(&engine(), out);
+        (self.read)(&engine(), &engine6(), out);
     }
 }
 
-fn packets(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
+fn packets(snapshot: &MetricsSnapshot, v6: &Metrics6Snapshot, out: &mut Vec<Series>) {
     for (kind, row) in TYPE_LABELS.iter().zip(&snapshot.packets) {
         for (outcome, value) in OUTCOME_LABELS.iter().zip(row) {
             if *value > 0 {
@@ -98,37 +104,60 @@ fn packets(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
             }
         }
     }
+    // WP9.1: the DHCPv6 message types.
+    for (kind, row) in TYPE_LABELS6.iter().zip(&v6.packets) {
+        for (outcome, value) in OUTCOME_LABELS.iter().zip(row) {
+            if *value > 0 {
+                out.push(Series {
+                    labels: Labels::owned(&["v6", kind, outcome]),
+                    value: Value::Counter(*value),
+                });
+            }
+        }
+    }
 }
 
-fn exchange(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
-    for (step, (counts, sum)) in STEP_LABELS.iter().zip(&snapshot.exchange) {
+fn exchange(snapshot: &MetricsSnapshot, v6: &Metrics6Snapshot, out: &mut Vec<Series>) {
+    for ((step, (counts, sum)), (counts6, sum6)) in
+        STEP_LABELS.iter().zip(&snapshot.exchange).zip(&v6.exchange)
+    {
+        // WP9.1: SOLICIT to ADVERTISE counts as `offer`, a committed REPLY as `ack`.
+        let mut total = *counts;
+        for (value, more) in total.iter_mut().zip(counts6) {
+            *value += more;
+        }
         out.push(Series {
             labels: Labels::owned(&[step]),
-            value: Value::Histogram(cumulative(counts, *sum)),
+            value: Value::Histogram(cumulative(&total, sum + sum6)),
         });
     }
 }
 
-fn naks(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
+fn naks(snapshot: &MetricsSnapshot, _v6: &Metrics6Snapshot, out: &mut Vec<Series>) {
     out.push(Series {
         labels: Labels::EMPTY,
         value: Value::Counter(snapshot.naks),
     });
 }
 
-fn declines(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
+fn declines(snapshot: &MetricsSnapshot, v6: &Metrics6Snapshot, out: &mut Vec<Series>) {
     out.push(Series {
         labels: Labels::EMPTY,
-        value: Value::Counter(snapshot.declines),
+        value: Value::Counter(snapshot.declines + v6.declines),
     });
 }
 
-fn dropped(snapshot: &MetricsSnapshot, out: &mut Vec<Series>) {
-    for (index, (reason, value)) in DROP_LABELS.iter().zip(&snapshot.dropped).enumerate() {
+fn dropped(snapshot: &MetricsSnapshot, v6: &Metrics6Snapshot, out: &mut Vec<Series>) {
+    for (index, ((reason, value), value6)) in DROP_LABELS
+        .iter()
+        .zip(&snapshot.dropped)
+        .zip(&v6.dropped)
+        .enumerate()
+    {
         let own = u16::try_from(index).map_or(0, |series| lease::DROPPED.get(series));
         out.push(Series {
             labels: Labels::owned(&[reason]),
-            value: Value::Counter(value + own),
+            value: Value::Counter(value + value6 + own),
         });
     }
 }
@@ -166,11 +195,15 @@ impl Collect for Leases {
         let Some(node) = source() else {
             return;
         };
-        for (state, count) in node.leases().read().counts_by_state() {
+        // WP9.1: the rows of `dhcp.leases6` count with those of `dhcp.leases`.
+        let v6 = node.leases6().read().counts_by_state();
+        for ((state, count), (_, count6)) in
+            node.leases().read().counts_by_state().into_iter().zip(v6)
+        {
             #[allow(clippy::cast_precision_loss, reason = "a gauge of rows")]
             out.push(Series {
                 labels: Labels::owned(&[state_name(state)]),
-                value: Value::Gauge(count as f64),
+                value: Value::Gauge((count + count6) as f64),
             });
         }
     }

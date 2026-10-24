@@ -62,6 +62,15 @@ use crate::{
     },
     server::{DhcpServer, ListenerInfo, ServerConfig},
     store_feed::{self, FeedProgress, StoreFeed},
+    // WP9.1: the DHCPv6 server and its lease path beside the DHCPv4 ones.
+    v6::{
+        lease::{
+            SharedLeases6,
+            commit::{NoObservations6, Observation6Hook, StoreLeases6},
+            index_from_data6,
+        },
+        server::{Dhcp6Server, Listener6Info, Server6Config},
+    },
 };
 
 /// How long the role waits before it reads a new image after its feed failed.
@@ -79,6 +88,10 @@ pub struct RoleSettings {
     /// Whether the profile expects conflict detection and warns without a probe
     /// (TGL-16: Hardened).
     pub probe_expected: bool,
+    // WP9.1: the DHCPv6 listeners (`[dhcp] listen` entries with an IPv6 address).
+    /// The DHCPv6 listeners, workers and engine settings; without listeners the DHCPv6
+    /// lease table is kept and nothing answers on port 547.
+    pub server6: Server6Config,
 }
 
 /// Why the role did not start.
@@ -130,6 +143,13 @@ pub struct DhcpStatus {
     // Slice 8 follow-ups: the proxy DHCP listeners of WP8.4 in the report.
     /// The proxy DHCP listeners bound (`[dhcp] proxy`), one worker each.
     pub proxies: Vec<std::net::SocketAddrV4>,
+    // WP9.1: the DHCPv6 side of the report.
+    /// The DHCPv6 listeners (port 547).
+    pub listeners6: Vec<Listener6Info>,
+    /// The DHCPv6 scopes in the image.
+    pub scopes6: usize,
+    /// The DHCPv6 leases by binding state.
+    pub leases6: [(BindingState, usize); 7],
 }
 
 /// A node's DHCP role as the API reaches it: locally in Phase 3.
@@ -160,6 +180,10 @@ pub struct LocalNode {
     probe_expected: AtomicBool,
     // WP8.1: the observation hook, for the operator's release as for the committer.
     observations: Arc<dyn ObservationHook>,
+    // WP9.1: the DHCPv6 server, its table and its lease store.
+    server6: RwLock<Option<Arc<Dhcp6Server>>>,
+    leases6: SharedLeases6,
+    lease_store6: StoreLeases6,
 }
 
 impl std::fmt::Debug for LocalNode {
@@ -181,6 +205,37 @@ impl LocalNode {
     /// The lease table.
     pub fn leases(&self) -> &SharedLeases {
         &self.leases
+    }
+
+    // WP9.1: the DHCPv6 side.
+    fn server6(&self) -> Option<Arc<Dhcp6Server>> {
+        self.server6
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The DHCPv6 lease table.
+    pub fn leases6(&self) -> &SharedLeases6 {
+        &self.leases6
+    }
+
+    /// The DHCPv6 lease store.
+    pub fn lease_store6(&self) -> &StoreLeases6 {
+        &self.lease_store6
+    }
+
+    /// The DHCPv6 offers held, for the expiry service to prune; none without a DHCPv6
+    /// listener.
+    pub fn offers6(&self) -> Option<Arc<crate::v6::engine::Offers6>> {
+        self.server6().map(|server| Arc::clone(server.offers()))
+    }
+
+    /// The DHCPv6 engine's counters summed over its workers.
+    pub fn metrics6(&self) -> crate::v6::engine::Metrics6Snapshot {
+        self.server6()
+            .map(|server| server.metrics())
+            .unwrap_or_default()
     }
 
     /// The lease store (its refusal gate and counters).
@@ -463,16 +518,26 @@ impl DhcpNode for LocalNode {
             .as_ref()
             .map_or(Revision::ZERO, |image| image.revision());
         let held = self.leases.revision().max(revision);
+        // WP9.1: the DHCPv6 listeners serve too.
+        let server6 = self.server6();
+        let listeners6 = server6
+            .as_ref()
+            .map(|server| server.listeners().to_vec())
+            .unwrap_or_default();
         DhcpStatus {
             node: self.node,
-            serving: server.is_some() && !listeners.is_empty(),
+            serving: server.is_some() && (!listeners.is_empty() || !listeners6.is_empty()),
             accepting: !gate.refusing(),
             refusal: gate.finding(),
             probe: self.probe.load(Ordering::Relaxed),
             probe_expected: self.probe_expected.load(Ordering::Relaxed),
             scopes: image.as_ref().map_or(0, |image| image.scopes().len()),
             leases: self.leases.read().counts_by_state(),
-            last_commit: server.as_ref().and_then(|server| server.last_commit()),
+            // WP9.1: the longer of the two families' last commits.
+            last_commit: server
+                .as_ref()
+                .and_then(|server| server.last_commit())
+                .max(server6.as_ref().and_then(|server| server.last_commit())),
             revision,
             lag: self.progress.lag(held),
             started: self.started,
@@ -483,6 +548,9 @@ impl DhcpNode for LocalNode {
                 .map(|server| server.proxies().to_vec())
                 .unwrap_or_default(),
             listeners,
+            scopes6: image.as_ref().map_or(0, |image| image.v6().scopes().len()),
+            leases6: self.leases6.read().counts_by_state(),
+            listeners6,
         }
     }
 
@@ -520,6 +588,9 @@ impl std::fmt::Debug for Role {
 /// Keeps the image and the table equal to the feed's rows.
 struct Follower {
     server: Arc<DhcpServer<SharedLeases>>,
+    // WP9.1: the DHCPv6 server and table.
+    server6: Option<Arc<Dhcp6Server>>,
+    leases6: SharedLeases6,
     leases: SharedLeases,
     /// The configuration rows (the leases are in the table, not here).
     data: DhcpData,
@@ -549,6 +620,14 @@ impl Follower {
                     Change::Lease((vrf, addr), None) => {
                         table.take(*vrf, *addr);
                     }
+                    // WP9.1: the DHCPv6 leases go to their own table.
+                    Change::Lease6((vrf, addr), Some(lease)) => {
+                        debug_assert_eq!((lease.vrf, lease.addr6()), (*vrf, *addr));
+                        self.leases6.write().apply_at(lease.clone(), delta.to);
+                    }
+                    Change::Lease6((vrf, addr), None) => {
+                        self.leases6.write().take(*vrf, *addr);
+                    }
                     other => {
                         self.data.apply_change(other);
                         configured = true;
@@ -557,11 +636,17 @@ impl Follower {
             }
             table.advance(delta.to);
         }
+        self.leases6.write().advance(delta.to);
+        self.leases6.changed();
         self.leases.changed();
         self.data.revision = delta.to;
         self.held = delta.to;
         if configured {
             self.server.set_image(build(&self.data).image);
+            // WP9.1: the DHCPv6 workers answer from the same image.
+            if let Some(server6) = &self.server6 {
+                server6.set_image(self.server.image());
+            }
             // WP8.5: the stored conflict detection setting (TGL-16).
             follow_conflict_setting(&self.server, &self.data);
         }
@@ -572,7 +657,10 @@ impl Follower {
     fn reset(&mut self, mut data: DhcpData) {
         let built = build(&data);
         let mut table = index_from_data(&data);
+        // WP9.1: the DHCPv6 table from the same image.
+        let mut table6 = index_from_data6(&data);
         data.leases.clear();
+        data.leases6.clear();
         let revision = data.revision;
         self.server.swap(built.image, |held| {
             // The role's own commits after the image's revision stay in the table.
@@ -582,6 +670,20 @@ impl Follower {
             *held = table;
         });
         self.leases.changed();
+        // WP9.1: the DHCPv6 table, swapped with the DHCPv6 workers' image.
+        let carry = |held: &mut crate::v6::lease::Lease6Index,
+                     table6: &mut crate::v6::lease::Lease6Index| {
+            for (lease, at) in held.rows_after(revision) {
+                table6.apply_at(lease, at);
+            }
+            std::mem::swap(held, table6);
+        };
+        if let Some(server6) = &self.server6 {
+            server6.swap(self.server.image(), |held| carry(held, &mut table6));
+        } else {
+            carry(&mut self.leases6.write(), &mut table6);
+        }
+        self.leases6.changed();
         // WP8.5: the stored conflict detection setting (TGL-16).
         follow_conflict_setting(&self.server, &data);
         self.data = data;
@@ -664,6 +766,34 @@ impl Role {
         settings: RoleSettings,
         observations: Arc<dyn ObservationHook>,
     ) -> Result<Self, StartError> {
+        Self::start_observed6(
+            store,
+            node,
+            settings,
+            observations,
+            Arc::new(NoObservations6),
+        )
+        .await
+    }
+
+    // WP9.1: the start with the observation hooks of both families.
+    /// [`Role::start_observed`] with `observations6`, the hook that adds the IPAM facts of
+    /// every DHCPv6 lease change to its batch.
+    ///
+    /// # Errors
+    ///
+    /// As [`Role::start`].
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the start steps of both families in their order"
+    )]
+    pub async fn start_observed6(
+        store: Arc<dyn Store>,
+        node: NodeId,
+        settings: RoleSettings,
+        observations: Arc<dyn ObservationHook>,
+        observations6: Arc<dyn Observation6Hook>,
+    ) -> Result<Self, StartError> {
         let feed_store = Arc::clone(&store);
         let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
             .await
@@ -682,7 +812,10 @@ impl Role {
             );
         }
         let leases = SharedLeases::new(index_from_data(&data));
+        // WP9.1: the DHCPv6 table.
+        let leases6 = SharedLeases6::new(index_from_data6(&data));
         data.leases.clear();
+        data.leases6.clear();
         let held = data.revision;
         let (lease_store, committer) = StoreLeases::with_hook(
             Arc::clone(&store),
@@ -691,8 +824,18 @@ impl Role {
             settings.commit,
             Arc::clone(&observations),
         );
+        // WP9.1: the DHCPv6 lease store shares the refusal gate.
+        let (lease_store6, committer6) = StoreLeases6::new(
+            Arc::clone(&store),
+            leases6.clone(),
+            node,
+            settings.commit,
+            observations6,
+            lease_store.gate_handle(),
+        );
         let stop = CancellationToken::new();
         let committer = tokio::spawn(committer.run(stop.child_token()));
+        let committer6 = tokio::spawn(committer6.run(stop.child_token()));
         let mut config = settings.server.clone();
         config.node = node;
         let start_leases = leases.clone();
@@ -708,9 +851,49 @@ impl Role {
             Err(error) => {
                 stop.cancel();
                 let _ = committer.await;
+                let _ = committer6.await;
                 return Err(StartError::Bind(error));
             }
         };
+        // WP9.1: the DHCPv6 listeners, over the same image.
+        let server6 = if settings.server6.listen.is_empty() {
+            None
+        } else {
+            let mut config6 = settings.server6.clone();
+            config6.node = node;
+            let image = server.image();
+            let table = leases6.clone();
+            let store6: Arc<dyn crate::v6::lease::store::Lease6Store> =
+                Arc::new(lease_store6.clone());
+            let started = tokio::task::spawn_blocking(move || {
+                Dhcp6Server::start(&config6, image, table, store6, true, None)
+            })
+            .await
+            .map_err(|join| StartError::Feed(join.to_string()))?;
+            match started {
+                Ok(server6) => Some(Arc::new(server6)),
+                Err(error) => {
+                    stop.cancel();
+                    let _ = tokio::task::spawn_blocking(move || drop(server)).await;
+                    let _ = committer.await;
+                    let _ = committer6.await;
+                    return Err(StartError::Bind(error));
+                }
+            }
+        };
+        let wake6 = server6.as_ref().map(|server6| {
+            let lease_store6 = lease_store6.clone();
+            let wake = server6.waker();
+            let stop = stop.child_token();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        () = stop.cancelled() => return,
+                        () = lease_store6.completed() => wake(),
+                    }
+                }
+            })
+        });
         let wake = {
             let lease_store = lease_store.clone();
             let wake = server.waker();
@@ -736,6 +919,8 @@ impl Role {
         let installs = Arc::new(AtomicU64::new(0));
         let follower = Follower {
             server: Arc::clone(&server),
+            server6: server6.clone(),
+            leases6: leases6.clone(),
             leases: leases.clone(),
             data,
             held,
@@ -754,12 +939,13 @@ impl Role {
             probe: AtomicBool::new(settings.probe),
             probe_expected: AtomicBool::new(settings.probe_expected),
             observations,
+            server6: RwLock::new(server6),
+            leases6,
+            lease_store6,
         });
-        Ok(Self {
-            node,
-            stop,
-            tasks: vec![follow, wake, reporter, committer],
-        })
+        let mut tasks = vec![follow, wake, reporter, committer, committer6];
+        tasks.extend(wake6);
+        Ok(Self { node, stop, tasks })
     }
 
     /// The role as the API and the metrics reach it.
@@ -775,11 +961,21 @@ impl Role {
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
+        // WP9.1: the DHCPv6 listeners stop with the DHCPv4 ones.
+        let server6 = node
+            .server6
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         if let Some(server) = server {
             // The follower holds a handle too; once it ends, the last one stops the
             // workers (`Drop` joins them).
             stop.cancel();
             let _ = tokio::task::spawn_blocking(move || drop(server)).await;
+        }
+        if let Some(server6) = server6 {
+            stop.cancel();
+            let _ = tokio::task::spawn_blocking(move || drop(server6)).await;
         }
         stop.cancel();
         for mut task in tasks {

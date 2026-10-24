@@ -1,0 +1,12 @@
+# A SOLICIT whose third option (6, the option request) claims 40 octets where 4 remain: the
+# options before it stay readable.
+#
+# msg-type SOLICIT, transaction id 0xdeadbe
+01 de ad be
+# option 1, client identifier, 10 octets: DUID-LL, hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 01
+# option 8, elapsed time 0
+00 08 00 02 00 00
+# option 6 with length 40 and four octets of value
+00 06 00 28 00 17 00 18

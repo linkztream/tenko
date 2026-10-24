@@ -1,0 +1,39 @@
+# A REPLY as a server sends it (RFC 8415 section 18.3.2), reconstructed by hand: the server
+# identifier, the client identifier, an IA_NA with T1 1500 s, T2 2400 s and one address,
+# DNS servers (RFC 3646), a domain search list, an NTP Server option (RFC 5908) with one
+# server address, and the Client FQDN of RFC 4704 with the S flag and a full name.
+#
+# msg-type REPLY, transaction id 0x1d2e3f
+07 1d 2e 3f
+# option 2, server identifier, 18 octets: DUID-UUID
+00 02 00 12
+00 04
+00 11 22 33 44 55 46 77 88 99 aa bb cc dd ee ff
+# option 1, client identifier, 14 octets: DUID-LLT, hardware type 1, time 0x2c3d4e5f, MAC
+00 01 00 0e
+00 01 00 01 2c 3d 4e 5f 00 00 5e 00 53 02
+# option 3, IA_NA, 40 octets: IAID 0x5e005302, T1 1500, T2 2400
+00 03 00 28
+5e 00 53 02
+00 00 05 dc
+00 00 09 60
+# option 5, IA Address, 24 octets: 2001:db8:1::100, preferred 3000 s, valid 4000 s
+00 05 00 18
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 01 00
+00 00 0b b8
+00 00 0f a0
+# option 23, DNS servers, 16 octets: 2001:db8::53
+00 17 00 10
+20 01 0d b8 00 00 00 00 00 00 00 00 00 00 00 53
+# option 24, domain search list, 32 octets: "example.test." and "lab.example.test."
+00 18 00 20
+07 65 78 61 6d 70 6c 65 04 74 65 73 74 00
+03 6c 61 62 07 65 78 61 6d 70 6c 65 04 74 65 73 74 00
+# option 56, NTP server, 20 octets: NTP_SUBOPTION_SRV_ADDR (1), 16 octets, 2001:db8::123
+00 38 00 14
+00 01 00 10
+20 01 0d b8 00 00 00 00 00 00 00 00 00 00 01 23
+# option 39, client FQDN, 22 octets: flags S (0x01), the name "laptop.example.test."
+00 27 00 16
+01
+06 6c 61 70 74 6f 70 07 65 78 61 6d 70 6c 65 04 74 65 73 74 00

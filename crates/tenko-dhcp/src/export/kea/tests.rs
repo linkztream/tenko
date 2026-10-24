@@ -103,6 +103,7 @@ impl Lab {
         self.data.scopes.insert(
             prefix,
             Scope {
+                v6: None,
                 prefix,
                 enabled: true,
                 lease: None,

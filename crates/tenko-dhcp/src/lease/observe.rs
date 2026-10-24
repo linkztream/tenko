@@ -150,3 +150,19 @@ impl ObservationHook for IpamObservations {
         Ok(observation.observed_at)
     }
 }
+
+// WP9.1: the facts of the DHCPv6 lease batch, by the same rules and counters.
+impl crate::v6::lease::commit::Observation6Hook for IpamObservations {
+    fn observe6(
+        &self,
+        lease: &tenko_core::dhcp::Lease6,
+        _previous: Option<&tenko_core::dhcp::Lease6>,
+        batch: &mut WriteBatch,
+    ) -> Result<Option<Timestamp>, StoreError> {
+        let now = batch.proposed_at;
+        let observation = self.facts.observe6(lease, now, batch)?;
+        self.count(observation.address);
+        self.count(observation.name);
+        Ok(observation.observed_at)
+    }
+}

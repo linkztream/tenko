@@ -1,0 +1,2 @@
+# Three octets: shorter than the four-octet header of a client message.
+01 4a 6b

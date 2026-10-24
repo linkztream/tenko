@@ -98,6 +98,78 @@ The smoke tears everything down at the end (containers, the data volume, the net
 work directory), also after a failure, after printing the logs of every service; `KEEP=1`
 leaves the lab running and prints the commands.
 
+## The round dhcp6
+
+WP9.1 ([docs/dhcp.md](../../../docs/dhcp.md) section 19): the DHCPv6 server of one node behind
+a gateway that relays two dual-stack client links to it, with real clients and a relay agent
+written against RFC 8415. `ROUNDS` selects what the smoke runs: the default (`ROUNDS=default`)
+keeps the rows above exactly as they are; `ROUNDS=dhcp6` runs only this round, which brings its
+own compose project (`compose.dhcp6.yml`, `tenkodhcp6lab`) and its own networks, sets the node
+up itself and tears down what it started; `ROUNDS="dhcp6 default"` runs both, this one first.
+It needs the binary (`NODE=tenko`), and nothing else of the lab may run: the networks use the
+same documentation addresses `192.0.2.0/24` as the lab above.
+
+```text
+          servers6 192.0.2.0/26, 2001:db8:100::/64
+   node .10, ::10 ─┐   tester .20, ::20
+                   └─── .2, ::2 ┌─────────┐ .66, ::1 ──── lan6 192.0.2.64/26, 2001:db8:101::/64
+                                 │  relay  │                client-dhclient6 (…:53:61), client-networkd (…:53:62)
+                                 └─────────┘ .130, ::1 ─── iot6 192.0.2.128/26, 2001:db8:102::/64
+                                                            client-iot6 (…:53:63)
+```
+
+| Service | What | Address |
+|---|---|---|
+| `relay` | The gateway: ISC's `dhcrelay -6` (Debian's `isc-dhcp-relay` 4.4) relays `lan6` and `iot6` up to the node's IPv6 address with the Interface-Id of each link (`-I`), and `dhcrelay -4` does the same for DHCPv4, so that one client can hold a lease of each family; it routes IPv4 between the networks. The interfaces keep Docker's names, so that their IPv6 addresses survive | `.2`, `.66`, `.130`; `::2`, `::1`, `::1` |
+| `netns`, `tenko` | As above: the node's namespace (with `net.ipv4.ip_unprivileged_port_start=0`, which opens ports 67 and 547) and the node from `deploy/Dockerfile`, with `--roles controller,dhcp`, the modules `ipam`, `dns` and `dhcp` (DDNS needs the DNS module; the node serves no DNS) and `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }, { address = "2001:db8:100::10", mode = "relay" }]` | `192.0.2.10`, `2001:db8:100::10` |
+| `client-dhclient6` | ISC's `dhclient -6 -D LL` (a DUID-LL from the MAC, so that the reservation and the correlation rows can name it) with `scripts/dhclient6.conf` and `scripts/client6-script.sh`, which puts the address on the interface and writes one line per event to `/run/lab/events6`; also `dhclient -4` on the same interface (with the files of the DHCPv4 clients) for the correlation row. `dhclient6.conf` defines option 56, which dhclient does not know (the script decodes it) | `lan6`, MAC `00:00:5e:00:53:61` |
+| `client-networkd` (profile `networkd`) | Debian 12's `systemd-networkd` (systemd 252) as a DHCPv6 client, started directly (`networkd.Dockerfile`, `scripts/networkd.sh`; there is no systemd as process 1) with `scripts/networkd-lab.network`: `DHCP=ipv6`, `WithoutRA=solicit`, Rapid Commit, a DUID-LL, DNS and NTP servers. Its debug log goes to the container log; what it learns is in `/run/systemd/netif/links`. It starts with its row | `lan6`, MAC `00:00:5e:00:53:62` |
+| `client-iot6` | `dhclient -6` on the second link | `iot6`, MAC `00:00:5e:00:53:63` |
+| `tester` | `scripts/relay-test6.py`: a relay agent written against RFC 8415 with the standard library only. It sends a RELAY-FORW around a SOLICIT and then around a REQUEST for the advertised address, from the tester's address on port 547 to the node's, optionally two deep (`--two-deep`: an inner lightweight relay of RFC 6221 with the link address `::`), with an Interface-Id (`--interface-id`), the Client Link-Layer Address of RFC 6939 (`--mac`), the Client FQDN of option 39 (`--fqdn`), Rapid Commit (`--rapid-commit`), a RELEASE at the end (`--release`) and a check of the address (`--expect`). It checks that the RELAY-REPL chain is as deep as the RELAY-FORW chain, that the Interface-Id is echoed in the layer that sent it, and an ADVERTISE and then a REPLY with an address. `relay-test.py` (DHCPv4) for the correlation row | `192.0.2.20`, `2001:db8:100::20` |
+
+The node is set up as in the lab above (the Lab profile, through the API): the server's option
+set holds the DHCPv4 options 6, 15 and 42 and the DHCPv6 options 23 (`2001:db8:100::53`), 24
+(`lab6.example.test`) and 56 (`2001:db8:100::123`); each link has an IPv4 prefix (pool `.94`
+to `.123` on lan6, `.158` to `.187` on iot6, option 3 the relay) and an IPv6 prefix with a
+`dhcp_pool` range `::1000` to `::1fff`, and a scope on each. The IPv6 scope of lan6 has a
+valid lifetime of 120 seconds and a preferred lifetime of 60 (T1 after 30); that of iot6
+names the Interface-Id `lab-iot6`. Servers6 has no scope.
+
+| Row | Checks |
+|---|---|
+| `v6.lease.dhclient` | `dhclient -6` on lan6 gets an address of the lan6 pool through `dhcrelay`, with DNS server `2001:db8:100::53` (option 23), domain search `lab6.example.test` (24) and NTP server `2001:db8:100::123` (56) |
+| `v6.lease.iot` | `dhclient -6` on iot6 gets an address of the iot6 pool: the relay's link address selects the scope (its own Interface-Id is not the one the scope names) |
+| `v6.lease.networkd` | `systemd-networkd` on lan6 gets an address of the lan6 pool, and its state file holds the DNS server and the NTP server |
+| `v6.rapid-commit` | networkd's SOLICIT carries Rapid Commit: the node's `tenko_dhcp_packets_total{family="v6",type="solicit",outcome="answered"}` rises while the REQUEST counter does not; `relay-test6.py --rapid-commit` gets a REPLY with the Rapid Commit option to its SOLICIT |
+| `v6.renew` | `dhclient` renews at T1 (a RENEW6 event with the same address) |
+| `v6.interface-id` | `relay-test6.py --two-deep --interface-id lab-iot6` with an outer link address on servers6 (no scope there) gets an address of the iot6 scope; the RELAY-REPL chain is two deep with the Interface-Id echoed in the inner layer |
+| `v6.reservation` | an IPAM host of mode `reserved` with an interface whose DUID is dhclient's DUID-LL (`00030001` and the MAC) and the address `2001:db8:101::80`: after a release dhclient gets `2001:db8:101::80` |
+| `v6.correlation.duid` | client-dhclient6 holds a DHCPv4 and a DHCPv6 lease: `GET /observations?mac=...&type=address` lists both addresses from a source `dhcp:<node>` (the server takes the MAC address from the DUID-LL) |
+| `v6.correlation.rfc6939` | `relay-test6.py --mac 00:00:5e:00:53:6f` with a DUID-EN (no MAC in it; option 79 of the innermost RELAY-FORW carries it) and `relay-test.py` with the same MAC: both addresses are listed for the MAC |
+| `v6.fqdn` | with a primary zone `example.test`, the reverse zone of `2001:db8:101::/64` and DDNS on for the lan6 scope: `relay-test6.py --fqdn host6` gets an address, and `host6.example.test` holds an AAAA record with it, a DHCID record (the API shows its type as `TYPE49`, identifier type 2 and digest type 1) and the PTR in `ip6.arpa`, all of origin `dhcp` |
+| `v6.release` | `dhclient -6 -r` on lan6: the node counts a RELEASE answered; `relay-test6.py --release` for `host6` removes its AAAA record and the PTR |
+
+```sh
+IMAGE=tenko:lab bash deploy/compose/lab-dhcp/smoke.sh   # the default rows
+IMAGE=tenko:lab ROUNDS=dhcp6 bash deploy/compose/lab-dhcp/smoke.sh
+```
+
+`NETWORKD_IMAGE` (with `NETWORKD_IMAGE_PREBUILT=1`) names a built networkd image, as `TOOLS_IMAGE`
+does the tools image; `KEEP=1` leaves the round running and prints the commands. By hand, with
+`KEEP=1`:
+
+```sh
+export LAB_DIR=/tmp/tmp.XXXXXX
+alias lab6='docker compose -p tenkodhcp6lab -f deploy/compose/lab-dhcp/compose.dhcp6.yml --profile networkd'
+lab6 exec client-iot6 dhclient -6 -D LL -v -1 -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
+  -lf /run/lab/dhclient6.leases -pf /run/lab/dhclient6.pid eth0
+lab6 exec client-iot6 cat /run/lab/events6
+lab6 exec tester python3 /lab/relay-test6.py --server 2001:db8:100::10 --bind 2001:db8:100::20 \
+  --two-deep --interface-id lab-iot6 --link 2001:db8:100::20 --expect 2001:db8:102::/64
+lab6 exec relay tcpdump -ni any -c 20 udp port 547
+lab6 down --volumes
+```
+
 ## By hand
 
 With `KEEP=1` the lab stays up; the work directory the smoke prints holds `tenko.toml` and

@@ -220,6 +220,7 @@ async fn network(
         .create_scope(
             &cx(),
             NewScope {
+                v6: None,
                 prefix: prefix.id,
                 enabled: None,
                 lease: None,
@@ -373,6 +374,7 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
             commit: CommitSettings::default(),
             probe: false,
             probe_expected: true,
+            server6: tenko_dhcp::v6::server::Server6Config::default(),
         },
     )
     .await

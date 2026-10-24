@@ -12,6 +12,13 @@
 //! | `os:<ip>` | `Observed::Os` with the guess of the lease's fingerprint (options 55, 60, 77, 81, 93) and its confidence | the lease binds and the [`LeaseClassifier`] knows the fingerprint (WP8.2) |
 //! | `vendor:<mac>` | `Observed::Vendor` with the vendor class of option 60 | the lease binds, the client has a MAC address and sent a vendor class (WP8.2) |
 //!
+//! A DHCPv6 lease (WP9.1, [`LeaseFacts::observe6`]) gives the address and name facts by
+//! the same rules: the address fact of its IPv6 address carries the client's MAC address
+//! from its link-layer address (the Client Link-Layer Address option a relay added, RFC
+//! 6939, else its DUID-LLT or DUID-LL), so that the reconciler sees the DHCPv4 and the
+//! DHCPv6 address of one device under one MAC (DHCP-11); the name fact is the name of
+//! RFC 4704. A DHCPv6 request has no fingerprint and no vendor class here.
+//!
 //! The guess comes from the classifier the role hands the index ([`LeaseFacts::set_classifier`],
 //! the rule table of `tenko_dhcp::fingerprint`); without one no OS fact is written. A
 //! fact's `last_seen` is the lease's client transaction time, its `expires_at` the end of
@@ -53,7 +60,7 @@ use std::{
 use tenko_core::{
     MacAddr, NodeId, ObservationId, Revision, Timestamp,
     codec::encode_key,
-    dhcp::{BindingState, Fingerprint, Lease},
+    dhcp::{BindingState, Fingerprint, Lease, Lease6},
     observe::{ObservationSource, Observed},
 };
 use tenko_store::{
@@ -213,6 +220,20 @@ impl std::fmt::Debug for LeaseFacts {
     }
 }
 
+/// What the rules read of a lease of either family.
+struct Parts<'a> {
+    vrf: tenko_core::VrfId,
+    ip: IpAddr,
+    conflict: bool,
+    bound: bool,
+    mac: Option<MacAddr>,
+    name: Option<String>,
+    vendor: Option<String>,
+    fingerprint: Option<&'a Fingerprint>,
+    cltt: Timestamp,
+    ends: Timestamp,
+}
+
 /// The fact a binding lease asks for.
 struct Wanted {
     observed: Observed,
@@ -292,19 +313,82 @@ impl LeaseFacts {
         now: Timestamp,
         batch: &mut WriteBatch,
     ) -> Result<LeaseObservation, StoreError> {
-        let ip = IpAddr::V4(lease.addr);
-        // A conflict (a probe answer or a DECLINE, WP8.5) is an `abandoned` row: its
-        // address fact names the answering MAC address (an ARP answer stores it as the
-        // row's `chaddr` with hardware type 1), or none (ICMP, a DECLINE), until the hold
-        // ends. It replaces the decliner's lease fact; the name fact ends.
+        self.observe_parts(
+            &Parts {
+                vrf: lease.vrf,
+                ip: IpAddr::V4(lease.addr),
+                // A conflict (a probe answer or a DECLINE, WP8.5) is an `abandoned` row:
+                // its address fact names the answering MAC address (an ARP answer stores
+                // it as the row's `chaddr` with hardware type 1), or none (ICMP, a
+                // DECLINE), until the hold ends. It replaces the decliner's lease fact; the
+                // name fact ends.
+                conflict: lease.state == BindingState::Abandoned && lease.ends > now,
+                bound: lease.is_bound(now),
+                mac: lease_mac(lease),
+                name: lease_name(lease),
+                vendor: lease_vendor(lease),
+                fingerprint: lease.fingerprint.as_ref(),
+                cltt: lease.cltt,
+                ends: lease.ends,
+            },
+            now,
+            batch,
+        )
+    }
+
+    // WP9.1: the facts of a DHCPv6 lease.
+    /// Adds the facts of a DHCPv6 lease (the row after the change) to `batch` by the same
+    /// rules: the address fact with the client's MAC address from its link-layer address,
+    /// the name fact of RFC 4704; an abandoned row (a DECLINE) is a conflict without a MAC
+    /// address.
+    ///
+    /// # Errors
+    ///
+    /// A fact that does not encode.
+    pub fn observe6(
+        &self,
+        lease: &Lease6,
+        now: Timestamp,
+        batch: &mut WriteBatch,
+    ) -> Result<LeaseObservation, StoreError> {
         let conflict = lease.state == BindingState::Abandoned && lease.ends > now;
-        let bound = lease.is_bound(now);
+        self.observe_parts(
+            &Parts {
+                vrf: lease.vrf,
+                ip: IpAddr::V6(lease.addr6()),
+                conflict,
+                bound: lease.is_bound(now),
+                mac: lease.mac().filter(|_| !conflict).map(MacAddr::new),
+                name: lease
+                    .fqdn
+                    .as_deref()
+                    .map(|name| name.trim().trim_end_matches('.'))
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
+                vendor: None,
+                fingerprint: None,
+                cltt: lease.cltt,
+                ends: lease.ends,
+            },
+            now,
+            batch,
+        )
+    }
+
+    fn observe_parts(
+        &self,
+        lease: &Parts<'_>,
+        now: Timestamp,
+        batch: &mut WriteBatch,
+    ) -> Result<LeaseObservation, StoreError> {
+        let ip = lease.ip;
+        let (conflict, bound) = (lease.conflict, lease.bound);
         let address = Observed::Address {
             vrf: lease.vrf,
             ip,
-            mac: lease_mac(lease),
+            mac: lease.mac,
         };
-        let name = lease_name(lease).map(|name| Observed::Name { ip, name });
+        let name = lease.name.clone().map(|name| Observed::Name { ip, name });
         let wanted = |observed: Observed| Wanted {
             observed,
             seen: lease.cltt.min(now),
@@ -314,7 +398,7 @@ impl LeaseFacts {
         let os = self
             .classifier
             .get()
-            .zip(lease.fingerprint.as_ref())
+            .zip(lease.fingerprint)
             .and_then(|(classifier, fingerprint)| classifier.os(fingerprint))
             .filter(|reading| !reading.guess.trim().is_empty())
             .map(|reading| Observed::Os {
@@ -322,9 +406,9 @@ impl LeaseFacts {
                 guess: reading.guess,
                 confidence: reading.confidence.min(100),
             });
-        let mac = lease_mac(lease);
+        let mac = lease.mac;
         let vendor = mac
-            .zip(lease_vendor(lease))
+            .zip(lease.vendor.clone())
             .map(|(mac, vendor)| Observed::Vendor { mac, vendor });
         let address_subject = FactSubject::of(&address);
         let name_subject = FactSubject::Name { ip };

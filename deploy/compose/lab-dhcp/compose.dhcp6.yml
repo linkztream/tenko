@@ -1,0 +1,217 @@
+# The round dhcp6 of the DHCP lab (WP9.1): the DHCPv6 server of one Tenko node behind a
+# gateway that relays two dual-stack client links to it. A lab, not a deployment: the
+# addresses are documentation values (RFC 5737, RFC 3849), the MACs those of RFC 7042, and
+# nothing is published on the host. README.md has the commands; smoke.sh runs the rows
+# (ROUNDS=dhcp6) with dhcp6.sh.
+#
+#   servers6  192.0.2.0/26    2001:db8:100::/64   the node (.10, ::10), the gateway (.2, ::2),
+#                                                 the tester (.20, ::20)
+#   lan6      192.0.2.64/26   2001:db8:101::/64   the gateway (.66, ::1), two clients
+#   iot6      192.0.2.128/26  2001:db8:102::/64   the gateway (.130, ::1), a client
+#
+# - relay: the gateway. ISC's dhcrelay -6 relays lan6 and iot6 to the node's IPv6 address
+#   (with the Interface-Id of the link), dhcrelay -4 does the same for DHCPv4 so that a
+#   client can hold a lease of each family; it routes IPv4 between the networks.
+# - netns: owns the node's network namespace: its two addresses, the IPv4 route to the
+#   other networks through the gateway, and net.ipv4.ip_unprivileged_port_start=0, which
+#   opens ports 67 and 547 to the node's user (the node needs no capability).
+# - tenko: the node from the musl image with the roles controller and dhcp and the modules
+#   ipam, dns and dhcp (DDNS needs the DNS module), listening for relays on both addresses.
+# - client-dhclient6 (lan6, 00:00:5e:00:53:61): ISC dhclient -6 and -4. client-networkd
+#   (lan6, ...:62, profile networkd): systemd-networkd, DHCPv6 with Rapid Commit.
+#   client-iot6 (iot6, ...:63): dhclient -6.
+# - tester: relay-test6.py and relay-test.py, relay agents on servers6.
+#
+# Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
+# file, required), TENKO_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE.
+
+# smoke.sh passes -p tenkodhcp6lab: COMPOSE_PROJECT_NAME of the other rounds would win over
+# this name.
+name: tenkodhcp6lab
+
+x-tools: &tools
+  image: ${TOOLS_IMAGE:-tenko-dhcp-lab-tools:latest}
+  restart: "no"
+  stop_grace_period: 1s
+
+x-client: &client
+  <<: *tools
+  entrypoint: ["/lab/client6.sh"]
+  # dhclient needs a raw socket and sets the address and the route.
+  cap_add:
+    - NET_ADMIN
+    - NET_RAW
+
+services:
+  relay:
+    <<: *tools
+    entrypoint: ["/lab/relay6.sh"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    environment:
+      NODE4: 192.0.2.10
+      NODE6: "2001:db8:100::10"
+      UP4: 192.0.2.2
+      LINKS4: "192.0.2.66 192.0.2.130"
+    networks:
+      servers6:
+        ipv4_address: 192.0.2.2
+        ipv6_address: "2001:db8:100::2"
+      lan6:
+        ipv4_address: 192.0.2.66
+        ipv6_address: "2001:db8:101::1"
+      iot6:
+        ipv4_address: 192.0.2.130
+        ipv6_address: "2001:db8:102::1"
+
+  netns:
+    <<: *tools
+    entrypoint: ["/lab/netns.sh"]
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    environment:
+      GATEWAY: 192.0.2.2
+      ROUTES: 192.0.2.0/24
+    # The API of the node is reached from the host on the IPv4 address; nothing is published.
+    networks:
+      servers6:
+        ipv4_address: 192.0.2.10
+        ipv6_address: "2001:db8:100::10"
+
+  tenko:
+    image: ${TENKO_IMAGE:-tenko:lab}
+    command: ["--roles", "controller,dhcp", "--config", "/lab/tenko.toml"]
+    network_mode: "service:netns"
+    depends_on:
+      - netns
+      - relay
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      TENKO_KEK__PROVIDER: file
+      TENKO_KEK__PATH: /run/secrets/kek
+      TENKO_HIBP__ONLINE: "false"
+      TENKO_UPDATES__AIR_GAPPED: "true"
+    secrets:
+      - kek
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tenko", "health", "--url", "http://127.0.0.1:8443"]
+      interval: 5s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    volumes:
+      - "tenko-data:/var/lib/tenko"
+      - "${LAB_DIR:?set LAB_DIR}/tenko.toml:/lab/tenko.toml:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  client-dhclient6:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.66
+    networks:
+      lan6:
+        ipv4_address: 192.0.2.69
+        ipv6_address: "2001:db8:101::69"
+        mac_address: "00:00:5e:00:53:61"
+
+  # systemd-networkd, started directly by the image's entry script (networkd.Dockerfile,
+  # NETWORKD_IMAGE, default tenko-dhcp-lab-networkd:latest). It needs the capabilities of
+  # its unit and writes what it learns to /run/systemd/netif.
+  client-networkd:
+    profiles: ["networkd"]
+    image: ${NETWORKD_IMAGE:-tenko-dhcp-lab-networkd:latest}
+    entrypoint: ["/lab/networkd.sh"]
+    restart: "no"
+    stop_grace_period: 3s
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BROADCAST
+    networks:
+      lan6:
+        ipv4_address: 192.0.2.70
+        ipv6_address: "2001:db8:101::70"
+        mac_address: "00:00:5e:00:53:62"
+
+  client-iot6:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.130
+    networks:
+      iot6:
+        ipv4_address: 192.0.2.133
+        ipv6_address: "2001:db8:102::133"
+        mac_address: "00:00:5e:00:53:63"
+
+  tester:
+    <<: *tools
+    entrypoint: ["sleep", "infinity"]
+    cap_add:
+      - NET_RAW
+    networks:
+      servers6:
+        ipv4_address: 192.0.2.20
+        ipv6_address: "2001:db8:100::20"
+
+# The gateway routes IPv4 between the networks, so the node's reply to giaddr (the
+# gateway's address on a client link) arrives on the servers6 bridge. Docker drops a packet
+# for a container's address that comes in on another bridge (the raw-table rules that keep
+# other hosts from reaching unpublished containers); nat-unprotected leaves those rules out
+# for the lab's networks, which publish nothing. The IPv6 gateways of the client links
+# are moved out of the way of the relay's ::1.
+networks:
+  servers6:
+    driver: bridge
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+      com.docker.network.bridge.gateway_mode_ipv6: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.0/26
+          gateway: 192.0.2.1
+        - subnet: "2001:db8:100::/64"
+          gateway: "2001:db8:100::1"
+  lan6:
+    driver: bridge
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+      com.docker.network.bridge.gateway_mode_ipv6: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.64/26
+          gateway: 192.0.2.65
+        - subnet: "2001:db8:101::/64"
+          gateway: "2001:db8:101::fffe"
+  iot6:
+    driver: bridge
+    enable_ipv6: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected
+      com.docker.network.bridge.gateway_mode_ipv6: nat-unprotected
+    ipam:
+      config:
+        - subnet: 192.0.2.128/26
+          gateway: 192.0.2.129
+        - subnet: "2001:db8:102::/64"
+          gateway: "2001:db8:102::fffe"
+
+secrets:
+  kek:
+    file: ${LAB_DIR:?set LAB_DIR}/secrets/kek
+
+volumes:
+  tenko-data: {}

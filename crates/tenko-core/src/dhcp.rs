@@ -54,13 +54,14 @@ pub use class::{
     Policy, PolicyAction, Term, filter_verdict,
 };
 pub use lease::{
-    BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Kind, LeaseEvent,
-    LeaseEventKind, LeaseRef, PoolShare, RelayInfo, write_identity,
+    BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event, Lease6Kind,
+    LeaseEvent, LeaseEventKind, LeaseRef, PoolShare, Relay6Info, RelayInfo, write_identity,
+    write_identity6,
 };
 pub use option::{
-    CATALOG_V4, CatalogEntry, OptionData, OptionDef, OptionKind, OptionLevel, OptionOwner,
-    OptionSet, OptionSetRef, OptionSpace, OptionValue, SERVER_MANAGED_V4, StaticRoute, catalog_v4,
-    kind_of, merge,
+    CATALOG_V4, CATALOG_V6, Catalog6Entry, CatalogEntry, OptionData, OptionDef, OptionKind,
+    OptionLevel, OptionOwner, OptionSet, OptionSetRef, OptionSpace, OptionValue, SERVER_MANAGED_V4,
+    SERVER_MANAGED_V6, StaticRoute, catalog_v4, catalog_v6, kind_of, merge,
 };
 
 crate::id_type! {
@@ -704,10 +705,76 @@ pub struct Scope {
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    // WP9.1: what a scope on an IPv6 prefix adds for DHCPv6.
+    /// The DHCPv6 settings of a scope on an IPv6 prefix; none: the defaults of
+    /// [`Scope6Settings`]. Refused on an IPv4 prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v6: Option<Scope6Settings>,
     /// Creation.
     pub created: Stamp,
     /// Last change.
     pub updated: Stamp,
+}
+
+// WP9.1: the DHCPv6 settings of a scope (plan section 2.3: a scope is a prefix with a DHCP
+// policy; the IPv6 prefix adds these).
+/// What a scope on an IPv6 prefix adds for DHCPv6 (RFC 8415). The valid lifetime of an
+/// address is the scope's (or the pool's) lease time; T1 and T2 come from the same lease
+/// times and are kept below the preferred lifetime.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct Scope6Settings {
+    /// The preferred lifetime in seconds; none: five eighths of the valid lifetime, as ISC
+    /// dhcpd does. Never above the valid lifetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_secs: Option<u32>,
+    /// Whether a SOLICIT with the Rapid Commit option is answered with a REPLY that
+    /// commits the lease (RFC 8415 section 18.3.1); none: yes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rapid_commit: Option<bool>,
+    /// The Interface-Id (option 18) a relay sends for the link of this scope, as text: a
+    /// relayed request that carries it selects the scope before its link address does
+    /// (RFC 8415 section 13.1; the lightweight relays of RFC 6221 send a link address of
+    /// zero and the Interface-Id). None: the link address alone selects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_id: Option<String>,
+}
+
+impl Scope6Settings {
+    /// Whether rapid commit is allowed.
+    pub fn rapid_commit(&self) -> bool {
+        self.rapid_commit.unwrap_or(true)
+    }
+
+    /// The preferred lifetime for a granted valid lifetime of `valid` seconds.
+    pub fn preferred(&self, valid: u32) -> u32 {
+        let default = u32::try_from(u64::from(valid) * 5 / 8).unwrap_or(valid);
+        self.preferred_secs.unwrap_or(default).min(valid)
+    }
+
+    /// Checks the settings.
+    ///
+    /// # Errors
+    ///
+    /// `dhcp.scope.invalid` naming the field.
+    pub fn validate(&self) -> Result<(), DhcpError> {
+        if self.preferred_secs == Some(0) {
+            return Err(DhcpError::invalid(
+                codes::SCOPE_INVALID,
+                "v6.preferred_secs",
+                "at least one second",
+            ));
+        }
+        if let Some(id) = &self.interface_id
+            && (id.is_empty() || id.len() > 128 || id.chars().any(char::is_control))
+        {
+            return Err(DhcpError::invalid(
+                codes::SCOPE_INVALID,
+                "v6.interface_id",
+                "1 to 128 printable characters",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Scope {
@@ -750,6 +817,16 @@ impl Scope {
         }
         if let Some(lease) = &self.lease {
             lease.validate("lease")?;
+        }
+        // WP9.1: the DHCPv6 settings belong to an IPv6 prefix.
+        if let Some(v6) = &self.v6 {
+            if matches!(prefix.cidr, IpNet::V4(_)) {
+                return invalid(
+                    "v6",
+                    "the DHCPv6 settings are for a scope on an IPv6 prefix",
+                );
+            }
+            v6.validate()?;
         }
         self.ddns.validate("ddns")?;
         for (index, class) in self.classes.iter().enumerate() {
@@ -1029,15 +1106,16 @@ pub fn check_reservations(candidates: &[ReservationCandidate]) -> Vec<Reservatio
 /// | `dhcp.leases.by_client` | ([`PrefixId`], client identity octets) | [`LeaseRef`] |
 /// | `dhcp.history` | ([`Timestamp`](crate::Timestamp), [`VrfId`](crate::VrfId), `Ipv4Addr`) | [`LeaseEvent`] |
 ///
-/// `dhcp.leases6` and `dhcp.pd_pools` follow in Slice 9; the plan's `dhcp.host_options` is
-/// the option set of [`OptionOwner::Host`] in `dhcp.option_sets`.
+/// `dhcp.leases6` and `dhcp.history6` came with WP9.1 and `dhcp.pd_pools` follows with
+/// WP9.2; the plan's `dhcp.host_options` is the option set of [`OptionOwner::Host`] in
+/// `dhcp.option_sets`.
 pub mod tables {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::{
-        Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease,
-        LeaseEvent, LeaseRef, OptionDef, OptionDefId, OptionOwner, OptionSet, Policy, PolicyId,
-        PoolSettings, Scope, SharedNetwork, SharedNetworkId,
+        Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
+        Lease6Event, LeaseEvent, LeaseRef, OptionDef, OptionDefId, OptionOwner, OptionSet, Policy,
+        PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
     };
     use crate::{
         Timestamp,
@@ -1077,12 +1155,19 @@ pub mod tables {
     /// Lease history, bounded by retention (P3-Q13).
     pub static HISTORY: TableDef<(Timestamp, VrfId, Ipv4Addr), LeaseEvent> =
         TableDef::new("dhcp.history");
+    // WP9.1: the DHCPv6 leases and their history (additive, no format change).
+    /// DHCPv6 leases, by VRF and address (an `IA_PD` prefix by its first address). The
+    /// role derives its client index from the rows; there is no `by_client` table.
+    pub static LEASES6: TableDef<(VrfId, Ipv6Addr), Lease6> = TableDef::new("dhcp.leases6");
+    /// DHCPv6 lease history, bounded by the same retention as `dhcp.history`.
+    pub static HISTORY6: TableDef<(Timestamp, VrfId, Ipv6Addr), Lease6Event> =
+        TableDef::new("dhcp.history6");
 
     /// The tables a node with the `dhcp` role receives through node sync: every table of the
     /// namespace except `dhcp.history` (plan section 3.2). Declared now and consumed by no
     /// node in Phase 3: the one node runs the role in the controller's process and reads
     /// the store directly (plan section 2.12); the fed `dhcp` node is Phase 5.
-    pub static NODE_TABLES: [TableName; 12] = [
+    pub static NODE_TABLES: [TableName; 13] = [
         TableName::from_static("dhcp.settings"),
         TableName::from_static("dhcp.scopes"),
         TableName::from_static("dhcp.shared_networks"),
@@ -1095,6 +1180,8 @@ pub mod tables {
         TableName::from_static("dhcp.filters"),
         TableName::from_static("dhcp.leases"),
         TableName::from_static("dhcp.leases.by_client"),
+        // WP9.1: the DHCPv6 leases.
+        TableName::from_static("dhcp.leases6"),
     ];
 
     /// The IPAM tables a `dhcp` node also receives, filtered to the rows its reservations
@@ -1111,7 +1198,7 @@ pub mod tables {
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 13] {
+    pub fn all() -> [&'static TableName; 15] {
         [
             SETTINGS.name(),
             SCOPES.name(),
@@ -1126,6 +1213,9 @@ pub mod tables {
             LEASES.name(),
             LEASES_BY_CLIENT.name(),
             HISTORY.name(),
+            // WP9.1: the DHCPv6 leases and their history.
+            LEASES6.name(),
+            HISTORY6.name(),
         ]
     }
 }

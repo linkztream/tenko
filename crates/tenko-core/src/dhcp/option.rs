@@ -446,6 +446,16 @@ impl OptionDef {
                 "the built-in catalog defines this code",
             ));
         }
+        // WP9.1: the same for the DHCPv6 catalog.
+        if self.space.is_dhcp6()
+            && (catalog_v6(self.code).is_some() || SERVER_MANAGED_V6.contains(&self.code))
+        {
+            return Err(DhcpError::code_reserved(
+                &self.space,
+                self.code,
+                "the built-in DHCPv6 catalog defines this code",
+            ));
+        }
         if !valid_name(&self.name) {
             return invalid("name", "1 to 64 characters of a-z, 0-9 and -");
         }
@@ -559,6 +569,66 @@ pub fn catalog_v4(code: u8) -> Option<&'static CatalogEntry> {
     CATALOG_V4.iter().find(|entry| entry.code == code)
 }
 
+// WP9.1: the DHCPv6 catalog (RFC 8415 and the option RFCs).
+/// One entry of the built-in DHCPv6 catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Catalog6Entry {
+    /// The code in `dhcp6`.
+    pub code: u16,
+    /// The name, as Kea names it.
+    pub name: &'static str,
+    /// The type.
+    pub kind: OptionKind,
+    /// Whether it holds a list.
+    pub array: bool,
+}
+
+const fn entry6(code: u16, name: &'static str, kind: OptionKind, array: bool) -> Catalog6Entry {
+    Catalog6Entry {
+        code,
+        name,
+        kind,
+        array,
+    }
+}
+
+/// DHCPv6 codes the server writes itself and an option set never holds: the identifiers,
+/// the identity associations and their addresses and prefixes, the option request, the
+/// preference, the elapsed time, the relay message, authentication, server unicast, the
+/// status code, rapid commit, the Interface-Id, the reconfigure options, the Remote-Id,
+/// the client FQDN (the server's answer of RFC 4704) and the client link-layer address.
+pub const SERVER_MANAGED_V6: [u16; 21] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 18, 19, 20, 25, 26, 37, 39, 79,
+];
+
+/// The built-in DHCPv6 catalog. Option 56 (NTP server, RFC 5908) holds the servers'
+/// addresses; the server writes each as an `NTP_SUBOPTION_SRV_ADDR` sub-option.
+pub const CATALOG_V6: &[Catalog6Entry] = &[
+    entry6(21, "sip-server-dns", OptionKind::Fqdn, true),
+    entry6(22, "sip-server-addr", OptionKind::Ipv6Address, true),
+    entry6(23, "dns-servers", OptionKind::Ipv6Address, true),
+    entry6(24, "domain-search", OptionKind::Fqdn, true),
+    entry6(27, "nis-servers", OptionKind::Ipv6Address, true),
+    entry6(28, "nisp-servers", OptionKind::Ipv6Address, true),
+    entry6(29, "nis-domain-name", OptionKind::Fqdn, false),
+    entry6(30, "nisp-domain-name", OptionKind::Fqdn, false),
+    entry6(31, "sntp-servers", OptionKind::Ipv6Address, true),
+    entry6(32, "information-refresh-time", OptionKind::U32, false),
+    entry6(41, "new-posix-timezone", OptionKind::String, false),
+    entry6(42, "new-tzdb-timezone", OptionKind::String, false),
+    entry6(56, "ntp-server", OptionKind::Ipv6Address, true),
+    entry6(59, "bootfile-url", OptionKind::String, false),
+    entry6(60, "bootfile-param", OptionKind::Binary, false),
+    entry6(64, "aftr-name", OptionKind::Fqdn, false),
+    entry6(82, "sol-max-rt", OptionKind::U32, false),
+    entry6(83, "inf-max-rt", OptionKind::U32, false),
+];
+
+/// The catalog entry of a DHCPv6 code.
+pub fn catalog_v6(code: u16) -> Option<&'static Catalog6Entry> {
+    CATALOG_V6.iter().find(|entry| entry.code == code)
+}
+
 /// The type of an option: the catalog for `dhcp4`, else the custom definition of the same
 /// space and code among `defs`.
 pub fn kind_of<'a>(
@@ -569,6 +639,12 @@ pub fn kind_of<'a>(
     if space.is_dhcp4()
         && let Ok(code) = u8::try_from(code)
         && let Some(entry) = catalog_v4(code)
+    {
+        return Some((entry.kind, entry.array));
+    }
+    // WP9.1: the DHCPv6 catalog.
+    if space.is_dhcp6()
+        && let Some(entry) = catalog_v6(code)
     {
         return Some((entry.kind, entry.array));
     }
@@ -611,8 +687,10 @@ impl OptionValue {
         &self,
         defs: impl IntoIterator<Item = &'a OptionDef>,
     ) -> Result<(), DhcpError> {
-        if self.space.is_dhcp4()
-            && u8::try_from(self.code).is_ok_and(|code| SERVER_MANAGED_V4.contains(&code))
+        // WP9.1: and the codes a DHCPv6 server writes itself.
+        if (self.space.is_dhcp4()
+            && u8::try_from(self.code).is_ok_and(|code| SERVER_MANAGED_V4.contains(&code)))
+            || (self.space.is_dhcp6() && SERVER_MANAGED_V6.contains(&self.code))
         {
             return Err(DhcpError::code_reserved(
                 &self.space,

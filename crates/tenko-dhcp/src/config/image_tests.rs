@@ -302,10 +302,14 @@ fn reference(data: &DhcpData) -> Built {
                 .cloned()
                 .collect(),
         );
+    // WP9.1: the DHCPv6 part as the build makes it.
+    let (warnings6, dropped6) = super::image::build_v6_into(data, &mut builder);
     Built {
         image: builder.build(),
         warnings: check_reservations(&candidates),
         dropped,
+        warnings6,
+        dropped6,
     }
 }
 
@@ -473,6 +477,7 @@ fn generate(seed: u64) -> DhcpData {
         data.scopes.insert(
             row.id,
             Scope {
+                v6: None,
                 prefix: row.id,
                 enabled: rng.chance(80),
                 lease: rng.chance(40).then(|| {
@@ -731,6 +736,7 @@ fn one_scope() -> (DhcpData, PrefixId) {
     data.scopes.insert(
         id,
         Scope {
+            v6: None,
             prefix: id,
             enabled: true,
             lease: None,

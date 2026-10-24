@@ -170,6 +170,7 @@ async fn lab(profile: DdnsProfile, update: UpdatePolicy) -> Lab {
         .create_scope(
             &cx(),
             NewScope {
+                v6: None,
                 prefix: prefix.id,
                 enabled: None,
                 lease: None,

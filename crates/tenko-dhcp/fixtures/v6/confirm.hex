@@ -1,0 +1,22 @@
+# A CONFIRM, the minimal message of RFC 8415 section 18.2.3: the client identifier, elapsed
+# time and the IA_NA with the address the client believes it still holds (T1, T2 and the
+# lifetimes are 0, the server ignores them); no server identifier. Documentation MAC
+# 00:00:5e:00:53:02.
+#
+# msg-type CONFIRM, transaction id 0x2a0005
+04 2a 00 05
+# option 1, client identifier, 10 octets: DUID-LL, hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 02
+# option 8, elapsed time 0
+00 08 00 02 00 00
+# option 3, IA_NA, 40 octets: IAID 0x5e005302, T1 0, T2 0
+00 03 00 28
+5e 00 53 02
+00 00 00 00
+00 00 00 00
+# option 5, IA Address, 24 octets: 2001:db8:1::100, lifetimes 0
+00 05 00 18
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 01 00
+00 00 00 00
+00 00 00 00

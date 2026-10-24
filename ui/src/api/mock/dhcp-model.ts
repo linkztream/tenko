@@ -285,6 +285,7 @@ export function createScope(state: DhcpState, ctx: DhcpContext, body: Obj): Scop
   if (state.scopes.some((s) => s.prefix === prefixId)) return fail(409, "dhcp.scope.exists", { prefix: prefixId });
   const row: ScopeRow = {
     prefix: prefixId,
+    family: prefix.cidr.includes(":") ? "v6" : "v4",
     enabled: typeof body.enabled === "boolean" ? body.enabled : true,
     classes: checkClasses(state, body.classes),
     ddns: body.ddns ? checkDdns(body.ddns, "ddns") : { ...state.settings.ddns },
@@ -1519,6 +1520,7 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
   });
   state.scopes.push({
     prefix: DHCP_IDS.lan,
+    family: "v4",
     enabled: true,
     lease: { default_secs: 43_200, min_secs: 3600, max_secs: 86_400 },
     ddns: {},

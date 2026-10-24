@@ -23,6 +23,12 @@
 //! while the DHCID at the name is still the client's; the PTR goes when it is a `dhcp` PTR
 //! that points at the lease's forward name. Records of another origin are never touched.
 //!
+//! **Both families** (WP9.1). A DHCPv6 lease writes an AAAA record where a DHCPv4 lease
+//! writes an A record, by the same rules, with the DHCID of its DUID (identifier type 2,
+//! RFC 4701 section 3.3) and the PTR under `ip6.arpa`. A client whose DHCPv4 and DHCPv6
+//! identities give the same DHCID (a DHCPv4 client that sends its DUID, RFC 4361) holds
+//! one name for both; the DHCID goes with the last address record of either family.
+//!
 //! **Zones.** Only primary zones Tenko serves. The forward zone is the scope's (its
 //! `forward_zone`, else the zone of the scope's domain name, option 15); the reverse zone
 //! is the most specific primary zone whose apex is a reverse zone covering the address
@@ -32,10 +38,7 @@
 //!
 //! [`UpdatePolicy::dhcp_allowed`]: tenko_core::dns::UpdatePolicy::dhcp_allowed
 
-use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::{collections::HashMap, net::IpAddr};
 
 use tenko_core::{
     dhcp::{ClientKey, DdnsConflict, DdnsPolicy},
@@ -131,22 +134,22 @@ impl Zones {
             .max_by_key(|zone| zone.name.label_count())
     }
 
-    /// The most specific reverse zone that covers `addr`, and the PTR name in it.
-    pub fn reverse_for(&self, addr: Ipv4Addr) -> Option<(&Zone, DnsName)> {
+    /// The most specific reverse zone that covers `addr`, and the PTR name in it (an
+    /// `in-addr.arpa` zone, RFC 2317 ones included, or an `ip6.arpa` zone).
+    pub fn reverse_for(&self, addr: IpAddr) -> Option<(&Zone, DnsName)> {
         self.zones
             .iter()
             .filter_map(|zone| {
                 let reverse = parse_zone(&zone.name)?;
-                reverse
-                    .net()
-                    .contains(&IpAddr::V4(addr))
-                    .then_some((zone, reverse))
+                reverse.net().contains(&addr).then_some((zone, reverse))
             })
             .max_by_key(|(_, reverse)| reverse.net().prefix_len())
             .map(|(zone, reverse)| {
-                let name = match reverse {
-                    ReverseZone::Plain { .. } => ptr_name(IpAddr::V4(addr)),
-                    ReverseZone::Classless { name, .. } => classless_ptr_name(addr, &name),
+                let name = match (reverse, addr) {
+                    (ReverseZone::Classless { name, .. }, IpAddr::V4(v4)) => {
+                        classless_ptr_name(v4, &name)
+                    }
+                    _ => ptr_name(addr),
                 };
                 (zone, name)
             })
@@ -156,8 +159,8 @@ impl Zones {
 /// One lease as the planner sees it.
 #[derive(Debug, Clone)]
 pub struct LeaseNames<'a> {
-    /// The address.
-    pub addr: Ipv4Addr,
+    /// The address: an A record for IPv4, AAAA for IPv6.
+    pub addr: IpAddr,
     /// The client.
     pub client: &'a ClientKey,
     /// The name of option 81.
@@ -353,6 +356,24 @@ fn dhcid_record(data: &[u8]) -> RecordData {
     }
 }
 
+// WP9.1: the address record of either family.
+/// The address record of `addr` and its type.
+fn address_record(addr: IpAddr) -> (Rtype, RecordData) {
+    match addr {
+        IpAddr::V4(address) => (Rtype::A, RecordData::A { address }),
+        IpAddr::V6(address) => (Rtype::AAAA, RecordData::Aaaa { address }),
+    }
+}
+
+/// The address record type of the other family.
+fn other_family(rtype: Rtype) -> Rtype {
+    if rtype == Rtype::A {
+        Rtype::AAAA
+    } else {
+        Rtype::A
+    }
+}
+
 fn holds(set: &RrSet, record: &RecordData) -> bool {
     let rdata = Rdata::from_data(record);
     set.rdata.contains(&rdata)
@@ -398,7 +419,7 @@ impl Planner {
         &mut self,
         view: &dyn ReadView,
         zones: &Zones,
-        addr: Ipv4Addr,
+        addr: IpAddr,
         written: &Written,
     ) -> Result<Vec<ZoneChanges>, StoreError> {
         let mut out = Vec::new();
@@ -406,7 +427,7 @@ impl Planner {
             && let Some(zone) = zones.holding(name)
             && self.dhcid_is(view, zone.id, name, dhcid)? == Some(true)
         {
-            let a = RecordData::A { address: addr };
+            let (rtype, a) = address_record(addr);
             let removed = self
                 .overlay
                 .get(&(zone.id, name.clone()))
@@ -414,20 +435,31 @@ impl Planner {
             let set = if removed {
                 None
             } else {
-                rrset(view, zone.id, name, Rtype::A)?
+                rrset(view, zone.id, name, rtype)?
+            };
+            // WP9.1: the DHCID stays while the client's records of the other family do.
+            let other = if removed {
+                None
+            } else {
+                rrset(view, zone.id, name, other_family(rtype))?
+                    .filter(|set| set.origin == Origin::Dhcp)
             };
             let mut changes = Vec::new();
             match set {
                 Some(set) if set.origin == Origin::Dhcp && holds(&set, &a) => {
                     if set.rdata.len() == 1 {
-                        changes.push(change(Op::Delete, name, Rtype::A, None, Vec::new()));
-                        changes.push(change(Op::Delete, name, DHCID, None, Vec::new()));
+                        changes.push(change(Op::Delete, name, rtype, None, Vec::new()));
+                        if other.is_none() {
+                            changes.push(change(Op::Delete, name, DHCID, None, Vec::new()));
+                        }
                     } else {
-                        changes.push(change(Op::Remove, name, Rtype::A, None, vec![a]));
+                        changes.push(change(Op::Remove, name, rtype, None, vec![a]));
                     }
                 }
-                Some(_) => {}
-                None => changes.push(change(Op::Delete, name, DHCID, None, Vec::new())),
+                None if other.is_none() => {
+                    changes.push(change(Op::Delete, name, DHCID, None, Vec::new()));
+                }
+                Some(_) | None => {}
             }
             if changes.iter().any(|c| c.rtype == DHCID) {
                 self.overlay.insert((zone.id, name.clone()), None);
@@ -480,10 +512,12 @@ impl Planner {
         &mut self,
         view: &dyn ReadView,
         zones: &Zones,
-        addr: Ipv4Addr,
+        addr: IpAddr,
         desired: &Desired,
         conflict: DdnsConflict,
     ) -> Result<LeasePlan, StoreError> {
+        // WP9.1: A for an IPv4 lease, AAAA for an IPv6 one.
+        let (address_type, address) = address_record(addr);
         let mut plan = LeasePlan::default();
         let Some(zone) = zones.get(desired.zone) else {
             plan.refusal = Some("the forward zone is gone".to_owned());
@@ -493,7 +527,7 @@ impl Planner {
         let key = (zone.id, name.clone());
         let removed = self.overlay.get(&key).is_some_and(Option::is_none);
         let read = |rtype| -> Result<Option<RrSet>, StoreError> {
-            if removed && (rtype == Rtype::A || rtype == DHCID) {
+            if removed && (rtype == address_type || rtype == DHCID) {
                 return Ok(None);
             }
             rrset(view, zone.id, name, rtype)
@@ -506,7 +540,7 @@ impl Planner {
             return Ok(plan);
         }
         if desired.write_a {
-            let a = read(Rtype::A)?;
+            let a = read(address_type)?;
             let ours = self.dhcid_is(view, zone.id, name, &desired.dhcid)?;
             let mut take_over = false;
             match a.as_ref().map(|set| set.origin) {
@@ -551,9 +585,9 @@ impl Planner {
             let mut a_set = change(
                 Op::Set,
                 name,
-                Rtype::A,
+                address_type,
                 Some(desired.ttl),
-                vec![RecordData::A { address: addr }],
+                vec![address],
             );
             a_set.take_over = take_over;
             let dhcid_set = change(

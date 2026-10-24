@@ -1,0 +1,10 @@
+# A RELAY-FORW without a Relay Message option (9): it only has an Interface-Id.
+#
+# msg-type RELAY-FORW, hop count 0
+0c 00
+# link address 2001:db8:1::1
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 00 01
+# peer address fe80::200:5eff:fe00:5301
+fe 80 00 00 00 00 00 00 02 00 5e ff fe 00 53 01
+# option 18, interface-id, 4 octets: "eth1"
+00 12 00 04 65 74 68 31

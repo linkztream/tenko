@@ -13,6 +13,9 @@
 //! and keeps the metrics `tenko_dhcp_history_rows` and `tenko_dhcp_history_purged_total`.
 //! The row count is taken by a scan once per term of office and then kept by adding the
 //! rows this process writes and subtracting the ones it purges.
+//!
+//! WP9.1: `dhcp.history6`, the DHCPv6 lease history, has the same retention, is purged by
+//! the same service in its own batches and counts in the same gauge.
 
 use std::{
     sync::{
@@ -170,25 +173,28 @@ impl std::fmt::Debug for PurgeService {
     }
 }
 
-/// The rows of `dhcp.history` in a view.
+/// The rows of `dhcp.history` and `dhcp.history6` in a view.
 ///
 /// # Errors
 ///
 /// A storage failure of the scan.
 pub fn count_rows(view: &dyn ReadView) -> Result<u64, StoreError> {
     let mut count = 0u64;
-    let mut range = KeyRange::all();
-    loop {
-        let page = view.scan(tables::HISTORY.name(), range.clone(), PAGE, false)?;
-        count += u64::try_from(page.len()).unwrap_or(u64::MAX);
-        if page.len() < PAGE {
-            return Ok(count);
+    for table in [tables::HISTORY.name(), tables::HISTORY6.name()] {
+        let mut range = KeyRange::all();
+        loop {
+            let page = view.scan(table, range.clone(), PAGE, false)?;
+            count += u64::try_from(page.len()).unwrap_or(u64::MAX);
+            if page.len() < PAGE {
+                break;
+            }
+            let Some((last, _)) = page.last() else {
+                break;
+            };
+            range = KeyRange::all().after(last.clone());
         }
-        let Some((last, _)) = page.last() else {
-            return Ok(count);
-        };
-        range = KeyRange::all().after(last.clone());
     }
+    Ok(count)
 }
 
 /// Where the row count of a term starts: the rows counted and the process's history
@@ -259,6 +265,42 @@ impl PurgeService {
                 AuditDraft::success(dhcp::audit::HISTORY_PURGE, vec![dhcp::server_object()])
                     .with_context("rows", count.to_string())
                     .with_context("before", cutoff.to_rfc3339()),
+            );
+            self.store.propose(batch).await?;
+            purged += count;
+            metrics::HISTORY_PURGED.add(count);
+            if old.len() < page.len() {
+                break;
+            }
+            view = self.store.read(ReadConsistency::Local).await?;
+        }
+        // WP9.1: the DHCPv6 history, by the same retention.
+        loop {
+            let page = view.scan_typed(
+                &tables::HISTORY6,
+                KeyRange::all(),
+                self.settings.batch.max(1),
+                false,
+            )?;
+            let old: Vec<_> = page
+                .iter()
+                .filter(|((at, _, _), _, _)| *at < cutoff)
+                .map(|(key, _, _)| *key)
+                .collect();
+            if old.is_empty() {
+                break;
+            }
+            let count = u64::try_from(old.len()).unwrap_or(u64::MAX);
+            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+            batch.preconditions.push(fence(epoch));
+            for key in &old {
+                batch.delete_typed(&tables::HISTORY6, key);
+            }
+            batch.audit(
+                AuditDraft::success(dhcp::audit::HISTORY_PURGE, vec![dhcp::server_object()])
+                    .with_context("rows", count.to_string())
+                    .with_context("before", cutoff.to_rfc3339())
+                    .with_context("family", "v6".to_owned()),
             );
             self.store.propose(batch).await?;
             purged += count;

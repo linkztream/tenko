@@ -32,7 +32,7 @@ pub use self::{
 
 use std::{
     collections::VecDeque,
-    net::Ipv4Addr,
+    net::IpAddr,
     sync::{Mutex, PoisonError},
 };
 
@@ -59,9 +59,10 @@ pub struct DdnsRequest {
     pub vrf: VrfId,
     /// The scope.
     pub scope: PrefixId,
-    /// The address.
-    pub addr: Ipv4Addr,
-    /// The client (the DHCID is computed from it, RFC 4701).
+    /// The address: of a DHCPv4 lease (A record) or, since WP9.1, a DHCPv6 lease (AAAA).
+    pub addr: IpAddr,
+    /// The client (the DHCID is computed from it, RFC 4701; a DHCPv6 client in the RFC
+    /// 4361 form of its DUID).
     pub client: ClientKey,
     /// The name of option 81, as the client sent it.
     pub fqdn: Option<String>,

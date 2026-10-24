@@ -27,10 +27,16 @@
 //! address) still has the old names removed. A refusal is not retried until the lease's
 //! next change (a renewal), and a failure is retried after a pause. A change of the
 //! DHCP configuration or of the zones makes the worker read every lease again.
+//!
+//! WP9.1: the worker follows `dhcp.leases6` the same way. A DHCPv6 lease writes an AAAA
+//! record with the DHCID of its DUID (identifier type 2) and the PTR under `ip6.arpa`; its
+//! forward zone is the scope's, else the zone of the first name of the scope's domain list
+//! (option 24), and the flags of its option 39 are kept on the row in the layout of option
+//! 81, so the rules of [`super::flags`] read them.
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    net::{IpAddr, Ipv4Addr},
+    net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -38,7 +44,7 @@ use std::{
 use futures::StreamExt as _;
 use tenko_core::{
     RequestCtx, SystemComponent, Timestamp, VrfId,
-    dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, tables},
+    dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, tables},
     dns::{DnsName, tables::ZONES},
     serde_util::HexBytes,
 };
@@ -57,8 +63,9 @@ use super::{
 };
 use crate::{config, image::ConfigImage};
 
-/// The address of a lease row.
-type Key = (VrfId, Ipv4Addr);
+/// The address of a lease row: a DHCPv4 row of `dhcp.leases` for an IPv4 address, a DHCPv6
+/// row of `dhcp.leases6` for an IPv6 one.
+type Key = (VrfId, IpAddr);
 
 /// Reads the profile's DDNS rules from a view of the store (the profile lives in the
 /// system settings, which this crate does not read).
@@ -174,7 +181,7 @@ pub fn request_of(lease: &Lease, image: &ConfigImage, now: Timestamp) -> DdnsReq
         },
         vrf: lease.vrf,
         scope: lease.scope,
-        addr: lease.addr,
+        addr: IpAddr::V4(lease.addr),
         client: lease.client.clone(),
         fqdn: lease.fqdn.clone(),
         hostname: lease.hostname.clone(),
@@ -185,16 +192,54 @@ pub fn request_of(lease: &Lease, image: &ConfigImage, now: Timestamp) -> DdnsReq
     }
 }
 
-/// The zone of the scope's domain name (option 15).
+// WP9.1: the request of a DHCPv6 lease row.
+/// The request a DHCPv6 lease row asks for, by the rules of [`request_of`]; the scope's
+/// DDNS settings (classes and policies are DHCPv4 only).
+pub fn request_of6(lease: &Lease6, image: &ConfigImage, now: Timestamp) -> DdnsRequest {
+    let active = lease.state == BindingState::Active && lease.ends > now;
+    let policy = image
+        .v6()
+        .scope(lease.scope)
+        .map(|scope| scope.ddns.clone())
+        .unwrap_or_default();
+    let lease_secs =
+        u32::try_from(lease.ends.saturating_since(lease.cltt).as_secs()).unwrap_or(u32::MAX);
+    DdnsRequest {
+        action: if active && policy.enabled {
+            DdnsAction::Add
+        } else {
+            DdnsAction::Remove
+        },
+        vrf: lease.vrf,
+        scope: lease.scope,
+        addr: IpAddr::V6(lease.addr6()),
+        client: lease.client_key(),
+        fqdn: lease.fqdn.clone(),
+        hostname: None,
+        fqdn_flags: lease.fqdn_flags,
+        policy,
+        lease_secs,
+        ends: lease.ends,
+    }
+}
+
+/// The zone of the scope's domain name: option 15 of a DHCPv4 scope, the first name of
+/// the domain list (option 24) of a DHCPv6 scope.
 fn domain_of(image: &ConfigImage, request: &DdnsRequest) -> Option<DnsName> {
+    if request.addr.is_ipv6() {
+        let value = image.v6().scope(request.scope)?.option(24)?;
+        let list = crate::v6::option::DomainList::parse(24, &value.data.0).ok()?;
+        let first = list.iter().next()?;
+        return DnsName::new(&first.to_string()).ok();
+    }
     let value = image.scope(request.scope)?.option(15)?;
     let text = std::str::from_utf8(&value.data.0).ok()?;
     DnsName::new(text.trim_end_matches('\0')).ok()
 }
 
 /// Whether IPAM names the address (an address object with a DNS name).
-fn ipam_named(view: &dyn ReadView, vrf: VrfId, addr: Ipv4Addr) -> Result<bool, StoreError> {
-    let Some((id, _)) = view.get_typed(&ADDRESS_IPS, &(vrf, IpAddr::V4(addr)))? else {
+fn ipam_named(view: &dyn ReadView, vrf: VrfId, addr: IpAddr) -> Result<bool, StoreError> {
+    let Some((id, _)) = view.get_typed(&ADDRESS_IPS, &(vrf, addr))? else {
         return Ok(false);
     };
     Ok(view
@@ -299,9 +344,41 @@ impl<'a> Worker<'a> {
                 break;
             };
             let last = tables::LEASES.key(last);
-            for (key, lease, _) in page {
+            for ((vrf, addr), lease, _) in page {
+                let key = (vrf, IpAddr::V4(addr));
                 let memo = self.memory.entry(key).or_insert_with(|| Memo {
                     client: lease.client.clone(),
+                    written: written_of(&lease.ddns),
+                    handled: None,
+                });
+                memo.handled = None;
+                self.mark(key);
+            }
+            if !full {
+                break;
+            }
+            range = KeyRange::all().after(last);
+        }
+        // WP9.1: the DHCPv6 rows.
+        let mut range = KeyRange::all();
+        loop {
+            let page = view
+                .scan_typed(
+                    &tables::LEASES6,
+                    range.clone(),
+                    crate::lease::follow::PAGE,
+                    false,
+                )
+                .map_err(|error| error.to_string())?;
+            let full = page.len() == crate::lease::follow::PAGE;
+            let Some((last, _, _)) = page.last() else {
+                break;
+            };
+            let last = tables::LEASES6.key(last);
+            for ((vrf, addr), lease, _) in page {
+                let key = (vrf, IpAddr::V6(addr));
+                let memo = self.memory.entry(key).or_insert_with(|| Memo {
+                    client: lease.client_key(),
                     written: written_of(&lease.ddns),
                     handled: None,
                 });
@@ -428,8 +505,13 @@ impl<'a> Worker<'a> {
             Ok(set) => {
                 for change in &set.changes {
                     if change.table == *tables::LEASES.name() {
-                        if let Ok(key) = tables::LEASES.decode_key(&change.key) {
-                            self.mark(key);
+                        if let Ok((vrf, addr)) = tables::LEASES.decode_key(&change.key) {
+                            self.mark((vrf, IpAddr::V4(addr)));
+                        }
+                    } else if change.table == *tables::LEASES6.name() {
+                        // WP9.1: a DHCPv6 lease row.
+                        if let Ok((vrf, addr)) = tables::LEASES6.decode_key(&change.key) {
+                            self.mark((vrf, IpAddr::V6(addr)));
                         }
                     } else {
                         // A configuration row or a zone changed: read everything again.
@@ -473,8 +555,17 @@ impl<'a> Worker<'a> {
             return;
         };
         for key in &keys {
-            let request = match view.get_typed(&tables::LEASES, key) {
-                Ok(Some((lease, _))) => request_of(&lease, image, now),
+            // WP9.1: the row of the key's family.
+            let row = match key.1 {
+                IpAddr::V4(addr) => view
+                    .get_typed(&tables::LEASES, &(key.0, addr))
+                    .map(|row| row.map(|(lease, _)| request_of(&lease, image, now))),
+                IpAddr::V6(addr) => view
+                    .get_typed(&tables::LEASES6, &(key.0, addr))
+                    .map(|row| row.map(|(lease, _)| request_of6(&lease, image, now))),
+            };
+            let request = match row {
+                Ok(Some(request)) => request,
                 Ok(None) => {
                     let Some(memo) = self.memory.get(key) else {
                         continue;
@@ -812,23 +903,40 @@ impl<'a> Worker<'a> {
             batch.preconditions.push(fence(self.epoch));
             let mut staged = Vec::new();
             for (key, client, state) in &todo {
-                let Ok(Some((mut lease, revision))) = view.get_typed(&tables::LEASES, key) else {
-                    continue;
+                // WP9.1: the outcome goes to the row of the key's family.
+                let staged_one = match key.1 {
+                    IpAddr::V4(addr) => {
+                        let row_key = (key.0, addr);
+                        let Ok(Some((mut lease, revision))) =
+                            view.get_typed(&tables::LEASES, &row_key)
+                        else {
+                            continue;
+                        };
+                        if lease.client != *client || same_state(&lease.ddns, state) {
+                            continue;
+                        }
+                        lease.ddns = state.clone();
+                        batch.expect_typed(&tables::LEASES, &row_key, Some(revision));
+                        batch.put_typed(&tables::LEASES, &row_key, &lease).is_ok()
+                    }
+                    IpAddr::V6(addr) => {
+                        let row_key = (key.0, addr);
+                        let Ok(Some((mut lease, revision))) =
+                            view.get_typed(&tables::LEASES6, &row_key)
+                        else {
+                            continue;
+                        };
+                        if lease.client_key() != *client || same_state(&lease.ddns, state) {
+                            continue;
+                        }
+                        lease.ddns = state.clone();
+                        batch.expect_typed(&tables::LEASES6, &row_key, Some(revision));
+                        batch.put_typed(&tables::LEASES6, &row_key, &lease).is_ok()
+                    }
                 };
-                if lease.client != *client {
-                    continue;
+                if staged_one {
+                    staged.push((*key, client.clone(), state.clone()));
                 }
-                let mut held = lease.ddns.clone();
-                held.updated = state.updated;
-                if held == *state {
-                    continue;
-                }
-                lease.ddns = state.clone();
-                batch.expect_typed(&tables::LEASES, key, Some(revision));
-                if batch.put_typed(&tables::LEASES, key, &lease).is_err() {
-                    continue;
-                }
-                staged.push((*key, client.clone(), state.clone()));
             }
             drop(view);
             if staged.is_empty() {
@@ -858,6 +966,13 @@ impl<'a> Worker<'a> {
             }
         }
     }
+}
+
+/// Whether the outcome held on a row is `state`, apart from its time.
+fn same_state(held: &DdnsState, state: &DdnsState) -> bool {
+    let mut held = held.clone();
+    held.updated = state.updated;
+    held == *state
 }
 
 #[async_trait::async_trait]

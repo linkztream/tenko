@@ -1,0 +1,19 @@
+# systemd-networkd in the round dhcp6 of the DHCP lab: DHCPv6 on eth0 without a router
+# advertisement, with a SOLICIT that asks for Rapid Commit, a DUID-LL from the MAC address
+# (so that a reservation and the correlation rows can name it) and the NTP servers of
+# option 56. Docker's own IPv4 address stays.
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv6
+IPv6AcceptRA=no
+LinkLocalAddressing=ipv6
+KeepConfiguration=yes
+
+[DHCPv6]
+WithoutRA=solicit
+RapidCommit=yes
+UseDNS=yes
+UseNTP=yes
+DUIDType=link-layer

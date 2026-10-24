@@ -1,0 +1,14 @@
+# An INFORMATION-REQUEST, the minimal message of RFC 8415 section 18.2.6: no IA option, an
+# option request for 23, 24 and the information refresh time (32), elapsed time and, as a
+# client may, its identifier. Documentation MAC 00:00:5e:00:53:02.
+#
+# msg-type INFORMATION-REQUEST, transaction id 0x2a0006
+0b 2a 00 06
+# option 1, client identifier, 10 octets: DUID-LL, hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 02
+# option 8, elapsed time 0
+00 08 00 02 00 00
+# option 6, option request, 6 octets: 23, 24, 32
+00 06 00 06
+00 17 00 18 00 20

@@ -115,7 +115,8 @@ struct Shared {
     wake: Notify,
     completions: Mutex<Vec<Completion>>,
     done: Notify,
-    gate: RefusalGate,
+    // WP9.1: shared with the DHCPv6 lease store, so that one refusal state covers both.
+    gate: Arc<RefusalGate>,
     leases: SharedLeases,
     counters: Counters,
 }
@@ -190,7 +191,7 @@ impl StoreLeases {
             wake: Notify::new(),
             completions: Mutex::new(Vec::with_capacity(capacity)),
             done: Notify::new(),
-            gate: RefusalGate::new(settings.retry_after),
+            gate: Arc::new(RefusalGate::new(settings.retry_after)),
             leases,
             counters: Counters::default(),
         });
@@ -211,6 +212,12 @@ impl StoreLeases {
     /// The refusal state (P3-Q14).
     pub fn gate(&self) -> &RefusalGate {
         &self.shared.gate
+    }
+
+    // WP9.1: the DHCPv6 lease store shares the gate.
+    /// The refusal state as a handle, for the DHCPv6 lease store of the same role.
+    pub fn gate_handle(&self) -> Arc<RefusalGate> {
+        Arc::clone(&self.shared.gate)
     }
 
     /// The table the committer applies its commits to.

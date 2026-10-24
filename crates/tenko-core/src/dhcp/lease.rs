@@ -13,7 +13,7 @@
 //! that identity as octets, the second part of the key of `dhcp.leases.by_client`, and
 //! [`write_identity`] writes it into a caller's buffer without allocating.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -374,8 +374,31 @@ pub enum Lease6Kind {
     Pd,
 }
 
-/// A DHCPv6 lease (Slice 9, `dhcp.leases6` then). Declared now so that the format of this
-/// phase holds its values; no table stores it yet.
+/// What the relay agent closest to a DHCPv6 client said about it (RFC 8415 section 9,
+/// RFC 4649, RFC 6221), kept on the lease (WP9.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub struct Relay6Info {
+    /// The link address of the relay closest to the client (zero for a lightweight relay
+    /// of RFC 6221).
+    #[schema(value_type = String, example = "2001:db8:1::1")]
+    pub link_address: Ipv6Addr,
+    /// The client's address as the relay saw it (its link-local address).
+    #[schema(value_type = String, example = "fe80::200:5eff:fe00:5301")]
+    pub peer_address: Ipv6Addr,
+    /// The relays the request passed, one for a single relay.
+    pub hops: u8,
+    /// The Interface-Id of the closest relay that sent one (option 18).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_id: Option<HexBytes>,
+    /// The Remote-Id of the closest relay that sent one (option 37, RFC 4649): the
+    /// enterprise number and the identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_id: Option<HexBytes>,
+}
+
+/// A DHCPv6 lease (`dhcp.leases6`, key VRF and address; WP9.1). An `IA_NA` binding is one
+/// address of one identity association of a client; an `IA_PD` binding (WP9.2) a delegated
+/// prefix keyed by its first address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Lease6 {
     /// The address, or the prefix's first address.
@@ -393,9 +416,14 @@ pub struct Lease6 {
     pub iaid: u32,
     /// The client's DUID.
     pub duid: Duid,
-    /// The client's link-layer address (RFC 6939), for the correlation of DHCP-11.
+    /// The client's link-layer address, for the correlation of DHCP-11: from the Client
+    /// Link-Layer Address option a relay added (RFC 6939), else from a DUID-LLT or DUID-LL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_layer: Option<HexBytes>,
+    // WP9.1: the link-layer type, the option 39 flags, the relay and the observation time.
+    /// The hardware type of `link_layer` (1 for Ethernet), when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_layer_type: Option<u16>,
     /// The binding state.
     pub state: BindingState,
     /// The client's last transaction time.
@@ -406,10 +434,137 @@ pub struct Lease6 {
     pub preferred_ends: Timestamp,
     /// The node that wrote the row.
     pub node: NodeId,
-    /// The name of RFC 4704.
+    /// The name of RFC 4704, as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fqdn: Option<String>,
+    /// The flags of the client's option 39, in the layout of RFC 4702 (S 0x01, O 0x02, N
+    /// 0x08), so that the DDNS rules read them as they read the flags of option 81.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fqdn_flags: Option<u8>,
+    /// What the relay closest to the client said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<Relay6Info>,
+    /// When the IPAM observation facts of the lease were last written (plan section 2.8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<Timestamp>,
     /// The DDNS outcome.
     #[serde(default)]
     pub ddns: DdnsState,
+}
+
+impl Lease6 {
+    /// The address as IPv6 (a row always holds one; an IPv4 value reads as its mapped
+    /// form).
+    pub fn addr6(&self) -> Ipv6Addr {
+        match self.addr {
+            IpAddr::V6(addr) => addr,
+            IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+        }
+    }
+
+    /// Whether the lease holds its address for the client at `now`.
+    pub fn is_bound(&self, now: Timestamp) -> bool {
+        self.state == BindingState::Active && self.ends > now
+    }
+
+    /// Whether the address may not be given to another client at `now`.
+    pub fn blocks(&self, now: Timestamp) -> bool {
+        self.state.holds_address() && self.ends > now
+    }
+
+    /// The client identity of the row: the IAID (four octets) and the DUID; the key of the
+    /// role's client index ([`write_identity6`]).
+    pub fn identity(&self) -> Vec<u8> {
+        let mut out = [0u8; MAX_IDENTITY6];
+        let len = write_identity6(self.iaid, self.duid.as_bytes(), &mut out);
+        out[..len].to_vec()
+    }
+
+    /// The client's Ethernet address, when its link-layer address is one.
+    pub fn mac(&self) -> Option<[u8; 6]> {
+        if self.link_layer_type.is_some_and(|kind| kind != 1) {
+            return None;
+        }
+        self.link_layer
+            .as_ref()
+            .and_then(|octets| <[u8; 6]>::try_from(octets.0.as_slice()).ok())
+    }
+
+    /// The client as the DDNS rules know a client: the RFC 4361 form of a client
+    /// identifier (type 255, the IAID, the DUID), so that the DHCID of the lease is of
+    /// identifier type 2 over the DUID (RFC 4701 section 3.3), the same as that of a
+    /// DHCPv4 client that sends its DUID.
+    pub fn client_key(&self) -> ClientKey {
+        let mut id = Vec::with_capacity(5 + self.duid.as_bytes().len());
+        id.push(255);
+        id.extend_from_slice(&self.iaid.to_be_bytes());
+        id.extend_from_slice(self.duid.as_bytes());
+        ClientKey {
+            htype: 0,
+            chaddr: HexBytes(Vec::new()),
+            client_id: Some(HexBytes(id)),
+        }
+    }
+}
+
+/// The longest DUID (RFC 8415 section 11.1: a type and at most 128 octets).
+pub const MAX_DUID: usize = 130;
+
+/// The longest DHCPv6 client identity: an IAID and a DUID.
+pub const MAX_IDENTITY6: usize = 4 + MAX_DUID;
+
+/// Writes the identity of a DHCPv6 binding (the IAID, big-endian, and the DUID) into `out`
+/// and returns its length; a DUID longer than [`MAX_DUID`] is cut to it.
+pub fn write_identity6(iaid: u32, duid: &[u8], out: &mut [u8; MAX_IDENTITY6]) -> usize {
+    let len = duid.len().min(MAX_DUID);
+    out[..4].copy_from_slice(&iaid.to_be_bytes());
+    out[4..4 + len].copy_from_slice(&duid[..len]);
+    4 + len
+}
+
+/// What happened to a DHCPv6 lease (`dhcp.history6`, key time, VRF, address; WP9.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Lease6Event {
+    /// When.
+    pub at: Timestamp,
+    /// What.
+    pub kind: LeaseEventKind,
+    /// The address, or the prefix's first address.
+    #[schema(value_type = String)]
+    pub addr: Ipv6Addr,
+    /// The prefix length: 128 for an address.
+    pub prefix_len: u8,
+    /// The VRF.
+    pub vrf: VrfId,
+    /// The scope.
+    pub scope: PrefixId,
+    /// The identity association.
+    pub iaid: u32,
+    /// The client's DUID.
+    pub duid: Duid,
+    /// The state after the event.
+    pub state: BindingState,
+    /// The end of that state.
+    pub ends: Timestamp,
+    /// The node that wrote it.
+    pub node: NodeId,
+}
+
+impl Lease6Event {
+    /// The history row of a lease after `kind`.
+    pub fn of(lease: &Lease6, kind: LeaseEventKind, at: Timestamp) -> Self {
+        Self {
+            at,
+            kind,
+            addr: lease.addr6(),
+            prefix_len: lease.prefix_len,
+            vrf: lease.vrf,
+            scope: lease.scope,
+            iaid: lease.iaid,
+            duid: lease.duid.clone(),
+            state: lease.state,
+            ends: lease.ends,
+            node: lease.node,
+        }
+    }
 }

@@ -72,6 +72,10 @@ pub struct DhcpScopeItem {
     /// The prefix's network.
     #[schema(value_type = String, example = "192.0.2.0/24")]
     pub cidr: ipnet::IpNet,
+    // WP9.1: the address family, so that a client tells DHCPv4 and DHCPv6 scopes apart.
+    /// `v4` for a scope on an IPv4 prefix (DHCPv4), `v6` on an IPv6 prefix (DHCPv6).
+    #[schema(example = "v4")]
+    pub family: String,
     /// The prefix's VRF.
     pub vrf: VrfId,
     /// The number of pools (IPAM ranges of role `dhcp_pool`).
@@ -115,6 +119,11 @@ pub struct DhcpScopeCreate {
     /// Free text.
     #[serde(default)]
     pub description: Option<String>,
+    // WP9.1: the DHCPv6 settings of a scope on an IPv6 prefix.
+    /// The DHCPv6 settings (preferred lifetime, rapid commit, the relay's Interface-Id);
+    /// only on an IPv6 prefix; the defaults when absent.
+    #[serde(default)]
+    pub v6: Option<tenko_core::dhcp::Scope6Settings>,
 }
 
 /// `PATCH /dhcp/scopes/{prefix}`: the fields to change; the prefix does not change.
@@ -151,6 +160,13 @@ pub struct DhcpScopePatch {
     /// Free text; an empty string clears it.
     #[serde(default)]
     pub description: Option<String>,
+    // WP9.1: the DHCPv6 settings of a scope on an IPv6 prefix.
+    /// The DHCPv6 settings, replaced whole; `null` keeps them, see `clear_v6`.
+    #[serde(default)]
+    pub v6: Option<tenko_core::dhcp::Scope6Settings>,
+    /// Drop the DHCPv6 settings (the defaults apply).
+    #[serde(default)]
+    pub clear_v6: bool,
 }
 
 /// How full a scope is (`GET /dhcp/scopes/{prefix}/utilization`, IPAM-10).

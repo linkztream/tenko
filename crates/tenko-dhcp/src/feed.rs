@@ -15,14 +15,14 @@
 use std::{
     collections::BTreeMap,
     future::Future,
-    net::Ipv4Addr,
+    net::{Ipv4Addr, Ipv6Addr},
     sync::{Arc, Mutex, PoisonError},
 };
 
 use tenko_core::{
     AddressId, HostId, InterfaceId, PrefixId, RangeId, Revision, VrfId,
     dhcp::{
-        Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease,
+        Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
         OptionDef, OptionDefId, OptionOwner, OptionSet, Policy, PolicyId, PoolSettings, Scope,
         SharedNetwork, SharedNetworkId,
     },
@@ -60,6 +60,9 @@ pub struct DhcpData {
     pub filters: BTreeMap<FilterId, Filter>,
     /// `dhcp.leases`.
     pub leases: BTreeMap<(VrfId, Ipv4Addr), Lease>,
+    // WP9.1: the DHCPv6 leases.
+    /// `dhcp.leases6`.
+    pub leases6: BTreeMap<(VrfId, Ipv6Addr), Lease6>,
     /// `ipam.prefixes`.
     pub prefixes: BTreeMap<PrefixId, Prefix>,
     /// `ipam.ranges`.
@@ -101,6 +104,9 @@ pub enum Change {
     Filter(FilterId, Option<Filter>),
     /// A lease.
     Lease((VrfId, Ipv4Addr), Option<Lease>),
+    // WP9.1: a DHCPv6 lease.
+    /// A DHCPv6 lease.
+    Lease6((VrfId, Ipv6Addr), Option<Lease6>),
     /// An IPAM prefix.
     Prefix(PrefixId, Option<Prefix>),
     /// An IPAM range.
@@ -117,7 +123,7 @@ impl Change {
     /// Whether the change is to a lease (the lease table's part of a delta) rather than to
     /// the configuration (the image's part).
     pub fn is_lease(&self) -> bool {
-        matches!(self, Self::Lease(..))
+        matches!(self, Self::Lease(..) | Self::Lease6(..))
     }
 }
 
@@ -157,6 +163,7 @@ impl DhcpData {
             Change::Policy(key, value) => set(&mut self.policies, key, value.as_ref()),
             Change::Filter(key, value) => set(&mut self.filters, key, value.as_ref()),
             Change::Lease(key, value) => set(&mut self.leases, key, value.as_ref()),
+            Change::Lease6(key, value) => set(&mut self.leases6, key, value.as_ref()),
             Change::Prefix(key, value) => set(&mut self.prefixes, key, value.as_ref()),
             Change::Range(key, value) => set(&mut self.ranges, key, value.as_ref()),
             Change::Host(key, value) => set(&mut self.hosts, key, value.as_ref()),

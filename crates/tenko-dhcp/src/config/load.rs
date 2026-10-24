@@ -15,8 +15,8 @@ use tenko_core::{
     dhcp::{
         OptionOwner,
         tables::{
-            CLASSES, EXCLUSIONS, FILTERS, LEASES, OPTION_DEFS, OPTION_SETS, POLICIES, POOLS,
-            SCOPES, SETTINGS, SHARED_NETWORKS,
+            CLASSES, EXCLUSIONS, FILTERS, LEASES, LEASES6, OPTION_DEFS, OPTION_SETS, POLICIES,
+            POOLS, SCOPES, SETTINGS, SHARED_NETWORKS,
         },
     },
     ipam::{Address, Prefix, Range},
@@ -68,6 +68,12 @@ pub fn data(view: &dyn ReadView, with_leases: bool) -> ConfigResult<DhcpData> {
         filters: all(view, &FILTERS)?,
         leases: if with_leases {
             all(view, &LEASES)?
+        } else {
+            BTreeMap::new()
+        },
+        // WP9.1: the DHCPv6 leases.
+        leases6: if with_leases {
+            all(view, &LEASES6)?
         } else {
             BTreeMap::new()
         },

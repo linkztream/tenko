@@ -44,6 +44,8 @@ pub mod probe;
 pub mod server;
 pub mod store;
 pub mod v4;
+// WP9.1: DHCPv6: the codec, the engine, the lease path of `dhcp.leases6` and the listeners.
+pub mod v6;
 // WP7.5: the role in the process: the feed on the store, the serving tables, the status
 // and the node commands.
 pub mod role;

@@ -62,6 +62,13 @@
 #                   stop the node and start Kea from the export)
 #   KEA_IMAGE       an existing kea image (with KEA_IMAGE_PREBUILT=1); default: build
 #                   tenko-dhcp-lab-kea:latest
+#   ROUNDS          the rounds to run: "default" (the rows above, as ever), "dhcp6" or both
+#                   (dhcp6 runs first). The round dhcp6 (WP9.1, dhcp6.sh, README.md) brings
+#                   its own compose project (compose.dhcp6.yml, tenkodhcp6lab) and
+#                   networks, sets the node up itself, runs the DHCPv6 rows and tears down
+#                   what it started; ROUNDS=dhcp6 runs nothing else.
+#   NETWORKD_IMAGE  an existing image of the networkd client of the round dhcp6 (with
+#                   NETWORKD_IMAGE_PREBUILT=1); default: build tenko-dhcp-lab-networkd:latest
 
 set -euo pipefail
 
@@ -73,6 +80,19 @@ export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tenkodhcplab}"
 node="${NODE:-tenko}"
 wait_secs="${WAIT_SECS:-300}"
 keep="${KEEP:-0}"
+# WP9.1: the rounds. "default" is every row of the other sections; "dhcp6" is the round of
+# dhcp6.sh, which needs the binary.
+rounds="${ROUNDS:-default}"
+run_default=0
+run_dhcp6=0
+for round in $rounds; do
+  case "$round" in
+    default) run_default=1 ;;
+    dhcp6) run_dhcp6=1 ;;
+    *) printf 'smoke: ROUNDS holds default and dhcp6, not %s\n' "$round" >&2; exit 2 ;;
+  esac
+done
+((run_default + run_dhcp6 > 0)) || { printf 'smoke: ROUNDS names no round\n' >&2; exit 2; }
 node_ip=192.0.2.10
 tester_ip=192.0.2.20
 api_base="http://$node_ip:8443"
@@ -100,6 +120,14 @@ esac
 export TOOLS_IMAGE="${TOOLS_IMAGE:-tenko-dhcp-lab-tools:latest}"
 build_tools=1
 [[ -n "${TOOLS_IMAGE_PREBUILT:-}" ]] && build_tools=0
+# WP9.1: the networkd client of the round dhcp6.
+export NETWORKD_IMAGE="${NETWORKD_IMAGE:-tenko-dhcp-lab-networkd:latest}"
+build_networkd=1
+[[ -n "${NETWORKD_IMAGE_PREBUILT:-}" ]] && build_networkd=0
+if ((run_dhcp6)) && [[ "$node" != tenko ]]; then
+  printf 'smoke: the round dhcp6 needs the binary (NODE=tenko)\n' >&2
+  exit 2
+fi
 if [[ -n "${IMAGE:-}" ]]; then
   export TENKO_IMAGE="$IMAGE"
   build_tenko=0
@@ -119,6 +147,10 @@ cookie=""
 status=0
 rows_failed=0
 summary=()
+
+# WP9.1: the round dhcp6 (ROUNDS=dhcp6): its functions only; it runs in dhcp6_round below.
+# shellcheck source=deploy/compose/lab-dhcp/dhcp6.sh
+source "$here/dhcp6.sh"
 
 step() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'smoke: %s\n' "$*" >&2; exit 1; }
@@ -185,7 +217,11 @@ cleanup() {
   status=$?
   set +e
   trap - EXIT
-  if ((status != 0)); then
+  # WP9.1: a round dhcp6 that stopped half way prints its logs.
+  if ((status != 0)) && ((v6_started)); then
+    v6_logs
+  fi
+  if ((status != 0)) && ((run_default)); then
     printf '\n==> FAILED (status %s): logs of the services\n' "$status" >&2
     for service in relay netns tenko node-example tester client-servers client-lan client-iot client-guest; do
       printf '\n--- %s ---\n' "$service" >&2
@@ -207,19 +243,29 @@ cleanup() {
     printf '%s\n' "${summary[@]}"
   fi
   if [[ "$keep" == 1 ]]; then
-    printf '\n==> KEEP=1: the lab keeps running; for example\n'
-    printf '    LAB_DIR=%s docker compose -f %s --profile %s exec client-lan dhclient -v -1 -cf /lab/dhclient.conf -sf /lab/client-script.sh eth0\n' \
-      "$work" "$compose_file" "$node"
-    printf 'tear it down with: LAB_DIR=%s docker compose -f %s --profile %s down --volumes\n' \
-      "$work" "$compose_file" "$node"
+    if ((run_default)); then
+      printf '\n==> KEEP=1: the lab keeps running; for example\n'
+      printf '    LAB_DIR=%s docker compose -f %s --profile %s exec client-lan dhclient -v -1 -cf /lab/dhclient.conf -sf /lab/client-script.sh eth0\n' \
+        "$work" "$compose_file" "$node"
+      printf 'tear it down with: LAB_DIR=%s docker compose -f %s --profile %s down --volumes\n' \
+        "$work" "$compose_file" "$node"
+    fi
+    # WP9.1: the round dhcp6 keeps its own lab.
+    if ((v6_started)); then
+      v6_keep_hint
+    fi
     exit "$status"
   fi
   printf '\n==> tear down\n'
-  # WP8.4: the pxe profile's services too.
-  pxe_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
-  # WP9.3: the kea profile's service too.
-  kea_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
-  compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
+  if ((run_default)); then
+    # WP8.4: the pxe profile's services too.
+    pxe_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
+    # WP9.3: the kea profile's service too.
+    kea_compose down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1
+    compose down --volumes --remove-orphans --timeout 30 >/dev/null 2>&1
+  fi
+  # WP9.1: the round dhcp6, when it is still up.
+  v6_teardown
   if [[ -n "$work" ]]; then
     rm -rf "$work"
   fi
@@ -721,6 +767,17 @@ if ((build_tools)); then
   docker build -f "$here/tools.Dockerfile" -t "$TOOLS_IMAGE" "$here"
 fi
 ok "tools" "$TOOLS_IMAGE (dhcrelay, dhclient, perfdhcp, udhcpc)"
+
+# WP9.1: the round dhcp6 (dhcp6.sh) runs first, in its own compose project; ROUNDS=dhcp6
+# stops after it.
+if ((run_dhcp6)); then
+  dhcp6_round
+fi
+if ((run_default == 0)); then
+  ((rows_failed == 0)) || fail "$rows_failed row(s) failed"
+  step "OK: the round dhcp6 passed"
+  exit 0
+fi
 
 if [[ "$node" == tenko ]]; then
   if ((build_tenko)); then

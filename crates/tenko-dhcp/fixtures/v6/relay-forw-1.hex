@@ -1,0 +1,32 @@
+# A RELAY-FORW from a relay on the client's link (RFC 8415 section 9), reconstructed by hand:
+# hop count 0, link address 2001:db8:1::1, the client's link-local address as the peer
+# address, an Interface-Id, a Remote-Id (RFC 4649), a Client Link-Layer Address (RFC 6939)
+# and the Relay Message that holds the SOLICIT of solicit-dhclient.hex.
+#
+# msg-type RELAY-FORW, hop count 0
+0c 00
+# link address 2001:db8:1::1
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 00 01
+# peer address fe80::200:5eff:fe00:5301
+fe 80 00 00 00 00 00 00 02 00 5e ff fe 00 53 01
+# option 18, interface-id, 4 octets: "eth1"
+00 12 00 04 65 74 68 31
+# option 37, remote-id, 8 octets: enterprise 32473 (0x7ed9, the documentation number of
+# RFC 5612) and the identifier 01 02 03 04
+00 25 00 08
+00 00 7e d9
+01 02 03 04
+# option 79, client link-layer address, 8 octets: hardware type 1, the MAC
+00 4f 00 08
+00 01 00 00 5e 00 53 01
+# option 9, relay message, 48 octets: the SOLICIT of solicit-dhclient.hex
+00 09 00 30
+01 4a 6b 1c
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 01
+00 08 00 02 00 00
+00 06 00 04 00 17 00 18
+00 03 00 0c
+5e 00 53 01
+00 00 00 00
+00 00 00 00

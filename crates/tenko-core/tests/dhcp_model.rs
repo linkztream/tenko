@@ -1186,6 +1186,7 @@ fn scope() -> impl Strategy<Value = Scope> {
                 description,
                 (created, updated),
             )| Scope {
+                v6: None,
                 prefix,
                 enabled,
                 lease,

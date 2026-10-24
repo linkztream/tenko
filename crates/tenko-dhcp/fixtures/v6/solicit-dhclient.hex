@@ -1,0 +1,19 @@
+# A SOLICIT as ISC dhclient 4.4 sends it (-6), reconstructed by hand from RFC 8415 sections 8
+# and 21: a DUID-LL client identifier, elapsed time 0, an option request for DNS servers (23)
+# and the domain search list (24), and one IA_NA with an IAID from the last four octets of the
+# MAC and no addresses. Documentation MAC 00:00:5e:00:53:01 (RFC 7042).
+#
+# msg-type SOLICIT, transaction id 0x4a6b1c
+01 4a 6b 1c
+# option 1, client identifier, 10 octets: DUID-LL (type 3), hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 01
+# option 8, elapsed time, 2 octets: 0
+00 08 00 02 00 00
+# option 6, option request, 4 octets: 23, 24
+00 06 00 04 00 17 00 18
+# option 3, IA_NA, 12 octets: IAID 0x5e005301, T1 0, T2 0, no options
+00 03 00 0c
+5e 00 53 01
+00 00 00 00
+00 00 00 00

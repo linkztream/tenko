@@ -7456,6 +7456,7 @@ export interface components {
             /** @description The server identifier. */
             server_id?: string | null;
             shared_network?: components["schemas"]["SharedNetworkId"] | null;
+            v6?: components["schemas"]["Scope6Settings"] | null;
         };
         /** @description A scope as the API reads it. */
         DhcpScopeItem: components["schemas"]["Scope"] & {
@@ -7464,6 +7465,11 @@ export interface components {
              * @example 192.0.2.0/24
              */
             cidr: string;
+            /**
+             * @description `v4` for a scope on an IPv4 prefix (DHCPv4), `v6` on an IPv6 prefix (DHCPv6).
+             * @example v4
+             */
+            family: string;
             /**
              * Format: int64
              * @description The active leases on the node.
@@ -7487,6 +7493,8 @@ export interface components {
             classes?: components["schemas"]["ClassId"][] | null;
             /** @description Drop the scope's lease times and use the server's. */
             clear_lease?: boolean;
+            /** @description Drop the DHCPv6 settings (the defaults apply). */
+            clear_v6?: boolean;
             ddns?: components["schemas"]["DdnsPolicy"] | null;
             /** @description Free text; an empty string clears it. */
             description?: string | null;
@@ -7498,6 +7506,7 @@ export interface components {
             /** @description The server identifier. */
             server_id?: string | null;
             shared_network?: components["schemas"]["SharedNetworkId"] | null;
+            v6?: components["schemas"]["Scope6Settings"] | null;
         };
         /** @description How full a scope is (`GET /dhcp/scopes/{prefix}/utilization`, IPAM-10). */
         DhcpScopeUtilization: {
@@ -13191,6 +13200,11 @@ export interface components {
                  */
                 cidr: string;
                 /**
+                 * @description `v4` for a scope on an IPv4 prefix (DHCPv4), `v6` on an IPv6 prefix (DHCPv6).
+                 * @example v4
+                 */
+                family: string;
+                /**
                  * Format: int64
                  * @description The active leases on the node.
                  */
@@ -17612,6 +17626,32 @@ export interface components {
             shared_network?: components["schemas"]["SharedNetworkId"] | null;
             /** @description Last change. */
             updated: components["schemas"]["Stamp"];
+            v6?: components["schemas"]["Scope6Settings"] | null;
+        };
+        /**
+         * @description What a scope on an IPv6 prefix adds for DHCPv6 (RFC 8415). The valid lifetime of an
+         *     address is the scope's (or the pool's) lease time; T1 and T2 come from the same lease
+         *     times and are kept below the preferred lifetime.
+         */
+        Scope6Settings: {
+            /**
+             * @description The Interface-Id (option 18) a relay sends for the link of this scope, as text: a
+             *     relayed request that carries it selects the scope before its link address does
+             *     (RFC 8415 section 13.1; the lightweight relays of RFC 6221 send a link address of
+             *     zero and the Interface-Id). None: the link address alone selects.
+             */
+            interface_id?: string | null;
+            /**
+             * Format: int32
+             * @description The preferred lifetime in seconds; none: five eighths of the valid lifetime, as ISC
+             *     dhcpd does. Never above the valid lifetime.
+             */
+            preferred_secs?: number | null;
+            /**
+             * @description Whether a SOLICIT with the Rapid Commit option is answered with a REPLY that
+             *     commits the lease (RFC 8415 section 18.3.1); none: yes.
+             */
+            rapid_commit?: boolean | null;
         };
         /** @description Zone scope name ([a-z0-9][a-z0-9_-]{0,62}); `default` for the default scope */
         ScopeName: string;

@@ -1,0 +1,5 @@
+# A RELAY-FORW cut after 20 octets: the type, the hop count and the first 18 octets of the
+# link address; the relay header is 34 octets.
+0c 00
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 00 01
+00 00

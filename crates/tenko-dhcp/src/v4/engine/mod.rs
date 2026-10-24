@@ -59,6 +59,8 @@ use tenko_core::{
     },
 };
 
+// WP9.1: the DHCPv6 engine hashes as this one does.
+pub(crate) use self::hash::{mix as hash_mix, of_bytes as hash_of_bytes};
 pub use self::{
     hashed::HashedAllocator,
     metrics::{MetricsSnapshot, WorkerMetrics},

@@ -44,6 +44,7 @@ fn new_scope(prefix: PrefixId) -> NewScope {
         restricted: false,
         classes: Vec::new(),
         description: None,
+        v6: None,
     }
 }
 

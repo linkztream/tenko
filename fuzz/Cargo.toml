@@ -262,6 +262,22 @@ doc = false
 bench = false
 # End WP7.6.
 
+# WP9.1: the DHCPv6 wire codec and the relay chain.
+[[bin]]
+name = "dhcp6_wire"
+path = "fuzz_targets/dhcp6_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dhcp6_relay"
+path = "fuzz_targets/dhcp6_relay.rs"
+test = false
+doc = false
+bench = false
+# End WP9.1.
+
 # WP10.1: the recursive resolver's targets (marked block).
 [[bin]]
 name = "dns_referral"

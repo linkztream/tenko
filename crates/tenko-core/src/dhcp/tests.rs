@@ -47,6 +47,7 @@ fn scope(prefix: PrefixId) -> Scope {
         restricted: false,
         classes: Vec::new(),
         description: None,
+        v6: None,
         created: stamp(),
         updated: stamp(),
     }
@@ -107,11 +108,11 @@ fn names_are_in_the_namespace() {
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), tables::all().len());
-    // Every table except the history is in the node subset.
+    // Every table except the histories is in the node subset.
     for table in tables::all() {
         assert_eq!(
             tables::NODE_TABLES.contains(table),
-            table.as_str() != "dhcp.history",
+            !matches!(table.as_str(), "dhcp.history" | "dhcp.history6"),
             "{table}"
         );
     }

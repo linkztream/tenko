@@ -67,6 +67,9 @@ pub struct NewScope {
     pub classes: Vec<ClassId>,
     /// Free text.
     pub description: Option<String>,
+    // WP9.1: the DHCPv6 settings of a scope on an IPv6 prefix.
+    /// The DHCPv6 settings; none: the defaults.
+    pub v6: Option<tenko_core::dhcp::Scope6Settings>,
 }
 
 /// Changes to a scope; the prefix does not change.
@@ -92,6 +95,9 @@ pub struct ScopeChange {
     pub classes: Option<Vec<ClassId>>,
     /// Free text; an empty string clears it.
     pub description: Option<String>,
+    // WP9.1: the DHCPv6 settings; `Some(None)` clears them.
+    /// The DHCPv6 settings of a scope on an IPv6 prefix; `Some(None)` drops them.
+    pub v6: Option<Option<tenko_core::dhcp::Scope6Settings>>,
 }
 
 /// An exclusion range as read.
@@ -336,6 +342,8 @@ impl ConfigService {
                 restricted: new.restricted,
                 classes: new.classes.clone(),
                 description: text(new.description.as_deref()),
+                // WP9.1: the DHCPv6 settings.
+                v6: new.v6.clone(),
                 created: now.clone(),
                 updated: now,
             };
@@ -414,6 +422,10 @@ impl ConfigService {
             }
             if let Some(description) = &change.description {
                 after.description = text(Some(description));
+            }
+            // WP9.1: the DHCPv6 settings.
+            if let Some(v6) = &change.v6 {
+                after.v6.clone_from(v6);
             }
             after.validate(&cidr_row)?;
             if after == before {

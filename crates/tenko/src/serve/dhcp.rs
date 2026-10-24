@@ -11,9 +11,12 @@
 //!    gate of P3-Q14 in front of it.
 //! 4. The listeners of `[dhcp] listen` bind and the workers start: only now does the node
 //!    answer, from complete tables. A snapshot install later resets both tables at once.
-//! 5. The leader services `dhcp.expiry` (bindings that ran out, over the role's table) and
-//!    `dhcp.history.purge` (the retention of P3-Q13) are registered; on one controller they
-//!    run at once.
+//! 5. The leader services `dhcp.expiry` (bindings that ran out, over the role's table),
+//!    `dhcp.expiry6` (the same for the DHCPv6 leases, WP9.1) and `dhcp.history.purge` (the
+//!    retention of P3-Q13) are registered; on one controller they run at once.
+//!
+//! WP9.1: the `[dhcp] listen` entries with an IPv6 address are the DHCPv6 listeners on
+//! `[dhcp.v6] port` (547), over the same image and the same store.
 //! 6. A follower keeps the profile current: the history retention and whether conflict
 //!    detection is expected (TGL-16, the health row `dhcp.probe.missing`).
 //!
@@ -34,6 +37,12 @@ use tenko_dhcp::{
     role::{self as dhcp_role, LocalNode, RoleSettings},
     server::{Listen, ServerConfig},
     v4::engine::{EngineSettings, ListenMode},
+    // WP9.1: the DHCPv6 listeners and their expiry.
+    v6::{
+        engine::Engine6Settings,
+        lease::expiry::Expiry6Service,
+        server::{Listen6, Server6Config, server_duid},
+    },
 };
 use tenko_store::{ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tokio::task::JoinHandle;
@@ -134,19 +143,58 @@ fn ddns_service(
     ))
 }
 
-/// The listeners and the engine's settings from `[dhcp]`.
+fn mode_of(mode: DhcpListenMode) -> ListenMode {
+    match mode {
+        DhcpListenMode::Relay => ListenMode::Relay,
+        DhcpListenMode::Direct => ListenMode::Direct,
+    }
+}
+
+// WP9.1: the DHCPv6 listeners, the entries of `[dhcp] listen` with an IPv6 address.
+/// The DHCPv6 listeners and settings from `[dhcp]` and `[dhcp.v6]`.
+pub(crate) fn server6_config(section: &DhcpSection, node: NodeId) -> Server6Config {
+    Server6Config {
+        listen: section
+            .listen
+            .iter()
+            .filter_map(|listen| match listen.address {
+                std::net::IpAddr::V6(address) => Some(Listen6 {
+                    address: std::net::SocketAddrV6::new(address, section.v6.port, 0, 0),
+                    mode: mode_of(listen.mode),
+                    interface: listen.interface.clone(),
+                }),
+                std::net::IpAddr::V4(_) => None,
+            })
+            .collect(),
+        workers: section.worker_count(),
+        engine: Engine6Settings {
+            offer_secs: section.offer_secs,
+            decline_hold_secs: section.decline.hold_secs,
+            relay_port: section.v6.relay_port,
+            client_port: section.v6.client_port,
+        },
+        node,
+        server_duid: section
+            .v6
+            .server_duid_octets()
+            .unwrap_or_else(|| server_duid(node)),
+        ..Server6Config::default()
+    }
+}
+
+/// The listeners and the engine's settings from `[dhcp]` (the IPv4 entries).
 pub(crate) fn server_config(section: &DhcpSection, node: NodeId) -> ServerConfig {
     ServerConfig {
         listen: section
             .listen
             .iter()
-            .map(|listen| Listen {
-                address: section.socket_addr(listen),
-                mode: match listen.mode {
-                    DhcpListenMode::Relay => ListenMode::Relay,
-                    DhcpListenMode::Direct => ListenMode::Direct,
-                },
-                interface: listen.interface.clone(),
+            .filter_map(|listen| match listen.address {
+                std::net::IpAddr::V4(address) => Some(Listen {
+                    address: std::net::SocketAddrV4::new(address, section.port),
+                    mode: mode_of(listen.mode),
+                    interface: listen.interface.clone(),
+                }),
+                std::net::IpAddr::V6(_) => None,
             })
             .collect(),
         workers: section.worker_count(),
@@ -214,8 +262,13 @@ async fn follow_profile(
 fn describe(node: &LocalNode, section: &DhcpSection) -> (String, String) {
     use tenko_dhcp::role::DhcpNode as _;
     let status = node.status();
-    let leases: usize = status.leases.iter().map(|(_, count)| count).sum();
-    let listening = if status.listeners.is_empty() {
+    let leases: usize = status
+        .leases
+        .iter()
+        .chain(&status.leases6)
+        .map(|(_, count)| count)
+        .sum();
+    let listening = if status.listeners.is_empty() && status.listeners6.is_empty() {
         "no listener ([dhcp] listen is empty)".to_owned()
     } else {
         status
@@ -236,6 +289,17 @@ fn describe(node: &LocalNode, section: &DhcpSection) -> (String, String) {
                 };
                 format!("{} ({mode})", listener.address)
             })
+            // WP9.1: the DHCPv6 listeners.
+            .chain(status.listeners6.iter().map(|listener| {
+                let mode = match (listener.mode, &listener.interface) {
+                    (ListenMode::Relay, _) => "DHCPv6 relay".to_owned(),
+                    (ListenMode::Direct, Some(interface)) => {
+                        format!("DHCPv6 direct on {interface}")
+                    }
+                    (ListenMode::Direct, None) => "DHCPv6 direct".to_owned(),
+                };
+                format!("{} ({mode})", listener.address)
+            }))
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -298,6 +362,8 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         commit: CommitSettings::default(),
         probe: resolved.roles.contains(Role::Probe),
         probe_expected: probe_expected(profile),
+        // WP9.1: the DHCPv6 listeners.
+        server6: server6_config(section, resolved.node_id),
     };
     // WP8.1: the lease batch carries the IPAM facts of the source `dhcp:<node>` (plan
     // section 2.8), from the hook over the stored facts; its outcomes are counted.
@@ -309,14 +375,16 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
     )
     .map_err(|problem| error("start.dhcp.feed", problem.to_string()))?;
     let node_id = resolved.node_id;
-    let role = dhcp_role::Role::start_observed(Arc::clone(&store), node_id, settings, hook)
+    // WP9.1: the same hook adds the facts of the DHCPv6 lease batches.
+    let hook6: Arc<dyn tenko_dhcp::v6::lease::commit::Observation6Hook> = hook.clone();
+    let role = dhcp_role::Role::start_observed6(Arc::clone(&store), node_id, settings, hook, hook6)
         .await
         .map_err(|problem| match problem {
             dhcp_role::StartError::Feed(detail) => error("start.dhcp.feed", detail),
             dhcp_role::StartError::Bind(io) => error(
                 "start.dhcp.bind",
                 format!(
-                    "the dhcp role cannot listen on {}: {io}; port 67 needs \
+                    "the dhcp role cannot listen on {}: {io}; ports 67 and 547 need \
                      CAP_NET_BIND_SERVICE on Linux, direct mode also CAP_NET_RAW \
                      (deploy/systemd/dhcp-direct.conf), the address must be one of this \
                      host's, and another DHCP server may hold the port",
@@ -339,6 +407,17 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         )
         .with_table(node.leases().clone()),
     ));
+    // WP9.1: the expiry of the DHCPv6 leases.
+    let mut expiry6 = Expiry6Service::new(
+        Arc::clone(&store),
+        resolved.node_id,
+        ExpirySettings::default(),
+    )
+    .with_table(node.leases6().clone());
+    if let Some(offers) = node.offers6() {
+        expiry6 = expiry6.with_offers(offers);
+    }
+    leaders.register(Arc::new(expiry6));
     let retention = Arc::new(HistoryRetention::new(
         history_profile(profile),
         section.history.days,
@@ -450,6 +529,53 @@ mod tests {
         assert_eq!(config.engine.client_port, 68);
         assert_eq!(config.engine.offer_secs, 10);
         assert_eq!(config.node, NodeId(4));
+    }
+
+    // WP9.1: the IPv6 entries are the DHCPv6 listeners, on the DHCPv6 port.
+    #[test]
+    fn ipv6_entries_become_the_dhcpv6_listeners() {
+        let section = DhcpSection {
+            listen: vec![
+                DhcpListen {
+                    address: "192.0.2.10".parse().expect("address"),
+                    mode: DhcpListenMode::Relay,
+                    interface: None,
+                },
+                DhcpListen {
+                    address: "2001:db8::10".parse().expect("address"),
+                    mode: DhcpListenMode::Relay,
+                    interface: None,
+                },
+                DhcpListen {
+                    address: "2001:db8:1::10".parse().expect("address"),
+                    mode: DhcpListenMode::Direct,
+                    interface: Some("eth2".to_owned()),
+                },
+            ],
+            ..DhcpSection::default()
+        };
+        assert_eq!(server_config(&section, NodeId(4)).listen.len(), 1);
+        let config = server6_config(&section, NodeId(4));
+        assert_eq!(config.listen.len(), 2);
+        assert_eq!(
+            config.listen[0].address,
+            "[2001:db8::10]:547".parse().expect("address")
+        );
+        assert_eq!(config.listen[1].mode, ListenMode::Direct);
+        assert_eq!(
+            (config.engine.relay_port, config.engine.client_port),
+            (547, 546)
+        );
+        // The server's DUID: a DUID-UUID of the node, the same at every start.
+        assert_eq!(config.server_duid[..2], [0, 4]);
+        assert_eq!(
+            config.server_duid,
+            server6_config(&section, NodeId(4)).server_duid
+        );
+        assert_ne!(
+            config.server_duid,
+            server6_config(&section, NodeId(5)).server_duid
+        );
     }
 
     #[test]

@@ -1,0 +1,12 @@
+# A SOLICIT whose IA_NA has 8 octets of value where it needs at least 12 (IAID, T1, T2): the
+# walk of the options is well formed, the typed option is not.
+#
+# msg-type SOLICIT, transaction id 0x0badc0
+01 0b ad c0
+# option 1, client identifier, 10 octets: DUID-LL, hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 01
+# option 3, IA_NA, 8 octets: IAID and T1 only
+00 03 00 08
+5e 00 53 01
+00 00 00 00

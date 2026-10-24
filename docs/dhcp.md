@@ -21,6 +21,7 @@ Contents:
 15. [Fingerprinting and the reconciliation view](#15-fingerprinting-and-the-reconciliation-view)
 17. [The home cut-over](#17-the-home-cut-over)
 18. [The Kea export](#18-the-kea-export)
+19. [DHCPv6](#19-dhcpv6)
 
 ## 1. The wire format
 
@@ -410,7 +411,7 @@ The node-local keys (`docs/dhcp-contracts.md` section 9, `deploy/tenko.example.t
 
 | Key | Default | Meaning |
 |---|---|---|
-| `[dhcp] listen` | none | Listeners: `{ address, mode = "relay" or "direct", interface }`, or an address alone for relay mode. Empty: the role builds its tables and answers nothing (the health row `dhcp.role.not_serving`) |
+| `[dhcp] listen` | none | Listeners: `{ address, mode = "relay" or "direct", interface }`, or an address alone for relay mode; an IPv6 address is a DHCPv6 listener on `[dhcp.v6] port` (section 19.7). Empty: the role builds its tables and answers nothing (the health row `dhcp.role.not_serving`) |
 | `[dhcp] port` | 67 | The server port |
 | `[dhcp] workers` | one per CPU, at most 8 | UDP workers per listener, 0 to 64 |
 | `[dhcp] offer_secs` | 10 | How long an offer holds its address in memory, 1 to 300 |
@@ -421,7 +422,7 @@ The node-local keys (`docs/dhcp-contracts.md` section 9, `deploy/tenko.example.t
 | `[dhcp.ddns] retries`, `backoff_ms` | 5, 1,000 | The DDNS worker (WP8.3) |
 | `[dhcp.history] days` | the installation's setting, else the profile's | A node-local retention of the lease history, 1 to 3,650 days |
 
-`tenko config check` refuses an entry that is not a unicast IPv4 address, an interface on a relay listener, an address listed twice, and values outside the ranges above.
+`tenko config check` refuses an entry that is not a unicast address, an interface on a relay listener, an address listed twice, and values outside the ranges above.
 
 ### 10.3 The listeners per platform and mode
 
@@ -441,7 +442,7 @@ The receiving address comes from the binding, not from `IP_PKTINFO`: `socket2` 0
 | Containers | A published UDP port (`-p 67:67/udp`); the gateway relays to the host's address | `network_mode: host` or macvlan, with `CAP_NET_RAW` |
 | Windows (MSI) | The firewall rule for UDP 67 is added when `TENKO_ROLES` holds `dhcp` (or `all`) | The same rule; broadcast replies |
 
-UDP 547 (DHCPv6) joins in Slice 9. The installer (`deploy/install.sh`) offers `controller,dhcp` and `controller,dns,dhcp`, checks that no other process holds UDP 67, and reminds that `[dhcp] listen` must be set. `deploy/README.md` has the walk-through.
+UDP 547 (DHCPv6, section 19.7) needs nothing more in relay mode. The installer (`deploy/install.sh`) offers `controller,dhcp` and `controller,dns,dhcp`, checks that no other process holds UDP 67, and reminds that `[dhcp] listen` must be set. `deploy/README.md` has the walk-through.
 
 ### 10.5 The status route and the node commands
 
@@ -968,7 +969,7 @@ Record the date, the lease times used and the findings in the Phase 3 status (`d
 
 ## 18. The Kea export
 
-WP9.3 writes Tenko's DHCPv4 configuration and leases in the form ISC Kea 2.6 reads (MIG-16, decisions P3-Q10 and P3-Q17 (a)), so that leaving Tenko is never blocked by a format only Tenko reads: `kea-dhcp4` starts from the export and keeps the clients' addresses. This section is for operators who leave Tenko or keep a Kea server as a fallback, and for reviewers of `tenko_dhcp::export::kea`. The DHCPv6 half (`Dhcp6`, `kea-dhcp6 -t`) comes with the DHCPv6 server (WP9.1).
+WP9.3 writes Tenko's DHCPv4 configuration and leases in the form ISC Kea 2.6 reads (MIG-16, decisions P3-Q10 and P3-Q17 (a)), so that leaving Tenko is never blocked by a format only Tenko reads: `kea-dhcp4` starts from the export and keeps the clients' addresses. This section is for operators who leave Tenko or keep a Kea server as a fallback, and for reviewers of `tenko_dhcp::export::kea`. The DHCPv6 half (`Dhcp6`, `kea-dhcp6 -t`) is WP9.3's, over the DHCPv6 server of section 19.
 
 ### 18.1 Running it
 
@@ -1063,3 +1064,120 @@ The unit tests in `crates/tenko-dhcp/src/export/kea/` cover the expressions, the
 | `export.kea.report` | the report names the DDNS policy (`export.kea.policy.ddns`) |
 | `export.kea.reservation` | with the node stopped, Kea on the node's address from the export gives client-lan its reservation `192.0.2.80` with options 3 and 6 |
 | `export.kea.lease` | client-iot asks again (INIT-REBOOT) and keeps the address of its exported lease |
+
+## 19. DHCPv6
+
+WP9.1 adds DHCPv6 (RFC 8415) to the `dhcp` role: stateful addresses in `IA_NA`, relayed and direct clients, the DNS and NTP options, the client FQDN of RFC 4704, DUID reservations from IPAM and the client link-layer address of RFC 6939 for the correlation with the client's DHCPv4 lease (DHCP-09, DHCP-11, DHCP-13). It runs on the same configuration image, the same store and the same lease rules as DHCPv4: a DHCPv6 scope is an IPAM prefix with a DHCP policy, a lease is a row committed before the REPLY, and the role never reads the store while it answers. Prefix delegation (`IA_PD`) and the router advertisement check of DHCP-10 are WP9.2; temporary addresses (`IA_TA`) are not served. This section is for operators who serve IPv6 clients and for reviewers of `tenko_dhcp::v6`; the RFCs and their status are in [CONFORMANCE.md](CONFORMANCE.md).
+
+### 19.1 The codec
+
+`tenko_dhcp::v6` reads and writes DHCPv6 messages without allocating, in the manner of the DHCPv4 codec (section 1):
+
+- **The view.** `Message::parse` checks the header of the message's type: the type and the three-octet transaction id of a client or server message, the type, the hop count, the link address and the peer address of a RELAY-FORW or RELAY-REPL (RFC 8415 sections 8 and 9). The options are walked when asked for; a malformed option ends the walk of its area there, the options before it stay readable, and `validate()` walks every option.
+- **Nested options.** An `IA_NA` holds its IA Address options and a status, an IA Address its own status, a relay message the message it relays; `IaNa::addresses`, `IaAddress::status` and `Message::relay_message` read them from the same buffer.
+- **The relay chain.** `RelayChain::parse` walks a RELAY-FORW inwards to the client's message, at most eight relays deep (`HOP_COUNT_LIMIT`, RFC 8415 section 7.6); a deeper chain or a RELAY-FORW without a Relay Message option is refused. The chain gives the link address of the innermost relay that sends one (a lightweight relay of RFC 6221 sends zero and the relay above it names the link), and the Interface-Id, the Remote-Id (RFC 4649) and the Client Link-Layer Address (RFC 6939) of the innermost relay that sends each.
+- **The typed options.** DUIDs of the four types (DUID-LLT, DUID-EN, DUID-LL and DUID-UUID of RFC 6355, with their link-layer address, time, enterprise number or UUID), `IA_NA` and IA Address, `IA_PD` and IA Prefix (read for WP9.2), Status Code, the Option Request, Elapsed Time, Rapid Commit, Reconfigure Accept, the Client FQDN of RFC 4704, the Client Link-Layer Address of RFC 6939, the address lists of options 22, 23 and 31, the domain list of option 24 (uncompressed, RFC 3646 section 4), the NTP Server option of RFC 5908 with its sub-options, Remote-Id, User Class and Vendor Class.
+- **The builder.** `MessageBuilder` writes the header and the options into a caller's buffer; an option that holds options is opened with `begin` and closed with `end`, which writes its length, so a RELAY-REPL around a RELAY-REPL around a REPLY with its `IA_NA`s is written outside in, in one pass. An option that does not fit returns `EncodeError::NoRoom` and leaves the message as it was; `rewind` takes back an opened option.
+- **The flags of option 39.** RFC 4704 has the flags S (0x01), O (0x02) and N (0x04); option 81 of DHCPv4 has S, O, E (0x04) and N (0x08). `ClientFqdn::flags_v4` maps the DHCPv6 flags into the DHCPv4 layout, with E set since the name is always in the wire encoding, so the lease row and the DDNS rules read them one way.
+
+The tests are `crates/tenko-dhcp/tests/dhcp6_codec.rs` (the fixtures in `fixtures/v6/`, annotated hex written from the RFC formats: SOLICITs as ISC dhclient and systemd-networkd send them, a REQUEST, RENEW, REBIND, RELEASE, DECLINE, CONFIRM and INFORMATION-REQUEST, relay chains one and two deep, a REPLY with the DNS and NTP options, a RELAY-REPL chain, and the malformed cases; every fixture written again through the builder octet for octet; loops over truncations, flips and random input), `tests/dhcp6_differential.rs` (the fixtures against `dhcproto`'s DHCPv6 decoder) and `tests/alloc6.rs` (no allocation from the parse to the hand-off of the change). The fuzz targets are `dhcp6_wire` (the whole message, the relay chain, every typed option, the domain list and the NTP option encoded again, and a REPLY built for every message that parses, which must read back) and `dhcp6_relay` (relay chains up to seven deep built from the input, their link address, Interface-Id and link-layer address, and the RELAY-REPL chain back with the Interface-Ids echoed), with seeds in `fuzz/seeds/`, in the weekly fuzz smoke (E31).
+
+### 19.2 Scopes, pools and options
+
+A DHCPv6 scope is a scope (section 3) on an IPAM prefix of role network that is IPv6: `POST /dhcp/scopes` names the prefix as for DHCPv4. Its pools are the prefix's IPAM ranges of role `dhcp_pool`, its exclusions the same as section 2 says (the explicit ones, the `reserved` and `infrastructure` ranges, the addresses of hosts that are not `dynamic`), plus the network's first address, the Subnet-Router anycast address (RFC 4291 section 2.6.1). The lease times are the valid lifetime: the pool's settings, else the range's `lease_secs`, else the scope's, else the server's. A scope on an IPv6 prefix also takes `v6` (refused on an IPv4 prefix, `dhcp.scope.invalid`):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `preferred_secs` | five eighths of the valid lifetime | The preferred lifetime, never above the valid lifetime |
+| `rapid_commit` | true | Whether a SOLICIT with Rapid Commit gets a committed REPLY (RFC 8415 section 18.3.1) |
+| `interface_id` | none | The relay Interface-Id (option 18, as text) that selects the scope before its link address does |
+
+T1 and T2 are half and four fifths of the preferred lifetime (RFC 8415 section 21.4), or the scope's `t1_secs` and `t2_secs` scaled as in DHCPv4, and never above the preferred lifetime. `PATCH /dhcp/scopes/{prefix}` replaces `v6` whole, and `clear_v6` drops it; every scope item says its `family` (`v4` or `v6`).
+
+The options of a DHCPv6 client are the values of space `dhcp6` in the same option sets (section 4): the server's, the shared network's and the scope's merged per code, the pool's, the reservation's. The built-in catalog (`tenko_core::dhcp::CATALOG_V6`) has, with Kea's names, 21 `sip-server-dns`, 22 `sip-server-addr`, 23 `dns-servers`, 24 `domain-search`, 27 and 28 the NIS servers, 29 and 30 the NIS domain names, 31 `sntp-servers`, 32 `information-refresh-time`, 41 and 42 the time zones, 56 `ntp-server`, 59 `bootfile-url`, 60 `bootfile-param`, 64 `aftr-name`, 82 `sol-max-rt` and 83 `inf-max-rt`. Option 56 holds the time servers' addresses in the option set; the server writes each as an `NTP_SUBOPTION_SRV_ADDR` sub-option (RFC 5908 section 4.1). The codes the server writes itself (`SERVER_MANAGED_V6`: the identifiers, the IAs and their addresses and prefixes, the option request, preference, elapsed time, relay message, authentication, server unicast, status code, rapid commit, Interface-Id, the reconfigure options, Remote-Id, client FQDN and client link-layer address) are refused in an option set, and a custom definition of a catalog code in `dhcp6` too.
+
+Classes and policies (section 16) are DHCPv4 only. The MAC filters (section 6) hold for DHCPv6 clients by their link-layer address (19.4), and a restricted scope serves only clients an allow entry matches and clients with a reservation.
+
+### 19.3 Reservations
+
+A reservation of a DHCPv6 address is an IPv6 address of status `active` or `planned` of an interface of a `reserved` host inside a served DHCPv6 scope, as for DHCPv4 (section 12.1). It is keyed by the interface's DUID (IPAM's `Interface::duid`) when it has one, else by its MAC address, which the engine matches against the client's link-layer address; an interface with neither gives the IPAM-18 warning `no_identity`, and two reservations of one address or one key in a scope keep the first and report the second (IPAM-23). The reservation wins over the pool, its address is never offered to another client, and its options are the interface's option set. Its findings are the image's own (`Built::warnings6`), apart from the DHCPv4 ones.
+
+### 19.4 The engine
+
+`tenko_dhcp::v6::engine::handle` is a pure function of the image, the DHCPv6 lease table, the offers held, the request and the clock, as section 9 describes for DHCPv4:
+
+- **The client.** Its DUID (option 1), which every message but an INFORMATION-REQUEST must carry; the IAID of each IA with the DUID is the identity of a binding. Its link-layer address comes from the Client Link-Layer Address option the relay on its link added (RFC 6939), else from its DUID-LLT or DUID-LL; a client with a DUID-EN or DUID-UUID behind a relay without RFC 6939 has none. The deny list drops a client whose MAC address it matches (DHCP-08).
+- **The Server Identifier** (RFC 8415 section 16). SOLICIT, CONFIRM and REBIND must not carry one; REQUEST, RENEW, RELEASE and DECLINE must carry this server's; an INFORMATION-REQUEST may carry this server's. Any other message is ignored (`other_server` or `incomplete`). The server's DUID is `[dhcp.v6] server_duid`, else a DUID-UUID derived from the node identifier, which stays the same across restarts and differs between nodes.
+- **The scope.** The relay's Interface-Id when a scope names it (the innermost relay that sends one first), else the link address of the innermost relay with one (RFC 6221), else, for a client on the listener's link, the listener's address. A scope of a shared network brings its siblings into the choice.
+- **The address of an IA.** The client's reservation, its bound lease of the IA, an address it put in the IA when that one is free, then the pool: the walk starts where the hash of the IAID and the DUID points and looks at no more than 4,096 addresses from there, which in a pool of 2^64 addresses finds a free one at once. Free means inside a pool and not excluded, not another client's reservation, binding or offer, not an abandoned address (offered to nobody, the decliner included, until its hold ends), and not given to another IA of the same message.
+
+| Request | Answer | Written |
+|---|---|---|
+| SOLICIT | ADVERTISE with an address per `IA_NA`, `NoAddrsAvail` for an IA without one; when no IA gets one, an ADVERTISE with the identifiers and a top-level `NoAddrsAvail` only (RFC 8415 section 18.3.9) | Nothing; the addresses are held for `[dhcp] offer_secs` |
+| SOLICIT with Rapid Commit, where the scope allows it | REPLY with Rapid Commit after the commit | The bindings (`granted`, or `renewed` for the client's own) |
+| REQUEST | REPLY after the commit; an IA without an address gets `NoAddrsAvail` | `granted` or `renewed` |
+| RENEW | REPLY after the commit with the binding's new lifetimes; an address of the IA that is not the client's binding or not on the link comes back with lifetimes of zero (RFC 8415 section 18.3.4); an IA without addresses and without a binding gets `NoBinding` | `renewed`, or `granted` for a lost binding taken back |
+| REBIND | As RENEW, without a Server Identifier | `rebound` or `granted` |
+| CONFIRM | REPLY with `Success` when every address of its IAs is on the link, else `NotOnLink`; no reply without an address (RFC 8415 section 18.3.3) | Nothing |
+| RELEASE | REPLY with `Success` after the commit; an IA the client holds nothing of gets `NoBinding` | `released`, ending now |
+| DECLINE | As RELEASE | The address `abandoned` for `[dhcp.decline] hold_secs` |
+| INFORMATION-REQUEST | REPLY with the options; one that carries an IA is ignored | Nothing |
+| ADVERTISE, REPLY, RECONFIGURE, RELAY-REPL, other types | Ignored | Nothing |
+
+A message changes at most eight bindings, its first eight IAs; the change of one message is one commit. The reply carries the server's DUID, the client's, the `IA_NA`s in the client's order with their addresses and the T1 and T2 of the first address's lifetimes, a status where the table says, Rapid Commit, the Client FQDN (19.6), and the options the client asks for in its Option Request in its order from the most specific level that holds them, with 23 and 24 also when the client does not ask for them; an option that does not fit within 1,452 octets is left out whole. Through relays the reply is a RELAY-REPL per RELAY-FORW from the outermost in, each with the hop count, the link address and the peer address of its RELAY-FORW and its Interface-Id echoed (RFC 8415 section 19.3), sent to the address the outermost RELAY-FORW came from on `[dhcp.v6] relay_port` (547); a client on the listener's link gets the reply at its link-local address on `[dhcp.v6] client_port` (546).
+
+While the store refuses lease writes (P3-Q14), a REQUEST, RENEW or REBIND of a binding the client holds is answered with the time the binding has left and nothing is written, a SOLICIT is answered only for a client with a bound lease, and everything else is dropped as `store_refused`. A client that sends to the server's unicast address without the Server Unicast option is served, not answered with `UseMulticast`: the listener does not learn whether a datagram was multicast (no `IPV6_PKTINFO`, as `IP_PKTINFO` in section 10.3), and in relay mode every request arrives unicast from the relay.
+
+The tests are `crates/tenko-dhcp/tests/engine6.rs` (every message type, the lifetimes and T1 and T2, rapid commit allowed and refused, relay chains two deep with a lightweight relay, the Interface-Id selection, reservations by DUID and by MAC through RFC 6939, the filters, the Server Identifier rules, two IAs in one commit, the options 23, 24 and 56, option 39, the store refusal), `tests/engine6_server.rs` (a relay on loopback), `tests/image6.rs` (the image of the rows) and `tests/role6.rs` (the role with both families over the in-memory store).
+
+### 19.5 Leases
+
+A DHCPv6 lease is a row of `dhcp.leases6`, keyed by VRF and address (`tenko_core::dhcp::Lease6`): the address and its prefix length (128), `na` (WP9.2 adds `pd`), the scope, the IAID and the DUID, the link-layer address and its type, the binding state, the client's last transaction time, the ends of the valid and preferred lifetimes, the name of RFC 4704 and its flags (in the layout of option 81), the relay closest to the client (link address, peer address, hops, Interface-Id, Remote-Id), the observation time and the DDNS outcome. Each event is a row of `dhcp.history6` (key time, VRF, address), purged by the retention of section 8.5 with `dhcp.history`. Both tables are additive in data format 4; there is no `by_client` table, the role derives its client index from the rows.
+
+The lease path is the one of section 8 for the other table: the engine's change (`PendingChange6`, every field inline) goes to `StoreLeases6`, whose committer builds one batch per change (a row and a history row per binding, and the IPAM facts), proposes the batches concurrently with the changes that touch the same address or client one after another, applies a committed batch to the role's DHCPv6 table and only then completes the ticket; the worker sends the REPLY then. The DHCPv6 store shares the refusal gate of the DHCPv4 store, so one refusal closes both and one commit opens both. The leader service `dhcp.expiry6` writes the bindings past their valid lifetime and the abandoned addresses past their hold as `expired`, in batches under the leader fence, as `dhcp.expiry` does.
+
+The lease batch carries the IPAM facts of the source `dhcp:<node>` (section 12.3): the address fact of the IPv6 address with the client's MAC address from its link-layer address, and the name fact of RFC 4704. A device whose DHCPv4 lease and DHCPv6 lease name one MAC address shows both addresses in IPAM under that MAC (`GET /observations?mac=`), which is the correlation of DHCP-11; a client without a link-layer address (a DUID-EN behind a relay without RFC 6939) is not correlated.
+
+### 19.6 DDNS
+
+DHCPv6 leases take the path of section 13 through the same worker, `dhcp.ddns`, which follows `dhcp.leases6` beside `dhcp.leases`. A DHCPv6 lease with a name writes an AAAA record where a DHCPv4 lease writes an A record, a DHCID of identifier type 2 (the DUID, RFC 4701 section 3.3) at the forward name, and the PTR under `ip6.arpa` in the most specific reverse zone Tenko serves for the address. The name is the one of option 39 (RFC 4704), under the scope's forward zone; a DHCPv6 scope that names no forward zone takes the zone of the first name of its option 24. The reply's option 39 carries the flags of section 13.3 in the RFC 4704 layout: S when the server writes the AAAA record, none of S, O and N when the client writes it, N when DDNS is off. A client whose DHCPv4 identity is the RFC 4361 form of the same IAID and DUID gets the same DHCID for both families and holds one name with an A and an AAAA record; the DHCID goes with the last address record of either family. A dual-stack client whose DHCPv4 client identifier is its MAC address has another DHCID for each family, and name protection gives the name to whichever writes it first (RFC 4703 section 5.4 recommends RFC 4361 identifiers for dual-stack clients).
+
+### 19.7 The listeners and the role
+
+A `[dhcp] listen` entry with an IPv6 address is a DHCPv6 listener on `[dhcp.v6] port` (547):
+
+| Mode | Linux | Windows |
+|---|---|---|
+| `relay` | Binds the unicast address on port 547: relay agents send their RELAY-FORW there. One `SO_REUSEPORT` socket per worker | The unicast address; one socket shared by the workers |
+| `direct` | Binds `[::]:547` with `SO_BINDTODEVICE` to the entry's interface and joins `All_DHCP_Relay_Agents_and_Servers` (`ff02::1:2`) on it; the entry's address selects the scope of the link. One socket the workers share, since a multicast reaches every socket of a reuse-port group | Binds `[::]:547` and joins `ff02::1:2` on the system's default interface |
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[dhcp.v6] port` | 547 | The DHCPv6 server port |
+| `[dhcp.v6] relay_port`, `client_port` | 547, 546 | Where replies to relay agents and to clients go |
+| `[dhcp.v6] server_duid` | a DUID-UUID of the node | The server's DUID in hexadecimal, 3 to 130 octets |
+
+`[dhcp] workers`, `offer_secs` and `[dhcp.decline] hold_secs` apply to both families. Port 547 is below 1024 like 67 and needs nothing more than `CAP_NET_BIND_SERVICE` in relay mode; direct mode needs the drop-in of section 10.4 for `SO_BINDTODEVICE`.
+
+The role starts the DHCPv6 server after the DHCPv4 one, over the same image (a change of the configuration swaps the image of both, a snapshot install both tables with the images), and stops it with the DHCPv4 one. The ready line lists the DHCPv6 listeners. `GET /nodes/{id}/dhcp` reports the role; its report (`DhcpStatus`) holds `listeners6`, `scopes6` and `leases6` beside the DHCPv4 figures, and `serving` counts the listeners of both families (the API's answer does not show the three fields yet: WP9.4). The metrics: `tenko_dhcp_packets_total{family="v6",type,outcome}` with the types `solicit`, `request`, `confirm`, `renew`, `rebind`, `release`, `decline`, `information-request` and `other`; `tenko_dhcp_leases{state}` counts the rows of both tables; `tenko_dhcp_dropped_total`, `tenko_dhcp_declines_total`, `tenko_dhcp_commit_duration_seconds` and `tenko_dhcp_exchange_duration_seconds` (`offer`: SOLICIT to ADVERTISE; `ack`: to a committed REPLY) count both families.
+
+### 19.8 What the API and the UI show
+
+The routes of section 7 read and write DHCPv6 scopes, pools (IPAM ranges), exclusions and `dhcp6` option sets. The lease, history and utilization routes read the DHCPv4 tables only: a DHCPv6 scope's utilization reads zero, and the DHCPv6 leases are in the store, in the role's report counts, in the metrics and as IPAM observations. WP9.4 adds the DHCPv6 leases and history to the routes and the UI, the `v6` settings and the DHCPv6 catalog to the scope page and the option editor, and the DUID reservations to the host page.
+
+### 19.9 The lab round `dhcp6`
+
+`ROUNDS=dhcp6 bash deploy/compose/lab-dhcp/smoke.sh` runs E29's IA_NA, relay and correlation rows on a dual-stack topology of its own (`compose.dhcp6.yml`, `dhcp6.sh`; the lab's README has the commands): ISC's `dhcrelay -6` and `-4` relay the links `lan6` (`2001:db8:101::/64`) and `iot6` (`2001:db8:102::/64`) to the node's `2001:db8:100::10` and `192.0.2.10`; the clients are ISC's `dhclient -6` with a DUID-LL, systemd-networkd run on its own with Rapid Commit, and `relay-test6.py`, a relay agent written against RFC 8415 that sends chains two deep with a lightweight relay, the Client Link-Layer Address of RFC 6939 and option 39.
+
+| Row | Checks |
+|---|---|
+| `v6.lease.dhclient` | dhclient -6 on lan6 gets an address of the pool through dhcrelay, with options 23, 24 and 56 |
+| `v6.lease.iot` | dhclient -6 on iot6 gets an address of the iot6 pool: the relay's link address selects the scope |
+| `v6.lease.networkd` | systemd-networkd gets an address of the pool with the DNS and NTP servers |
+| `v6.rapid-commit` | networkd's SOLICIT is answered with a committed REPLY and no REQUEST follows |
+| `v6.renew` | dhclient renews at T1 and keeps its address |
+| `v6.interface-id` | a chain two deep whose outer link has no scope gets an address of the scope its Interface-Id names, the Interface-Id echoed |
+| `v6.reservation` | an IPAM host of mode `reserved` with dhclient's DUID gets its reserved address |
+| `v6.correlation.rfc6939`, `v6.correlation.duid` | the DHCPv4 and the DHCPv6 lease of one MAC address are both IPAM facts of that MAC, by RFC 6939 and by DUID-LL |
+| `v6.fqdn` | option 39 gives the AAAA, the DHCID and the `ip6.arpa` PTR in Tenko's zones, of origin `dhcp` |
+| `v6.release` | a RELEASE is answered and removes the names |

@@ -38,6 +38,11 @@ use crate::{
 pub(super) fn item(row: ScopeRow) -> DhcpScopeItem {
     DhcpScopeItem {
         cidr: row.prefix.cidr,
+        // WP9.1: the family of the prefix.
+        family: match row.prefix.cidr {
+            ipnet::IpNet::V4(_) => "v4".to_owned(),
+            ipnet::IpNet::V6(_) => "v6".to_owned(),
+        },
         vrf: row.prefix.vrf,
         pools: row.pools,
         leases: row.leases,
@@ -153,6 +158,8 @@ pub(super) async fn create_dhcp_scope(
                 restricted,
                 classes: body.classes,
                 description: body.description,
+                // WP9.1: the DHCPv6 settings.
+                v6: body.v6,
             },
         )
         .await?;
@@ -245,6 +252,12 @@ pub(super) async fn update_dhcp_scope(
                 restricted: body.restricted,
                 classes: body.classes,
                 description: body.description,
+                // WP9.1: the DHCPv6 settings, replaced or dropped.
+                v6: if body.clear_v6 {
+                    Some(None)
+                } else {
+                    body.v6.map(Some)
+                },
             },
             expect,
         )

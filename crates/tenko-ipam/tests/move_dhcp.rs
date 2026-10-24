@@ -149,6 +149,7 @@ impl Moving {
         let now = Timestamp::now();
         let stamp = Stamp::new(now, Principal::system(SystemComponent::Dhcp));
         let scope = Scope {
+            v6: None,
             prefix,
             enabled,
             lease: Some(LeaseTimes::fixed(7_200)),

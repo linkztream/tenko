@@ -44,7 +44,9 @@ Contents:
 | `Lease`, `ClientKey`, `BindingState`, `PoolShare`, `RelayInfo`, `Fingerprint`, `DdnsState` | A DHCPv4 lease (`dhcp.leases`, key VRF and address) with the failover draft's fields: state (`free`, `active`, `expired`, `released`, `abandoned`, `reset`, `backup`), `cltt`, `ends`, `tstp`, `tsfp`, `atsfp`, node, share; host name, FQDN, DDNS outcome, fingerprint, relay information, the observation time |
 | `ClientKey::identity`, `write_identity` | The client identity of RFC 4361 and RFC 6842 as octets: `1` and option 61 when sent, else `0`, `htype` and `chaddr`; the second part of the key of `dhcp.leases.by_client`; `write_identity` writes it into a stack buffer of `MAX_IDENTITY` (256) octets |
 | `LeaseRef`, `LeaseEvent`, `LeaseEventKind` | The client index value; the history row (`granted`, `renewed`, `rebound`, `released`, `declined`, `expired`, `reclaimed`, `conflict`) |
-| `Lease6`, `Lease6Kind` | The DHCPv6 lease of Slice 9 (IA_NA or IA_PD, IAID, DUID, the RFC 6939 link-layer address), declared now so that this phase's format holds its values; no table stores it yet |
+| `Lease6`, `Lease6Kind`, `Lease6Event`, `Relay6Info` | The DHCPv6 lease (`dhcp.leases6`, WP9.1): IA_NA (IA_PD with WP9.2), IAID, DUID, the link-layer address of RFC 6939 or the DUID and its type, the valid and preferred ends, the name of RFC 4704 with its flags in the layout of option 81, the relay closest to the client, the observation time, the DDNS outcome; `identity()` (IAID and DUID), `client_key()` (the RFC 4361 form, for a DHCID of type 2); the history row of `dhcp.history6` |
+| `Scope6Settings` | What a scope on an IPv6 prefix adds (`Scope::v6`, WP9.1): the preferred lifetime, rapid commit, the relay Interface-Id that selects the scope; refused on an IPv4 prefix |
+| `CATALOG_V6`, `SERVER_MANAGED_V6` | The built-in DHCPv6 catalog (18 entries, Kea's names; 56 holds addresses written as RFC 5908 sub-options) and the 21 codes a DHCPv6 server writes itself |
 | `ReservationCandidate`, `ReservationWarning`, `check_reservations` | The derived reservations' check: a reserved host without identity (IPAM-18), an address or a client reserved twice (IPAM-23); a reservation inside a pool is allowed and wins |
 | `DhcpScope` | The scopes `dhcp.read` and `dhcp.write`, `required(action, kind)` |
 | `scope_object`, `server_object` | The authorization objects: a scope is `dhcp_scope` with its prefix's id; the server-wide configuration is the `dhcp_scope` singleton |
@@ -71,7 +73,10 @@ All in the namespace `dhcp` of the replicated store; the constants are `tenko_co
 | `dhcp.leases.by_client` | (`PrefixId`, client identity octets) | `LeaseRef` | WP7.2, in the batch of each lease change |
 | `dhcp.history` | (`Timestamp`, `VrfId`, `Ipv4Addr`) | `LeaseEvent` | WP7.2, in the batch; purged by retention |
 
-`dhcp.leases6` and `dhcp.pd_pools` follow in Slice 9 and are additive. The plan's `dhcp.host_options` is the option set of `OptionOwner::Host` in `dhcp.option_sets` (section 14). Reservations have no table: the role derives them from `ipam.hosts`, `ipam.interfaces` and `ipam.addresses`.
+| `dhcp.leases6` | (`VrfId`, `Ipv6Addr`) | `Lease6` | WP9.1 (the role's commits, `dhcp.expiry6`) |
+| `dhcp.history6` | (`Timestamp`, `VrfId`, `Ipv6Addr`) | `Lease6Event` | WP9.1, in the batch; purged with `dhcp.history` |
+
+`dhcp.leases6` and `dhcp.history6` (WP9.1) are additive; `dhcp.leases6` is in the node subset, and the role derives its DHCPv6 client index from the rows (no `by_client` table). `dhcp.pd_pools` follows with WP9.2. The plan's `dhcp.host_options` is the option set of `OptionOwner::Host` in `dhcp.option_sets` (section 14). Reservations have no table: the role derives them from `ipam.hosts`, `ipam.interfaces` and `ipam.addresses`.
 
 ## 3. Engine contracts
 
@@ -92,6 +97,9 @@ All in the namespace `dhcp` of the replicated store; the constants are `tenko_co
 | `ddns::DdnsQueue` | `enqueue(DdnsRequest)` after the commit, never inside it (ADR 0020); bounded, `QueueFull` is dropped and counted | `MemDdnsQueue` |
 | `fingerprint::Fingerprinter` | `fingerprint_of(&Message)` (options 55, 60, 77, 81, 93) and `classify` to an `OsGuess` with a confidence (P3-Q15) | `RuleTable` (first match), `NoFingerprinter` |
 | `metrics` | The families of section 8 | — |
+| `v6::Message`, `v6::RelayChain`, `v6::MessageBuilder` (WP9.1) | The borrowed view over a DHCPv6 message, the walk of its relay chain, and the builder with nested options; none allocates (`docs/dhcp.md` section 19.1) | — |
+| `v6::lease::Lease6Table`, `PendingChange6`, `store::Lease6Store` (WP9.1) | The DHCPv6 lease table, the change of one message (up to eight bindings, every field inline), the hand-off; production `Lease6Index`, `StoreLeases6` (sharing the DHCPv4 store's refusal gate), `Expiry6Service` | `MemLease6Store` |
+| `v6::lease::commit::Observation6Hook` (WP9.1) | The IPAM facts of a DHCPv6 lease batch | `NoObservations6`; production `IpamObservations` |
 
 The no-allocation rule: `crates/tenko-dhcp/tests/alloc.rs` runs the codec's sections (WP7.1a) and then the DORA path of `tests/dora/mod.rs` up to the commit hand-off: parse, scope selection, the client identity, the filters, the reservation and lease lookups, the reference allocator, the `PendingChange`, `LeaseStore::submit`, and the OFFER or ACK into a stack buffer, over the fixture requests: zero allocations, reallocations and bytes. The same path with a `LeaseStore` whose `submit` boxes the change must fail the section, and the test asserts that it does, so the guard is known to bite. WP7.3 replaces the skeleton `dora` with the engine and keeps the section. The other tests: `tests/contracts.rs` (the table, the store, the feed, the image, the allocator's rules against an oracle, the probe, the queue, the fingerprinter).
 
@@ -218,7 +226,8 @@ Node-local settings of the role in `tenko.toml`, built and documented in `deploy
 | `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs accepted per client per window; one beyond is dropped as `rate_limited` and the client keeps its lease (WP8.5) |
 | `[dhcp.ddns] retries`, `backoff_ms` | WP8.3 | The DDNS worker's retries while the store refuses |
 | `[dhcp.history] days` | per profile (P3-Q13) | A node-local override of the retention |
-| `[dhcp.v6]` | Slice 9 | DHCPv6 listeners |
+| `[dhcp.v6] port`, `relay_port`, `client_port` | 547, 547, 546 | The DHCPv6 ports (WP9.1); the DHCPv6 listeners are the `[dhcp] listen` entries with an IPv6 address |
+| `[dhcp.v6] server_duid` | a DUID-UUID derived from the node identifier | The server's DUID in hexadecimal, 3 to 130 octets |
 
 ## 10. Node sync
 
@@ -274,3 +283,10 @@ Where the code settles what the plan left to it (recorded in ADR 0019 and ADR 00
 - **Slice 8 follow-ups: `replace` under Hardened.** The configuration service refuses a scope's, a policy's or the server's DDNS settings with `conflict: replace` under the Hardened profile with `dhcp.ddns.invalid` (field `ddns.conflict` or `action.ddns.conflict`); it reads the profile through the same source as the DDNS worker (`ConfigService::set_profile`).
 - **Slice 8 follow-ups: proxy listeners in the status.** `DhcpListenMode` has the value `proxy`: `GET /nodes/{id}/dhcp` lists the proxy DHCP listeners of `[dhcp] proxy` after the others, one worker each (`DhcpStatus.proxies`).
 - **WP8.3: `UpdatePolicy.dhcp`** is `Option<bool>`: none follows the profile (Home and Lab allow DHCP updates, Standard and Hardened do not); the DDNS outcomes of `tenko_dhcp_ddns_total` are `written`, `removed`, `refused`, `failed`, `skipped` and `dropped`, and the worker is the leader service `dhcp.ddns` following `dhcp.leases` by a store watch (`docs/dhcp.md` section 13).
+- **WP9.1: the DHCPv6 listeners in `[dhcp] listen`.** An entry with an IPv6 address is a DHCPv6 listener; `[dhcp.v6]` holds only the ports and the server's DUID, so one list says where the role answers.
+- **WP9.1: one change per message.** A DHCPv6 message changes up to eight bindings (`PendingChange6`), committed as one batch with one revision and one REPLY, rather than one change per IA: the REPLY of a REQUEST with two `IA_NA`s promises both or neither.
+- **WP9.1: no `dhcp.leases6.by_client`.** The DHCPv6 client index is derived from the rows in memory; the rows are the only truth.
+- **WP9.1: the server's DUID.** A DUID-UUID (RFC 6355) whose UUID is derived from the node identifier: stable across restarts (RFC 8415 section 11), different per node, overridden by `[dhcp.v6] server_duid`.
+- **WP9.1: option 56 holds addresses.** The option set holds the NTP servers' addresses (`ipv6_address`, array) and the server writes the RFC 5908 sub-options, so the value is typed for the API and the UI.
+- **WP9.1: the flags of option 39 on the row.** `Lease6.fqdn_flags` keeps them in the layout of option 81, so the DDNS rules of WP8.3 read them unchanged.
+- **WP9.1: the family of a scope.** Scope items carry `family` (`v4` or `v6`); the lease and history routes read the DHCPv4 tables only until WP9.4.

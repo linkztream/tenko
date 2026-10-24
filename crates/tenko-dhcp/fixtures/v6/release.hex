@@ -1,0 +1,25 @@
+# A RELEASE, the minimal message of RFC 8415 section 18.2.7: the client identifier, the
+# server identifier, elapsed time, and the IA_NA with the address being given back (the
+# lifetimes are 0, the server ignores them). Documentation MAC 00:00:5e:00:53:02.
+#
+# msg-type RELEASE, transaction id 0x2a0003
+08 2a 00 03
+# option 1, client identifier, 10 octets: DUID-LL, hardware type 1, the MAC
+00 01 00 0a
+00 03 00 01 00 00 5e 00 53 02
+# option 2, server identifier, 18 octets: DUID-UUID
+00 02 00 12
+00 04
+00 11 22 33 44 55 46 77 88 99 aa bb cc dd ee ff
+# option 8, elapsed time 0
+00 08 00 02 00 00
+# option 3, IA_NA, 40 octets: IAID 0x5e005302, T1 0, T2 0
+00 03 00 28
+5e 00 53 02
+00 00 00 00
+00 00 00 00
+# option 5, IA Address, 24 octets: 2001:db8:1::100, lifetimes 0
+00 05 00 18
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 01 00
+00 00 00 00
+00 00 00 00

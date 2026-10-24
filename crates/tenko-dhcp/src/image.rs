@@ -166,6 +166,8 @@ pub struct ConfigImage {
     policies: Vec<Policy>,
     // WP8.4: the classes and policies compiled for the DORA path.
     matcher: Matcher,
+    // WP9.1: the DHCPv6 scopes and reservations.
+    v6: crate::v6::image::Image6,
 }
 
 impl ConfigImage {
@@ -284,6 +286,12 @@ impl ConfigImage {
     pub fn matcher(&self) -> &Matcher {
         &self.matcher
     }
+
+    // WP9.1: the DHCPv6 part.
+    /// The DHCPv6 scopes and reservations.
+    pub fn v6(&self) -> &crate::v6::image::Image6 {
+        &self.v6
+    }
 }
 
 /// Puts a [`ConfigImage`] together.
@@ -348,6 +356,12 @@ impl ImageBuilder {
             .insert((reservation.scope, reservation.addr), index);
         self.image.reservations.push(reservation);
         None
+    }
+
+    // WP9.1: the DHCPv6 part, put together by its own methods.
+    /// The DHCPv6 part, to add scopes and reservations to.
+    pub fn v6(&mut self) -> &mut crate::v6::image::Image6 {
+        &mut self.image.v6
     }
 
     /// Sets the filters.

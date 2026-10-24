@@ -600,12 +600,15 @@ max_upload = 64
 #     CAP_NET_RAW, AF_PACKET and AF_NETLINK (the drop-in deploy/systemd/dhcp-direct.conf),
 #     and without them it answers by broadcast. On Windows it binds the interface's
 #     address and answers by broadcast.
-# `interface` is required for "direct". UDP 547 (DHCPv6) is not served yet; it joins in
-# Slice 9.
+# `interface` is required for "direct". An entry with an IPv6 address is a DHCPv6 listener
+# on [dhcp.v6] port (547, docs/dhcp.md section 19.7): "relay" binds the unicast address,
+# where relay agents send their RELAY-FORW; "direct" binds [::]:547 on `interface` and
+# joins ff02::1:2 there (CAP_NET_RAW on Linux for SO_BINDTODEVICE).
 # Environment: TENKO_DHCP__LISTEN='[{ address = "192.0.2.10", mode = "relay" }]'
 listen = []
 # listen = [{ address = "192.0.2.10", mode = "relay" }]
 # listen = [{ address = "192.0.2.10", mode = "direct", interface = "eth0" }]
+# listen = ["192.0.2.10", "2001:db8::10"]
 # The server port. Another port is for tests and labs: clients and relay agents send to 67.
 port = 67
 # UDP workers per listener (0 to 8); 0 is one per CPU, at most 8.
@@ -658,6 +661,16 @@ backoff_ms = 1000
 # Days the lease history is kept on this node, overriding the default of the security
 # profile (Home 30, Standard and Hardened 90, Lab 7). Not set: the profile's default.
 # days = 30
+
+[dhcp.v6]
+# DHCPv6 (WP9.1, docs/dhcp.md section 19): the server port of the IPv6 entries of
+# [dhcp] listen, where replies to relay agents and to clients go (tests and labs use other
+# ports), and the server's DUID (option 2) in hexadecimal, 3 to 130 octets. Not set: a
+# DUID-UUID derived from the node identifier, the same at every start.
+port = 547
+relay_port = 547
+client_port = 546
+# server_duid = "0004a8b1c2d3e4f5061728394a5b6c7d8e9f"
 
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own

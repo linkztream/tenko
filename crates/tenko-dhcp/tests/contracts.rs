@@ -548,6 +548,7 @@ impl Ids {
                 Change::Scope(
                     prefix,
                     present.then(|| Scope {
+                        v6: None,
                         prefix,
                         enabled: true,
                         lease: None,
@@ -1532,7 +1533,7 @@ fn ddns_request(last: u8, action: DdnsAction) -> DdnsRequest {
         action,
         vrf: VrfId::generate(),
         scope: PrefixId::generate(),
-        addr: Ipv4Addr::new(192, 0, 2, last),
+        addr: std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         client: ClientKey {
             htype: 1,
             chaddr: HexBytes(mac(last).to_vec()),

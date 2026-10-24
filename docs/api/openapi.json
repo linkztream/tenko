@@ -40839,6 +40839,17 @@
                 "type": "null"
               }
             ]
+          },
+          "v6": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Scope6Settings",
+                "description": "The DHCPv6 settings (preferred lifetime, rapid commit, the relay's Interface-Id);\nonly on an IPv6 prefix; the defaults when absent."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -40852,6 +40863,7 @@
             "type": "object",
             "required": [
               "cidr",
+              "family",
               "vrf",
               "pools",
               "leases",
@@ -40862,6 +40874,11 @@
                 "type": "string",
                 "description": "The prefix's network.",
                 "example": "192.0.2.0/24"
+              },
+              "family": {
+                "type": "string",
+                "description": "`v4` for a scope on an IPv4 prefix (DHCPv4), `v6` on an IPv6 prefix (DHCPv6).",
+                "example": "v4"
               },
               "leases": {
                 "type": "integer",
@@ -40912,6 +40929,10 @@
           "clear_lease": {
             "type": "boolean",
             "description": "Drop the scope's lease times and use the server's."
+          },
+          "clear_v6": {
+            "type": "boolean",
+            "description": "Drop the DHCPv6 settings (the defaults apply)."
           },
           "ddns": {
             "oneOf": [
@@ -40968,6 +40989,17 @@
               {
                 "$ref": "#/components/schemas/SharedNetworkId",
                 "description": "The shared network; the nil UUID leaves the shared network."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "v6": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Scope6Settings",
+                "description": "The DHCPv6 settings, replaced whole; `null` keeps them, see `clear_v6`."
               },
               {
                 "type": "null"
@@ -55582,6 +55614,7 @@
                   "type": "object",
                   "required": [
                     "cidr",
+                    "family",
                     "vrf",
                     "pools",
                     "leases",
@@ -55592,6 +55625,11 @@
                       "type": "string",
                       "description": "The prefix's network.",
                       "example": "192.0.2.0/24"
+                    },
+                    "family": {
+                      "type": "string",
+                      "description": "`v4` for a scope on an IPv4 prefix (DHCPv4), `v6` on an IPv6 prefix (DHCPv6).",
+                      "example": "v4"
                     },
                     "leases": {
                       "type": "integer",
@@ -65833,6 +65871,46 @@
           "updated": {
             "$ref": "#/components/schemas/Stamp",
             "description": "Last change."
+          },
+          "v6": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Scope6Settings",
+                "description": "The DHCPv6 settings of a scope on an IPv6 prefix; none: the defaults of\n[`Scope6Settings`]. Refused on an IPv4 prefix."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Scope6Settings": {
+        "type": "object",
+        "description": "What a scope on an IPv6 prefix adds for DHCPv6 (RFC 8415). The valid lifetime of an\naddress is the scope's (or the pool's) lease time; T1 and T2 come from the same lease\ntimes and are kept below the preferred lifetime.",
+        "properties": {
+          "interface_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Interface-Id (option 18) a relay sends for the link of this scope, as text: a\nrelayed request that carries it selects the scope before its link address does\n(RFC 8415 section 13.1; the lightweight relays of RFC 6221 send a link address of\nzero and the Interface-Id). None: the link address alone selects."
+          },
+          "preferred_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The preferred lifetime in seconds; none: five eighths of the valid lifetime, as ISC\ndhcpd does. Never above the valid lifetime.",
+            "minimum": 0
+          },
+          "rapid_commit": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether a SOLICIT with the Rapid Commit option is answered with a REPLY that\ncommits the lease (RFC 8415 section 18.3.1); none: yes."
           }
         }
       },

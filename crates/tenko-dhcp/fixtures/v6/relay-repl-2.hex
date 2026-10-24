@@ -1,0 +1,49 @@
+# The RELAY-REPL chain a server sends back for relay-forw-2.hex (RFC 8415 section 19.3),
+# reconstructed by hand: each RELAY-REPL copies the hop count, the link address and the peer
+# address of the RELAY-FORW it answers; the Interface-Id is echoed where the request had one
+# (the outer relay sent none, the inner one sent "port-7"); the innermost Relay Message
+# holds an ADVERTISE for the SOLICIT. Total 179 octets: 34 + 4 + 141.
+#
+# --- outer relay ---
+# msg-type RELAY-REPL, hop count 1
+0d 01
+# link address 2001:db8:ffff::1
+20 01 0d b8 ff ff 00 00 00 00 00 00 00 00 00 01
+# peer address 2001:db8:1::2
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 00 02
+# option 9, relay message, 141 octets: the inner RELAY-REPL
+00 09 00 8d
+# --- inner relay ---
+# msg-type RELAY-REPL, hop count 0
+0d 00
+# link address ::
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# peer address fe80::200:5eff:fe00:5301
+fe 80 00 00 00 00 00 00 02 00 5e ff fe 00 53 01
+# option 18, interface-id, 6 octets: "port-7" (echoed)
+00 12 00 06 70 6f 72 74 2d 37
+# option 9, relay message, 93 octets: the ADVERTISE
+00 09 00 5d
+# --- the server's ADVERTISE ---
+# msg-type ADVERTISE, transaction id 0x0b17c9
+02 0b 17 c9
+# option 2, server identifier, 18 octets: DUID-UUID
+00 02 00 12
+00 04
+00 11 22 33 44 55 46 77 88 99 aa bb cc dd ee ff
+# option 1, client identifier, 14 octets: the DUID-EN of the SOLICIT
+00 01 00 0e
+00 02 00 00 ab 11
+a1 b2 c3 d4 e5 f6 07 18
+# option 3, IA_NA, 40 octets: IAID 2, T1 1500, T2 2400
+00 03 00 28
+00 00 00 02
+00 00 05 dc
+00 00 09 60
+# option 5, IA Address, 24 octets: 2001:db8:1::101, preferred 3000 s, valid 4000 s
+00 05 00 18
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 01 01
+00 00 0b b8
+00 00 0f a0
+# option 7, preference, 1 octet: 255
+00 07 00 01 ff

@@ -1,0 +1,29 @@
+# A REQUEST, reconstructed by hand from RFC 8415 section 18.2.2: a DUID-LLT client
+# identifier, the server's DUID-UUID, one IA_NA that holds the address the server offered,
+# an option request and elapsed time. Documentation MAC 00:00:5e:00:53:02, documentation
+# prefix 2001:db8::/32.
+#
+# msg-type REQUEST, transaction id 0x1d2e3f
+03 1d 2e 3f
+# option 1, client identifier, 14 octets: DUID-LLT (type 1), hardware type 1,
+# time 0x2c3d4e5f (seconds since 2000-01-01), the MAC
+00 01 00 0e
+00 01 00 01 2c 3d 4e 5f 00 00 5e 00 53 02
+# option 2, server identifier, 18 octets: DUID-UUID (type 4, RFC 6355), 16 octets of UUID
+00 02 00 12
+00 04
+00 11 22 33 44 55 46 77 88 99 aa bb cc dd ee ff
+# option 3, IA_NA, 40 octets: IAID 0x5e005302, T1 0, T2 0, and one IA Address
+00 03 00 28
+5e 00 53 02
+00 00 00 00
+00 00 00 00
+# option 5, IA Address, 24 octets: 2001:db8:1::100, preferred 3000 s, valid 4000 s
+00 05 00 18
+20 01 0d b8 00 01 00 00 00 00 00 00 00 00 01 00
+00 00 0b b8
+00 00 0f a0
+# option 6, option request, 4 octets: 23, 24
+00 06 00 04 00 17 00 18
+# option 8, elapsed time 100 (one second)
+00 08 00 02 00 64
