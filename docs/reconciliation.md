@@ -301,6 +301,8 @@ The commands are planned as the approving person with the same planner and check
 
 `POST /api/v1/proposals/{id}/reject` needs `approve` on proposals. The body is `{"reason": "..."}` and the reason is optional: it is trimmed, a blank reason counts as none, and it has at most 1,024 bytes and no control characters other than line breaks and tabs (400 `ipam.validation` otherwise). `If-Match` works as for approval. The proposal becomes `rejected`, and the rejection memory (section 4.3) is written in the same batch inside an inline job.
 
+**Many at once.** `POST /api/v1/proposals/approve` and `POST /api/v1/proposals/reject` decide up to 500 proposals in one request. The body is `{"ids": [...]}`, and the rejection also takes the `reason` of the single route, which goes to every proposal (a bad reason is 400 `ipam.validation` for the whole request). Each proposal is decided in order with the logic of the single route and independently of the others: one that is no longer open, lies outside the caller's scope, has nothing to apply or is refused by any other check of the single route is `skipped` with that route's error code and message, and the rest are applied. The answer lists every id as `approved`, `rejected` or `skipped` and gives the three counts. The rights are those of the single route, checked for each proposal (a principal that may not approve proposals at all gets 403 at once), and there is no `dry_run`, `If-Match` or `acknowledge`: a plan that needs an acknowledgement is skipped (`ipam.plan.unacknowledged`). Each decision writes the audit records of the single route and nothing else; there is no record of the batch. An empty list is 422 `ipam.proposal.batch_empty` and more than 500 ids is 422 `ipam.proposal.batch_too_large`. In the web UI an administrator or operator selects rows of the inbox and approves or rejects them in one step.
+
 ### 5.3 Run now
 
 `POST /api/v1/proposals/reconcile` needs `approve` on proposals and runs the reconciler once, now, on the server that answers. It returns the report of section 3.2. A server without a reconciler answers 503 `ipam.reconciler.unavailable`.
@@ -432,6 +434,8 @@ The index tables follow their fact in the same batch.
 | `GET /api/v1/proposals/{id}` | `get_proposal` | `read`; returns an `ETag` |
 | `POST /api/v1/proposals/{id}/approve` | `approve_proposal` | `approve` on proposals, plus the right each command needs |
 | `POST /api/v1/proposals/{id}/reject` | `reject_proposal` | `approve` on proposals |
+| `POST /api/v1/proposals/approve` | `approve_proposals` | `approve` on proposals, plus the right each command needs, checked for each proposal |
+| `POST /api/v1/proposals/reject` | `reject_proposals` | `approve` on proposals, checked for each proposal |
 | `POST /api/v1/proposals/reconcile` | `reconcile_proposals` | `approve` on proposals |
 | `GET /api/v1/prefixes/{id}/adoption` | `get_adoption_policy` | `read` on the prefix |
 | `PUT /api/v1/prefixes/{id}/adoption` | `set_adoption_policy` | `update` on the prefix |

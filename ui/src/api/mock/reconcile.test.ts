@@ -43,7 +43,7 @@ describe("the reconciler operations of the document", () => {
   const OPERATIONS = apiOperations.filter((o) => /^\/api\/v1\/(observations|proposals)(\/|$)|^\/api\/v1\/prefixes\/\{id\}\/adoption$/.test(o.path));
 
   it("are all answered, each after the session check", async () => {
-    expect(OPERATIONS.length).toBe(10);
+    expect(OPERATIONS.length).toBe(12);
     for (const operation of OPERATIONS) {
       const path = operation.path.replace("{id}", IPAM_IDS.prefix.lan).replace("{subject}", "00-00-5E-00-53-D1");
       const json = operation.method === "get" || operation.method === "delete" ? undefined : {};
@@ -162,6 +162,46 @@ describe("decisions", () => {
     const blank = await post<S["Decision"]>(`${V}/proposals/${P.outside}/reject`, {});
     expect(blank.body.proposal.reason ?? null).toBeNull();
     expect((await post<Problem>(`${V}/proposals/${P.outside}/reject`, {})).body.code).toBe("ipam.proposal.not_open");
+  });
+
+  it("decides many at once, each as the single route does, and skips what the single route refuses", async () => {
+    const unknown = "00000000-0000-4000-8000-000000000999";
+    const done = await post<S["BatchDecision"]>(`${V}/proposals/approve`, { ids: [P.printerTaken, unknown, P.mediaPc, P.mediaPc, P.thermostat] });
+    expect(done.status).toBe(200);
+    expect(done.body).toMatchObject({ approved: 2, rejected: 0, skipped: 3 });
+    expect(done.body.results.map((r) => [r.id, r.outcome, r.code ?? null, r.status ?? null])).toEqual([
+      [P.printerTaken, "skipped", "ipam.proposal.nothing_to_apply", 409],
+      [unknown, "skipped", "ipam.proposal.not_found", 404],
+      [P.mediaPc, "approved", null, null],
+      [P.mediaPc, "skipped", "ipam.proposal.not_open", 409],
+      [P.thermostat, "approved", null, null],
+    ]);
+    expect(done.body.results[3]?.params).toMatchObject({ state: "accepted" });
+    expect(reconcileState().proposals.get(P.mediaPc)?.state).toBe("accepted");
+    expect(reconcileState().proposals.get(P.printerTaken)?.state).toBe("open");
+    expect(audit.records.filter((r) => r.draft.action === "ipam.proposal.approve")).toHaveLength(2);
+
+    const rejected = await post<S["BatchDecision"]>(`${V}/proposals/reject`, { ids: [P.outside, P.mediaPc], reason: "  A lab network  " });
+    expect(rejected.body).toMatchObject({ approved: 0, rejected: 1, skipped: 1 });
+    expect(reconcileState().proposals.get(P.outside)).toMatchObject({ state: "rejected", reason: "A lab network" });
+    expect(rejected.body.results[1]).toMatchObject({ outcome: "skipped", code: "ipam.proposal.not_open" });
+  });
+
+  it("takes one to 500 identifiers, a good reason and nothing else in a batch", async () => {
+    for (const verb of ["approve", "reject"]) {
+      expect((await post<Problem>(`${V}/proposals/${verb}`, { ids: [] })).body).toMatchObject({ code: "ipam.proposal.batch_empty", status: 422 });
+      const many = Array.from({ length: 501 }, () => P.mediaPc);
+      const refused = await post<Problem>(`${V}/proposals/${verb}`, { ids: many });
+      expect(refused.body).toMatchObject({ code: "ipam.proposal.batch_too_large", status: 422, params: { count: "501", limit: "500" } });
+      for (const body of [{}, { ids: "x" }, { ids: ["nope"] }, { ids: [P.mediaPc], bogus: 1 }]) {
+        expect((await post<Problem>(`${V}/proposals/${verb}`, body)).body.code, JSON.stringify(body)).toBe("sys.invalid_request");
+      }
+    }
+    expect((await post<Problem>(`${V}/proposals/approve`, { ids: [P.mediaPc], reason: "x" })).body.code).toBe("sys.invalid_request");
+    const bad = await post<Problem>(`${V}/proposals/reject`, { ids: [P.mediaPc], reason: "badbell" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.code).toBe("ipam.validation");
+    expect(reconcileState().proposals.get(P.mediaPc)?.state).toBe("open");
   });
 
   it("runs the reconciler now: what intent caught up with expires, the rest stays open", async () => {

@@ -19,6 +19,8 @@
 //! | `GET /proposals/{id}` | 200 proposal with `ETag` | 403, 404 `ipam.proposal.not_found` |
 //! | `POST /proposals/{id}/approve` | 200 decision with `ETag`, or the plan of a dry run | 403, 404, 409 `ipam.proposal.not_open`, `ipam.proposal.nothing_to_apply`, `ipam.plan.unacknowledged`, `ipam.name_taken`, 412 `ipam.proposal.revision_mismatch`, 423 `ipam.host.locked` |
 //! | `POST /proposals/{id}/reject` | 200 decision with `ETag` | 400 `ipam.validation`, 403, 404, 409 `ipam.proposal.not_open`, 412 |
+//! | `POST /proposals/approve` | 200 outcome of every proposal and the counts | 400, 403, 422 `ipam.proposal.batch_empty`, `ipam.proposal.batch_too_large`, 503 |
+//! | `POST /proposals/reject` | 200 outcome of every proposal and the counts | 400 `ipam.validation`, 403, 422 `ipam.proposal.batch_empty`, `ipam.proposal.batch_too_large`, 503 |
 //! | `POST /proposals/reconcile` | 200 report of the run | 403, 503 `ipam.reconciler.unavailable` |
 //! | `GET /prefixes/{id}/adoption` | 200 policy view with `ETag` | 403, 404 `ipam.not_found`, 409 `ipam.object_deleted` |
 //! | `PUT /prefixes/{id}/adoption` | 200 policy view with `ETag` | 400 `ipam.adoption.invalid`, `sys.invalid_request`, 403, 404, 409, 412 `ipam.revision_mismatch` |
@@ -57,6 +59,23 @@
 //! `ipam.proposal.revision_mismatch` when the proposal changed since; a decided proposal
 //! answers 409 `ipam.proposal.not_open`.
 //!
+//! # Deciding many at once
+//!
+//! `POST /proposals/approve` and `POST /proposals/reject` take `{"ids": [...]}` (one to 500
+//! identifiers; the rejection also the `reason` of the single route, which applies to all)
+//! and decide the proposals in order, each as the single route does and independently of
+//! the others: one that is not open any more, lies outside the caller's scope, has nothing
+//! to apply or is refused by any other check of the single route is `skipped` with the code
+//! and message the single route answers with, and the rest are applied. The answer lists
+//! every identifier with its outcome (`approved`, `rejected` or `skipped`) and the counts.
+//! There is no `If-Match`, no dry run and no acknowledgement: a warning that needs one
+//! skips the proposal (`ipam.plan.unacknowledged`). Authorization is the single route's,
+//! evaluated for each proposal, after a first check that the principal may approve
+//! proposals at all (403). Each decision writes the audit records of the single route and
+//! nothing else, so there is no record of the batch itself. An empty list and a list over
+//! 500 are 422 `ipam.proposal.batch_empty` and `ipam.proposal.batch_too_large`; a bad
+//! reason is 400 `ipam.validation` for the whole request.
+//!
 //! `POST /proposals/reconcile` runs the reconciler once, now, and answers its report. It
 //! needs the reconciler on this server (503 `ipam.reconciler.unavailable` otherwise). The
 //! path coexists with `GET /proposals/{id}`: the static segment wins, so only `POST` is
@@ -86,7 +105,7 @@
 //! - reading an adoption policy needs [`Action::Read`] and changing or removing one
 //!   [`Action::Update`] on the prefix.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     Extension, Json,
@@ -96,9 +115,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    Action, CodedError, ObjectKind, ObjectRef, PrefixId, ProposalId, Revision, Timestamp,
+    Action, CodedError, ObjectKind, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision,
+    Timestamp,
 };
 use tenko_ipam::{
+    PlanOptions,
     proposals::{
         self, AdoptionPolicy, Decision, IntentProposal, IntentProposalKind, IntentProposalState,
         PolicyView, ProposalQuery, ProposalSeverity,
@@ -110,8 +131,8 @@ use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::common::{
-    IfMatch, Ipam, IpamJson, IpamPath, ReadParams, WriteParams, authorize, command_access,
-    enum_params, if_match, new_of, with_etag, write_args,
+    IfMatch, Ipam, IpamHandle, IpamJson, IpamPath, ReadParams, WriteParams, authorize,
+    command_access, enum_params, if_match, new_of, with_etag, write_args,
 };
 use crate::{
     dto::Page,
@@ -129,6 +150,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_proposal))
         .routes(routes!(approve_proposal))
         .routes(routes!(reject_proposal))
+        .routes(routes!(approve_proposals))
+        .routes(routes!(reject_proposals))
         .routes(routes!(
             get_adoption_policy,
             set_adoption_policy,
@@ -144,6 +167,119 @@ pub struct RejectRequest {
     /// line breaks and tabs. Blank counts as no reason.
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+/// The most proposals one batch decision takes.
+pub const MAX_BATCH: usize = 500;
+
+/// The body of a batch approval.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchApproveRequest {
+    /// The proposals to approve, in the order they are applied: one to 500 identifiers.
+    pub ids: Vec<ProposalId>,
+}
+
+/// The body of a batch rejection.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BatchRejectRequest {
+    /// The proposals to reject, in the order they are rejected: one to 500 identifiers.
+    pub ids: Vec<ProposalId>,
+    /// Why the proposals are rejected, for all of them; the rules of the single rejection
+    /// apply (at most 1,024 bytes, no control characters other than line breaks and tabs,
+    /// blank counts as no reason).
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// What happened to one proposal of a batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchOutcome {
+    /// The proposal was approved.
+    Approved,
+    /// The proposal was rejected.
+    Rejected,
+    /// The proposal was left as it was; `code` and `message` say why.
+    Skipped,
+}
+
+/// The outcome of one proposal of a batch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BatchItem {
+    /// The proposal.
+    pub id: ProposalId,
+    /// What happened to it.
+    pub outcome: BatchOutcome,
+    /// For a skipped proposal the error code of the refusal, the code the single route
+    /// answers with, for example `ipam.proposal.not_open`.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// For a skipped proposal the HTTP status of that refusal.
+    #[serde(default)]
+    pub status: Option<u16>,
+    /// For a skipped proposal the English explanation of the refusal.
+    #[serde(default)]
+    pub message: Option<String>,
+    /// For a skipped proposal the parameters of that refusal, as in the problem document of
+    /// the single route (for example `state`); empty otherwise.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
+}
+
+impl BatchItem {
+    /// The item for `id`: `done` when the decision was applied, a skip with the error
+    /// otherwise.
+    fn new(id: ProposalId, done: BatchOutcome, outcome: Result<Decision, ApiError>) -> Self {
+        match outcome {
+            Ok(_) => Self {
+                id,
+                outcome: done,
+                code: None,
+                status: None,
+                message: None,
+                params: BTreeMap::new(),
+            },
+            Err(error) => {
+                let error = error.coded_error();
+                Self {
+                    id,
+                    outcome: BatchOutcome::Skipped,
+                    code: Some(error.code.to_string()),
+                    status: Some(error.status),
+                    message: Some(error.detail.clone()),
+                    params: error.params.clone(),
+                }
+            }
+        }
+    }
+}
+
+/// The answer of a batch decision: the outcome of every proposal and the counts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BatchDecision {
+    /// One entry per identifier of the request, in its order.
+    pub results: Vec<BatchItem>,
+    /// How many proposals were approved.
+    pub approved: usize,
+    /// How many proposals were rejected.
+    pub rejected: usize,
+    /// How many proposals were skipped.
+    pub skipped: usize,
+}
+
+impl BatchDecision {
+    /// The answer for `results`, with the counts.
+    fn of(results: Vec<BatchItem>) -> Self {
+        let count = |wanted| results.iter().filter(|item| item.outcome == wanted).count();
+        Self {
+            approved: count(BatchOutcome::Approved),
+            rejected: count(BatchOutcome::Rejected),
+            skipped: count(BatchOutcome::Skipped),
+            results,
+        }
+    }
 }
 
 /// The 503 of the endpoints that need the reconciler on this server.
@@ -313,7 +449,26 @@ async fn approve_proposal(
 ) -> Result<Response, ApiError> {
     let args = write_args(&filters, false)?;
     let expected = if_match(&headers)?;
-    authorize(&app, &cx, Action::Approve, ObjectRef::from(id))?;
+    authorize_approval(&app, &cx, &ipam, id, &args.options).await?;
+    let decision =
+        proposals::approve(&ipam, id, &cx, &args.options, args.dry_run, expected).await?;
+    if !decision.dry_run {
+        nudge(reconciler.as_ref());
+    }
+    Ok(decided(decision))
+}
+
+/// What an approval of proposal `id` needs: [`Action::Approve`] on the proposal, what each
+/// of its commands needs on its own, and, for a scoped principal, a plan that stays inside
+/// its scope. Shared by the single and the batch approval.
+async fn authorize_approval(
+    app: &AppState,
+    cx: &RequestCtx,
+    ipam: &IpamHandle,
+    id: ProposalId,
+    options: &PlanOptions,
+) -> Result<(), ApiError> {
+    authorize(app, cx, Action::Approve, ObjectRef::from(id))?;
     // The principal needs what each command needs on its own. The commands of a proposal
     // never change once it is open (a changed set supersedes it with a new proposal), so
     // what is checked here is what the approval applies.
@@ -322,17 +477,11 @@ async fn approve_proposal(
     drop(view);
     for command in &proposal.commands {
         let (action, object) = command_access(command);
-        authorize(&app, &cx, action, object)?;
+        authorize(app, cx, action, object)?;
     }
     // A scoped principal's approval is planned and checked first: every object the
     // proposal creates, changes or deletes must lie inside its scope (IAM-01).
-    ipam.check(&cx, &proposal.commands, &args.options).await?;
-    let decision =
-        proposals::approve(&ipam, id, &cx, &args.options, args.dry_run, expected).await?;
-    if !decision.dry_run {
-        nudge(reconciler.as_ref());
-    }
-    Ok(decided(decision))
+    ipam.check(cx, &proposal.commands, options).await
 }
 
 /// Rejects a proposal and remembers its evidence, so the same subject does not open again
@@ -369,6 +518,133 @@ async fn reject_proposal(
     authorize(&app, &cx, Action::Approve, ObjectRef::from(id))?;
     let decision = proposals::reject(&ipam, id, request.reason, &cx, expected).await?;
     Ok(decided(decision))
+}
+
+/// Approves many proposals, each as the single approval does, one after the other.
+#[utoipa::path(
+    post,
+    path = "/proposals/approve",
+    tag = "proposals",
+    operation_id = "approve_proposals",
+    summary = "Approve many proposals",
+    request_body = BatchApproveRequest,
+    responses(
+        (status = 200, description = "The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more, that the principal may not approve, or that the single approval refuses is `skipped` with the code and message of that refusal; the others are applied", body = BatchDecision),
+        (status = 400, description = "The body is malformed (`sys.invalid_request`) or a parameter is unknown (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal may not approve proposals at all", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn approve_proposals(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    Ipam(ipam): Ipam,
+    reconciler: Option<Extension<Arc<Reconciler>>>,
+    filters: Filters,
+    IpamJson(request): IpamJson<BatchApproveRequest>,
+) -> Result<Json<BatchDecision>, ApiError> {
+    filters.only(&[])?;
+    check_batch_size(request.ids.len())?;
+    authorize(&app, &cx, Action::Approve, new_of(ObjectKind::Proposal))?;
+    let options = PlanOptions::default();
+    let each = for_each_proposal(&cx);
+    let mut results = Vec::with_capacity(request.ids.len());
+    for id in request.ids {
+        let outcome = async {
+            authorize_approval(&app, &each, &ipam, id, &options).await?;
+            let decision = proposals::approve(&ipam, id, &each, &options, false, None).await?;
+            Ok::<_, ApiError>(decision)
+        }
+        .await;
+        results.push(BatchItem::new(id, BatchOutcome::Approved, outcome));
+    }
+    let decision = BatchDecision::of(results);
+    if decision.approved > 0 {
+        nudge(reconciler.as_ref());
+    }
+    Ok(Json(decision))
+}
+
+/// Rejects many proposals, each as the single rejection does, one after the other.
+#[utoipa::path(
+    post,
+    path = "/proposals/reject",
+    tag = "proposals",
+    operation_id = "reject_proposals",
+    summary = "Reject many proposals",
+    request_body = BatchRejectRequest,
+    responses(
+        (status = 200, description = "The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more or that the principal may not decide is `skipped` with the code and message of that refusal; the others are rejected with the same reason", body = BatchDecision),
+        (status = 400, description = "The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal may not decide proposals at all", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn reject_proposals(
+    State(app): State<AppState>,
+    Ctx(cx): Ctx,
+    Ipam(ipam): Ipam,
+    filters: Filters,
+    IpamJson(request): IpamJson<BatchRejectRequest>,
+) -> Result<Json<BatchDecision>, ApiError> {
+    filters.only(&[])?;
+    check_batch_size(request.ids.len())?;
+    // The reason is the same for every proposal: a bad one refuses the request, it does not
+    // skip each proposal in turn.
+    let reason = proposals::clean_reason(request.reason)?;
+    authorize(&app, &cx, Action::Approve, new_of(ObjectKind::Proposal))?;
+    let each = for_each_proposal(&cx);
+    let mut results = Vec::with_capacity(request.ids.len());
+    for id in request.ids {
+        let outcome = async {
+            authorize(&app, &each, Action::Approve, ObjectRef::from(id))?;
+            let decision = proposals::reject(&ipam, id, reason.clone(), &each, None).await?;
+            Ok::<_, ApiError>(decision)
+        }
+        .await;
+        results.push(BatchItem::new(id, BatchOutcome::Rejected, outcome));
+    }
+    Ok(Json(BatchDecision::of(results)))
+}
+
+/// The context each proposal of a batch is decided in: the request's, without its idempotency
+/// key. The key belongs to the batch as a whole (a repeat of the request is answered from its
+/// first answer); handed to every approval it would match the receipt of the first one against
+/// the commands of the next and refuse them with `ipam.idempotency_mismatch`.
+fn for_each_proposal(cx: &RequestCtx) -> RequestCtx {
+    RequestCtx {
+        idempotency: None,
+        ..cx.clone()
+    }
+}
+
+/// The 422 of a batch with no proposal or too many.
+fn check_batch_size(count: usize) -> Result<(), ApiError> {
+    if count == 0 {
+        return Err(ApiError::from_coded_error(
+            CodedError::new(
+                proposals::codes::BATCH_EMPTY,
+                422,
+                "name at least one proposal",
+            )
+            .with_title("Unprocessable content"),
+        ));
+    }
+    if count > MAX_BATCH {
+        return Err(ApiError::from_coded_error(
+            CodedError::new(
+                proposals::codes::BATCH_TOO_LARGE,
+                422,
+                format!("{count} proposals exceed the limit of {MAX_BATCH} in one request"),
+            )
+            .with_title("Unprocessable content")
+            .with_param("count", count.to_string())
+            .with_param("limit", MAX_BATCH.to_string()),
+        ));
+    }
+    Ok(())
 }
 
 /// Runs the reconciler once, now, instead of waiting for its interval.
@@ -1307,6 +1583,408 @@ mod tests {
         );
     }
 
+    // ----- batch decisions -------------------------------------------------------------
+
+    /// The identifiers of the open proposals of one kind.
+    async fn open_ids(lab: &Lab, kind: &str) -> Vec<String> {
+        let list = lab
+            .get(&format!("/proposals?state=open&kind={kind}&sort=created"))
+            .await;
+        list.assert_json(200);
+        list.ids()
+    }
+
+    /// The results of a batch answer as `(id, outcome, code)`.
+    fn outcomes(reply: &Reply) -> Vec<(String, String, Option<String>)> {
+        reply.body["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .map(|item| {
+                (
+                    item["id"].as_str().expect("id").to_owned(),
+                    item["outcome"].as_str().expect("outcome").to_owned(),
+                    item["code"].as_str().map(str::to_owned),
+                )
+            })
+            .collect()
+    }
+
+    /// An authorizer that allows everything but deciding the listed proposals, as the scope
+    /// of an operator that covers some of the proposals and not others.
+    struct OutOfScopeFor(Vec<ObjectRef>);
+
+    impl Authorizer for OutOfScopeFor {
+        fn check(
+            &self,
+            _principal: &Principal,
+            action: Action,
+            object: &ObjectRef,
+        ) -> Result<(), Denied> {
+            if action == Action::Approve && self.0.contains(object) {
+                Err(Denied {
+                    action,
+                    object: *object,
+                    reason: DenyReason::OutOfScope,
+                })
+            } else {
+                Ok(())
+            }
+        }
+
+        fn scope(&self, _principal: &Principal, _action: Action, _kind: ObjectKind) -> ScopeFilter {
+            ScopeFilter::All
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_approval_makes_every_device_intent_and_answers_each() {
+        let lab = Lab::new().await;
+        lab.poll(vec![
+            vm("qemu/101", "web01", WEB_MAC, "192.0.2.10"),
+            vm("qemu/102", "db01", DB_MAC, "192.0.2.11"),
+        ])
+        .await;
+        assert_eq!(lab.reconcile().await.opened, 2);
+        let ids = open_ids(&lab, "discovered_host").await;
+        assert_eq!(ids.len(), 2);
+
+        let reply = lab
+            .with_json("POST", "/proposals/approve", &[], &json!({ "ids": ids }))
+            .await;
+        reply.assert_json(200);
+        let body = &reply.body;
+        assert_eq!(
+            (
+                body["approved"].as_u64(),
+                body["rejected"].as_u64(),
+                body["skipped"].as_u64()
+            ),
+            (Some(2), Some(0), Some(0)),
+            "{body}"
+        );
+        let expected: Vec<_> = ids
+            .iter()
+            .map(|id| (id.clone(), "approved".to_owned(), None))
+            .collect();
+        assert_eq!(outcomes(&reply), expected, "the order of the request");
+        let mut names = lab.host_names().await;
+        names.sort();
+        assert_eq!(names, ["db01", "web01"]);
+        assert_eq!(open_ids(&lab, "discovered_host").await.len(), 0);
+        let accepted = lab.get("/proposals?state=accepted").await;
+        assert_eq!(accepted.items().len(), 2, "{}", accepted.body);
+        let report = lab.reconcile().await;
+        assert_eq!(report.opened, 0, "{report:?}");
+    }
+
+    #[tokio::test]
+    async fn a_batch_approval_skips_what_the_single_route_refuses_and_applies_the_rest() {
+        let lab = Lab::new().await;
+        lab.discover().await;
+        let web = lab
+            .get(&format!("/proposals?state=open&subject={WEB_MAC}"))
+            .await
+            .ids()
+            .remove(0);
+        let conflict = open_ids(&lab, "conflict").await.remove(0);
+        let unknown = ProposalId::generate().to_string();
+        let ids = [&conflict, &unknown, &web, &web];
+
+        let reply = lab
+            .with_json("POST", "/proposals/approve", &[], &json!({ "ids": ids }))
+            .await;
+        reply.assert_json(200);
+        let body = &reply.body;
+        assert_eq!(
+            (
+                body["approved"].as_u64(),
+                body["rejected"].as_u64(),
+                body["skipped"].as_u64()
+            ),
+            (Some(1), Some(0), Some(3)),
+            "{body}"
+        );
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (
+                    conflict.clone(),
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.nothing_to_apply".to_owned())
+                ),
+                (
+                    unknown.clone(),
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.not_found".to_owned())
+                ),
+                (web.clone(), "approved".to_owned(), None),
+                (
+                    web.clone(),
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.not_open".to_owned())
+                ),
+            ]
+        );
+        let results = body["results"].as_array().expect("results");
+        assert_eq!(results[0]["status"], 409, "{body}");
+        assert_eq!(results[1]["status"], 404, "{body}");
+        assert!(
+            results[0]["message"]
+                .as_str()
+                .is_some_and(|m| !m.is_empty()),
+            "{body}"
+        );
+        assert_eq!(results[2]["code"], Value::Null, "{body}");
+        assert!(lab.host_names().await.contains(&"web01".to_owned()));
+        assert_eq!(
+            lab.get(&format!("/proposals/{conflict}")).await.body["state"],
+            "open",
+            "a skipped proposal is left as it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_rejection_records_one_reason_and_skips_the_decided() {
+        let lab = Lab::new().await;
+        lab.poll(vec![
+            vm("qemu/101", "web01", WEB_MAC, "192.0.2.10"),
+            vm("qemu/102", "db01", DB_MAC, "192.0.2.11"),
+        ])
+        .await;
+        lab.reconcile().await;
+        let ids = open_ids(&lab, "discovered_host").await;
+
+        // A bad reason refuses the request and decides nothing.
+        let bad = json!({ "ids": ids, "reason": "bell\u{7}" });
+        lab.with_json("POST", "/proposals/reject", &[], &bad)
+            .await
+            .assert_problem(400, "ipam.validation");
+        let long = json!({ "ids": ids, "reason": "x".repeat(2_000) });
+        lab.with_json("POST", "/proposals/reject", &[], &long)
+            .await
+            .assert_problem(400, "ipam.validation");
+        assert_eq!(open_ids(&lab, "discovered_host").await.len(), 2);
+
+        lab.with_json(
+            "POST",
+            &format!("/proposals/{}/reject", ids[0]),
+            &[],
+            &json!({}),
+        )
+        .await
+        .assert_json(200);
+        let reason = json!({ "ids": ids, "reason": "  lab devices, not for the register  " });
+        let reply = lab
+            .with_json("POST", "/proposals/reject", &[], &reason)
+            .await;
+        reply.assert_json(200);
+        let body = &reply.body;
+        assert_eq!(
+            (
+                body["approved"].as_u64(),
+                body["rejected"].as_u64(),
+                body["skipped"].as_u64()
+            ),
+            (Some(0), Some(1), Some(1)),
+            "{body}"
+        );
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (
+                    ids[0].clone(),
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.not_open".to_owned())
+                ),
+                (ids[1].clone(), "rejected".to_owned(), None),
+            ]
+        );
+        let stored = lab.get(&format!("/proposals/{}", ids[1])).await;
+        assert_eq!(stored.body["state"], "rejected");
+        assert_eq!(stored.body["reason"], "lab devices, not for the register");
+        lab.assert_no_hosts().await;
+        // Rejected is remembered: the next run opens nothing.
+        assert_eq!(lab.reconcile().await.opened, 0);
+
+        // No reason is fine.
+        let lab = Lab::new().await;
+        let id = lab.discover_web().await;
+        let reply = lab
+            .with_json("POST", "/proposals/reject", &[], &json!({ "ids": [id] }))
+            .await;
+        reply.assert_json(200);
+        assert_eq!(reply.body["rejected"], 1, "{}", reply.body);
+    }
+
+    #[tokio::test]
+    async fn a_scoped_operator_decides_what_it_may_and_the_rest_is_skipped() {
+        let lab = Lab::new().await;
+        lab.poll(vec![
+            vm("qemu/101", "web01", WEB_MAC, "192.0.2.10"),
+            vm("qemu/102", "db01", DB_MAC, "192.0.2.11"),
+            vm("qemu/103", "app01", "00-00-5E-00-53-03", "192.0.2.12"),
+        ])
+        .await;
+        lab.reconcile().await;
+        let ids = open_ids(&lab, "discovered_host").await;
+        assert_eq!(ids.len(), 3);
+        let outside = ObjectRef::from(ids[1].parse::<ProposalId>().expect("id"));
+        let scoped = lab.checked_by(Arc::new(OutOfScopeFor(vec![outside])));
+
+        let reply = scoped
+            .with_json("POST", "/proposals/approve", &[], &json!({ "ids": ids }))
+            .await;
+        reply.assert_json(200);
+        let body = &reply.body;
+        assert_eq!(
+            (body["approved"].as_u64(), body["skipped"].as_u64()),
+            (Some(2), Some(1)),
+            "{body}"
+        );
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (ids[0].clone(), "approved".to_owned(), None),
+                (
+                    ids[1].clone(),
+                    "skipped".to_owned(),
+                    Some("auth.out_of_scope".to_owned())
+                ),
+                (ids[2].clone(), "approved".to_owned(), None),
+            ]
+        );
+        assert_eq!(body["results"][1]["status"], 403, "{body}");
+        assert_eq!(open_ids(&lab, "discovered_host").await, [ids[1].clone()]);
+        assert_eq!(lab.host_names().await.len(), 2);
+
+        let reply = scoped
+            .with_json("POST", "/proposals/reject", &[], &json!({ "ids": ids }))
+            .await;
+        reply.assert_json(200);
+        assert_eq!(
+            outcomes(&reply)
+                .into_iter()
+                .map(|(_, outcome, code)| (outcome, code))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.not_open".to_owned())
+                ),
+                ("skipped".to_owned(), Some("auth.out_of_scope".to_owned())),
+                (
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.not_open".to_owned())
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_under_an_idempotency_key_decides_every_proposal() {
+        let lab = Lab::new().await;
+        lab.poll(vec![
+            vm("qemu/101", "web01", WEB_MAC, "192.0.2.10"),
+            vm("qemu/102", "db01", DB_MAC, "192.0.2.11"),
+            vm("qemu/103", "app01", "00-00-5E-00-53-03", "192.0.2.12"),
+        ])
+        .await;
+        lab.reconcile().await;
+        let ids = open_ids(&lab, "discovered_host").await;
+        let reply = lab
+            .with_json(
+                "POST",
+                "/proposals/approve",
+                &[("idempotency-key", "batch-one")],
+                &json!({ "ids": ids }),
+            )
+            .await;
+        reply.assert_json(200);
+        assert_eq!(reply.body["approved"], 3, "{}", reply.body);
+        assert_eq!(lab.host_names().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_reader_cannot_decide_a_batch() {
+        let lab = Lab::new().await;
+        let id = lab.discover_web().await;
+        let reader = Policy::new(true, false);
+        let lab = lab.checked_by(Arc::clone(&reader) as Arc<dyn Authorizer>);
+        for path in ["/proposals/approve", "/proposals/reject"] {
+            lab.with_json("POST", path, &[], &json!({ "ids": [id] }))
+                .await
+                .assert_problem(403, "auth.forbidden");
+        }
+        lab.assert_no_hosts().await;
+        assert_eq!(open_ids(&lab, "discovered_host").await, [id]);
+    }
+
+    #[tokio::test]
+    async fn a_batch_takes_one_to_five_hundred_proposals() {
+        let lab = Lab::new().await;
+        let id = lab.discover_web().await;
+        for path in ["/proposals/approve", "/proposals/reject"] {
+            lab.with_json("POST", path, &[], &json!({ "ids": [] }))
+                .await
+                .assert_problem(422, "ipam.proposal.batch_empty");
+            let many: Vec<String> = (0..501)
+                .map(|_| ProposalId::generate().to_string())
+                .collect();
+            let refused = lab
+                .with_json("POST", path, &[], &json!({ "ids": many }))
+                .await;
+            refused.assert_problem(422, "ipam.proposal.batch_too_large");
+            assert_eq!(refused.body["params"]["count"], "501");
+            assert_eq!(refused.body["params"]["limit"], "500");
+
+            // The limit itself is fine: every unknown identifier is skipped.
+            let limit: Vec<String> = (0..500)
+                .map(|_| ProposalId::generate().to_string())
+                .collect();
+            let reply = lab
+                .with_json("POST", path, &[], &json!({ "ids": limit }))
+                .await;
+            reply.assert_json(200);
+            assert_eq!(reply.body["skipped"], 500, "{}", reply.body);
+            assert_eq!(
+                reply.body["results"].as_array().expect("results").len(),
+                500
+            );
+        }
+        // Nothing was decided on the way.
+        assert_eq!(
+            open_ids(&lab, "discovered_host").await,
+            std::slice::from_ref(&id)
+        );
+        // The body is checked like any other.
+        for body in [json!({}), json!({ "ids": "x" }), json!({ "ids": ["nope"] })] {
+            lab.with_json("POST", "/proposals/approve", &[], &body)
+                .await
+                .assert_problem(400, "sys.invalid_request");
+        }
+        lab.with_json(
+            "POST",
+            "/proposals/approve",
+            &[],
+            &json!({ "ids": [id], "reason": "x" }),
+        )
+        .await
+        .assert_problem(400, "sys.invalid_request");
+        lab.with_json(
+            "POST",
+            "/proposals/approve?bogus=1",
+            &[],
+            &json!({ "ids": [id] }),
+        )
+        .await
+        .assert_problem(400, "sys.invalid_query");
+        lab.without_ipam()
+            .with_json("POST", "/proposals/approve", &[], &json!({ "ids": [id] }))
+            .await
+            .assert_problem(503, "ipam.unavailable");
+    }
+
     // ----- the reconciler --------------------------------------------------------------
 
     #[tokio::test]
@@ -1751,6 +2429,18 @@ mod tests {
                 &["200", "400", "403", "404", "409", "412", "503"][..],
             ),
             (
+                "/api/v1/proposals/approve",
+                "post",
+                "approve_proposals",
+                &["200", "400", "403", "422", "503"][..],
+            ),
+            (
+                "/api/v1/proposals/reject",
+                "post",
+                "reject_proposals",
+                &["200", "400", "403", "422", "503"][..],
+            ),
+            (
                 "/api/v1/proposals/reconcile",
                 "post",
                 "reconcile_proposals",
@@ -1802,6 +2492,10 @@ mod tests {
             .as_ref()
             .expect("post");
         assert!(reject.request_body.is_some());
+        for path in ["/api/v1/proposals/approve", "/api/v1/proposals/reject"] {
+            let batch = document.paths.paths[path].post.as_ref().expect("post");
+            assert!(batch.request_body.is_some(), "{path}");
+        }
     }
 
     #[test]

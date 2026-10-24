@@ -367,6 +367,11 @@ pub mod codes {
     pub const NOTHING_TO_APPLY: &str = "ipam.proposal.nothing_to_apply";
     /// `If-Match` does not match the proposal (412). Params: `expected`, `actual`.
     pub const REVISION_MISMATCH: &str = "ipam.proposal.revision_mismatch";
+    /// A batch decision names no proposal (422).
+    pub const BATCH_EMPTY: &str = "ipam.proposal.batch_empty";
+    /// A batch decision names more proposals than one request takes (422). Params:
+    /// `count`, `limit`.
+    pub const BATCH_TOO_LARGE: &str = "ipam.proposal.batch_too_large";
     /// The adoption policy is invalid (400). Params: `field`.
     pub const POLICY_INVALID: &str = "ipam.adoption.invalid";
     /// The reconciler does not run on this server (503).

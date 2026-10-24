@@ -3760,6 +3760,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/proposals/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve many proposals */
+        post: operations["approve_proposals"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/proposals/reconcile": {
         parameters: {
             query?: never;
@@ -3771,6 +3788,23 @@ export interface paths {
         put?: never;
         /** Run the reconciler now */
         post: operations["reconcile_proposals"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject many proposals */
+        post: operations["reject_proposals"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5968,6 +6002,64 @@ export interface components {
             lab: boolean;
             /** @description At least one toggle is weaker than the Home baseline. */
             weaker_than_home: boolean;
+        };
+        /** @description The body of a batch approval. */
+        BatchApproveRequest: {
+            /** @description The proposals to approve, in the order they are applied: one to 500 identifiers. */
+            ids: components["schemas"]["ProposalId"][];
+        };
+        /** @description The answer of a batch decision: the outcome of every proposal and the counts. */
+        BatchDecision: {
+            /** @description How many proposals were approved. */
+            approved: number;
+            /** @description How many proposals were rejected. */
+            rejected: number;
+            /** @description One entry per identifier of the request, in its order. */
+            results: components["schemas"]["BatchItem"][];
+            /** @description How many proposals were skipped. */
+            skipped: number;
+        };
+        /** @description The outcome of one proposal of a batch. */
+        BatchItem: {
+            /**
+             * @description For a skipped proposal the error code of the refusal, the code the single route
+             *     answers with, for example `ipam.proposal.not_open`.
+             */
+            code?: string | null;
+            /** @description The proposal. */
+            id: components["schemas"]["ProposalId"];
+            /** @description For a skipped proposal the English explanation of the refusal. */
+            message?: string | null;
+            /** @description What happened to it. */
+            outcome: components["schemas"]["BatchOutcome"];
+            /**
+             * @description For a skipped proposal the parameters of that refusal, as in the problem document of
+             *     the single route (for example `state`); empty otherwise.
+             */
+            params?: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description For a skipped proposal the HTTP status of that refusal.
+             */
+            status?: number | null;
+        };
+        /**
+         * @description What happened to one proposal of a batch.
+         * @enum {string}
+         */
+        BatchOutcome: "approved" | "rejected" | "skipped";
+        /** @description The body of a batch rejection. */
+        BatchRejectRequest: {
+            /** @description The proposals to reject, in the order they are rejected: one to 500 identifiers. */
+            ids: components["schemas"]["ProposalId"][];
+            /**
+             * @description Why the proposals are rejected, for all of them; the rules of the single rejection
+             *     apply (at most 1,024 bytes, no control characters other than line breaks and tabs,
+             *     blank counts as no reason).
+             */
+            reason?: string | null;
         };
         /**
          * @description The state of a binding (the failover draft's binding states).
@@ -38968,6 +39060,66 @@ export interface operations {
             };
         };
     };
+    approve_proposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more, that the principal may not approve, or that the single approval refuses is `skipped` with the code and message of that refusal; the others are applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchDecision"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) or a parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not approve proposals at all */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     reconcile_proposals: {
         parameters: {
             query?: never;
@@ -39005,6 +39157,66 @@ export interface operations {
                 };
             };
             /** @description The reconciler does not run on this server (`ipam.reconciler.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reject_proposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchRejectRequest"];
+            };
+        };
+        responses: {
+            /** @description The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more or that the principal may not decide is `skipped` with the code and message of that refusal; the others are rejected with the same reason */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchDecision"];
+                };
+            };
+            /** @description The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal may not decide proposals at all */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

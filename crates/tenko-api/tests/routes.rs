@@ -333,6 +333,8 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/vlans/{id}/prefixes", "list_vlan_prefixes"),
     // proposals
     ("GET", "/proposals", "list_proposals"),
+    ("POST", "/proposals/approve", "approve_proposals"),
+    ("POST", "/proposals/reject", "reject_proposals"),
     ("POST", "/proposals/reconcile", "reconcile_proposals"),
     ("GET", "/proposals/{id}", "get_proposal"),
     ("POST", "/proposals/{id}/approve", "approve_proposal"),

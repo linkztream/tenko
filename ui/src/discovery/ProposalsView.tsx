@@ -4,6 +4,11 @@
 // in the URL is docked beside the grid with its evidence, the suggested change and the
 // decision. "Reconcile now" runs the reconciler and shows what the run did.
 //
+// An administrator or operator selects rows with the grid's checkbox column (the loaded rows;
+// the grid pages in more as it scrolls) and approves or rejects them in one go: one
+// confirmation or one reason dialog, one request, one toast with the counts and, when the
+// server skipped some, a panel with the reasons and a way to keep them selected.
+//
 // Filters live in the URL (`state`, `kind`, `severity`, `prefix`, `q`), so a link from the
 // prefix pane or the dashboard opens the inbox already narrowed.
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
@@ -13,7 +18,8 @@ import { paths } from "../app/paths";
 import { Icon } from "../components/Icon";
 import { PageHead } from "../components/PageHead";
 import { toast } from "../components/toast";
-import { DataGrid } from "../grid/DataGrid";
+import { ActionBar, ActionButton } from "../grid/ActionBar";
+import { createGridSelection, DataGrid } from "../grid/DataGrid";
 import { FilterBar, ToggleChip } from "../grid/FilterBar";
 import { createColumnState } from "../grid/prefs";
 import { createListSource } from "../grid/source";
@@ -21,9 +27,9 @@ import { sortParam, type RowAction, type SortState } from "../grid/types";
 import { t } from "../i18n";
 import { useWriteToast } from "../ipam/plan/PlanDialog";
 import { useCommands } from "../shell/commands";
-import { PROPOSAL_KINDS, PROPOSAL_STATES, reconcileNow, SEVERITIES, type Decision, type Proposal, type ProposalKind, type ProposalSeverity, type ProposalState, type ReconcileReport } from "./api";
+import { approveProposals, PROPOSAL_KINDS, PROPOSAL_STATES, reconcileNow, rejectProposal, rejectProposals, SEVERITIES, type BatchDecision, type Decision, type Proposal, type ProposalKind, type ProposalSeverity, type ProposalState, type ReconcileReport } from "./api";
 import { proposalColumns } from "./columns";
-import { ApproveDialog, ReconcileReportDialog, RejectDialog } from "./dialogs";
+import { ApproveDialog, ApproveManyDialog, ReconcileReportDialog, RejectDialog, SkippedDialog } from "./dialogs";
 import { DiscoveryNav } from "./DiscoveryNav";
 import { isDecider } from "./access";
 import { canApprove, isOpen, isProposalEvent, kindIcon, kindWord, ruleText, severityIcon, severityWord, stateWord, subjectLabel } from "./model";
@@ -98,7 +104,14 @@ export default function ProposalsView() {
   const columns = proposalColumns(names);
   const columnState = createColumnState("proposals", () => columns);
 
-  const [dialog, setDialog] = createSignal<{ kind: "approve" | "reject"; proposal: Proposal } | null>(null);
+  const [dialog, setDialog] = createSignal<
+    | { kind: "approve"; proposal: Proposal }
+    | { kind: "reject"; proposal: Proposal }
+    | { kind: "approve_many"; proposals: Proposal[] }
+    | { kind: "reject_many"; proposals: Proposal[] }
+    | null
+  >(null);
+  const [skipped, setSkipped] = createSignal<{ result: BatchDecision; labels: Map<string, string> } | null>(null);
   const [report, setReport] = createSignal<ReconcileReport | null>(null);
   const [running, setRunning] = createSignal(false);
 
@@ -148,6 +161,26 @@ export default function ProposalsView() {
     },
   ]);
 
+  // Only an administrator or operator decides, and only open proposals can be decided: the grid
+  // offers its checkbox column to them. The selection covers the loaded rows.
+  const selectable = (p: Proposal) => isDecider() && isOpen(p);
+  const selection = createGridSelection(source.rows, (p) => p.id, selectable);
+  const selected = () => source.rows().filter((p) => selection.has(p.id));
+
+  /** The toast of a batch, the selection cleared, and the panel of what was skipped. */
+  const batchDone = (verb: "approved" | "rejected", result: BatchDecision, proposals: Proposal[]) => {
+    setDialog(null);
+    const done = verb === "approved" ? result.approved : result.rejected;
+    toast({
+      kind: result.skipped > 0 ? "info" : "ok",
+      title: t(verb === "approved" ? "discovery.batch.done_approved" : "discovery.batch.done_rejected", { count: done }),
+      body: result.skipped > 0 ? t("discovery.batch.done_skipped", { count: result.skipped }) : undefined,
+    });
+    selection.clear();
+    source.reload();
+    if (result.skipped > 0) setSkipped({ result, labels: new Map(proposals.map((p) => [p.id, ruleText(p)])) });
+  };
+
   const rowActions: RowAction<Proposal>[] = [
     { id: "open", label: () => t("discovery.action.open"), run: open },
     {
@@ -177,7 +210,7 @@ export default function ProposalsView() {
   // A click anywhere in a row opens the proposal; links and buttons inside it do their own thing.
   const onGridClick = (e: MouseEvent) => {
     const el = e.target as HTMLElement;
-    if (el.closest("a, button, input, select, textarea")) return;
+    if (el.closest("a, button, input, select, textarea, td.check")) return;
     const id = el.closest<HTMLElement>("tr[data-id]")?.dataset.id;
     const row = id ? source.rows().find((p) => p.id === id) : undefined;
     if (row) open(row);
@@ -270,7 +303,9 @@ export default function ProposalsView() {
             rowKey={(p) => subjectLabel(p)}
             rowLabel={(p) => ruleText(p)}
             rowClass={(p) => [p.kind === "conflict" ? "conflict" : p.kind === "address_mismatch" || p.kind === "orphaned_intent" ? "differs" : "proposal", p.id === params.id ? "current" : ""].join(" ")}
-            noSelection
+            noSelection={!isDecider()}
+            selectable={selectable}
+            selection={selection}
             sort={sort()}
             onSort={setSort}
             loading={source.loading()}
@@ -293,6 +328,26 @@ export default function ProposalsView() {
               </div>
             }
           />
+          <ActionBar count={selection.count()} onClear={selection.clear}>
+            <ActionButton
+              primary
+              icon="check"
+              label={t("discovery.batch.approve", { count: selection.count() })}
+              testid="action-approve"
+              onClick={() => setDialog({ kind: "approve_many", proposals: selected() })}
+            />
+            <ActionButton
+              icon="x"
+              label={t("discovery.batch.reject", { count: selection.count() })}
+              testid="action-reject"
+              onClick={() => setDialog({ kind: "reject_many", proposals: selected() })}
+            />
+            <Show when={source.hasMore() && selection.all()}>
+              <span class="muted" data-testid="selection-loaded-only">
+                {t("discovery.batch.loaded_only", { count: selection.count() })}
+              </span>
+            </Show>
+          </ActionBar>
         </div>
         <Show when={params.id} keyed>
           {(id) => (
@@ -309,17 +364,52 @@ export default function ProposalsView() {
       </div>
 
       <Show when={dialog()} keyed>
-        {(d) =>
-          d.kind === "approve" ? (
-            <ApproveDialog proposal={d.proposal} onClose={() => setDialog(null)} onDone={(r) => decided(t("discovery.toast.approved"), r)} />
-          ) : (
+        {(d) => {
+          if (d.kind === "approve") {
+            return <ApproveDialog proposal={d.proposal} onClose={() => setDialog(null)} onDone={(r) => decided(t("discovery.toast.approved"), r)} />;
+          }
+          if (d.kind === "approve_many") {
+            return (
+              <ApproveManyDialog
+                proposals={d.proposals}
+                send={() => approveProposals(d.proposals.map((p) => p.id))}
+                onClose={() => setDialog(null)}
+                onDone={(r) => batchDone("approved", r, d.proposals)}
+              />
+            );
+          }
+          if (d.kind === "reject_many") {
+            return (
+              <RejectDialog
+                proposals={d.proposals}
+                send={(reason) => rejectProposals(d.proposals.map((p) => p.id), reason)}
+                onClose={() => setDialog(null)}
+                onDone={(r) => batchDone("rejected", r, d.proposals)}
+              />
+            );
+          }
+          return (
             <RejectDialog
-              proposal={d.proposal}
+              proposals={[d.proposal]}
+              send={(reason) => rejectProposal(d.proposal, reason)}
               onClose={() => setDialog(null)}
               onDone={(r) => decided(d.proposal.kind === "conflict" ? t("discovery.toast.dismissed") : t("discovery.toast.rejected"), r)}
             />
-          )
-        }
+          );
+        }}
+      </Show>
+      <Show when={skipped()}>
+        {(s) => (
+          <SkippedDialog
+            result={s().result}
+            label={(id) => s().labels.get(id) ?? id}
+            onKeep={(ids) => {
+              setSkipped(null);
+              selection.set(ids);
+            }}
+            onClose={() => setSkipped(null)}
+          />
+        )}
       </Show>
       <Show when={report()}>{(r) => <ReconcileReportDialog report={r()} onClose={() => setReport(null)} />}</Show>
     </div>

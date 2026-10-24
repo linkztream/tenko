@@ -6,14 +6,15 @@ import type { ApiEvent } from "../api/events";
 import type { IconName } from "../components/Icon";
 import { formatDateTime, formatList, t, tDynamic } from "../i18n";
 import { parseIp } from "../ipam/ip";
-import type {
-  ObservationSource,
-  Observed,
-  ObservedFact,
-  Proposal,
-  ProposalKind,
-  ProposalSeverity,
-  ProposalState,
+import {
+  PROPOSAL_KINDS,
+  type ObservationSource,
+  type Observed,
+  type ObservedFact,
+  type Proposal,
+  type ProposalKind,
+  type ProposalSeverity,
+  type ProposalState,
 } from "./api";
 
 // ---------------------------------------------------------------------------------
@@ -37,6 +38,13 @@ export function kindIcon(kind: ProposalKind): IconName {
     case "orphaned_intent":
       return "clock";
   }
+}
+
+/** The kinds of some proposals with how many of each, as one phrase: "60 discovered hosts and 3 conflicts". */
+export function kindSummary(list: readonly Pick<Proposal, "kind">[]): string {
+  const counts = new Map<ProposalKind, number>();
+  for (const p of list) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1);
+  return formatList(PROPOSAL_KINDS.filter((k) => counts.has(k)).map((k) => t(`discovery.batch.kind.${k}`, { count: counts.get(k) ?? 0 })));
 }
 
 /** The design's exception class of a kind: magenta for proposals, red for conflicts, amber for differences. */

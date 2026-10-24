@@ -692,3 +692,44 @@ test("the status bar item on another page links to the proposal inbox", async ({
   await expect(page).toHaveURL(/\/discovery$/);
   await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(4);
 });
+
+test("an administrator selects three proposals and approves them at once, and they leave the open list", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  const { hosts, outside } = await arrange(api);
+
+  await page.goto("/discovery");
+  const grid = page.getByTestId("grid-proposals");
+  await expect(grid.getByTestId("row")).toHaveCount(4);
+  await expect(page.getByTestId("actionbar")).toHaveCount(0);
+
+  // The grid's check boxes select the three discovered hosts, not the network.
+  for (const proposal of hosts) await withId(grid, "row", proposal.id).getByRole("checkbox").check();
+  await expect(page.getByTestId("actionbar")).toBeVisible();
+  await expect(page.getByTestId("action-approve")).toHaveText("Approve 3");
+  await expect(page.getByTestId("action-reject")).toHaveText("Reject 3");
+
+  // One confirmation names the count and the kind.
+  await page.getByTestId("action-approve").click();
+  const dialog = page.getByTestId("dialog-approve-many");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("approve-kinds")).toContainText("3 discovered hosts");
+  for (const proposal of hosts) expect((await proposalOf(api, proposal.id)).state).toBe("open");
+  await dialog.getByTestId("form-submit").click();
+  await expect(dialog).toHaveCount(0);
+
+  // One toast with the count; the three leave the open list, the network stays, the selection is gone.
+  await expect(page.getByTestId("toast").filter({ hasText: "3 proposals approved" })).toBeVisible();
+  await expect(grid.getByTestId("row")).toHaveCount(1);
+  await expect(withId(grid, "row", outside.id)).toBeVisible();
+  await expect(page.getByTestId("actionbar")).toHaveCount(0);
+  await expect(page.getByTestId("dialog-skipped")).toHaveCount(0);
+
+  // Each proposal was approved as a person would approve it, and its host exists.
+  for (const [n, proposal] of hosts.entries()) {
+    const accepted = await proposalOf(api, proposal.id);
+    expect(accepted.state).toBe("accepted");
+    expect(accepted.decided?.by).toMatchObject({ kind: "user" });
+    expect(await hostByName(api, sampleHost(n).name)).toBeDefined();
+  }
+  expect((await proposals(api, { state: "open" })).map((p) => p.id)).toEqual([outside.id]);
+});

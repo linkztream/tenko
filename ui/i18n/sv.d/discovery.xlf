@@ -10,6 +10,87 @@
         <notes><note category="description">Status bar item that links to the proposal inbox: the number of open proposals.</note></notes>
         <segment><source>{count, plural, one {# open proposal} other {# open proposals}}</source><target>{count, plural, one {# öppet förslag} other {# öppna förslag}}</target></segment>
       </unit>
+      <unit id="discovery.batch.approve">
+        <notes><note category="description">The action bar button that approves the selected proposals; the number is how many are selected.</note></notes>
+        <segment><source>Approve {count, number}</source><target>Godkänn {count, number}</target></segment>
+      </unit>
+      <unit id="discovery.batch.reject">
+        <notes><note category="description">The action bar button that rejects the selected proposals; the number is how many are selected.</note></notes>
+        <segment><source>Reject {count, number}</source><target>Avvisa {count, number}</target></segment>
+      </unit>
+      <unit id="discovery.batch.approve_title">
+        <notes><note category="description">Title of the confirmation of an approval of several proposals.</note></notes>
+        <segment><source>{count, plural, one {Approve # proposal} other {Approve # proposals}}</source><target>{count, plural, one {Godkänn # förslag} other {Godkänn # förslag}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.approve_body">
+        <notes><note category="description">{kinds} is a phrase such as 60 discovered hosts and 3 conflicts.</note></notes>
+        <segment><source>This applies the suggested changes of {kinds}, one proposal after the other. A proposal that can no longer be approved is skipped and listed afterwards.</source><target>Detta genomför de föreslagna ändringarna för {kinds}, ett förslag i taget. Ett förslag som inte längre går att godkänna hoppas över och listas efteråt.</target></segment>
+      </unit>
+      <unit id="discovery.batch.approve_confirm">
+        <notes><note category="description">The confirm button of the approval of several proposals.</note></notes>
+        <segment><source>{count, plural, one {Approve # proposal} other {Approve # proposals}}</source><target>{count, plural, one {Godkänn # förslag} other {Godkänn # förslag}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.reject_title">
+        <notes><note category="description">Title and confirm button of the rejection of several proposals.</note></notes>
+        <segment><source>{count, plural, one {Reject # proposal} other {Reject # proposals}}</source><target>{count, plural, one {Avvisa # förslag} other {Avvisa # förslag}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.reject_body">
+        <notes><note category="description">{kinds} is a phrase such as 60 discovered hosts and 3 conflicts.</note></notes>
+        <segment><source>{kinds} are rejected with the same reason. The same evidence will not open them again. A proposal that is not open any more is skipped and listed afterwards.</source><target>{kinds} avvisas med samma skäl. Samma underlag öppnar dem inte igen. Ett förslag som inte längre är öppet hoppas över och listas efteråt.</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.discovered_host">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# discovered host} other {# discovered hosts}}</source><target>{count, plural, one {# upptäckt värd} other {# upptäckta värdar}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.address_mismatch">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# address difference} other {# address differences}}</source><target>{count, plural, one {# adressskillnad} other {# adressskillnader}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.conflict">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# conflict} other {# conflicts}}</source><target>{count, plural, one {# konflikt} other {# konflikter}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.outside_prefixes">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# host outside known networks} other {# hosts outside known networks}}</source><target>{count, plural, one {# värd utanför kända nät} other {# värdar utanför kända nät}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.orphaned_intent">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# host not seen any more} other {# hosts not seen any more}}</source><target>{count, plural, one {# värd som inte syns längre} other {# värdar som inte syns längre}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.done_approved">
+        <notes><note category="description">Title of the toast after an approval of several proposals.</note></notes>
+        <segment><source>{count, plural, one {# proposal approved} other {# proposals approved}}</source><target>{count, plural, one {# förslag godkändes} other {# förslag godkändes}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.done_rejected">
+        <notes><note category="description">Title of the toast after a rejection of several proposals.</note></notes>
+        <segment><source>{count, plural, one {# proposal rejected} other {# proposals rejected}}</source><target>{count, plural, one {# förslag avvisades} other {# förslag avvisades}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.done_skipped">
+        <notes><note category="description">Body of the toast when the server skipped some proposals of a batch.</note></notes>
+        <segment><source>{count, plural, one {# skipped} other {# skipped}}</source><target>{count, plural, one {# hoppades över} other {# hoppades över}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.skipped_title">
+        <notes><note category="description">Title of the panel that lists the proposals a batch skipped.</note></notes>
+        <segment><source>{count, plural, one {# proposal was skipped} other {# proposals were skipped}}</source><target>{count, plural, one {# förslag hoppades över} other {# förslag hoppades över}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.skipped_body">
+        <segment><source>These proposals were left as they were. The rest of the batch went through.</source><target>Dessa förslag lämnades som de var. Resten av gruppen genomfördes.</target></segment>
+      </unit>
+      <unit id="discovery.batch.keep">
+        <notes><note category="description">Button of the skipped panel: select the skipped proposals again.</note></notes>
+        <segment><source>Keep them selected</source><target>Behåll markeringen</target></segment>
+      </unit>
+      <unit id="discovery.batch.loaded_only">
+        <notes><note category="description">Shown in the action bar when more proposals match the filter than the grid has loaded.</note></notes>
+        <segment><source>Only the {count, number} loaded rows are selected. Scroll down to load more.</source><target>Endast de {count, number} inlästa raderna är markerade. Rulla ner för att läsa in fler.</target></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.batch_empty">
+        <segment><source>Name at least one proposal.</source><target>Ange minst ett förslag.</target></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.batch_too_large">
+        <segment><source>Too many proposals at once ({count, number}, at most {limit, number}).</source><target>För många förslag på en gång ({count, number}, högst {limit, number}).</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

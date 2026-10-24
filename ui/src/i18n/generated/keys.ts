@@ -1825,6 +1825,25 @@ export type MessageKey =
   | "discovery.action.reject"
   | "discovery.approve.confirm"
   | "discovery.approve.title"
+  | "discovery.batch.approve"
+  | "discovery.batch.approve_body"
+  | "discovery.batch.approve_confirm"
+  | "discovery.batch.approve_title"
+  | "discovery.batch.done_approved"
+  | "discovery.batch.done_rejected"
+  | "discovery.batch.done_skipped"
+  | "discovery.batch.keep"
+  | "discovery.batch.kind.address_mismatch"
+  | "discovery.batch.kind.conflict"
+  | "discovery.batch.kind.discovered_host"
+  | "discovery.batch.kind.orphaned_intent"
+  | "discovery.batch.kind.outside_prefixes"
+  | "discovery.batch.loaded_only"
+  | "discovery.batch.reject"
+  | "discovery.batch.reject_body"
+  | "discovery.batch.reject_title"
+  | "discovery.batch.skipped_body"
+  | "discovery.batch.skipped_title"
   | "discovery.col.created"
   | "discovery.col.first_seen"
   | "discovery.col.kind"
@@ -3401,6 +3420,8 @@ export type MessageKey =
   | "errors.ipam.prefix.overlap"
   | "errors.ipam.prefix.overlaps_range"
   | "errors.ipam.prefix.resize_orphans"
+  | "errors.ipam.proposal.batch_empty"
+  | "errors.ipam.proposal.batch_too_large"
   | "errors.ipam.proposal.not_found"
   | "errors.ipam.proposal.not_open"
   | "errors.ipam.proposal.nothing_to_apply"
@@ -7034,6 +7055,23 @@ export interface MessageArgs {
   "dhcp.util.at": { time: string | number };
   "dhcp.util.label": { percent: string | number };
   "discovery.approve.confirm": { count: number };
+  "discovery.batch.approve": { count: number };
+  "discovery.batch.approve_body": { kinds: string | number };
+  "discovery.batch.approve_confirm": { count: number };
+  "discovery.batch.approve_title": { count: number };
+  "discovery.batch.done_approved": { count: number };
+  "discovery.batch.done_rejected": { count: number };
+  "discovery.batch.done_skipped": { count: number };
+  "discovery.batch.kind.address_mismatch": { count: number };
+  "discovery.batch.kind.conflict": { count: number };
+  "discovery.batch.kind.discovered_host": { count: number };
+  "discovery.batch.kind.orphaned_intent": { count: number };
+  "discovery.batch.kind.outside_prefixes": { count: number };
+  "discovery.batch.loaded_only": { count: number };
+  "discovery.batch.reject": { count: number };
+  "discovery.batch.reject_body": { kinds: string | number };
+  "discovery.batch.reject_title": { count: number };
+  "discovery.batch.skipped_title": { count: number };
   "discovery.count": { count: number; more: string };
   "discovery.count_open": { count: number; more: string };
   "discovery.fact.address_mac": { ip: string | number; mac: string | number };
@@ -7316,6 +7354,7 @@ export interface MessageArgs {
   "errors.ipam.prefix.host_bits": { cidr: string | number; network: string | number };
   "errors.ipam.prefix.overlap": { cidr: string | number; existing: string | number };
   "errors.ipam.prefix.overlaps_range": { range: string | number };
+  "errors.ipam.proposal.batch_too_large": { count: number; limit: number };
   "errors.ipam.proposal.not_open": { state: string | number };
   "errors.ipam.range.covers_reservation": { host: string | number; ip: string | number };
   "errors.ipam.range.not_in_network": { cidr: string | number };
@@ -9786,6 +9825,25 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.action.reject",
   "discovery.approve.confirm",
   "discovery.approve.title",
+  "discovery.batch.approve",
+  "discovery.batch.approve_body",
+  "discovery.batch.approve_confirm",
+  "discovery.batch.approve_title",
+  "discovery.batch.done_approved",
+  "discovery.batch.done_rejected",
+  "discovery.batch.done_skipped",
+  "discovery.batch.keep",
+  "discovery.batch.kind.address_mismatch",
+  "discovery.batch.kind.conflict",
+  "discovery.batch.kind.discovered_host",
+  "discovery.batch.kind.orphaned_intent",
+  "discovery.batch.kind.outside_prefixes",
+  "discovery.batch.loaded_only",
+  "discovery.batch.reject",
+  "discovery.batch.reject_body",
+  "discovery.batch.reject_title",
+  "discovery.batch.skipped_body",
+  "discovery.batch.skipped_title",
   "discovery.col.created",
   "discovery.col.first_seen",
   "discovery.col.kind",
@@ -11362,6 +11420,8 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.prefix.overlap",
   "errors.ipam.prefix.overlaps_range",
   "errors.ipam.prefix.resize_orphans",
+  "errors.ipam.proposal.batch_empty",
+  "errors.ipam.proposal.batch_too_large",
   "errors.ipam.proposal.not_found",
   "errors.ipam.proposal.not_open",
   "errors.ipam.proposal.nothing_to_apply",

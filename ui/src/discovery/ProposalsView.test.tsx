@@ -12,7 +12,7 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
-import { confirmPlan } from "../ipam/testkit";
+import { confirmPlan, recordWrites } from "../ipam/testkit";
 import { rejectProposal } from "./api";
 import ProposalsView from "./ProposalsView";
 import { resetRefs } from "./refs";
@@ -751,6 +751,215 @@ describe("reconcile now", () => {
     expect(screen.queryByTestId("dialog-reconcile-report")).toBeNull();
     // The button works again.
     await waitFor(() => expect((screen.getByTestId("discovery-reconcile") as HTMLButtonElement).disabled).toBe(false));
+  });
+});
+
+describe("deciding many at once", () => {
+  const box = (id: string) => within(rowOf(id)).getByRole("checkbox") as HTMLInputElement;
+  const pick = (...ids: string[]) => ids.forEach((id) => fireEvent.click(box(id)));
+  const bar = () => screen.queryByTestId("actionbar");
+  const grid = () => screen.getByRole("grid", { name: "Proposals" });
+  const buttons = () => Array.from(bar()?.querySelectorAll("button[data-testid^='action-']") ?? []).map((b) => b.textContent);
+
+  it("offers the check box column and the select-all box to someone who may decide, and a bar for the selection", async () => {
+    await openInbox();
+    expect(bar()).toBeNull();
+    pick(P.mediaPc, P.hallSwitchClient);
+    expect(box(P.mediaPc).checked).toBe(true);
+    expect(box(P.outside).checked).toBe(false);
+    expect(bar()?.textContent).toContain("2");
+    expect(buttons()).toEqual(["Approve 2", "Reject 2"]);
+
+    // The header box selects the loaded rows, and a click on a box does not open the proposal.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows in view" }));
+    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+    expect(screen.queryByTestId("selection-loaded-only")).toBeNull();
+    expect(screen.queryByTestId("proposal-panel")).toBeNull();
+
+    fireEvent.click(within(bar() as HTMLElement).getByRole("button", { name: "Clear selection (Esc)" }));
+    expect(bar()).toBeNull();
+  });
+
+  it("follows the keys of the grid: Space, Shift with the arrows, Ctrl+A and Esc", async () => {
+    await openInbox();
+    fireEvent.focus(grid());
+    fireEvent.keyDown(grid(), { key: " " });
+    fireEvent.keyDown(grid(), { key: "ArrowDown", shiftKey: true });
+    expect(buttons()).toEqual(["Approve 2", "Reject 2"]);
+    expect([box(P.printerTaken).checked, box(P.outside).checked, box(P.thermostat).checked]).toEqual([true, true, false]);
+    fireEvent.keyDown(grid(), { key: "a", ctrlKey: true });
+    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+    fireEvent.keyDown(grid(), { key: "Escape" });
+    expect(bar()).toBeNull();
+  });
+
+  it("gives a viewer no check boxes and no bar", async () => {
+    await signInAs(["viewer"]);
+    await openInbox();
+    expect(within(grid()).queryAllByRole("checkbox")).toHaveLength(0);
+    expect(bar()).toBeNull();
+  });
+
+  it("does not offer a proposal that is decided already for selection", async () => {
+    await openInbox(`${paths.discovery()}?state=all`, 9);
+    expect(within(rowOf(P.speaker)).queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows in view" }));
+    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+  });
+
+  it("asks once, naming the count and the kinds, and approves them in one request", async () => {
+    await openInbox();
+    const writes = recordWrites();
+    pick(P.mediaPc, P.hallSwitchClient, P.iotAddress);
+    fireEvent.click(screen.getByTestId("action-approve"));
+
+    const dialog = await screen.findByTestId("dialog-approve-many");
+    expect(screen.getByRole("dialog", { name: "Approve 3 proposals" })).toBeTruthy();
+    expect(within(dialog).getByTestId("approve-kinds").textContent).toContain("3 discovered hosts");
+    expect(within(dialog).getByTestId("form-submit").textContent).toBe("Approve 3 proposals");
+    // Cancel decides nothing.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId("dialog-approve-many")).toBeNull());
+    expect(stored(P.mediaPc).state).toBe("open");
+    expect(buttons()).toEqual(["Approve 3", "Reject 3"]);
+
+    fireEvent.click(screen.getByTestId("action-approve"));
+    fireEvent.click(within(await screen.findByTestId("dialog-approve-many")).getByTestId("form-submit"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-approve-many")).toBeNull());
+
+    const batches = writes().filter((w) => w.url.endsWith("/api/v1/proposals/approve"));
+    expect(batches).toHaveLength(1);
+    // The ids go in the order of the list.
+    expect(batches[0]?.body?.ids).toEqual([P.iotAddress, P.hallSwitchClient, P.mediaPc]);
+    expect([...((batches[0]?.body?.ids as string[]) ?? [])].sort()).toEqual([P.hallSwitchClient, P.iotAddress, P.mediaPc].sort());
+    for (const id of [P.mediaPc, P.hallSwitchClient, P.iotAddress]) expect(stored(id).state).toBe("accepted");
+    expect(await screen.findByText("3 proposals approved")).toBeTruthy();
+    await listed(3);
+    expect(rowIds()).toEqual([P.printerTaken, P.outside, P.thermostat]);
+    // The selection is gone with the rows, and nothing was skipped.
+    expect(bar()).toBeNull();
+    expect(screen.queryByTestId("dialog-skipped")).toBeNull();
+    expect([...ipamState().data.host.values()].some((h) => h.name === "media-pc")).toBe(true);
+  });
+
+  it("rejects the selection with one reason dialog and one request", async () => {
+    await openInbox();
+    const writes = recordWrites();
+    pick(P.mediaPc, P.hallSwitchClient);
+    fireEvent.click(screen.getByTestId("action-reject"));
+
+    const dialog = await screen.findByTestId("dialog-reject");
+    expect(screen.getByRole("dialog", { name: "Reject 2 proposals" })).toBeTruthy();
+    expect(within(dialog).getByTestId("reject-kinds").textContent).toContain("2 discovered hosts are rejected with the same reason");
+    expect(within(dialog).getByTestId("form-submit").textContent).toBe("Reject 2 proposals");
+    fireEvent.input(within(dialog).getByTestId("field-reason"), { target: { value: "  Visitors' devices  " } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-reject")).toBeNull());
+
+    const batches = writes().filter((w) => w.url.endsWith("/api/v1/proposals/reject"));
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.body?.reason).toBe("Visitors' devices");
+    for (const id of [P.mediaPc, P.hallSwitchClient]) {
+      expect(stored(id).state).toBe("rejected");
+      expect(stored(id).reason).toBe("Visitors' devices");
+    }
+    expect(await screen.findByText("2 proposals rejected")).toBeTruthy();
+    await listed(4);
+    expect(bar()).toBeNull();
+  });
+
+  it("refuses a reason of more than 1,024 bytes for the selection too", async () => {
+    await openInbox();
+    pick(P.mediaPc, P.hallSwitchClient);
+    fireEvent.click(screen.getByTestId("action-reject"));
+    const dialog = await screen.findByTestId("dialog-reject");
+    fireEvent.input(within(dialog).getByTestId("field-reason"), { target: { value: "å".repeat(513) } });
+    expect((within(dialog).getByTestId("form-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(stored(P.mediaPc).state).toBe("open");
+  });
+
+  it("reports what was skipped with the reasons, and can keep those rows selected", async () => {
+    await openInbox();
+    pick(P.printerTaken, P.mediaPc, P.hallSwitchClient);
+    fireEvent.click(screen.getByTestId("action-approve"));
+    const dialog = await screen.findByTestId("dialog-approve-many");
+    expect(within(dialog).getByTestId("approve-kinds").textContent).toContain("2 discovered hosts and 1 conflict");
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+
+    // One toast with the counts.
+    expect(await screen.findByText("2 proposals approved")).toBeTruthy();
+    expect(screen.getByText("1 skipped")).toBeTruthy();
+    // The panel lists the skipped proposal with the reason of the single route.
+    const skipped = await screen.findByTestId("dialog-skipped");
+    expect(screen.getByRole("dialog", { name: "1 proposal was skipped" })).toBeTruthy();
+    const items = within(skipped).getAllByTestId("skipped-item");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.dataset.id).toBe(P.printerTaken);
+    expect(items[0]?.dataset.code).toBe("ipam.proposal.nothing_to_apply");
+    expect(items[0]?.textContent).toContain("192.0.2.30 is intended for printer-1");
+    expect(items[0]?.textContent).toContain("The proposal suggests no change. Resolve its cause, then reject it.");
+    expect(stored(P.printerTaken).state).toBe("open");
+    // The selection was cleared by the batch.
+    expect(bar()).toBeNull();
+
+    fireEvent.click(within(skipped).getByTestId("skipped-keep"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-skipped")).toBeNull());
+    await listed(4);
+    expect(box(P.printerTaken).checked).toBe(true);
+    expect(buttons()).toEqual(["Approve 1", "Reject 1"]);
+  });
+
+  it("closes the panel of the skipped without keeping the selection", async () => {
+    await openInbox();
+    pick(P.printerTaken, P.mediaPc);
+    fireEvent.click(screen.getByTestId("action-approve"));
+    fireEvent.click(within(await screen.findByTestId("dialog-approve-many")).getByTestId("form-submit"));
+    const skipped = await screen.findByTestId("dialog-skipped");
+    fireEvent.click(within(skipped).getByTestId("skipped-close"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-skipped")).toBeNull());
+    await listed(5);
+    expect(bar()).toBeNull();
+  });
+
+  it("names a proposal that was decided elsewhere meanwhile as skipped", async () => {
+    await openInbox();
+    pick(P.mediaPc, P.hallSwitchClient);
+    await rejectProposal({ id: P.hallSwitchClient }, "decided on another screen");
+    fireEvent.click(screen.getByTestId("action-reject"));
+    fireEvent.click(within(await screen.findByTestId("dialog-reject")).getByTestId("form-submit"));
+    expect(await screen.findByText("1 proposal rejected")).toBeTruthy();
+    const skipped = await screen.findByTestId("dialog-skipped");
+    const item = within(skipped).getByTestId("skipped-item");
+    expect(item.dataset.code).toBe("ipam.proposal.not_open");
+    expect(item.textContent).toContain("The proposal was decided already (rejected).");
+    expect(stored(P.hallSwitchClient).reason).toBe("decided on another screen");
+  });
+
+  it("shows the error and keeps the dialog when the request fails", async () => {
+    await openInbox();
+    server.use(
+      http.post("*/api/v1/proposals/approve", () =>
+        HttpResponse.json({ type: "about:blank", status: 503, code: "ipam.unavailable", title: "Service unavailable", detail: "no ipam" }, { status: 503, headers: { "content-type": "application/problem+json" } }),
+      ),
+    );
+    pick(P.mediaPc, P.hallSwitchClient);
+    fireEvent.click(screen.getByTestId("action-approve"));
+    const dialog = await screen.findByTestId("dialog-approve-many");
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(dialog.querySelector("[role='alert']")).not.toBeNull());
+    expect(screen.getByTestId("dialog-approve-many")).toBeTruthy();
+    expect(stored(P.mediaPc).state).toBe("open");
+    expect(buttons()).toEqual(["Approve 2", "Reject 2"]);
+  });
+
+  it("has no violations with the confirmation and with the skipped panel open", async () => {
+    await openInbox();
+    pick(P.printerTaken, P.mediaPc);
+    fireEvent.click(screen.getByTestId("action-approve"));
+    const dialog = await screen.findByTestId("dialog-approve-many");
+    expect(await axeViolations(dialog)).toEqual([]);
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    expect(await axeViolations(await screen.findByTestId("dialog-skipped"))).toEqual([]);
   });
 });
 

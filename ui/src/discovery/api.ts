@@ -16,6 +16,8 @@ export type ProposalState = S["IntentProposalState"];
 export type ProposalSeverity = S["ProposalSeverity"];
 export type ProposalEvidence = S["ProposalEvidence"];
 export type Decision = S["Decision"];
+export type BatchDecision = S["BatchDecision"];
+export type BatchItem = S["BatchItem"];
 export type ReconcileReport = S["ReconcileReport"];
 export type ObservedFact = S["ObservedFact"];
 export type ObservationSource = S["ObservationSource"];
@@ -35,6 +37,9 @@ export const ADOPTION_MODES: readonly AdoptionMode[] = ["manual", "adopt_hosts",
 
 /** The most bytes a rejection reason may have (docs/reconciliation.md, section 5.2). */
 export const MAX_REASON_BYTES = 1024;
+
+/** The most proposals one batch decision takes; a longer selection goes in several requests. */
+export const MAX_BATCH = 500;
 
 export function getProposal(id: string, signal?: AbortSignal): Promise<Proposal> {
   return api.get("/api/v1/proposals/{id}", { path: { id }, signal });
@@ -69,6 +74,31 @@ export function rejectProposal(proposal: Pick<Proposal, "id" | "revision">, reas
     body: trimmed ? { reason: trimmed } : {},
     ifMatch: proposal.revision ?? ANY_REVISION,
   });
+}
+
+/**
+ * Approves many proposals at once. The server applies each as the single approval does and
+ * reports each: the ones it could not approve come back skipped with the reason, the others
+ * are approved.
+ */
+export function approveProposals(ids: readonly string[]): Promise<BatchDecision> {
+  return inChunks(ids, (chunk) => api.post("/api/v1/proposals/approve", { body: { ids: chunk } }));
+}
+
+/** Rejects many proposals at once with one optional reason; the answer is as for approving. */
+export function rejectProposals(ids: readonly string[], reason: string): Promise<BatchDecision> {
+  const trimmed = reason.trim();
+  return inChunks(ids, (chunk) => api.post("/api/v1/proposals/reject", { body: trimmed ? { ids: chunk, reason: trimmed } : { ids: chunk } }));
+}
+
+/** Sends the identifiers in requests of at most MAX_BATCH and answers them as one batch. */
+async function inChunks(ids: readonly string[], send: (chunk: string[]) => Promise<BatchDecision>): Promise<BatchDecision> {
+  const results: BatchItem[] = [];
+  for (let at = 0; at < ids.length; at += MAX_BATCH) {
+    results.push(...(await send(ids.slice(at, at + MAX_BATCH))).results);
+  }
+  const count = (outcome: BatchItem["outcome"]) => results.filter((r) => r.outcome === outcome).length;
+  return { results, approved: count("approved"), rejected: count("rejected"), skipped: count("skipped") };
 }
 
 /** Runs the reconciler once, now. */

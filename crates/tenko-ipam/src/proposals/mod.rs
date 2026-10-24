@@ -30,7 +30,7 @@ pub mod query;
 pub(crate) mod sync;
 
 pub use adoption::{PolicyView, policy_view, set_policy};
-pub use decide::{Decision, approve, reject};
+pub use decide::{Decision, approve, clean_reason, reject};
 pub use model::{
     AdoptionMode, AdoptionPolicy, IntentProposal, IntentProposalKind, IntentProposalState,
     ProposalEvidence, ProposalSeverity, ProposalSubject, Rejection, StoredPolicy, actions, codes,

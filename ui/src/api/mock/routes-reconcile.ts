@@ -423,12 +423,9 @@ function commit(p: IntentProposal): IntentProposal {
   return next;
 }
 
-const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
-  const principal = requireSession();
-  onlyQuery(ctx.url, ["dry_run", "acknowledge"]);
-  const found = findProposal(ctx.params.id);
-  requireDecider(principal);
-  decidable(found, ctx.ifMatch());
+/** Plans (a dry run) or applies the commands of an open proposal and marks it accepted. */
+function approveOne(found: IntentProposal, ifMatch: number | "*" | null, dryRun: boolean, acknowledge: readonly string[]): S["Decision"] {
+  decidable(found, ifMatch);
   const commands = found.commands ?? [];
   if (commands.length === 0) {
     throw new Problem("ipam.proposal.nothing_to_apply", {
@@ -437,15 +434,9 @@ const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
       params: { id: found.id },
     });
   }
-  const dryRun = ctx.query("dry_run") === "true";
-  const acknowledge = (ctx.query("acknowledge") ?? "")
-    .split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
   const outcome = applyCommands(commands, { dryRun, acknowledge });
   if (dryRun) {
-    const decision: S["Decision"] = { dry_run: true, proposal: found, plan: outcome.plan, warnings: outcome.warnings, results: [], revision: null, job_id: null };
-    return ok(decision, etag(found.revision));
+    return { dry_run: true, proposal: found, plan: outcome.plan, warnings: outcome.warnings, results: [], revision: null, job_id: null };
   }
   const accepted = commit({
     ...found,
@@ -455,7 +446,7 @@ const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
     updated: new Date().toISOString(),
   });
   appendAudit({ action: "ipam.proposal.approve", objects: [{ kind: "proposal", id: found.id }, ...outcome.results], context: { rule: found.rule } });
-  const decision: S["Decision"] = {
+  return {
     dry_run: false,
     proposal: accepted,
     plan: outcome.plan,
@@ -464,16 +455,24 @@ const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
     revision: accepted.revision ?? null,
     job_id: outcome.job_id,
   };
-  return ok(decision, etag(accepted.revision));
-});
+}
 
-const reject = route("post", "/api/v1/proposals/{id}/reject", async (ctx) => {
+const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
   const principal = requireSession();
-  onlyQuery(ctx.url, []);
+  onlyQuery(ctx.url, ["dry_run", "acknowledge"]);
   const found = findProposal(ctx.params.id);
   requireDecider(principal);
-  const body = await ctx.optionalBody();
-  const raw = body.reason;
+  const dryRun = ctx.query("dry_run") === "true";
+  const acknowledge = (ctx.query("acknowledge") ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  const decision = approveOne(found, ctx.ifMatch(), dryRun, acknowledge);
+  return ok(decision, etag(decision.proposal.revision));
+});
+
+/** The reason of a rejection as it is recorded: trimmed, empty for none; refused when too long. */
+function cleanReason(raw: unknown): string {
   if (raw !== undefined && raw !== null && typeof raw !== "string") {
     throw new Problem("sys.invalid_request", { status: 400, detail: "reason must be text", params: { part: "body" } });
   }
@@ -486,7 +485,12 @@ const reject = route("post", "/api/v1/proposals/{id}/reject", async (ctx) => {
       params: { field: "reason" },
     });
   }
-  decidable(found, ctx.ifMatch());
+  return reason;
+}
+
+/** Marks an open proposal rejected with the (already checked) reason. */
+function rejectOne(found: IntentProposal, ifMatch: number | "*" | null, reason: string): S["Decision"] {
+  decidable(found, ifMatch);
   const rejected = commit({
     ...found,
     state: "rejected",
@@ -495,8 +499,81 @@ const reject = route("post", "/api/v1/proposals/{id}/reject", async (ctx) => {
     updated: new Date().toISOString(),
   });
   appendAudit({ action: "ipam.proposal.reject", objects: [{ kind: "proposal", id: found.id }], context: reason ? { reason } : {} });
-  const decision: S["Decision"] = { dry_run: false, proposal: rejected, results: [], warnings: [], revision: rejected.revision ?? null, job_id: null };
-  return ok(decision, etag(rejected.revision));
+  return { dry_run: false, proposal: rejected, results: [], warnings: [], revision: rejected.revision ?? null, job_id: null };
+}
+
+const reject = route("post", "/api/v1/proposals/{id}/reject", async (ctx) => {
+  const principal = requireSession();
+  onlyQuery(ctx.url, []);
+  const found = findProposal(ctx.params.id);
+  requireDecider(principal);
+  const body = await ctx.optionalBody();
+  const reason = cleanReason(body.reason);
+  const decision = rejectOne(found, ctx.ifMatch(), reason);
+  return ok(decision, etag(decision.proposal.revision));
+});
+
+/** The most proposals one batch takes (the server's limit). */
+const MAX_BATCH = 500;
+
+/** The identifiers of a batch body, checked as the server does; `reason` only where allowed. */
+function batchIds(body: Record<string, unknown>, allowed: readonly string[]): string[] {
+  for (const key of Object.keys(body)) {
+    if (!allowed.includes(key)) {
+      throw new Problem("sys.invalid_request", { status: 400, detail: `unknown field \`${key}\``, params: { part: "body" } });
+    }
+  }
+  const ids = body.ids;
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && isUuid(id))) {
+    throw new Problem("sys.invalid_request", { status: 400, detail: "`ids` must be a list of proposal identifiers", params: { part: "body" } });
+  }
+  if (ids.length === 0) {
+    throw new Problem("ipam.proposal.batch_empty", { status: 422, detail: "name at least one proposal" });
+  }
+  if (ids.length > MAX_BATCH) {
+    throw new Problem("ipam.proposal.batch_too_large", {
+      status: 422,
+      detail: `${ids.length} proposals exceed the limit of ${MAX_BATCH} in one request`,
+      params: { count: String(ids.length), limit: String(MAX_BATCH) },
+    });
+  }
+  return ids as string[];
+}
+
+/** One id of a batch: the decision applied, or a skip with the refusal of the single route. */
+function batchItem(id: string, done: "approved" | "rejected", decide: () => void): S["BatchItem"] {
+  try {
+    decide();
+    return { id, outcome: done };
+  } catch (err) {
+    if (!(err instanceof Problem)) throw err;
+    const { status, code, detail, params } = err.reply.body;
+    return { id, outcome: "skipped", code, status, message: detail, ...(params && Object.keys(params).length ? { params } : {}) };
+  }
+}
+
+/** The answer of a batch: the items and the counts. */
+function batchDecision(results: S["BatchItem"][]): S["BatchDecision"] {
+  const count = (outcome: S["BatchItem"]["outcome"]) => results.filter((r) => r.outcome === outcome).length;
+  return { results, approved: count("approved"), rejected: count("rejected"), skipped: count("skipped") };
+}
+
+const approveMany = route("post", "/api/v1/proposals/approve", async (ctx) => {
+  const principal = requireSession();
+  onlyQuery(ctx.url, []);
+  const ids = batchIds(await ctx.body(), ["ids"]);
+  requireDecider(principal);
+  return ok(batchDecision(ids.map((id) => batchItem(id, "approved", () => void approveOne(findProposal(id), null, false, [])))));
+});
+
+const rejectMany = route("post", "/api/v1/proposals/reject", async (ctx) => {
+  const principal = requireSession();
+  onlyQuery(ctx.url, []);
+  const body = await ctx.body();
+  const ids = batchIds(body, ["ids", "reason"]);
+  const reason = cleanReason(body.reason);
+  requireDecider(principal);
+  return ok(batchDecision(ids.map((id) => batchItem(id, "rejected", () => void rejectOne(findProposal(id), null, reason)))));
 });
 
 /** Whether the difference behind an open proposal still exists in intent. */
@@ -703,6 +780,8 @@ export const reconcileRoutes: HttpHandler[] = [
   proposal,
   approve,
   reject,
+  approveMany,
+  rejectMany,
   getAdoption,
   setAdoption,
   clearAdoption,

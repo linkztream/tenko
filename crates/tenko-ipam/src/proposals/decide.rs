@@ -333,20 +333,14 @@ pub(crate) async fn apply(
     Err(IpamError::contended(attempts))
 }
 
-/// Rejects a proposal as `cx` with an optional reason, and remembers its fingerprint.
+/// The reason of a rejection as it is recorded: trimmed, `None` when blank. A batch of
+/// rejections checks it once before it starts.
 ///
 /// # Errors
 ///
-/// `ipam.validation` (400) for a reason over 1,024 bytes or with control characters,
-/// `ipam.proposal.not_found` (404), `ipam.proposal.revision_mismatch` (412),
-/// `ipam.proposal.not_open` (409), `ipam.contended`.
-pub async fn reject(
-    ipam: &IpamService,
-    id: ProposalId,
-    reason: Option<String>,
-    cx: &RequestCtx,
-    expected: Option<Revision>,
-) -> IpamResult<Decision> {
+/// `ipam.validation` (400) for a reason over 1,024 bytes or with control characters other
+/// than line breaks and tabs.
+pub fn clean_reason(reason: Option<String>) -> IpamResult<Option<String>> {
     let reason = reason
         .map(|reason| reason.trim().to_owned())
         .filter(|reason| !reason.is_empty());
@@ -361,6 +355,24 @@ pub async fn reject(
             format!("the reason has at most {MAX_REASON} bytes and no control characters"),
         ));
     }
+    Ok(reason)
+}
+
+/// Rejects a proposal as `cx` with an optional reason, and remembers its fingerprint.
+///
+/// # Errors
+///
+/// `ipam.validation` (400) for a reason over 1,024 bytes or with control characters,
+/// `ipam.proposal.not_found` (404), `ipam.proposal.revision_mismatch` (412),
+/// `ipam.proposal.not_open` (409), `ipam.contended`.
+pub async fn reject(
+    ipam: &IpamService,
+    id: ProposalId,
+    reason: Option<String>,
+    cx: &RequestCtx,
+    expected: Option<Revision>,
+) -> IpamResult<Decision> {
+    let reason = clean_reason(reason)?;
     let attempts = ipam.config().max_attempts.max(1);
     for attempt in 0..attempts {
         let consistency = if attempt == 0 {

@@ -24757,6 +24757,77 @@
         }
       }
     },
+    "/api/v1/proposals/approve": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Approve many proposals",
+        "operationId": "approve_proposals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more, that the principal may not approve, or that the single approval refuses is `skipped` with the code and message of that refusal; the others are applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`) or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not approve proposals at all",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/proposals/reconcile": {
       "post": {
         "tags": [
@@ -24797,6 +24868,77 @@
           },
           "503": {
             "description": "The reconciler does not run on this server (`ipam.reconciler.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/reject": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Reject many proposals",
+        "operationId": "reject_proposals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The outcome of every proposal, in the order of the request, and the counts. A proposal that is not open any more or that the principal may not decide is `skipped` with the code and message of that refusal; the others are rejected with the same reason",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not decide proposals at all",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No identifier (`ipam.proposal.batch_empty`) or more than 500 (`ipam.proposal.batch_too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36938,6 +37080,141 @@
             "description": "At least one toggle is weaker than the Home baseline."
           }
         }
+      },
+      "BatchApproveRequest": {
+        "type": "object",
+        "description": "The body of a batch approval.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalId"
+            },
+            "description": "The proposals to approve, in the order they are applied: one to 500 identifiers."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BatchDecision": {
+        "type": "object",
+        "description": "The answer of a batch decision: the outcome of every proposal and the counts.",
+        "required": [
+          "results",
+          "approved",
+          "rejected",
+          "skipped"
+        ],
+        "properties": {
+          "approved": {
+            "type": "integer",
+            "description": "How many proposals were approved.",
+            "minimum": 0
+          },
+          "rejected": {
+            "type": "integer",
+            "description": "How many proposals were rejected.",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchItem"
+            },
+            "description": "One entry per identifier of the request, in its order."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "How many proposals were skipped.",
+            "minimum": 0
+          }
+        }
+      },
+      "BatchItem": {
+        "type": "object",
+        "description": "The outcome of one proposal of a batch.",
+        "required": [
+          "id",
+          "outcome"
+        ],
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a skipped proposal the error code of the refusal, the code the single route\nanswers with, for example `ipam.proposal.not_open`."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ProposalId",
+            "description": "The proposal."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a skipped proposal the English explanation of the refusal."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/BatchOutcome",
+            "description": "What happened to it."
+          },
+          "params": {
+            "type": "object",
+            "description": "For a skipped proposal the parameters of that refusal, as in the problem document of\nthe single route (for example `state`); empty otherwise.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "For a skipped proposal the HTTP status of that refusal.",
+            "minimum": 0
+          }
+        }
+      },
+      "BatchOutcome": {
+        "type": "string",
+        "description": "What happened to one proposal of a batch.",
+        "enum": [
+          "approved",
+          "rejected",
+          "skipped"
+        ]
+      },
+      "BatchRejectRequest": {
+        "type": "object",
+        "description": "The body of a batch rejection.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposalId"
+            },
+            "description": "The proposals to reject, in the order they are rejected: one to 500 identifiers."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the proposals are rejected, for all of them; the rules of the single rejection\napply (at most 1,024 bytes, no control characters other than line breaks and tabs,\nblank counts as no reason)."
+          }
+        },
+        "additionalProperties": false
       },
       "BindingState": {
         "type": "string",
