@@ -90,8 +90,7 @@ fn created<T: serde::Serialize>(location: &str, body: &T) -> Result<Response, Ro
         (status = 400, description = "Unknown parameter (`sys.invalid_query`) or a subject that is not a UUID (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_grants(
     State(app): State<AppState>,
@@ -182,8 +181,7 @@ async fn revoke_grant(
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []))
+    )
 )]
 async fn list_grant_subjects(
     State(app): State<AppState>,
@@ -205,8 +203,7 @@ async fn list_grant_subjects(
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_service_accounts(
     State(app): State<AppState>,
@@ -262,7 +259,7 @@ async fn create_service_account(
         Forbidden,
         Unavailable
     ),
-    security(("session" = []), ("token" = []))
+    security(("session" = []))
 )]
 async fn list_service_account_tokens(
     State(app): State<AppState>,
@@ -357,8 +354,7 @@ async fn revoke_service_account_token(
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_role_policies(
     State(app): State<AppState>,

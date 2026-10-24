@@ -534,7 +534,8 @@ fn running_version(extension: Option<&Extension<RunningVersion>>) -> String {
     summary = "Liveness probe",
     responses(
         (status = 200, description = "The process answers", body = Health)
-    )
+    ),
+    security()
 )]
 async fn health(running: Option<Extension<RunningVersion>>) -> Json<Health> {
     Json(Health {
@@ -552,7 +553,8 @@ async fn health(running: Option<Extension<RunningVersion>>) -> Json<Health> {
     responses(
         (status = 200, description = "The node serves requests", body = Readiness),
         (status = 503, description = "Not ready: starting, catching up or shutting down", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security()
 )]
 async fn ready(State(state): State<AppState>) -> Result<Json<Readiness>, ApiError> {
     let not_ready = |reason: &str| {
@@ -706,7 +708,8 @@ pub(crate) async fn assemble(
                 ("Content-Disposition" = String, description = "`attachment; filename=\"tenko-ca-root.pem\"`")
             )),
         (status = 404, description = "The listener does not use the internal CA (`tls.no_internal_ca`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security()
 )]
 async fn get_ca_root(source: Option<Extension<Arc<CaRootSource>>>) -> Result<Response, ApiError> {
     let root = source
@@ -813,7 +816,8 @@ pub(crate) fn system_object() -> ObjectRef {
     summary = "Get the OpenAPI document of this API",
     responses(
         (status = 200, description = "The OpenAPI document", body = Object, content_type = "application/json")
-    )
+    ),
+    security()
 )]
 async fn openapi_document() -> Response {
     (

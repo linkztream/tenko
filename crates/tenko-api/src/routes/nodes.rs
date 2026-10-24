@@ -292,7 +292,8 @@ async fn list_enrolments(
         (status = 403, description = "Not allowed to enrol nodes, or a controller token without a sign-in in the last five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A node has the name (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The role controller beside another role (`cluster.enrolment.roles`), a lifetime outside 60 s to 7 days or a controller token for more than an hour (`cluster.enrolment.lifetime`), or a bad name (`cluster.node.name`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn create_enrolment(
     State(app): State<AppState>,
@@ -408,7 +409,8 @@ async fn delete_enrolment(
         (status = 403, description = "The token does not allow a requested role (`cluster.enrolment.roles`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "No common protocol major (`cluster.protocol.unsupported`) or the name is taken (`cluster.node.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The certificate request (`cluster.ca.invalid_csr`), the name (`cluster.node.name`) or the address (`cluster.node.address`) is not usable", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security()
 )]
 async fn enrol_node(
     PublicCtx { ctx, .. }: PublicCtx,

@@ -68,8 +68,7 @@ fn user_response(status: StatusCode, user: UserInfo) -> Response {
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_users(
     State(app): State<AppState>,
@@ -132,8 +131,7 @@ async fn create_user(
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn get_user(
     Svc(service): Svc,
@@ -332,8 +330,7 @@ async fn set_user_roles(
         (status = 200, description = "Every role with its description", body = Page<RoleInfo>),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 #[allow(clippy::unused_async, reason = "axum handlers are async functions")]
 async fn list_roles(

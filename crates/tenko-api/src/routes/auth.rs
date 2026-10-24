@@ -509,7 +509,8 @@ fn login_answer(outcome: LoginOutcome) -> Result<Response, RouteError> {
         (status = 401, description = "The user name or password was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts, or the account is locked (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn login_password(
     Svc(service): Svc,
@@ -538,7 +539,8 @@ async fn login_password(
         (status = 401, description = "The code was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn login_totp(
     Svc(service): Svc,
@@ -567,7 +569,8 @@ async fn login_totp(
         (status = 401, description = "The code was not accepted (`auth.invalid_credentials`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many failed attempts (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn login_recovery(
     Svc(service): Svc,
@@ -594,7 +597,8 @@ async fn login_recovery(
         (status = 200, description = "The options for `navigator.credentials.get()` and the ceremony id for the finish step", body = WebAuthnLoginOptions),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the password challenge is unknown (`auth.challenge_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn webauthn_login_start(
     Svc(service): Svc,
@@ -620,7 +624,8 @@ async fn webauthn_login_start(
         (status = 403, description = "The break-glass account needs a hardware key (`auth.break_glass.hardware_key_only`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "The break-glass rate limit applies (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn webauthn_login_finish(
     Svc(service): Svc,
@@ -698,8 +703,7 @@ async fn get_session(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Json<SessionInf
         (status = 200, description = "Every session of the user; `current` marks the session of the request", body = Page<SessionSummary>),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_sessions(
     State(app): State<AppState>,
@@ -725,7 +729,7 @@ async fn list_sessions(
         Unauthenticated,
         Unavailable
     ),
-    security(("session" = []), ("token" = []))
+    security(("session" = []))
 )]
 async fn revoke_session(
     Svc(service): Svc,
@@ -951,8 +955,7 @@ async fn webauthn_register_finish(
         (status = 200, description = "Every credential of the user", body = Page<CredentialInfo>),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_webauthn_credentials(
     State(app): State<AppState>,
@@ -1038,8 +1041,7 @@ async fn regenerate_recovery_codes(
         (status = 200, description = "Every token of the user", body = Page<TokenInfo>),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn list_tokens(
     State(app): State<AppState>,
@@ -1096,8 +1098,7 @@ async fn create_token(
         (status = 404, description = "No such token (`auth.token.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn revoke_token(
     Svc(service): Svc,
@@ -2714,6 +2715,7 @@ mod tests {
         let session_only = [
             "logout",
             "get_session",
+            "revoke_session",
             "change_password",
             "totp_enroll_start",
             "totp_enroll_finish",
@@ -2760,7 +2762,10 @@ mod tests {
                     responses.keys().any(|status| status.starts_with('2')),
                     "{label}: a success"
                 );
-                let security: Vec<Vec<&str>> = operation["security"]
+                // The operation's own requirement, else the document's.
+                let security: Vec<Vec<&str>> = operation
+                    .get("security")
+                    .unwrap_or(&document["security"])
                     .as_array()
                     .map(|requirements| {
                         requirements

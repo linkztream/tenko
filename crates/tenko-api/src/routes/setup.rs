@@ -42,7 +42,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
     responses(
         (status = 200, description = "The setup state; the profiles are listed while setup is open", body = SetupState),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn get_setup(Svc(service): Svc) -> Result<Json<SetupState>, RouteError> {
     Ok(Json(service.setup_state().await?))
@@ -79,7 +80,8 @@ pub struct SetupResponse {
         (status = 422, description = "The password breaks the policy of the chosen profile (`auth.password.policy`, with the violations in `errors`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Too many wrong setup tokens (`auth.throttled`); `Retry-After` gives the seconds", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
-    )
+    ),
+    security()
 )]
 async fn complete_setup(
     Svc(service): Svc,

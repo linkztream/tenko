@@ -161,7 +161,8 @@ async fn get_updates(
         (status = 409, description = "The check is off: air-gapped or switched off in the settings (`update.check_off`, parameter `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 502, description = "The release source did not answer with a valid manifest (`update.fetch_failed`, `update.manifest.*`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn check_updates(
     State(state): State<AppState>,
@@ -188,7 +189,8 @@ async fn check_updates(
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn put_update_manifest(
     State(state): State<AppState>,
@@ -221,7 +223,8 @@ async fn put_update_manifest(
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn install_update(
     State(state): State<AppState>,
@@ -255,7 +258,8 @@ async fn install_update(
         (status = 409, description = "This installation cannot install now (`update.install_blocked`, parameter `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The file is larger than the manifest says (`update.size_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn upload_update(
     State(state): State<AppState>,

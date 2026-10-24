@@ -96,7 +96,8 @@ pub(super) async fn list_dns_keys(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change keys", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A key of this name exists (`dns.key.exists`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 pub(super) async fn create_dns_key(
     State(app): State<AppState>,
@@ -168,7 +169,8 @@ pub(super) async fn get_dns_key(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change keys", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such key (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 pub(super) async fn delete_dns_key(
     State(app): State<AppState>,

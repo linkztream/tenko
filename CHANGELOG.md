@@ -13,6 +13,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 - The cache section of the DNS settings page shows the cache as a tree of names in the style of the Windows DNS manager's cache view: folders from (root) down in the left pane, the records of the folder selected in the right pane with its own records as "(same as parent folder)", and each RRSIG as a row of its own with the type covered, the signer and the expiry instead of joined into the data of the entry it signs. A press of Show the entries or Read again reads up to 10,000 entries at once (1,000 a page) and says when the cap cut it short; expanding and selecting folders never reads, and the previous and next page buttons are gone. See `docs/dns-resolver.md` section 3.7.
 
+### Fixed
+
+- The OpenAPI document (`GET /api/v1/openapi.json`, `docs/api/openapi.json`) declares the security requirement of every operation: a session cookie or a bearer token by default, a session only on the 66 operations a personal token can never call (account changes, the administration of users, access, settings and the system, secrets, DNS keys, trust anchors, language packs and updates), and none on the 14 public ones (setup, the sign-in ceremonies, node enrolment, liveness and readiness, the CA root, the languages of the sign-in page and the document itself). Before, 326 operations said nothing about authentication although the server answers them 401 without credentials, and three said the opposite of what the server does: `DELETE /auth/sessions/{id}` and `GET /access/service-accounts/{id}/tokens` refuse a token, and `GET /access/subjects` accepts one. See `docs/api/README.md`.
+
 ## [0.0.4] - 2026-10-23
 
 ### Added

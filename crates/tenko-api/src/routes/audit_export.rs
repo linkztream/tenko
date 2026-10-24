@@ -140,7 +140,8 @@ async fn get_audit_export(
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "TGL-21 requires an enabled sink (`audit.export.required`), or `If-Match` is stale (`audit.export.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "The server runs without the audit export", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn put_audit_export(
     State(state): State<AppState>,
@@ -175,7 +176,8 @@ async fn put_audit_export(
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No sink has this id (`audit.export.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "The server runs without the audit export", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn test_audit_export(
     State(state): State<AppState>,

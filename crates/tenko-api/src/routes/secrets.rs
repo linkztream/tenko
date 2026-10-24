@@ -276,7 +276,8 @@ async fn list_secrets(
         (status = 409, description = "An account that may reveal secrets signs in with a PIN alone (`vault.pin_coupling`, parameters `accounts`, `next`: `passkey`, and `route`: the passkey enrolment route)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The value exceeds 64 KiB (`vault.secret.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "A value is invalid (`vault.secret.invalid`, parameter `field`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn create_secret(
     State(app): State<AppState>,
@@ -368,7 +369,8 @@ async fn get_secret(
         (status = 409, description = "`If-Match` is stale or the secret changed meanwhile (`vault.secret.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The value exceeds 64 KiB (`vault.secret.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "A value is invalid (`vault.secret.invalid`, parameter `field`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn update_secret(
     State(app): State<AppState>,
@@ -453,7 +455,8 @@ async fn connector_references(
         (status = 403, description = "Not allowed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such operator secret (`vault.secret.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Still referenced (`vault.secret.in_use`, parameters `hosts` and `connectors` with the counts), or `If-Match` is stale (`vault.secret.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn delete_secret(
     State(app): State<AppState>,
@@ -668,7 +671,8 @@ async fn get_host_credentials(
         (status = 409, description = "`If-Match` is stale or the set changed meanwhile (`vault.host_credentials.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Too many bindings or a secret twice (`vault.secret.invalid`), or a secret that is not an operator secret (`vault.host_credentials.secret_missing`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn update_host_credentials(
     State(app): State<AppState>,

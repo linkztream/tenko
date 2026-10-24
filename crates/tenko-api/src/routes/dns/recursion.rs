@@ -212,7 +212,8 @@ async fn list_dns_trust_anchors(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The root's anchor may not be replaced outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn add_dns_trust_anchor(
     State(app): State<AppState>,
@@ -286,7 +287,8 @@ async fn get_dns_trust_anchor(
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to change trust anchors", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No trust anchor for the zone (`dns.trust_anchor.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The root's anchor may not be removed outside the Lab profile (`dns.trust_anchor.root_protected`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn remove_dns_trust_anchor(
     State(app): State<AppState>,
@@ -400,7 +402,8 @@ async fn list_dns_ntas(
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the anchor is invalid (`dns.nta.invalid`, parameters `field` and `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to create one", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn create_dns_nta(
     State(app): State<AppState>,
@@ -436,7 +439,8 @@ async fn create_dns_nta(
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dns.keys`, or a token tries to delete one", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such negative trust anchor (`dns.nta.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn delete_dns_nta(
     State(app): State<AppState>,

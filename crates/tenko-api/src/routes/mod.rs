@@ -54,6 +54,11 @@
 //!
 //! Every path is registered in exactly one module (axum panics on overlapping routes), and
 //! the stubs answer `501` with `sys.not_implemented` until their owner replaces them.
+//!
+//! The document requires a session or a token on every operation ([`ApiDoc`]), which is
+//! what a handler taking [`Ctx`](crate::extract::Ctx) gets. An operation whose handler takes
+//! no `Ctx` declares `security()`, public; one that a personal token can never pass declares
+//! `security(("session" = []))` (`docs/api/README.md`).
 
 use utoipa::{
     Modify, OpenApi,
@@ -109,7 +114,8 @@ pub mod topology;
 pub mod users;
 pub mod vlans;
 
-/// The skeleton of the OpenAPI document: info, one tag per area and the security schemes.
+/// The skeleton of the OpenAPI document: info, one tag per area, the security schemes and
+/// the default requirement of every operation, a session or a token.
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -155,6 +161,7 @@ pub mod vlans;
         (name = "dhcp", description = "DHCP: server settings, scopes, shared networks, pools and exclusions, options, classes, policies, MAC filters, reservations, leases, history, export and the DHCP role of a node"),
     ),
     components(schemas(ProblemDetails, crate::dto::SortOrder, tenko_ipam::query::Deleted)),
+    security(("session" = []), ("token" = [])),
     modifiers(&SecurityAddon)
 )]
 struct ApiDoc;
@@ -273,3 +280,6 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
 pub(crate) fn not_implemented(method: &str, path: &str) -> ApiError {
     ApiError::not_implemented(method, &format!("{API_BASE}{path}"))
 }
+
+#[cfg(test)]
+mod tests;

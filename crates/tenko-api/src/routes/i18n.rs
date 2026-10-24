@@ -138,7 +138,8 @@ fn with_cache(mut response: Response, cache: HeaderValue) -> Response {
     summary = "List the languages of the installation",
     responses(
         (status = 200, description = "The languages users may choose", body = LanguageList)
-    )
+    ),
+    security()
 )]
 async fn get_languages(
     State(state): State<AppState>,
@@ -174,7 +175,8 @@ pub struct PackQuery {
             headers(("ETag" = String, description = "The content hash in quotes"))),
         (status = 304, description = "Not modified (If-None-Match)"),
         (status = 404, description = "No active uploaded pack for the tag (`i18n.pack.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security()
 )]
 async fn get_pack(
     State(state): State<AppState>,
@@ -224,7 +226,8 @@ async fn get_pack(
         (status = 200, description = "Every language with its versions", body = PackList),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn list_packs(
     State(state): State<AppState>,
@@ -259,7 +262,8 @@ fn malformed(detail: impl Into<String>) -> ApiError {
         (status = 413, description = "Over 2 MiB (`i18n.pack.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Not a usable pack (`i18n.pack.invalid`, the problems in `errors`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No embedded UI to check against (`i18n.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn upload_pack(
     State(state): State<AppState>,
@@ -319,7 +323,8 @@ async fn upload_pack(
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "Nothing uploaded for the tag (`i18n.pack.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn get_pack_report(
     State(state): State<AppState>,
@@ -347,7 +352,8 @@ async fn get_pack_report(
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No candidate (`i18n.pack.no_candidate`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn get_pack_candidate(
     State(state): State<AppState>,
@@ -380,7 +386,8 @@ async fn get_pack_candidate(
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No candidate (`i18n.pack.no_candidate`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn preview_pack(
     State(state): State<AppState>,
@@ -412,7 +419,8 @@ async fn preview_pack(
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No candidate (`i18n.pack.no_candidate`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Not previewed yet (`i18n.pack.not_previewed`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn activate_pack(
     State(state): State<AppState>,
@@ -442,7 +450,8 @@ async fn activate_pack(
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No candidate (`i18n.pack.no_candidate`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn discard_pack_candidate(
     State(state): State<AppState>,
@@ -475,7 +484,8 @@ async fn discard_pack_candidate(
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "Nothing uploaded for the tag (`i18n.pack.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The installation's default language (`i18n.pack.default_language`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn delete_pack(
     State(state): State<AppState>,

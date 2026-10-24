@@ -268,7 +268,7 @@ An account that must change its password (after an administrator reset it) gets 
 
 ## 12. API
 
-Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listing routes also accept a token.
+Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listings of grants, subjects, service accounts and role policies also accept a token. Listing a service account's tokens administers the account, so it needs a session like the other changes.
 
 | Method | Path | Operation id | Success | Notes |
 |---|---|---|---|---|
@@ -278,7 +278,7 @@ Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listi
 | GET | `/access/subjects` | `list_grant_subjects` | 200 page of `SubjectSummary` | The enabled people and service accounts a grant can name, ordered by name; for an administrator or the holder of a delegable grant |
 | GET | `/access/service-accounts` | `list_service_accounts` | 200 page of `UserInfo` | Ordered by name |
 | POST | `/access/service-accounts` | `create_service_account` | 201 `UserInfo`, `Location` | Administrator; no password, passkey or session |
-| GET | `/access/service-accounts/{id}/tokens` | `list_service_account_tokens` | 200 page of `TokenInfo` | Secrets are never shown again |
+| GET | `/access/service-accounts/{id}/tokens` | `list_service_account_tokens` | 200 page of `TokenInfo` | Administrator, with a session; secrets are never shown again |
 | POST | `/access/service-accounts/{id}/tokens` | `create_service_account_token` | 201 `CreatedToken` | Scoped tokens only; the secret is shown once |
 | DELETE | `/access/service-accounts/{id}/tokens/{token}` | `revoke_service_account_token` | 204 | |
 | GET | `/access/role-policies` | `list_role_policies` | 200 page of `RolePolicyView` | One per role |

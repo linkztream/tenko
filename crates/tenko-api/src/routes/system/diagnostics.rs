@@ -302,8 +302,7 @@ pub(crate) fn document(
         (status = 200, description = "The diagnostics of this node, redacted", body = SystemDiagnostics),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed", body = ProblemDetails, content_type = "application/problem+json")
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn system_diagnostics(
     State(state): State<AppState>,

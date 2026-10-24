@@ -60,8 +60,7 @@ fn view_response(view: SecuritySettingsView) -> Response {
         Unauthenticated,
         Forbidden,
         Unavailable
-    ),
-    security(("session" = []), ("token" = []))
+    )
 )]
 async fn get_security_settings(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Response, RouteError> {
     Ok(view_response(service.security_settings(&ctx).await?))

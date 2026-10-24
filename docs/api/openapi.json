@@ -69,15 +69,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -327,15 +319,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/access/role-policies/{role}": {
@@ -548,15 +532,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -734,9 +710,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       },
@@ -983,12 +956,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/addresses": {
@@ -2382,7 +2350,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/auth/login/recovery": {
@@ -2461,7 +2430,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/auth/login/totp": {
@@ -2540,7 +2510,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/auth/logout": {
@@ -2906,15 +2877,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/auth/sessions/{id}": {
@@ -2983,9 +2946,6 @@
         "security": [
           {
             "session": []
-          },
-          {
-            "token": []
           }
         ]
       }
@@ -3028,15 +2988,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -3185,15 +3137,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/auth/totp": {
@@ -3425,15 +3369,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/auth/webauthn/credentials/{id}": {
@@ -3602,7 +3538,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/auth/webauthn/login/start": {
@@ -3660,7 +3597,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/auth/webauthn/register/finish": {
@@ -5158,7 +5096,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/custom-fields/{key}": {
@@ -5321,7 +5264,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -5441,7 +5389,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dhcp/classes": {
@@ -11758,7 +11711,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/keys/{key}": {
@@ -11895,7 +11853,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/lists": {
@@ -12633,7 +12596,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/ntas/{id}": {
@@ -12699,7 +12667,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/trust-anchors": {
@@ -12854,7 +12827,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/trust-anchors/{zone}": {
@@ -13001,7 +12979,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/dns/trust-anchors/{zone}/refresh": {
@@ -15126,7 +15109,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/health/ready": {
@@ -15157,7 +15141,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/hosts": {
@@ -16129,7 +16114,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/hosts/{id}/history": {
@@ -16783,7 +16773,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/i18n/packs": {
@@ -16824,7 +16815,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -16913,7 +16909,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/packs/{tag}": {
@@ -16975,7 +16976,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       },
       "delete": {
         "tags": [
@@ -17038,7 +17040,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/packs/{tag}/activate": {
@@ -17110,7 +17117,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/packs/{tag}/candidate": {
@@ -17172,7 +17184,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -17232,7 +17249,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/packs/{tag}/preview": {
@@ -17294,7 +17316,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/packs/{tag}/report": {
@@ -17356,7 +17383,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/i18n/template.xlf": {
@@ -19712,7 +19744,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/nodes/enrolments": {
@@ -19832,7 +19865,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/nodes/enrolments/{id}": {
@@ -22426,7 +22464,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/prefixes": {
@@ -26251,15 +26290,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/scans": {
@@ -26937,7 +26968,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/secrets/{id}": {
@@ -27102,7 +27138,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -27232,7 +27273,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/secrets/{id}/references": {
@@ -27574,7 +27620,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/settings/audit-export/test": {
@@ -27656,7 +27707,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/settings/default-language": {
@@ -27802,7 +27858,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -27979,7 +28040,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -28155,15 +28221,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "patch": {
         "tags": [
@@ -28300,7 +28358,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       },
       "post": {
         "tags": [
@@ -28397,7 +28456,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/sites": {
@@ -29748,7 +29808,8 @@
               }
             }
           }
-        }
+        },
+        "security": []
       }
     },
     "/api/v1/system/diagnostics": {
@@ -29789,15 +29850,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/system/kek": {
@@ -30044,7 +30097,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/system/status": {
@@ -30207,7 +30265,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/system/updates/install": {
@@ -30288,7 +30351,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/system/updates/manifest": {
@@ -30360,7 +30428,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/system/updates/upload": {
@@ -30468,7 +30541,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       }
     },
     "/api/v1/system/updates/whats-new": {
@@ -31754,15 +31832,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -31960,15 +32030,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "session": []
-          },
-          {
-            "token": []
-          }
-        ]
+        }
       },
       "delete": {
         "tags": [
@@ -73844,6 +73906,14 @@
       }
     }
   },
+  "security": [
+    {
+      "session": []
+    },
+    {
+      "token": []
+    }
+  ],
   "tags": [
     {
       "name": "setup",

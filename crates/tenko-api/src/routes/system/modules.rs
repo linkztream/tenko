@@ -101,7 +101,8 @@ async fn get_modules(
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`modules` in tenko.toml decides (`modules.pinned`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No module service (`modules.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn put_modules(
     State(state): State<AppState>,

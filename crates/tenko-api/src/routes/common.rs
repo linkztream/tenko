@@ -1480,7 +1480,8 @@ async fn write_custom_field(
         (status = 400, description = "Invalid definition (`ipam.custom_field.invalid_definition`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The key exists (`ipam.name_taken`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn create_custom_field(
     State(app): State<AppState>,
@@ -1569,7 +1570,8 @@ async fn get_custom_field(
         (status = 409, description = "Incompatible change (`ipam.custom_field.incompatible_change`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "If-Match is stale (`ipam.revision_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn update_custom_field(
     State(app): State<AppState>,
@@ -1611,7 +1613,8 @@ async fn update_custom_field(
         (status = 409, description = "Objects still use the field (`ipam.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "If-Match is stale (`ipam.revision_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn delete_custom_field(
     State(app): State<AppState>,

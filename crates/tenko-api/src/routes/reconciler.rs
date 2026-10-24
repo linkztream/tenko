@@ -60,7 +60,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)", body = ProblemDetails, content_type = "application/problem+json")
-    )
+    ),
+    security(("session" = []))
 )]
 async fn get_reconciler_settings(
     State(state): State<AppState>,
