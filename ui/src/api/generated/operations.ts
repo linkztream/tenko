@@ -343,6 +343,7 @@ export const apiOperations = [
   { id: "get_modules", method: "get", path: "/api/v1/system/modules", tags: ["system"], summary: "Get the product modules this installation runs" },
   { id: "put_modules", method: "put", path: "/api/v1/system/modules", tags: ["system"], summary: "Set the product modules this installation runs" },
   { id: "system_status", method: "get", path: "/api/v1/system/status", tags: ["system"], summary: "Get the status of the installation: version, store, certificates and warnings" },
+  { id: "get_tls", method: "get", path: "/api/v1/system/tls", tags: ["system"], summary: "Get the TLS mode and certificates of this node's listener" },
   { id: "get_updates", method: "get", path: "/api/v1/system/updates", tags: ["system"], summary: "Get the update status: newer releases with their notes and how to install them" },
   { id: "check_updates", method: "post", path: "/api/v1/system/updates/check", tags: ["system"], summary: "Ask the release source for new versions now" },
   { id: "install_update", method: "post", path: "/api/v1/system/updates/install", tags: ["system"], summary: "Install a newer version from the release source" },

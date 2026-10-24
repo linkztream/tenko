@@ -14,7 +14,8 @@ use tokio::{sync::watch, time::MissedTickBehavior};
 use zeroize::Zeroizing;
 
 use super::{
-    CertSource, ExpiryState, TlsError, TlsMaterial, TlsMode, TlsPolicy, TlsResolver, TlsStatus, tls,
+    CertSource, ExpiryState, PendingCertificate, TlsError, TlsMaterial, TlsMode, TlsPolicy,
+    TlsResolver, TlsStatus, tls,
 };
 
 /// Default interval at which imported files are checked for changes.
@@ -71,8 +72,12 @@ impl TlsService {
         let (status, _) = watch::channel(Arc::new(TlsStatus {
             mode,
             certificate: None,
+            chain_len: 0,
             last_error: None,
             loaded_at: None,
+            accept_replacement: true,
+            pending: None,
+            watch_interval: None,
             revision: 0,
         }));
         Ok(Self {
@@ -97,6 +102,14 @@ impl TlsService {
         Arc::clone(&self.inner.resolver)
     }
 
+    /// Whether a certificate replaced in the imported files is loaded while the listener
+    /// runs (default true). Off, the watcher reports the new certificate as
+    /// [`TlsStatus::pending`] and the next start loads it.
+    pub fn set_accept_replacement(&self, accept: bool) {
+        let _serialized = self.lock_files();
+        self.update(|status| status.accept_replacement = accept);
+    }
+
     /// Subscribes to status changes.
     pub fn watch(&self) -> watch::Receiver<Arc<TlsStatus>> {
         self.inner.status.subscribe()
@@ -117,8 +130,14 @@ impl TlsService {
         let mut files = self.lock_files();
         match mode {
             TlsMode::Imported { .. } => {
-                self.update(|status| status.mode = mode);
-                self.reload_locked(&mut files).map(drop)
+                self.update(|status| {
+                    status.mode = mode;
+                    status.pending = None;
+                });
+                // A switch of mode, and the start of the process, load the files whatever
+                // the replacement setting says: that setting is about files that change
+                // while the listener runs.
+                self.reload_locked(&mut files, true).map(drop)
             }
             TlsMode::ReverseProxy { .. } => {
                 self.inner.resolver.set(None);
@@ -126,8 +145,10 @@ impl TlsService {
                 self.update(|status| {
                     status.mode = mode;
                     status.certificate = None;
+                    status.chain_len = 0;
                     status.loaded_at = None;
                     status.last_error = None;
+                    status.pending = None;
                 });
                 Ok(())
             }
@@ -137,6 +158,7 @@ impl TlsService {
                 self.update(|status| {
                     status.mode = mode;
                     status.last_error = None;
+                    status.pending = None;
                 });
                 Ok(())
             }
@@ -147,27 +169,33 @@ impl TlsService {
     pub fn install(&self, material: TlsMaterial) {
         let mut files = self.lock_files();
         let info = material.info().clone();
+        let chain_len = material.chain().len();
         self.inner.resolver.set(Some(material));
         // The served material no longer comes from the files, so a later switch to mode b
         // (or the next poll in it) must read them again.
         *files = None;
         self.update(|status| {
             status.certificate = Some(info);
+            status.chain_len = chain_len;
             status.loaded_at = Some(Timestamp::now());
             status.last_error = None;
+            status.pending = None;
         });
     }
 
     /// Re-reads the files of mode b now; returns whether new material was installed.
     /// Unchanged files are not parsed again. On failure the previous material keeps
-    /// serving and the error is published.
+    /// serving and the error is published. While the service does not accept a replacement
+    /// ([`set_accept_replacement`](TlsService::set_accept_replacement)) and files are being
+    /// served, changed files are parsed and published as
+    /// [`TlsStatus::pending`] instead of being installed, and the answer is `false`.
     ///
     /// # Errors
     ///
     /// [`TlsError::NoLocalTls`] outside mode b, or the load error.
     pub fn reload(&self) -> Result<bool, TlsError> {
         let mut files = self.lock_files();
-        self.reload_locked(&mut files)
+        self.reload_locked(&mut files, false)
     }
 
     /// Spawns a task that calls [`reload`](TlsService::reload) every `interval` while the
@@ -176,9 +204,11 @@ impl TlsService {
     /// The task also logs a warning once whenever the served certificate (in any mode)
     /// moves into the warning, critical or expired state of its validity.
     pub fn spawn_watcher(&self, interval: Duration) -> tokio::task::JoinHandle<()> {
+        let interval = interval.max(MIN_WATCH_INTERVAL);
+        self.update(|status| status.watch_interval = Some(interval));
         let service = self.clone();
         tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(interval.max(MIN_WATCH_INTERVAL));
+            let mut ticker = tokio::time::interval(interval);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut reported = None;
             loop {
@@ -208,7 +238,8 @@ impl TlsService {
     }
 
     /// `reload` with the `files` lock held by the caller.
-    fn reload_locked(&self, files: &mut Option<FileState>) -> Result<bool, TlsError> {
+    /// `force` loads the files even when the service does not accept a replacement.
+    fn reload_locked(&self, files: &mut Option<FileState>, force: bool) -> Result<bool, TlsError> {
         let TlsMode::Imported {
             cert_path,
             key_path,
@@ -216,7 +247,7 @@ impl TlsService {
         else {
             return Err(TlsError::NoLocalTls);
         };
-        self.try_reload(&cert_path, &key_path, files)
+        self.try_reload(&cert_path, &key_path, files, force)
             .inspect_err(|error| self.publish_failure(error, &cert_path, &key_path))
     }
 
@@ -225,6 +256,7 @@ impl TlsService {
         cert_path: &Path,
         key_path: &Path,
         files: &mut Option<FileState>,
+        force: bool,
     ) -> Result<bool, TlsError> {
         let cert = read_file(cert_path)?;
         let key = Zeroizing::new(read_file(key_path)?);
@@ -236,8 +268,11 @@ impl TlsService {
         if files.as_ref() == Some(&state) {
             // Back to the files that are being served (a failed edit was reverted): the
             // earlier failure no longer applies.
-            if self.status().last_error.is_some() {
-                self.update(|status| status.last_error = None);
+            if self.status().last_error.is_some() || self.status().pending.is_some() {
+                self.update(|status| {
+                    status.last_error = None;
+                    status.pending = None;
+                });
             }
             return Ok(false);
         }
@@ -250,6 +285,11 @@ impl TlsService {
             },
         )?;
         let info = material.info().clone();
+        if !force && files.is_some() && !self.status().accept_replacement {
+            self.publish_pending(&info, material.chain().len());
+            return Ok(false);
+        }
+        let chain_len = material.chain().len();
         self.inner.resolver.set(Some(material));
         *files = Some(state);
         tracing::info!(
@@ -262,10 +302,47 @@ impl TlsService {
         );
         self.update(|status| {
             status.certificate = Some(info);
+            status.chain_len = chain_len;
             status.loaded_at = Some(Timestamp::now());
             status.last_error = None;
+            status.pending = None;
         });
         Ok(true)
+    }
+
+    /// Publishes the certificate in the files that is not served because replacements are
+    /// not accepted; logs once per certificate.
+    fn publish_pending(&self, info: &tls::CertInfo, chain_len: usize) {
+        let status = self.status();
+        let known = status
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.certificate.sha256 == info.sha256);
+        if known && status.last_error.is_none() {
+            return;
+        }
+        let detected_at = status
+            .pending
+            .as_ref()
+            .filter(|_| known)
+            .map_or_else(Timestamp::now, |pending| pending.detected_at);
+        if !known {
+            tracing::warn!(
+                subject = %info.subject,
+                sha256 = %info.sha256,
+                not_after = %info.not_after,
+                "a newer TLS certificate is on disk; replacing a certificate while the                  listener runs is not accepted under this security profile, so it is loaded                  at the next start"
+            );
+        }
+        let pending = PendingCertificate {
+            certificate: info.clone(),
+            chain_len,
+            detected_at,
+        };
+        self.update(|status| {
+            status.pending = Some(pending);
+            status.last_error = None;
+        });
     }
 
     /// Publishes a failed reload; a failure with the same text as the published one is

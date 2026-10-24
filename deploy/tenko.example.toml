@@ -91,6 +91,11 @@ addresses = []
 # key_path = "/etc/tenko/tls/privkey.pem"
 # Mode b: seconds between checks of the files for changes.
 watch_interval_secs = 5
+# Mode b: load a certificate that is replaced in those files while Tenko runs. Not set, the
+# security profile decides: on under Lab and Home, off under Standard (set true to opt in),
+# never under Hardened (true is refused). Off, a newer certificate on disk is reported as
+# pending (the warning sys.tls.certificate_pending) and loaded at the next restart.
+# accept_external_replacement = true
 # Mode c: the proxies allowed to connect; forwarded headers from anyone else are refused.
 trusted_proxies = []
 # Mode c: the proxies send the PROXY protocol (v1 or v2) instead of X-Forwarded-* headers.

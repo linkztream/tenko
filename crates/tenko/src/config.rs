@@ -2315,6 +2315,12 @@ pub struct TlsSection {
     pub key_path: Option<PathBuf>,
     /// Mode b: seconds between checks of the files for changes (default 5).
     pub watch_interval_secs: u64,
+    /// Mode b: load a certificate that is replaced in the files while the listener runs.
+    /// Unset, the profile decides: on under Lab and Home, off under Standard. Standard may
+    /// switch it on; Hardened never accepts it and refuses `true`. Off, the new certificate
+    /// is reported as pending and the next start loads it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_external_replacement: Option<bool>,
     /// Mode c: addresses or networks of the reverse proxies; every other source is refused.
     #[serde(deserialize_with = "string_or_list")]
     pub trusted_proxies: Vec<String>,
@@ -2342,6 +2348,7 @@ impl Default for TlsSection {
             cert_path: None,
             key_path: None,
             watch_interval_secs: 5,
+            accept_external_replacement: None,
             trusted_proxies: Vec::new(),
             proxy_protocol: false,
             public_host: None,
@@ -3371,7 +3378,30 @@ impl ServerSection {
 }
 
 impl TlsSection {
+    /// Whether a certificate replaced in the imported files is loaded while the listener
+    /// runs, under `profile` (TGL-08): on under Lab and Home unless the key says otherwise,
+    /// off under Standard unless the key says on, never under Hardened.
+    pub fn accept_external_replacement_for(&self, profile: Profile) -> bool {
+        match profile {
+            Profile::Hardened => false,
+            Profile::Standard => self.accept_external_replacement.unwrap_or(false),
+            Profile::Lab | Profile::Home => self.accept_external_replacement.unwrap_or(true),
+        }
+    }
+
+    /// The keys that depend on the profile: Hardened refuses the acceptance of a
+    /// replaced certificate.
+    fn check_profile(&self, profile: Profile) -> Result<(), ConfigError> {
+        if self.accept_external_replacement == Some(true) && profile == Profile::Hardened {
+            return Err(ConfigError::invalid(
+                "tls.accept_external_replacement = true is not allowed under the Hardened                  profile: a replaced certificate is loaded at the next restart only (TGL-08)",
+            ));
+        }
+        Ok(())
+    }
+
     fn resolve(&self, profile: Profile) -> Result<TlsSpec, ConfigError> {
+        self.check_profile(profile)?;
         let host = |key: &str, name: &str| checked_host(&format!("tls.{key}"), name);
         if self.watch_interval_secs == 0 || self.renew_check_hours == 0 {
             return Err(ConfigError::invalid(
@@ -3799,6 +3829,84 @@ retired = [\"tenko_kek_old\"]
             let error = loaded.config.resolve().expect_err("invalid");
             assert!(error.message.contains(needle), "{text}: {error}");
         }
+    }
+
+    #[test]
+    fn accepting_a_replaced_certificate_follows_the_profile() {
+        let section = |text: &str| {
+            from_text(
+                &format!(
+                    "data_dir = \"/d\"
+{text}"
+                ),
+                &[],
+            )
+            .expect("parses")
+            .config
+        };
+        let unset = section("");
+        for (profile, accepted) in [
+            (Profile::Lab, true),
+            (Profile::Home, true),
+            (Profile::Standard, false),
+            (Profile::Hardened, false),
+        ] {
+            assert_eq!(
+                unset.tls.accept_external_replacement_for(profile),
+                accepted,
+                "{profile:?} unset"
+            );
+        }
+        // Standard opts in, the others may opt out, Hardened never accepts.
+        let on = section(
+            "[tls]
+accept_external_replacement = true
+",
+        );
+        let off = section(
+            "[tls]
+accept_external_replacement = false
+",
+        );
+        assert!(on.tls.accept_external_replacement_for(Profile::Standard));
+        assert!(!off.tls.accept_external_replacement_for(Profile::Home));
+        assert!(!off.tls.accept_external_replacement_for(Profile::Lab));
+        assert!(!on.tls.accept_external_replacement_for(Profile::Hardened));
+    }
+
+    #[test]
+    fn hardened_refuses_accepting_a_replaced_certificate() {
+        let text = |profile: &str, value: &str| {
+            format!(
+                "data_dir = \"/d\"
+[profile]
+name = \"{profile}\"
+[tls]
+                 accept_external_replacement = {value}
+"
+            )
+        };
+        for profile in ["lab", "home", "standard"] {
+            let loaded = from_text(&text(profile, "true"), &[]).expect("parses");
+            loaded.config.resolve().unwrap_or_else(|error| {
+                panic!("{profile} accepts the key: {error}");
+            });
+        }
+        let hardened = from_text(&text("hardened", "true"), &[]).expect("parses");
+        let error = hardened
+            .config
+            .resolve()
+            .expect_err("refused under Hardened");
+        assert!(
+            error.message.contains("accept_external_replacement")
+                && error.message.contains("Hardened"),
+            "{error}"
+        );
+        // Off is what Hardened does anyway.
+        let off = from_text(&text("hardened", "false"), &[]).expect("parses");
+        off.config
+            .resolve()
+            .expect("false is allowed under Hardened");
     }
 
     #[test]

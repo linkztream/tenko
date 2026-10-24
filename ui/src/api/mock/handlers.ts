@@ -10,6 +10,7 @@ import { auditExportRoutes } from "./routes-audit-export";
 import { authRoutes } from "./routes-auth";
 import { backupRoutes } from "./routes-backup";
 import { guardrailsRoutes } from "./routes-guardrails";
+import { tlsRoutes } from "./routes-tls";
 import { reconcilerRoutes } from "./routes-reconciler";
 import { clusterRoutes, quorumGate } from "./routes-cluster";
 import { i18nRoutes } from "./routes-i18n";
@@ -78,6 +79,7 @@ export const happyPaths: HttpHandler[] = [
   ...backupRoutes,
   ...reconcilerRoutes,
   ...guardrailsRoutes,
+  ...tlsRoutes,
   ...i18nRoutes,
   // The DNS area of Phase 2 (WP4.5): zones, records, zone files, access lists and TSIG keys.
   ...dnsRoutes,

@@ -30,14 +30,15 @@ async function renderApp(url: string, roles?: string[]) {
 afterEach(() => setSessionForTest(null, "loading"));
 
 // WP7.4: the DHCP tab.
-const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "backup", "reconciler", "guardrails", "dns", "dhcp", "languages"];
-const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Backup", "Reconciler", "Guardrails", "DNS", "DHCP", "Languages"];
+const TABS = ["security", "users", "updates", "secrets", "access", "audit-export", "vault", "certificates", "backup", "reconciler", "guardrails", "dns", "dhcp", "languages"];
+const TAB_NAMES = ["Security", "Users", "Updates", "Secrets", "Access", "Audit export", "Vault", "Certificates", "Backup", "Reconciler", "Guardrails", "DNS", "DHCP", "Languages"];
 
 /** The sub-pages of WP3.11b, each with a part only the page itself shows. */
 const PAGES = [
   { key: "access", url: "/settings/access", title: "Access", marker: "access-roles" },
   { key: "audit-export", url: "/settings/audit-export", title: "Audit export", marker: "audit-export-sinks" },
   { key: "vault", url: "/settings/vault", title: "Vault", marker: "vault-key" },
+  { key: "certificates", url: "/settings/certificates", title: "Certificates", marker: "certificates-mode" },
   { key: "backup", url: "/settings/backup", title: "Backup", marker: "backup-status" },
 ] as const;
 

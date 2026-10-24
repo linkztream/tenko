@@ -55,9 +55,13 @@ pub(super) async fn start(
     let policy = TlsPolicy {
         tls13_only: resolved.config.tls.tls13_only || profile == Profile::Hardened,
     };
+    let service = TlsService::new(TlsMode::InternalCa, policy)
+        .map_err(|error| StartError::coded("tls", &error))?;
+    // The stored profile decides, as for the other profile keys: a file written for Home
+    // that meets a Hardened installation does not accept a replacement.
+    service.set_accept_replacement(resolved.config.tls.accept_external_replacement_for(profile));
     let base = TlsSetup {
-        service: TlsService::new(TlsMode::InternalCa, policy)
-            .map_err(|error| StartError::coded("tls", &error))?,
+        service,
         policy,
         lab_plain_http: false,
         profile,
@@ -208,10 +212,15 @@ fn imported(base: TlsSetup, mode: TlsMode, interval: Duration) -> Result<TlsSetu
     switch(&base.service, mode)?;
     let summary = match &base.service.status().certificate {
         Some(info) => format!(
-            "imported certificate {} until {}, watched every {} s",
+            "imported certificate {} until {}, watched every {} s{}",
             info.subject,
             info.not_after,
-            interval.as_secs()
+            interval.as_secs(),
+            if base.service.status().accept_replacement {
+                ""
+            } else {
+                "; a replaced certificate is loaded at the next start"
+            }
         ),
         None => "imported certificate".to_owned(),
     };

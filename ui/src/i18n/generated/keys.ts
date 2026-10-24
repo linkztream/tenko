@@ -638,6 +638,68 @@ export type MessageKey =
   | "backup.warning.failed"
   | "backup.warning.restored"
   | "backup.warning.stale"
+  | "certificates.accept.label"
+  | "certificates.accept.off"
+  | "certificates.accept.on"
+  | "certificates.accept.where"
+  | "certificates.ca.heading"
+  | "certificates.chain"
+  | "certificates.chain_len"
+  | "certificates.days"
+  | "certificates.days_left"
+  | "certificates.error"
+  | "certificates.expiry.expired"
+  | "certificates.expiry.not_yet_valid"
+  | "certificates.expiry.soon"
+  | "certificates.fingerprint"
+  | "certificates.hsts"
+  | "certificates.imported.cert_path"
+  | "certificates.imported.heading"
+  | "certificates.imported.interval"
+  | "certificates.imported.interval.value"
+  | "certificates.imported.key_path"
+  | "certificates.issuer"
+  | "certificates.lede"
+  | "certificates.loaded_at"
+  | "certificates.min_version"
+  | "certificates.min_version.value"
+  | "certificates.mode.heading"
+  | "certificates.mode.imported"
+  | "certificates.mode.imported.help"
+  | "certificates.mode.internal_ca"
+  | "certificates.mode.internal_ca.help"
+  | "certificates.mode.label"
+  | "certificates.mode.plain"
+  | "certificates.mode.plain.help"
+  | "certificates.mode.reverse_proxy"
+  | "certificates.mode.reverse_proxy.help"
+  | "certificates.names"
+  | "certificates.names.none"
+  | "certificates.none"
+  | "certificates.off"
+  | "certificates.on"
+  | "certificates.pending.detected"
+  | "certificates.pending.heading"
+  | "certificates.pending.notice"
+  | "certificates.plain.notice"
+  | "certificates.proxy.heading"
+  | "certificates.proxy.host"
+  | "certificates.proxy.note"
+  | "certificates.proxy.protocol"
+  | "certificates.proxy.trusted"
+  | "certificates.read_at"
+  | "certificates.refresh"
+  | "certificates.rule.hardened"
+  | "certificates.rule.home"
+  | "certificates.rule.lab"
+  | "certificates.rule.standard"
+  | "certificates.rule.unknown"
+  | "certificates.served.heading"
+  | "certificates.subject"
+  | "certificates.title"
+  | "certificates.unknown"
+  | "certificates.valid_from"
+  | "certificates.valid_until"
   | "cluster.action.add"
   | "cluster.action.check_digests"
   | "cluster.action.promote"
@@ -5507,6 +5569,7 @@ export type MessageKey =
   | "settings.nav.access"
   | "settings.nav.audit_export"
   | "settings.nav.backup"
+  | "settings.nav.certificates"
   | "settings.nav.dhcp"
   | "settings.nav.dns"
   | "settings.nav.guardrails"
@@ -6750,6 +6813,16 @@ export interface MessageArgs {
   "backup.schedule.target_dir_help": { dir: string | number };
   "backup.warning.failed": { error: string | number };
   "backup.warning.stale": { days: number };
+  "certificates.chain_len": { count: number };
+  "certificates.days": { days: number };
+  "certificates.error": { error: string | number };
+  "certificates.expiry.expired": { date: string | number };
+  "certificates.expiry.not_yet_valid": { date: string | number };
+  "certificates.expiry.soon": { date: string | number; days: number };
+  "certificates.imported.interval.value": { seconds: number };
+  "certificates.min_version.value": { version: string | number };
+  "certificates.pending.detected": { time: string | number };
+  "certificates.read_at": { time: string | number };
   "cluster.action.promote_named": { name: string | number };
   "cluster.action.remove_named": { name: string | number };
   "cluster.col.format": { format: string | number };
@@ -8520,6 +8593,68 @@ export const messageKeys: readonly MessageKey[] = [
   "backup.warning.failed",
   "backup.warning.restored",
   "backup.warning.stale",
+  "certificates.accept.label",
+  "certificates.accept.off",
+  "certificates.accept.on",
+  "certificates.accept.where",
+  "certificates.ca.heading",
+  "certificates.chain",
+  "certificates.chain_len",
+  "certificates.days",
+  "certificates.days_left",
+  "certificates.error",
+  "certificates.expiry.expired",
+  "certificates.expiry.not_yet_valid",
+  "certificates.expiry.soon",
+  "certificates.fingerprint",
+  "certificates.hsts",
+  "certificates.imported.cert_path",
+  "certificates.imported.heading",
+  "certificates.imported.interval",
+  "certificates.imported.interval.value",
+  "certificates.imported.key_path",
+  "certificates.issuer",
+  "certificates.lede",
+  "certificates.loaded_at",
+  "certificates.min_version",
+  "certificates.min_version.value",
+  "certificates.mode.heading",
+  "certificates.mode.imported",
+  "certificates.mode.imported.help",
+  "certificates.mode.internal_ca",
+  "certificates.mode.internal_ca.help",
+  "certificates.mode.label",
+  "certificates.mode.plain",
+  "certificates.mode.plain.help",
+  "certificates.mode.reverse_proxy",
+  "certificates.mode.reverse_proxy.help",
+  "certificates.names",
+  "certificates.names.none",
+  "certificates.none",
+  "certificates.off",
+  "certificates.on",
+  "certificates.pending.detected",
+  "certificates.pending.heading",
+  "certificates.pending.notice",
+  "certificates.plain.notice",
+  "certificates.proxy.heading",
+  "certificates.proxy.host",
+  "certificates.proxy.note",
+  "certificates.proxy.protocol",
+  "certificates.proxy.trusted",
+  "certificates.read_at",
+  "certificates.refresh",
+  "certificates.rule.hardened",
+  "certificates.rule.home",
+  "certificates.rule.lab",
+  "certificates.rule.standard",
+  "certificates.rule.unknown",
+  "certificates.served.heading",
+  "certificates.subject",
+  "certificates.title",
+  "certificates.unknown",
+  "certificates.valid_from",
+  "certificates.valid_until",
   "cluster.action.add",
   "cluster.action.check_digests",
   "cluster.action.promote",
@@ -13389,6 +13524,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.access",
   "settings.nav.audit_export",
   "settings.nav.backup",
+  "settings.nav.certificates",
   "settings.nav.dhcp",
   "settings.nav.dns",
   "settings.nav.guardrails",

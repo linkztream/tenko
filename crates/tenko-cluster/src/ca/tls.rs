@@ -452,6 +452,19 @@ pub fn server_config(
     Ok(Arc::new(config))
 }
 
+/// A certificate found in the imported files that the listener does not serve: the
+/// operator's profile does not accept a replacement from outside, so it is loaded at the
+/// next start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingCertificate {
+    /// What the leaf certificate in the files says.
+    pub certificate: CertInfo,
+    /// Number of certificates in the chain file.
+    pub chain_len: usize,
+    /// When the watcher first saw this certificate in the files.
+    pub detected_at: Timestamp,
+}
+
 /// What the TLS layer currently serves, published on `TlsService::watch` for the API
 /// listener and the health view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,10 +473,20 @@ pub struct TlsStatus {
     pub mode: TlsMode,
     /// The served certificate (modes a and b, once loaded).
     pub certificate: Option<CertInfo>,
+    /// Number of certificates in the served chain (the leaf and its intermediates).
+    pub chain_len: usize,
     /// The last load or reload failure; the previous material keeps serving.
     pub last_error: Option<String>,
     /// When the served material was installed.
     pub loaded_at: Option<Timestamp>,
+    /// Whether a certificate replaced in the imported files is loaded while the listener
+    /// runs (the profile decides, see `tls.accept_external_replacement`).
+    pub accept_replacement: bool,
+    /// Mode b: a newer certificate is on disk and waits for the next start, because
+    /// `accept_replacement` is off.
+    pub pending: Option<PendingCertificate>,
+    /// Mode b: how often the watcher looks at the files, once it runs.
+    pub watch_interval: Option<std::time::Duration>,
     /// Incremented on every change of mode, material or error.
     pub revision: u64,
 }

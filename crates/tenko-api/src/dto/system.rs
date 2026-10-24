@@ -387,6 +387,121 @@ pub struct CertificateStatus {
     pub loaded_at: Timestamp,
 }
 
+/// How close a certificate is to its end of validity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CertificateState {
+    /// 30 whole days or more left.
+    Valid,
+    /// Fewer than 30 whole days left.
+    Warning,
+    /// Fewer than 7 whole days left.
+    Critical,
+    /// Past its end of validity.
+    Expired,
+    /// Its validity has not begun (a wrong clock, or a certificate dated ahead).
+    NotYetValid,
+}
+
+/// What a certificate says: the leaf of a chain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TlsCertificate {
+    /// Subject distinguished name (RFC 4514 text).
+    pub subject: String,
+    /// Issuer distinguished name.
+    pub issuer: String,
+    /// DNS names of the subject alternative name.
+    pub dns_names: Vec<String>,
+    /// IP addresses of the subject alternative name.
+    pub ip_addresses: Vec<String>,
+    /// Start of validity.
+    pub not_before: Timestamp,
+    /// End of validity.
+    pub not_after: Timestamp,
+    /// Whole days until `not_after` (negative once expired).
+    pub days_left: i64,
+    /// The classification of `days_left`.
+    pub state: CertificateState,
+    /// Number of certificates in the chain: the leaf and its intermediates.
+    pub chain_len: u32,
+    /// SHA-256 of the leaf certificate (DER), lower-case hexadecimal.
+    pub sha256: String,
+}
+
+/// Mode b: the files the certificate is read from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ImportedTls {
+    /// The certificate chain file (PEM, leaf first).
+    pub cert_path: String,
+    /// The private key file; its contents are never part of any answer.
+    pub key_path: String,
+    /// Seconds between checks of the files for a change, once the watcher runs.
+    pub watch_interval_secs: Option<u64>,
+    /// Whether a certificate replaced in the files while the listener runs is loaded. The
+    /// security profile decides: on under Lab and Home, off under Standard unless
+    /// `tls.accept_external_replacement` is set, never under Hardened.
+    pub accept_external_replacement: bool,
+}
+
+/// Mode a: the root of the internal CA that issued the server certificate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct InternalCaTls {
+    /// Subject of the CA root certificate, when it can be read.
+    pub root_subject: Option<String>,
+    /// End of validity of the CA root, when it can be read.
+    pub root_not_after: Option<Timestamp>,
+    /// SHA-256 of the CA root certificate, lower-case hexadecimal.
+    pub root_sha256: Option<String>,
+    /// Where the root is downloaded (`GET /system/ca-root`, no sign-in needed).
+    pub download_path: String,
+}
+
+/// Mode c: the reverse proxy that ends TLS.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ReverseProxyTls {
+    /// Addresses and networks (CIDR) of the proxies allowed to connect.
+    pub trusted_proxies: Vec<String>,
+    /// Whether the proxies speak the PROXY protocol.
+    pub proxy_protocol: bool,
+    /// The public host name clients use.
+    pub public_host: String,
+}
+
+/// A certificate that is on disk but not served: the profile does not accept a
+/// replacement while the listener runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PendingTlsCertificate {
+    /// What the certificate in the files says.
+    pub certificate: TlsCertificate,
+    /// When the watcher first saw it.
+    pub detected_at: Timestamp,
+}
+
+/// `GET /system/tls`: the certificates of this node's listener.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TlsDetails {
+    /// The TLS mode.
+    pub mode: TlsMode,
+    /// Lowest TLS version accepted (`1.2` or `1.3`), when the listener terminates TLS.
+    pub min_version: Option<String>,
+    /// Whether HTTPS responses carry `Strict-Transport-Security`.
+    pub hsts: bool,
+    /// The certificate the listener serves (modes a and b).
+    pub certificate: Option<TlsCertificate>,
+    /// When the listener loaded the served certificate.
+    pub loaded_at: Option<Timestamp>,
+    /// The last failed load or reload; the previous certificate keeps serving.
+    pub last_error: Option<String>,
+    /// A newer certificate on disk that waits for the next start (mode b).
+    pub pending: Option<PendingTlsCertificate>,
+    /// Mode b: the files and the replacement setting.
+    pub imported: Option<ImportedTls>,
+    /// Mode a: the CA root.
+    pub internal_ca: Option<InternalCaTls>,
+    /// Mode c: the proxies and the public host name.
+    pub reverse_proxy: Option<ReverseProxyTls>,
+}
+
 /// Which web UI the binary serves.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct UiStatus {

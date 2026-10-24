@@ -18,6 +18,9 @@
 //! server binary provides it as the request extension `Arc<CaRootSource>`; without it, or
 //! in another TLS mode, the answer is 404 `tls.no_internal_ca`.
 //!
+//! `GET /system/tls` ([`tls`]) reports the certificate of the listener, the files it comes
+//! from and the CA root.
+//!
 //! `GET /health` and `GET /system/status` name the version the server runs as: the request
 //! extension [`RunningVersion`] when the server binary provides it (under the version layout
 //! of in-app updates, the version the update service reports), else the crate version.
@@ -55,12 +58,14 @@ use crate::{
 
 pub mod diagnostics;
 pub mod modules;
+pub mod tls;
 pub mod updates;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .merge(diagnostics::routes())
         .merge(modules::routes())
+        .merge(tls::routes())
         .merge(updates::routes())
         .routes(routes!(health))
         .routes(routes!(ready))
@@ -121,6 +126,15 @@ impl CaRootSource {
     /// modes.
     pub fn current(&self) -> Option<Arc<str>> {
         matches!(self.tls.status().mode, TlsMode::InternalCa).then(|| Arc::clone(&self.root_pem))
+    }
+
+    /// What the root certificate says, while the listener is in TLS mode a and the PEM can
+    /// be read.
+    pub fn info(&self) -> Option<tenko_cluster::ca::CertInfo> {
+        use rustls::pki_types::{CertificateDer, pem::PemObject as _};
+        let root = self.current()?;
+        let der = CertificateDer::from_pem_slice(root.as_bytes()).ok()?;
+        tenko_cluster::ca::CertInfo::from_der(&der).ok()
     }
 
     /// The SHA-256 fingerprint of the root (hex) while the listener is in TLS mode a,

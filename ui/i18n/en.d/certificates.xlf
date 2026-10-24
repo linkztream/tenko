@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="certificates">
+      <unit id="settings.nav.certificates">
+        <notes><note category="description">Link in the settings navigation to the certificates page.</note></notes>
+        <segment><source>Certificates</source></segment>
+      </unit>
+      <unit id="certificates.title">
+        <notes><note category="description">Title of the certificates settings page and its entry in the browser tab.</note></notes>
+        <segment><source>Certificates</source></segment>
+      </unit>
+      <unit id="certificates.lede">
+        <segment><source>The certificate that the web interface and the API of this node show to browsers and clients, and where it comes from. The TLS mode and the files are set in tenko.toml; this page shows what is in force and changes nothing.</source></segment>
+      </unit>
+      <unit id="certificates.refresh">
+        <notes><note category="description">Button that reads the certificates again.</note></notes>
+        <segment><source>Refresh</source></segment>
+      </unit>
+      <unit id="certificates.read_at">
+        <notes><note category="description">Time the page last read the certificates.</note></notes>
+        <segment><source>Read {time}</source></segment>
+      </unit>
+      <unit id="certificates.mode.heading">
+        <segment><source>TLS mode</source></segment>
+      </unit>
+      <unit id="certificates.mode.label">
+        <segment><source>Mode</source></segment>
+      </unit>
+      <unit id="certificates.mode.internal_ca">
+        <segment><source>Internal certificate authority</source></segment>
+      </unit>
+      <unit id="certificates.mode.internal_ca.help">
+        <segment><source>The certificate is issued by Tenko's own certificate authority. Install its root certificate on the computers you administer from.</source></segment>
+      </unit>
+      <unit id="certificates.mode.imported">
+        <segment><source>Imported certificate</source></segment>
+      </unit>
+      <unit id="certificates.mode.imported.help">
+        <segment><source>Your own certificate chain and key are read from PEM files on this node.</source></segment>
+      </unit>
+      <unit id="certificates.mode.reverse_proxy">
+        <segment><source>Reverse proxy</source></segment>
+      </unit>
+      <unit id="certificates.mode.reverse_proxy.help">
+        <segment><source>TLS ends in a proxy in front of Tenko, which holds the certificate.</source></segment>
+      </unit>
+      <unit id="certificates.mode.plain">
+        <segment><source>Plain HTTP</source></segment>
+      </unit>
+      <unit id="certificates.mode.plain.help">
+        <segment><source>No TLS at all. Only the Lab profile allows it.</source></segment>
+      </unit>
+      <unit id="certificates.plain.notice">
+        <segment><source>Plain HTTP is accepted from every source. Use it in a lab only.</source></segment>
+      </unit>
+      <unit id="certificates.min_version">
+        <segment><source>Lowest TLS version</source></segment>
+      </unit>
+      <unit id="certificates.min_version.value">
+        <segment><source>TLS {version}</source></segment>
+      </unit>
+      <unit id="certificates.hsts">
+        <notes><note category="description">HTTP Strict Transport Security.</note></notes>
+        <segment><source>HSTS</source></segment>
+      </unit>
+      <unit id="certificates.on">
+        <segment><source>On</source></segment>
+      </unit>
+      <unit id="certificates.off">
+        <segment><source>Off</source></segment>
+      </unit>
+      <unit id="certificates.served.heading">
+        <segment><source>Certificate in use</source></segment>
+      </unit>
+      <unit id="certificates.subject">
+        <segment><source>Subject</source></segment>
+      </unit>
+      <unit id="certificates.names">
+        <segment><source>Names</source></segment>
+      </unit>
+      <unit id="certificates.names.none">
+        <segment><source>No names</source></segment>
+      </unit>
+      <unit id="certificates.issuer">
+        <segment><source>Issuer</source></segment>
+      </unit>
+      <unit id="certificates.valid_from">
+        <segment><source>Valid from</source></segment>
+      </unit>
+      <unit id="certificates.valid_until">
+        <segment><source>Valid until</source></segment>
+      </unit>
+      <unit id="certificates.days_left">
+        <segment><source>Days left</source></segment>
+      </unit>
+      <unit id="certificates.days">
+        <segment><source>{days, plural, one {# day} other {# days}}</source></segment>
+      </unit>
+      <unit id="certificates.chain">
+        <segment><source>Chain</source></segment>
+      </unit>
+      <unit id="certificates.chain_len">
+        <segment><source>{count, plural, one {# certificate} other {# certificates}}</source></segment>
+      </unit>
+      <unit id="certificates.fingerprint">
+        <segment><source>SHA-256 fingerprint</source></segment>
+      </unit>
+      <unit id="certificates.loaded_at">
+        <notes><note category="description">When Tenko loaded the certificate in use.</note></notes>
+        <segment><source>Loaded</source></segment>
+      </unit>
+      <unit id="certificates.unknown">
+        <segment><source>Unknown</source></segment>
+      </unit>
+      <unit id="certificates.none">
+        <segment><source>No certificate is installed, so TLS handshakes fail.</source></segment>
+      </unit>
+      <unit id="certificates.error">
+        <segment><source>The last attempt to load a certificate failed, and the previous certificate stays in use: {error}</source></segment>
+      </unit>
+      <unit id="certificates.expiry.soon">
+        <notes><note category="description">Shown while the status warning for an expiring certificate is active.</note></notes>
+        <segment><source>The server certificate expires in {days, plural, one {# day} other {# days}}, on {date}. Replace it before then.</source></segment>
+      </unit>
+      <unit id="certificates.expiry.expired">
+        <segment><source>The server certificate expired on {date}. Clients that check it refuse the connection.</source></segment>
+      </unit>
+      <unit id="certificates.expiry.not_yet_valid">
+        <segment><source>The server certificate is not valid until {date}. Check the clock of this node and the certificate.</source></segment>
+      </unit>
+      <unit id="certificates.pending.notice">
+        <segment><source>A newer certificate is on disk but is not in use. This security profile does not load a replaced certificate while Tenko runs; restart Tenko to apply it.</source></segment>
+      </unit>
+      <unit id="certificates.pending.heading">
+        <segment><source>Certificate waiting for a restart</source></segment>
+      </unit>
+      <unit id="certificates.pending.detected">
+        <segment><source>Found in the files {time}. It is loaded at the next start.</source></segment>
+      </unit>
+      <unit id="certificates.imported.heading">
+        <segment><source>Imported files</source></segment>
+      </unit>
+      <unit id="certificates.imported.cert_path">
+        <segment><source>Certificate chain file</source></segment>
+      </unit>
+      <unit id="certificates.imported.key_path">
+        <segment><source>Private key file</source></segment>
+      </unit>
+      <unit id="certificates.imported.interval">
+        <segment><source>Checked for changes</source></segment>
+      </unit>
+      <unit id="certificates.imported.interval.value">
+        <segment><source>every {seconds, number} s</source></segment>
+      </unit>
+      <unit id="certificates.accept.label">
+        <segment><source>Replacement from outside</source></segment>
+      </unit>
+      <unit id="certificates.accept.on">
+        <segment><source>Accepted</source></segment>
+      </unit>
+      <unit id="certificates.accept.off">
+        <segment><source>Not accepted</source></segment>
+      </unit>
+      <unit id="certificates.accept.where">
+        <segment><source>The setting is tls.accept_external_replacement in tenko.toml. While it is off, a certificate that is uploaded or replaced is read at the next start only.</source></segment>
+      </unit>
+      <unit id="certificates.rule.lab">
+        <segment><source>Lab profile: a certificate replaced in the files is loaded within seconds. Turn that off with tls.accept_external_replacement = false.</source></segment>
+      </unit>
+      <unit id="certificates.rule.home">
+        <segment><source>Home profile: a certificate replaced in the files is loaded within seconds. Turn that off with tls.accept_external_replacement = false.</source></segment>
+      </unit>
+      <unit id="certificates.rule.standard">
+        <segment><source>Standard profile: off unless you set tls.accept_external_replacement = true. A replaced certificate is loaded at the next restart.</source></segment>
+      </unit>
+      <unit id="certificates.rule.hardened">
+        <segment><source>Hardened profile: never. A replaced certificate is loaded at the next restart only, and the configuration refuses tls.accept_external_replacement = true.</source></segment>
+      </unit>
+      <unit id="certificates.rule.unknown">
+        <segment><source>The security profile could not be read. Home and Lab load a replaced certificate while Tenko runs, Standard only when you switch it on, and Hardened never.</source></segment>
+      </unit>
+      <unit id="certificates.ca.heading">
+        <segment><source>Root of the internal certificate authority</source></segment>
+      </unit>
+      <unit id="certificates.proxy.heading">
+        <segment><source>Reverse proxy</source></segment>
+      </unit>
+      <unit id="certificates.proxy.note">
+        <segment><source>Tenko speaks plain HTTP to the proxies below. The certificate that clients see is the proxy's, and it is renewed there.</source></segment>
+      </unit>
+      <unit id="certificates.proxy.host">
+        <segment><source>Public host name</source></segment>
+      </unit>
+      <unit id="certificates.proxy.trusted">
+        <segment><source>Trusted proxies</source></segment>
+      </unit>
+      <unit id="certificates.proxy.protocol">
+        <segment><source>PROXY protocol</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

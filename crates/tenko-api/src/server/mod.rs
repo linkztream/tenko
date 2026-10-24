@@ -188,6 +188,16 @@ pub(crate) struct ListenerInfo {
 }
 
 impl ListenerInfo {
+    /// The mode as the API names it: mode c without a trusted-proxy rule is plain HTTP.
+    pub(crate) fn mode_of(&self, mode: &TlsMode) -> system::TlsMode {
+        match mode {
+            TlsMode::InternalCa => system::TlsMode::InternalCa,
+            TlsMode::Imported { .. } => system::TlsMode::Imported,
+            TlsMode::ReverseProxy { .. } if self.lab_plain_http => system::TlsMode::Plain,
+            TlsMode::ReverseProxy { .. } => system::TlsMode::ReverseProxy,
+        }
+    }
+
     /// The TLS status and the warnings it implies.
     pub(crate) fn status(
         &self,
@@ -195,12 +205,7 @@ impl ListenerInfo {
     ) -> (system::TlsStatus, Vec<StatusWarning>) {
         let status = self.tls.status();
         let mut warnings = Vec::new();
-        let mode = match &status.mode {
-            TlsMode::InternalCa => system::TlsMode::InternalCa,
-            TlsMode::Imported { .. } => system::TlsMode::Imported,
-            TlsMode::ReverseProxy { .. } if self.lab_plain_http => system::TlsMode::Plain,
-            TlsMode::ReverseProxy { .. } => system::TlsMode::ReverseProxy,
-        };
+        let mode = self.mode_of(&status.mode);
         if mode == system::TlsMode::Plain {
             warnings.push(warning(
                 "sys.tls.plain_http",
@@ -238,6 +243,19 @@ impl ListenerInfo {
                 "sys.tls.no_certificate",
                 "TLS is on but no certificate is installed; handshakes fail",
                 &[],
+            ));
+        }
+        if let Some(pending) = &status.pending {
+            warnings.push(warning(
+                "sys.tls.certificate_pending",
+                &format!(
+                    "a newer certificate (valid until {}) is on disk and is not served: this                      security profile does not accept a replaced certificate while the                      listener runs; restart to apply it",
+                    pending.certificate.not_after
+                ),
+                &[
+                    ("not_after", pending.certificate.not_after.to_string()),
+                    ("sha256", pending.certificate.sha256.clone()),
+                ],
             ));
         }
         if let Some(error) = &status.last_error {

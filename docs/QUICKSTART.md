@@ -26,6 +26,9 @@ one link away (section 5). The node below is 192.0.2.10 in 192.0.2.0/24, the rou
 
 3. Open `https://<the node's address>:8443/`, accept the internal CA's certificate once,
    and paste the setup token the installer printed.
+   To serve your own certificate instead of the internal CA's (for example one that an
+   ACME client renews), or to see which certificate the node serves, read
+   [certificates.md](certificates.md).
 4. Finish the first-run wizard: the profile, the administrator, the host name, the data
    directory, the roles with their modules, and the DNS and DHCP steps (both can be skipped
    and done in section 3).

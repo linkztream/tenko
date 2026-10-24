@@ -295,6 +295,101 @@ fn reload_serves_replaced_files() {
 }
 
 #[test]
+fn a_replacement_is_pending_while_the_service_does_not_accept_it() {
+    let first = Identity::new();
+    let dir = TestDir::new();
+    dir.write(&first);
+    let tls = service(dir.mode());
+    tls.set_accept_replacement(false);
+    // The start loads the files whatever the setting says.
+    tls.set_mode(dir.mode()).expect("initial load");
+    assert_eq!(served_leaf(&tls), first.der);
+    assert_eq!(tls.status().chain_len, 1);
+    assert!(tls.status().pending.is_none());
+
+    let second = Identity::new();
+    dir.write(&second);
+
+    assert_eq!(tls.reload(), Ok(false));
+    assert_eq!(
+        served_leaf(&tls),
+        first.der,
+        "the old certificate keeps serving"
+    );
+    let status = tls.status();
+    assert!(!status.accept_replacement);
+    let pending = status
+        .pending
+        .as_ref()
+        .expect("the new certificate is pending");
+    assert_eq!(pending.certificate.sha256, second.sha256());
+    assert_eq!(pending.chain_len, 1);
+    assert!(status.last_error.is_none());
+    assert_eq!(
+        status.certificate.as_ref().map(|info| info.sha256.clone()),
+        Some(first.sha256())
+    );
+
+    // The same files again change nothing, not even the revision.
+    let revision = status.revision;
+    assert_eq!(tls.reload(), Ok(false));
+    assert_eq!(tls.status().revision, revision);
+
+    // A restart loads what is on disk and the pending state is gone.
+    let restarted = service(dir.mode());
+    restarted.set_accept_replacement(false);
+    restarted.set_mode(dir.mode()).expect("load at start");
+    assert_eq!(served_leaf(&restarted), second.der);
+    assert!(restarted.status().pending.is_none());
+}
+
+#[test]
+fn restoring_the_served_files_clears_the_pending_state() {
+    let first = Identity::new();
+    let (dir, service) = loaded(&first);
+    service.set_accept_replacement(false);
+    dir.write(&Identity::new());
+    assert_eq!(service.reload(), Ok(false));
+    assert!(service.status().pending.is_some());
+
+    dir.write(&first);
+
+    assert_eq!(service.reload(), Ok(false));
+    assert!(service.status().pending.is_none());
+}
+
+#[test]
+fn accepting_again_installs_the_pending_files_at_the_next_poll() {
+    let first = Identity::new();
+    let (dir, service) = loaded(&first);
+    service.set_accept_replacement(false);
+    let second = Identity::new();
+    dir.write(&second);
+    assert_eq!(service.reload(), Ok(false));
+
+    service.set_accept_replacement(true);
+
+    assert_eq!(service.reload(), Ok(true));
+    assert_eq!(served_leaf(&service), second.der);
+    assert!(service.status().pending.is_none());
+}
+
+#[test]
+fn a_broken_replacement_is_an_error_not_a_pending_certificate() {
+    let first = Identity::new();
+    let (dir, service) = loaded(&first);
+    service.set_accept_replacement(false);
+    fs::write(dir.cert_path(), "not a certificate").expect("write");
+
+    assert!(service.reload().is_err());
+
+    let status = service.status();
+    assert!(status.pending.is_none());
+    assert!(status.last_error.is_some());
+    assert_eq!(served_leaf(&service), first.der);
+}
+
+#[test]
 fn reload_of_unchanged_files_returns_false_and_publishes_nothing() {
     let identity = Identity::new();
     let (_dir, service) = loaded(&identity);
@@ -614,9 +709,14 @@ async fn watcher_reports_a_broken_file_and_recovers() {
 async fn watcher_leaves_other_modes_alone_and_stops_when_aborted() {
     let service = service(TlsMode::InternalCa);
     service.install(Identity::new().material());
-    let revision = service.status().revision;
 
     let handle = service.spawn_watcher(Duration::from_millis(20));
+    // Starting the watcher publishes its interval, once.
+    let revision = service.status().revision;
+    assert_eq!(
+        service.status().watch_interval,
+        Some(Duration::from_millis(20))
+    );
     tokio::time::sleep(Duration::from_millis(250)).await;
     assert!(!handle.is_finished());
     assert_eq!(service.status().revision, revision);

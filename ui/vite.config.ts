@@ -87,6 +87,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   audit_export: ["audit_export."],
   vault: ["vault."],
   backup: ["backup."],
+  certificates: ["certificates."],
   reconciler: ["reconciler."],
   guardrails: ["guardrails."],
   languages: ["languages.", "errors.i18n."],

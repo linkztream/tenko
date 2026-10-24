@@ -35,5 +35,5 @@ pub use proxy::TrustedProxies;
 pub use reload::{DEFAULT_WATCH_INTERVAL, TlsService};
 pub use tls::{
     CertInfo, CertSource, EXPIRY_CRITICAL_DAYS, EXPIRY_WARNING_DAYS, Expiry, ExpiryState,
-    TlsMaterial, TlsMode, TlsPolicy, TlsResolver, TlsStatus, server_config,
+    PendingCertificate, TlsMaterial, TlsMode, TlsPolicy, TlsResolver, TlsStatus, server_config,
 };

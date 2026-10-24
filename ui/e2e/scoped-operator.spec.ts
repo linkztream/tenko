@@ -40,6 +40,7 @@ const ADMIN_PAGES: ReadonlyArray<{ path: string; root: string }> = [
   { path: "/settings/access", root: "page-access" },
   { path: "/settings/audit-export", root: "page-audit-export" },
   { path: "/settings/vault", root: "page-vault" },
+  { path: "/settings/certificates", root: "page-certificates" },
   { path: "/settings/backup", root: "page-backup" },
   { path: "/settings/reconciler", root: "page-reconciler" },
   { path: "/settings/guardrails", root: "page-guardrails" },

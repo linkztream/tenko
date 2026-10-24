@@ -14,6 +14,7 @@ import { banner, profileSettings } from "./profiles";
 import { Problem, fail, ok } from "./reply";
 import { route } from "./route";
 import { modulesWarnings, statusModules } from "./routes-updates";
+import { tlsWarnings } from "./routes-tls";
 import { iso, randomId, uuidHandle } from "./util";
 import {
   failPolicy,
@@ -155,7 +156,7 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
   }
   // The modules this installation runs, and a pending change of them, are for administrators.
   const admin = isAdmin(user);
-  if (admin) warnings.push(...modulesWarnings());
+  if (admin) warnings.push(...modulesWarnings(), ...tlsWarnings());
   // Nodes that share no protocol major with this controller (docs/cluster.md, section 5).
   warnings.push(...clusterWarnings(), ...dataFormatWarnings());
   return ok<SystemStatus>({

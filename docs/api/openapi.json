@@ -30146,6 +30146,57 @@
         }
       }
     },
+    "/api/v1/system/tls": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get the TLS mode and certificates of this node's listener",
+        "operationId": "get_tls",
+        "responses": {
+          "200": {
+            "description": "The TLS mode, the served certificate and what belongs to the mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TlsDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The listener is not running yet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/updates": {
       "get": {
         "tags": [
@@ -37608,6 +37659,17 @@
           }
         }
       },
+      "CertificateState": {
+        "type": "string",
+        "description": "How close a certificate is to its end of validity.",
+        "enum": [
+          "valid",
+          "warning",
+          "critical",
+          "expired",
+          "not_yet_valid"
+        ]
+      },
       "CertificateStatus": {
         "type": "object",
         "description": "The certificate the listener serves.",
@@ -44258,6 +44320,38 @@
           }
         }
       },
+      "ImportedTls": {
+        "type": "object",
+        "description": "Mode b: the files the certificate is read from.",
+        "required": [
+          "cert_path",
+          "key_path",
+          "accept_external_replacement"
+        ],
+        "properties": {
+          "accept_external_replacement": {
+            "type": "boolean",
+            "description": "Whether a certificate replaced in the files while the listener runs is loaded. The\nsecurity profile decides: on under Lab and Home, off under Standard unless\n`tls.accept_external_replacement` is set, never under Hardened."
+          },
+          "cert_path": {
+            "type": "string",
+            "description": "The certificate chain file (PEM, leaf first)."
+          },
+          "key_path": {
+            "type": "string",
+            "description": "The private key file; its contents are never part of any answer."
+          },
+          "watch_interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds between checks of the files for a change, once the watcher runs.",
+            "minimum": 0
+          }
+        }
+      },
       "InfraAddressItem": {
         "type": "object",
         "description": "One address of an authority server in the infrastructure cache.",
@@ -45202,6 +45296,44 @@
           "name": {
             "type": "string",
             "description": "Name, such as `eth0`."
+          }
+        }
+      },
+      "InternalCaTls": {
+        "type": "object",
+        "description": "Mode a: the root of the internal CA that issued the server certificate.",
+        "required": [
+          "download_path"
+        ],
+        "properties": {
+          "download_path": {
+            "type": "string",
+            "description": "Where the root is downloaded (`GET /system/ca-root`, no sign-in needed)."
+          },
+          "root_not_after": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "End of validity of the CA root, when it can be read."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "root_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SHA-256 of the CA root certificate, lower-case hexadecimal."
+          },
+          "root_subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subject of the CA root certificate, when it can be read."
           }
         }
       },
@@ -58629,6 +58761,24 @@
           }
         }
       },
+      "PendingTlsCertificate": {
+        "type": "object",
+        "description": "A certificate that is on disk but not served: the profile does not accept a\nreplacement while the listener runs.",
+        "required": [
+          "certificate",
+          "detected_at"
+        ],
+        "properties": {
+          "certificate": {
+            "$ref": "#/components/schemas/TlsCertificate",
+            "description": "What the certificate in the files says."
+          },
+          "detected_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the watcher first saw it."
+          }
+        }
+      },
       "PlanOptions": {
         "type": "object",
         "description": "Options of one plan.",
@@ -63961,6 +64111,32 @@
         },
         "additionalProperties": false
       },
+      "ReverseProxyTls": {
+        "type": "object",
+        "description": "Mode c: the reverse proxy that ends TLS.",
+        "required": [
+          "trusted_proxies",
+          "proxy_protocol",
+          "public_host"
+        ],
+        "properties": {
+          "proxy_protocol": {
+            "type": "boolean",
+            "description": "Whether the proxies speak the PROXY protocol."
+          },
+          "public_host": {
+            "type": "string",
+            "description": "The public host name clients use."
+          },
+          "trusted_proxies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Addresses and networks (CIDR) of the proxies allowed to connect."
+          }
+        }
+      },
       "Revision": {
         "type": "integer",
         "format": "int64",
@@ -68872,6 +69048,171 @@
         "type": "string",
         "format": "date-time",
         "description": "RFC 3339 date and time in UTC"
+      },
+      "TlsCertificate": {
+        "type": "object",
+        "description": "What a certificate says: the leaf of a chain.",
+        "required": [
+          "subject",
+          "issuer",
+          "dns_names",
+          "ip_addresses",
+          "not_before",
+          "not_after",
+          "days_left",
+          "state",
+          "chain_len",
+          "sha256"
+        ],
+        "properties": {
+          "chain_len": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of certificates in the chain: the leaf and its intermediates.",
+            "minimum": 0
+          },
+          "days_left": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole days until `not_after` (negative once expired)."
+          },
+          "dns_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DNS names of the subject alternative name."
+          },
+          "ip_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IP addresses of the subject alternative name."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "Issuer distinguished name."
+          },
+          "not_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "End of validity."
+          },
+          "not_before": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Start of validity."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the leaf certificate (DER), lower-case hexadecimal."
+          },
+          "state": {
+            "$ref": "#/components/schemas/CertificateState",
+            "description": "The classification of `days_left`."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject distinguished name (RFC 4514 text)."
+          }
+        }
+      },
+      "TlsDetails": {
+        "type": "object",
+        "description": "`GET /system/tls`: the certificates of this node's listener.",
+        "required": [
+          "mode",
+          "hsts"
+        ],
+        "properties": {
+          "certificate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TlsCertificate",
+                "description": "The certificate the listener serves (modes a and b)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hsts": {
+            "type": "boolean",
+            "description": "Whether HTTPS responses carry `Strict-Transport-Security`."
+          },
+          "imported": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImportedTls",
+                "description": "Mode b: the files and the replacement setting."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "internal_ca": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/InternalCaTls",
+                "description": "Mode a: the CA root."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The last failed load or reload; the previous certificate keeps serving."
+          },
+          "loaded_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the listener loaded the served certificate."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Lowest TLS version accepted (`1.2` or `1.3`), when the listener terminates TLS."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TlsMode",
+            "description": "The TLS mode."
+          },
+          "pending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingTlsCertificate",
+                "description": "A newer certificate on disk that waits for the next start (mode b)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reverse_proxy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReverseProxyTls",
+                "description": "Mode c: the proxies and the public host name."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "TlsMode": {
         "type": "string",

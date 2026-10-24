@@ -4589,6 +4589,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/tls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the TLS mode and certificates of this node's listener */
+        get: operations["get_tls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/updates": {
         parameters: {
             query?: never;
@@ -6258,6 +6275,11 @@ export interface components {
             /** @description SHA-256 of the certificate, lower-case hex. */
             sha256: string;
         };
+        /**
+         * @description How close a certificate is to its end of validity.
+         * @enum {string}
+         */
+        CertificateState: "valid" | "warning" | "critical" | "expired" | "not_yet_valid";
         /** @description The certificate the listener serves. */
         CertificateStatus: {
             /**
@@ -8861,6 +8883,24 @@ export interface components {
             /** @description The targets the mapping step offers (custom fields included). */
             targets: components["schemas"]["TargetInfo"][];
         };
+        /** @description Mode b: the files the certificate is read from. */
+        ImportedTls: {
+            /**
+             * @description Whether a certificate replaced in the files while the listener runs is loaded. The
+             *     security profile decides: on under Lab and Home, off under Standard unless
+             *     `tls.accept_external_replacement` is set, never under Hardened.
+             */
+            accept_external_replacement: boolean;
+            /** @description The certificate chain file (PEM, leaf first). */
+            cert_path: string;
+            /** @description The private key file; its contents are never part of any answer. */
+            key_path: string;
+            /**
+             * Format: int64
+             * @description Seconds between checks of the files for a change, once the watcher runs.
+             */
+            watch_interval_secs?: number | null;
+        };
         /** @description One address of an authority server in the infrastructure cache. */
         InfraAddressItem: {
             /** @description The address. */
@@ -9211,6 +9251,16 @@ export interface components {
             mac?: components["schemas"]["MacAddr"] | null;
             /** @description Name, such as `eth0`. */
             name: string;
+        };
+        /** @description Mode a: the root of the internal CA that issued the server certificate. */
+        InternalCaTls: {
+            /** @description Where the root is downloaded (`GET /system/ca-root`, no sign-in needed). */
+            download_path: string;
+            root_not_after?: components["schemas"]["Timestamp"] | null;
+            /** @description SHA-256 of the CA root certificate, lower-case hexadecimal. */
+            root_sha256?: string | null;
+            /** @description Subject of the CA root certificate, when it can be read. */
+            root_subject?: string | null;
         };
         /**
          * @description One change, as part of a plan.
@@ -14476,6 +14526,16 @@ export interface components {
              */
             target: number;
         };
+        /**
+         * @description A certificate that is on disk but not served: the profile does not accept a
+         *     replacement while the listener runs.
+         */
+        PendingTlsCertificate: {
+            /** @description What the certificate in the files says. */
+            certificate: components["schemas"]["TlsCertificate"];
+            /** @description When the watcher first saw it. */
+            detected_at: components["schemas"]["Timestamp"];
+        };
         /** @description Options of one plan. */
         PlanOptions: {
             /**
@@ -16594,6 +16654,15 @@ export interface components {
              * @default null
              */
             ttl_secs: number | null;
+        };
+        /** @description Mode c: the reverse proxy that ends TLS. */
+        ReverseProxyTls: {
+            /** @description Whether the proxies speak the PROXY protocol. */
+            proxy_protocol: boolean;
+            /** @description The public host name clients use. */
+            public_host: string;
+            /** @description Addresses and networks (CIDR) of the proxies allowed to connect. */
+            trusted_proxies: string[];
         };
         /**
          * Format: int64
@@ -18772,6 +18841,52 @@ export interface components {
          * @description RFC 3339 date and time in UTC
          */
         Timestamp: string;
+        /** @description What a certificate says: the leaf of a chain. */
+        TlsCertificate: {
+            /**
+             * Format: int32
+             * @description Number of certificates in the chain: the leaf and its intermediates.
+             */
+            chain_len: number;
+            /**
+             * Format: int64
+             * @description Whole days until `not_after` (negative once expired).
+             */
+            days_left: number;
+            /** @description DNS names of the subject alternative name. */
+            dns_names: string[];
+            /** @description IP addresses of the subject alternative name. */
+            ip_addresses: string[];
+            /** @description Issuer distinguished name. */
+            issuer: string;
+            /** @description End of validity. */
+            not_after: components["schemas"]["Timestamp"];
+            /** @description Start of validity. */
+            not_before: components["schemas"]["Timestamp"];
+            /** @description SHA-256 of the leaf certificate (DER), lower-case hexadecimal. */
+            sha256: string;
+            /** @description The classification of `days_left`. */
+            state: components["schemas"]["CertificateState"];
+            /** @description Subject distinguished name (RFC 4514 text). */
+            subject: string;
+        };
+        /** @description `GET /system/tls`: the certificates of this node's listener. */
+        TlsDetails: {
+            certificate?: components["schemas"]["TlsCertificate"] | null;
+            /** @description Whether HTTPS responses carry `Strict-Transport-Security`. */
+            hsts: boolean;
+            imported?: components["schemas"]["ImportedTls"] | null;
+            internal_ca?: components["schemas"]["InternalCaTls"] | null;
+            /** @description The last failed load or reload; the previous certificate keeps serving. */
+            last_error?: string | null;
+            loaded_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Lowest TLS version accepted (`1.2` or `1.3`), when the listener terminates TLS. */
+            min_version?: string | null;
+            /** @description The TLS mode. */
+            mode: components["schemas"]["TlsMode"];
+            pending?: components["schemas"]["PendingTlsCertificate"] | null;
+            reverse_proxy?: components["schemas"]["ReverseProxyTls"] | null;
+        };
         /**
          * @description How the listener secures connections (OPS-22, TGL-08).
          * @enum {string}
@@ -42921,6 +43036,53 @@ export interface operations {
             };
             /** @description Not allowed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_tls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The TLS mode, the served certificate and what belongs to the mode */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TlsDetails"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The listener is not running yet */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

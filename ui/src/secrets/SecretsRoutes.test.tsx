@@ -89,6 +89,7 @@ describe("the secrets page under Settings", () => {
       "access",
       "audit-export",
       "vault",
+      "certificates",
       "backup",
       "reconciler",
       "guardrails",

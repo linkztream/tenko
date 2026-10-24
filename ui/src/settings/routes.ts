@@ -33,6 +33,12 @@ const PAGE_ROUTES: readonly AppRoute[] = [
     title: "backup.title",
   },
   {
+    path: "/settings/certificates",
+    component: lazy(withPacks(["settings", "certificates"], () => import("./certificates/CertificatesPage"))),
+    access: "admin",
+    title: "certificates.title",
+  },
+  {
     path: "/settings/reconciler",
     component: lazy(withPacks(["settings", "reconciler"], () => import("./reconciler/ReconcilerPage"))),
     access: "admin",
