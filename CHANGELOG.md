@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-10-24
+
 ### Added
 
 - The VLANs of a network controller arrive in IPAM: every network of a controller becomes a `network` fact (name, subnet, VLAN id, DHCP mode, management flag), and the reconciler opens "VLAN discovered" proposals for a tagged network whose VLAN IPAM does not have and "Prefix VLAN differs" proposals for a prefix whose range equals the network's subnet but is not linked to that VLAN, each approved or rejected on the Discovery page with its own kind filter (the two approve in either order); the topology lists the controllers' networks with VLAN, subnet, DHCP and management under the controller lines and in the panel of a controller's gateway; and the UniFi connector with only an API key reads the networks of Network 10.0 and later through the Integration API, placing each client in the network whose subnet holds its address. See `docs/reconciliation.md` section 4.10 and `docs/connectors-unifi.md` section 2.3.
@@ -24,6 +26,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - Running the installer again no longer undoes the operator's configuration or hides what it cannot change: `install.sh --reconfigure` changes `tenko.toml` by the answers given and carries every other value over (a hand-set `[dns] listen`, `[dhcp]`, `[server]`, `[tls]`, `[kek]`, `[dns.recursion]`, the profile), saying so per section, instead of writing the defaults, which put the dns role on every address and failed to start where systemd-resolved's stub holds 127.0.0.53:53; it refuses that with exit 4 under `--keep-resolved-stub`, before the file is written; `--roles` on a node that has started before says that the stored set does not follow the file and names the three ways to change it (the nodes page, `tenko node roles set`, `PUT /api/v1/nodes/{id}/roles`) while still putting the drop-ins of the new roles in place (`dhcp-direct.conf` joins `probe.conf`); and the processes the service starts (the update check of a new binary, the scan tools, `systemd-creds`, the connector plugins) no longer get `NOTIFY_SOCKET`, so systemd has nothing to refuse and log.
 - The scan configuration of the controller's own probe role is reachable from the UI: the section "This controller" of the Nodes page links to it while the probe role runs, and the Scan now error "no probe covers this target" links to the scan configuration of the one probe, or to the Nodes page when there are several or none.
 - The OpenAPI document (`GET /api/v1/openapi.json`, `docs/api/openapi.json`) declares the security requirement of every operation: a session cookie or a bearer token by default, a session only on the 66 operations a personal token can never call (account changes, the administration of users, access, settings and the system, secrets, DNS keys, trust anchors, language packs and updates), and none on the 14 public ones (setup, the sign-in ceremonies, node enrolment, liveness and readiness, the CA root, the languages of the sign-in page and the document itself). Before, 326 operations said nothing about authentication although the server answers them 401 without credentials, and three said the opposite of what the server does: `DELETE /auth/sessions/{id}` and `GET /access/service-accounts/{id}/tokens` refuse a token, and `GET /access/subjects` accepts one. See `docs/api/README.md`.
+
+### Action required
+
+- A node in the Standard profile with `[tls] mode = "imported"` no longer loads a certificate file that changed on disk by itself: `[tls] accept_external_replacement` is off there by default (on in Home and Lab, never in Hardened). Set it to `true` to keep the automatic reload, or restart the node after a renewal; the status warning `sys.tls.certificate_pending` says when a newer file waits on disk. Nothing changes for the internal CA or a reverse proxy.
 
 ## [0.0.4] - 2026-10-23
 

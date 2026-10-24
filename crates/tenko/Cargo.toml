@@ -1,6 +1,6 @@
 [package]
 name = "tenko"
-version = "0.0.4"
+version = "0.0.5"
 description = "The Tenko DDI binary: the server roles and the command-line client in one executable"
 edition.workspace = true
 rust-version.workspace = true

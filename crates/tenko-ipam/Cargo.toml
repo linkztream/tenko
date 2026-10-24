@@ -1,6 +1,6 @@
 [package]
 name = "tenko-ipam"
-version = "0.0.4"
+version = "0.0.5"
 description = "IPAM domain: commands, plan and apply over the store, the per-VRF prefix tree, next free allocation, utilization alarms, import and export"
 edition.workspace = true
 rust-version.workspace = true
