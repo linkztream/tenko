@@ -58,6 +58,14 @@
         <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
         <segment><source>{count, plural, one {# host not seen any more} other {# hosts not seen any more}}</source></segment>
       </unit>
+      <unit id="discovery.batch.kind.vlan_discovered">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# discovered VLAN} other {# discovered VLANs}}</source></segment>
+      </unit>
+      <unit id="discovery.batch.kind.prefix_vlan_mismatch">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# prefix on another VLAN} other {# prefixes on another VLAN}}</source></segment>
+      </unit>
       <unit id="discovery.batch.done_approved">
         <notes><note category="description">Title of the toast after an approval of several proposals.</note></notes>
         <segment><source>{count, plural, one {# proposal approved} other {# proposals approved}}</source></segment>

@@ -6,7 +6,9 @@
 //! The reconciler compares intent with what the sources observe ([`super::observations`])
 //! and keeps one open **proposal** per subject: a discovered host, intent that nobody has
 //! seen for a long time, a host seen on another address, a conflict, an address outside every
-//! known network. A proposal carries its evidence and the commands that would resolve it.
+//! known network, a VLAN a network controller carries that IPAM does not know, a prefix that
+//! is not linked to the VLAN a controller carries its network on. A proposal carries its
+//! evidence and the commands that would resolve it.
 //! Observations never become intent by themselves: a person approves a proposal here, or an
 //! adoption policy of the prefix applies it (ADR 0005). [`super::common`] documents the
 //! conventions every IPAM endpoint follows: the IPAM service as a request extension (503
@@ -29,10 +31,11 @@
 //! # Proposals
 //!
 //! A proposal has a `kind` (`discovered_host`, `orphaned_intent`, `address_mismatch`,
-//! `conflict`, `outside_prefixes`), a `severity` (`info`, `warning`, `critical`) and a
-//! `state`: `open`, `accepted` (approved by a person or adopted by a policy), `rejected`,
-//! `expired` (the observation no longer holds) or `superseded` (a newer proposal about the
-//! same subject replaced it). At most one proposal per subject is open at a time.
+//! `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch`), a `severity`
+//! (`info`, `warning`, `critical`) and a `state`: `open`, `accepted` (approved by a person or
+//! adopted by a policy), `rejected`, `expired` (the observation no longer holds) or
+//! `superseded` (a newer proposal about the same subject replaced it). At most one proposal
+//! per subject is open at a time.
 //!
 //! The list takes the filters `kind`, `state` and `severity` (each repeatable or
 //! comma-separated; all states unless `state` says otherwise), `prefix` (proposals about
@@ -470,18 +473,20 @@ async fn authorize_approval(
 ) -> Result<(), ApiError> {
     authorize(app, cx, Action::Approve, ObjectRef::from(id))?;
     // The principal needs what each command needs on its own. The commands of a proposal
-    // never change once it is open (a changed set supersedes it with a new proposal), so
-    // what is checked here is what the approval applies.
+    // never change once it is open (a changed set supersedes it with a new proposal); the
+    // approval applies them as the intent stands now, which only leaves out a VLAN another
+    // decision created since, so what is checked here is what the approval applies.
     let view = ipam.view(None).await?;
     let proposal = query::get(view.as_ref(), id)?;
+    let commands = proposals::current_commands(view.as_ref(), &proposal.commands)?;
     drop(view);
-    for command in &proposal.commands {
+    for command in &commands {
         let (action, object) = command_access(command);
         authorize(app, cx, action, object)?;
     }
     // A scoped principal's approval is planned and checked first: every object the
     // proposal creates, changes or deletes must lie inside its scope (IAM-01).
-    ipam.check(cx, &proposal.commands, options).await
+    ipam.check(cx, &commands, options).await
 }
 
 /// Rejects a proposal and remembers its evidence, so the same subject does not open again
@@ -979,6 +984,42 @@ mod tests {
                 .expect("ingest");
         }
 
+        /// One complete topology read of the connector as a network controller, seen now:
+        /// the networks `(reference, name, VLAN id, subnet)`.
+        async fn networks(&self, networks: &[(&str, &str, Option<u16>, &str)]) {
+            let when = Timestamp::now();
+            let source = ObservationSource::NetworkController {
+                connector: self.connector,
+            };
+            let observations = networks
+                .iter()
+                .map(|(reference, name, vlan, subnet)| Observation {
+                    id: ObservationId::generate(),
+                    source: source.clone(),
+                    subject: Observed::Network {
+                        controller: (*reference).to_owned(),
+                        name: (*name).to_owned(),
+                        subnet: subnet.parse().ok(),
+                        vlan: *vlan,
+                        dhcp: tenko_core::observe::NetworkDhcp::Disabled,
+                        management: false,
+                    },
+                    observed_at: when,
+                    received_at: when,
+                    expires_at: when.checked_add(Duration::from_secs(900)),
+                })
+                .collect();
+            self.reconciler
+                .ingest(IngestBatch {
+                    source,
+                    observations,
+                    complete: true,
+                    received_at: when,
+                })
+                .await
+                .expect("ingest");
+        }
+
         /// A run of the reconciler, now.
         async fn reconcile(&self) -> ReconcileReport {
             self.reconciler
@@ -1405,6 +1446,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_controller_network_opens_a_vlan_and_a_link_and_both_approve_in_turn() {
+        let lab = Lab::new().await;
+        lab.networks(&[
+            ("net-iot", "IoT", Some(30), "192.0.2.1/24"),
+            ("net-default", "Default", None, "198.51.100.1/24"),
+        ])
+        .await;
+        let report = lab.reconcile().await;
+        assert_eq!(report.opened, 2, "{report:?}");
+        let vlans = lab.get("/proposals?state=open&kind=vlan_discovered").await;
+        vlans.assert_json(200);
+        assert_eq!(vlans.items().len(), 1, "{}", vlans.body);
+        assert_eq!(vlans.items()[0]["rule"], "ipam.reconcile.vlan_discovered");
+        assert_eq!(vlans.items()[0]["params"]["vid"], "30");
+        let links = lab
+            .get(&format!(
+                "/proposals?state=open&kind=prefix_vlan_mismatch&prefix={}",
+                lab.network
+            ))
+            .await;
+        links.assert_json(200);
+        assert_eq!(links.items().len(), 1, "{}", links.body);
+        assert_eq!(links.items()[0]["rule"], "ipam.reconcile.prefix_vlan_unset");
+
+        // The VLAN first; the link then names it instead of creating it again.
+        let vlan = vlans.ids().remove(0);
+        lab.post(&format!("/proposals/{vlan}/approve"), &[])
+            .await
+            .assert_json(200);
+        let link = links.ids().remove(0);
+        let preview = lab
+            .post(&format!("/proposals/{link}/approve?dry_run=true"), &[])
+            .await;
+        preview.assert_json(200);
+        let applied = lab.post(&format!("/proposals/{link}/approve"), &[]).await;
+        applied.assert_json(200);
+        assert_eq!(applied.body["proposal"]["state"], "accepted");
+        let view = lab.service.view(None).await.expect("view");
+        let vlans: Vec<tenko_core::ipam::Vlan> =
+            ipam_query::list(view.as_ref(), &ipam_query::ListQuery::default())
+                .expect("vlans")
+                .items;
+        assert_eq!(vlans.len(), 1);
+        assert_eq!((vlans[0].vid, vlans[0].name.as_str()), (30, "IoT"));
+        let prefix: tenko_core::ipam::Prefix =
+            ipam_query::get(view.as_ref(), lab.network).expect("prefix");
+        assert_eq!(prefix.vlan, Some(vlans[0].id));
+        drop(view);
+
+        // A second run yields nothing.
+        let again = lab.reconcile().await;
+        assert_eq!(again.opened, 0, "{again:?}");
+        lab.get("/proposals?state=open")
+            .await
+            .assert_json(200)
+            .assert_no_items();
+    }
+
+    #[tokio::test]
     async fn a_stale_if_match_is_refused_and_a_current_one_is_accepted() {
         let lab = Lab::new().await;
         let id = lab.discover_web().await;
@@ -1676,6 +1776,78 @@ mod tests {
         assert_eq!(accepted.items().len(), 2, "{}", accepted.body);
         let report = lab.reconcile().await;
         assert_eq!(report.opened, 0, "{report:?}");
+    }
+
+    #[tokio::test]
+    async fn a_batch_approves_a_vlan_and_the_link_of_its_prefix_in_one_request() {
+        let networks = [("net-iot", "IoT", Some(30), "192.0.2.1/24")];
+        let lab = Lab::new().await;
+        lab.networks(&networks).await;
+        assert_eq!(lab.reconcile().await.opened, 2);
+        let vlan = open_ids(&lab, "vlan_discovered").await.remove(0);
+        let link = open_ids(&lab, "prefix_vlan_mismatch").await.remove(0);
+
+        // The VLAN first: the link then names it instead of creating it again.
+        let reply = lab
+            .with_json(
+                "POST",
+                "/proposals/approve",
+                &[],
+                &json!({ "ids": [&vlan, &link] }),
+            )
+            .await;
+        reply.assert_json(200);
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (vlan.clone(), "approved".to_owned(), None),
+                (link.clone(), "approved".to_owned(), None),
+            ],
+            "{}",
+            reply.body
+        );
+        let view = lab.service.view(None).await.expect("view");
+        let vlans: Vec<tenko_core::ipam::Vlan> =
+            ipam_query::list(view.as_ref(), &ipam_query::ListQuery::default())
+                .expect("vlans")
+                .items;
+        assert_eq!(vlans.len(), 1);
+        let prefix: tenko_core::ipam::Prefix =
+            ipam_query::get(view.as_ref(), lab.network).expect("prefix");
+        assert_eq!(prefix.vlan, Some(vlans[0].id));
+        drop(view);
+        assert_eq!(lab.reconcile().await.opened, 0);
+
+        // The link first: it creates the VLAN, and the VLAN proposal has nothing left.
+        let lab = Lab::new().await;
+        lab.networks(&networks).await;
+        lab.reconcile().await;
+        let vlan = open_ids(&lab, "vlan_discovered").await.remove(0);
+        let link = open_ids(&lab, "prefix_vlan_mismatch").await.remove(0);
+        let reply = lab
+            .with_json(
+                "POST",
+                "/proposals/approve",
+                &[],
+                &json!({ "ids": [&link, &vlan] }),
+            )
+            .await;
+        reply.assert_json(200);
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (link, "approved".to_owned(), None),
+                (
+                    vlan,
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.nothing_to_apply".to_owned())
+                ),
+            ],
+            "{}",
+            reply.body
+        );
+        let report = lab.reconcile().await;
+        assert_eq!((report.opened, report.expired), (0, 1), "{report:?}");
     }
 
     #[tokio::test]

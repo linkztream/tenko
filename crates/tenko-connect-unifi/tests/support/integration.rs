@@ -1,5 +1,7 @@
 //! The Integration API of the fake controller, derived from the classic fixtures: the
-//! adopted devices and the connected clients, with UUIDs built from their MAC addresses.
+//! adopted devices and the connected clients, with UUIDs built from their MAC addresses, and
+//! the LAN networks as Network 10 reports them (the list without, the detail with the IPv4
+//! configuration), with UUIDs built from their record ids.
 
 use axum::{http::StatusCode, response::Response};
 use serde_json::{Map, Value, json};
@@ -38,6 +40,15 @@ pub(super) fn handle(state: &State, req: &Req, rest: &str) -> Response {
             .find(|device| device["id"] == *id)
             .map_or_else(not_found, |device| reply(StatusCode::OK, &device)),
         (true, ["sites", SITE, "clients"]) => page(req, clients(state)),
+        (true, ["sites", SITE, "networks"]) if state.integration_networks => {
+            page(req, networks(state, false))
+        }
+        (true, ["sites", SITE, "networks", id]) if state.integration_networks => {
+            networks(state, true)
+                .into_iter()
+                .find(|network| network["id"] == *id)
+                .map_or_else(not_found, |network| reply(StatusCode::OK, &network))
+        }
         _ => not_found(),
     }
 }
@@ -185,6 +196,94 @@ fn clients(state: &State) -> Vec<Value> {
                 .and_then(Value::as_str);
             if let Some(uplink) = uplink {
                 entry.insert("uplinkDeviceId".to_owned(), json!(device_id(uplink)));
+            }
+            Some(Value::Object(entry))
+        })
+        .collect()
+}
+
+/// The Integration API id of a network, from its record id.
+pub fn network_id(record: &str) -> String {
+    let digits: String = record
+        .chars()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("20000000-0000-0000-0000-{digits:0>12}")
+}
+
+/// The LAN networks: VLAN 1 for the untagged default network, the IPv4 configuration with
+/// the DHCP mode in the detail only.
+fn networks(state: &State, detail: bool) -> Vec<Value> {
+    state
+        .networks
+        .iter()
+        .filter(|network| {
+            matches!(
+                network.get("purpose").and_then(Value::as_str),
+                Some("corporate" | "guest" | "vlan-only")
+            )
+        })
+        .filter_map(|network| {
+            let record = network.get("_id").and_then(Value::as_str)?;
+            let tagged = network.get("vlan_enabled") == Some(&Value::Bool(true));
+            let vlan = match network.get("vlan") {
+                Some(Value::Number(number)) => number.as_u64(),
+                Some(Value::String(text)) => text.parse().ok(),
+                _ => None,
+            };
+            let subnet = network.get("ip_subnet").and_then(Value::as_str);
+            let mut entry = Map::new();
+            entry.insert("id".to_owned(), json!(network_id(record)));
+            entry.insert(
+                "name".to_owned(),
+                json!(
+                    network
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or(record)
+                ),
+            );
+            entry.insert("enabled".to_owned(), json!(true));
+            entry.insert(
+                "vlanId".to_owned(),
+                json!(if tagged { vlan.unwrap_or(1) } else { 1 }),
+            );
+            entry.insert(
+                "management".to_owned(),
+                json!(if subnet.is_some() {
+                    "GATEWAY"
+                } else {
+                    "UNMANAGED"
+                }),
+            );
+            entry.insert(
+                "default".to_owned(),
+                json!(network.get("attr_no_delete") == Some(&Value::Bool(true))),
+            );
+            entry.insert("metadata".to_owned(), json!({ "origin": "USER_DEFINED" }));
+            if detail && let Some((host, length)) = subnet.and_then(|text| text.split_once('/')) {
+                let mut ipv4 = Map::new();
+                ipv4.insert("hostIpAddress".to_owned(), json!(host));
+                ipv4.insert(
+                    "prefixLength".to_owned(),
+                    json!(length.parse::<u8>().unwrap_or(24)),
+                );
+                if network.get("dhcp_relay_enabled") == Some(&Value::Bool(true)) {
+                    ipv4.insert(
+                        "dhcpConfiguration".to_owned(),
+                        json!({ "mode": "RELAY", "dhcpServerIpAddresses": ["192.0.2.53"] }),
+                    );
+                } else if network.get("dhcpd_enabled") == Some(&Value::Bool(true)) {
+                    ipv4.insert(
+                        "dhcpConfiguration".to_owned(),
+                        json!({ "mode": "SERVER", "leaseTimeSeconds": 86400 }),
+                    );
+                }
+                entry.insert("ipv4Configuration".to_owned(), Value::Object(ipv4));
             }
             Some(Value::Object(entry))
         })

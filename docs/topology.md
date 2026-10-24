@@ -9,7 +9,7 @@ Tenko draws the network as a graph: routers, switches, access points, hypervisor
 
 | Source | What it adds |
 |---|---|
-| Network controller (connector with the `network_controller` capability, CONN-05) | Its devices with name, model, kind (gateway, switch, access point), MAC and management address, and the port table of each switch (port names, untagged VLAN, uplink flag, link state); its networks with their VLANs, and the wireless networks with the access points that broadcast them (CONN-18). Every scheduled poll also reports where each client is attached (switch port or SSID, with the VLAN) and the links between devices (uplinks, wired and wireless links), which arrive as `attachment` and `link` observations |
+| Network controller (connector with the `network_controller` capability, CONN-05) | Its devices with name, model, kind (gateway, switch, access point), MAC and management address, and the port table of each switch (port names, untagged VLAN, uplink flag, link state); its networks with their VLANs, and the wireless networks with the access points that broadcast them (CONN-18). Every scheduled poll also reports where each client is attached (switch port or SSID, with the VLAN), the links between devices (uplinks, wired and wireless links) and the networks, which arrive as `attachment`, `link` and `network` observations; the reconciler turns the networks into VLAN proposals ([reconciliation.md](reconciliation.md) section 4.10) |
 | SNMP probe (`snmp` method, [scanning.md](scanning.md)) | `attachment` observations from the bridge tables (switch, port and VLAN of each client), `link` observations from the LLDP tables, the `name` of each polled switch for its management address, and address sightings |
 | Other probe methods | Address sightings with MAC addresses (ARP, ND), names (reverse DNS, mDNS, LLMNR), vendors of MAC addresses, operating system guesses |
 | Inventory connectors (Proxmox, Home Assistant) | Hosts with their MAC and IP addresses, operating system and platform; a virtual machine or container names its hypervisor node as its parent |
@@ -59,7 +59,7 @@ A client reported by several sources (the controller and an SNMP probe) is one e
 
 ## 4 The API
 
-`GET /api/v1/topology` answers the nodes, the edges and a summary: counts per node and edge kind before and after filtering, the VLANs in view with the names of their VLAN objects, the sites, the controllers with their last read or error, and the networks the controllers report with their VLANs. Filters, combined with AND:
+`GET /api/v1/topology` answers the nodes, the edges and a summary: counts per node and edge kind before and after filtering, the VLANs in view with the names of their VLAN objects, the sites, the controllers with their last read or error, and the networks the controllers report (`networks`: the connector, the controller's reference, name, VLAN id, subnet, `dhcp` as `disabled`, `relay` or `server` when the controller reports it, and the `management` flag). Filters, combined with AND:
 
 | Parameter | Keeps |
 |---|---|
@@ -82,7 +82,9 @@ The graph is computed from one read view of the store: every fact of the observa
 
 The topology area (`/topology`, the `T` chord of the `G` shortcuts) draws the graph as SVG and loads its code only when it is opened, so the first page load does not grow. Network devices form a forest from the routers outward; the clients of a switch or an access point sit in a grid under it, and more than twelve clients under one parent are drawn as one group that opens on demand. Edge kinds have their own line styles. Filters choose the site, the VLAN, the kinds and a search text; the map follows live changes of observations and intent.
 
-Selecting a node opens its panel with its ports and what hangs on each, its neighbours, and links to the host page and to the observations of the device. The panel highlights the path to the nearest router or between two chosen nodes. The map is keyboard reachable: one node is in the tab order at a time, the arrow keys move to the nearest node in that direction, Enter opens the panel, and `+`, `-` and `0` zoom and fit. VLAN colors follow the rules of IPAM-20 (design decision 11): hues spread around the circle for the VLANs in view with at least 3:1 contrast against the map, a swatch shape and the VLAN id as text as the redundant cues; with 150 or more VLANs in view only the selected VLAN keeps its color.
+Under the controller lines, a disclosure "N networks from the network controllers" lists every network the controllers report: name, VLAN chip (or "untagged"), subnet (or "no subnet"), the DHCP mode and a "Management" tag for the network Tenko or the controller is reached through, with the controller's name when there are several. The list is also there when the controller runs on a server of its own and no gateway of it is on the map.
+
+Selecting a node opens its panel with its ports and what hangs on each, its neighbours, and links to the host page and to the observations of the device. The panel of a router that a network controller reports also lists that controller's networks, as above. The panel highlights the path to the nearest router or between two chosen nodes. The map is keyboard reachable: one node is in the tab order at a time, the arrow keys move to the nearest node in that direction, Enter opens the panel, and `+`, `-` and `0` zoom and fit. VLAN colors follow the rules of IPAM-20 (design decision 11): hues spread around the circle for the VLANs in view with at least 3:1 contrast against the map, a swatch shape and the VLAN id as text as the redundant cues; with 150 or more VLANs in view only the selected VLAN keeps its color.
 
 ### Choice of the drawing library
 

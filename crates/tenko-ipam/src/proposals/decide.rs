@@ -7,12 +7,17 @@
 //! planner treats as automation, so a locked host refuses it (IPAM-16). A rejection
 //! records the reason and remembers the proposal's fingerprint: the reconciler does not
 //! open the same subject again until its evidence changes.
+//!
+//! The commands applied are the proposal's as the intent stands at the decision
+//! ([`current_commands`]): a VLAN that another decision created since the proposal opened is
+//! not created twice, and the prefix link that would have named the new VLAN names the
+//! existing one.
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    Coded, JobId, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision,
+    Coded, JobId, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision, VlanId,
     audit::{AuditAction, AuditDraft},
-    ipam::{AssignmentMode, Stamp},
+    ipam::{AssignmentMode, Stamp, Vlan},
 };
 use tenko_jobs::JobState;
 use tenko_store::{ReadConsistency, ReadView, ReadViewExt, WriteBatch};
@@ -28,6 +33,7 @@ use crate::{
     jobs::{WriteStepParams, committed_revision, edit_job, with_batch},
     plan::{PlanOptions, PlanView, PlanWarning},
     service::IpamService,
+    tables::{VLAN_VIDS, VLANS},
 };
 
 /// Longest rejection reason in bytes.
@@ -206,10 +212,70 @@ async fn pause(attempt: u32) {
     tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
 }
 
+/// The live VLAN with `vid` that a VLAN of `site` would duplicate: the site's own, or a
+/// global one.
+fn existing_vlan(
+    view: &dyn ReadView,
+    site: Option<tenko_core::SiteId>,
+    vid: u16,
+) -> IpamResult<Option<VlanId>> {
+    let mut keys = vec![(site, vid)];
+    if site.is_some() {
+        keys.push((None, vid));
+    }
+    for key in keys {
+        if let Some((id, _)) = view.get_typed(&VLAN_VIDS, &key)?
+            && view
+                .get_typed(&VLANS, &id)?
+                .is_some_and(|(vlan, _): (Vlan, _)| !vlan.meta.is_deleted())
+        {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// The commands of a proposal against the intent in `view`: a VLAN it would create that
+/// exists by now (the same VLAN id at the same site, or a global one) is left out, and the
+/// commands that name the VLAN it would have created name the existing one. Approving a
+/// "VLAN discovered" proposal and the "prefix VLAN mismatch" proposal that creates the same
+/// VLAN therefore works in either order.
+///
+/// # Errors
+///
+/// Store and decoding errors.
+pub fn current_commands(
+    view: &dyn ReadView,
+    commands: &[IpamCommand],
+) -> IpamResult<Vec<IpamCommand>> {
+    let mut renamed: Vec<(VlanId, VlanId)> = Vec::new();
+    let mut out = Vec::with_capacity(commands.len());
+    for command in commands {
+        if let IpamCommand::CreateVlan(input) = command
+            && let Some(planned) = input.id
+            && let Some(existing) = existing_vlan(view, input.site, input.vid)?
+        {
+            if existing != planned {
+                renamed.push((planned, existing));
+            }
+            continue;
+        }
+        let mut command = command.clone();
+        if let IpamCommand::UpdatePrefix(update) = &mut command
+            && let Some(Some(vlan)) = update.patch.vlan
+            && let Some((_, existing)) = renamed.iter().find(|(planned, _)| *planned == vlan)
+        {
+            update.patch.vlan = Some(Some(*existing));
+        }
+        out.push(command);
+    }
+    Ok(out)
+}
+
 /// The commands of a proposal as an applier runs them: a policy sets its host mode on the
 /// hosts it creates.
-fn commands_for(proposal: &IntentProposal, applier: Applier) -> Vec<IpamCommand> {
-    let mut commands = proposal.commands.clone();
+fn commands_for(commands: Vec<IpamCommand>, applier: Applier) -> Vec<IpamCommand> {
+    let mut commands = commands;
     if let Applier::Policy { host_mode, .. } = applier {
         for command in &mut commands {
             if let IpamCommand::CreateHost(input) = command {
@@ -260,7 +326,8 @@ pub(crate) async fn apply(
         let view = ipam.store().read(consistency).await?;
         let proposal = load(view.as_ref(), id)?;
         check(&proposal, expected)?;
-        if proposal.commands.is_empty() {
+        let commands = current_commands(view.as_ref(), &proposal.commands)?;
+        if commands.is_empty() {
             return Err(IpamError::new(
                 codes::NOTHING_TO_APPLY,
                 409,
@@ -269,7 +336,7 @@ pub(crate) async fn apply(
             .titled("Nothing to apply")
             .param("id", id));
         }
-        let commands = commands_for(&proposal, applier);
+        let commands = commands_for(commands, applier);
         let mut plan = ipam.plan(view.as_ref(), cx, options, &commands)?;
         if dry_run {
             return Ok(Decision {

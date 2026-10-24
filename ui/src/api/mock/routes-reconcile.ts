@@ -318,7 +318,7 @@ const observation = route("get", "/api/v1/observations/{subject}", (ctx) => {
 // ---------------------------------------------------------------------------------
 // Proposals
 
-const KINDS = ["discovered_host", "orphaned_intent", "address_mismatch", "conflict", "outside_prefixes"] as const;
+const KINDS = ["discovered_host", "orphaned_intent", "address_mismatch", "conflict", "outside_prefixes", "vlan_discovered", "prefix_vlan_mismatch"] as const;
 const STATES = ["open", "accepted", "rejected", "expired", "superseded"] as const;
 const SEVERITIES = ["info", "warning", "critical"] as const;
 const SEVERITY_RANK: Record<string, number> = { info: 0, warning: 1, critical: 2 };

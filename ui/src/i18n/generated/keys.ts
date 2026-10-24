@@ -1838,6 +1838,8 @@ export type MessageKey =
   | "discovery.batch.kind.discovered_host"
   | "discovery.batch.kind.orphaned_intent"
   | "discovery.batch.kind.outside_prefixes"
+  | "discovery.batch.kind.prefix_vlan_mismatch"
+  | "discovery.batch.kind.vlan_discovered"
   | "discovery.batch.loaded_only"
   | "discovery.batch.reject"
   | "discovery.batch.reject_body"
@@ -1872,6 +1874,7 @@ export type MessageKey =
   | "discovery.fact.expired"
   | "discovery.fact.link"
   | "discovery.fact.name"
+  | "discovery.fact.network"
   | "discovery.fact.no_ports"
   | "discovery.fact.os"
   | "discovery.fact.parent"
@@ -1885,6 +1888,7 @@ export type MessageKey =
   | "discovery.fact_type.host"
   | "discovery.fact_type.link"
   | "discovery.fact_type.name"
+  | "discovery.fact_type.network"
   | "discovery.fact_type.os"
   | "discovery.fact_type.services"
   | "discovery.fact_type.vendor"
@@ -1901,6 +1905,8 @@ export type MessageKey =
   | "discovery.kind.discovered_host"
   | "discovery.kind.orphaned_intent"
   | "discovery.kind.outside_prefixes"
+  | "discovery.kind.prefix_vlan_mismatch"
+  | "discovery.kind.vlan_discovered"
   | "discovery.lookup.label"
   | "discovery.lookup.placeholder"
   | "discovery.lookup.submit"
@@ -1990,6 +1996,9 @@ export type MessageKey =
   | "discovery.rule.discovered_mac"
   | "discovery.rule.orphaned_address"
   | "discovery.rule.outside_prefixes"
+  | "discovery.rule.prefix_vlan_differs"
+  | "discovery.rule.prefix_vlan_unset"
+  | "discovery.rule.vlan_discovered"
   | "discovery.severity.critical"
   | "discovery.severity.info"
   | "discovery.severity.warning"
@@ -6510,6 +6519,15 @@ export type MessageKey =
   | "topology.neighbour.local"
   | "topology.neighbour.remote"
   | "topology.neighbour.ssid"
+  | "topology.networks.dhcp.disabled"
+  | "topology.networks.dhcp.relay"
+  | "topology.networks.dhcp.server"
+  | "topology.networks.management"
+  | "topology.networks.no_subnet"
+  | "topology.networks.none"
+  | "topology.networks.summary"
+  | "topology.networks.title"
+  | "topology.networks.untagged"
   | "topology.node.aria"
   | "topology.panel.back"
   | "topology.panel.details"
@@ -7067,6 +7085,8 @@ export interface MessageArgs {
   "discovery.batch.kind.discovered_host": { count: number };
   "discovery.batch.kind.orphaned_intent": { count: number };
   "discovery.batch.kind.outside_prefixes": { count: number };
+  "discovery.batch.kind.prefix_vlan_mismatch": { count: number };
+  "discovery.batch.kind.vlan_discovered": { count: number };
   "discovery.batch.loaded_only": { count: number };
   "discovery.batch.reject": { count: number };
   "discovery.batch.reject_body": { kinds: string | number };
@@ -7079,6 +7099,7 @@ export interface MessageArgs {
   "discovery.fact.attachment_vlan": { mac: string | number; vlan: string | number; where: string | number };
   "discovery.fact.link": { a: string | number; b: string | number; kind: string | number };
   "discovery.fact.name": { ip: string | number; name: string | number };
+  "discovery.fact.network": { name: string | number; subnet: string; vlan: string };
   "discovery.fact.no_ports": { ip: string | number };
   "discovery.fact.os": { confidence: string | number; guess: string | number; ip: string | number };
   "discovery.fact.parent": { parent: string | number };
@@ -7105,6 +7126,9 @@ export interface MessageArgs {
   "discovery.rule.discovered_mac": { ips: string; mac: string; name: string | number; sources: number };
   "discovery.rule.orphaned_address": { host: string; ip: string | number; last_seen: string | number };
   "discovery.rule.outside_prefixes": { cidr: string | number; count: number };
+  "discovery.rule.prefix_vlan_differs": { cidr: string | number; current: string | number; name: string | number; vid: string | number };
+  "discovery.rule.prefix_vlan_unset": { cidr: string | number; name: string | number; vid: string | number };
+  "discovery.rule.vlan_discovered": { name: string | number; vid: string | number };
   "discovery.source.dhcp": { node: string | number };
   "discovery.source.dns": { zone: string | number };
   "discovery.source.inventory": { name: string | number };
@@ -7951,6 +7975,7 @@ export interface MessageArgs {
   "topology.neighbour.local": { port: string | number };
   "topology.neighbour.remote": { port: string | number };
   "topology.neighbour.ssid": { ssid: string | number };
+  "topology.networks.summary": { count: number };
   "topology.node.aria": { kind: string | number; label: string | number };
   "topology.path.start": { label: string | number };
   "topology.port.connected": { port: string | number };
@@ -9838,6 +9863,8 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.batch.kind.discovered_host",
   "discovery.batch.kind.orphaned_intent",
   "discovery.batch.kind.outside_prefixes",
+  "discovery.batch.kind.prefix_vlan_mismatch",
+  "discovery.batch.kind.vlan_discovered",
   "discovery.batch.loaded_only",
   "discovery.batch.reject",
   "discovery.batch.reject_body",
@@ -9872,6 +9899,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.fact.expired",
   "discovery.fact.link",
   "discovery.fact.name",
+  "discovery.fact.network",
   "discovery.fact.no_ports",
   "discovery.fact.os",
   "discovery.fact.parent",
@@ -9885,6 +9913,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.fact_type.host",
   "discovery.fact_type.link",
   "discovery.fact_type.name",
+  "discovery.fact_type.network",
   "discovery.fact_type.os",
   "discovery.fact_type.services",
   "discovery.fact_type.vendor",
@@ -9901,6 +9930,8 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.kind.discovered_host",
   "discovery.kind.orphaned_intent",
   "discovery.kind.outside_prefixes",
+  "discovery.kind.prefix_vlan_mismatch",
+  "discovery.kind.vlan_discovered",
   "discovery.lookup.label",
   "discovery.lookup.placeholder",
   "discovery.lookup.submit",
@@ -9990,6 +10021,9 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.rule.discovered_mac",
   "discovery.rule.orphaned_address",
   "discovery.rule.outside_prefixes",
+  "discovery.rule.prefix_vlan_differs",
+  "discovery.rule.prefix_vlan_unset",
+  "discovery.rule.vlan_discovered",
   "discovery.severity.critical",
   "discovery.severity.info",
   "discovery.severity.warning",
@@ -14510,6 +14544,15 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.neighbour.local",
   "topology.neighbour.remote",
   "topology.neighbour.ssid",
+  "topology.networks.dhcp.disabled",
+  "topology.networks.dhcp.relay",
+  "topology.networks.dhcp.server",
+  "topology.networks.management",
+  "topology.networks.no_subnet",
+  "topology.networks.none",
+  "topology.networks.summary",
+  "topology.networks.title",
+  "topology.networks.untagged",
   "topology.node.aria",
   "topology.panel.back",
   "topology.panel.details",

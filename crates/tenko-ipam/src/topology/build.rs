@@ -527,7 +527,8 @@ fn add_facts(builder: &mut Builder, facts: &[&ObservedFact]) {
                     builder.info[id].os = Some((2, guess.clone()));
                 }
             }
-            Observed::Services { .. } => {}
+            // The controller networks reach the summary from the live topology, not as nodes.
+            Observed::Services { .. } | Observed::Network { .. } => {}
         }
     }
 }

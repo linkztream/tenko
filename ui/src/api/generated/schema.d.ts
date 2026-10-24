@@ -6776,6 +6776,7 @@ export interface components {
         ControllerMode: "automatic" | "unchanged" | "manual";
         /** @description A network on the controller. */
         ControllerNetwork: {
+            dhcp?: components["schemas"]["NetworkDhcp"] | null;
             /** @description The controller's reference (for UniFi the network `_id`, not the VLAN). */
             id: string;
             /** @description Whether Tenko or the controller is managed through this network (never written). */
@@ -8318,6 +8319,14 @@ export interface components {
             };
             /** @enum {string} */
             type: "vendor";
+        } | {
+            /** @description A network of a network controller, by the controller's own reference. */
+            data: {
+                /** @description The controller's reference of the network. */
+                controller: string;
+            };
+            /** @enum {string} */
+            type: "network";
         };
         /**
          * @description The answer of a factor enrolment. Enrolling a factor does not raise the strength of the
@@ -9251,7 +9260,7 @@ export interface components {
          * @description What a proposal is about.
          * @enum {string}
          */
-        IntentProposalKind: "discovered_host" | "orphaned_intent" | "address_mismatch" | "conflict" | "outside_prefixes";
+        IntentProposalKind: "discovered_host" | "orphaned_intent" | "address_mismatch" | "conflict" | "outside_prefixes" | "vlan_discovered" | "prefix_vlan_mismatch";
         /**
          * @description The decision state of a proposal.
          * @enum {string}
@@ -11704,6 +11713,11 @@ export interface components {
              */
             vlan?: number | null;
         };
+        /**
+         * @description What a network controller does for DHCP on one of its networks.
+         * @enum {string}
+         */
+        NetworkDhcp: "disabled" | "relay" | "server";
         /** @description A network of a controller with the VLAN it carries. */
         NetworkInView: components["schemas"]["ControllerNetwork"] & {
             /** @description The controller. */
@@ -12254,6 +12268,34 @@ export interface components {
             };
             /** @enum {string} */
             type: "vendor";
+        } | {
+            /**
+             * @description A network a network controller reports: a LAN with its VLAN and subnet. Not a
+             *     sighting of any address; the reconciler compares it with the VLANs and prefixes of
+             *     intent.
+             */
+            data: {
+                /**
+                 * @description The controller's own reference of the network (for UniFi the network `_id`, not
+                 *     the VLAN), stable across polls.
+                 */
+                controller: string;
+                /** @description What the controller does for DHCP on the network. */
+                dhcp?: components["schemas"]["NetworkDhcp"];
+                /** @description Whether Tenko or the controller is reached through the network. */
+                management?: boolean;
+                /** @description The name. */
+                name: string;
+                /** @description The subnet, without host bits. */
+                subnet?: string | null;
+                /**
+                 * Format: int32
+                 * @description The VLAN id; absent for the untagged default network.
+                 */
+                vlan?: number | null;
+            };
+            /** @enum {string} */
+            type: "network";
         };
         /**
          * @description One source's knowledge of one subject: the latest report as the source gave it, with
@@ -37408,7 +37450,7 @@ export interface operations {
                 at_least?: number;
                 /** @description Only facts of this source: a source key such as `inventory:<connector>`, or a connector identifier (which matches the inventory and the network controller source of the connector). */
                 source?: string;
-                /** @description Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name` or `vendor`. */
+                /** @description Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name`, `vendor` or `network`. */
                 type?: string;
                 /** @description Only facts that name this MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`). */
                 mac?: string;

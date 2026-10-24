@@ -22,9 +22,9 @@
 //! `GET /observations` takes the filters `source` (a source key such as
 //! `inventory:<connector>`, or a connector identifier, which matches the inventory and the
 //! network controller source of that connector), `type` (`host`, `address`, `attachment`,
-//! `services`, `os`, `link`, `name` or `vendor`), `mac`, `ip`, `within` (a network: facts that name an
-//! address inside it), `q` (text over the subject, name, OS, platform, parent, tags and
-//! attachment device), `current` (`true`: only facts that count as current now, `false`:
+//! `services`, `os`, `link`, `name`, `vendor` or `network`), `mac`, `ip`, `within` (a
+//! network: facts that name an address inside it), `q` (text over the subject, name, OS,
+//! platform, parent, tags, attachment device and network name), `current` (`true`: only facts that count as current now, `false`:
 //! only expired ones) and `sort` (`last_seen`, `first_seen`, `source`, `subject`; `-` in
 //! front for descending; `-last_seen` by default). The answer is a page of facts; the cursor
 //! is bound to the query like every other list.
@@ -78,7 +78,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 }
 
 /// The subject types a fact can have (`FactSubject::type_name`).
-const SUBJECT_TYPES: [&str; 8] = [
+const SUBJECT_TYPES: [&str; 9] = [
     "host",
     "address",
     "attachment",
@@ -87,6 +87,7 @@ const SUBJECT_TYPES: [&str; 8] = [
     "link",
     "name",
     "vendor",
+    "network",
 ];
 
 /// The `type` filter, or 400 `sys.invalid_query` for an unknown type.
@@ -120,7 +121,7 @@ fn subject_type(filters: &Filters) -> Result<Option<String>, ApiError> {
     params(
         PageParams,
         ("source" = Option<String>, Query, description = "Only facts of this source: a source key such as `inventory:<connector>`, or a connector identifier (which matches the inventory and the network controller source of the connector)."),
-        ("type" = Option<String>, Query, description = "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name` or `vendor`."),
+        ("type" = Option<String>, Query, description = "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name`, `vendor` or `network`."),
         ("mac" = Option<String>, Query, description = "Only facts that name this MAC address (`00-00-5E-00-53-01` or `00:00:5e:00:53:01`)."),
         ("ip" = Option<String>, Query, description = "Only facts that name this IP address."),
         ("within" = Option<String>, Query, description = "Only facts that name an IP address inside this network, such as `192.0.2.0/24`."),

@@ -14,6 +14,7 @@ import {
   lastSeenOf,
   lookupSubject,
   NO_NAMES,
+  kindSummary,
   observedText,
   probeMethodWord,
   ruleName,
@@ -74,12 +75,18 @@ describe("the words of a proposal", () => {
     expect(kindWord("conflict")).toBe("Conflict");
     expect(kindWord("outside_prefixes")).toBe("Outside known networks");
     expect(kindWord("orphaned_intent")).toBe("Not seen any more");
+    expect(kindWord("vlan_discovered")).toBe("VLAN discovered");
+    expect(kindWord("prefix_vlan_mismatch")).toBe("Prefix VLAN differs");
 
     expect(kindIcon("discovered_host")).toBe("proposal");
     expect(kindIcon("conflict")).toBe("conflict");
     expect(kindIcon("address_mismatch")).toBe("alert");
     expect(kindIcon("outside_prefixes")).toBe("layers");
     expect(kindIcon("orphaned_intent")).toBe("clock");
+    expect(kindIcon("vlan_discovered")).toBe("cable");
+    expect(kindIcon("prefix_vlan_mismatch")).toBe("link");
+    expect(kindClass("vlan_discovered")).toBe("proposal");
+    expect(kindClass("prefix_vlan_mismatch")).toBe("discrepancy");
 
     // Magenta for proposals, red for conflicts, amber for differences.
     expect(kindClass("discovered_host")).toBe("proposal");
@@ -263,6 +270,26 @@ describe("the text of a rule", () => {
     });
   });
 
+  describe("the VLANs of controller networks", () => {
+    it("counts them in the phrase of a batch decision", () => {
+      expect(kindSummary([{ kind: "vlan_discovered" }, { kind: "prefix_vlan_mismatch" }, { kind: "prefix_vlan_mismatch" }])).toBe(
+        "1 discovered VLAN and 2 prefixes on another VLAN",
+      );
+    });
+
+    it("names the VLAN to create and the prefix to link", () => {
+      expect(text("ipam.reconcile.vlan_discovered", { vid: "30", name: "IoT", cidr: "198.51.100.0/24" })).toBe(
+        "The network controller carries VLAN 30 (IoT), which IPAM does not know; create the VLAN",
+      );
+      expect(text("ipam.reconcile.prefix_vlan_unset", { cidr: "198.51.100.0/24", vid: "30", name: "IoT" })).toBe(
+        "The network controller carries 198.51.100.0/24 on VLAN 30 (IoT); link the prefix to that VLAN",
+      );
+      expect(text("ipam.reconcile.prefix_vlan_differs", { cidr: "198.51.100.0/24", vid: "30", name: "IoT", current: "20" })).toBe(
+        "The network controller carries 198.51.100.0/24 on VLAN 30 (IoT), but the prefix is linked to VLAN 20; link it to VLAN 30",
+      );
+    });
+  });
+
   describe("outside_prefixes (section 4.9)", () => {
     it("counts the addresses and names the network to create", () => {
       expect(text("ipam.reconcile.outside_prefixes", { cidr: "203.0.113.224/27", count: "1", ips: "203.0.113.230" })).toBe(
@@ -428,6 +455,14 @@ describe("facts", () => {
     it("reads the clock when no time is given", () => {
       expect(isCurrent({ expires_at: new Date(Date.now() + 60_000).toISOString() })).toBe(true);
       expect(isCurrent({ expires_at: new Date(Date.now() - 60_000).toISOString() })).toBe(false);
+    });
+  });
+
+  describe("a network of a controller", () => {
+    it("says its name, VLAN and subnet, and names no subject to look up", () => {
+      const tagged = { type: "network" as const, data: { controller: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", dhcp: "relay" as const } };
+      expect(observedText(tagged)).toBe("IoT: VLAN 30, 198.51.100.0/24");
+      expect(observedText({ type: "network", data: { controller: "net-default", name: "Default" } })).toBe("Default: untagged");
     });
   });
 

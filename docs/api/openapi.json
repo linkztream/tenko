@@ -22268,7 +22268,7 @@
           {
             "name": "type",
             "in": "query",
-            "description": "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name` or `vendor`.",
+            "description": "Only facts about this kind of subject: `host`, `address`, `attachment`, `services`, `os`, `link`, `name`, `vendor` or `network`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -38891,6 +38891,17 @@
           "name"
         ],
         "properties": {
+          "dhcp": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NetworkDhcp",
+                "description": "What the controller does for DHCP on the network; absent when unknown."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "description": "The controller's reference (for UniFi the network `_id`, not the VLAN)."
@@ -42886,6 +42897,35 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "A network of a network controller, by the controller's own reference.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A network of a network controller, by the controller's own reference.",
+                "required": [
+                  "controller"
+                ],
+                "properties": {
+                  "controller": {
+                    "type": "string",
+                    "description": "The controller's reference of the network."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "network"
+                ]
+              }
+            }
           }
         ],
         "description": "What a fact is about, within its source: the source's own identity of the thing it\nreports. Two reports of one source about one subject are the same fact, refreshed.\n\nAdjacently tagged (`{\"type\": \"address\", \"data\": {...}}`) because variants carry IP\naddresses (see the encoding rules in `tenko_core::codec`)."
@@ -45202,7 +45242,9 @@
           "orphaned_intent",
           "address_mismatch",
           "conflict",
-          "outside_prefixes"
+          "outside_prefixes",
+          "vlan_discovered",
+          "prefix_vlan_mismatch"
         ]
       },
       "IntentProposalState": {
@@ -51534,6 +51576,15 @@
           }
         }
       },
+      "NetworkDhcp": {
+        "type": "string",
+        "description": "What a network controller does for DHCP on one of its networks.",
+        "enum": [
+          "disabled",
+          "relay",
+          "server"
+        ]
+      },
       "NetworkInView": {
         "allOf": [
           {
@@ -53077,6 +53128,64 @@
                 "type": "string",
                 "enum": [
                   "vendor"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A network a network controller reports: a LAN with its VLAN and subnet. Not a\nsighting of any address; the reconciler compares it with the VLANs and prefixes of\nintent.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "A network a network controller reports: a LAN with its VLAN and subnet. Not a\nsighting of any address; the reconciler compares it with the VLANs and prefixes of\nintent.",
+                "required": [
+                  "controller",
+                  "name"
+                ],
+                "properties": {
+                  "controller": {
+                    "type": "string",
+                    "description": "The controller's own reference of the network (for UniFi the network `_id`, not\nthe VLAN), stable across polls."
+                  },
+                  "dhcp": {
+                    "$ref": "#/components/schemas/NetworkDhcp",
+                    "description": "What the controller does for DHCP on the network."
+                  },
+                  "management": {
+                    "type": "boolean",
+                    "description": "Whether Tenko or the controller is reached through the network."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The name."
+                  },
+                  "subnet": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The subnet, without host bits."
+                  },
+                  "vlan": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int32",
+                    "description": "The VLAN id; absent for the untagged default network.",
+                    "minimum": 0
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "network"
                 ]
               }
             }

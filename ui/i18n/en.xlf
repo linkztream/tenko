@@ -8682,6 +8682,27 @@
       <unit id="discovery.fact_type.vendor">
         <segment><source>Vendor</source></segment>
       </unit>
+      <unit id="discovery.fact_type.network">
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="discovery.fact.network">
+        <segment><source>{name}: {vlan, select, none {untagged} other {VLAN {vlan}}}{subnet, select, none {} other {, {subnet}}}</source></segment>
+      </unit>
+      <unit id="discovery.kind.vlan_discovered">
+        <segment><source>VLAN discovered</source></segment>
+      </unit>
+      <unit id="discovery.kind.prefix_vlan_mismatch">
+        <segment><source>Prefix VLAN differs</source></segment>
+      </unit>
+      <unit id="discovery.rule.vlan_discovered">
+        <segment><source>The network controller carries VLAN {vid} ({name}), which IPAM does not know; create the VLAN</source></segment>
+      </unit>
+      <unit id="discovery.rule.prefix_vlan_unset">
+        <segment><source>The network controller carries {cidr} on VLAN {vid} ({name}); link the prefix to that VLAN</source></segment>
+      </unit>
+      <unit id="discovery.rule.prefix_vlan_differs">
+        <segment><source>The network controller carries {cidr} on VLAN {vid} ({name}), but the prefix is linked to VLAN {current}; link it to VLAN {vid}</source></segment>
+      </unit>
       <unit id="discovery.method.tcp_connect">
         <segment><source>TCP connect</source></segment>
       </unit>
@@ -9947,6 +9968,33 @@
       </unit>
       <unit id="topology.controller.error_generic">
         <segment><source>The last read failed ({code})</source></segment>
+      </unit>
+      <unit id="topology.networks.title">
+        <segment><source>Networks</source></segment>
+      </unit>
+      <unit id="topology.networks.summary">
+        <segment><source>{count, plural, one {# network} other {# networks}} from the network controllers</source></segment>
+      </unit>
+      <unit id="topology.networks.none">
+        <segment><source>The controller reports no networks.</source></segment>
+      </unit>
+      <unit id="topology.networks.untagged">
+        <segment><source>untagged</source></segment>
+      </unit>
+      <unit id="topology.networks.no_subnet">
+        <segment><source>no subnet</source></segment>
+      </unit>
+      <unit id="topology.networks.management">
+        <segment><source>Management</source></segment>
+      </unit>
+      <unit id="topology.networks.dhcp.disabled">
+        <segment><source>No DHCP</source></segment>
+      </unit>
+      <unit id="topology.networks.dhcp.relay">
+        <segment><source>DHCP relay</source></segment>
+      </unit>
+      <unit id="topology.networks.dhcp.server">
+        <segment><source>DHCP server</source></segment>
       </unit>
       <unit id="topology.empty.title">
         <segment><source>Nothing to draw yet</source></segment>

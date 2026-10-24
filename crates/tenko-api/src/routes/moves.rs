@@ -480,6 +480,7 @@ mod tests {
                 vlan: Some(30),
                 subnet: "198.51.100.0/24".parse().ok(),
                 management: false,
+                dhcp: None,
             },
             ControllerNetwork {
                 id: "net-home".to_owned(),
@@ -487,6 +488,7 @@ mod tests {
                 vlan: Some(20),
                 subnet: "203.0.113.0/24".parse().ok(),
                 management: false,
+                dhcp: None,
             },
         ]);
         controller.profiles.extend([

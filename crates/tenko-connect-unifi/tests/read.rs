@@ -949,8 +949,71 @@ async fn a_rate_limit_is_retried_and_a_persistent_one_is_reported() {
 
 // ---- the Integration API -------------------------------------------------------------
 
+/// One network of a topology: name, VLAN, subnet, DHCP mode and management flag.
+type NetworkRow<'a> = (
+    &'a str,
+    Option<u16>,
+    Option<String>,
+    &'a ControllerDhcp,
+    bool,
+);
+
+/// The LAN networks the fake's Integration API reports, as the topology carries them.
+fn assert_integration_networks(snapshot: &TopologySnapshot, flavor: Flavor) {
+    // The LAN networks of Network 10: VLAN 1 of the default network is untagged, the
+    // subnet and the DHCP mode come from the detail of each network.
+    let rows: Vec<NetworkRow<'_>> = snapshot
+        .networks
+        .iter()
+        .map(|network| {
+            (
+                network.name.as_str(),
+                network.vlan,
+                network.subnet.map(|net| net.to_string()),
+                &network.dhcp,
+                network.management,
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "Default",
+                None,
+                Some("192.0.2.0/24".to_owned()),
+                &ControllerDhcp::Server,
+                true
+            ),
+            (
+                "IoT",
+                Some(30),
+                Some("198.51.100.0/24".to_owned()),
+                &ControllerDhcp::Server,
+                false
+            ),
+            (
+                "Guest",
+                Some(40),
+                Some("203.0.113.0/25".to_owned()),
+                &ControllerDhcp::Server,
+                false
+            ),
+            ("Lab", Some(50), None, &ControllerDhcp::Disabled, false),
+            (
+                "Relay",
+                Some(60),
+                Some("203.0.113.128/25".to_owned()),
+                &ControllerDhcp::RelayTo(vec![ip("192.0.2.53")]),
+                false
+            ),
+        ],
+        "{flavor:?}"
+    );
+}
+
 #[tokio::test]
-async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() {
+async fn the_integration_api_yields_devices_uplinks_networks_and_clients_without_ports() {
     for flavor in BOTH {
         let fake = FakeController::start(flavor).await;
         let snapshot = Unifi
@@ -993,13 +1056,20 @@ async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() 
             "{flavor:?}"
         );
 
-        // Clients hang on a device with no port, SSID, network or VLAN.
+        assert_integration_networks(&snapshot, flavor);
+        let iot = support::integration::network_id("5f1000000000000000000002");
+        let default = support::integration::network_id("5f1000000000000000000001");
+
+        // Clients hang on a device with no port or SSID, in the network that holds their
+        // address.
         assert_eq!(snapshot.clients.len(), 7, "{flavor:?}");
         assert_eq!(
             client(&snapshot, ids::PRINTER),
             &ClientAttachment {
                 ip: Some(ip("198.51.100.20")),
                 name: Some("printer.example.test".to_owned()),
+                network: Some(NetworkRef(iot.clone())),
+                vlan: Some(30),
                 ..attachment(ids::PRINTER, ids::ACCESS)
             }
         );
@@ -1008,6 +1078,7 @@ async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() 
             &ClientAttachment {
                 ip: Some(ip("192.0.2.40")),
                 name: Some("phone.example.test".to_owned()),
+                network: Some(NetworkRef(default)),
                 ..attachment(ids::PHONE, ids::HALL)
             }
         );
@@ -1016,6 +1087,8 @@ async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() 
             &ClientAttachment {
                 ip: Some(ip("198.51.100.41")),
                 name: Some("sensor".to_owned()),
+                network: Some(NetworkRef(iot)),
+                vlan: Some(30),
                 ..attachment(ids::SENSOR, ids::GARDEN)
             }
         );
@@ -1026,7 +1099,6 @@ async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() 
                 ..attachment(ids::IDLE, ids::ACCESS)
             }
         );
-        assert_eq!(snapshot.networks, Vec::<ControllerNetwork>::new());
         assert_eq!(snapshot.profiles, Vec::<PortProfile>::new());
         assert_eq!(snapshot.wlans, Vec::<WirelessNetwork>::new());
         assert_eq!(
@@ -1035,6 +1107,24 @@ async fn the_integration_api_yields_devices_uplinks_and_clients_without_ports() 
             "an API key needs no session"
         );
     }
+}
+
+#[tokio::test]
+async fn an_integration_api_without_networks_yields_none_and_clients_without_a_network() {
+    let fake = FakeController::start(Flavor::SelfHosted).await;
+    fake.state().integration_networks = false;
+    let snapshot = Unifi
+        .topology(&fake.key_context())
+        .await
+        .expect("the topology");
+    assert_eq!(snapshot.networks, Vec::<ControllerNetwork>::new());
+    assert_eq!(snapshot.clients.len(), 7);
+    assert!(
+        snapshot
+            .clients
+            .iter()
+            .all(|client| client.network.is_none() && client.vlan.is_none())
+    );
 }
 
 #[tokio::test]

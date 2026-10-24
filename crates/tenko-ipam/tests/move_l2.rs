@@ -78,6 +78,7 @@ fn network(id: &str, name: &str, vid: u16, cidr: &str) -> ControllerNetwork {
         vlan: Some(vid),
         subnet: cidr.parse().ok(),
         management: false,
+        dhcp: None,
     }
 }
 

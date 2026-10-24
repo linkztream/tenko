@@ -159,6 +159,20 @@ describe("the map", () => {
     expect(controllers[0]?.textContent).toContain("6 devices read");
   });
 
+  it("lists the networks the controllers report with VLAN, subnet, DHCP and management", async () => {
+    await openMap();
+    const block = screen.getByTestId("topology-networks");
+    expect(block.querySelector("summary")?.textContent).toBe("2 networks from the network controllers");
+    const rows = within(block).getAllByTestId("controller-network");
+    expect(rows.map((r) => [r.dataset.key, r.dataset.vlan])).toEqual([
+      ["net-mgmt", "10"],
+      ["net-iot", "30"],
+    ]);
+    expect(rows[0]?.textContent).toContain("Management");
+    expect(within(rows[0] as HTMLElement).getByTestId("network-dhcp").dataset.dhcp).toBe("server");
+    expect(within(rows[1] as HTMLElement).getByTestId("network-dhcp").textContent).toBe("DHCP relay");
+  });
+
   it("colors the links of clients with the VLAN and keeps the VLAN id as text in the legend", async () => {
     await openMap();
     const graph = await graphOf();

@@ -227,8 +227,8 @@ describe("the seeded graph", () => {
       { connector: T.controller, name: "unifi.example.test", observed_at: g.summary.computed_at, devices: TOPOLOGY_COUNTS.controllerDevices },
     ]);
     expect(g.summary.networks).toEqual([
-      { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true, connector: T.controller },
-      { id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", management: false, connector: T.controller },
+      { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true, dhcp: "server", connector: T.controller },
+      { id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", management: false, dhcp: "relay", connector: T.controller },
     ]);
     expect(Date.parse(g.summary.computed_at ?? "")).toBeLessThanOrEqual(Date.now());
     // A VLAN renamed in IPAM is renamed in the legend.

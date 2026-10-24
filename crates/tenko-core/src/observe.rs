@@ -7,6 +7,7 @@
 
 use std::net::IpAddr;
 
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -186,6 +187,55 @@ pub enum Observed {
         /// The vendor name.
         vendor: String,
     },
+    /// A network a network controller reports: a LAN with its VLAN and subnet. Not a
+    /// sighting of any address; the reconciler compares it with the VLANs and prefixes of
+    /// intent.
+    Network {
+        /// The controller's own reference of the network (for UniFi the network `_id`, not
+        /// the VLAN), stable across polls.
+        controller: String,
+        /// The name.
+        name: String,
+        /// The subnet, without host bits.
+        #[serde(default)]
+        #[schema(value_type = Option<String>)]
+        subnet: Option<IpNet>,
+        /// The VLAN id; absent for the untagged default network.
+        #[serde(default)]
+        vlan: Option<u16>,
+        /// What the controller does for DHCP on the network.
+        #[serde(default)]
+        dhcp: NetworkDhcp,
+        /// Whether Tenko or the controller is reached through the network.
+        #[serde(default)]
+        management: bool,
+    },
+}
+
+/// What a network controller does for DHCP on one of its networks.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkDhcp {
+    /// No DHCP from the controller.
+    #[default]
+    Disabled,
+    /// The controller relays DHCP to other servers.
+    Relay,
+    /// The controller serves DHCP itself.
+    Server,
 }
 
 /// A host as an inventory source reports it (CONN-02).
@@ -389,6 +439,14 @@ mod tests {
                 mac: "00:00:5e:00:53:10".parse().expect("mac"),
                 vendor: "ICANN, IANA Department".to_owned(),
             },
+            Observed::Network {
+                controller: "net-iot".to_owned(),
+                name: "IoT".to_owned(),
+                subnet: Some("198.51.100.0/24".parse().expect("net")),
+                vlan: Some(30),
+                dhcp: NetworkDhcp::Relay,
+                management: false,
+            },
         ] {
             let back: Observed = from_cbor(&to_cbor(&subject).expect("cbor")).expect("cbor");
             assert_eq!(back, subject);
@@ -410,6 +468,29 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ProbeMethod::ReverseDns).expect("json"),
             "reverse_dns"
+        );
+    }
+
+    #[test]
+    fn networks_without_dhcp_or_management_read_as_defaults() {
+        let json = r#"{"type": "network", "data": {"controller": "n1", "name": "Default"}}"#;
+        let Observed::Network {
+            subnet,
+            vlan,
+            dhcp,
+            management,
+            ..
+        } = serde_json::from_str(json).expect("json")
+        else {
+            panic!("not a network");
+        };
+        assert_eq!(
+            (subnet, vlan, dhcp, management),
+            (None, None, NetworkDhcp::Disabled, false)
+        );
+        assert_eq!(
+            serde_json::to_value(NetworkDhcp::Server).expect("json"),
+            "server"
         );
     }
 

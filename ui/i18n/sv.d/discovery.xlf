@@ -58,6 +58,14 @@
         <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
         <segment><source>{count, plural, one {# host not seen any more} other {# hosts not seen any more}}</source><target>{count, plural, one {# värd som inte syns längre} other {# värdar som inte syns längre}}</target></segment>
       </unit>
+      <unit id="discovery.batch.kind.vlan_discovered">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# discovered VLAN} other {# discovered VLANs}}</source><target>{count, plural, one {# upptäckt VLAN} other {# upptäckta VLAN}}</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.prefix_vlan_mismatch">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# prefix on another VLAN} other {# prefixes on another VLAN}}</source><target>{count, plural, one {# prefix på ett annat VLAN} other {# prefix på ett annat VLAN}}</target></segment>
+      </unit>
       <unit id="discovery.batch.done_approved">
         <notes><note category="description">Title of the toast after an approval of several proposals.</note></notes>
         <segment><source>{count, plural, one {# proposal approved} other {# proposals approved}}</source><target>{count, plural, one {# förslag godkändes} other {# förslag godkändes}}</target></segment>

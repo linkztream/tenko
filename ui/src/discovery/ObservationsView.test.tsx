@@ -201,7 +201,7 @@ describe("the observations", () => {
     expect(screen.getByTestId("filter-type-services").getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("offers a chip for every type of fact, the name and the vendor among them", async () => {
+  it("offers a chip for every type of fact, the name, the vendor and the network among them", async () => {
     await openObservations();
     expect(screen.getAllByTestId(/^filter-type-/).map((chip) => [chip.dataset.testid, chip.textContent])).toEqual([
       ["filter-type-host", "Host"],
@@ -212,6 +212,7 @@ describe("the observations", () => {
       ["filter-type-link", "Link"],
       ["filter-type-name", "Name"],
       ["filter-type-vendor", "Vendor"],
+      ["filter-type-network", "Network"],
     ]);
   });
 

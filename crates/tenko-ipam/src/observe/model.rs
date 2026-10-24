@@ -98,6 +98,11 @@ pub enum FactSubject {
         /// The MAC address.
         mac: MacAddr,
     },
+    /// A network of a network controller, by the controller's own reference.
+    Network {
+        /// The controller's reference of the network.
+        controller: String,
+    },
 }
 
 impl FactSubject {
@@ -113,6 +118,9 @@ impl FactSubject {
             Observed::Os { ip, .. } => FactSubject::Os { ip: *ip },
             Observed::Name { ip, .. } => FactSubject::Name { ip: *ip },
             Observed::Vendor { mac, .. } => FactSubject::Vendor { mac: *mac },
+            Observed::Network { controller, .. } => FactSubject::Network {
+                controller: controller.clone(),
+            },
             Observed::Link { a, b, kind } => {
                 // A link is the same fact whichever end the source names first.
                 let (a, b) = if (&a.device, &a.port) <= (&b.device, &b.port) {
@@ -126,7 +134,7 @@ impl FactSubject {
     }
 
     /// The type name (`host`, `address`, `attachment`, `services`, `os`, `link`, `name`,
-    /// `vendor`).
+    /// `vendor`, `network`).
     pub const fn type_name(&self) -> &'static str {
         match self {
             FactSubject::Host { .. } => "host",
@@ -137,13 +145,14 @@ impl FactSubject {
             FactSubject::Link { .. } => "link",
             FactSubject::Name { .. } => "name",
             FactSubject::Vendor { .. } => "vendor",
+            FactSubject::Network { .. } => "network",
         }
     }
 
     /// The canonical text of the subject, the second part of the fact key:
     /// `host:<external id>`, `address:<vrf>/<ip>`, `attachment:<mac>`, `services:<ip>`,
-    /// `os:<ip>`, `link:<device>|<port>|<device>|<port>|<kind>`, `name:<ip>` or
-    /// `vendor:<mac>`.
+    /// `os:<ip>`, `link:<device>|<port>|<device>|<port>|<kind>`, `name:<ip>`,
+    /// `vendor:<mac>` or `network:<controller reference>`.
     pub fn key(&self) -> String {
         match self {
             FactSubject::Host { external_id } => format!("host:{external_id}"),
@@ -153,6 +162,7 @@ impl FactSubject {
             FactSubject::Os { ip } => format!("os:{ip}"),
             FactSubject::Name { ip } => format!("name:{ip}"),
             FactSubject::Vendor { mac } => format!("vendor:{mac}"),
+            FactSubject::Network { controller } => format!("network:{controller}"),
             FactSubject::Link { a, b, kind } => {
                 let kind = serde_json::to_value(kind)
                     .ok()
@@ -256,7 +266,8 @@ pub fn observed_macs(observed: &Observed) -> Vec<MacAddr> {
         Observed::Services { .. }
         | Observed::Os { .. }
         | Observed::Link { .. }
-        | Observed::Name { .. } => BTreeSet::new(),
+        | Observed::Name { .. }
+        | Observed::Network { .. } => BTreeSet::new(),
     };
     set.into_iter().collect()
 }
@@ -269,9 +280,10 @@ pub fn observed_ips(observed: &Observed) -> Vec<IpAddr> {
         | Observed::Services { ip, .. }
         | Observed::Os { ip, .. }
         | Observed::Name { ip, .. } => BTreeSet::from([*ip]),
-        Observed::Attachment { .. } | Observed::Link { .. } | Observed::Vendor { .. } => {
-            BTreeSet::new()
-        }
+        Observed::Attachment { .. }
+        | Observed::Link { .. }
+        | Observed::Vendor { .. }
+        | Observed::Network { .. } => BTreeSet::new(),
     };
     set.into_iter().collect()
 }
@@ -421,6 +433,25 @@ mod tests {
         assert_eq!(observed_macs(&vendor), vec![mac("00:00:5e:00:53:40")]);
         assert_eq!(observed_ips(&vendor), Vec::<IpAddr>::new());
         assert_eq!(observed_name(&vendor), None);
+    }
+
+    #[test]
+    fn controller_networks_are_facts_by_their_reference() {
+        let network = Observed::Network {
+            controller: "net-iot".to_owned(),
+            name: "IoT".to_owned(),
+            subnet: Some("198.51.100.0/24".parse().expect("net")),
+            vlan: Some(30),
+            dhcp: tenko_core::observe::NetworkDhcp::Server,
+            management: false,
+        };
+        let subject = FactSubject::of(&network);
+        assert_eq!(subject.key(), "network:net-iot");
+        assert_eq!(subject.type_name(), "network");
+        // A network names no device: no MAC, no address, no name to join the view by.
+        assert_eq!(observed_macs(&network), Vec::<MacAddr>::new());
+        assert_eq!(observed_ips(&network), Vec::<IpAddr>::new());
+        assert_eq!(observed_name(&network), None);
     }
 
     #[test]

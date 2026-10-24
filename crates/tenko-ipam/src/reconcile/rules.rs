@@ -17,6 +17,9 @@
 //! | `ipam.reconcile.conflict_networks` | conflict | warning | none |
 //! | `ipam.reconcile.conflict_address_taken` | conflict | warning | none |
 //! | `ipam.reconcile.outside_prefixes` | outside prefixes | warning | create the suggested network |
+//! | `ipam.reconcile.vlan_discovered` | VLAN discovered | info | create the VLAN a controller network carries (its name, the prefix's site) |
+//! | `ipam.reconcile.prefix_vlan_unset` | prefix VLAN mismatch | info | link the prefix whose range equals the network's subnet to the VLAN, creating the VLAN when missing |
+//! | `ipam.reconcile.prefix_vlan_differs` | prefix VLAN mismatch | warning | the same, for a prefix linked to a VLAN with another id |
 //! | `ipam.reconcile.dns_record_held` | conflict | warning | none: another origin holds an RRset IPAM wants |
 //! | `ipam.reconcile.dns_no_zone` | orphaned intent | info | none: DNS names without a zone in Tenko, listed |
 //! | `ipam.reconcile.dns_orphaned_record` | orphaned intent | info | none: an `ipam` RRset without intent (orphan rule `propose`) |
@@ -36,20 +39,21 @@ use std::{
 
 use ipnet::IpNet;
 use tenko_core::{
-    AddressId, HostId, InterfaceId, MacAddr, ObjectRef, PrefixId, TenantId, VrfId,
-    ipam::{Address, AssignmentMode, Host, Status, Tag},
+    AddressId, HostId, InterfaceId, MacAddr, ObjectRef, PrefixId, SiteId, TenantId, VlanId, VrfId,
+    ipam::{Address, AssignmentMode, Host, Prefix, Status, Tag},
     net::HostName,
+    observe::Observed,
 };
 
 use super::snapshot::{Placement, Seen, Snapshot};
 use crate::{
     command::{
         AddressInput, AddressPatch, HostInput, InterfaceInput, IpamCommand, PrefixInput,
-        UpdateAddress,
+        PrefixPatch, UpdateAddress, UpdatePrefix, VlanInput,
     },
     dns::{DnsFinding, plan::record_text},
     net::{Family, contains_net},
-    observe::model::IntentSighting,
+    observe::model::{IntentSighting, ObservedFact},
     proposals::model::{IntentProposalKind, ProposalEvidence, ProposalSeverity, ProposalSubject},
 };
 
@@ -73,6 +77,12 @@ pub mod rule {
     pub const CONFLICT_ADDRESS_TAKEN: &str = "ipam.reconcile.conflict_address_taken";
     /// Addresses outside every known network.
     pub const OUTSIDE_PREFIXES: &str = "ipam.reconcile.outside_prefixes";
+    /// A VLAN a network controller carries that IPAM does not know.
+    pub const VLAN_DISCOVERED: &str = "ipam.reconcile.vlan_discovered";
+    /// A prefix without a VLAN whose network a controller carries on one.
+    pub const PREFIX_VLAN_UNSET: &str = "ipam.reconcile.prefix_vlan_unset";
+    /// A prefix linked to another VLAN than the one a controller carries its network on.
+    pub const PREFIX_VLAN_DIFFERS: &str = "ipam.reconcile.prefix_vlan_differs";
     /// An RRset IPAM wants is held by another origin with other data.
     pub const DNS_RECORD_HELD: &str = "ipam.reconcile.dns_record_held";
     /// DNS names of intent without a zone in Tenko.
@@ -131,6 +141,7 @@ pub(crate) fn candidates(
     out.extend(mismatches(snapshot));
     out.extend(conflicts(snapshot));
     out.extend(outside(snapshot));
+    out.extend(vlans(snapshot));
     out.extend(orphans(snapshot, sightings, config));
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out.dedup_by(|a, b| a.key == b.key);
@@ -1136,6 +1147,308 @@ fn outside(snapshot: &Snapshot) -> Vec<Candidate> {
             }
         })
         .collect()
+}
+
+// ----- controller networks and VLANs -------------------------------------------------
+
+/// One network a controller reports with a VLAN id, and the prefix of intent whose range
+/// equals its subnet.
+struct TaggedNetwork<'a> {
+    fact: &'a ObservedFact,
+    name: &'a str,
+    subnet: Option<IpNet>,
+    vid: u16,
+    prefix: Option<&'a Prefix>,
+}
+
+/// The live prefix whose range equals `subnet`: the only one, else the one of the default
+/// VRF; none when that does not settle it.
+fn prefix_of_subnet(snapshot: &Snapshot, subnet: IpNet) -> Option<&Prefix> {
+    let intent = &snapshot.intent;
+    let equal: Vec<&Prefix> = intent
+        .prefixes
+        .values()
+        .filter(|prefix| prefix.cidr == subnet)
+        .collect();
+    match equal.as_slice() {
+        [one] => Some(*one),
+        [] => None,
+        _ => {
+            let default: Vec<&Prefix> = equal
+                .into_iter()
+                .filter(|prefix| Some(prefix.vrf) == intent.default_vrf)
+                .collect();
+            match default.as_slice() {
+                [one] => Some(*one),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The evidence of networks, one entry per fact.
+fn network_evidence(networks: &[&TaggedNetwork<'_>]) -> Vec<ProposalEvidence> {
+    let mut out: Vec<ProposalEvidence> = networks
+        .iter()
+        .map(|network| ProposalEvidence {
+            source: network.fact.source.clone(),
+            source_key: network.fact.source_key.clone(),
+            subject_key: network.fact.subject_key.clone(),
+            observation: network.fact.observation,
+            mac: None,
+            ip: None,
+            name: Some(network.name.to_owned()),
+            first_seen: network.fact.first_seen,
+            last_seen: network.fact.last_seen,
+            sightings: network.fact.sightings,
+        })
+        .collect();
+    out.sort_by(|a, b| (&a.source_key, &a.subject_key).cmp(&(&b.source_key, &b.subject_key)));
+    out.dedup_by(|a, b| (&a.source_key, &a.subject_key) == (&b.source_key, &b.subject_key));
+    out
+}
+
+/// The VLAN a VLAN proposal creates: the network's name, the prefix's site (global without
+/// one), tagged `discovered`.
+fn new_vlan(id: VlanId, site: Option<SiteId>, vid: u16, name: &str) -> IpamCommand {
+    let name: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(128)
+        .collect();
+    IpamCommand::CreateVlan(VlanInput {
+        id: Some(id),
+        vid,
+        vni: None,
+        name: if name.is_empty() {
+            format!("VLAN {vid}")
+        } else {
+            name
+        },
+        site,
+        status: None,
+        tags: discovered_tag(),
+        custom: BTreeMap::new(),
+        description: None,
+    })
+}
+
+fn site_text(site: Option<SiteId>) -> String {
+    site.map_or_else(|| "global".to_owned(), |site| site.to_string())
+}
+
+/// The VLANs and prefix links the networks of the controllers call for. A tagged network
+/// whose VLAN id has no VLAN at the site of its prefix (or a global one) suggests the VLAN; a
+/// prefix whose range equals a tagged network's subnet and that is not linked to a VLAN with
+/// that id suggests the link, creating the VLAN in the same approval when it is missing (an
+/// approval checks again whether another decision created it since). The untagged default
+/// network suggests nothing, and neither does a prefix whose networks disagree on the VLAN.
+fn vlans(snapshot: &Snapshot) -> Vec<Candidate> {
+    let networks = tagged_networks(snapshot);
+    // The VLAN each missing (site, VLAN id) gets, shared by the proposals of one run.
+    let mut missing: MissingVlans<'_, '_> = BTreeMap::new();
+    for network in &networks {
+        let site = network.prefix.and_then(|prefix| prefix.site);
+        if snapshot.intent.vlan_at(site, network.vid).is_none() {
+            missing
+                .entry((site, network.vid))
+                .or_insert_with(|| (VlanId::generate(), Vec::new()))
+                .1
+                .push(network);
+        }
+    }
+    let mut out = vlan_candidates(&missing);
+    out.extend(link_candidates(snapshot, &networks, &missing));
+    out
+}
+
+/// The VLAN each missing (site, VLAN id) gets, with the networks that carry it.
+type MissingVlans<'s, 'n> = BTreeMap<(Option<SiteId>, u16), (VlanId, Vec<&'n TaggedNetwork<'s>>)>;
+
+/// The current networks with a VLAN id, each with the prefix that equals its subnet.
+fn tagged_networks(snapshot: &Snapshot) -> Vec<TaggedNetwork<'_>> {
+    snapshot
+        .networks
+        .iter()
+        .filter_map(|index| {
+            let fact = &snapshot.facts[*index];
+            let Observed::Network {
+                name, subnet, vlan, ..
+            } = &fact.observed
+            else {
+                return None;
+            };
+            let vid = vlan.filter(|vid| (1..=4094).contains(vid))?;
+            let subnet = subnet.map(|subnet| subnet.trunc());
+            Some(TaggedNetwork {
+                fact,
+                name: name.as_str(),
+                subnet,
+                vid,
+                prefix: subnet.and_then(|subnet| prefix_of_subnet(snapshot, subnet)),
+            })
+        })
+        .collect()
+}
+
+/// One VLAN-discovered proposal per missing VLAN.
+fn vlan_candidates(missing: &MissingVlans<'_, '_>) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for ((site, vid), (id, group)) in missing {
+        let name = group.first().map_or("", |network| network.name);
+        let prefix = group.iter().find_map(|network| network.prefix);
+        let subnet = group.iter().find_map(|network| network.subnet);
+        let mut params = BTreeMap::from([
+            ("vid".to_owned(), vid.to_string()),
+            ("name".to_owned(), name.to_owned()),
+        ]);
+        if let Some(subnet) = subnet {
+            params.insert("cidr".to_owned(), subnet.to_string());
+        }
+        out.push(Candidate {
+            kind: IntentProposalKind::VlanDiscovered,
+            rule: rule::VLAN_DISCOVERED,
+            key: format!("vlan_discovered/{}/{vid}", site_text(*site)),
+            subject: ProposalSubject {
+                cidr: subnet,
+                vrf: prefix.map(|prefix| prefix.vrf),
+                prefix: prefix.map(|prefix| prefix.id),
+                name: Some(name.to_owned()),
+                objects: prefix
+                    .map(|prefix| vec![ObjectRef::from(prefix.id)])
+                    .unwrap_or_default(),
+                ..ProposalSubject::default()
+            },
+            severity: ProposalSeverity::Info,
+            summary: format!(
+                "The network controller carries VLAN {vid} ({name}), which IPAM does not know; create the VLAN"
+            ),
+            params,
+            evidence: network_evidence(group),
+            commands: vec![new_vlan(*id, *site, *vid, name)],
+            shape: vec![format!("vlan:{}/{vid}/{name}", site_text(*site))],
+        });
+    }
+    out
+}
+
+/// The tagged networks by the prefix that equals their subnet.
+fn by_prefix<'n, 's>(
+    networks: &'n [TaggedNetwork<'s>],
+) -> BTreeMap<PrefixId, Vec<&'n TaggedNetwork<'s>>> {
+    let mut out: BTreeMap<PrefixId, Vec<&TaggedNetwork<'_>>> = BTreeMap::new();
+    for network in networks {
+        if let Some(prefix) = network.prefix {
+            out.entry(prefix.id).or_default().push(network);
+        }
+    }
+    out
+}
+
+/// One link proposal per prefix that equals the subnet of tagged networks with one VLAN id
+/// and is not linked to a VLAN with that id.
+fn link_candidates(
+    snapshot: &Snapshot,
+    networks: &[TaggedNetwork<'_>],
+    missing: &MissingVlans<'_, '_>,
+) -> Vec<Candidate> {
+    let intent = &snapshot.intent;
+    let mut out = Vec::new();
+    for (prefix_id, group) in by_prefix(networks) {
+        let vids: Vec<u16> = group
+            .iter()
+            .map(|network| network.vid)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let (Some(prefix), [vid]) = (intent.prefixes.get(&prefix_id), vids.as_slice()) else {
+            continue;
+        };
+        let vid = *vid;
+        let current = prefix.vlan.and_then(|id| intent.vlans.get(&id));
+        if current.is_some_and(|vlan| vlan.vid == vid) {
+            continue;
+        }
+        let name = group.first().map_or("", |network| network.name);
+        let site = prefix.site;
+        let mut commands = Vec::new();
+        let mut objects = vec![ObjectRef::from(prefix.id)];
+        let target = if let Some(vlan) = intent.vlan_at(site, vid) {
+            objects.push(ObjectRef::from(vlan.id));
+            vlan.id
+        } else {
+            let id = missing
+                .get(&(site, vid))
+                .map_or_else(VlanId::generate, |(id, _)| *id);
+            commands.push(new_vlan(id, site, vid, name));
+            id
+        };
+        commands.push(IpamCommand::UpdatePrefix(UpdatePrefix {
+            id: prefix.id,
+            expected: None,
+            patch: PrefixPatch {
+                vlan: Some(Some(target)),
+                ..PrefixPatch::default()
+            },
+        }));
+        let mut params = BTreeMap::from([
+            ("cidr".to_owned(), prefix.cidr.to_string()),
+            ("vid".to_owned(), vid.to_string()),
+            ("name".to_owned(), name.to_owned()),
+        ]);
+        let (rule, severity, summary) = match current {
+            None => (
+                rule::PREFIX_VLAN_UNSET,
+                ProposalSeverity::Info,
+                format!(
+                    "The network controller carries {} on VLAN {vid} ({name}); link the prefix to that VLAN",
+                    prefix.cidr
+                ),
+            ),
+            Some(other) => {
+                params.insert("current".to_owned(), other.vid.to_string());
+                objects.push(ObjectRef::from(other.id));
+                (
+                    rule::PREFIX_VLAN_DIFFERS,
+                    ProposalSeverity::Warning,
+                    format!(
+                        "The network controller carries {} on VLAN {vid} ({name}), but the prefix is linked to VLAN {}; link it to VLAN {vid}",
+                        prefix.cidr, other.vid
+                    ),
+                )
+            }
+        };
+        let creates = commands.len() > 1;
+        out.push(Candidate {
+            kind: IntentProposalKind::PrefixVlanMismatch,
+            rule,
+            key: format!("prefix_vlan_mismatch/{}", prefix.id),
+            subject: ProposalSubject {
+                cidr: Some(prefix.cidr),
+                vrf: Some(prefix.vrf),
+                prefix: Some(prefix.id),
+                name: Some(name.to_owned()),
+                objects,
+                ..ProposalSubject::default()
+            },
+            severity,
+            summary,
+            params,
+            evidence: network_evidence(&group),
+            commands,
+            shape: vec![if creates {
+                format!(
+                    "prefix_vlan:{}/new:{}/{vid}/{name}",
+                    prefix.id,
+                    site_text(site)
+                )
+            } else {
+                format!("prefix_vlan:{}/{target}", prefix.id)
+            }],
+        });
+    }
+    out
 }
 
 // ----- orphaned intent --------------------------------------------------------------

@@ -64,8 +64,9 @@ pub fn answers(data: &[u8]) {
             .filter_map(|(i, v)| integration::device_of(&format!("d{i}"), v))
             .collect(),
         clients: next().iter().filter_map(integration::client_of).collect(),
+        networks: next().iter().filter_map(integration::network_of).collect(),
     };
-    let _ = integration::topology(&integration, at);
+    let _ = integration::topology(&integration, &local, at);
     let _ = integration::inventory(&integration);
 }
 

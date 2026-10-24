@@ -18,7 +18,7 @@
 )]
 
 mod classic;
-mod integration;
+pub mod integration;
 mod tls;
 
 use std::{
@@ -218,6 +218,9 @@ pub struct State {
     pub profiles: Vec<Value>,
     /// Client records, read by `stat/user/<mac>` and written by `rest/user/<id>`.
     pub users: Vec<Value>,
+    /// Whether the Integration API serves the networks, as Network 10 does (`true`, the
+    /// default); `false` answers 404 like the 9.x releases.
+    pub integration_networks: bool,
     /// Open sessions: cookie token to CSRF token.
     sessions: HashMap<String, String>,
     writes: Vec<Write>,
@@ -239,6 +242,7 @@ impl State {
             wlans: fixture(include_str!("../fixtures/classic/wlanconf.json")),
             profiles: fixture(include_str!("../fixtures/classic/portconf.json")),
             users: fixture(include_str!("../fixtures/classic/user.json")),
+            integration_networks: true,
             sessions: HashMap::new(),
             writes: Vec::new(),
             logins: 0,

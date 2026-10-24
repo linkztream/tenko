@@ -28,6 +28,10 @@
 .topology-controller[data-state="error"] { color: var(--danger-ink); }
 .topology-controller[data-state="ok"] svg.i { color: var(--ok-ink); }
 .topology-controller-error { font-weight: var(--fw-medium); }
+.topology-networks-block > summary { cursor: pointer; color: var(--ink-2); }
+.topology-networks { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: var(--sp-2); }
+.topology-network { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.topology-network .network-name { min-inline-size: 8ch; }
 
 /* ---------- The drawing ---------- */
 .topology-canvas { position: relative; flex: 1; min-height: 240px; overflow: hidden; background: var(--surface); }

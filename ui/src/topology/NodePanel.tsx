@@ -1,7 +1,8 @@
 // One device, docked beside the map (/topology/<id>): what it is and what the sources know
 // about it, its ports and what hangs on each, its neighbours, the host of intent with its
-// addresses, links to the host page and the observations, and the path actions. The panel
-// follows the `discovery` and `ipam` topics, so a change of the graph shows up at once.
+// addresses, the networks of its controller when it is a controller's gateway, links to the
+// host page and the observations, and the path actions. The panel follows the `discovery`
+// and `ipam` topics, so a change of the graph shows up at once.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, createUniqueId, For, Match, Show, Switch } from "solid-js";
 import { createLiveQuery } from "../api/live";
@@ -14,8 +15,9 @@ import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
 import type { VlanStyle } from "../ipam/vlan/palette";
 import { VlanChip } from "../ipam/vlan/VlanChip";
-import { getNode, isNodeGone, type Neighbour, type TopologyNodeView, type TopologyPort } from "./api";
+import { getNode, isNodeGone, type Neighbour, type NetworkInView, type TopologyNodeView, type TopologyPort } from "./api";
 import { edgeWord, kindWord, portStateWord, portTitle, sourceWord } from "./model";
+import { NetworkList } from "./NetworkList";
 
 export interface NodePanelProps {
   id: string;
@@ -37,6 +39,14 @@ export interface NodePanelProps {
   vlanStyle: (vid: number) => VlanStyle | undefined;
   /** The name of a VLAN in view. */
   vlanName: (vid: number) => string | undefined;
+  /** The networks the controllers report (the summary of the graph). */
+  networks?: readonly NetworkInView[] | undefined;
+}
+
+/** The connectors whose network controller reports a node, from its source keys. */
+export function controllersOf(sources: readonly string[]): string[] {
+  const prefix = "network_controller:";
+  return sources.filter((s) => s.startsWith(prefix)).map((s) => s.slice(prefix.length));
 }
 
 /** The ports, edge kind and wireless network of a link, in words. */
@@ -213,6 +223,12 @@ export function NodePanel(props: NodePanelProps) {
         {(v) => {
           const node = () => v().node;
           const sources = () => [...new Set(node().sources.map(sourceWord))];
+          // A controller's gateway shows the networks of its controller.
+          const networks = () => {
+            if (node().kind !== "router") return [];
+            const controllers = controllersOf(node().sources);
+            return (props.networks ?? []).filter((n) => controllers.includes(n.connector));
+          };
           return (
             <>
               <div class="panel-head">
@@ -378,6 +394,16 @@ export function NodePanel(props: NodePanelProps) {
                     </Show>
                   </div>
                 </section>
+
+                <Show when={networks().length > 0}>
+                  <section class="section" aria-labelledby={`${listId}-networks`} data-testid="node-networks">
+                    <h3 id={`${listId}-networks`}>
+                      {t("topology.networks.title")}
+                      <span class="more muted">{networks().length}</span>
+                    </h3>
+                    <NetworkList networks={networks()} vlanStyle={props.vlanStyle} testid="node-network-list" />
+                  </section>
+                </Show>
 
                 <section class="section" aria-labelledby={`${listId}-intent`} data-testid="node-intent">
                   <h3 id={`${listId}-intent`}>{t("topology.panel.intent")}</h3>

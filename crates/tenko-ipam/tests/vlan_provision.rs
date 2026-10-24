@@ -379,6 +379,7 @@ async fn a_controller_that_changed_after_the_submit_rolls_the_job_back() {
                 vlan: Some(70),
                 subnet: None,
                 management: false,
+                dhcp: None,
             });
     });
     let job = world.drive(submitted.job_id).await;
@@ -447,6 +448,7 @@ async fn a_network_that_exists_as_asked_is_only_checked() {
                 vlan: Some(90),
                 subnet: None,
                 management: false,
+                dhcp: None,
             });
     });
     let world = World::new(Some(memory.clone()));
@@ -479,6 +481,7 @@ async fn a_network_that_exists_as_asked_is_only_checked() {
                 vlan: Some(91),
                 subnet: None,
                 management: false,
+                dhcp: None,
             });
     });
     let preview = world.preview(&renamed).await.expect("preview");

@@ -112,6 +112,7 @@ fn controller_table(connector: ConnectorId) -> ControllerTopology {
                 vlan: Some(10),
                 subnet: None,
                 management: true,
+                dhcp: None,
             },
             ControllerNetwork {
                 id: "net-iot".to_owned(),
@@ -119,6 +120,7 @@ fn controller_table(connector: ConnectorId) -> ControllerTopology {
                 vlan: Some(30),
                 subnet: None,
                 management: false,
+                dhcp: None,
             },
         ],
         wlans: vec![ControllerWlan {

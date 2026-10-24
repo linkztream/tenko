@@ -202,6 +202,9 @@ pub struct ControllerNetwork {
     /// Whether Tenko or the controller is managed through this network (never written).
     #[serde(default)]
     pub management: bool,
+    /// What the controller does for DHCP on the network; absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp: Option<tenko_core::observe::NetworkDhcp>,
 }
 
 /// A wireless network (SSID).

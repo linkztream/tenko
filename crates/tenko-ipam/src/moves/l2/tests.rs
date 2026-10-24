@@ -56,6 +56,7 @@ fn network(id: &str, name: &str, vlan: u16, management: bool) -> ControllerNetwo
         vlan: Some(vlan),
         subnet: None,
         management,
+        dhcp: None,
     }
 }
 

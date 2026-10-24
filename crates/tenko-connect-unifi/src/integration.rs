@@ -3,17 +3,23 @@
 //!
 //! The Integration API of the 9.x releases reports sites, devices with their upstream
 //! device, and clients with the device they hang on; it reports no port profiles, no
-//! port of a wired client, no SSID or VLAN of a client, no LLDP and no networks. The
-//! topology it yields therefore has devices without port tables (an uplink the plugin
-//! cannot mark must not appear as an ordinary port), uplink links without ports, and
-//! clients attached to a device without a port. Writes need the classic API.
+//! port of a wired client, no SSID or VLAN of a client and no LLDP. The releases from
+//! 10.0 on also report the networks with their VLAN ids (`/sites/{id}/networks`, the
+//! subnet and the DHCP mode in the detail of each network); on a release without them the
+//! list answers 404 and the topology has no networks. The topology it yields therefore has
+//! devices without port tables (an uplink the plugin cannot mark must not appear as an
+//! ordinary port), uplink links without ports, clients attached to a device without a port
+//! or an SSID, in the network whose subnet holds their address, and the networks. Writes
+//! need the classic API.
 
 use std::collections::HashMap;
 
+use ipnet::IpNet;
 use serde_json::Value;
 use tenko_connect::sdk::http::reqwest::{Method, StatusCode};
 use tenko_connect::{
-    ClientAttachment, DeviceKind, DeviceRef, NetworkDevice, TopologyLink, TopologySnapshot,
+    ClientAttachment, ControllerDhcp, ControllerNetwork, DeviceKind, DeviceRef, NetworkDevice,
+    NetworkRef, TopologyLink, TopologySnapshot,
 };
 use tenko_core::{
     MacAddr, Timestamp,
@@ -24,6 +30,7 @@ use crate::{
     detect::Paths,
     http::{Effect, Http},
     json,
+    model::Local,
 };
 
 /// The most pages one list reads.
@@ -66,6 +73,24 @@ pub struct Client {
     pub device: Option<String>,
 }
 
+/// A network as the Integration API reports it (Network 10.0 and later).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Network {
+    /// The API's id.
+    pub id: String,
+    /// The name.
+    pub name: String,
+    /// The VLAN id; `None` for the default network, which the API reports as VLAN 1 and
+    /// which is untagged.
+    pub vlan: Option<u16>,
+    /// Whether it is the default network.
+    pub default: bool,
+    /// The subnet, without host bits (`hostIpAddress` and `prefixLength` of the detail).
+    pub subnet: Option<IpNet>,
+    /// The DHCP mode of the detail.
+    pub dhcp: ControllerDhcp,
+}
+
 /// Everything one Integration API read returned.
 #[derive(Debug, Clone, Default)]
 pub struct Read {
@@ -73,6 +98,8 @@ pub struct Read {
     pub devices: Vec<Device>,
     /// Clients.
     pub clients: Vec<Client>,
+    /// Networks; empty on releases before 10.0.
+    pub networks: Vec<Network>,
 }
 
 /// A client of the Integration API.
@@ -180,7 +207,50 @@ impl<'a> Api<'a> {
             })
     }
 
-    /// Devices and clients of a site.
+    /// The networks of a site, each with the detail that carries its subnet and DHCP mode;
+    /// none on a release whose API has no networks (the list answers 404).
+    ///
+    /// # Errors
+    ///
+    /// The API's error.
+    pub async fn networks(
+        &self,
+        site_id: &str,
+    ) -> Result<Vec<Network>, tenko_connect::ConnectorError> {
+        let entries = match self.list(&format!("/sites/{site_id}/networks")).await {
+            Ok(entries) => entries,
+            Err(tenko_connect::ConnectorError::Unsupported) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut networks = Vec::new();
+        for entry in entries {
+            if json::flag(&entry, "enabled") == Some(false) {
+                continue;
+            }
+            let Some(id) = json::id(&entry, "id") else {
+                continue;
+            };
+            // The list leaves out the IPv4 configuration; a network the gateway or a switch
+            // manages has it in its detail.
+            let unmanaged = json::text(&entry, "management")
+                .is_some_and(|management| management.eq_ignore_ascii_case("unmanaged"));
+            let detail = if unmanaged || entry.get("ipv4Configuration").is_some() {
+                entry
+            } else {
+                match self.get(&format!("/sites/{site_id}/networks/{id}")).await {
+                    Ok(detail) => detail,
+                    Err(tenko_connect::ConnectorError::Unsupported) => entry,
+                    Err(error) => return Err(error),
+                }
+            };
+            if let Some(network) = network_of(&detail) {
+                networks.push(network);
+            }
+        }
+        Ok(networks)
+    }
+
+    /// Devices, clients and networks of a site.
     ///
     /// # Errors
     ///
@@ -207,7 +277,12 @@ impl<'a> Api<'a> {
             .iter()
             .filter_map(client_of)
             .collect();
-        Ok(Read { devices, clients })
+        let networks = self.networks(site_id).await?;
+        Ok(Read {
+            devices,
+            clients,
+            networks,
+        })
     }
 }
 
@@ -253,8 +328,69 @@ pub(crate) fn client_of(value: &Value) -> Option<Client> {
     })
 }
 
-/// The topology of an Integration API read.
-pub fn topology(read: &Read, observed_at: Timestamp) -> TopologySnapshot {
+pub(crate) fn network_of(value: &Value) -> Option<Network> {
+    let id = json::id(value, "id")?;
+    let default = json::flag(value, "default").unwrap_or(false);
+    let ipv4 = value.get("ipv4Configuration");
+    let subnet = ipv4.and_then(|ipv4| {
+        let host = json::ip(ipv4, "hostIpAddress")?;
+        let length = u8::try_from(json::uint(ipv4, "prefixLength")?).ok()?;
+        IpNet::new(host, length).ok().map(|net| net.trunc())
+    });
+    let dhcp = ipv4
+        .and_then(|ipv4| ipv4.get("dhcpConfiguration"))
+        .filter(|dhcp| !dhcp.is_null())
+        .map_or(ControllerDhcp::Disabled, |dhcp| {
+            match json::text(dhcp, "mode").as_deref() {
+                Some(mode) if mode.eq_ignore_ascii_case("server") => ControllerDhcp::Server,
+                Some(mode) if mode.eq_ignore_ascii_case("relay") => ControllerDhcp::RelayTo(
+                    json::array(dhcp, "dhcpServerIpAddresses")
+                        .iter()
+                        .filter_map(|ip| ip.as_str()?.trim().parse().ok())
+                        .collect(),
+                ),
+                _ => ControllerDhcp::Disabled,
+            }
+        });
+    Some(Network {
+        name: json::text(value, "name").unwrap_or_else(|| id.clone()),
+        id,
+        // VLAN 1 is the untagged default network; additional networks have 2 and up.
+        vlan: json::vlan(value, "vlanId").filter(|vid| *vid >= 2 && !default),
+        default,
+        subnet,
+        dhcp,
+    })
+}
+
+/// The topology of an Integration API read. `local` holds the addresses of the controller
+/// and of Tenko: a network that holds one of them, or the address of a device, is a
+/// management network, like the default network (see [`crate::model`]).
+pub fn topology(read: &Read, local: &Local, observed_at: Timestamp) -> TopologySnapshot {
+    let networks: Vec<ControllerNetwork> = read
+        .networks
+        .iter()
+        .map(|network| {
+            let holds = |ip: &std::net::IpAddr| network.subnet.is_some_and(|net| net.contains(ip));
+            ControllerNetwork {
+                id: NetworkRef(network.id.clone()),
+                name: network.name.clone(),
+                vlan: network.vlan,
+                subnet: network.subnet,
+                dhcp: network.dhcp.clone(),
+                management: network.default
+                    || local.controller.iter().chain(&local.tenko).any(holds)
+                    || read.devices.iter().filter_map(|d| d.ip.as_ref()).any(holds),
+            }
+        })
+        .collect();
+    // The API names no network of a client: the most specific subnet that holds its address.
+    let network_of_ip = |ip: std::net::IpAddr| {
+        networks
+            .iter()
+            .filter(|network| network.subnet.is_some_and(|net| net.contains(&ip)))
+            .max_by_key(|network| network.subnet.map(|net| net.prefix_len()))
+    };
     let macs: HashMap<&str, MacAddr> = read
         .devices
         .iter()
@@ -301,21 +437,22 @@ pub fn topology(read: &Read, observed_at: Timestamp) -> TopologySnapshot {
             .iter()
             .filter_map(|client| {
                 let device = macs.get(client.device.as_deref()?)?;
+                let network = client.ip.and_then(network_of_ip);
                 Some(ClientAttachment {
                     mac: client.mac,
                     ip: client.ip,
                     device: DeviceRef(device.to_string()),
                     port: None,
                     ssid: None,
-                    network: None,
-                    vlan: None,
+                    network: network.map(|network| network.id.clone()),
+                    vlan: network.and_then(|network| network.vlan),
                     name: client.name.clone(),
                     vendor: None,
                     management: false,
                 })
             })
             .collect(),
-        networks: Vec::new(),
+        networks,
         profiles: Vec::new(),
         wlans: Vec::new(),
     }

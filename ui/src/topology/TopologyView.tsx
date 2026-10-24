@@ -37,6 +37,7 @@ import {
   VLAN_COLOR_LIMIT,
   vlanColorIds,
 } from "./model";
+import { NetworkList } from "./NetworkList";
 import { NodePanel } from "./NodePanel";
 import { edgesOnPath, pathToRouter, placedPath, shortestPath } from "./path";
 import { TopologyMap } from "./TopologyMap";
@@ -380,6 +381,18 @@ export default function TopologyView() {
                 <For each={s().controllers}>{(c) => <ControllerLine controller={c} />}</For>
               </ul>
             </Show>
+            <Show when={s().networks.length > 0}>
+              <details class="topology-networks-block" data-testid="topology-networks">
+                <summary>{t("topology.networks.summary", { count: s().networks.length })}</summary>
+                <NetworkList
+                  networks={s().networks}
+                  vlanStyle={vlanStyle}
+                  controllerName={
+                    s().controllers.length > 1 ? (id) => s().controllers.find((c) => c.connector === id)?.name : undefined
+                  }
+                />
+              </details>
+            </Show>
           </div>
         )}
       </Show>
@@ -518,6 +531,7 @@ export default function TopologyView() {
                 }}
                 vlanStyle={vlanStyle}
                 vlanName={vlanName}
+                networks={summary()?.networks ?? []}
               />
             );
           }}

@@ -1,6 +1,6 @@
 //! One consistent picture for a reconcile run: the live intent, the current facts with the
-//! address and MAC pairs they report, and the stored proposals, rejections, policies and
-//! sightings, all from one read view.
+//! address and MAC pairs they report and the networks controllers report, and the stored
+//! proposals, rejections, policies and sightings, all from one read view.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -8,10 +8,10 @@ use std::{
 };
 
 use tenko_core::{
-    AddressId, HostId, InterfaceId, MacAddr, ObjectRef, PrefixId, ProposalId, Revision, TenantId,
-    Timestamp, VrfId,
-    ipam::{Address, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Tenant, Vrf},
-    observe::Observed,
+    AddressId, HostId, InterfaceId, MacAddr, ObjectRef, PrefixId, ProposalId, Revision, SiteId,
+    TenantId, Timestamp, VlanId, VrfId,
+    ipam::{Address, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Tenant, Vlan, Vrf},
+    observe::{ObservationSource, Observed},
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
 
@@ -26,7 +26,7 @@ use crate::{
     proposals::model::{
         ADOPTION, IntentProposal, OPEN_KEYS, PROPOSALS, REJECTIONS, Rejection, StoredPolicy,
     },
-    tables::{ADDRESSES, HOSTS, INTERFACES, PREFIXES, RANGES, TENANTS, VRFS},
+    tables::{ADDRESSES, HOSTS, INTERFACES, PREFIXES, RANGES, TENANTS, VLANS, VRFS},
 };
 
 /// Name of the default tenant and VRF.
@@ -86,6 +86,10 @@ pub(crate) struct Intent {
     pub hosts: BTreeMap<HostId, Host>,
     /// Live host names per tenant, lowercase.
     pub host_names: BTreeSet<(TenantId, String)>,
+    /// Live VLANs.
+    pub vlans: BTreeMap<VlanId, Vlan>,
+    /// Live VLANs by site (`None`: global) and VLAN id.
+    pub vlan_ids: BTreeMap<(Option<SiteId>, u16), VlanId>,
 }
 
 impl Intent {
@@ -119,6 +123,13 @@ impl Intent {
             prefix.meta.revision = revision;
             intent.by_vrf.entry(prefix.vrf).or_default().push(prefix.id);
             intent.prefixes.insert(prefix.id, prefix);
+        }
+        for (_, vlan, _) in view.scan_typed(&VLANS, KeyRange::all(), usize::MAX, false)? {
+            let vlan: Vlan = vlan;
+            if !vlan.meta.is_deleted() {
+                intent.vlan_ids.insert((vlan.site, vlan.vid), vlan.id);
+                intent.vlans.insert(vlan.id, vlan);
+            }
         }
         for (_, range, _) in view.scan_typed(&RANGES, KeyRange::all(), usize::MAX, false)? {
             let range: Range = range;
@@ -224,6 +235,15 @@ impl Intent {
                 .map_or(Placement::Unplaced, |vrf| Placement::Outside { vrf }),
             _ => Placement::Unplaced,
         }
+    }
+
+    /// The live VLAN with VLAN id `vid` that a network of `site` uses: the site's own, else
+    /// a global one.
+    pub(crate) fn vlan_at(&self, site: Option<SiteId>, vid: u16) -> Option<&Vlan> {
+        self.vlan_ids
+            .get(&(site, vid))
+            .or_else(|| site.and_then(|_| self.vlan_ids.get(&(None, vid))))
+            .and_then(|id| self.vlans.get(id))
     }
 
     /// Whether `ip` lies inside a live DHCP pool of `prefix`.
@@ -333,6 +353,8 @@ pub(crate) struct Snapshot {
     pub vendors: BTreeMap<MacAddr, BTreeSet<String>>,
     /// The scopes the probes apply (`scan.scopes`); empty when no probe reported one.
     pub scopes: Vec<ScanScope>,
+    /// Indexes in [`Self::facts`] of the current networks network controllers report.
+    pub networks: Vec<usize>,
 }
 
 impl Snapshot {
@@ -357,8 +379,15 @@ impl Snapshot {
         let mut seen = Vec::new();
         let mut names: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
         let mut vendors: BTreeMap<MacAddr, BTreeSet<String>> = BTreeMap::new();
+        let mut networks = Vec::new();
         for (index, fact) in facts.iter().enumerate() {
             if !fact.is_current(now) {
+                continue;
+            }
+            if let Observed::Network { .. } = &fact.observed {
+                if matches!(fact.source, ObservationSource::NetworkController { .. }) {
+                    networks.push(index);
+                }
                 continue;
             }
             if let Observed::Vendor { mac, vendor } = &fact.observed {
@@ -419,6 +448,7 @@ impl Snapshot {
             sightings,
             vendors,
             scopes: super::scopes::load(view)?,
+            networks,
         })
     }
 }
@@ -438,10 +468,13 @@ fn pairs(index: usize, fact: &ObservedFact, intent: &Intent) -> Vec<Seen> {
         placement: ip.map(|ip| intent.place(ip, hint)),
         name: name.clone(),
     };
-    // A link names devices, not addresses; a name or a vendor is not a sighting.
+    // A link names devices, not addresses; a name, a vendor or a network is not a sighting.
     if matches!(
         fact.observed,
-        Observed::Link { .. } | Observed::Name { .. } | Observed::Vendor { .. }
+        Observed::Link { .. }
+            | Observed::Name { .. }
+            | Observed::Vendor { .. }
+            | Observed::Network { .. }
     ) {
         return Vec::new();
     }

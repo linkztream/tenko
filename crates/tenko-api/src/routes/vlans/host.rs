@@ -30,6 +30,7 @@ use tenko_connect::{
 use tenko_core::{
     CodedError, ConnectorId, UserId,
     codec::{from_cbor, to_cbor},
+    observe::NetworkDhcp,
     serde_util::HexBytes,
 };
 use tenko_ipam::vlan::controllers::{
@@ -274,6 +275,11 @@ pub fn topology_of(connector: ConnectorId, snapshot: &TopologySnapshot) -> Contr
                 vlan: network.vlan,
                 subnet: network.subnet,
                 management: network.management,
+                dhcp: Some(match network.dhcp {
+                    tenko_connect::ControllerDhcp::Disabled => NetworkDhcp::Disabled,
+                    tenko_connect::ControllerDhcp::RelayTo(_) => NetworkDhcp::Relay,
+                    tenko_connect::ControllerDhcp::Server => NetworkDhcp::Server,
+                }),
             })
             .collect(),
         wlans: snapshot

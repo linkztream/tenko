@@ -9,16 +9,18 @@
 //! after three poll intervals, at least 15 minutes, unless a newer poll refreshes it; a
 //! host's MAC and IP addresses are sorted and deduplicated, its tags deduplicated in order;
 //! the vendor facts of an inventory become one vendor observation per MAC address, the last
-//! report of a MAC address winning.
+//! report of a MAC address winning; a controller's networks become one network observation
+//! per controller reference, the subnet without host bits and a VLAN id outside 1 to 4094
+//! dropped.
 
 use std::time::Duration;
 
 use tenko_core::{
     ConnectorId, ObservationId, Timestamp,
-    observe::{Observation, ObservationSource, Observed},
+    observe::{NetworkDhcp, Observation, ObservationSource, Observed},
 };
 
-use crate::{InventoryBatch, TopologySnapshot};
+use crate::{ControllerDhcp, InventoryBatch, TopologySnapshot};
 
 /// How far in the future a source's timestamp may lie before the host replaces it.
 pub const MAX_CLOCK_SKEW: Duration = Duration::from_secs(300);
@@ -185,7 +187,8 @@ pub fn inventory(
 
 /// The observations of a network controller's topology: where each client is attached, the
 /// vendor of each client the controller reports one for, the name of each client with a name
-/// and an address, and the links between devices.
+/// and an address, the links between devices, and the controller's networks with their VLANs
+/// and subnets.
 pub fn topology(
     connector: ConnectorId,
     topology: &TopologySnapshot,
@@ -244,6 +247,27 @@ pub fn topology(
             kind: link.kind,
         })
     }));
+    let mut references: Vec<&str> = Vec::with_capacity(topology.networks.len());
+    for network in &topology.networks {
+        let reference = network.id.0.trim();
+        if reference.is_empty() || references.contains(&reference) {
+            continue;
+        }
+        references.push(reference);
+        let name = network.name.trim();
+        observations.push(observation(Observed::Network {
+            controller: reference.to_owned(),
+            name: if name.is_empty() { reference } else { name }.to_owned(),
+            subnet: network.subnet.map(|subnet| subnet.trunc()),
+            vlan: network.vlan.filter(|vid| (1..=4094).contains(vid)),
+            dhcp: match network.dhcp {
+                ControllerDhcp::Disabled => NetworkDhcp::Disabled,
+                ControllerDhcp::RelayTo(_) => NetworkDhcp::Relay,
+                ControllerDhcp::Server => NetworkDhcp::Server,
+            },
+            management: network.management,
+        }));
+    }
     (
         ObservationBatch {
             connector,
@@ -390,6 +414,87 @@ mod tests {
             &o.subject,
             Observed::Vendor { vendor, .. } if vendor == "Example Devices"
         )));
+    }
+
+    #[test]
+    fn controller_networks_become_network_observations() {
+        let connector = ConnectorId::generate();
+        let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
+        let network = |id: &str, name: &str, vlan: Option<u16>, subnet: Option<&str>| {
+            crate::ControllerNetwork {
+                id: crate::NetworkRef(id.to_owned()),
+                name: name.to_owned(),
+                vlan,
+                subnet: subnet.map(|text| text.parse().expect("net")),
+                dhcp: ControllerDhcp::Disabled,
+                management: false,
+            }
+        };
+        let mut tagged = network("net-iot", " IoT ", Some(30), Some("198.51.100.1/24"));
+        tagged.dhcp = ControllerDhcp::RelayTo(vec!["192.0.2.53".parse().expect("ip")]);
+        let mut untagged = network("net-default", "Default", None, Some("192.0.2.1/24"));
+        untagged.dhcp = ControllerDhcp::Server;
+        untagged.management = true;
+        let topology = TopologySnapshot {
+            observed_at: now,
+            devices: vec![],
+            links: vec![],
+            clients: vec![],
+            networks: vec![
+                tagged,
+                untagged,
+                network("net-cams", "", Some(40), None),
+                network("net-iot", "IoT again", Some(31), None),
+                network("net-odd", "Odd", Some(4095), None),
+            ],
+            profiles: vec![],
+            wlans: vec![],
+        };
+        let (normalized, warnings) =
+            super::topology(connector, &topology, now, Duration::from_secs(300));
+        assert_eq!(warnings, Vec::<String>::new());
+        assert!(normalized.complete);
+        let networks: Vec<&Observed> = normalized.observations.iter().map(|o| &o.subject).collect();
+        assert_eq!(
+            networks,
+            [
+                &Observed::Network {
+                    controller: "net-iot".to_owned(),
+                    name: "IoT".to_owned(),
+                    subnet: Some("198.51.100.0/24".parse().expect("net")),
+                    vlan: Some(30),
+                    dhcp: NetworkDhcp::Relay,
+                    management: false,
+                },
+                &Observed::Network {
+                    controller: "net-default".to_owned(),
+                    name: "Default".to_owned(),
+                    subnet: Some("192.0.2.0/24".parse().expect("net")),
+                    vlan: None,
+                    dhcp: NetworkDhcp::Server,
+                    management: true,
+                },
+                &Observed::Network {
+                    controller: "net-cams".to_owned(),
+                    name: "net-cams".to_owned(),
+                    subnet: None,
+                    vlan: Some(40),
+                    dhcp: NetworkDhcp::Disabled,
+                    management: false,
+                },
+                &Observed::Network {
+                    controller: "net-odd".to_owned(),
+                    name: "Odd".to_owned(),
+                    subnet: None,
+                    vlan: None,
+                    dhcp: NetworkDhcp::Disabled,
+                    management: false,
+                },
+            ]
+        );
+        assert!(normalized.observations.iter().all(|o| o.source
+            == ObservationSource::NetworkController { connector }
+            && o.expires_at == now.checked_add(Duration::from_secs(900))));
     }
 
     #[tokio::test]

@@ -88,6 +88,7 @@ const SUBJECT_TYPES: &[&str] = &[
     "link",
     "name",
     "vendor",
+    "network",
 ];
 
 /// A sort field of the fact list.
@@ -212,6 +213,7 @@ fn search_text(fact: &ObservedFact) -> String {
         }
         Observed::Os { guess, .. } => parts.push(guess.as_str()),
         Observed::Vendor { vendor, .. } => parts.push(vendor.as_str()),
+        Observed::Network { name, .. } => parts.push(name.as_str()),
         Observed::Address { .. }
         | Observed::Services { .. }
         | Observed::Link { .. }
@@ -649,7 +651,10 @@ fn summarize(facts: &[ObservedFact], now: Timestamp) -> SubjectSummary {
                 vlan: *vlan,
                 last_seen: fact.last_seen,
             }),
-            Observed::Address { .. } | Observed::Link { .. } | Observed::Name { .. } => {}
+            Observed::Address { .. }
+            | Observed::Link { .. }
+            | Observed::Name { .. }
+            | Observed::Network { .. } => {}
         }
     }
     attachments.sort_by(|a, b| (&a.source, a.mac).cmp(&(&b.source, b.mac)));

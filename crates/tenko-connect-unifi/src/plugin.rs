@@ -190,7 +190,7 @@ impl Connector for Unifi {
         let version = if let Some(key) = call.key() {
             let api = integration::Api::new(&call.http, call.detected.paths, key);
             api.site(&call.config.site).await?;
-            notes.push("read-only: devices, uplinks and clients without ports, VLANs or SSIDs; writes need the local account".to_owned());
+            notes.push("read-only: devices, uplinks, clients without ports or SSIDs, and from Network 10 the networks with their VLANs; writes need the local account".to_owned());
             api.version().await.ok().flatten()
         } else {
             in_session!(call, |session| {
@@ -260,10 +260,9 @@ impl NetworkController for Unifi {
         if let Some(key) = call.key() {
             let api = integration::Api::new(&call.http, call.detected.paths, key);
             let site = api.site(&call.config.site).await?;
-            return Ok(integration::topology(
-                &api.read(&site).await?,
-                Timestamp::now(),
-            ));
+            let read = api.read(&site).await?;
+            let local = local_view(&call.config).await;
+            return Ok(integration::topology(&read, &local, Timestamp::now()));
         }
         let read = in_session!(call, |session| read_classic(&mut session).await)?;
         let local = local_view(&call.config).await;

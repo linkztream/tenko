@@ -65,8 +65,8 @@ function freshController(): MockVlanController {
     enabled: true,
     writes_enabled: true,
     networks: [
-      { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true },
-      { id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", management: false },
+      { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true, dhcp: "server" },
+      { id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", management: false, dhcp: "relay" },
     ],
   };
 }

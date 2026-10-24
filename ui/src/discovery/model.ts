@@ -37,6 +37,10 @@ export function kindIcon(kind: ProposalKind): IconName {
       return "layers";
     case "orphaned_intent":
       return "clock";
+    case "vlan_discovered":
+      return "cable";
+    case "prefix_vlan_mismatch":
+      return "link";
   }
 }
 
@@ -50,7 +54,7 @@ export function kindSummary(list: readonly Pick<Proposal, "kind">[]): string {
 /** The design's exception class of a kind: magenta for proposals, red for conflicts, amber for differences. */
 export function kindClass(kind: ProposalKind): "proposal" | "conflict" | "discrepancy" {
   if (kind === "conflict") return "conflict";
-  if (kind === "address_mismatch" || kind === "orphaned_intent") return "discrepancy";
+  if (kind === "address_mismatch" || kind === "orphaned_intent" || kind === "prefix_vlan_mismatch") return "discrepancy";
   return "proposal";
 }
 
@@ -228,6 +232,13 @@ export function observedText(observed: Observed): string {
       return observed.data.ip && observed.data.name ? t("discovery.fact.name", { ip: observed.data.ip, name: observed.data.name }) : otherObservedText(observed);
     case "vendor":
       return observed.data.mac && observed.data.vendor ? t("discovery.fact.vendor", { mac: observed.data.mac, vendor: observed.data.vendor }) : otherObservedText(observed);
+    case "network":
+      // A network a controller reports: no device, no sighting of an address.
+      return t("discovery.fact.network", {
+        name: observed.data.name,
+        vlan: observed.data.vlan != null ? String(observed.data.vlan) : "none",
+        subnet: observed.data.subnet ?? "none",
+      });
     default:
       // A kind of fact that a newer server adds.
       return otherObservedText(observed);
@@ -271,6 +282,9 @@ export function lookupSubject(fact: ObservedFact): string | null {
     case "vendor":
       // The MAC address whose vendor it is.
       return o.data.mac;
+    case "network":
+      // A network names no device to look up.
+      return null;
     default: {
       // A kind of fact that a newer server adds: whatever it names, MAC address first.
       const d = dataOf(o);

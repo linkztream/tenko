@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import { server } from "../api/mock/node";
+import { RECONCILE_IDS } from "../api/mock/reconcile-store";
 import { TOPOLOGY_IDS } from "../api/mock/topology-store";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -339,6 +340,35 @@ describe("path actions", () => {
     await loaded(T.gateway);
     expect((screen.getByTestId("node-path-router") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId("node-path-router-reason").textContent).toBe("This device is a router.");
+  });
+});
+
+describe("the networks of a controller", () => {
+  const networks = [
+    { connector: RECONCILE_IDS.controller, id: "net-default", name: "Default", subnet: "192.0.2.0/24", management: true, dhcp: "server" as const },
+    { connector: RECONCILE_IDS.controller, id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", dhcp: "relay" as const },
+    { connector: "7f1d0000-0000-4000-8000-0000000000ff", id: "net-other", name: "Other", vlan: 40 },
+  ];
+
+  it("lists the networks of its controller in the panel of a controller's gateway", async () => {
+    renderPanel(T.gateway, { networks });
+    await loaded(T.gateway);
+    const section = await screen.findByTestId("node-networks");
+    const rows = within(section).getAllByTestId("controller-network");
+    expect(rows.map((r) => r.dataset.key)).toEqual(["net-default", "net-iot"]);
+    expect(rows[0]?.textContent).toContain("Default");
+    expect(rows[0]?.textContent).toContain("untagged");
+    expect(rows[0]?.textContent).toContain("DHCP server");
+    expect(within(rows[0] as HTMLElement).getByTestId("network-management").textContent).toBe("Management");
+    expect(rows[1]?.dataset.vlan).toBe("30");
+    expect(rows[1]?.textContent).toContain("DHCP relay");
+    expect(within(rows[1] as HTMLElement).queryByTestId("network-management")).toBeNull();
+  });
+
+  it("lists no networks for a device that is not a gateway", async () => {
+    renderPanel(T.swCore, { networks });
+    await loaded(T.swCore);
+    expect(screen.queryByTestId("node-networks")).toBeNull();
   });
 });
 

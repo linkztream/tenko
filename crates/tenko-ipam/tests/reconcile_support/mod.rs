@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use tenko_core::{
     ConnectorId, MacAddr, NodeId, ObservationId, Timestamp, VrfId,
-    observe::{Observation, ObservationSource, Observed, ObservedHost, ProbeMethod},
+    observe::{NetworkDhcp, Observation, ObservationSource, Observed, ObservedHost, ProbeMethod},
 };
 use tenko_ipam::{
     IpamService, PlanOptions,
@@ -157,6 +157,58 @@ impl World {
             })
             .await
             .expect("name ingest");
+    }
+
+    /// One complete topology read of this world's connector as a network controller at
+    /// `when`, reporting the networks `(reference, name, VLAN id, subnet)`.
+    pub async fn networks(
+        &self,
+        networks: &[(&str, &str, Option<u16>, Option<&str>)],
+        when: Timestamp,
+    ) -> IngestReport {
+        let source = ObservationSource::NetworkController {
+            connector: self.connector,
+        };
+        let observations = networks
+            .iter()
+            .map(|(reference, name, vlan, subnet)| Observation {
+                id: ObservationId::generate(),
+                source: source.clone(),
+                subject: Observed::Network {
+                    controller: (*reference).to_owned(),
+                    name: (*name).to_owned(),
+                    subnet: subnet.map(|text| text.parse().expect("subnet")),
+                    vlan: *vlan,
+                    dhcp: NetworkDhcp::Disabled,
+                    management: false,
+                },
+                observed_at: when,
+                received_at: when,
+                expires_at: when.checked_add(Duration::from_secs(900)),
+            })
+            .collect();
+        self.reconciler
+            .ingest(IngestBatch {
+                source,
+                observations,
+                complete: true,
+                received_at: when,
+            })
+            .await
+            .expect("network ingest")
+    }
+
+    /// Rejects a proposal as a person.
+    pub async fn reject(&self, proposal: &IntentProposal) -> Decision {
+        proposals::reject(
+            &self.service,
+            proposal.id,
+            Some("not ours".to_owned()),
+            &crate::common::person(),
+            None,
+        )
+        .await
+        .expect("reject")
     }
 
     pub async fn reconcile(&self, when: Timestamp) -> ReconcileReport {

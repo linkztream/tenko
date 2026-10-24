@@ -33,16 +33,23 @@ pub enum IntentProposalKind {
     Conflict,
     /// An address seen outside every known network: a prefix is suggested.
     OutsidePrefixes,
+    /// A network controller carries a VLAN that IPAM has no VLAN for: the VLAN is suggested.
+    VlanDiscovered,
+    /// A network controller carries a prefix's network on a VLAN the prefix is not linked
+    /// to: the link is suggested.
+    PrefixVlanMismatch,
 }
 
 impl IntentProposalKind {
     /// Every kind.
-    pub const ALL: [IntentProposalKind; 5] = [
+    pub const ALL: [IntentProposalKind; 7] = [
         IntentProposalKind::DiscoveredHost,
         IntentProposalKind::OrphanedIntent,
         IntentProposalKind::AddressMismatch,
         IntentProposalKind::Conflict,
         IntentProposalKind::OutsidePrefixes,
+        IntentProposalKind::VlanDiscovered,
+        IntentProposalKind::PrefixVlanMismatch,
     ];
 
     /// The `snake_case` name.
@@ -53,6 +60,8 @@ impl IntentProposalKind {
             IntentProposalKind::AddressMismatch => "address_mismatch",
             IntentProposalKind::Conflict => "conflict",
             IntentProposalKind::OutsidePrefixes => "outside_prefixes",
+            IntentProposalKind::VlanDiscovered => "vlan_discovered",
+            IntentProposalKind::PrefixVlanMismatch => "prefix_vlan_mismatch",
         }
     }
 }

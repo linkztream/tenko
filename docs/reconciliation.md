@@ -58,6 +58,7 @@ A fact is stored once per source and subject, under the key (source key, subject
 | `name` | `name:<ip>` | Probes, network controllers, DHCP leases | A name found for an address (reverse DNS, mDNS, LLMNR, the `sysName` of a polled device, the name of a client on a network controller, or the FQDN of option 81, else the host name of option 12, of a lease). It is not a sighting of the address |
 | `vendor` | `vendor:<mac>` | Probes, network controllers, inventory connectors | The vendor of a MAC address: the organization its OUI is registered to, the vendor a network controller reports for a client, or the manufacturer an inventory source reports for a device |
 | `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
+| `network` | `network:<controller reference>` | Network controllers | A network of the controller (for UniFi the network's `_id`, not the VLAN): its name, subnet without host bits, VLAN id (none for the untagged default network), what the controller does for DHCP on it (`disabled`, `relay` or `server`) and whether Tenko or the controller is reached through it. It names no device and is no sighting of an address; the reconciler compares it with the VLANs and prefixes of intent (section 4.10) |
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
 
@@ -101,7 +102,7 @@ The table `ipam.obs.last_seen` records when an address or an interface of intent
 
 The connector host (`tenko-connect`) normalizes what a plugin reports before it reaches the observation layer, with these rules:
 
-- An inventory batch becomes one `host` observation per host, with sorted and de-duplicated MAC and IP addresses and de-duplicated tags, and one `vendor` observation per MAC address the batch reports a vendor for (the last report of a MAC address wins). A network controller topology becomes one `attachment` observation per client, one `vendor` observation per client with a vendor, one `name` observation per client with a name and an address, and one `link` observation per link, always as a complete batch.
+- An inventory batch becomes one `host` observation per host, with sorted and de-duplicated MAC and IP addresses and de-duplicated tags, and one `vendor` observation per MAC address the batch reports a vendor for (the last report of a MAC address wins). A network controller topology becomes one `attachment` observation per client, one `vendor` observation per client with a vendor, one `name` observation per client with a name and an address, one `link` observation per link, and one `network` observation per network (one per controller reference; a VLAN id outside 1 to 4094 is dropped), always as a complete batch.
 - The batch keeps the source's time, unless that lies more than five minutes ahead of the host's clock. Then the host's receive time is used and a warning is recorded.
 - Every observation expires three poll intervals after it was received, but not sooner than 15 minutes.
 - Every batch names its source, so a complete batch with no observations still tells which facts are gone.
@@ -190,7 +191,7 @@ The VRF comes from the source when the source names one, as probe `address` fact
 | Field | Meaning |
 |---|---|
 | `id`, `revision` | Identifier; the store revision, which is the `ETag` and the `If-Match` value of decisions |
-| `kind`, `rule`, `key` | The kind (`discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`), the stable code of the rule such as `ipam.reconcile.discovered_mac`, and the subject key (section 4.3) |
+| `kind`, `rule`, `key` | The kind (`discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered` or `prefix_vlan_mismatch`), the stable code of the rule such as `ipam.reconcile.discovered_mac`, and the subject key (section 4.3) |
 | `severity`, `state` | `info`, `warning` or `critical`; and the state of section 4.2 |
 | `subject` | What it concerns: `mac`, `ip`, `cidr`, `vrf`, `prefix` (the most specific network of the address), `name` and the intent `objects` involved |
 | `summary`, `params` | A one-line English summary and the named values it was built from; the UI translates the rule with `params` |
@@ -225,6 +226,8 @@ The subject key makes a proposal unique among the open ones. The rules produce t
 | `conflict_networks` | `conflict/networks:<mac>/<v4 or v6>` |
 | `conflict_address_taken` | `conflict/taken:<address id>` |
 | `outside_prefixes` | `outside_prefixes/<vrf>/<cidr>` |
+| `vlan_discovered` | `vlan_discovered/<site or global>/<vid>` |
+| `prefix_vlan_unset`, `prefix_vlan_differs` | `prefix_vlan_mismatch/<prefix id>` |
 
 The fingerprint covers what the proposal says, not when or with which generated identifiers: times, sighting counts and the identifiers of objects the commands would create do not count. Each run compares the candidate for a key with the open proposal of that key:
 
@@ -285,6 +288,15 @@ A probe keeps one fact per address and method, so a second device on the same ad
 
 `ipam.reconcile.outside_prefixes` proposes a network for addresses seen outside every known network of their VRF (section 3.3). The suggested network is the /24 (IPv4) or /64 (IPv6) around the address, made longer until it contains no prefix that exists in the VRF; prefixes that contain it, such as a supernet, do not block it. Addresses inside a network already suggested in the same run join its proposal. Sightings from the MAC address of an `unmanaged` host are left out. The severity is `warning`, and the suggested command creates the prefix with the role `network` and the tag `discovered`. Such an address produces no discovered-host proposal until its network exists; after the network is approved, the next run proposes the hosts.
 
+### 4.10 VLAN discovered and prefix VLAN mismatch
+
+The networks of the network controllers (`network` facts, section 2.2) are compared with the VLANs and prefixes of intent. A network matches the prefix whose range equals its subnet; when several VRFs have such a prefix, the one of the default VRF, and none when that does not settle it. The VLAN of a network belongs to the site of its prefix, or is global when the prefix has no site or the network has none; a global VLAN with the same VLAN id counts for every site.
+
+- `ipam.reconcile.vlan_discovered` (kind `vlan_discovered`, severity `info`): a tagged network whose VLAN id has no live VLAN at its site or globally. The command creates the VLAN with the network's name, at that site, with the tag `discovered`. Networks of several controllers with the same site and VLAN id share one proposal, named after the first.
+- `ipam.reconcile.prefix_vlan_unset` (kind `prefix_vlan_mismatch`, severity `info`): a prefix that matches a tagged network and has no VLAN. `ipam.reconcile.prefix_vlan_differs` (same kind, severity `warning`, parameter `current`): the prefix is linked to a VLAN with another VLAN id. The commands link the prefix to the VLAN with the network's VLAN id at the prefix's site (or a global one); when that VLAN does not exist yet, they create it first, with the same identifier the VLAN proposal of the same run suggests.
+
+The untagged default network suggests nothing, nor does a network without a subnet suggest a link, nor a prefix whose matching networks disagree on the VLAN id. An approval applies the commands as the intent stands at that moment (section 5.1), so the two proposals can be approved in either order: approving the link first creates the VLAN and links the prefix, and the VLAN proposal expires on the next run; approving the VLAN first lets the link name it. A batch approval (section 5.1) decides them in the order of its ids the same way: the VLAN before the link approves both, the link before the VLAN approves the link and skips the VLAN proposal with `ipam.proposal.nothing_to_apply`. A rejected VLAN proposal leaves the link proposal open, and the other way round: they are subjects of their own. Adoption policies never adopt either kind (section 6.4).
+
 ## 5. Decisions
 
 ### 5.1 Approve
@@ -296,6 +308,8 @@ A probe keeps one fact per address and method, so a second device on the same ad
 - `If-Match: "<revision>"`: the `ETag` of the proposal. A proposal that changed since answers 412 `ipam.proposal.revision_mismatch`.
 
 The commands are planned as the approving person with the same planner and checks as any other change, so a taken name answers 409 `ipam.name_taken` and so on. The commands, the proposal's new state (`accepted`, `decided`, `results`), the removal of its open-key row and all audit records then commit in one batch inside one inline job (`job_id` in the answer): all of it or nothing. If the intent changed between planning and writing, Tenko plans again. A decided proposal answers 409 `ipam.proposal.not_open`. A proposal without commands answers 409 `ipam.proposal.nothing_to_apply`; reject it once it is resolved.
+
+The commands are applied as the intent stands at the approval: a VLAN the proposal would create that exists by now (the same VLAN id at the same site, or a global one) is left out, and a prefix link that would have named the new VLAN names the existing one. The rights are checked for these commands. When nothing is left, the approval answers 409 `ipam.proposal.nothing_to_apply`, and the next run expires the proposal.
 
 ### 5.2 Reject
 
@@ -374,7 +388,7 @@ The policy in force for a prefix is its own, else the one of the nearest prefix 
 
 ### 6.4 What is never adopted
 
-Whatever the mode, a policy never adopts conflicts, orphaned intent or outside-prefix proposals, address changes of `static` and `reserved` hosts (intent wins), anything that touches a locked or `unmanaged` host, a proposal with no commands, a proposal without a prefix, or a proposal whose last adoption failed.
+Whatever the mode, a policy never adopts conflicts, orphaned intent, outside-prefix, VLAN-discovered or prefix-VLAN proposals, address changes of `static` and `reserved` hosts (intent wins), anything that touches a locked or `unmanaged` host, a proposal with no commands, a proposal without a prefix, or a proposal whose last adoption failed.
 
 ### 6.5 Failures
 

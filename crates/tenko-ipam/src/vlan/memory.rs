@@ -171,6 +171,7 @@ impl MemoryController {
                 vlan: Some(10),
                 subnet: "192.0.2.0/24".parse().ok(),
                 management: true,
+                dhcp: None,
             }],
             devices: Vec::new(),
             wlans: Vec::new(),
@@ -646,6 +647,7 @@ impl MemoryControllers {
                     vlan: Some(plan.spec.vid),
                     subnet: None,
                     management: false,
+                    dhcp: None,
                 }),
             }
             undo_steps = 1;
@@ -1041,6 +1043,7 @@ mod tests {
             vlan: Some(vlan),
             subnet: None,
             management: false,
+            dhcp: None,
         }
     }
 
