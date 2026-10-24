@@ -168,7 +168,7 @@ Runbooks are written and validated in Phase 4 against the interop lab (MIG-17). 
 
 | Runbook | Status |
 |---|---|
-| Windows DNS and DHCP in an AD domain | Planned |
+| Windows DNS and DHCP in an AD domain | Manual draft in [active-directory.md](active-directory.md) with today's features (zone transfer, zone file import, RFC 2136 updates from the controllers' addresses, scopes entered by hand); the automated version over the Windows adapter and GSS-TSIG is Phase 4 |
 | BIND | Planned |
 | OPNsense | Planned |
 | Pi-hole and dnsmasq | Planned |

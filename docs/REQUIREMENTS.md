@@ -215,7 +215,7 @@ Tenko DNS has three engines, not one, because AD clients expect a single server 
 | DNS-27 | Performance: a single core sustains more than 100k QPS; dnsperf and flamethrower results are documented. | 2 | Should |
 | DNS-28 | AD secure dynamic updates: GSS-TSIG (RFC 3645) over TKEY, SSPI on Windows and krb5 on Linux. A wizard sets up the computer account and the SPN `DNS/<host>`. Ownership is tracked per RRset, with a "secure only" mode per zone (CON-03). | 4 | Must |
 | DNS-29 | Aging and scavenging with Windows semantics: a per-record timestamp (null means static), NoRefresh and Refresh intervals, and designated scavenging servers. Timestamps survive replication and import (MIG-06, MIG-07). | 4 | Must |
-| DNS-30 | AD DC locator: SRV records in `_msdcs` and `_sites` are served and validated. Netlogon re-registers them every 24 h. | 4 | Must |
+| DNS-30 | AD DC locator: SRV records in `_msdcs` and `_sites` are served and validated. Netlogon re-registers them every hour; the DNS client refreshes the host records every 24 h. | 4 | Must |
 | DNS-31 | Global Query Block List, with `wpad` and `isatap` as default entries. | 4 | Must |
 | DNS-32 | GlobalNames zone. | 4 | Should |
 | DNS-33 | Netmask ordering and round robin as toggles. | 4 | Should |
