@@ -5382,6 +5382,9 @@ export type MessageKey =
   | "scans.now.kind.snmp_poll"
   | "scans.now.kinds"
   | "scans.now.kinds_required"
+  | "scans.now.no_probe.many"
+  | "scans.now.no_probe.none"
+  | "scans.now.no_probe.one"
   | "scans.now.refused_title"
   | "scans.now.start"
   | "scans.now.started"
@@ -7734,6 +7737,7 @@ export interface MessageArgs {
   "scans.fact.os": { confidence: string | number; guess: string | number };
   "scans.fact.ports": { ports: string | number };
   "scans.fact.tls": { ports: string | number };
+  "scans.now.no_probe.one": { name: string | number };
   "scans.now.started": { probes: number };
   "scans.now.title": { target: string | number };
   "scans.part.ingested": { batches: string | number; ingested: string | number };
@@ -13339,6 +13343,9 @@ export const messageKeys: readonly MessageKey[] = [
   "scans.now.kind.snmp_poll",
   "scans.now.kinds",
   "scans.now.kinds_required",
+  "scans.now.no_probe.many",
+  "scans.now.no_probe.none",
+  "scans.now.no_probe.one",
   "scans.now.refused_title",
   "scans.now.start",
   "scans.now.started",

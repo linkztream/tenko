@@ -522,6 +522,18 @@
         <notes><note category="description">Title of the notice shown when a scan was created but every probe refused it.</note></notes>
         <segment><source>Scan refused by the probes</source><target>Skanningen avvisades av proberna</target></segment>
       </unit>
+      <unit id="scans.now.no_probe.one">
+        <notes><note category="description">Link in the Scan now error "no probe covers this target" when exactly one probe exists; it opens that probe's scan configuration.</note></notes>
+        <segment><source>Open the scan configuration of {name} to add the network to its prefixes.</source><target>Öppna skanningskonfigurationen för {name} för att lägga till nätverket bland dess prefix.</target></segment>
+      </unit>
+      <unit id="scans.now.no_probe.many">
+        <notes><note category="description">Link in the Scan now error "no probe covers this target" when several probes exist; it opens the Nodes page.</note></notes>
+        <segment><source>Several probes exist. Choose one on the Nodes page and add the network to its prefixes.</source><target>Flera prober finns. Välj en på sidan Noder och lägg till nätverket bland dess prefix.</target></segment>
+      </unit>
+      <unit id="scans.now.no_probe.none">
+        <notes><note category="description">Link in the Scan now error "no probe covers this target" when no probe exists; it opens the Nodes page.</note></notes>
+        <segment><source>No probe runs yet. Turn on the probe role of a node on the Nodes page first.</source><target>Ingen prob körs ännu. Slå först på rollen prob för en nod på sidan Noder.</target></segment>
+      </unit>
       <unit id="scans.now.follow">
         <notes><note category="description">Link to the page of the scan that was just started.</note></notes>
         <segment><source>Follow the scan</source><target>Följ skanningen</target></segment>

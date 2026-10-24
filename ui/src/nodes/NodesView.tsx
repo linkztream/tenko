@@ -29,6 +29,7 @@ import { useCommands } from "../shell/commands";
 import { EnrolDialog } from "./EnrolDialog";
 import { linkState, linkWord, roleWord, tokenStateWord } from "./model";
 import { CertificateText, LinkBadge, NodePanel } from "./NodePanel";
+import { NodeScanPanel } from "./NodeScanPanel";
 // node-roles: the roles of this controller.
 import { RolesEditor } from "./RolesEditor";
 import "./nodes.css";
@@ -230,6 +231,10 @@ export default function NodesView() {
                   <span class="aside">{t("nodes.roles.self_hint", { id: id() })}</span>
                 </h2>
                 <RolesEditor id={id()} bare />
+                {/* The probe role the controller runs now: the way to its scan configuration. */}
+                <Show when={system()?.node.roles.includes("probe")}>
+                  <NodeScanPanel id={id()} bare />
+                </Show>
               </section>
             )}
           </Show>

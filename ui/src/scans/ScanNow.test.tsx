@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api } from "../api/client";
+import { server } from "../api/mock/node";
 import { IPAM_IDS } from "../api/mock/ipam/api";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -143,6 +145,34 @@ describe("refusals", () => {
     expect((await listScans()).items.some((s) => s.target.value === UNCOVERED.value)).toBe(false);
     expect((within(dialog).getByTestId("scan-now-start") as HTMLButtonElement).disabled).toBe(false);
     expect(await axeViolations(dialog, { disable: ["region"] })).toEqual([]);
+  });
+
+  describe("the way to the probes", () => {
+    const probe = (node: number, name: string) => ({ node, name, in_process: node === 1, stored: false, in_sync: true, kill_switch: { stopped: false } });
+    async function refused(items: ReturnType<typeof probe>[]) {
+      server.use(http.get("/api/v1/scans/probes", () => HttpResponse.json({ items })));
+      renderNow(UNCOVERED);
+      const dialog = await openDialog();
+      fireEvent.click(within(dialog).getByTestId("scan-now-start"));
+      return await within(dialog).findByTestId("scan-now-no-probe-link");
+    }
+
+    it("links to the scan configuration of the one probe", async () => {
+      const link = await refused([probe(1, "controller-1")]);
+      expect(link.getAttribute("href")).toBe("/nodes/1/scan");
+      expect(link.textContent).toContain("controller-1");
+    });
+
+    it("links to the Nodes page when several probes exist", async () => {
+      const link = await refused([probe(1, "controller-1"), probe(3, "probe-annex")]);
+      expect(link.getAttribute("href")).toBe("/nodes");
+    });
+
+    it("asks for the probe role first, linking to the Nodes page, when no probe exists", async () => {
+      const link = await refused([]);
+      expect(link.getAttribute("href")).toBe("/nodes");
+      expect(link.textContent).toContain("Turn on the probe role");
+    });
   });
 
   it("says that a prefix does not exist", async () => {

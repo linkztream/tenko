@@ -4,21 +4,65 @@
 // only while the Discovery module runs and only for operators and administrators, who have the
 // right to execute on a target; the server decides again.
 import { A } from "@solidjs/router";
-import { createSignal, For, Show } from "solid-js";
+import { createResource, createSignal, For, Show } from "solid-js";
 import { ErrorNotice, Notice } from "../components/Notice";
+import { paths } from "../app/paths";
 import { Dialog } from "../components/Dialog";
 import { Icon } from "../components/Icon";
 import { hasRole, isAdmin } from "../auth/session";
 import { formatDuration, t } from "../i18n";
 import { moduleRunning } from "../updates/modules";
-import { createScan } from "./api";
-import { SCAN_KINDS, type ScanKind, type ScanNowTarget, type ScanView, scanPath } from "./model";
+import { ApiError } from "../api/problem";
+import { createScan, listProbes } from "./api";
+import { nodeScanPath, SCAN_KINDS, type ScanKind, type ScanNowTarget, type ScanView, scanPath } from "./model";
 import { kindWord, noteText } from "./text";
 import "./scans.css";
 
 /** The waits the dialog offers, in seconds; the server takes 30 to 3,600 and defaults to ten minutes. */
 const DEADLINES: readonly number[] = [60, 300, 600, 1800, 3600];
 const DEFAULT_DEADLINE = 600;
+
+/** Where to go after "no probe covers this target": the probe's scan configuration, or the Nodes page. */
+function NoProbeHint() {
+  const [probes] = createResource(async () => {
+    try {
+      return (await listProbes()).items;
+    } catch {
+      return undefined;
+    }
+  });
+  return (
+    <Show when={probes()}>
+      {(list) => (
+        <p class="muted" data-testid="scan-now-no-probe-hint">
+          <Show
+            when={list().length > 0}
+            fallback={
+              <A href={paths.nodes()} data-testid="scan-now-no-probe-link">
+                {t("scans.now.no_probe.none")}
+              </A>
+            }
+          >
+            <Show
+              when={list().length === 1 ? list()[0] : undefined}
+              fallback={
+                <A href={paths.nodes()} data-testid="scan-now-no-probe-link">
+                  {t("scans.now.no_probe.many")}
+                </A>
+              }
+            >
+              {(probe) => (
+                <A href={nodeScanPath(probe().node)} data-testid="scan-now-no-probe-link">
+                  {t("scans.now.no_probe.one", { name: probe().name })}
+                </A>
+              )}
+            </Show>
+          </Show>
+        </p>
+      )}
+    </Show>
+  );
+}
 
 function ScanNowDialog(props: ScanNowTarget & { onClose: () => void }) {
   const [kinds, setKinds] = createSignal<readonly ScanKind[]>(["passive_refresh"]);
@@ -95,6 +139,9 @@ function ScanNowDialog(props: ScanNowTarget & { onClose: () => void }) {
               </small>
             </div>
             <ErrorNotice error={error()} />
+            <Show when={error() instanceof ApiError && (error() as ApiError).code === "scan.job.no_probe"}>
+              <NoProbeHint />
+            </Show>
             <div class="dialog-actions">
               <button type="button" class="btn ghost" data-testid="scan-now-cancel" onClick={() => props.onClose()}>
                 {t("common.action.cancel")}

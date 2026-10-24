@@ -395,6 +395,30 @@ describe("revoking a node", () => {
   });
 });
 
+describe("the scan configuration of this controller", () => {
+  /** Answers the status as if the controller ran exactly `roles`. */
+  async function running(roles: string[]) {
+    const status = await api.get("/api/v1/system/status");
+    server.use(http.get("/api/v1/system/status", () => HttpResponse.json({ ...status, node: { ...status.node, roles } })));
+  }
+
+  it("links the \"This controller\" section to the scan configuration while the probe role runs", async () => {
+    await running(["controller", "dns", "probe"]);
+    openNodes();
+    const section = await screen.findByTestId("nodes-self");
+    const link = await within(section).findByTestId("node-scan-config");
+    expect(link.getAttribute("href")).toBe("/nodes/1/scan");
+  });
+
+  it("shows nothing about scanning there while the probe role does not run", async () => {
+    await running(["controller", "dns"]);
+    openNodes();
+    const section = await screen.findByTestId("nodes-self");
+    await within(section).findByTestId("node-roles-running");
+    expect(within(section).queryByTestId("node-scan-panel")).toBeNull();
+  });
+});
+
 describe("when the server cannot answer", () => {
   const failing = (path: string) =>
     server.use(
