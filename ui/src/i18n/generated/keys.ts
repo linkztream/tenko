@@ -2148,6 +2148,9 @@ export type MessageKey =
   | "dns.cache.lede"
   | "dns.cache.more"
   | "dns.cache.next"
+  | "dns.cache.no_node"
+  | "dns.cache.not_dns_body"
+  | "dns.cache.not_dns_title"
   | "dns.cache.open_hint"
   | "dns.cache.page"
   | "dns.cache.previous"
@@ -2161,6 +2164,7 @@ export type MessageKey =
   | "dns.cache.signature_hint"
   | "dns.cache.stale"
   | "dns.cache.stale_hint"
+  | "dns.cache.sub"
   | "dns.cache.suffix"
   | "dns.cache.suffix_invalid"
   | "dns.cache.suffix_placeholder"
@@ -2630,6 +2634,7 @@ export type MessageKey =
   | "dns.loss.unsupported_type"
   | "dns.nav.acls"
   | "dns.nav.blocking"
+  | "dns.nav.cache"
   | "dns.nav.forwarders"
   | "dns.nav.keys"
   | "dns.nav.label"
@@ -10011,6 +10016,9 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.lede",
   "dns.cache.more",
   "dns.cache.next",
+  "dns.cache.no_node",
+  "dns.cache.not_dns_body",
+  "dns.cache.not_dns_title",
   "dns.cache.open_hint",
   "dns.cache.page",
   "dns.cache.previous",
@@ -10024,6 +10032,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.signature_hint",
   "dns.cache.stale",
   "dns.cache.stale_hint",
+  "dns.cache.sub",
   "dns.cache.suffix",
   "dns.cache.suffix_invalid",
   "dns.cache.suffix_placeholder",
@@ -10493,6 +10502,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.loss.unsupported_type",
   "dns.nav.acls",
   "dns.nav.blocking",
+  "dns.nav.cache",
   "dns.nav.forwarders",
   "dns.nav.keys",
   "dns.nav.label",

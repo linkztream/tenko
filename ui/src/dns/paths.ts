@@ -13,6 +13,8 @@ export const dnsPaths = {
   acls: () => "/dns/acls",
   keys: () => "/dns/keys",
   log: () => "/dns/log",
+  /** The cache of a node, beside the query log. */
+  cache: () => "/dns/cache",
   forwarders: () => "/dns/forwarders",
   lists: () => "/dns/lists",
   /** The home view of the query log and the lists: the figures of 24 hours or 7 days, the pause and allow from the log. */

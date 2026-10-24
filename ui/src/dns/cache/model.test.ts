@@ -1,4 +1,4 @@
-// The pure parts of the cache section: the suffix filter, the reading of the pages up to the cap,
+// The pure parts of the cache view: the suffix filter, the reading of the pages up to the cap,
 // the data column and the signatures, the TTL left, and the tree of names with its folders and
 // the rows of the right pane.
 import { describe, expect, it } from "vitest";
@@ -11,17 +11,14 @@ import {
   nameLabels,
   paneRows,
   pathTo,
-  readPages,
   rrsigTime,
   signatures,
   ttlLeft,
   utcMinute,
   visibleFolders,
-  type CachePage,
-  type DnsCacheEntry,
   type PaneRow,
-  type Rrsig,
-} from "./cache";
+} from "./model";
+import { readPages, type CachePage, type DnsCacheEntry, type Rrsig } from "./api";
 
 function entry(extra: Partial<DnsCacheEntry>): DnsCacheEntry {
   return { name: "www.example.test", type: "A", rcode: 0, ttl: 60, stale: false, hits: 0, state: "unvalidated", records: [], ...extra };

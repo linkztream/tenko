@@ -16,8 +16,9 @@ import { PageHead } from "../../components/PageHead";
 import { toast } from "../../components/toast";
 import { formatDateTime, formatNumber, t } from "../../i18n";
 import { DnsNav } from "../DnsNav";
+import { NodeSelect, useDnsNode } from "../node";
 import { DnsProblem, unavailable } from "../Parts";
-import { logNodes, nodeDns, readLog, switchLog, type QueryLogLine, type QueryLogStatus } from "./api";
+import { nodeDns, readLog, switchLog, type QueryLogLine, type QueryLogStatus } from "./api";
 import { checkFilters, clientKind, filtered, NO_FILTERS, PAGE_SIZE, RCODES, rcodeName, toQuery, type FilterProblem, type LogFilters } from "./model";
 // WP10.4: the validation state and the extended error.
 import { byValidation, edeName, VALIDATION_STATES, type ValidationState } from "./model";
@@ -200,9 +201,7 @@ function Lines(props: { lines: QueryLogLine[] }) {
 }
 
 export default function LogPage() {
-  const [nodes] = createResource(() => logNodes());
-  const [chosen, setChosen] = createSignal<number>();
-  const node = createMemo(() => chosen() ?? nodes.latest?.[0]);
+  const { nodes, node, choose } = useDnsNode();
   const [status, { refetch: refetchStatus }] = createResource(node, (id) => nodeDns(id));
   const log = () => (status.error ? undefined : status.latest?.query_log ?? undefined);
 
@@ -318,12 +317,7 @@ export default function LogPage() {
           </Notice>
         </Show>
         <Show when={(nodes.latest?.length ?? 0) > 0}>
-          <div class="dns-log-node">
-            <label for="dns-log-node">{t("dns.log.node_label")}</label>
-            <select id="dns-log-node" class="select" data-testid="field-node" value={String(node() ?? "")} onChange={(e) => setChosen(Number(e.currentTarget.value))}>
-              <For each={nodes.latest ?? []}>{(id) => <option value={String(id)}>{t("dns.log.node", { id })}</option>}</For>
-            </select>
-          </div>
+          <NodeSelect nodes={nodes.latest ?? []} node={node()} onChoose={choose} />
         </Show>
         <Switch>
           <Match when={status.error && unavailable(status.error)}>

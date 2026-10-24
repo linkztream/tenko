@@ -36,3 +36,6 @@
 .tag.dns-diff-change { background: var(--accent-wash); color: var(--accent); }
 .tag.dns-diff-delete { background: var(--danger-wash); color: var(--danger-ink); }
 
+/* The node choice of the query log and the cache view. */
+.dns-node { display: flex; align-items: center; gap: var(--sp-3); }
+.dns-node label { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); }

@@ -14,7 +14,7 @@ import { ConfirmDialog } from "../../components/Dialog";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { toast } from "../../components/toast";
 import { formatNumber, t } from "../../i18n";
-import { cacheSuffix, ttlLeft } from "./cache";
+import { cacheSuffix, ttlLeft } from "../../dns/cache/model";
 import { addressesOf, capabilities, flushInfra, listInfra, type InfraCut } from "./infra";
 
 /** The node's resolver is off. */

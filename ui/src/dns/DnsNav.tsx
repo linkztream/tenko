@@ -1,5 +1,5 @@
 // The sub-navigation of the DNS area: zones, views (WP6.4), forwarders, block lists, the blocking
-// view, access lists, for holders of `dns.keys` the TSIG keys, and the query log.
+// view, access lists, for holders of `dns.keys` the TSIG keys, the query log, and the cache of a node.
 import { A, useLocation } from "@solidjs/router";
 import { For, Show } from "solid-js";
 import { t, type MessageKey } from "../i18n";
@@ -33,6 +33,7 @@ const TABS: readonly Tab[] = [
   // WP10.0
   { id: "recursion", href: recursionPath, label: "dns.nav.recursion", match: (p) => p.startsWith(recursionPath), shown: () => true },
   { id: "log", href: dnsPaths.log(), label: "dns.nav.log", match: (p) => p.startsWith("/dns/log"), shown: () => true },
+  { id: "cache", href: dnsPaths.cache(), label: "dns.nav.cache", match: (p) => p.startsWith("/dns/cache"), shown: () => true },
 ];
 
 export function DnsNav() {

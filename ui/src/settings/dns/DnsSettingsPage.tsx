@@ -19,8 +19,6 @@ import { nodeDns } from "../../dns/log/api";
 import { moduleOff, notBuilt } from "../../dns/Parts";
 import { dnsPaths } from "../../dns/paths";
 import { SettingsNav } from "../SettingsNav";
-// cache-browse: what the cache holds.
-import { CacheSection } from "./CacheSection";
 // WP10.4: what the recursive resolver knows about the authorities.
 import { InfraSection } from "./InfraSection";
 // dns-visibility: the upstreams with their times and states.
@@ -222,8 +220,6 @@ export default function DnsSettingsPage() {
                   </A>
                 </p>
                 <Status status={shown()} />
-                {/* cache-browse: what the cache holds. */}
-                <CacheSection node={shown().node} />
                 {/* WP10.4: the infrastructure cache beside the cache. */}
                 <InfraSection node={shown().node} />
               </>

@@ -1,4 +1,4 @@
-// The cache section of the DNS settings page: nothing is read until asked, the tree of names
+// The cache page of the DNS area (/dns/cache): nothing is read until asked, the tree of names
 // built from the entries with the root expanded, expansion and selection with the mouse and the
 // keyboard, the path to a suffix expanded and its folder selected, the "(same as parent folder)"
 // rows, the signatures as rows of their own, the folder rows that open their folder, the cap of
@@ -16,7 +16,8 @@ import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
-import DnsSettingsPage from "./DnsSettingsPage";
+import { dnsNotBuilt } from "../testkit";
+import CachePage from "./CachePage";
 
 /** Every request to the listing route, with its query: each one the server would audit. */
 let requests: URLSearchParams[] = [];
@@ -38,7 +39,7 @@ afterEach(async () => {
 });
 
 function open() {
-  return renderRoute(DnsSettingsPage, { url: "/settings/dns", path: "/settings/dns" });
+  return renderRoute(CachePage, { url: "/dns/cache", path: "/dns/cache" });
 }
 
 async function section(): Promise<HTMLElement> {
@@ -114,7 +115,7 @@ async function shown() {
   await waitFor(() => expect(folders().length).toBeGreaterThan(0));
 }
 
-describe("the cache section", () => {
+describe("the cache page", () => {
   it("reads nothing until asked, then shows the tree with the root expanded to the top-level domains", async () => {
     open();
     const cache = await section();
@@ -381,11 +382,42 @@ describe("the cache section", () => {
     expect(screen.queryByTestId("dns-cache-tree")).toBeNull();
   });
 
+  it("is the cache tab, the last of the DNS tabs, and offers the node the log shows", async () => {
+    open();
+    await section();
+    const tabs = screen.getAllByTestId("dns-nav-link");
+    expect(tabs.at(-1)?.dataset.key).toBe("cache");
+    expect(tabs.at(-1)?.getAttribute("aria-current")).toBe("page");
+    expect((screen.getByTestId("field-node") as HTMLSelectElement).value).toBe("1");
+  });
+
+  it("says when the node does not run the DNS role", async () => {
+    server.use(
+      http.get("/api/v1/nodes/:id/dns", () =>
+        HttpResponse.json(
+          { type: "about:blank", status: 409, code: "dns.node.not_dns", title: "Not a DNS node", detail: "node 1 does not run the dns role", params: { node: "1" } },
+          { status: 409, headers: { "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+    open();
+    expect(await screen.findByTestId("dns-cache-not-dns")).toBeTruthy();
+    expect(screen.queryByTestId("dns-cache-form")).toBeNull();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("says when the server has no DNS service", async () => {
+    dnsNotBuilt();
+    open();
+    expect(await screen.findByTestId("dns-not-built")).toBeTruthy();
+    expect(screen.queryByTestId("dns-cache-form")).toBeNull();
+  });
+
   it("speaks Swedish", async () => {
     await setLocale("sv");
     open();
-    const cache = await section();
-    expect(within(cache).getByRole("heading", { level: 2 }).textContent).toBe("Vad cachen innehåller");
+    await section();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Vad cachen innehåller");
     suffix("example.test");
     show();
     await waitFor(() => expect(rows().length).toBe(7));

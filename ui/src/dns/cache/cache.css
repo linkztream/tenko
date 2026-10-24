@@ -1,0 +1,29 @@
+/* The cache view (/dns/cache): the suffix form, the tree of names beside the records of the folder. */
+.dns-cache-body { display: flex; flex-direction: column; gap: var(--sp-5); }
+.dns-cache { display: grid; gap: var(--sp-4); }
+.dns-cache-lede { margin: 0; font-size: var(--fs-12); max-inline-size: 80ch; }
+.dns-cache-form { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
+.dns-cache-actions, .dns-cache-paging, .dns-cache-more { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.dns-cache-data { overflow-wrap: anywhere; }
+/* The tree of names beside the records of the folder selected; the tree goes above the table
+ * once both no longer fit side by side. The tree's rows are the shared .tree and .tnode. */
+.dns-cache-browser { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: flex-start; }
+.dns-cache-tree {
+  flex: 1 1 220px; max-inline-size: 100%; max-block-size: 480px; overflow: auto;
+  border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface);
+}
+.dns-cache-pane { flex: 999 1 420px; min-inline-size: 0; display: grid; gap: var(--sp-3); }
+.dns-cache-tree .tree:focus { outline: none; }
+.dns-cache-tree .tree:focus-visible .tnode.active { outline: 2px solid var(--focus); outline-offset: -2px; }
+.dns-cache-tree .tnode { cursor: pointer; }
+.dns-cache-tree .tnode .lbl { align-items: center; }
+.dns-cache-tree .tnode .lbl svg.i { color: var(--ink-3); flex: none; }
+.dns-cache-tree .tnode.selected { background: var(--accent-wash); }
+.dns-cache-tree .tnode.selected .lbl .mono { color: var(--accent); font-weight: var(--fw-semibold); }
+.dns-cache-tree .tnode.more .lbl { color: var(--ink-3); font-size: var(--fs-12); }
+.dns-cache-folder { margin: 0; font-size: var(--fs-13); color: var(--ink-2); overflow-wrap: anywhere; }
+.dns-cache-same { font-style: italic; }
+.dns-cache-folder-row { cursor: pointer; }
+.dns-cache-folder-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.dns-cache-folder-name { display: inline-flex; align-items: center; gap: 6px; }
+.dns-cache-folder-name svg.i { color: var(--ink-3); }

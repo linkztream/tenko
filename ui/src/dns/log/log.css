@@ -1,8 +1,6 @@
-/* The query log page (WP5.4): the node choice, the filter form in one wrapping row, the table
+/* The query log page (WP5.4): the filter form in one wrapping row, the table
    of queries and the paging row. */
 .dns-log-body { display: flex; flex-direction: column; gap: var(--sp-5); }
-.dns-log-node { display: flex; align-items: center; gap: var(--sp-3); }
-.dns-log-node label { font-size: var(--fs-12); color: var(--ink-2); font-weight: var(--fw-medium); }
 .dns-log-figures { margin: 0; font-size: var(--fs-12); }
 .dns-log-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-4) var(--sp-5); }
 .dns-log-filters .field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 160px; }

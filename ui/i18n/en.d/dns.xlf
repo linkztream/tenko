@@ -32,6 +32,9 @@
       <unit id="dns.nav.log">
         <segment><source>Query log</source></segment>
       </unit>
+      <unit id="dns.nav.cache">
+        <segment><source>Cache</source></segment>
+      </unit>
       <unit id="dns.state.not_built_title">
         <notes><note category="description">Shown when the server answers the DNS routes with 501 (not implemented).</note></notes>
         <segment><source>The DNS service is not available yet.</source></segment>
@@ -897,7 +900,7 @@
         <segment><source>The last queries a node answered</source></segment>
       </unit>
       <unit id="dns.log.node_label">
-        <notes><note category="description">Label of the choice of the node whose query log is shown.</note></notes>
+        <notes><note category="description">Label of the choice of the node whose query log or cache is shown.</note></notes>
         <segment><source>Node</source></segment>
       </unit>
       <unit id="dns.log.node">

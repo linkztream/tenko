@@ -1,4 +1,4 @@
-// The cache section of the DNS settings page: what the node's cache holds, as the cache view of
+// The cache view of the DNS area (/dns/cache): what the node's cache holds, as the cache view of
 // the Windows DNS manager shows it. Nothing is read until the administrator asks, since every
 // page read is audited (`dns.cache.read`): the entries are the names the clients asked. A press
 // of the button reads the entries at or below the suffix, page by page up to the cap of
@@ -15,36 +15,41 @@
 // or goes to its first folder, Left closes it or goes to its parent, Home and End jump, Enter
 // on a "show more" shows more. A folder row of the right pane opens its folder on a double click
 // or Enter.
-import { createMemo, createResource, createSignal, For, onCleanup, Show } from "solid-js";
-import { errorMessage } from "../../api/problem";
+import { createMemo, createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
+import { ApiError, errorMessage } from "../../api/problem";
 import { ConfirmDialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
+import { PageHead } from "../../components/PageHead";
 import { toast } from "../../components/toast";
 import { logicalArrow } from "../../grid/focus";
 import { formatDateTime, formatNumber, t } from "../../i18n";
+import { DnsNav } from "../DnsNav";
+import { nodeDns } from "../log/api";
+import { NodeSelect, useDnsNode } from "../node";
+import { DnsProblem, unavailable } from "../Parts";
+import { CACHE_PAGE, CACHE_PAGES, flushCache, readCache, type CacheListing, type DnsCacheEntry, type Rrsig } from "./api";
 import {
   buildCacheTree,
-  CACHE_PAGE,
-  CACHE_PAGES,
   cacheSuffix,
   entryData,
-  flushCache,
   folderChildren,
   paneRows,
   pathTo,
-  readCache,
   rrsigTime,
   ttlLeft,
   utcMinute,
   visibleFolders,
   WINDOW,
-  type CacheListing,
   type CacheNode,
-  type DnsCacheEntry,
-  type Rrsig,
   type TreeItem,
-} from "./cache";
+} from "./model";
+import "../dns.css";
+import "./cache.css";
+
+function notDns(err: unknown): boolean {
+  return err instanceof ApiError && err.code === "dns.node.not_dns";
+}
 
 function Ttl(props: { entry: DnsCacheEntry }) {
   const left = () => ttlLeft(props.entry.ttl);
@@ -448,7 +453,9 @@ function CacheBrowser(props: { listing: CacheListing }) {
   );
 }
 
-export function CacheSection(props: { node: number }) {
+/** The suffix form, the tree of names and the flush of one node's cache. The node is fixed for
+ * the life of the component: the page keys it by node, so another node starts a new read. */
+function CacheView(props: { node: number }) {
   const [typed, setTyped] = createSignal("");
   const [invalid, setInvalid] = createSignal(false);
   // The suffix of the read asked for and a counter that makes every press a new read;
@@ -492,9 +499,8 @@ export function CacheSection(props: { node: number }) {
   };
 
   return (
-    <section class="page-section dns-set-group" data-testid="dns-cache">
-      <h2>{t("dns.cache.title")}</h2>
-      <p class="muted dns-set-doc" data-testid="dns-cache-audit-note">
+    <section class="dns-cache" data-testid="dns-cache">
+      <p class="muted dns-cache-lede" data-testid="dns-cache-audit-note">
         {t("dns.cache.lede")}
       </p>
       <form class="dns-cache-form" data-testid="dns-cache-form" onSubmit={show} novalidate>
@@ -564,5 +570,49 @@ export function CacheSection(props: { node: number }) {
         />
       </Show>
     </section>
+  );
+}
+
+export default function CachePage() {
+  const { nodes, node, choose } = useDnsNode();
+  const [status] = createResource(node, (id) => nodeDns(id));
+
+  return (
+    <div class="page dns-page" data-testid="page-dns-cache">
+      <DnsNav />
+      <PageHead title={t("dns.cache.title")} sub={t("dns.cache.sub")} />
+      <div class="page-body dns-cache-body">
+        <Show when={nodes.error}>
+          <ErrorNotice error={nodes.error} />
+        </Show>
+        <Show when={nodes.latest && nodes.latest.length === 0}>
+          <Notice kind="info" role="status" testid="dns-cache-no-node">
+            {t("dns.cache.no_node")}
+          </Notice>
+        </Show>
+        <Show when={(nodes.latest?.length ?? 0) > 0}>
+          <NodeSelect nodes={nodes.latest ?? []} node={node()} onChoose={choose} />
+        </Show>
+        <Switch>
+          <Match when={status.error && unavailable(status.error)}>
+            <DnsProblem error={status.error} />
+          </Match>
+          <Match when={status.error && notDns(status.error)}>
+            <Notice kind="info" role="status" title={t("dns.cache.not_dns_title")} testid="dns-cache-not-dns">
+              {t("dns.cache.not_dns_body")}
+            </Notice>
+          </Match>
+          <Match when={status.error}>
+            <ErrorNotice error={status.error} />
+          </Match>
+          <Match when={status.latest && node()}>
+            {/* Keyed by the node: choosing another one drops the entries read from the first. */}
+            <Show when={node()} keyed>
+              {(id) => <CacheView node={id} />}
+            </Show>
+          </Match>
+        </Switch>
+      </div>
+    </div>
   );
 }

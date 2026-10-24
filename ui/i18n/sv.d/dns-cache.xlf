@@ -3,7 +3,7 @@
   <file id="tenko-ui">
     <group id="dns-cache">
       <unit id="dns.cache.title">
-        <notes><note category="description">Heading of the section of the DNS settings page that lists what the node's cache holds.</note></notes>
+        <notes><note category="description">Title of the cache page of the DNS area and caption of its table of what the node's cache holds.</note></notes>
         <segment><source>What the cache holds</source><target>Vad cachen innehåller</target></segment>
       </unit>
       <unit id="dns.cache.lede">
@@ -144,6 +144,19 @@
       <unit id="dns.cache.capped">
         <notes><note category="description">Notice when a read stopped at the cap; {count} is a number.</note></notes>
         <segment><source>The view holds the first {count} entries. A name or suffix narrows the listing.</source><target>Vyn visar de första {count} posterna. Ett namn eller suffix begränsar listan.</target></segment>
+      </unit>
+      <unit id="dns.cache.sub">
+        <segment><source>The entries of a node's cache, read on request</source><target>Posterna i en nods cache, lästa på begäran</target></segment>
+      </unit>
+      <unit id="dns.cache.no_node">
+        <segment><source>This server is not a node of a cluster yet, so there is no cache to read.</source><target>Servern är ännu inte en nod i ett kluster, så det finns ingen cache att läsa.</target></segment>
+      </unit>
+      <unit id="dns.cache.not_dns_title">
+        <segment><source>This node does not answer DNS queries</source><target>Den här noden besvarar inte DNS-frågor</target></segment>
+      </unit>
+      <unit id="dns.cache.not_dns_body">
+        <notes><note category="description">Shown on the cache page when the node has no DNS role.</note></notes>
+        <segment><source>The DNS role does not run on this node, so it keeps no cache.</source><target>DNS-rollen körs inte på noden, så den har ingen cache.</target></segment>
       </unit>
     </group>
   </file>
