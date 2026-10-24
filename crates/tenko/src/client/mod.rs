@@ -80,13 +80,17 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone, Default, Args)]
 pub struct ClientOpts {
     /// Base URL of the controller, for example `https://ddi.example.org:8443`. Defaults to
-    /// the URL stored by `tenko login`.
+    /// the URL stored by `tenko login`; without a sign-in, on a node whose configuration is
+    /// readable (`/etc/tenko/tenko.toml` or `TENKO_CONFIG`), to the node's own API
+    /// (`https://localhost:8443` with the default listener). A sign-in to another node
+    /// wins: pass the URL to reach this one. Credentials are never taken from the node.
     #[arg(long, value_name = "URL", env = "TENKO_URL")]
     pub url: Option<String>,
 
     /// PEM file with the root certificate to trust besides the system roots, for example
     /// the internal CA root (`<data_dir>/tls/ca-root.pem`). Defaults to the one stored by
-    /// `tenko login`.
+    /// `tenko login` for the same URL, else, when the URL is the node's own API, to
+    /// `<data_dir>/tls/ca-root.pem` of the node's configuration.
     #[arg(long, value_name = "FILE", env = "TENKO_CA_FILE")]
     pub ca_file: Option<PathBuf>,
 
@@ -247,8 +251,41 @@ pub struct Target {
     pub json: bool,
 }
 
+/// The address and trust anchor of the node a client command runs on, from the node's
+/// configuration ([`crate::local_node`]); never its credentials.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeDefaults {
+    /// The node's own API.
+    pub url: String,
+    /// The internal CA root of the node, in its `internal_ca` mode.
+    pub ca_file: Option<PathBuf>,
+}
+
+impl NodeDefaults {
+    /// The defaults of this node, when its configuration is readable and names an API the
+    /// client can reach directly.
+    pub fn discover() -> Option<Self> {
+        let node = crate::local_node::NodeConfig::discover(None)?;
+        Some(Self {
+            url: node.api_url()?,
+            ca_file: node.ca_file(),
+        })
+    }
+
+    /// The sign-in command for this node, with its address and trust anchor.
+    fn login_command(&self) -> String {
+        let mut command = format!("tenko login --url {}", self.url);
+        if let Some(ca_file) = &self.ca_file {
+            let _ = write!(command, " --ca-file {}", ca_file.display());
+        }
+        command.push_str(" -u <account>");
+        command
+    }
+}
+
 impl Target {
-    /// The target of `opts`: flags first, then `TENKO_TOKEN`, then the stored credentials.
+    /// The target of `opts`: flags first, then `TENKO_TOKEN`, then the stored credentials,
+    /// then the address of the node the command runs on ([`NodeDefaults`]).
     ///
     /// # Errors
     ///
@@ -258,10 +295,25 @@ impl Target {
         let env_token = std::env::var(TOKEN_ENV)
             .ok()
             .filter(|token| !token.is_empty());
+        let node = NodeDefaults::discover();
+        Self::resolve_from(opts, need_token, stored, env_token, node)
+    }
+
+    /// [`Target::resolve`] from what it read: the stored credentials, `TENKO_TOKEN` and the
+    /// node's defaults. These apply when neither the flags nor a sign-in name a server, and
+    /// the node's CA root whenever the URL is the node's own.
+    fn resolve_from(
+        opts: &ClientOpts,
+        need_token: bool,
+        stored: Option<Credentials>,
+        env_token: Option<String>,
+        node: Option<NodeDefaults>,
+    ) -> Result<Self, Failure> {
         let url = opts
             .url
             .clone()
             .or_else(|| stored.as_ref().map(|credentials| credentials.url.clone()))
+            .or_else(|| node.as_ref().map(|node| node.url.clone()))
             .ok_or_else(|| {
                 Failure::new(
                     exit::USAGE,
@@ -271,22 +323,33 @@ impl Target {
         let same_server = stored
             .as_ref()
             .is_some_and(|credentials| same_url(&credentials.url, &url));
-        let ca_file = opts.ca_file.clone().or_else(|| {
-            stored
-                .as_ref()
-                .filter(|_| same_server)
-                .and_then(|credentials| credentials.ca_file.clone())
-        });
+        let this_node = node.filter(|node| same_url(&node.url, &url));
+        let ca_file = opts
+            .ca_file
+            .clone()
+            .or_else(|| {
+                stored
+                    .as_ref()
+                    .filter(|_| same_server)
+                    .and_then(|credentials| credentials.ca_file.clone())
+            })
+            .or_else(|| this_node.as_ref().and_then(|node| node.ca_file.clone()));
         let token = env_token.or_else(|| {
             stored
                 .filter(|_| same_server)
                 .map(|credentials| credentials.token)
         });
         if need_token && token.is_none() {
-            return Err(Failure::new(
-                exit::AUTH,
-                format!("not signed in to {url}: run `tenko login` (or set {TOKEN_ENV})"),
-            ));
+            let message = match &this_node {
+                Some(node) => format!(
+                    "not signed in to this node ({url}): run `{}` (or set {TOKEN_ENV})",
+                    node.login_command()
+                ),
+                None => {
+                    format!("not signed in to {url}: run `tenko login` (or set {TOKEN_ENV})")
+                }
+            };
+            return Err(Failure::new(exit::AUTH, message));
         }
         Ok(Self {
             url,
@@ -1068,5 +1131,143 @@ mod tests {
             token_id: "id".to_owned(),
         };
         assert!(!format!("{credentials:?}").contains("tnk_secret"));
+    }
+
+    fn opts(url: Option<&str>, ca_file: Option<&str>) -> ClientOpts {
+        ClientOpts {
+            url: url.map(str::to_owned),
+            ca_file: ca_file.map(PathBuf::from),
+            json: false,
+        }
+    }
+
+    fn signed_in(url: &str) -> Credentials {
+        Credentials {
+            url: url.to_owned(),
+            ca_file: Some(PathBuf::from("/home/admin/other-ca.pem")),
+            user: "admin".to_owned(),
+            token: "tnk_stored".to_owned(),
+            token_id: "id".to_owned(),
+        }
+    }
+
+    fn this_node() -> NodeDefaults {
+        NodeDefaults {
+            url: "https://localhost:8443".to_owned(),
+            ca_file: Some(PathBuf::from("/var/lib/tenko/tls/ca-root.pem")),
+        }
+    }
+
+    fn resolved(
+        opts: &ClientOpts,
+        stored: Option<Credentials>,
+        node: Option<NodeDefaults>,
+    ) -> Result<Target, Failure> {
+        Target::resolve_from(opts, false, stored, None, node)
+    }
+
+    #[test]
+    fn without_flags_or_a_sign_in_the_client_takes_its_node() {
+        let target = resolved(&opts(None, None), None, Some(this_node())).expect("a target");
+        assert_eq!(target.url, "https://localhost:8443");
+        assert_eq!(
+            target.ca_file,
+            Some(PathBuf::from("/var/lib/tenko/tls/ca-root.pem"))
+        );
+        assert!(target.token.is_none(), "never a credential from the node");
+    }
+
+    #[test]
+    fn flags_and_a_sign_in_win_over_the_node() {
+        let flagged = resolved(
+            &opts(Some("https://ddi.example.org:8443"), None),
+            None,
+            Some(this_node()),
+        )
+        .expect("a target");
+        assert_eq!(flagged.url, "https://ddi.example.org:8443");
+        assert_eq!(flagged.ca_file, None, "another server gets no node CA");
+
+        let stored = resolved(
+            &opts(None, None),
+            Some(signed_in("https://ddi.example.org:8443")),
+            Some(this_node()),
+        )
+        .expect("a target");
+        assert_eq!(stored.url, "https://ddi.example.org:8443");
+        assert_eq!(
+            stored.ca_file,
+            Some(PathBuf::from("/home/admin/other-ca.pem"))
+        );
+    }
+
+    #[test]
+    fn the_node_ca_follows_the_node_url() {
+        // Signed in elsewhere, the node reached with --url: its CA root, not the stored one.
+        let target = resolved(
+            &opts(Some("https://LOCALHOST:8443/"), None),
+            Some(signed_in("https://ddi.example.org:8443")),
+            Some(this_node()),
+        )
+        .expect("a target");
+        assert_eq!(
+            target.ca_file,
+            Some(PathBuf::from("/var/lib/tenko/tls/ca-root.pem"))
+        );
+        assert!(
+            target.token.is_none(),
+            "the stored token is for the other server"
+        );
+
+        let flagged = resolved(&opts(None, Some("/tmp/mine.pem")), None, Some(this_node()))
+            .expect("a target");
+        assert_eq!(flagged.ca_file, Some(PathBuf::from("/tmp/mine.pem")));
+    }
+
+    #[test]
+    fn not_signed_in_to_this_node_names_its_sign_in_command() {
+        let failure = Target::resolve_from(&opts(None, None), true, None, None, Some(this_node()))
+            .expect_err("no token");
+        assert_eq!(failure.status, exit::AUTH);
+        assert_eq!(
+            failure.message,
+            "not signed in to this node (https://localhost:8443): run `tenko login --url \
+             https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem -u <account>` (or \
+             set TENKO_TOKEN)"
+        );
+
+        let elsewhere = Target::resolve_from(
+            &opts(Some("https://ddi.example.org:8443"), None),
+            true,
+            None,
+            None,
+            Some(this_node()),
+        )
+        .expect_err("no token");
+        assert_eq!(
+            elsewhere.message,
+            "not signed in to https://ddi.example.org:8443: run `tenko login` (or set \
+             TENKO_TOKEN)"
+        );
+
+        let token = Target::resolve_from(
+            &opts(None, None),
+            true,
+            None,
+            Some("tnk_env".to_owned()),
+            Some(this_node()),
+        )
+        .expect("TENKO_TOKEN signs in");
+        assert_eq!(token.url, "https://localhost:8443");
+    }
+
+    #[test]
+    fn no_server_anywhere_names_the_three_ways() {
+        let failure = resolved(&opts(None, None), None, None).expect_err("no server");
+        assert_eq!(failure.status, exit::USAGE);
+        assert_eq!(
+            failure.message,
+            "no server: pass --url (or set TENKO_URL), or sign in with `tenko login`"
+        );
     }
 }

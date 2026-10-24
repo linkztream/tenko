@@ -12,6 +12,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 ### Changed
 
 - The cache section of the DNS settings page shows the cache as a tree of names in the style of the Windows DNS manager's cache view: folders from (root) down in the left pane, the records of the folder selected in the right pane with its own records as "(same as parent folder)", and each RRSIG as a row of its own with the type covered, the signer and the expiry instead of joined into the data of the entry it signs. A press of Show the entries or Read again reads up to 10,000 entries at once (1,000 a page) and says when the cap cut it short; expanding and selecting folders never reads, and the previous and next page buttons are gone. See `docs/dns-resolver.md` section 3.7.
+- A client command on a node whose configuration it can read (`/etc/tenko/tenko.toml` or `TENKO_CONFIG`) and that has no `--url`, `TENKO_URL` or sign-in reaches the node's own API (`https://localhost:8443` with the default listener) and trusts its internal CA root (`<data_dir>/tls/ca-root.pem`), so `tenko login -u admin` is enough on the node; a sign-in to another node still wins, credentials are never taken from the node, and `not signed in` names the full sign-in command for the node, with its address and CA file. See `tenko login --help` and `docs/QUICKSTART.md`.
 
 ### Fixed
 

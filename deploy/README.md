@@ -316,6 +316,9 @@ in upper case, with a double underscore between a section and its key: `TENKO_DA
 comma-separated string (`kek.retired` and `auth.attestation_roots` need the TOML array).
 `TENKO_CONFIG` names the file like `--config`. `TENKO_URL`, `TENKO_CA_FILE`,
 `TENKO_TOKEN`, `TENKO_CREDENTIALS` and `TENKO_SETUP_TOKEN` belong to the client commands.
+On a node, a client command without `--url`, `TENKO_URL` or a sign-in reads the file of
+`TENKO_CONFIG` or `/etc/tenko/tenko.toml` for the node's own API and its CA root, so
+`tenko login -u admin` there needs no more; a sign-in to another node wins.
 
 ## Run
 

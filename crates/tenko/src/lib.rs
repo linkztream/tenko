@@ -8,6 +8,7 @@
 //! | [`serve`] | `tenko serve`: the start order of the controller role, readiness, shutdown |
 //! | [`platform`] | systemd `sd_notify` and the Windows service |
 //! | [`client`] | the client commands over the public API |
+//! | [`local_node`] | what a client command reads from the configuration of the node it runs on |
 //! | [`kek`] | `tenko kek rotate`: key-encryption key rotation with the server stopped |
 //! | [`cluster`] | `tenko cluster` and the cluster start step of `tenko serve` (controller cluster, Slice 3) |
 //! | [`backup`] | `tenko backup`: create, verify and restore backups (Slice 3) |
@@ -33,6 +34,7 @@ pub mod config;
 pub mod config_init;
 pub mod exit;
 pub mod kek;
+pub mod local_node;
 pub mod logging;
 pub mod modules;
 pub mod node;

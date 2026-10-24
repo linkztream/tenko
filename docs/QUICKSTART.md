@@ -50,10 +50,12 @@ probe later, enrolled from the Cluster page with a token ([cluster.md](cluster.m
 The home network domain is `home.arpa` (RFC 8375), which Tenko's resolver answers locally;
 a company uses its own name, such as `corp.example.com`. Never use `.local`: mDNS owns it,
 and most clients resolve it without asking any DNS server. Each step names the UI path and,
-where one exists, the `tenko` command; sign in once for the commands:
+where one exists, the `tenko` command; sign in once for the commands, as root on the node
+(the client finds the node's own address and CA root in `/etc/tenko/tenko.toml`; from
+another machine add `--url` and `--ca-file`):
 
 ```bash
-tenko login --url https://localhost:8443 --ca-file /var/lib/tenko/tls/ca-root.pem -u admin
+tenko login -u admin
 ```
 
 1. Create the network in IPAM, and note the `id` the command prints: IPAM, Add prefix,
