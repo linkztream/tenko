@@ -61,6 +61,10 @@ pub const ENV_ALLOWLIST: &[&str] = &[
 /// The log level variable the host passes on to plugins when it is set.
 pub const LOG_ENV: &str = "TENKO_PLUGIN_LOG";
 
+/// The socket of the service manager's readiness protocol. Only the main process of the
+/// unit notifies; a plugin that sent through it would be refused, and logged, by systemd.
+const NOTIFY_ENV: &str = "NOTIFY_SOCKET";
+
 /// Longest forwarded log line, in bytes.
 const MAX_LOG_LINE: usize = 4096;
 
@@ -501,6 +505,7 @@ fn command(spec: &LaunchSpec) -> Command {
     for (name, value) in &spec.env {
         command.env(name, value);
     }
+    command.env_remove(NOTIFY_ENV);
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
     }
@@ -697,6 +702,23 @@ fn clip(line: &str) -> String {
 mod tests {
     use super::*;
     use crate::sample;
+
+    #[test]
+    fn a_plugin_never_gets_the_notify_socket() {
+        assert!(!ENV_ALLOWLIST.contains(&NOTIFY_ENV));
+        let mut spec = LaunchSpec::executable(PathBuf::from("plugin"), Vec::new());
+        spec.env
+            .push((NOTIFY_ENV.into(), "/run/systemd/notify".into()));
+        let command = command(&spec);
+        let notify = command
+            .as_std()
+            .get_envs()
+            .find(|(name, _)| *name == NOTIFY_ENV);
+        assert!(
+            !matches!(notify, Some((_, Some(_)))),
+            "the environment of a plugin carries NOTIFY_SOCKET: {notify:?}"
+        );
+    }
 
     #[test]
     fn manifests_are_compared_member_by_member() {

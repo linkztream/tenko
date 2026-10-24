@@ -75,7 +75,7 @@ no simple pattern such as `1234`); the other profiles take a password.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--roles controller[,dns][,dhcp][,probe]` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below; with the probe role the installer puts the drop-in `systemd/probe.conf` in place, "The probe role" below) |
+| `--roles controller[,dns][,dhcp][,probe]` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below; with the probe role the installer puts the drop-in `systemd/probe.conf` in place, "The probe role" below). On a node that has started before the roles are in the store: `--reconfigure --roles` writes the file and the drop-ins but cannot change the running set; change it on the nodes page of the web UI, with `tenko node roles set <id> --roles ...`, or with `PUT /api/v1/nodes/{id}/roles` ([../docs/cluster.md](../docs/cluster.md), section 13) |
 | `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
 | `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)) |
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
@@ -93,7 +93,7 @@ no simple pattern such as `1234`); the other profiles take a password.
 | `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
 | `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved |
 | `--use-self` | no (asked in interactive mode, default no) | With the dns role, point this host's own resolver at Tenko (`127.0.0.1`) once the node listens there; `--uninstall` restores the previous resolver |
-| `--reconfigure` | | Write `tenko.toml` again from the answers; the old file stays as `tenko.toml.<time>.bak` |
+| `--reconfigure` | | Change `tenko.toml` by the answers you give; every other value of the file (`[dns] listen`, `[dhcp]`, `[server]`, `[tls]`, `[kek]`, `[dns.recursion]`, the profile, comments) is carried over, one output line per section; the old file stays as `tenko.toml.<time>.bak` |
 | `--yes` | | No questions; the defaults for what no flag gives |
 | `--no-start` | | Everything except enabling and starting the service (containers without systemd) |
 | `--dry-run` | | Print every step, change nothing |
@@ -129,8 +129,10 @@ What it does, in this order:
    certificate, plus the host's IPv4 and global IPv6 addresses when it has them, `[dns]
    listen` and `forwarders`, a commented `[dhcp] listen` example with the dhcp role, and
    `[kek]` for a key file) and checks it with `tenko config check`. With the dhcp role it
-   closes with a reminder: set `[dhcp] listen`, and install `systemd/dhcp-direct.conf` for
-   direct mode (section "DHCP" below).
+   closes with a reminder: set `[dhcp] listen`; the installer puts `systemd/dhcp-direct.conf` in
+   place when it runs again and the listener is in direct mode (section "DHCP" below).
+   On a rerun with `--reconfigure` it changes the file that is there by your answers and
+   carries the rest over (see the option); the old file stays as `tenko.toml.<time>.bak`.
 5. Installs `systemd/tenko.service` unchanged (the script carries a copy; a test keeps the
    two equal) with its drop-ins, enables and starts it, and waits until `tenko health`
    reports the node ready.
@@ -520,8 +522,9 @@ the unit 1.2 without the drop-in and 1.6 with it.
 **The dhcp role.** UDP 67 is below 1024 and covered by the base unit's
 `CAP_NET_BIND_SERVICE`, so relay mode needs no change. Direct mode (the broadcasts of clients
 on a link) needs the drop-in `systemd/dhcp-direct.conf`, which grants the same
-capability and address families as the probe drop-in; section "DHCP: the dhcp role and UDP
-67" has the steps and the reasons.
+capability and address families as the probe drop-in (`install.sh` puts it in place when
+the dhcp role is listed and `[dhcp] listen` has a listener in direct mode, and removes it
+with the role); section "DHCP: the dhcp role and UDP 67" has the steps and the reasons.
 
 **The smoke test.** `systemd/smoke.sh` checks the unit end to end on a host where systemd
 is PID 1; the CI job `systemd-smoke` runs it on a Linux runner on the weekly schedule

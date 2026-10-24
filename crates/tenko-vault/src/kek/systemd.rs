@@ -378,6 +378,19 @@ impl Finished {
     }
 }
 
+/// The command of the tool: piped streams, and not the service manager's notify socket,
+/// because the tool is not the unit's main process.
+fn tool_command(tool: &Path, args: &[String]) -> Command {
+    let mut command = Command::new(tool);
+    command
+        .args(args)
+        .env_remove("NOTIFY_SOCKET")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
 /// Runs `tool args…` with `input` on standard input and collects standard output and error.
 ///
 /// Standard input is written from its own thread and both outputs are read from theirs, so
@@ -391,11 +404,7 @@ fn run_tool(
     timeout: Duration,
     stdout_hint: usize,
 ) -> Result<Finished, String> {
-    let mut child = Command::new(tool)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut child = tool_command(tool, args)
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", tool.display()))?;
     let (Some(stdin), Some(stdout), Some(stderr)) =
@@ -512,6 +521,16 @@ mod tests {
 
     use super::*;
     use crate::kek::KekInit;
+
+    #[test]
+    fn the_tool_does_not_get_the_notify_socket() {
+        let command = tool_command(Path::new("systemd-creds"), &["encrypt".to_owned()]);
+        assert!(
+            command
+                .get_envs()
+                .any(|(name, value)| name == "NOTIFY_SOCKET" && value.is_none())
+        );
+    }
 
     /// The marker the tests seal; it must never show up in an argument, the environment or
     /// an error text.

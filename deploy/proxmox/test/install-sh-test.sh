@@ -117,6 +117,167 @@ unit_checks() {
     for v in dns probe "controller, dns" "controller," controller,dns,dns controller,scan; do expect "valid_roles refuses '${v}'" 1 "$(valid_roles "$v"; echo $?)"; done
     for v in wizard all ipam ipam,dns,discovery; do expect "valid_modules ${v}" 0 "$(valid_modules "$v"; echo $?)"; done
     for v in "" ipam,foo "ipam dns"; do expect "valid_modules refuses '${v}'" 1 "$(valid_modules "$v"; echo $?)"; done
+    echo "== (1b) the shipped drop-ins, the toml helpers and the rerun of a configuration"
+    expect "the embedded probe drop-in is deploy/systemd/probe.conf" "same" \
+      "$(cmp -s <(probe_dropin_text) "${repo}/deploy/systemd/probe.conf" && echo same || echo differs)"
+    expect "the embedded dhcp drop-in is deploy/systemd/dhcp-direct.conf" "same" \
+      "$(cmp -s <(dhcp_direct_dropin_text) "${repo}/deploy/systemd/dhcp-direct.conf" && echo same || echo differs)"
+    work="$(mktemp -d)"
+    TMP="$work"
+    cfg="${work}/tenko.toml"
+    cat >"$cfg" <<'CFG_END'
+# Tenko DDI node configuration, hand edited
+data_dir = "/var/lib/tenko"
+roles = "controller,dns"
+# modules = ["ipam", "dns", "dhcp", "discovery"]   # not set
+
+[profile]
+name = "standard"
+
+[server]
+listen = ["0.0.0.0:9443", "[::]:9443"]
+
+[tls]
+mode = "internal_ca"
+host_name = "tenko.example.test"
+addresses = ["127.0.0.1", "192.0.2.10"]
+
+[kek]
+provider = "file"
+path = "/etc/tenko/kek.key"
+
+[dns]
+# Held by hand: the resolved stub keeps 127.0.0.53:53
+listen = [
+  "192.0.2.10:53", # the one address of the node
+]
+forwarders = ["192.0.2.1"]
+
+[dns.recursion]
+enabled = true
+roots = [
+  ["a", "b"],
+]
+CFG_END
+    expect "toml_get of a multi-line array" '[ "192.0.2.10:53", ]' \
+      "$(toml_get "$cfg" dns listen | tr -s ' ')"
+    expect "toml_get of a key in a section" '["192.0.2.1"]' "$(toml_get "$cfg" dns forwarders)"
+    expect "toml_get of a top-level key" '"controller,dns"' "$(toml_get "$cfg" "" roles)"
+    expect "toml_get of a key the file lacks" "" "$(toml_get "$cfg" "" modules)"
+    expect "toml_sections" "(top level) profile server tls kek dns dns.recursion" "$(toml_sections "$cfg" | paste -sd' ' -)"
+    expect "toml_set replaces a multi-line array and nothing else" "same" \
+      "$(toml_set dns listen '["198.51.100.7:53"]' <"$cfg" | diff <(sed '/^listen = \[$/,/^\]$/c listen = ["198.51.100.7:53"]' "$cfg") - >/dev/null && echo same || echo differs)"
+    expect "toml_set keeps the file when the value is the same" "same" \
+      "$(toml_set dns forwarders '["192.0.2.1"]' <"$cfg" | cmp -s - "$cfg" && echo same || echo differs)"
+    expect "toml_set drops a key" "0" "$(toml_set dns forwarders '' <"$cfg" | grep -c '^forwarders')"
+
+    # The answers of an installer run, as answers() leaves them before the file is read.
+    rerun_defaults() {
+      ROLES=controller,dns MODULES=wizard PROFILE=home HOST_NAME=default.example.test
+      DNS_ADDRESS=all FORWARDERS=198.51.100.1 API_PORT=8443
+      OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DATA_DIR="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
+      SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0
+      HAVE_CONFIG=1 OPT_RECONFIGURE=1 KEK_TARGET=file DATA_DIR=/var/lib/tenko
+    }
+    # --reconfigure --roles controller,dns,dhcp,probe, nothing else given.
+    rerun_defaults
+    OPT_ROLES=controller,dns,dhcp,probe SET_ROLES=1 ROLES=controller,dns,dhcp,probe
+    seed_from_config "$cfg"
+    config_carry "$cfg" >"${work}/carry.out"
+    carried="$(cat "$CARRY_FILE")"
+    out="$(cat "${work}/carry.out")"
+    has "$carried" 'roles = "controller,dns,dhcp,probe"' "reconfigure: the roles are the ones given"
+    has "$carried" '  "192.0.2.10:53", # the one address of the node' "reconfigure: [dns] listen is carried over, comment and all"
+    lacks "$carried" '0.0.0.0:53' "reconfigure: [dns] listen is not reset to every address"
+    has "$carried" 'forwarders = ["192.0.2.1"]' "reconfigure: the forwarders are carried over, not the host's resolvers"
+    has "$carried" 'listen = ["0.0.0.0:9443", "[::]:9443"]' "reconfigure: [server] listen is carried over"
+    has "$carried" 'host_name = "tenko.example.test"' "reconfigure: [tls] is carried over"
+    has "$carried" 'name = "standard"' "reconfigure: the profile is carried over"
+    has "$carried" 'roots = [' "reconfigure: [dns.recursion] is carried over"
+    expect "reconfigure: one [kek] section" "1" "$(grep -c '^\[kek\]' <<<"$carried")"
+    expect "reconfigure: the dhcp role adds [dhcp] once" "1" "$(grep -c '^\[dhcp\]' <<<"$carried")"
+    expect "reconfigure: the API port follows [server] listen" "9443" "$API_PORT"
+    expect "reconfigure: the host name is the file's" "tenko.example.test" "$HOST_NAME"
+    for sec in "the top-level keys" "[profile]" "[server]" "[tls]" "[kek]" "[dns]" "[dns.recursion]"; do
+      has "$out" "..  Carried over ${sec} of" "reconfigure: says that ${sec} is carried over"
+    done
+    has "$out" "Carried over the top-level keys of ${CONFIG}, except roles (your answer)" "reconfigure: names the answer that replaced a top-level key"
+    has "$out" "Added [dhcp]" "reconfigure: says that [dhcp] is new"
+    lacks "$out" "Added [dns]" "reconfigure: [dns] is not added again"
+    # Only the dns address given: the rest, the forwarders included, stays.
+    rerun_defaults
+    OPT_DNS_ADDRESS=198.51.100.7 SET_DNS_ADDRESS=1 DNS_ADDRESS=198.51.100.7
+    seed_from_config "$cfg"
+    config_carry "$cfg" >"${work}/carry.out"
+    carried="$(cat "$CARRY_FILE")"
+    has "$carried" 'listen = ["198.51.100.7:53"]' "reconfigure: --dns-address replaces [dns] listen"
+    lacks "$carried" '192.0.2.10:53' "reconfigure: the multi-line listen is gone, not duplicated"
+    has "$carried" 'forwarders = ["192.0.2.1"]' "reconfigure: --dns-address leaves the forwarders"
+    has "$(cat "${work}/carry.out")" "Carried over [dns] of ${CONFIG}, except listen (your answer)" "reconfigure: names the key the flag replaced"
+    # Nothing given: the file comes out as it went in.
+    rerun_defaults
+    seed_from_config "$cfg"
+    config_carry "$cfg" >"${work}/carry.out"
+    expect "reconfigure with no answers changes nothing" "same" "$(cmp -s "$CARRY_FILE" "$cfg" && echo same || echo differs)"
+    expect "the dns answer is the file's own listen" "192.0.2.10:53" "$DNS_ADDRESS"
+
+    # The stub of systemd-resolved: the dns role on every address is refused with --keep-resolved-stub.
+    ss() {
+      case "$*" in
+      *-Hlnup*"sport = :53"*) echo 'UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=1,fd=13))' ;;
+      esac
+      return 0
+    }
+    stub_case() { # <active> <dns address> <keep stub>: step_ports in a subshell, its output and status
+      rerun_defaults
+      ACTIVE="$1" DNS_ADDRESS="$2" OPT_KEEP_STUB="$3"
+      (step_ports 2>&1)
+      echo "rc=$?"
+    }
+    out="$(stub_case 1 all 1)"
+    has "$out" "rc=4" "stub: the dns role on every address with --keep-resolved-stub exits 4 on a rerun of a running node"
+    has "$out" "--keep-resolved-stub was given" "stub: says why"
+    has "$out" "--dns-address <addr>[,<addr>], or [dns] listen in" "stub: says what to do"
+    out="$(stub_case 0 all 1)"
+    has "$out" "rc=4" "stub: the same on a first start"
+    out="$(stub_case 1 192.0.2.10 1)"
+    has "$out" "rc=0" "stub: the node's own address is fine with --keep-resolved-stub"
+    has "$out" "answers on 192.0.2.10" "stub: says where the dns role answers"
+    out="$(stub_case 1 '0.0.0.0:53' 1)"
+    has "$out" "rc=4" "stub: 0.0.0.0:53 is every address too"
+    unset -f ss stub_case
+
+    # --roles on a node that has started before.
+    rerun_defaults
+    DATA_DIR="${work}/data"
+    ROLES=controller,dns,dhcp,probe SET_ROLES=1
+    expect "roles: nothing to say on a node that has not started" "" "$(warn_roles_in_store)"
+    mkdir -p "${DATA_DIR}/store"
+    out="$(warn_roles_in_store)"
+    has "$out" "!!" "roles: a warning line when the store exists"
+    expect "roles: exactly one line" "1" "$(wc -l <<<"$out")"
+    has "$out" "nodes page of the web UI" "roles: names the web UI"
+    has "$out" "tenko node roles set <id> --roles controller,dns,dhcp,probe" "roles: names the command"
+    has "$out" "PUT /api/v1/nodes/{id}/roles" "roles: names the API"
+    OPT_RECONFIGURE=0
+    expect "roles: silent without --reconfigure" "" "$(warn_roles_in_store)"
+    expect "--help says it too" "yes" "$(bash "$installer" --help | tr -s ' \n' '  ' | grep -q 'tenko node roles set <id> --roles ...' && echo yes)"
+
+    # The dhcp role's direct mode brings its drop-in.
+    cat >"${work}/direct.toml" <<'CFG_END'
+[dhcp]
+# listen = [{ address = "192.0.2.10", mode = "relay" }]
+listen = [{ address = "192.0.2.10", mode = "direct", interface = "eth0" }]
+CFG_END
+    ROLES=controller,dhcp
+    expect "dhcp_direct_wanted with a direct listener" 0 "$(dhcp_direct_wanted "${work}/direct.toml"; echo $?)"
+    ROLES=controller
+    expect "dhcp_direct_wanted without the dhcp role" 1 "$(dhcp_direct_wanted "${work}/direct.toml"; echo $?)"
+    ROLES=controller,dhcp
+    expect "dhcp_direct_wanted without a direct listener" 1 "$(dhcp_direct_wanted "$cfg"; echo $?)"
+    printf '[dhcp]\n# listen = [{ address = "192.0.2.10", mode = "direct", interface = "eth0" }]\n' >"${work}/commented.toml"
+    expect "dhcp_direct_wanted ignores a comment" 1 "$(dhcp_direct_wanted "${work}/commented.toml"; echo $?)"
+    rm -rf "$work"
     exit "$failures"
   )
   failures=$((failures + $?))

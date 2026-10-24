@@ -27,6 +27,10 @@
 # stopped node, then the new binary as /usr/local/bin/tenko and a start, which switches the
 # updates layout; docs/upgrades.md section 7.3). The data directory and the key are never
 # touched. The same version changes nothing and says so; missing pieces are put back.
+# --reconfigure changes /etc/tenko/tenko.toml by the answers given as flags or at the
+# questions and carries every other value over (a hand-set [dns] listen, [tls], [kek], ...),
+# saying so per section. A node that has started before keeps its roles in the store, so
+# --roles then writes the file and the drop-ins but does not change the running set.
 #
 # Exit statuses:
 #   0  done, or nothing to change
@@ -63,6 +67,7 @@ readonly DROPIN_DIR=/etc/systemd/system/tenko.service.d
 readonly DROPIN_KEK=/etc/systemd/system/tenko.service.d/kek-file.conf
 readonly DROPIN_DATA=/etc/systemd/system/tenko.service.d/data-dir.conf
 readonly DROPIN_PROBE=/etc/systemd/system/tenko.service.d/probe.conf
+readonly DROPIN_DHCP=/etc/systemd/system/tenko.service.d/dhcp-direct.conf
 readonly RESOLVED_DROPIN=/etc/systemd/resolved.conf.d/tenko.conf
 readonly RESOLV_CONF=/etc/resolv.conf
 readonly RESOLV_MARK='# Written by the Tenko installer (--use-self)'
@@ -89,7 +94,13 @@ Answers (asked when --yes is not given; the default is in brackets):
                                       discovery scans; with it the installer puts the drop-in
                                       probe.conf (CAP_NET_RAW, for ARP and the raw scan
                                       methods; ICMP needs nothing) next to the unit, and
-                                      --reconfigure --roles without it removes the drop-in
+                                      --reconfigure --roles without it removes the drop-in.
+                                      A node that has started before keeps its roles in the
+                                      store: --reconfigure --roles writes the file and the
+                                      drop-ins but cannot change the running set; change it on
+                                      the nodes page of the web UI, with `tenko node roles set
+                                      <id> --roles ...`, or with PUT /api/v1/nodes/{id}/roles
+                                      (docs/cluster.md, section 13)
   --modules all|<list>|wizard         product modules: ipam,dns,dhcp,discovery; wizard leaves
                                       the choice to first-run setup [wizard]
   --profile home|standard|hardened|lab   security profile [home]
@@ -120,8 +131,10 @@ Behaviour:
   --use-self                          with the dns role: point this host's own resolver at Tenko
                                       (127.0.0.1) once the node listens; --uninstall restores
                                       the previous resolver [asked in interactive mode, default no]
-  --reconfigure                       write /etc/tenko/tenko.toml again from the answers (the old
-                                      file is kept as tenko.toml.<time>.bak)
+  --reconfigure                       change /etc/tenko/tenko.toml by the answers you give: every
+                                      other value of the file (listen addresses, [tls], [kek],
+                                      [dns.recursion], ...) is carried over; the old file is
+                                      kept as tenko.toml.<time>.bak
   --no-start                          everything except enabling and starting the service
   --dry-run                           print every step, change nothing
   --uninstall                         remove the service and the binary; keep data, key, config
@@ -376,6 +389,152 @@ forwarder_list() {
   local joined
   printf -v joined '%s, ' "${out[@]}"
   printf '%s' "${joined%, }"
+}
+
+# ── Reading and editing a kept tenko.toml ───────────────────────────────────────────────────
+# --reconfigure changes the file the operator has, not a new one: these helpers read a key and
+# replace, insert or drop one, and leave every other line (and its comments) as it is. awk
+# only reads text here; nothing in the file is run. A header is a line that starts with `[`
+# outside a multi-line value; `depth` follows the brackets of such a value.
+TOML_LIB="$(
+  cat <<'TOML_LIB_END'
+function strip(line,    out, i, c, q) {
+  out = ""; q = ""
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (q != "") {
+      out = out c
+      if (c == "\\" && q == "\"") { i++; out = out substr(line, i, 1) } else if (c == q) q = ""
+      continue
+    }
+    if (c == "\"" || c == "\047") { q = c; out = out c; continue }
+    if (c == "#") break
+    out = out c
+  }
+  return out
+}
+function delta(text,    o, c) {
+  gsub(/"[^"]*"/, "", text); gsub("\047[^\047]*\047", "", text)
+  o = gsub(/\[/, "", text); c = gsub(/\]/, "", text)
+  return o - c
+}
+function is_header(s) { return s ~ /^[ \t]*\[/ }
+function header_name(s) {
+  sub(/^[ \t]*\[+/, "", s); sub(/\][ \t]*\]?[ \t]*$/, "", s); gsub(/[ \t]/, "", s)
+  return s
+}
+function is_key(s, key) { return match(s, "^[ \t]*" key "[ \t]*=") }
+function value_of(s) { s = substr(s, index(s, "=") + 1); sub(/^[ \t]+/, "", s); return s }
+TOML_LIB_END
+)
+"
+# toml_get <file> <section> <key>: the value of the key, comments removed and a multi-line
+# array on one line; nothing when the key is absent. The section "" is the top level.
+toml_get() {
+  T_SEC="$2" T_KEY="$3" awk "${TOML_LIB}"'
+BEGIN { sec = ENVIRON["T_SEC"]; key = ENVIRON["T_KEY"]; cur = ""; depth = 0; capture = 0; v = "" }
+{
+  s = strip($0)
+  if (depth > 0) {
+    depth += delta(s)
+    if (capture) { v = v " " s; if (depth <= 0) { print v; exit } }
+    next
+  }
+  if (is_header(s)) { cur = header_name(s); next }
+  if (cur == sec && is_key(s, key)) {
+    v = value_of(s); depth = delta(v)
+    if (depth <= 0) { print v; exit }
+    capture = 1
+    next
+  }
+  if (index(s, "=") > 0) { depth = delta(value_of(s)); if (depth < 0) depth = 0 }
+}' "$1"
+}
+
+# toml_set <section> <key> <value>, standard input to standard output: the key set to the
+# value (TOML text), in place when it exists (a multi-line array included), else added at the
+# end of the section, and the section added at the end of the file when it is missing. An
+# empty value drops the key.
+toml_set() {
+  T_SEC="$1" T_KEY="$2" T_VAL="$3" awk "${TOML_LIB}"'
+BEGIN { sec = ENVIRON["T_SEC"]; key = ENVIRON["T_KEY"]; val = ENVIRON["T_VAL"]
+        cur = ""; depth = 0; skip = 0; done = 0; nheld = 0; seen = (sec == "") }
+function flush(    i) { for (i = 1; i <= nheld; i++) print held[i]; nheld = 0 }
+function leave() { if (!done && cur == sec && val != "") { print key " = " val; done = 1 } }
+{
+  s = strip($0)
+  if (depth > 0) {
+    depth += delta(s)
+    if (!skip) print $0
+    if (depth <= 0) skip = 0
+    next
+  }
+  if (s ~ /^[ \t]*$/) { held[++nheld] = $0; next }
+  if (is_header(s)) {
+    if (cur == sec) leave()
+    cur = header_name(s)
+    if (cur == sec) seen = 1
+    flush(); print $0; next
+  }
+  if (!done && cur == sec && is_key(s, key)) {
+    depth = delta(value_of(s)); if (depth < 0) depth = 0
+    skip = (depth > 0); done = 1
+    flush()
+    if (val != "") print key " = " val
+    next
+  }
+  if (index(s, "=") > 0) { depth = delta(value_of(s)); if (depth < 0) depth = 0 }
+  flush(); print $0
+}
+END {
+  if (cur == sec) leave()
+  flush()
+  if (!done && !seen && val != "") { print ""; print "[" sec "]"; print key " = " val }
+}'
+}
+
+# toml_sections <file>: the section names in file order, once each; "(top level)" first when
+# the file has keys before its first header.
+toml_sections() {
+  awk "${TOML_LIB}"'
+BEGIN { depth = 0; top = 0 }
+{
+  s = strip($0)
+  if (depth > 0) { depth += delta(s); next }
+  if (is_header(s)) { n = header_name(s); if (!(n in seen)) { seen[n] = 1; print n }; seen_header = 1; next }
+  if (index(s, "=") > 0) {
+    if (!seen_header && !top) { top = 1; print "(top level)" }
+    depth = delta(value_of(s)); if (depth < 0) depth = 0
+  }
+}' "$1"
+}
+
+# toml_section_text <file> <section>: the lines of the section and of its sub-tables, comments
+# removed (to look for a setting such as mode = "direct").
+toml_section_text() {
+  T_SEC="$2" awk "${TOML_LIB}"'
+BEGIN { sec = ENVIRON["T_SEC"]; cur = ""; depth = 0 }
+{
+  s = strip($0)
+  if (depth == 0 && is_header(s)) { cur = header_name(s); next }
+  if (cur == sec || index(cur, sec ".") == 1) print s
+  if (depth > 0) depth += delta(s)
+  else if (index(s, "=") > 0) { depth = delta(value_of(s)); if (depth < 0) depth = 0 }
+}' "$1"
+}
+
+# toml_strings: the quoted strings of a value on standard input, unquoted, one per line.
+toml_strings() { grep -oE '"([^"\\]|\\.)*"' | sed 's/^"//; s/"$//' || true; }
+
+# dns_binds_wildcard <answer>: the answer makes the dns role listen on every address.
+dns_binds_wildcard() { dns_listen "$1" | grep -qE '"(0\.0\.0\.0|\[::\]):'; }
+
+# listen_answer <[dns] listen value>: the --dns-address answer that gives the same listen.
+listen_answer() {
+  local list
+  list="$(toml_strings <<<"$1" | paste -sd, -)"
+  if [[ "$list" == "0.0.0.0:53,[::]:53" ]]; then list=all; fi
+  printf '%s' "$list"
 }
 
 # host_resolvers: the resolvers this host uses, loopback excluded, comma separated (the
@@ -657,6 +816,58 @@ check_or_die() {
   "$fn" "$value" || die "$E_USAGE" "${what}: invalid value '${value}'"
 }
 
+# What the configuration on the host says, as answers (FILE_VAL, only for the keys it sets
+# to a usable value): roles, modules, profile, host, dns (the --dns-address form), fwd (the
+# --forwarders form) and data_dir.
+declare -A FILE_VAL=()
+read_config_values() {
+  local v cfg="${1:-$CONFIG}"
+  FILE_VAL=()
+  [[ -f "$cfg" ]] || return 0
+  v="$(toml_get "$cfg" "" roles | toml_strings | head -n 1)"
+  if valid_roles "$v"; then FILE_VAL[roles]="$v"; fi
+  v="$(toml_get "$cfg" "" modules | toml_strings | paste -sd, -)"
+  if [[ -n "$v" ]] && valid_modules "$v"; then FILE_VAL[modules]="$v"; fi
+  v="$(toml_get "$cfg" profile name | toml_strings | head -n 1)"
+  if valid_profile "$v"; then FILE_VAL[profile]="$v"; fi
+  v="$(toml_get "$cfg" tls host_name | toml_strings | head -n 1)"
+  if valid_hostname "$v"; then FILE_VAL[host]="$v"; fi
+  v="$(toml_get "$cfg" "" data_dir | toml_strings | head -n 1)"
+  if valid_data_dir "$v"; then FILE_VAL[data_dir]="$v"; fi
+  v="$(listen_answer "$(toml_get "$cfg" dns listen)")"
+  if [[ -n "$v" ]] && dns_listen "$v" >/dev/null; then FILE_VAL[dns]="$v"; fi
+  v="$(toml_get "$cfg" dns forwarders)"
+  if [[ -n "$v" ]]; then
+    v="$(toml_strings <<<"$v" | paste -sd, -)"
+    v="${v:-none}"
+    if forwarder_list "$v" >/dev/null; then FILE_VAL[fwd]="$v"; fi
+  fi
+  v="$(toml_get "$cfg" server listen | toml_strings | head -n 1)"
+  v="${v##*:}"
+  if valid_port "$v"; then API_PORT="$v"; fi
+  return 0
+}
+
+# seed_from_config: a kept configuration names the host name and the roles the unit serves
+# (the probe drop-in follows them, as do the port checks and the closing lines). With
+# --reconfigure every answer not given as a flag starts from the file, so that the questions
+# offer the file's values and nothing is reset to a default.
+seed_from_config() {
+  read_config_values "${1:-$CONFIG}"
+  ((HAVE_CONFIG)) || return 0
+  [[ -z "$OPT_HOST" && -n "${FILE_VAL[host]:-}" ]] && HOST_NAME="${FILE_VAL[host]}"
+  if ((!OPT_RECONFIGURE)); then
+    [[ -n "${FILE_VAL[roles]:-}" ]] && ROLES="${FILE_VAL[roles]}"
+    return 0
+  fi
+  [[ -z "$OPT_ROLES" && -n "${FILE_VAL[roles]:-}" ]] && ROLES="${FILE_VAL[roles]}"
+  [[ -z "$OPT_MODULES" && -n "${FILE_VAL[modules]:-}" ]] && MODULES="${FILE_VAL[modules]}"
+  [[ -z "$OPT_PROFILE" && -n "${FILE_VAL[profile]:-}" ]] && PROFILE="${FILE_VAL[profile]}"
+  ((!SET_DNS_ADDRESS)) && [[ -n "${FILE_VAL[dns]:-}" ]] && DNS_ADDRESS="${FILE_VAL[dns]}"
+  ((!SET_FORWARDERS)) && [[ -n "${FILE_VAL[fwd]:-}" ]] && FORWARDERS="${FILE_VAL[fwd]}"
+  return 0
+}
+
 # answers: the defaults, the flags, and in interactive mode the questions.
 answers() {
   local default_host forwarders_default
@@ -667,25 +878,9 @@ answers() {
   MODULES="${OPT_MODULES:-wizard}"
   PROFILE="${OPT_PROFILE:-home}"
   HOST_NAME="${OPT_HOST:-$default_host}"
-  # A kept configuration names the host name the closing lines show.
-  if [[ -z "$OPT_HOST" && -f "$CONFIG" ]]; then
-    local kept
-    kept="$(sed -n 's/^host_name = "\(.*\)"$/\1/p' "$CONFIG" | head -n 1)"
-    if [[ -n "$kept" ]]; then
-      HOST_NAME="$kept"
-    fi
-  fi
-  # A kept configuration names the roles the unit serves: the probe drop-in follows them, as
-  # do the port checks and the closing lines.
-  if ((HAVE_CONFIG && !OPT_RECONFIGURE)) && [[ -f "$CONFIG" ]]; then
-    local kept_roles
-    kept_roles="$(sed -n 's/^roles = "\(.*\)"$/\1/p' "$CONFIG" | head -n 1)"
-    if [[ -n "$kept_roles" ]] && valid_roles "$kept_roles"; then
-      ROLES="$kept_roles"
-    fi
-  fi
   DNS_ADDRESS="${OPT_DNS_ADDRESS:-all}"
   FORWARDERS="${OPT_FORWARDERS:-${forwarders_default:-none}}"
+  seed_from_config
   LANGUAGE="${OPT_LANGUAGE:-en}"
   ADMIN="$OPT_ADMIN"
 
@@ -783,6 +978,18 @@ Names the host looks up then go through Tenko: your zones first, forwarders for 
   fi
 }
 
+# warn_roles_in_store: --reconfigure --roles on a node that has started before. The roles of a
+# node are in the store since its first start (docs/cluster.md, section 13); the file's roles
+# seeded them once and change nothing now. The file and the drop-ins follow the new roles,
+# so that a change made in the web UI works at the restart.
+warn_roles_in_store() {
+  ((HAVE_CONFIG && OPT_RECONFIGURE)) || return 0
+  [[ -d "${DATA_DIR}/store" ]] || return 0
+  ((SET_ROLES)) || [[ "$ROLES" != "${FILE_VAL[roles]:-$ROLES}" ]] || return 0
+  warn "--roles ${ROLES} is written to ${CONFIG}, but this node has started before and keeps its roles in the store, so the running set does not change; change it on the nodes page of the web UI, with tenko node roles set <id> --roles ${ROLES}, or with PUT /api/v1/nodes/{id}/roles (docs/cluster.md, section 13); the drop-ins for the new roles are put in place now, so the change works at the restart"
+  return 0
+}
+
 # check_use_self <1 when the configuration is written now>: --use-self needs the dns role,
 # answering on 127.0.0.1 port 53 (a resolver address has no port). A kept configuration is
 # read for both; a [dns] section without a listen line answers on every address.
@@ -829,7 +1036,14 @@ setup_answers() {
 # ── Steps ───────────────────────────────────────────────────────────────────────────────────
 step_ports() {
   local holder line
-  ((ACTIVE)) && return 0
+  if ((ACTIVE)); then
+    # The node holds its own ports. Only the stub of systemd-resolved can still be in the way,
+    # when --reconfigure moves the dns role to every address.
+    if ((HAVE_CONFIG && OPT_RECONFIGURE)) && [[ "$ROLES" == *dns* ]] && resolved_stub_holds_53; then
+      step_resolved_stub
+    fi
+    return 0
+  fi
   have ss || {
     warn "ss (iproute2) is missing; the ports are not checked before the start"
     return 0
@@ -875,12 +1089,26 @@ step_ports() {
     die "$E_PORT" "Port 53 is taken by ${other}; stop it or narrow it to other addresses, or give the dns role other addresses with --dns-address"
   fi
   ((stub)) || return 0
-  if [[ "$DNS_ADDRESS" != all ]]; then
+  step_resolved_stub
+}
+
+# resolved_stub_holds_53: systemd-resolved listens on port 53 (its stub, 127.0.0.53).
+resolved_stub_holds_53() {
+  have ss || return 1
+  { ss -Hlnup 'sport = :53' 2>/dev/null; ss -Hlntp 'sport = :53' 2>/dev/null; } |
+    grep -q 'users:(("systemd-resolve'
+}
+
+# step_resolved_stub: the stub of systemd-resolved holds 127.0.0.53:53. The dns role may listen
+# on other addresses; on every address it needs the stub off, which is asked and done here
+# unless --keep-resolved-stub forbids it (exit 4, before the configuration is written).
+step_resolved_stub() {
+  if ! dns_binds_wildcard "$DNS_ADDRESS"; then
     ok "systemd-resolved holds 127.0.0.53:53 only; the dns role answers on ${DNS_ADDRESS}"
     return 0
   fi
   if ((OPT_KEEP_STUB)); then
-    die "$E_PORT" "systemd-resolved's stub listener holds port 53 and --keep-resolved-stub was given; pass --dns-address with this host's addresses"
+    die "$E_PORT" "systemd-resolved's stub listener holds 127.0.0.53:53 and --keep-resolved-stub was given, but the dns role would listen on every address (${DNS_ADDRESS}); give it this host's addresses: --dns-address <addr>[,<addr>], or [dns] listen in ${CONFIG}"
   fi
   if ! ask_yes_no "systemd-resolved listens on 127.0.0.53:53, which the dns role on every address (0.0.0.0:53) needs.
 
@@ -1153,13 +1381,142 @@ config_add_kek_file() {
   WROTE_CONFIG=1
 }
 
+# config_dns_section <listen> <forwarders>: the [dns] section of a configuration written by
+# the installer (the TOML strings, comma separated).
+config_dns_section() {
+  printf '\n[dns]\n'
+  printf "# Where the dns role answers (UDP and TCP). Port 53 needs the unit's CAP_NET_BIND_SERVICE.\n"
+  printf 'listen = [%s]\n' "$1"
+  printf '# Upstream resolvers for names outside the zones; empty: such names are refused.\n'
+  printf 'forwarders = [%s]\n' "$2"
+}
+
+# config_dhcp_section: the [dhcp] section of a configuration written by the installer.
+# WP7.5: the dhcp role serves nothing until [dhcp] listen names an address.
+config_dhcp_section() {
+  cat <<'DHCP_SECTION_END'
+
+[dhcp]
+# Where the dhcp role listens (UDP 67): the node's own unicast address for a gateway that
+# relays to it (relay mode), or an interface for the broadcasts of clients on its link
+# (direct mode, which needs the drop-in deploy/systemd/dhcp-direct.conf). Set it, then
+# restart the service. Every key: tenko.example.toml.
+# listen = [{ address = "192.0.2.10", mode = "relay" }]
+# listen = [{ address = "192.0.2.10", mode = "direct", interface = "eth0" }]
+DHCP_SECTION_END
+}
+
+# carry_changed <answer> <value> <1 when the flag was given>: the answer differs from what the
+# configuration says, or was given as a flag and the configuration does not set it. What is
+# not changed stays in the file as it is.
+carry_changed() {
+  if [[ -z "${FILE_VAL[$1]+set}" ]]; then
+    (($3))
+  else
+    [[ "$2" != "${FILE_VAL[$1]}" ]]
+  fi
+}
+
+# carry_set <section> <key> <value>: the kept configuration (CARRY_FILE) with the key set; an
+# empty value drops it. CARRY_SET lists what the answers replaced, for the report.
+CARRY_FILE="" CARRY_SET=() CARRY_ADDED=()
+carry_set() {
+  toml_set "$1" "$2" "$3" <"$CARRY_FILE" >"${CARRY_FILE}.next"
+  mv -f "${CARRY_FILE}.next" "$CARRY_FILE"
+  CARRY_SET+=("${1:-(top level)}|$2")
+}
+
+# carry_append <section> <text>: a section the kept configuration lacks (a role gained, a
+# key file), added at the end.
+carry_append() {
+  [[ -z "$(tail -c 1 "$CARRY_FILE")" ]] || echo >>"$CARRY_FILE"
+  printf '%s
+' "$2" >>"$CARRY_FILE"
+  CARRY_ADDED+=("$1")
+}
+
+# config_carry: writes CARRY_FILE, the kept configuration with only the answers that differ
+# from it applied, and says per section what was carried over. A value the operator did not
+# give again is not reset to a default: [dns] listen, [dhcp], [server], [tls], [kek],
+# [dns.recursion] and every other section stay as they are.
+config_carry() {
+  local src="${1:-$CONFIG}" sections s e keys
+  CARRY_FILE="${TMP}/tenko.toml.carry" CARRY_SET=() CARRY_ADDED=()
+  cp "$src" "$CARRY_FILE"
+  sections="$(toml_sections "$src")"
+  if carry_changed roles "$ROLES" "$SET_ROLES"; then carry_set "" roles "\"${ROLES}\""; fi
+  if carry_changed modules "$MODULES" "$SET_MODULES"; then
+    case "$MODULES" in
+    wizard) carry_set "" modules "" ;;
+    all) carry_set "" modules '["all"]' ;;
+    *) carry_set "" modules "[\"${MODULES//,/\", \"}\"]" ;;
+    esac
+  fi
+  if [[ -n "$OPT_DATA_DIR" ]] && carry_changed data_dir "$DATA_DIR" 1; then carry_set "" data_dir "\"${DATA_DIR}\""; fi
+  if carry_changed profile "$PROFILE" "$([[ -n "$OPT_PROFILE" ]] && echo 1 || echo 0)"; then
+    carry_set profile name "\"${PROFILE}\""
+  fi
+  if carry_changed host "$HOST_NAME" "$([[ -n "$OPT_HOST" ]] && echo 1 || echo 0)"; then
+    carry_set tls host_name "\"${HOST_NAME}\""
+  fi
+  if [[ "$ROLES" == *dns* ]]; then
+    if grep -qx dns <<<"$sections"; then
+      if [[ "$(dns_listen "$DNS_ADDRESS")" != "$(dns_listen "${FILE_VAL[dns]:-$DNS_ADDRESS}")" ]] ||
+        { [[ -z "${FILE_VAL[dns]:-}" ]] && ((SET_DNS_ADDRESS)); }; then
+        carry_set dns listen "[$(dns_listen "$DNS_ADDRESS")]"
+      fi
+      if [[ "$(forwarder_list "$FORWARDERS")" != "$(forwarder_list "${FILE_VAL[fwd]:-$FORWARDERS}")" ]] ||
+        { [[ -z "${FILE_VAL[fwd]:-}" ]] && ((SET_FORWARDERS)); }; then
+        carry_set dns forwarders "[$(forwarder_list "$FORWARDERS")]"
+      fi
+    else
+      carry_append dns "$(config_dns_section "$(dns_listen "$DNS_ADDRESS")" "$(forwarder_list "$FORWARDERS")")"
+    fi
+  fi
+  if [[ "$ROLES" == *dhcp* ]] && ! grep -qx dhcp <<<"$sections"; then
+    carry_append dhcp "$(config_dhcp_section)"
+  fi
+  if [[ "$KEK_TARGET" == file ]] && ! grep -qx kek <<<"$sections"; then
+    carry_append kek "$(kek_file_section)"
+  fi
+  while IFS= read -r s; do
+    keys=""
+    for e in "${CARRY_SET[@]}"; do
+      [[ "${e%%|*}" == "$s" ]] && keys+=", ${e#*|}"
+    done
+    if [[ "$s" == "(top level)" ]]; then s="the top-level keys"; else s="[${s}]"; fi
+    info "Carried over ${s} of ${CONFIG}${keys:+, except ${keys#, } (your answer)}"
+  done <<<"$sections"
+  for s in "${CARRY_ADDED[@]}"; do
+    info "Added [${s}] (the roles or the key file need it)"
+  done
+  return 0
+}
+
 step_config() {
   local modules_line listen forwarders tls_addresses ip ip6 api_listen api_note kek_section=""
   if ((HAVE_CONFIG && !OPT_RECONFIGURE)); then
-    ok "Keeping ${CONFIG} (--reconfigure writes it again from the answers)"
+    ok "Keeping ${CONFIG} (--reconfigure changes it by the answers you give)"
     if ((FRESH_KEY)) && [[ "$KEK_MODE" == file ]]; then
       config_add_kek_file
     fi
+    return 0
+  fi
+  if ((HAVE_CONFIG)); then
+    config_carry
+    if same_file "$CARRY_FILE" "$CONFIG"; then
+      ok "${CONFIG} needs no change"
+      return 0
+    fi
+    if ((!OPT_DRY)); then
+      local backup
+      backup="${CONFIG}.$(date -u +%Y%m%dT%H%M%SZ).bak"
+      cp -p "$CONFIG" "$backup"
+      ok "Kept the previous configuration as ${backup}"
+    fi
+    put "$CONFIG" 0640 root:tenko <"$CARRY_FILE" || true
+    ok "Changed ${CONFIG}"
+    WROTE_CONFIG=1
     return 0
   fi
   case "$MODULES" in
@@ -1212,31 +1569,12 @@ ${kek_section}"
   if [[ "$ROLES" == *dns* ]]; then
     listen="$(dns_listen "$DNS_ADDRESS")"
     forwarders="$(forwarder_list "$FORWARDERS")"
-    body+="
-[dns]
-# Where the dns role answers (UDP and TCP). Port 53 needs the unit's CAP_NET_BIND_SERVICE.
-listen = [${listen}]
-# Upstream resolvers for names outside the zones; empty: such names are refused.
-forwarders = [${forwarders}]
+    body+="$(config_dns_section "$listen" "$forwarders")
 "
   fi
-  # WP7.5: the dhcp role serves nothing until [dhcp] listen names an address.
   if [[ "$ROLES" == *dhcp* ]]; then
-    body+="
-[dhcp]
-# Where the dhcp role listens (UDP 67): the node's own unicast address for a gateway that
-# relays to it (relay mode), or an interface for the broadcasts of clients on its link
-# (direct mode, which needs the drop-in deploy/systemd/dhcp-direct.conf). Set it, then
-# restart the service. Every key: tenko.example.toml.
-# listen = [{ address = \"192.0.2.10\", mode = \"relay\" }]
-# listen = [{ address = \"192.0.2.10\", mode = \"direct\", interface = \"eth0\" }]
+    body+="$(config_dhcp_section)
 "
-  fi
-  if ((HAVE_CONFIG)) && ((!OPT_DRY)); then
-    local backup
-    backup="${CONFIG}.$(date -u +%Y%m%dT%H%M%SZ).bak"
-    cp -p "$CONFIG" "$backup"
-    ok "Kept the previous configuration as ${backup}"
   fi
   printf '%s' "$body" | put "$CONFIG" 0640 root:tenko || true
   ok "Wrote ${CONFIG}"
@@ -1653,6 +1991,66 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 TENKO_PROBE_END
 }
 
+# The drop-in of deploy/systemd/dhcp-direct.conf, unchanged: CAP_NET_RAW and the address
+# families of the dhcp role's direct mode (deploy/proxmox/test/install-sh-test.sh compares it
+# with the file).
+dhcp_direct_dropin_text() {
+  cat <<'TENKO_DHCP_END'
+# Drop-in for the direct mode of the dhcp role of Tenko DDI: lets the unit hear the
+# broadcasts of DHCP clients on a link ([dhcp] listen with mode = "direct" and an
+# `interface` in tenko.toml, roles = "controller,dhcp").
+#
+# Install (as root):
+#   install -d /etc/systemd/system/tenko.service.d
+#   install -m 0644 deploy/systemd/dhcp-direct.conf /etc/systemd/system/tenko.service.d/dhcp-direct.conf
+#   systemctl daemon-reload && systemctl restart tenko
+# Without systemd, `setcap cap_net_bind_service,cap_net_raw+ep` on the binary does the same
+# for the capabilities (repeat it after every update, because a replaced file loses it).
+# To remove it: delete the file, then `systemctl daemon-reload && systemctl restart tenko`.
+#
+# Relay mode needs none of this: it binds the node's unicast address on UDP 67, where only
+# relayed traffic arrives, and the base unit's CAP_NET_BIND_SERVICE covers the port. Install
+# this drop-in only when a link has no relay agent.
+#
+# What it opens up, compared with the base unit (whose only capability is
+# CAP_NET_BIND_SERVICE, for UDP 67 and port 53, which stays):
+#   * CAP_NET_RAW, in the bounding set and as an ambient capability, so the unprivileged
+#     account `tenko` may bind a socket to an interface (SO_BINDTODEVICE, which direct mode
+#     uses to hear the broadcasts of one link only) and open the AF_PACKET socket with
+#     which it answers a client that has no address yet by a link-layer unicast. Without
+#     the capability the server answers such a client by broadcast.
+#   * AF_NETLINK: the server lists the interfaces and their addresses.
+#   * AF_PACKET: the link-layer replies named above.
+# Everything else in the base unit stays: no new privileges, the system call filter, a
+# read-only system, and the state directory as the only writable place besides the log
+# directory.
+#
+# Listing only what is new is not enough for these three settings: the base unit sets the
+# first two to empty and gives the third a shorter list, so each is reset below and given
+# its full value.
+#
+# probe.conf grants the same set of capabilities and address families, so either drop-in is
+# enough when the dhcp role and the probe role run together; installing both changes
+# nothing, because each resets the settings and gives them the same value.
+
+[Service]
+AmbientCapabilities=
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+RestrictAddressFamilies=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+TENKO_DHCP_END
+}
+
+# dhcp_direct_wanted: the dhcp role is listed and [dhcp] in the configuration has a listener
+# in direct mode, which binds an interface and answers through a raw socket.
+dhcp_direct_wanted() {
+  local cfg="${1:-$CONFIG}"
+  [[ "$ROLES" == *dhcp* && -f "$cfg" ]] || return 1
+  toml_section_text "$cfg" dhcp | grep -qE 'mode[[:space:]]*=[[:space:]]*"direct"'
+}
+
 step_unit() {
   local changed=0
   [[ -d /etc/systemd/system ]] || run install -d -m 0755 /etc/systemd/system
@@ -1688,8 +2086,9 @@ step_unit() {
     changed=1
   fi
   # The probe role: its drop-in comes with the role and goes with it (--reconfigure --roles
-  # without probe), the way dhcp-direct.conf is left to the operator because it needs an
-  # interface the installer does not ask for.
+  # without probe). The one of the dhcp role's direct mode comes with a direct listener in
+  # [dhcp] listen (the interface is the operator's to name) and goes with the role; a file
+  # that differs from the shipped one is the operator's and stays.
   if [[ "$ROLES" == *probe* ]]; then
     [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
     probe_dropin_text | put "$DROPIN_PROBE" 0644 root:root && changed=1
@@ -1697,8 +2096,17 @@ step_unit() {
     run rm -f "$DROPIN_PROBE"
     changed=1
   fi
+  if [[ -f "$DROPIN_DHCP" && "$(dhcp_direct_dropin_text | sha256sum)" != "$(sha256sum <"$DROPIN_DHCP")" ]]; then
+    ! dhcp_direct_wanted || warn "${DROPIN_DHCP} differs from the one the installer ships; it is left as it is"
+  elif dhcp_direct_wanted; then
+    [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
+    dhcp_direct_dropin_text | put "$DROPIN_DHCP" 0644 root:root && changed=1
+  elif [[ -f "$DROPIN_DHCP" && "$ROLES" != *dhcp* ]]; then
+    run rm -f "$DROPIN_DHCP"
+    changed=1
+  fi
   if ((changed)); then
-    if [[ -f "$DROPIN_KEK" || -f "$DROPIN_DATA" || -f "$DROPIN_PROBE" ]]; then
+    if [[ -f "$DROPIN_KEK" || -f "$DROPIN_DATA" || -f "$DROPIN_PROBE" || -f "$DROPIN_DHCP" ]]; then
       ok "Installed the unit ${UNIT} with drop-ins in ${DROPIN_DIR}"
     else
       ok "Installed the unit ${UNIT}"
@@ -1848,8 +2256,8 @@ summary() {
   # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.
   if [[ "$ROLES" == *dhcp* ]]; then
     printf '    %-14s %s\n' "DHCP:" "set [dhcp] listen in ${CONFIG} (relay mode: the node's address, the gateway relays to it;" \
-      "" "direct mode: an interface, and install deploy/systemd/dhcp-direct.conf as" \
-      "" "/etc/systemd/system/tenko.service.d/dhcp-direct.conf); then restart the service." \
+      "" "direct mode: an interface; run this script again and it puts the drop-in" \
+      "" "${DROPIN_DHCP} in place); then restart the service." \
       "" "UDP 67 must be open on the host's firewall; 547 (DHCPv6) is not served yet."
     if [[ "$ROLES" != *probe* ]]; then
       printf '    %-14s %s\n' "" "Conflict detection (docs/dhcp.md, section 14.5) is off without the probe role:" \
@@ -1901,6 +2309,7 @@ uninstall() {
   [[ -f "$DROPIN_KEK" ]] && run rm -f "$DROPIN_KEK"
   [[ -f "$DROPIN_DATA" ]] && run rm -f "$DROPIN_DATA"
   [[ -f "$DROPIN_PROBE" ]] && run rm -f "$DROPIN_PROBE"
+  [[ -f "$DROPIN_DHCP" ]] && run rm -f "$DROPIN_DHCP"
   [[ -d "$DROPIN_DIR" ]] && [[ -z "$(ls -A "$DROPIN_DIR")" ]] && run rmdir "$DROPIN_DIR"
   [[ -f "$UNIT" ]] && run rm -f "$UNIT"
   ((SYSTEMD)) && run systemctl daemon-reload
@@ -2029,6 +2438,7 @@ main() {
     fi
   fi
   answers
+  warn_roles_in_store
   setup_answers
   get_binary
   plan_kek

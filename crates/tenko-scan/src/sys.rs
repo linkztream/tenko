@@ -64,6 +64,25 @@ pub trait System: Send + Sync + std::fmt::Debug {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostSystem;
 
+/// The command of a tool such as `ip` or `ping`: no standard input, piped outputs, and not the
+/// service manager's notify socket, because the tool is not the unit's main process.
+fn tool_command(program: &str, args: &[&str]) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .args(args)
+        .env_remove("NOTIFY_SOCKET")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: a service or a console session gets no flashing window.
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
+
 #[async_trait]
 impl System for HostSystem {
     async fn run(
@@ -72,19 +91,7 @@ impl System for HostSystem {
         args: &[&str],
         timeout: Duration,
     ) -> Result<CommandOutput, ScanError> {
-        let mut command = tokio::process::Command::new(program);
-        command
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            // CREATE_NO_WINDOW: a service or a console session gets no flashing window.
-            command.creation_flags(0x0800_0000);
-        }
-        let child = command
+        let child = tool_command(program, args)
             .spawn()
             .map_err(|error| ScanError::io(format!("cannot run {program}: {error}")))?;
         let output = tokio::time::timeout(timeout, child.wait_with_output())
@@ -214,6 +221,17 @@ impl System for RecordedSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_does_not_get_the_notify_socket() {
+        let command = tool_command("ip", &["-6", "neigh", "show"]);
+        assert!(
+            command
+                .as_std()
+                .get_envs()
+                .any(|(name, value)| name == "NOTIFY_SOCKET" && value.is_none())
+        );
+    }
 
     #[tokio::test]
     async fn recorded_commands_and_files_replay() {

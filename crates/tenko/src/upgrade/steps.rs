@@ -377,17 +377,25 @@ fn make_executable(_path: &Path) -> Result<(), StepError> {
     Ok(())
 }
 
+/// The command that runs the new binary with `args`. The new binary is not the unit's main
+/// process, so it does not get the service manager's notify socket either.
+fn new_binary_command(binary: &Path, args: &[&std::ffi::OsStr]) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(binary);
+    command
+        .args(args)
+        .env_remove("TENKO_CONFIG")
+        .env_remove("NOTIFY_SOCKET")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    command
+}
+
 /// Runs the new binary with `args` and returns its standard output.
 async fn run_new(
     binary: &Path,
     args: &[&std::ffi::OsStr],
 ) -> Result<(Option<i32>, String), StepError> {
-    let mut command = tokio::process::Command::new(binary);
-    command
-        .args(args)
-        .env_remove("TENKO_CONFIG")
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true);
+    let mut command = new_binary_command(binary, args);
     let output = tokio::time::timeout(CHECK_TIMEOUT, command.output())
         .await
         .map_err(|_| {
@@ -520,4 +528,22 @@ fn switch(inner: &Inner, params: &SwitchParams, job: tenko_core::JobId) -> Resul
         })?;
     tracing::info!(from = %running, to = %params.version, "switched the current version");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_new_binary_does_not_get_the_notify_socket() {
+        let command = new_binary_command(Path::new("tenko"), &["upgrade".as_ref()]);
+        let removed = |wanted: &str| {
+            command
+                .as_std()
+                .get_envs()
+                .any(|(name, value)| name == wanted && value.is_none())
+        };
+        assert!(removed("NOTIFY_SOCKET"));
+        assert!(removed("TENKO_CONFIG"));
+    }
 }
