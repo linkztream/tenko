@@ -7,7 +7,7 @@
         <segment><source>What the cache holds</source><target>Vad cachen innehåller</target></segment>
       </unit>
       <unit id="dns.cache.lede">
-        <segment><source>The entries of the node's cache in name order: the answer each name and type got, how long it stays fresh and how often it answered. They are the names the clients asked, so every page read is recorded in the audit log.</source><target>Posterna i nodens cache i namnordning: svaret som varje namn och typ fick, hur länge det är färskt och hur ofta det har svarat. Det är namnen som klienterna frågade efter, så varje sida som läses registreras i granskningsloggen.</target></segment>
+        <segment><source>The entries of the node's cache as a tree of names, as the cache view of the Windows DNS manager shows them: the answer each name and type got, how long it stays fresh and how often it answered. They are the names the clients asked, so every read is recorded in the audit log; the view reads only when you press the button and never refreshes on its own.</source><target>Posterna i nodens cache som ett träd av namn, så som cachevyn i Windows DNS-hanteraren visar dem: svaret som varje namn och typ fick, hur länge det är färskt och hur ofta det har svarat. Det är namnen som klienterna frågade efter, så varje läsning registreras i granskningsloggen; vyn läser bara när du trycker på knappen och uppdateras aldrig av sig själv.</target></segment>
       </unit>
       <unit id="dns.cache.suffix">
         <segment><source>Name or suffix</source><target>Namn eller suffix</target></segment>
@@ -20,7 +20,7 @@
         <segment><source>Enter a DNS name, such as example.test.</source><target>Ange ett DNS-namn, till exempel example.test.</target></segment>
       </unit>
       <unit id="dns.cache.show">
-        <notes><note category="description">Button that reads the first page of the cache; the read is audited.</note></notes>
+        <notes><note category="description">Button that reads the entries of the cache and builds the tree of names; the read is audited.</note></notes>
         <segment><source>Show the entries</source><target>Visa posterna</target></segment>
       </unit>
       <unit id="dns.cache.reload">
@@ -108,6 +108,42 @@
       </unit>
       <unit id="dns.cache.page">
         <segment><source>Page {page}</source><target>Sida {page}</target></segment>
+      </unit>
+      <unit id="dns.cache.root">
+        <notes><note category="description">The folder at the top of the tree of names in the cache: the DNS root, as the Windows DNS manager names it.</note></notes>
+        <segment><source>(root)</source><target>(rot)</target></segment>
+      </unit>
+      <unit id="dns.cache.tree_label">
+        <notes><note category="description">Accessible name of the tree of names in the cache section.</note></notes>
+        <segment><source>Names in the cache</source><target>Namn i cachen</target></segment>
+      </unit>
+      <unit id="dns.cache.same_as_parent">
+        <notes><note category="description">Name column of a record that belongs to the folder selected itself; the Windows DNS manager's own phrase.</note></notes>
+        <segment><source>(same as parent folder)</source><target>(samma som överordnad mapp)</target></segment>
+      </unit>
+      <unit id="dns.cache.open_hint">
+        <notes><note category="description">Hint of a folder row in the record list.</note></notes>
+        <segment><source>Double-click or press Enter to open the folder</source><target>Dubbelklicka eller tryck på Enter för att öppna mappen</target></segment>
+      </unit>
+      <unit id="dns.cache.signature">
+        <notes><note category="description">Data column of an RRSIG row: {type} is the record type the signature covers, {signer} a DNS name, {time} the expiry in UTC as 2026-11-12 02:08.</note></notes>
+        <segment><source>{type}, signer {signer}, expires {time}</source><target>{type}, signerad av {signer}, går ut {time}</target></segment>
+      </unit>
+      <unit id="dns.cache.signature_hint">
+        <notes><note category="description">Hint of the data of an RRSIG row.</note></notes>
+        <segment><source>The expiry of the signature, in UTC</source><target>När signaturen går ut, i UTC</target></segment>
+      </unit>
+      <unit id="dns.cache.more">
+        <notes><note category="description">Button that shows more folders or rows; {count} is a number.</note></notes>
+        <segment><source>Show {count} more</source><target>Visa {count} till</target></segment>
+      </unit>
+      <unit id="dns.cache.rows_shown">
+        <notes><note category="description">How many of the rows of the folder selected are shown; {shown} and {total} are numbers.</note></notes>
+        <segment><source>{shown} of {total} rows shown</source><target>{shown} av {total} rader visas</target></segment>
+      </unit>
+      <unit id="dns.cache.capped">
+        <notes><note category="description">Notice when a read stopped at the cap; {count} is a number.</note></notes>
+        <segment><source>The view holds the first {count} entries. A name or suffix narrows the listing.</source><target>Vyn visar de första {count} posterna. Ett namn eller suffix begränsar listan.</target></segment>
       </unit>
     </group>
   </file>

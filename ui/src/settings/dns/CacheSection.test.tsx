@@ -1,7 +1,9 @@
-// The cache section of the DNS settings page: nothing is read until asked, the entries in name
-// order with their TTL, view, stale flag, hits and data, the suffix filter and its check,
-// paging by cursor, the flush of a suffix after a confirmation, the audit of every read, a
-// failed read, Swedish, and no accessibility violations.
+// The cache section of the DNS settings page: nothing is read until asked, the tree of names
+// built from the entries with the root expanded, expansion and selection with the mouse and the
+// keyboard, the path to a suffix expanded and its folder selected, the "(same as parent folder)"
+// rows, the signatures as rows of their own, the folder rows that open their folder, the cap of
+// a read and the windows of the panes, no read on expand or select, the flush of a suffix after
+// a confirmation, a failed read, Swedish, and no accessibility violations.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,11 +18,21 @@ import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
 import DnsSettingsPage from "./DnsSettingsPage";
 
+/** Every request to the listing route, with its query: each one the server would audit. */
+let requests: URLSearchParams[] = [];
+const onRequest = ({ request }: { request: Request }) => {
+  const url = new URL(request.url);
+  if (request.method === "GET" && /\/dns\/cache$/.test(url.pathname)) requests.push(url.searchParams);
+};
+
 beforeEach(async () => {
   await signInAlex();
+  requests = [];
+  server.events.on("request:start", onRequest);
 });
 
 afterEach(async () => {
+  server.events.removeListener("request:start", onRequest);
   setSessionForTest(null);
   await setLocale("en");
 });
@@ -33,12 +45,54 @@ async function section(): Promise<HTMLElement> {
   return screen.findByTestId("dns-cache");
 }
 
+function tree(): HTMLElement {
+  return screen.getByTestId("dns-cache-tree");
+}
+
+/** The folders shown in the tree, by name. */
+function folders(): string[] {
+  return screen.queryAllByTestId("dns-cache-node").map((n) => n.dataset.key ?? "");
+}
+
+function folder(name: string): HTMLElement {
+  const el = screen.queryAllByTestId("dns-cache-node").find((n) => n.dataset.key === name);
+  if (!el) throw new Error(`no folder ${name}`);
+  return el;
+}
+
+function selected(): string | undefined {
+  return screen.queryAllByTestId("dns-cache-node").find((n) => n.getAttribute("aria-selected") === "true")?.dataset.key;
+}
+
 function rows(): HTMLElement[] {
   return screen.queryAllByTestId("dns-cache-row");
 }
 
-function keys(): string[] {
-  return rows().map((r) => `${r.dataset.key} ${r.dataset.type}`);
+function folderRow(name: string): HTMLElement {
+  const el = screen.queryAllByTestId("dns-cache-folder-row").find((r) => r.dataset.key === name);
+  if (!el) throw new Error(`no folder row ${name}`);
+  return el;
+}
+
+/** The rows of the right pane as `name type`, folders as `folder name`. */
+function pane(): string[] {
+  return [...screen.getByTestId("dns-cache-table").querySelectorAll("tbody tr")].map((r) => {
+    const row = r as HTMLElement;
+    if (row.dataset.testid === "dns-cache-folder-row") return `folder ${row.dataset.key}`;
+    return `${row.dataset.own === "true" ? "(same)" : row.dataset.key} ${row.dataset.type}${row.dataset.covered ? ` ${row.dataset.covered}` : ""}`;
+  });
+}
+
+function cells(row: HTMLElement): (string | null)[] {
+  return within(row).getAllByRole("cell").map((c) => c.textContent);
+}
+
+function selectFolder(name: string) {
+  fireEvent.click(folder(name).querySelector(".tnode") as HTMLElement);
+}
+
+function toggleFolder(name: string) {
+  fireEvent.click(folder(name).querySelector(".tw") as HTMLElement);
 }
 
 function suffix(text: string) {
@@ -53,66 +107,165 @@ function reads() {
   return audit.records.filter((r) => r.draft.action === "dns.cache.read");
 }
 
+async function shown() {
+  open();
+  await section();
+  show();
+  await waitFor(() => expect(folders().length).toBeGreaterThan(0));
+}
+
 describe("the cache section", () => {
-  it("reads nothing until asked, then lists the entries in name order", async () => {
+  it("reads nothing until asked, then shows the tree with the root expanded to the top-level domains", async () => {
     open();
     const cache = await section();
     expect(cache.textContent).toContain("recorded in the audit log");
-    expect(screen.queryByTestId("dns-cache-table")).toBeNull();
+    expect(screen.getByTestId("dns-cache-show").textContent).toBe("Show the entries");
+    expect(screen.queryByTestId("dns-cache-tree")).toBeNull();
     expect(reads()).toHaveLength(0);
+    expect(requests).toHaveLength(0);
     show();
-    await waitFor(() => expect(rows().length).toBe(7));
-    expect(keys()).toEqual([
-      "example.net TXT",
-      "ns1.example.org AAAA",
-      "example.test MX",
-      "intranet.example.test A",
-      "missing.example.test A",
-      "www.example.test A",
-      "www.example.test AAAA",
-    ]);
+    await waitFor(() => expect(folders()).toEqual([".", "net", "org", "test"]));
+    expect(screen.getByTestId("dns-cache-show").textContent).toBe("Read again");
+    expect(folder(".").textContent).toBe("(root)");
+    expect(folder(".").getAttribute("aria-expanded")).toBe("true");
+    expect(folder(".").getAttribute("aria-level")).toBe("1");
+    expect(folder("test").getAttribute("aria-expanded")).toBe("false");
+    expect(folder("test").getAttribute("aria-level")).toBe("2");
+    expect(folder("net").textContent).toBe("net");
+    expect(selected()).toBe(".");
+    expect(pane()).toEqual(["folder net", "folder org", "folder test"]);
+    expect(requests.map((q) => q.get("limit"))).toEqual(["1000"]);
     expect(reads()).toHaveLength(1);
     expect(reads()[0]?.draft.details?.context).toMatchObject({ from_cursor: "first", to_cursor: "end", entries: "7" });
   });
 
-  it("shows the TTL left, the view, the stale flag, the hits and the data of each entry", async () => {
-    open();
-    await section();
+  it("expands, collapses and selects folders without reading, and reads only on the button", async () => {
+    await shown();
+    toggleFolder("test");
+    expect(folders()).toEqual([".", "net", "org", "test", "example.test"]);
+    expect(folder("test").getAttribute("aria-expanded")).toBe("true");
+    expect(selected()).toBe(".");
+    selectFolder("example.test");
+    expect(selected()).toBe("example.test");
+    expect(screen.getByTestId("dns-cache-folder").textContent).toBe("example.test");
+    selectFolder("net");
+    expect(pane()).toEqual(["example.net TXT"]);
+    toggleFolder("org");
+    toggleFolder("example.org");
+    toggleFolder("test");
+    expect(folders()).toEqual([".", "net", "org", "example.org", "test"]);
+    selectFolder(".");
+    fireEvent.dblClick(folderRow("test"));
+    fireEvent.keyDown(folderRow("example.test"), { key: "Enter" });
+    fireEvent.keyDown(tree(), { key: "ArrowUp" });
+    fireEvent.keyDown(tree(), { key: "Home" });
+    fireEvent.keyDown(tree(), { key: "End" });
+    expect(requests).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
     show();
-    await waitFor(() => expect(rows().length).toBe(7));
-    const cells = (key: string, type: string) => {
-      const row = rows().find((r) => r.dataset.key === key && r.dataset.type === type);
-      if (!row) throw new Error(`no row ${key} ${type}`);
-      return within(row).getAllByRole("cell").map((c) => c.textContent);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    await waitFor(() => expect(reads()).toHaveLength(2));
+    // A new read starts the tree afresh.
+    await waitFor(() => expect(folders()).toEqual([".", "net", "org", "test"]));
+    expect(selected()).toBe(".");
+  });
+
+  it("lists a folder's own records as the same as the parent folder, then the names under it with their signatures", async () => {
+    await shown();
+    toggleFolder("test");
+    selectFolder("example.test");
+    expect(pane()).toEqual([
+      "(same) MX",
+      "intranet.example.test A",
+      "missing.example.test A",
+      "www.example.test A",
+      "www.example.test RRSIG CNAME",
+      "www.example.test RRSIG A",
+      "www.example.test AAAA",
+    ]);
+    const row = (key: string, type: string, covered?: string) => {
+      const found = rows().find((r) => r.dataset.key === key && r.dataset.type === type && (!covered || r.dataset.covered === covered));
+      if (!found) throw new Error(`no row ${key} ${type}`);
+      return found;
     };
-    expect(cells("www.example.test", "A")).toEqual(["www.example.test", "A", "4 min", "Default", "Secure", "", "41", "CNAME cdn.example.test, 192.0.2.80"]);
-    expect(cells("example.test", "MX")).toEqual(["example.test", "MX", "56 min", "Default", "Unvalidated", "", "3", "10 mail.example.test"]);
-    expect(cells("example.net", "TXT")[2]).toBe("3 h");
-    expect(cells("intranet.example.test", "A")[3]).toBe(CACHE_VIEW);
-    expect(cells("missing.example.test", "A")).toEqual(["missing.example.test", "A", "–", "Default", "Unvalidated", "Stale", "0", "NXDOMAIN"]);
-    expect(cells("ns1.example.org", "AAAA")[7]).toBe("NODATA");
+    expect(cells(row("example.test", "MX"))).toEqual(["(same as parent folder)", "MX", "56 min", "Default", "Unvalidated", "", "3", "10 mail.example.test"]);
+    expect(row("example.test", "MX").querySelector(".dns-cache-same")?.classList.contains("muted")).toBe(true);
+    expect(cells(row("www.example.test", "A"))).toEqual(["www", "A", "4 min", "Default", "Secure", "", "41", "CNAME cdn.example.test, 192.0.2.80"]);
+    expect(cells(row("www.example.test", "RRSIG", "A"))).toEqual(["www", "RRSIG", "4 min", "Default", "", "", "", "A, signer example.test, expires 2026-11-12 02:08"]);
+    expect(within(row("www.example.test", "RRSIG", "CNAME")).getByTestId("dns-cache-data").textContent).toBe(
+      "CNAME, signer example.test, expires 2026-11-12 02:08",
+    );
+    expect(cells(row("www.example.test", "AAAA"))[7]).toBe("2001:db8::80");
+    expect(cells(row("intranet.example.test", "A"))[3]).toBe(CACHE_VIEW);
+    expect(cells(row("missing.example.test", "A"))).toEqual(["missing", "A", "–", "Default", "Unvalidated", "Stale", "0", "NXDOMAIN"]);
     expect(screen.getAllByTestId("dns-cache-stale")).toHaveLength(1);
   });
 
   it("shows the validation state of each entry and the extended error code of a bogus one", async () => {
-    open();
-    await section();
-    show();
-    await waitFor(() => expect(rows().length).toBe(7));
-    const state = (key: string, type: string) => {
-      const row = rows().find((r) => r.dataset.key === key && r.dataset.type === type);
-      return within(row as HTMLElement).getByTestId("dns-cache-state");
-    };
-    expect(state("www.example.test", "A").dataset.state).toBe("secure");
-    expect(state("www.example.test", "A").querySelector(".tag")?.getAttribute("title")).toContain("Signatures valid until");
-    expect(within(state("www.example.test", "A")).queryByTestId("dns-cache-ede")).toBeNull();
-    expect(state("example.net", "TXT").dataset.state).toBe("unvalidated");
-    expect(state("ns1.example.org", "AAAA").dataset.state).toBe("bogus");
-    expect(within(state("ns1.example.org", "AAAA")).getByTestId("dns-cache-ede").textContent).toBe("EDE 6");
-    expect(screen.getAllByTestId("dns-cache-ede")).toHaveLength(1);
+    await shown();
+    toggleFolder("org");
+    selectFolder("example.org");
+    const [bogus] = rows();
+    expect(cells(bogus as HTMLElement).slice(0, 2)).toEqual(["ns1", "AAAA"]);
+    expect(within(bogus as HTMLElement).getByTestId("dns-cache-state").dataset.state).toBe("bogus");
+    expect(within(bogus as HTMLElement).getByTestId("dns-cache-ede").textContent).toBe("EDE 6");
+    expect(within(bogus as HTMLElement).getByTestId("dns-cache-data").textContent).toBe("NODATA");
+    toggleFolder("test");
+    selectFolder("example.test");
+    const secure = rows().find((r) => r.dataset.key === "www.example.test" && r.dataset.type === "A") as HTMLElement;
+    expect(within(secure).getByTestId("dns-cache-state").querySelector(".tag")?.getAttribute("title")).toContain("Signatures valid until");
+    expect(within(secure).queryByTestId("dns-cache-ede")).toBeNull();
+    selectFolder("net");
+    expect(cells(rows()[0] as HTMLElement)[2]).toBe("3 h");
   });
 
-  it("narrows the listing to a suffix and checks it first", async () => {
+  it("moves through the tree with the keyboard, opening, closing and selecting folders", async () => {
+    await shown();
+    const list = tree();
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(selected()).toBe("net");
+    expect(list.getAttribute("aria-activedescendant")).toBe(folder("net").id);
+    fireEvent.keyDown(list, { key: "End" });
+    expect(selected()).toBe("test");
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(folder("test").getAttribute("aria-expanded")).toBe("true");
+    expect(selected()).toBe("test");
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(selected()).toBe("example.test");
+    fireEvent.keyDown(list, { key: "ArrowLeft" });
+    expect(selected()).toBe("test");
+    fireEvent.keyDown(list, { key: "ArrowLeft" });
+    expect(folder("test").getAttribute("aria-expanded")).toBe("false");
+    expect(folders()).toEqual([".", "net", "org", "test"]);
+    fireEvent.keyDown(list, { key: "Home" });
+    expect(selected()).toBe(".");
+    fireEvent.keyDown(list, { key: "ArrowLeft" });
+    expect(folders()).toEqual(["."]);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("gives a closed folder the selection inside it", async () => {
+    await shown();
+    toggleFolder("test");
+    selectFolder("example.test");
+    toggleFolder("test");
+    expect(selected()).toBe("test");
+  });
+
+  it("opens a folder from its row in the right pane on a double click or Enter", async () => {
+    await shown();
+    fireEvent.dblClick(folderRow("test"));
+    expect(selected()).toBe("test");
+    expect(folder("test").getAttribute("aria-expanded")).toBe("false");
+    expect(pane()).toEqual(["folder example.test"]);
+    fireEvent.keyDown(folderRow("example.test"), { key: "Enter" });
+    expect(selected()).toBe("example.test");
+    expect(folders()).toEqual([".", "net", "org", "test", "example.test"]);
+    expect(document.activeElement).toBe(tree());
+    expect(requests).toHaveLength(1);
+  });
+
+  it("narrows the read to a suffix, checks it first, and opens the path to its folder", async () => {
     open();
     await section();
     suffix("not a name");
@@ -121,42 +274,80 @@ describe("the cache section", () => {
     expect(reads()).toHaveLength(0);
     suffix("Example.Test.");
     show();
-    await waitFor(() => expect(rows().length).toBe(5));
-    expect(rows().every((r) => r.dataset.key?.endsWith("example.test"))).toBe(true);
+    await waitFor(() => expect(folders()).toEqual([".", "test", "example.test"]));
+    expect(folder(".").getAttribute("aria-expanded")).toBe("true");
+    expect(folder("test").getAttribute("aria-expanded")).toBe("true");
+    expect(selected()).toBe("example.test");
+    expect(rows()).toHaveLength(7);
     expect(screen.queryByTestId("field-error")).toBeNull();
+    expect(requests.at(-1)?.get("suffix")).toBe("example.test");
     expect(reads().at(-1)?.draft.details?.context).toMatchObject({ "filter.suffix": "example.test" });
+    // A suffix that is a name without names under it is a folder of its own.
+    suffix("www.example.test");
+    show();
+    await waitFor(() => expect(folders()).toEqual([".", "test", "example.test", "www.example.test"]));
+    expect(selected()).toBe("www.example.test");
+    expect(pane()).toEqual(["(same) A", "(same) RRSIG CNAME", "(same) RRSIG A", "(same) AAAA"]);
     suffix("nothing.example.test");
     show();
     expect((await screen.findByTestId("dns-cache-empty")).textContent).toContain("No entries for nothing.example.test");
+    expect(screen.queryByTestId("dns-cache-tree")).toBeNull();
   });
 
-  it("pages through the cursor", async () => {
+  it("follows the cursor up to ten pages and says when the cap cut the read short", async () => {
     const state = dnsCacheState();
-    const template = state.entries[0]!;
-    state.entries = Array.from({ length: 130 }, (_, n) => ({ ...template, name: `h${String(n).padStart(3, "0")}.example.test` }));
+    const template = state.entries.find((e) => e.name === "www.example.test" && e.type === "AAAA")!;
+    state.entries = Array.from({ length: 10_050 }, (_, n) => ({ ...template, name: `h${String(n).padStart(5, "0")}.example.test` }));
     open();
     await section();
+    suffix("example.test");
     show();
-    await waitFor(() => expect(rows().length).toBe(100));
-    expect(screen.getByTestId("dns-cache-paging").dataset.page).toBe("1");
-    expect((screen.getByTestId("dns-cache-previous") as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId("dns-cache-next"));
-    await waitFor(() => expect(rows().length).toBe(30));
-    expect(rows()[0]?.dataset.key).toBe("h100.example.test");
-    expect(screen.getByTestId("dns-cache-paging").dataset.page).toBe("2");
-    expect((screen.getByTestId("dns-cache-next") as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId("dns-cache-previous"));
-    await waitFor(() => expect(rows().length).toBe(100));
-    expect(reads().map((r) => r.draft.details?.context?.from_cursor)).toEqual(["first", "p100", "first"]);
+    expect(await screen.findByTestId("dns-cache-capped", {}, { timeout: 10_000 })).toBeTruthy();
+    expect(screen.getByTestId("dns-cache-capped").textContent).toContain("first 10,000 entries");
+    expect(requests.map((q) => q.get("cursor") ?? "first")).toEqual(["first", ...Array.from({ length: 9 }, (_, n) => `p${(n + 1) * 1000}`)]);
+    expect(reads()).toHaveLength(10);
+    // The pane shows a window of the 10,000 rows.
+    expect(rows()).toHaveLength(200);
+    expect(screen.getByText("200 of 10,000 rows shown")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("dns-cache-pane-more"));
+    expect(rows()).toHaveLength(400);
+    expect(requests).toHaveLength(10);
   });
 
-  it("flushes the suffix shown after a confirmation and reads again", async () => {
+  it("reads everything without a notice below the cap", async () => {
+    const state = dnsCacheState();
+    const template = state.entries[0]!;
+    state.entries = Array.from({ length: 1_500 }, (_, n) => ({ ...template, name: `h${String(n).padStart(4, "0")}.example.test` }));
+    await shown();
+    expect(requests).toHaveLength(2);
+    expect(screen.queryByTestId("dns-cache-capped")).toBeNull();
+  });
+
+  it("shows a window of the folders under a folder, with a show more for the rest", async () => {
+    const state = dnsCacheState();
+    const template = state.entries[0]!;
+    state.entries = Array.from({ length: 250 }, (_, n) => ({ ...template, name: `www.d${String(n).padStart(3, "0")}.example.test` }));
+    open();
+    await section();
+    suffix("example.test");
+    show();
+    await waitFor(() => expect(folders()).toHaveLength(203));
+    const more = screen.getByTestId("dns-cache-tree-more");
+    expect(more.textContent).toBe("Show 50 more");
+    expect(more.getAttribute("aria-level")).toBe("4");
+    fireEvent.click(more.querySelector(".tnode") as HTMLElement);
+    expect(folders()).toHaveLength(253);
+    expect(screen.queryByTestId("dns-cache-tree-more")).toBeNull();
+    expect(requests).toHaveLength(1);
+  });
+
+  it("flushes the suffix read after a confirmation and reads again", async () => {
     open();
     await section();
     expect(screen.queryByTestId("dns-cache-flush")).toBeNull();
     suffix("www.example.test");
     show();
-    await waitFor(() => expect(rows().length).toBe(2));
+    await waitFor(() => expect(rows().length).toBe(4));
     const flush = screen.getByTestId("dns-cache-flush");
     expect(flush.textContent).toBe("Flush www.example.test");
     fireEvent.click(flush);
@@ -169,6 +360,7 @@ describe("the cache section", () => {
     fireEvent.click(within(await screen.findByTestId("dns-cache-flush-dialog")).getByTestId("confirm-ok"));
     expect(await screen.findByTestId("dns-cache-empty")).toBeTruthy();
     expect(dnsCacheState().entries).toHaveLength(5);
+    expect(requests.map((q) => q.get("suffix"))).toEqual(["www.example.test", "www.example.test"]);
     const flushes = audit.records.filter((r) => r.draft.action === "dns.cache.flush");
     expect(flushes.at(-1)?.draft.details?.context).toMatchObject({ detail: "2 cache entr(ies) at or below www.example.test removed" });
   });
@@ -186,7 +378,7 @@ describe("the cache section", () => {
     const cache = await section();
     show();
     expect(await within(cache).findByRole("alert")).toBeTruthy();
-    expect(screen.queryByTestId("dns-cache-table")).toBeNull();
+    expect(screen.queryByTestId("dns-cache-tree")).toBeNull();
   });
 
   it("speaks Swedish", async () => {
@@ -194,9 +386,14 @@ describe("the cache section", () => {
     open();
     const cache = await section();
     expect(within(cache).getByRole("heading", { level: 2 }).textContent).toBe("Vad cachen innehåller");
+    suffix("example.test");
     show();
     await waitFor(() => expect(rows().length).toBe(7));
+    expect(folder(".").textContent).toBe("(rot)");
+    expect(within(rows()[0] as HTMLElement).getAllByRole("cell")[0]?.textContent).toBe("(samma som överordnad mapp)");
     expect(screen.getByTestId("dns-cache-stale").textContent).toBe("Inaktuell");
+    const signature = rows().find((r) => r.dataset.covered === "A") as HTMLElement;
+    expect(within(signature).getByTestId("dns-cache-data").textContent).toBe("A, signerad av example.test, går ut 2026-11-12 02:08");
   });
 
   it("has no accessibility violations", async () => {
@@ -204,7 +401,7 @@ describe("the cache section", () => {
     await section();
     suffix("example.test");
     show();
-    await waitFor(() => expect(rows().length).toBe(5));
+    await waitFor(() => expect(rows().length).toBe(7));
     expect(await axeViolations(container)).toEqual([]);
   });
 });

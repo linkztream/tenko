@@ -29,11 +29,29 @@ function entry(name: string, type: string, ttl: number, records: S["RecordData"]
   };
 }
 
+/** A signature of example.test over `covered`, valid from 2026-10-22 07:40 to 2026-11-12 02:08 UTC. */
+function rrsig(covered: S["Rtype"], labels: number): S["RecordData"] {
+  return {
+    type: "RRSIG",
+    type_covered: covered,
+    algorithm: 13,
+    labels,
+    original_ttl: 300,
+    expiration: Date.UTC(2026, 10, 12, 2, 8) / 1000,
+    inception: Date.UTC(2026, 9, 22, 7, 40) / 1000,
+    key_tag: 4711,
+    signer: "example.test",
+    signature: "3045022100c0ffee",
+  };
+}
+
 export function seedDnsCache(): DnsCacheState {
   const entries = [
     entry("www.example.test", "A", 245, [
       { type: "CNAME", target: "cdn.example.test" },
+      rrsig("CNAME", 3),
       { type: "A", address: "192.0.2.80" },
+      rrsig("A", 3),
     ], { hits: 41, state: "secure", signature_expiry: "2026-11-01T00:00:00Z" }),
     entry("www.example.test", "AAAA", 245, [{ type: "AAAA", address: "2001:db8::80" }], { hits: 12 }),
     entry("example.test", "MX", 3_400, [{ type: "MX", preference: 10, exchange: "mail.example.test" }], { hits: 3 }),

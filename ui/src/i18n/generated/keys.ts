@@ -2125,6 +2125,7 @@ export type MessageKey =
   | "dns.blocking.window.24h"
   | "dns.blocking.window.7d"
   | "dns.blocking.window.label"
+  | "dns.cache.capped"
   | "dns.cache.col.data"
   | "dns.cache.col.hits"
   | "dns.cache.col.name"
@@ -2145,18 +2146,26 @@ export type MessageKey =
   | "dns.cache.flush_title"
   | "dns.cache.flushed"
   | "dns.cache.lede"
+  | "dns.cache.more"
   | "dns.cache.next"
+  | "dns.cache.open_hint"
   | "dns.cache.page"
   | "dns.cache.previous"
   | "dns.cache.reload"
+  | "dns.cache.root"
+  | "dns.cache.rows_shown"
+  | "dns.cache.same_as_parent"
   | "dns.cache.show"
+  | "dns.cache.signature"
   | "dns.cache.signature_expiry"
+  | "dns.cache.signature_hint"
   | "dns.cache.stale"
   | "dns.cache.stale_hint"
   | "dns.cache.suffix"
   | "dns.cache.suffix_invalid"
   | "dns.cache.suffix_placeholder"
   | "dns.cache.title"
+  | "dns.cache.tree_label"
   | "dns.cache.ttl_h"
   | "dns.cache.ttl_min"
   | "dns.cache.ttl_none"
@@ -7004,6 +7013,7 @@ export interface MessageArgs {
   "dns.blocking.tile.cached_hint": { share: string | number };
   "dns.blocking.tile.clients_hint": { mode: string };
   "dns.blocking.tile.queries_hint": { window: string };
+  "dns.cache.capped": { count: string | number };
   "dns.cache.ede": { code: string | number };
   "dns.cache.ede_hint": { code: string | number };
   "dns.cache.empty_suffix": { suffix: string | number };
@@ -7011,7 +7021,10 @@ export interface MessageArgs {
   "dns.cache.flush_body": { suffix: string | number };
   "dns.cache.flush_title": { suffix: string | number };
   "dns.cache.flushed": { suffix: string | number };
+  "dns.cache.more": { count: string | number };
   "dns.cache.page": { page: string | number };
+  "dns.cache.rows_shown": { shown: string | number; total: string | number };
+  "dns.cache.signature": { signer: string | number; time: string | number; type: string | number };
   "dns.cache.signature_expiry": { time: string | number };
   "dns.cache.ttl_h": { value: string | number };
   "dns.cache.ttl_min": { value: string | number };
@@ -9975,6 +9988,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.blocking.window.24h",
   "dns.blocking.window.7d",
   "dns.blocking.window.label",
+  "dns.cache.capped",
   "dns.cache.col.data",
   "dns.cache.col.hits",
   "dns.cache.col.name",
@@ -9995,18 +10009,26 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.flush_title",
   "dns.cache.flushed",
   "dns.cache.lede",
+  "dns.cache.more",
   "dns.cache.next",
+  "dns.cache.open_hint",
   "dns.cache.page",
   "dns.cache.previous",
   "dns.cache.reload",
+  "dns.cache.root",
+  "dns.cache.rows_shown",
+  "dns.cache.same_as_parent",
   "dns.cache.show",
+  "dns.cache.signature",
   "dns.cache.signature_expiry",
+  "dns.cache.signature_hint",
   "dns.cache.stale",
   "dns.cache.stale_hint",
   "dns.cache.suffix",
   "dns.cache.suffix_invalid",
   "dns.cache.suffix_placeholder",
   "dns.cache.title",
+  "dns.cache.tree_label",
   "dns.cache.ttl_h",
   "dns.cache.ttl_min",
   "dns.cache.ttl_none",
