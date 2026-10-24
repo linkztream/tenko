@@ -68,10 +68,11 @@ The date is the date the ADR was written or last changed status.
 | [0013](0013-partitions.md) | Partitions and multi-site ownership | Accepted | 2026-10-11 |
 | [0014](0014-controller-cluster.md) | The controller cluster | Accepted | 2026-10-10 |
 | [0015](0015-scoped-authorization.md) | Scoped authorization, service accounts and scoped tokens | Accepted | 2026-10-11 |
-| [0016](0016-backup-and-restore.md) | Backup and restore | Accepted | 2026-10-11 |
+| [0016](0016-backup-and-restore.md) | Backup and restore | Accepted (a restore by the service added by ADR 0023) | 2026-10-11 |
 | [0017](0017-dns-data-model-and-serving-path.md) | DNS data model and serving path | Proposed | 2026-10-17 |
 | [0018](0018-dnssec-key-handling-and-signing.md) | DNSSEC key handling and signing | Proposed | 2026-10-18 |
 | [0019](0019-dhcp-data-model-and-lease-path.md) | DHCP data model and lease path | Proposed | 2026-10-21 |
 | [0020](0020-ddns-from-dhcp.md) | DDNS from DHCP | Proposed | 2026-10-21 |
 | [0021](0021-recursive-resolution-and-validation.md) | Recursive resolution and validation | Accepted | 2026-10-22 |
 | [0022](0022-licensing-model.md) | Licensing model: BSL 1.1 with an internal-use grant, AGPL as the Change License, a CLA | Accepted | 2026-10-22 |
+| [0023](0023-no-root-after-installation.md) | No root after the first installation | Accepted | 2026-10-24 |
