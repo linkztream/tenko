@@ -17,6 +17,10 @@
 //   height. More pages load as the end comes into view.
 // - Loading never flashes: the loading row appears only after 300 ms, and a reload keeps the
 //   rows it replaces until the new ones arrive.
+// - Columns are resized on the handle at the trailing edge of their header (ColumnResize.tsx):
+//   drag, double-click to fit, or Tab from the grid to the handle of the focused column and
+//   the arrow keys. The widths are kept per list and user (widths.ts); the column menu of the
+//   filter bar resets them, or the footer when the list has no column menu.
 import {
   createEffect,
   createMemo,
@@ -38,6 +42,7 @@ import { Si } from "../components/Si";
 import { t } from "../i18n";
 import { setSelectionStatus } from "../shell/status";
 import { isTyping } from "../shell/keyboard";
+import { ColumnResize, createResizer } from "./ColumnResize";
 import { DRAG_MIME, endDrag, startDrag, type DragItem } from "./dnd";
 import { isMoveKey, logicalArrow, moveFocus, ROW_HEIGHT, scrollToShow, visibleWindow, type CellFocus } from "./focus";
 import { Menu } from "./Menu";
@@ -54,6 +59,9 @@ const HEADER_HEIGHT = 30;
 const FALLBACK_VIEWPORT = 640;
 /** Rows before the end of the loaded rows at which the next page is requested. */
 const LOAD_AHEAD = 20;
+/** Widths of the selection and actions columns (grid.css, `col.c-check` and `col.c-acts`). */
+const CHECK_WIDTH = 34;
+const ACTIONS_WIDTH = 40;
 
 export interface EditorProps<T> {
   row: T;
@@ -144,6 +152,13 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   /** Focusable columns: the selection column, the data columns, the actions column. */
   const colCount = () => (hasCheck() ? 1 : 0) + cols().length + (hasActions() ? 1 : 0);
   const span = () => colCount();
+  const widths = columnState.widths;
+  const resizer = createResizer({
+    widths,
+    columns: cols,
+    table: () => table,
+    extra: () => (hasCheck() ? CHECK_WIDTH : 0) + (hasActions() ? ACTIONS_WIDTH : 0),
+  });
 
   const rowHeight = () => ROW_HEIGHT[density()];
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -459,6 +474,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
           aria-multiselectable={props.noSelection ? undefined : "true"}
           aria-busy={props.loading ? "true" : undefined}
           aria-activedescendant={activeDescendant()}
+          style={resizer.tableWidth() ? { width: resizer.tableWidth() } : undefined}
           tabIndex={0}
           onKeyDown={onKeyDown}
           onFocus={() => setActive(true)}
@@ -471,7 +487,10 @@ export function DataGrid<T>(props: DataGridProps<T>) {
               <col class="c-check" />
             </Show>
             <For each={cols()}>
-              {(c) => <col style={c.width ? { width: `${c.width}px` } : undefined} />}
+              {(c) => {
+                const width = () => resizer.colWidth(c.id);
+                return <col style={width() ? { width: `${width()}px` } : undefined} />;
+              }}
             </For>
             <Show when={hasActions()}>
               <col class="c-acts" />
@@ -502,24 +521,40 @@ export function DataGrid<T>(props: DataGridProps<T>) {
                 </th>
               </Show>
               <For each={cols()}>
-                {(c, i) => (
-                  <th
-                    scope="col"
-                    id={`${props.id}-h${i() + (hasCheck() ? 1 : 0)}`}
-                    aria-sort={ariaSort(c)}
-                    classList={{ r: c.align === "right", focus: isFocus(-1, i() + (hasCheck() ? 1 : 0)) }}
-                    data-col={c.id}
-                  >
-                    <Show when={c.sort && props.onSort} fallback={c.header()}>
-                      <button type="button" class="th-sort" tabIndex={-1} onClick={() => sortBy(c)}>
-                        {c.header()}
-                        <Show when={props.sort?.field === c.sort}>
-                          <Icon name={props.sort?.desc ? "chev-d" : "chev-u"} size="xs" />
-                        </Show>
-                      </button>
-                    </Show>
-                  </th>
-                )}
+                {(c, i) => {
+                  /** The focus column of this header cell; its label's id names the column. */
+                  const at = () => i() + (hasCheck() ? 1 : 0);
+                  const labelId = () => `${props.id}-h${at()}-label`;
+                  return (
+                    <th
+                      scope="col"
+                      id={`${props.id}-h${at()}`}
+                      aria-sort={ariaSort(c)}
+                      // The header text names the column, not the resize handle inside the cell.
+                      aria-labelledby={labelId()}
+                      classList={{ r: c.align === "right", focus: isFocus(-1, at()) }}
+                      data-col={c.id}
+                    >
+                      <Show when={c.sort && props.onSort} fallback={<span id={labelId()}>{c.header()}</span>}>
+                        <button type="button" class="th-sort" tabIndex={-1} onClick={() => sortBy(c)}>
+                          <span id={labelId()}>{c.header()}</span>
+                          <Show when={props.sort?.field === c.sort}>
+                            <Icon name={props.sort?.desc ? "chev-d" : "chev-u"} size="xs" />
+                          </Show>
+                        </button>
+                      </Show>
+                      <Show when={resizer.enabled()}>
+                        <ColumnResize
+                          resizer={resizer}
+                          column={c.id}
+                          label={t("grid.resize.handle", { column: c.header() })}
+                          tabbable={focus().col === at()}
+                          onEnd={() => table.focus({ preventScroll: true })}
+                        />
+                      </Show>
+                    </th>
+                  );
+                }}
               </For>
               <Show when={hasActions()}>
                 <th class="acts" scope="col" id={`${props.id}-h${colCount() - 1}`}>
@@ -682,6 +717,11 @@ export function DataGrid<T>(props: DataGridProps<T>) {
           <span>{t("grid.selected", { count: selection.count() })}</span>
         </Show>
         {props.footer}
+        <Show when={widths.custom() && !widths.menu()}>
+          <button type="button" class="btn sm ghost grid-reset-widths" data-testid="grid-reset-widths" onClick={() => widths.reset()}>
+            {t("grid.resize.reset")}
+          </button>
+        </Show>
       </div>
       <Show when={menu()}>
         {(m) => {

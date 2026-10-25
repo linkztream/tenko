@@ -265,6 +265,12 @@ with its prefix here and in its `routes.ts`.
 - The grid is a WAI-ARIA grid with `aria-activedescendant`: arrow keys, Home/End,
   PageUp/PageDown, Space and Shift selection, Enter opens, the context menu key opens the
   row actions, `/` focuses the filter.
+- Every list's columns can be resized on the handle at the trailing edge of the header
+  (`src/grid/ColumnResize.tsx`): drag it, double-click or double-tap it to fit the content,
+  or Tab from the grid to the handle of the focused column and use the arrow keys (Shift for
+  larger steps, Enter or Escape to go back); the widths are kept per list and per user in
+  `localStorage` (`src/grid/widths.ts`), "Reset column widths" in the column menu (or under a
+  list without one) drops them, and the phone layout (560 px and narrower) ignores them.
 
 ### Mock API and tests
 
@@ -289,6 +295,7 @@ names are kebab case and stable; text and layout may change without breaking the
 | Grid row | `row` | `data-id` (object id), `data-key` (readable key: IP, CIDR, name) |
 | Grid cell | | `data-col` (column id) |
 | Grid footer, empty state | `grid-foot`, `grid-empty` | |
+| Column resize handle, width reset | `col-resize` (in each header cell), `grid-reset-widths` (grid footer, a list without a column menu), `reset-column-widths` (column menu) | `data-resize` (column id) |
 | Filter bar, its input | `filterbar` (the only one on a page) or `filterbar-<grid id>`, `filter-input` | |
 | Action (button, link) | `<area>-<action>`, e.g. `vlan-create`, `dashboard-claim` | |
 | Dialog body or form | `dialog-<name>`, e.g. `dialog-vlan-form`, `dialog-delete` | |

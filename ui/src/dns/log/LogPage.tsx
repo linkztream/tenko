@@ -6,7 +6,7 @@
 // update the node. Every read is audited by the server. Administrators stop and start the log
 // (the kill switch). A node whose log is off shows an empty state that says where it is set.
 import { A } from "@solidjs/router";
-import { createMemo, createResource, createSignal, For, Match, Show, Switch } from "solid-js";
+import { createMemo, createResource, createSignal, createUniqueId, For, Match, Show, Switch } from "solid-js";
 import { ApiError, errorMessage } from "../../api/problem";
 import { paths } from "../../app/paths";
 import { isAdmin } from "../../auth/session";
@@ -14,7 +14,9 @@ import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { PageHead } from "../../components/PageHead";
 import { toast } from "../../components/toast";
-import { formatDateTime, formatNumber, t } from "../../i18n";
+import { ColumnResize, createResizer } from "../../grid/ColumnResize";
+import { createColumnWidths } from "../../grid/widths";
+import { formatDateTime, formatNumber, t, type MessageKey } from "../../i18n";
 import { DnsNav } from "../DnsNav";
 import { NodeSelect, useDnsNode } from "../node";
 import { DnsProblem, unavailable } from "../Parts";
@@ -113,89 +115,128 @@ function Client(props: { line: QueryLogLine }) {
   );
 }
 
+// The columns of the log: the id is the `data-col` of the cells and the key of their width.
+const COLUMNS: readonly { id: string; header: MessageKey; right?: boolean }[] = [
+  { id: "time", header: "dns.log.col.time" },
+  { id: "client", header: "dns.log.col.client" },
+  { id: "transport", header: "dns.log.col.transport" },
+  { id: "name", header: "dns.log.col.name" },
+  { id: "type", header: "dns.log.col.type" },
+  { id: "rcode", header: "dns.log.col.rcode" },
+  // WP10.1: how the answer was found and what the resolver asked for it.
+  { id: "resolution", header: "dns.log.col.resolution" },
+  { id: "subqueries", header: "dns.log.col.subqueries", right: true },
+  // WP10.1: end.
+  // WP10.4: the validation state and the extended error.
+  { id: "validation", header: "dns.log.col.validation" },
+  { id: "ede", header: "dns.log.col.ede" },
+  // WP10.4: end.
+  { id: "latency", header: "dns.log.col.latency", right: true },
+  { id: "flags", header: "dns.log.col.flags" },
+];
+
 function Lines(props: { lines: QueryLogLine[] }) {
+  let table!: HTMLTableElement;
+  const ids = createUniqueId();
+  // The column widths the user set on the header handles, kept like those of the grids.
+  const widths = createColumnWidths("dns-log");
+  const resizer = createResizer({ widths, columns: () => COLUMNS, table: () => table });
   return (
-    <div class="table-wrap">
-      <table class="plain dns-log-table" data-testid="dns-log-table">
-        <caption class="sr-only">{t("dns.log.table")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("dns.log.col.time")}</th>
-            <th scope="col">{t("dns.log.col.client")}</th>
-            <th scope="col">{t("dns.log.col.transport")}</th>
-            <th scope="col">{t("dns.log.col.name")}</th>
-            <th scope="col">{t("dns.log.col.type")}</th>
-            <th scope="col">{t("dns.log.col.rcode")}</th>
-            {/* WP10.1: how the answer was found and what the resolver asked for it. */}
-            <th scope="col">{t("dns.log.col.resolution")}</th>
-            <th scope="col" class="r">
-              {t("dns.log.col.subqueries")}
-            </th>
-            {/* WP10.1: end. */}
-            {/* WP10.4: the validation state and the extended error. */}
-            <th scope="col">{t("dns.log.col.validation")}</th>
-            <th scope="col">{t("dns.log.col.ede")}</th>
-            <th scope="col" class="r">
-              {t("dns.log.col.latency")}
-            </th>
-            <th scope="col">{t("dns.log.col.flags")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <For each={props.lines}>
-            {(line, index) => (
-              <tr data-testid="dns-log-row" data-index={index()} data-key={line.qname} data-rcode={line.rcode}>
-                <td data-col="time" class="nowrap">
-                  {formatDateTime(line.at, TIME)}
-                </td>
-                <td data-col="client">
-                  <Client line={line} />
-                </td>
-                <td data-col="transport">{t(`dns.log.transport.${line.transport}`)}</td>
-                <td data-col="name" class="mono">
-                  {line.qname}
-                </td>
-                <td data-col="type" class="mono">
-                  {line.type}
-                </td>
-                <td data-col="rcode" class="mono">
-                  <span class={line.rcode === 0 ? undefined : "dns-log-bad"}>{rcodeName(line.rcode)}</span>
-                </td>
-                {/* WP10.1: the resolution and the sub-queries. */}
-                <td data-col="resolution">
-                  <Resolution line={line} />
-                </td>
-                <td data-col="subqueries" class="r">
-                  <Show when={line.subqueries}>{(count) => formatNumber(count())}</Show>
-                </td>
-                {/* WP10.1: end. */}
-                {/* WP10.4: the validation state and the extended error. */}
-                <td data-col="validation">
-                  <Validation line={line} />
-                </td>
-                <td data-col="ede" class="nowrap">
-                  <Ede line={line} />
-                </td>
-                <td data-col="latency" class="r nowrap">
-                  {t("dns.log.latency", { ms: formatNumber(line.duration_micros / 1000, { maximumFractionDigits: 2 }) })}
-                </td>
-                <td data-col="flags">
-                  <Show when={line.cached}>
-                    <span class="tag" data-testid="dns-log-cached">
-                      {t("dns.log.cached")}
-                    </span>
-                  </Show>
-                  <Show when={line.blocked}>
-                    <span class="tag conflict" data-testid="dns-log-blocked">
-                      {t("dns.log.blocked")}
-                    </span>
-                  </Show>
-                </td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
+    <div>
+      <div class="table-wrap">
+        <table
+          ref={table}
+          class="plain resizable dns-log-table"
+          classList={{ sized: widths.custom() }}
+          style={resizer.tableWidth() ? { width: resizer.tableWidth() } : undefined}
+          data-testid="dns-log-table"
+        >
+          <caption class="sr-only">{t("dns.log.table")}</caption>
+          <colgroup>
+            <For each={COLUMNS}>
+              {(c) => {
+                const width = () => resizer.colWidth(c.id);
+                return <col style={width() ? { width: `${width()}px` } : undefined} />;
+              }}
+            </For>
+          </colgroup>
+          <thead>
+            <tr>
+              <For each={COLUMNS}>
+                {(c) => (
+                  <th scope="col" class={c.right ? "r" : undefined} data-col={c.id} aria-labelledby={`${ids}-${c.id}`}>
+                    <span id={`${ids}-${c.id}`}>{t(c.header)}</span>
+                    <Show when={resizer.enabled()}>
+                      <ColumnResize resizer={resizer} column={c.id} label={t("grid.resize.handle", { column: t(c.header) })} />
+                    </Show>
+                  </th>
+                )}
+              </For>
+            </tr>
+          </thead>
+          <tbody>
+            <For each={props.lines}>
+              {(line, index) => (
+                <tr data-testid="dns-log-row" data-index={index()} data-key={line.qname} data-rcode={line.rcode}>
+                  <td data-col="time" class="nowrap">
+                    {formatDateTime(line.at, TIME)}
+                  </td>
+                  <td data-col="client">
+                    <Client line={line} />
+                  </td>
+                  <td data-col="transport">{t(`dns.log.transport.${line.transport}`)}</td>
+                  <td data-col="name" class="mono">
+                    {line.qname}
+                  </td>
+                  <td data-col="type" class="mono">
+                    {line.type}
+                  </td>
+                  <td data-col="rcode" class="mono">
+                    <span class={line.rcode === 0 ? undefined : "dns-log-bad"}>{rcodeName(line.rcode)}</span>
+                  </td>
+                  {/* WP10.1: the resolution and the sub-queries. */}
+                  <td data-col="resolution">
+                    <Resolution line={line} />
+                  </td>
+                  <td data-col="subqueries" class="r">
+                    <Show when={line.subqueries}>{(count) => formatNumber(count())}</Show>
+                  </td>
+                  {/* WP10.1: end. */}
+                  {/* WP10.4: the validation state and the extended error. */}
+                  <td data-col="validation">
+                    <Validation line={line} />
+                  </td>
+                  <td data-col="ede" class="nowrap">
+                    <Ede line={line} />
+                  </td>
+                  <td data-col="latency" class="r nowrap">
+                    {t("dns.log.latency", { ms: formatNumber(line.duration_micros / 1000, { maximumFractionDigits: 2 }) })}
+                  </td>
+                  <td data-col="flags">
+                    <Show when={line.cached}>
+                      <span class="tag" data-testid="dns-log-cached">
+                        {t("dns.log.cached")}
+                      </span>
+                    </Show>
+                    <Show when={line.blocked}>
+                      <span class="tag conflict" data-testid="dns-log-blocked">
+                        {t("dns.log.blocked")}
+                      </span>
+                    </Show>
+                  </td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+      </div>
+      <Show when={widths.custom()}>
+        <div class="dns-log-widths">
+          <button type="button" class="btn sm ghost" data-testid="dns-log-reset-widths" onClick={() => widths.reset()}>
+            {t("grid.resize.reset")}
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }

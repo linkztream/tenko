@@ -177,6 +177,6 @@ describe("the lease history", () => {
     await loaded();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Lånehistorik");
     expect(within(rows(GRID)[0]!).getByTestId("event-kind").textContent).toBe("Förnyat");
-    expect(screen.getByLabelText("Händelse")).toBeTruthy();
+    expect(screen.getByLabelText("Händelse", { selector: "select" })).toBeTruthy();
   });
 });

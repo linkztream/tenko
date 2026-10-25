@@ -335,8 +335,8 @@ describe("the words", () => {
     await setLocale("sv");
     open();
     await loaded();
-    expect(screen.getByLabelText("Adressfamilj")).toBeTruthy();
-    expect(screen.getByLabelText("DUID")).toBeTruthy();
+    expect(screen.getByLabelText("Adressfamilj", { selector: "select" })).toBeTruthy();
+    expect(screen.getByLabelText("DUID", { selector: "input" })).toBeTruthy();
     const r = row(GRID, V6[0]!);
     expect(within(r).getByTestId("lease-kind").textContent).toBe("Adress");
     expect(within(r).getByTestId("lease-peer").textContent).toBe("Även DHCPv4: 192.0.2.100");

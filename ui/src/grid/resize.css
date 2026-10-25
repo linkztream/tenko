@@ -1,0 +1,38 @@
+/*
+ * The column resize handle (ColumnResize.tsx) on the trailing edge of a header cell of the
+ * data grid (`table.grid`) and of plain tables that list rows (`table.plain.resizable`).
+ * Invisible until the header is hovered or the handle has the focus; token roles only, so it
+ * follows the light and dark themes, and logical sides, so it mirrors right to left.
+ */
+
+table.plain.resizable thead th { position: relative; }
+/* Once widths are stored, a plain table lays out like the grid: fixed columns, one line per
+   row, clipped cells. */
+table.plain.resizable.sized { table-layout: fixed; }
+table.plain.resizable.sized th, table.plain.resizable.sized td { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.col-resize {
+  position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.col-resize::after {
+  content: ""; position: absolute; inset-block: 7px; inset-inline-end: 3px;
+  width: 2px; border-radius: var(--r-pill);
+  background: transparent;
+  transition: background-color var(--dur-1);
+}
+thead th:hover > .col-resize::after { background: var(--line-strong); }
+.col-resize:hover::after, .col-resize.active::after, .col-resize:focus-visible::after { background: var(--accent); }
+.col-resize:focus { outline: none; }
+.col-resize:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--r-1); }
+/* A finger needs a wider target than a mouse pointer, and a visible one. */
+@media (pointer: coarse) {
+  .col-resize { width: 16px; }
+  .col-resize::after { background: var(--line); }
+}
+
+/* While a column is dragged the pointer keeps the resize cursor and no text gets selected. */
+html.col-resizing, html.col-resizing * { cursor: col-resize !important; user-select: none !important; }

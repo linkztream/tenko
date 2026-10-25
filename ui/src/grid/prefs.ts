@@ -1,8 +1,10 @@
 // Column visibility and order of each grid, remembered per browser under
 // `tenko-grid:<grid id>` in localStorage (like theme and density in app/prefs.ts). A column
-// the stored order does not know (a newer UI) keeps its default place.
+// the stored order does not know (a newer UI) keeps its default place. The column widths
+// live apart, per user (widths.ts), and come with the state so the column menu can reset them.
 import { createSignal, type Accessor } from "solid-js";
 import type { Column } from "./types";
+import { createColumnWidths, type ColumnWidths } from "./widths";
 
 export interface ColumnPrefs {
   order: string[];
@@ -59,6 +61,8 @@ export interface ColumnState<T> {
   /** Moves a column one place earlier (-1) or later (+1). */
   move: (id: string, delta: -1 | 1) => void;
   reset: () => void;
+  /** The column widths the user set. */
+  widths: ColumnWidths;
 }
 
 /** Column state for the grid `id` (call inside a component). */
@@ -97,5 +101,6 @@ export function createColumnState<T>(id: string, columns: Accessor<readonly Colu
       update({ ...current(), order });
     },
     reset: () => update(null),
+    widths: createColumnWidths(id),
   };
 }

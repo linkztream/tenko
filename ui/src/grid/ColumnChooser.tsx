@@ -1,5 +1,6 @@
 // Column visibility and order (the column icon of the filter bar). Each column has a check
-// box and two buttons that move it one place; the choice is remembered per grid.
+// box and two buttons that move it one place; the choice is remembered per grid. The foot
+// resets the order and visibility, and apart from them the widths the user set.
 import { For, onCleanup, onMount, untrack } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "../components/Icon";
@@ -77,6 +78,15 @@ export function ColumnChooser<T>(props: { anchor: HTMLElement; state: ColumnStat
         <div class="foot">
           <button type="button" class="btn sm ghost" onClick={() => props.state.reset()}>
             {t("grid.columns.reset")}
+          </button>
+          <button
+            type="button"
+            class="btn sm ghost"
+            data-testid="reset-column-widths"
+            disabled={!props.state.widths.custom()}
+            onClick={() => props.state.widths.reset()}
+          >
+            {t("grid.resize.reset")}
           </button>
         </div>
       </div>

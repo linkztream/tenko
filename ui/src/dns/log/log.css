@@ -8,5 +8,6 @@
 .dns-log-filter-actions { display: flex; gap: var(--sp-3); }
 .dns-log-table .nowrap { white-space: nowrap; }
 .dns-log-table td.mono { font-family: var(--font-data); }
+.dns-log-widths { display: flex; justify-content: flex-end; margin-block-start: var(--sp-2); }
 .dns-log-bad { color: var(--danger-ink); font-weight: var(--fw-medium); }
 .dns-log-paging { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }

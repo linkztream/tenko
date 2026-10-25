@@ -422,3 +422,28 @@ describe("the validation columns", () => {
     await waitFor(() => expect(names()).toEqual(["indeterminate.example.test"]));
   });
 });
+
+describe("the column widths of the log", () => {
+  afterEach(() => localStorage.clear());
+
+  it("resizes a column on its header handle, fixes the layout and resets it under the table", async () => {
+    open();
+    await loaded();
+    const table = screen.getByTestId("dns-log-table");
+    const cols = () => Array.from(table.querySelectorAll("col")).map((c) => (c as HTMLElement).style.width);
+    expect(table.classList.contains("sized")).toBe(false);
+    expect(screen.getByRole("columnheader", { name: "Name" })).toBeTruthy();
+    const handle = within(table).getByRole("separator", { name: "Resize column Name" });
+    fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+    expect(table.classList.contains("sized")).toBe(true);
+    // Name grew by the large step from the default width; every other column but the last is fixed.
+    expect(cols()[3]).toBe("200px");
+    expect(cols().slice(0, -1).every((w) => w !== "")).toBe(true);
+    expect(cols().at(-1)).toBe("");
+    expect(await axeViolations(table)).toEqual([]);
+    fireEvent.click(screen.getByTestId("dns-log-reset-widths"));
+    expect(table.classList.contains("sized")).toBe(false);
+    expect(cols().every((w) => w === "")).toBe(true);
+    expect(screen.queryByTestId("dns-log-reset-widths")).toBeNull();
+  });
+});

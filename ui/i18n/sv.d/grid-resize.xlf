@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="grid-resize">
+      <unit id="grid.resize.handle">
+        <notes><note category="description">Accessible name of the handle on the edge of a column header that changes the column's width; {column} is the header text.</note></notes>
+        <segment><source>Resize column {column}</source><target>Ändra bredden på kolumnen {column}</target></segment>
+      </unit>
+      <unit id="grid.resize.reset">
+        <notes><note category="description">Button in the column menu or under a list that drops the column widths the user set.</note></notes>
+        <segment><source>Reset column widths</source><target>Återställ kolumnbredder</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

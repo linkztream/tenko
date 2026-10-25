@@ -504,3 +504,45 @@ test("Undo in the toast of a delete brings the host back", async ({ page, api, s
   await expect(page.getByTestId("host-edit")).toBeVisible();
   expect((await hostByName(api, "undo01.example.com"))?.meta.deleted ?? null).toBeNull();
 });
+
+test("a column of the address list is widened by drag and keeps its width after a reload", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  await api.post("/prefixes", { cidr: "192.0.2.0/24" });
+  await api.post("/addresses", { ip: "192.0.2.30", dns_name: "wide.example.com" });
+
+  await page.goto("/ipam/addresses");
+  const grid = page.getByTestId("grid-addresses");
+  await expect(gridRow(page, "addresses", "192.0.2.30")).toBeVisible();
+  const header = grid.locator("thead th[data-col]").first();
+  const column = await header.getAttribute("data-col");
+  const handle = header.getByRole("separator");
+  await expect(handle).toHaveAccessibleName(/^Resize column /);
+  const before = (await header.boundingBox())!.width;
+
+  // Drag the trailing edge 80 px further.
+  const box = (await handle.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 40, y, { steps: 4 });
+  await page.mouse.move(box.x + box.width / 2 + 80, y, { steps: 4 });
+  await page.mouse.up();
+  const after = (await header.boundingBox())!.width;
+  expect(after).toBeGreaterThan(before + 70);
+  expect(after).toBeLessThan(before + 90);
+
+  // The width is stored for this user and list, and comes back after a reload.
+  const stored = await page.evaluate(() =>
+    Object.keys(localStorage).filter((k) => k.startsWith("tenko-grid-widths:") && k.endsWith(":addresses")),
+  );
+  expect(stored).toHaveLength(1);
+  await page.reload();
+  await expect(gridRow(page, "addresses", "192.0.2.30")).toBeVisible();
+  const kept = grid.locator(`thead th[data-col="${column}"]`);
+  expect(Math.abs((await kept.boundingBox())!.width - after)).toBeLessThanOrEqual(1);
+
+  // The column menu resets the widths.
+  await page.getByRole("button", { name: "Choose columns" }).click();
+  await page.getByTestId("reset-column-widths").click();
+  expect(Math.abs((await kept.boundingBox())!.width - before)).toBeLessThanOrEqual(1);
+});

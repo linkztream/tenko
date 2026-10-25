@@ -1,7 +1,8 @@
 // The filter bar above a grid (design.css `.filterbar`): a query field that accepts
 // `field:value` terms ("/" focuses it), dimension chips the view passes in, the soft-deleted
-// filter where the list has one, the row density and the column chooser.
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+// filter where the list has one, the row density and the column chooser (which also resets
+// the column widths, so the grid leaves that out of its footer).
+import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { DENSITIES, density, setDensity, type Density } from "../app/prefs";
 import { Icon } from "../components/Icon";
 import { Segmented } from "../components/Segmented";
@@ -41,6 +42,11 @@ export interface FilterBarProps<T> {
 export function FilterBar<T>(props: FilterBarProps<T>) {
   let input!: HTMLInputElement;
   const [chooser, setChooser] = createSignal<HTMLElement | null>(null);
+
+  createEffect(() => {
+    const columns = props.columns;
+    if (columns) onCleanup(columns.widths.attachMenu());
+  });
 
   onMount(() => {
     if (props.slashFocus === false) return;

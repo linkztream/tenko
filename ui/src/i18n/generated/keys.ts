@@ -3690,6 +3690,8 @@ export type MessageKey =
   | "grid.loading"
   | "grid.loading_more"
   | "grid.more"
+  | "grid.resize.handle"
+  | "grid.resize.reset"
   | "grid.row_actions"
   | "grid.rows"
   | "grid.saving"
@@ -7581,6 +7583,7 @@ export interface MessageArgs {
   "grid.columns.move_down": { column: string | number };
   "grid.columns.move_up": { column: string | number };
   "grid.filter.invalid": { field: string | number; value: string | number };
+  "grid.resize.handle": { column: string | number };
   "grid.row_actions": { row: string | number };
   "grid.rows": { count: number };
   "grid.select_row": { row: string | number };
@@ -11907,6 +11910,8 @@ export const messageKeys: readonly MessageKey[] = [
   "grid.loading",
   "grid.loading_more",
   "grid.more",
+  "grid.resize.handle",
+  "grid.resize.reset",
   "grid.row_actions",
   "grid.rows",
   "grid.saving",

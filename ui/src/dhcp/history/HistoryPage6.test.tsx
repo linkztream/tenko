@@ -153,8 +153,8 @@ describe("the words", () => {
     await setLocale("sv");
     open();
     await loaded();
-    expect(screen.getByLabelText("Adressfamilj")).toBeTruthy();
-    expect(screen.getByLabelText("DUID")).toBeTruthy();
+    expect(screen.getByLabelText("Adressfamilj", { selector: "select" })).toBeTruthy();
+    expect(screen.getByLabelText("DUID", { selector: "input" })).toBeTruthy();
     expect(within(rowOf(`${V6_100} granted`)).getByTestId("event-family").textContent).toBe("DHCPv6");
   });
 });
