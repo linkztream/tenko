@@ -76,6 +76,12 @@ pub mod codes {
     pub const HOST_LOCKED: &str = "ipam.host.locked";
     /// Only people lock and unlock hosts (403, IPAM-16).
     pub const HOST_LOCK_MANUAL_ONLY: &str = "ipam.host.lock_manual_only";
+    /// The host is decommissioned: it cannot be decommissioned again, and no address can be
+    /// assigned to its interfaces (409). Params: `host`.
+    pub const HOST_DECOMMISSIONED: &str = "ipam.host.decommissioned";
+    /// The host is not decommissioned, so there is nothing to reinstate (409). Params:
+    /// `host`.
+    pub const HOST_NOT_DECOMMISSIONED: &str = "ipam.host.not_decommissioned";
     /// The plan has warnings that need an acknowledgement (409). Params: `codes`.
     pub const PLAN_UNACKNOWLEDGED: &str = "ipam.plan.unacknowledged";
     /// The store changed since the plan was made (409); preview again.
@@ -109,6 +115,10 @@ pub mod codes {
     pub const WARN_DUPLICATE_MAC: &str = "ipam.interface.duplicate_mac";
     /// Warning: the address lies inside a reserved or infrastructure range.
     pub const WARN_ADDRESS_IN_RANGE: &str = "ipam.address.in_range";
+    /// Warning: a reinstated host could not take back an address it released, because the
+    /// address is gone, assigned elsewhere, or its interface is gone. Params: `address`,
+    /// `ip`, `cause` (`deleted`, `assigned`, `interface_gone`).
+    pub const WARN_REINSTATE_SKIPPED: &str = "ipam.host.reinstate_skipped";
     // Backlog: the import's supernet step.
     /// Warning (needs acknowledgement): an import turns an existing network into a
     /// supernet so that the networks it imports inside it can be created. Params: `cidr`,

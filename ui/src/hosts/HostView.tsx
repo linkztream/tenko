@@ -9,7 +9,7 @@ import { ANY_REVISION, api } from "../api/client";
 import { events } from "../api/events";
 import { fetchAll } from "../api/paginate";
 import { errorMessage } from "../api/problem";
-import type { Address, AssignmentMode, Host, Interface, JobSummary, Site, Tenant } from "../api/types";
+import type { Address, AssignmentMode, Host, Interface, JobSummary, PlanWarning, Site, Tenant } from "../api/types";
 import { ASSIGNMENT_MODES } from "../api/types";
 import { decodeSegment, paths } from "../app/paths";
 import { may } from "../auth/gate";
@@ -43,7 +43,11 @@ import { ScanNowLazy } from "../scans/ScanNowLazy";
 // WP8.6: the DHCP reservations block of a reserved host, loaded with the dhcp words.
 import { moduleRunning } from "../updates/modules";
 import { Connect } from "./Connect";
+import { DecommissionBanner, ReinstateSkipped } from "./DecommissionBanner";
+import { DecommissionDialog, decommissionTitle } from "./DecommissionDialog";
 import { DnsRecords } from "./DnsRecords";
+import { skippedOf } from "./lifecycle";
+import { ReinstateDialog, reinstateTitle } from "./LifecycleDialogs";
 import { HostCredentialsSection } from "./credentials";
 import { HostForm, InterfaceForm } from "./HostForm";
 import "../ipam/ipam.css";
@@ -84,7 +88,7 @@ export default function HostView() {
   const name = () => decodeSegment(params.fqdn);
 
   const [found, { refetch }] = createResource(name, async (n) => {
-    const page = await api.get("/api/v1/hosts", { query: { q: n, deleted: "include", limit: 50 } });
+    const page = await api.get("/api/v1/hosts", { query: { q: n, deleted: "include", lifecycle: "all", limit: 50 } });
     return page.items.filter((h) => h.name.toLowerCase() === n.toLowerCase()) as Host[];
   });
   const [chosen, setChosen] = createSignal<string | null>(null);
@@ -132,11 +136,15 @@ export default function HostView() {
     | { kind: "move" }
     | { kind: "delete" }
     | { kind: "restore" }
+    | { kind: "decommission" }
+    | { kind: "reinstate" }
     | { kind: "iface"; iface?: Interface }
     | { kind: "iface_delete"; iface: Interface }
     | null
   >(null);
   const [modeMenu, setModeMenu] = createSignal<HTMLElement | null>(null);
+  /** The addresses the last reinstatement did not bind again. */
+  const [skipped, setSkipped] = createSignal<PlanWarning[]>([]);
 
   /** Whether the principal may change this host: judged by the anchors of the host (docs/access.md 3.2). */
   const mayHost = () => {
@@ -271,6 +279,12 @@ export default function HostView() {
                     {t("ipam.do.move")}
                     <Kbd keys={["M"]} />
                   </button>
+                  <Show when={!h().decommissioned}>
+                    <button type="button" class="btn" data-testid="host-decommission" onClick={() => setDialog({ kind: "decommission" })}>
+                      <Icon name="clock" />
+                      {t("hosts.do.decommission")}
+                    </button>
+                  </Show>
                   <button type="button" class="btn danger" data-testid="host-delete" onClick={() => setDialog({ kind: "delete" })}>
                     <Icon name="trash" />
                     {t("ipam.do.delete")}
@@ -281,6 +295,8 @@ export default function HostView() {
             </div>
 
             <div class="page-body detail-body host-body">
+              <DecommissionBanner host={h()} mayReinstate={mayHost()} onReinstate={() => setDialog({ kind: "reinstate" })} />
+              <ReinstateSkipped warnings={skipped()} onDismiss={() => setSkipped([])} />
               <Show when={missing().mac || missing().duid}>
                 <Notice kind="warn" role="status" title={t("hosts.warn.identifier_title")}>
                   <span
@@ -551,6 +567,33 @@ export default function HostView() {
                         onDone={() => {
                           setDialog(null);
                           void refetch();
+                        }}
+                      />
+                    );
+                  case "decommission":
+                    return (
+                      <DecommissionDialog
+                        hosts={[h()]}
+                        onClose={() => setDialog(null)}
+                        onDone={(r) => {
+                          setDialog(null);
+                          writeToast(decommissionTitle([h()]), r);
+                          void refetch();
+                          void details.refetch();
+                        }}
+                      />
+                    );
+                  case "reinstate":
+                    return (
+                      <ReinstateDialog
+                        hosts={[h()]}
+                        onClose={() => setDialog(null)}
+                        onDone={(r) => {
+                          setDialog(null);
+                          setSkipped(skippedOf(r));
+                          writeToast(reinstateTitle([h()]), r);
+                          void refetch();
+                          void details.refetch();
                         }}
                       />
                     );

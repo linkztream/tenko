@@ -15560,6 +15560,15 @@
             }
           },
           {
+            "name": "lifecycle",
+            "in": "query",
+            "description": "Hosts by lifecycle state: `active` (the default: hosts that are not decommissioned), `decommissioned` (the cleanup view) or `all`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "tag",
             "in": "query",
             "description": "Only hosts that carry every one of these tags. Repeat the parameter or separate the tags with commas.",
@@ -16461,6 +16470,148 @@
         ]
       }
     },
+    "/api/v1/hosts/{id}/decommission": {
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Decommission a host",
+        "operationId": "decommission_host",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecommissionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The decommissioned host (`decommissioned` is set), with `ETag`, or the plan of a dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse_Host"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed: deleting the host is (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such host (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The host is decommissioned already, or deleted (`ipam.host.decommissioned`, `ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "The host is locked against automation (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/hosts/{id}/history": {
       "get": {
         "tags": [
@@ -16812,6 +16963,138 @@
           },
           "422": {
             "description": "The `Idempotency-Key` was used for a different request (`ipam.idempotency_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "The host is locked against automation (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}/reinstate": {
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Reinstate a decommissioned host",
+        "operationId": "reinstate_host",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The active host, with `ETag`, or the plan of a dry run; the warning `ipam.host.reinstate_skipped` names each address that did not come back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResponse_Host"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed: deleting the host is (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such host (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The host is not decommissioned, or deleted (`ipam.host.not_decommissioned`, `ipam.object_deleted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "`If-Match` is stale (`ipam.revision_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25528,6 +25811,120 @@
           },
           "423": {
             "description": "A host of the change is locked (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/keep": {
+      "post": {
+        "tags": [
+          "proposals"
+        ],
+        "summary": "Keep an address conflict as intended",
+        "operationId": "keep_proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Proposal identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The revision the client read, as `\"12\"`; the write fails with 412\n`ipam.revision_mismatch` when the object changed since.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The decision: the closed proposal (state `rejected`) and the revision, with `ETag` of the proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Decision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The reason is over 1,024 bytes or has control characters (`ipam.validation`), the body is malformed (`sys.invalid_request`), or a parameter is unknown (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal may not decide proposals",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such proposal (`ipam.proposal.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The proposal is decided already, or it is not an address conflict (`ipam.proposal.not_open`, `ipam.proposal.not_keepable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "If-Match is stale (`ipam.proposal.revision_mismatch`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40306,6 +40703,94 @@
           }
         }
       },
+      "Decommission": {
+        "type": "object",
+        "description": "When, by whom and why a host was decommissioned, and what it released, so that a\nreinstatement can bind the addresses again.",
+        "required": [
+          "at",
+          "by"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "by": {
+            "$ref": "#/components/schemas/Principal",
+            "description": "By whom."
+          },
+          "kept_dns": {
+            "type": "boolean",
+            "description": "Whether the DNS names of the released addresses were kept (their records stay)."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, as the operator wrote it."
+          },
+          "released": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReleasedAddress"
+            },
+            "description": "The addresses the host released, with the interface each was on."
+          }
+        }
+      },
+      "DecommissionBody": {
+        "type": "object",
+        "description": "What a decommission records and whether it keeps the DNS names.",
+        "properties": {
+          "keep_dns": {
+            "type": "boolean",
+            "description": "Keep the DNS names of the released addresses, so their records stay. By default the\nnames and their records are removed."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, for the list of decommissioned hosts (at most 1,024 bytes)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DecommissionHost": {
+        "type": "object",
+        "description": "Decommissions a host: its addresses are released (unassigned, and their DNS names\nremoved unless `keep_dns`), its facts raise no proposals and the default lists leave it\nout. A reinstatement binds the addresses again.",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "expected": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision the caller read (`If-Match`).",
+            "minimum": 0
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "keep_dns": {
+            "type": "boolean",
+            "description": "Keep the DNS names of the released addresses, so their records stay. By default the\nnames are removed and the DNS actuator removes the records."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, for the list of decommissioned hosts (at most 1,024 bytes)."
+          }
+        },
+        "additionalProperties": false
+      },
       "DefaultLanguage": {
         "type": "object",
         "description": "`PUT /settings/default-language` and its answer (API-21).",
@@ -44916,6 +45401,17 @@
           "meta"
         ],
         "properties": {
+          "decommissioned": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Decommission",
+                "description": "Set while the host is decommissioned: its addresses are released, its facts raise\nno proposals and the default lists leave it out. Absent for an active host."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/HostId",
             "description": "Identifier."
@@ -47269,6 +47765,64 @@
                 "type": "string",
                 "enum": [
                   "set_mode"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Decommissions a host (its lifecycle state).",
+            "required": [
+              "args",
+              "op"
+            ],
+            "properties": {
+              "args": {
+                "$ref": "#/components/schemas/DecommissionHost",
+                "description": "Decommissions a host (its lifecycle state)."
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "decommission_host"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reinstates a decommissioned host: the addresses it released and that are still free\nare bound again, with the DNS names they lost.",
+            "required": [
+              "args",
+              "op"
+            ],
+            "properties": {
+              "args": {
+                "type": "object",
+                "description": "Reinstates a decommissioned host: the addresses it released and that are still free\nare bound again, with the DNS names they lost.",
+                "required": [
+                  "host"
+                ],
+                "properties": {
+                  "expected": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "format": "int64",
+                    "description": "The revision the caller read.",
+                    "minimum": 0
+                  },
+                  "host": {
+                    "$ref": "#/components/schemas/HostId",
+                    "description": "The host."
+                  }
+                }
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "reinstate_host"
                 ]
               }
             }
@@ -54401,6 +54955,17 @@
             ],
             "description": "Platform, such as `qemu`, `lxc` or `esphome`."
           },
+          "power": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PowerState",
+                "description": "Whether the host runs, when the source tells (a hypervisor's guest). The addresses\nof a stopped host are configured, not in use: the reconciler treats them as a\ndormant claim."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -57564,6 +58129,17 @@
                 "meta"
               ],
               "properties": {
+                "decommissioned": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Decommission",
+                      "description": "Set while the host is decommissioned: its addresses are released, its facts raise\nno proposals and the default lists leave it out. Absent for an active host."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "id": {
                   "$ref": "#/components/schemas/HostId",
                   "description": "Identifier."
@@ -61305,6 +61881,14 @@
         "enum": [
           "primary",
           "secondary"
+        ]
+      },
+      "PowerState": {
+        "type": "string",
+        "description": "The power state of an observed host.",
+        "enum": [
+          "running",
+          "stopped"
         ]
       },
       "Prefix": {
@@ -65725,6 +66309,35 @@
           "1.2.0",
           "1.2.0-rc.1"
         ]
+      },
+      "ReleasedAddress": {
+        "type": "object",
+        "description": "An address a decommissioned host released.",
+        "required": [
+          "address",
+          "interface"
+        ],
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/AddressId",
+            "description": "The address."
+          },
+          "dns_name": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Fqdn",
+                "description": "The DNS name it had and lost (absent when the name was kept or there was none)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interface": {
+            "$ref": "#/components/schemas/InterfaceId",
+            "description": "The interface it was assigned to."
+          }
+        }
       },
       "RemoteHealth": {
         "type": "string",
@@ -75255,6 +75868,17 @@
               "meta"
             ],
             "properties": {
+              "decommissioned": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Decommission",
+                    "description": "Set while the host is decommissioned: its addresses are released, its facts raise\nno proposals and the default lists leave it out. Absent for an active host."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "id": {
                 "$ref": "#/components/schemas/HostId",
                 "description": "Identifier."

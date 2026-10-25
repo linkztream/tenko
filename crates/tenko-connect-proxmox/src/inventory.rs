@@ -9,8 +9,8 @@
 //! | Host | `external_id` | Addresses | Other facts |
 //! |---|---|---|---|
 //! | Node | `node/<name>` | IP addresses from `/cluster/status` and the active interfaces of the node's network configuration | OS `Proxmox VE <version>`, platform `proxmox-ve`, tag `status:<status>` |
-//! | QEMU guest | `qemu/<vmid>` | MAC addresses of `netN`; IP addresses from the guest agent on those MAC addresses, else the static cloud-init addresses | OS from `ostype`, platform `qemu`, parent `node/<node>` |
-//! | LXC container | `lxc/<vmid>` | MAC addresses of `netN`; IP addresses from the running container's interfaces on those MAC addresses, else the static `ip`/`ip6` | OS from `ostype`, platform `lxc`, parent `node/<node>` |
+//! | QEMU guest | `qemu/<vmid>` | MAC addresses of `netN`; IP addresses from the guest agent on those MAC addresses, else the static cloud-init addresses | OS from `ostype`, platform `qemu`, parent `node/<node>`, power state from `status` |
+//! | LXC container | `lxc/<vmid>` | MAC addresses of `netN`; IP addresses from the running container's interfaces on those MAC addresses, else the static `ip`/`ip6` | OS from `ostype`, platform `lxc`, parent `node/<node>`, power state from `status` |
 //!
 //! Guests carry their Proxmox tags as they are, and `status:<status>`, `pool:<pool>`,
 //! `template` (when templates are included), `bridge:<name>` or `vnet:<name>` per interface,
@@ -25,7 +25,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tenko_core::{MacAddr, observe::ObservedHost};
+use tenko_core::{
+    MacAddr,
+    observe::{ObservedHost, PowerState},
+};
 
 use crate::net::{self, Nic};
 
@@ -163,6 +166,16 @@ impl Guest {
     /// Whether it runs.
     pub fn running(&self) -> bool {
         self.status.as_deref() == Some("running")
+    }
+
+    /// The power state the status tells: `running`, or `stopped` (a template too); none
+    /// for another status or none at all.
+    pub fn power(&self) -> Option<PowerState> {
+        match self.status.as_deref() {
+            Some("running") => Some(PowerState::Running),
+            Some("stopped") => Some(PowerState::Stopped),
+            _ => None,
+        }
     }
 }
 
@@ -370,6 +383,7 @@ pub fn node_host(node: &Node, snapshot: &Snapshot) -> ObservedHost {
         platform: Some("proxmox-ve".to_owned()),
         parent: None,
         tags,
+        power: None,
     }
 }
 
@@ -473,6 +487,7 @@ pub fn guest_host(guest: &Guest, answers: Option<&GuestAnswers>, sdn: &Sdn) -> O
         platform: Some(guest.kind.as_str().to_owned()),
         parent: Some(format!("node/{}", guest.node)),
         tags,
+        power: guest.power(),
     }
 }
 
@@ -585,7 +600,9 @@ mod tests {
             ]
         );
         assert_eq!(node.tags, ["status:online"]);
+        assert_eq!(node.power, None, "a node has no power state");
         let vm = &hosts[2];
+        assert_eq!(vm.power, Some(PowerState::Running));
         assert_eq!(vm.name.as_deref(), Some("web01"));
         assert_eq!(vm.macs.len(), 2);
         assert_eq!(vm.ips, vec!["198.51.100.10".parse::<IpAddr>().expect("ip")]);
@@ -617,6 +634,8 @@ mod tests {
         let stopped = &hosts[4];
         assert_eq!(stopped.macs.len(), 0, "no configuration was read");
         assert_eq!(stopped.tags, ["status:stopped"]);
+        assert_eq!(stopped.power, Some(PowerState::Stopped));
+        assert!(stopped.is_stopped());
     }
 
     #[test]

@@ -513,6 +513,37 @@ const reject = route("post", "/api/v1/proposals/{id}/reject", async (ctx) => {
   return ok(decision, etag(decision.proposal.revision));
 });
 
+/** The rules of the address conflicts that "keep both" decides. */
+const KEEPABLE_RULES = ["ipam.reconcile.conflict_shared_address", "ipam.reconcile.conflict_address_taken"];
+
+/** Keeps an address conflict as it is: the proposal is rejected, with the reason. */
+const keep = route("post", "/api/v1/proposals/{id}/keep", async (ctx) => {
+  const principal = requireSession();
+  onlyQuery(ctx.url, []);
+  const found = findProposal(ctx.params.id);
+  requireDecider(principal);
+  const body = await ctx.optionalBody();
+  const reason = cleanReason(body.reason);
+  decidable(found, ctx.ifMatch());
+  if (!KEEPABLE_RULES.includes(found.rule)) {
+    throw new Problem("ipam.proposal.not_keepable", {
+      status: 409,
+      detail: `proposal ${found.id} is not an address conflict`,
+      params: { id: found.id, rule: found.rule },
+    });
+  }
+  const kept = commit({
+    ...found,
+    state: "rejected",
+    reason: reason || null,
+    decided: { at: new Date().toISOString(), by: principalNow() },
+    updated: new Date().toISOString(),
+  });
+  appendAudit({ action: "ipam.proposal.keep", objects: [{ kind: "proposal", id: found.id }], context: reason ? { reason } : {} });
+  const decision: S["Decision"] = { dry_run: false, proposal: kept, results: [], warnings: [], revision: kept.revision ?? null, job_id: null };
+  return ok(decision, etag(kept.revision));
+});
+
 /** The most proposals one batch takes (the server's limit). */
 const MAX_BATCH = 500;
 
@@ -780,6 +811,7 @@ export const reconcileRoutes: HttpHandler[] = [
   proposal,
   approve,
   reject,
+  keep,
   approveMany,
   rejectMany,
   getAdoption,

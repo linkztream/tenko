@@ -401,7 +401,7 @@ function buildSeed(now: number, revision: number): ReconcileState {
         ],
       },
       summary: "192.0.2.30 is intended for printer-1 (00:00:5e:00:53:1e) but used by 00:00:5e:00:53:b0",
-      params: { ip: "192.0.2.30", host: "printer-1", intended_mac: "00:00:5e:00:53:1e", macs: "00:00:5e:00:53:b0" },
+      params: { ip: "192.0.2.30", host: "printer-1", intended_mac: "00:00:5e:00:53:1e", macs: "00:00:5e:00:53:b0", hosts: HOST_IDS["printer-1"]!, dormant_hosts: "" },
       evidence: [evidence(printerTaken, { mac: "00:00:5e:00:53:b0", ip: "192.0.2.30" })],
       commands: [],
       created: ago(2 * HOUR_MS),
@@ -545,4 +545,91 @@ export function putServices(ip: string, openTcp: number[], options: ServicesOpti
   };
   facts.push(added);
   return added;
+}
+
+export interface GuestOptions {
+  /** The power state the source reports (default `stopped`). */
+  power?: "running" | "stopped";
+  /** Whether the fact has expired already. */
+  expired?: boolean;
+}
+
+let guestNo = 0;
+
+/**
+ * Adds the fact an inventory connector reports for a guest with the address `ip`; by default
+ * the guest is stopped, so its address is a dormant claim. For the tests of the lifecycle of
+ * a host and of the address conflicts.
+ */
+export function putGuest(ip: string, name: string, options: GuestOptions = {}): ObservedFact {
+  const now = Date.now();
+  guestNo += 1;
+  const externalId = `vm-9${guestNo}`;
+  const seen = iso(now - 5 * MINUTE);
+  const added: ObservedFact = {
+    source: { type: "inventory", connector: RECONCILE_IDS.inventory },
+    source_key: `inventory:${RECONCILE_IDS.inventory}`,
+    subject: { type: "host", data: { external_id: externalId } },
+    subject_key: `host:${externalId}`,
+    observed: { type: "host", data: { external_id: externalId, name, ips: [ip], platform: "qemu", power: options.power ?? "stopped" } },
+    observation: `0190d1c2-0000-7000-8000-0000a0${guestNo.toString(16).padStart(6, "0")}`,
+    first_seen: iso(now - DAY_MS),
+    last_seen: seen,
+    received_at: seen,
+    expires_at: options.expired ? iso(now - MINUTE) : iso(now + 6 * HOUR_MS),
+    sightings: 3,
+    counted_at: seen,
+    revision: db.revision,
+  };
+  reconcileState().facts.push(added);
+  return added;
+}
+
+export interface AddressConflictOptions {
+  rule: "ipam.reconcile.conflict_shared_address" | "ipam.reconcile.conflict_address_taken";
+  ip: string;
+  /** The ids of the hosts in the conflict (for a taken address the intended host first). */
+  hosts: string[];
+  /** The ids of the hosts whose claim comes only from a stopped guest. */
+  dormant?: string[];
+}
+
+let conflictNo = 0;
+
+/** Adds an open address conflict about the hosts, as the reconciler opens one for two claims on one address. */
+export function putAddressConflict(options: AddressConflictOptions): IntentProposal {
+  conflictNo += 1;
+  const now = Date.now();
+  const id = `0190d1c2-0000-7000-8000-0000d2${conflictNo.toString(16).padStart(6, "0")}`;
+  const taken = options.rule === "ipam.reconcile.conflict_address_taken";
+  const params: Record<string, string> = {
+    ip: options.ip,
+    hosts: options.hosts.join(", "),
+    macs: "00:00:5e:00:53:b0, 00:00:5e:00:53:b1",
+    count: String(options.hosts.length),
+  };
+  if (taken) {
+    params.host = "intended";
+    params.intended_mac = "00:00:5e:00:53:1e";
+    params.dormant_hosts = (options.dormant ?? []).join(", ");
+  }
+  const proposal: IntentProposal = {
+    id,
+    kind: "conflict",
+    rule: options.rule,
+    key: `conflict/${taken ? "taken" : "shared"}:${options.ip}`,
+    severity: "warning",
+    state: "open",
+    subject: { ip: options.ip, objects: [] },
+    summary: `${options.ip} is claimed by ${options.hosts.length} hosts`,
+    params,
+    evidence: [],
+    commands: [],
+    fingerprint: digestOf(`${id}|${options.ip}`),
+    revision: db.revision,
+    created: iso(now - HOUR_MS),
+    updated: iso(now - 5 * MINUTE),
+  };
+  reconcileState().proposals.set(id, proposal);
+  return proposal;
 }

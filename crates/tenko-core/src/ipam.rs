@@ -283,8 +283,50 @@ pub struct Host {
     /// Site.
     #[serde(default)]
     pub site: Option<SiteId>,
+    /// Set while the host is decommissioned: its addresses are released, its facts raise
+    /// no proposals and the default lists leave it out. Absent for an active host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decommissioned: Option<Decommission>,
     /// Metadata.
     pub meta: Meta,
+}
+
+impl Host {
+    /// Whether the host is decommissioned.
+    pub fn is_decommissioned(&self) -> bool {
+        self.decommissioned.is_some()
+    }
+}
+
+/// When, by whom and why a host was decommissioned, and what it released, so that a
+/// reinstatement can bind the addresses again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Decommission {
+    /// When.
+    pub at: Timestamp,
+    /// By whom.
+    pub by: Principal,
+    /// Why, as the operator wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Whether the DNS names of the released addresses were kept (their records stay).
+    #[serde(default)]
+    pub kept_dns: bool,
+    /// The addresses the host released, with the interface each was on.
+    #[serde(default)]
+    pub released: Vec<ReleasedAddress>,
+}
+
+/// An address a decommissioned host released.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ReleasedAddress {
+    /// The address.
+    pub address: AddressId,
+    /// The interface it was assigned to.
+    pub interface: InterfaceId,
+    /// The DNS name it had and lost (absent when the name was kept or there was none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_name: Option<Fqdn>,
 }
 
 /// A network interface of a host.

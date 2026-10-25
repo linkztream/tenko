@@ -14,6 +14,7 @@ import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
 import { getSubject, listProposals, type ObservedFact, type Proposal } from "./api";
 import { KindBadge } from "./columns";
+import { dormantClaims } from "./dormant";
 import { FactTable } from "./FactTable";
 import { isCurrent, isProposalEvent, ruleText, sourceText } from "./model";
 import { useSourceNames } from "./refs";
@@ -115,6 +116,15 @@ export function HostObservations(props: { host: Host; interfaces: readonly Inter
                   <span data-testid="host-os">{os().length > 0 ? formatList(os()) : "–"}</span>
                 </div>
               </div>
+              <Show when={dormantClaims(p().facts).length > 0}>
+                <ul class="plain-list" data-testid="host-dormant">
+                  <For each={dormantClaims(p().facts)}>
+                    {(c) => (
+                      <li data-ip={c.ip}>{t("hosts.observations.dormant", { ip: c.ip, name: c.name })}</li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
               <FactTable facts={p().facts} names={names()} links label={t("hosts.observations.title")} />
             </Show>
             <Show when={p().subjects.length > 0}>

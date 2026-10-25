@@ -59,7 +59,10 @@ use tenko_ipam::{
     Applied, Entity, HistoryEntry, IpamCommand, IpamPlan, IpamService, PlanOptions, PlanView,
     PlanWarning, codes,
     command::{CustomFieldInput, CustomFieldPatch, UpdateCustomField},
-    query::{self, AddressRow, Deleted, HostExpander, ListQuery, Listable, SearchHit, TagCount},
+    query::{
+        self, AddressRow, Deleted, HostExpander, HostLifecycle, ListQuery, Listable, SearchHit,
+        TagCount,
+    },
     scope::{ScopeIndex, ScopedWriteError},
 };
 use tenko_store::ReadView;
@@ -525,6 +528,8 @@ pub(crate) enum Filter {
     Mode,
     /// `locked=true|false` (hosts).
     Locked,
+    /// `lifecycle=active|decommissioned|all` (hosts); `active` when absent.
+    Lifecycle,
 }
 
 impl Filter {
@@ -546,6 +551,7 @@ impl Filter {
             Filter::PrefixRole | Filter::RangeRole => "role",
             Filter::Mode => "mode",
             Filter::Locked => "locked",
+            Filter::Lifecycle => "lifecycle",
         }
     }
 }
@@ -623,6 +629,12 @@ pub(crate) fn list_args<T: Listable>(
                 query.mode = enum_param::<AssignmentMode>(filters, name, "an assignment mode")?;
             }
             Filter::Locked => query.locked = filters.boolean(name)?,
+            Filter::Lifecycle => {
+                query.lifecycle = Some(
+                    enum_param::<HostLifecycle>(filters, name, "active, decommissioned or all")?
+                        .unwrap_or_default(),
+                );
+            }
         }
     }
     Ok(ListArgs { query, page, scope })
@@ -864,6 +876,10 @@ pub(crate) fn command_access(command: &IpamCommand) -> (Action, ObjectRef) {
         IpamCommand::SetLock { host, .. } | IpamCommand::SetMode { host, .. } => {
             (Action::Update, (*host).into())
         }
+        // A decommission releases the host's addresses and a reinstatement takes them back:
+        // the rights of deleting the host.
+        IpamCommand::DecommissionHost(input) => (Action::Delete, input.host.into()),
+        IpamCommand::ReinstateHost { host, .. } => (Action::Delete, (*host).into()),
         IpamCommand::Delete { object, .. } => (Action::Delete, *object),
         IpamCommand::Restore { object, .. } => (Action::Update, *object),
         IpamCommand::CreateCustomField(_)

@@ -83,6 +83,7 @@ pub(crate) fn host(name: &str, mode: AssignmentMode) -> Host {
         mode,
         lock: false,
         site: None,
+        decommissioned: None,
         meta: meta(false),
     }
 }

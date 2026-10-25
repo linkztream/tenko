@@ -1,0 +1,3 @@
+/* The actions on an address conflict in the proposal panel. Token roles only. */
+.conflict-host { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.conflict-why { font-size: var(--fs-12); }

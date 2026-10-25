@@ -141,6 +141,7 @@ impl Lab {
             mode,
             lock: false,
             site: None,
+            decommissioned: None,
             meta: Meta::new(stamp()),
         };
         let interface = Interface {

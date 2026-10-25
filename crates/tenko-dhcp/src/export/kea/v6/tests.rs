@@ -208,6 +208,7 @@ impl Lab {
             mode: AssignmentMode::Reserved,
             lock: false,
             site: None,
+            decommissioned: None,
             meta: Meta::new(stamp()),
         };
         let interface = Interface {

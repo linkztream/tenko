@@ -232,6 +232,7 @@ pub fn sample_host(index: u16, site: &str, credential: bool) -> ObservedHost {
         platform: Some("sample".to_owned()),
         parent: None,
         tags,
+        power: None,
     }
 }
 

@@ -1,11 +1,14 @@
 // The hosts (/ipam/hosts): the unit of intent (IPAM-12) with its assignment mode (IPAM-14)
 // and lock (IPAM-16). The server filters (`mode`, `locked`, `tag`, `site`, `q`, `deleted`)
 // and sorts (`name`, `mode`). Bulk actions on the selection: move to a network (M), set the
-// mode (Shift+M), lock or unlock (L), export CSV; each one previews its plan first.
+// mode (Shift+M), lock or unlock (L), decommission, reinstate, delete, export CSV; each one
+// previews its plan first. The lifecycle filter (`lifecycle`: active, decommissioned or all,
+// kept in the address of the page) lists the hosts that were retired, with when, by whom and
+// why, for reinstating or deleting.
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api } from "../api/client";
-import type { AssignmentMode, BulkResponse, Host, IpamCommand, Site, Tenant } from "../api/types";
+import type { AssignmentMode, BulkResponse, Host, HostLifecycle, IpamCommand, Site, Tenant } from "../api/types";
 import { ASSIGNMENT_MODES } from "../api/types";
 import { fetchAll } from "../api/paginate";
 import { createLiveQuery } from "../api/live";
@@ -34,8 +37,12 @@ import { useTree } from "../ipam/tree/PrefixTree";
 import { modeHint, modeWord } from "../ipam/words";
 import { isTyping } from "../shell/keyboard";
 import { hostsCsv } from "./csv";
+import { DecommissionDialog, decommissionTitle } from "./DecommissionDialog";
+import { DecommissionedBy, DecommissionedTag } from "./DecommissionedTag";
 import { HostForm } from "./HostForm";
 import { saveTextFile } from "./handoff";
+import { isDecommissioned, lifecycleOf, LIFECYCLES, reinstatedToasts } from "./lifecycle";
+import { DeleteManyDialog, ReinstateDialog, reinstateTitle } from "./LifecycleDialogs";
 import "../ipam/ipam.css";
 import "./hosts.css";
 
@@ -60,11 +67,15 @@ export default function HostsView() {
   const [deleted, setDeleted] = createSignal<DeletedFilter>(
     params.deleted === "include" || params.deleted === "only" ? params.deleted : "exclude",
   );
+  const [lifecycle, setLifecycle] = createSignal<HostLifecycle>(lifecycleOf(params.lifecycle));
   const [sort, setSort] = createSignal<SortState | null>({ field: "name", desc: false });
   const [dialog, setDialog] = createSignal<
     | { kind: "create" }
     | { kind: "move"; items: DragItem[] }
     | { kind: "bulk"; bulk: Bulk; hosts: Host[] }
+    | { kind: "decommission"; hosts: Host[] }
+    | { kind: "reinstate"; hosts: Host[] }
+    | { kind: "delete_many"; hosts: Host[] }
     | { kind: "delete"; host: Host }
     | { kind: "restore"; host: Host }
     | { kind: "history"; host: Host }
@@ -108,6 +119,7 @@ export default function HostsView() {
         ...p,
         locked: locked() ? true : undefined,
         deleted: deleted() === "exclude" ? undefined : deleted(),
+        lifecycle: lifecycle() === "active" ? undefined : lifecycle(),
         sort: sortParam(sort()),
       };
     },
@@ -116,7 +128,24 @@ export default function HostsView() {
     relevant: (e) => [...e.objects, ...e.deleted].some((o) => o.kind === "host" || o.kind === "interface"),
   });
 
-  const columns: Column<Host>[] = [
+  // The columns of the lifecycle (when, by whom and why) come with the views that list retired hosts.
+  const lifecycleColumns: Column<Host>[] = [
+    {
+      id: "decommissioned",
+      header: () => t("hosts.col.decommissioned"),
+      width: 230,
+      text: (h) => (h.decommissioned ? h.decommissioned.at : ""),
+      render: (h) => <Show when={h.decommissioned}>{(d) => <DecommissionedBy decommissioned={d()} />}</Show>,
+    },
+    {
+      id: "decommission_reason",
+      header: () => t("hosts.col.decommission_reason"),
+      width: 240,
+      text: (h) => h.decommissioned?.reason ?? "",
+      render: (h) => <span class="decommission-reason">{h.decommissioned?.reason ?? ""}</span>,
+    },
+  ];
+  const baseColumns: Column<Host>[] = [
     {
       id: "name",
       header: () => t("ipam.col.name"),
@@ -124,7 +153,11 @@ export default function HostsView() {
       sort: "name",
       fixed: true,
       text: (h) => h.name,
-      render: (h) => <span class="hostname">{h.name}</span>,
+      render: (h) => (
+        <>
+          <span class="hostname">{h.name}</span> <DecommissionedTag decommissioned={h.decommissioned} />
+        </>
+      ),
     },
     {
       id: "mode",
@@ -154,7 +187,8 @@ export default function HostsView() {
       ),
     },
   ];
-  const columnState = createColumnState("hosts", () => columns);
+  const columns = createMemo<Column<Host>[]>(() => [...baseColumns, ...(lifecycle() === "active" ? [] : lifecycleColumns)]);
+  const columnState = createColumnState("hosts", columns);
   const selectable = (h: Host) => !h.meta.deleted;
   const selection = createGridSelection(source.rows, (h) => h.id, selectable);
   const selected = () => source.rows().filter((h) => selection.has(h.id));
@@ -176,6 +210,18 @@ export default function HostsView() {
     },
     { id: "history", label: () => t("ipam.do.history"), run: (h) => setDialog({ kind: "history", host: h }) },
     { id: "restore", label: () => t("ipam.do.restore"), disabled: (h) => !h.meta.deleted, hidden: (h) => !mayRow(h), run: (h) => setDialog({ kind: "restore", host: h }) },
+    {
+      id: "decommission",
+      label: () => t("hosts.do.decommission"),
+      hidden: (h) => !mayRow(h) || !!h.meta.deleted || isDecommissioned(h),
+      run: (h) => setDialog({ kind: "decommission", hosts: [h] }),
+    },
+    {
+      id: "reinstate",
+      label: () => t("hosts.do.reinstate"),
+      hidden: (h) => !mayRow(h) || !!h.meta.deleted || !isDecommissioned(h),
+      run: (h) => setDialog({ kind: "reinstate", hosts: [h] }),
+    },
     { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (h) => !!h.meta.deleted, hidden: (h) => !mayRow(h), run: (h) => setDialog({ kind: "delete", host: h }) },
   ];
 
@@ -253,6 +299,25 @@ export default function HostsView() {
         }}
         columns={columnState}
       >
+        <select
+          class="select"
+          aria-label={t("hosts.lifecycle.label")}
+          data-testid="filter-lifecycle"
+          onChange={(e) => {
+            const next = lifecycleOf(e.currentTarget.value);
+            setLifecycle(next);
+            selection.clear();
+            setParams({ lifecycle: next === "active" ? undefined : next });
+          }}
+        >
+          <For each={LIFECYCLES}>
+            {(l) => (
+              <option value={l} selected={lifecycle() === l}>
+                {t(`hosts.lifecycle.${l}`)}
+              </option>
+            )}
+          </For>
+        </select>
         <ToggleChip
           pressed={locked()}
           testid="filter-locked"
@@ -269,13 +334,13 @@ export default function HostsView() {
         <DataGrid
           id="hosts"
           label={t("ipam.nav.hosts")}
-          columns={columns}
+          columns={columns()}
           columnState={columnState}
           rows={source.rows()}
           rowId={(h) => h.id}
           rowKey={(h) => h.name}
           rowLabel={(h) => h.name}
-          rowClass={(h) => (h.meta.deleted ? "deleted" : h.mode === "unmanaged" ? "unmanaged" : undefined)}
+          rowClass={(h) => (h.meta.deleted ? "deleted" : h.decommissioned ? "decommissioned" : h.mode === "unmanaged" ? "unmanaged" : undefined)}
           selectable={selectable}
           selection={selection}
           sort={sort()}
@@ -295,7 +360,13 @@ export default function HostsView() {
           dragLabel={(list) => t("ipam.move.dragging", { count: list.length })}
           empty={
             <div class="empty">
-              <h3>{applied() || locked() ? t("grid.empty.filtered") : t("hosts.empty")}</h3>
+              <h3>
+                {applied() || locked()
+                  ? t("grid.empty.filtered")
+                  : lifecycle() === "decommissioned"
+                    ? t("hosts.empty_decommissioned")
+                    : t("hosts.empty")}
+              </h3>
             </div>
           }
         />
@@ -309,6 +380,13 @@ export default function HostsView() {
               onClick={() => setModeMenu(document.querySelector<HTMLElement>("[data-testid='action-mode']"))}
             />
             <ActionButton icon="lock" label={t("hosts.do.toggle_lock")} keys={["L"]} onClick={toggleLock} testid="action-lock" />
+            <Show when={selected().every((h) => !isDecommissioned(h))}>
+              <ActionButton label={t("hosts.do.decommission")} testid="action-decommission" onClick={() => setDialog({ kind: "decommission", hosts: selected() })} />
+            </Show>
+            <Show when={selected().every(isDecommissioned)}>
+              <ActionButton label={t("hosts.do.reinstate")} testid="action-reinstate" onClick={() => setDialog({ kind: "reinstate", hosts: selected() })} />
+            </Show>
+            <ActionButton icon="trash" label={t("ipam.do.delete")} testid="action-delete" onClick={() => setDialog({ kind: "delete_many", hosts: selected() })} />
           </Show>
           <ActionButton
             icon="export"
@@ -368,6 +446,45 @@ export default function HostsView() {
                       <For each={d.hosts.slice(0, 12)}>{(h) => <li>{h.name}</li>}</For>
                     </ul>
                   }
+                />
+              );
+            case "decommission":
+              return (
+                <DecommissionDialog
+                  hosts={d.hosts}
+                  onClose={() => setDialog(null)}
+                  onDone={(r) => {
+                    setDialog(null);
+                    selection.clear();
+                    source.reload();
+                    writeToast(decommissionTitle(d.hosts), r);
+                  }}
+                />
+              );
+            case "reinstate":
+              return (
+                <ReinstateDialog
+                  hosts={d.hosts}
+                  onClose={() => setDialog(null)}
+                  onDone={(r) => {
+                    setDialog(null);
+                    selection.clear();
+                    source.reload();
+                    reinstatedToasts(reinstateTitle(d.hosts), r, writeToast);
+                  }}
+                />
+              );
+            case "delete_many":
+              return (
+                <DeleteManyDialog
+                  hosts={d.hosts}
+                  onClose={() => setDialog(null)}
+                  onDone={(r) => {
+                    setDialog(null);
+                    selection.clear();
+                    source.reload();
+                    writeToast(t("hosts.bulk.delete_title", { count: d.hosts.length }), r);
+                  }}
                 />
               );
             case "delete":

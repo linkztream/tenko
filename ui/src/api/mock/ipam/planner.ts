@@ -73,6 +73,7 @@ import {
   updateHost,
   updateInterface,
 } from "./plan-hosts";
+import { decommissionHost, reinstateHost } from "./plan-lifecycle";
 import { invalid, planUnacknowledged } from "./problems";
 import { lookup, store, type Kind } from "./state";
 import { allLevels } from "./tree";
@@ -184,6 +185,8 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
   restore: restoreCommand,
   set_lock: setLock,
   set_mode: setMode,
+  decommission_host: decommissionHost,
+  reinstate_host: reinstateHost,
   allocate_address: allocateAddress,
   allocate_prefix: allocatePrefix,
   create_custom_field: createCustomField,
@@ -210,6 +213,8 @@ export function commandKind(command: RawCommand): Kind | null {
     }
     case "set_lock":
     case "set_mode":
+    case "decommission_host":
+    case "reinstate_host":
       return "host";
     case "allocate_address":
       return "address";

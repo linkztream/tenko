@@ -195,6 +195,7 @@ impl Rows {
             mode,
             lock: false,
             site: None,
+            decommissioned: None,
             meta: meta(),
         };
         let interface = Interface {

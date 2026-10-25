@@ -29,6 +29,7 @@ use crate::{
 
 mod fields;
 mod hosts;
+pub(crate) mod lifecycle;
 mod reserve;
 mod space;
 mod tenancy;
@@ -261,6 +262,8 @@ impl<'v> Planner<'v> {
                 mode,
                 expected,
             } => self.set_mode(*host, *mode, *expected),
+            IpamCommand::DecommissionHost(input) => self.decommission_host(input),
+            IpamCommand::ReinstateHost { host, expected } => self.reinstate_host(*host, *expected),
             IpamCommand::AllocateAddress(alloc) => {
                 let (result, ip) = self.allocate_address(alloc)?;
                 if let IpamCommand::AllocateAddress(planned) = &mut planned {

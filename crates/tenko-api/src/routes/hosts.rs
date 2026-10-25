@@ -32,9 +32,10 @@
 //! that tries gets 403 `ipam.host.lock_manual_only`, and automation that changes a locked host
 //! gets 423 `ipam.host.locked`.
 //!
-//! The list takes the filters `tenant`, `site`, `mode`, `locked` (`true` or `false`), `tag`,
-//! `q` (text over the name, the description and the tags), `sort` (`name` by default, `mode`,
-//! `created`, `updated`) and `deleted`.
+//! The list takes the filters `tenant`, `site`, `mode`, `locked` (`true` or `false`),
+//! `lifecycle` (`active` by default, `decommissioned` or `all`; see [`super::host_lifecycle`]),
+//! `tag`, `q` (text over the name, the description and the tags), `sort` (`name` by default,
+//! `mode`, `created`, `updated`) and `deleted`.
 //!
 //! # Deleting
 //!
@@ -102,6 +103,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         ("site" = Option<String>, Query, description = "Only hosts at this site (identifier)."),
         ("mode" = Option<String>, Query, description = "Only hosts with this assignment mode: `static`, `reserved`, `dynamic` or `unmanaged`."),
         ("locked" = Option<bool>, Query, description = "Only hosts that are locked (`true`) or not locked (`false`) against automation."),
+        ("lifecycle" = Option<String>, Query, description = "Hosts by lifecycle state: `active` (the default: hosts that are not decommissioned), `decommissioned` (the cleanup view) or `all`."),
         ("tag" = Option<String>, Query, description = "Only hosts that carry every one of these tags. Repeat the parameter or separate the tags with commas."),
         ("q" = Option<String>, Query, description = "Case-insensitive text search over the name, the description and the tags."),
         ("sort" = Option<String>, Query, description = "Sort order: comma-separated fields, `-` in front for descending, for example `-updated,name`. Fields: `name` (the default), `mode`, `created`, `updated`."),
@@ -127,6 +129,7 @@ async fn list_hosts(
             Filter::Site,
             Filter::Mode,
             Filter::Locked,
+            Filter::Lifecycle,
             Filter::Tag,
             Filter::Q,
             Filter::Sort,

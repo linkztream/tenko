@@ -67,6 +67,16 @@ message ObservedHost {
   optional string parent = 7;
   // Tags from the source.
   repeated string tags = 8;
+  // Whether the host runs, when the source tells (a hypervisor's guest). The addresses of a
+  // stopped host are configured, not in use, and the reconciler treats them as a dormant
+  // claim. Unspecified when the source does not tell.
+  PowerState power = 9;
+}
+
+enum PowerState {
+  POWER_STATE_UNSPECIFIED = 0;
+  POWER_STATE_RUNNING = 1;
+  POWER_STATE_STOPPED = 2;
 }
 
 message WebhookRequest {

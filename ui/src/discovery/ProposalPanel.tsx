@@ -17,6 +17,7 @@ import { TimeAgo } from "../grid/cells";
 import { t, tDynamic } from "../i18n";
 import { PlanPreview } from "../ipam/plan/PlanPreview";
 import { isTyping } from "../shell/keyboard";
+import { AddressConflictActions } from "./AddressConflictActions";
 import { approveProposal, getProposal, type Proposal } from "./api";
 import { KindBadge, SeverityBadge, StateBadge } from "./columns";
 import { canApprove, isOpen, ruleText, sourceText, type SourceNames } from "./model";
@@ -143,6 +144,7 @@ export function ProposalPanel(props: ProposalPanelProps) {
                       {p().kind === "conflict" ? t("discovery.action.dismiss") : t("discovery.action.reject")}
                       <Kbd keys={["R"]} />
                     </button>
+                    <AddressConflictActions proposal={p()} />
                   </div>
                 </div>
               </Show>

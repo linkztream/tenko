@@ -1,6 +1,9 @@
 //! The records of proposals and adoption policies, and their tables.
 
-use std::{collections::BTreeMap, net::IpAddr};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+};
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
@@ -271,6 +274,30 @@ pub struct Rejection {
     /// The reason given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Set when a person kept an address conflict as intended ("keep both"): the conflict
+    /// stays quiet while the same devices share the address, whatever the sources say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept: Option<KeptConflict>,
+}
+
+/// An address conflict a person said is intended, such as a dormant fallback guest that
+/// keeps the address of the guest that replaced it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct KeptConflict {
+    /// The devices of the conflict when it was kept.
+    pub macs: BTreeSet<MacAddr>,
+}
+
+impl KeptConflict {
+    /// The devices a conflict names: the MAC addresses of its evidence.
+    pub fn of(evidence: &[ProposalEvidence]) -> Self {
+        Self {
+            macs: evidence
+                .iter()
+                .filter_map(|evidence| evidence.mac)
+                .collect(),
+        }
+    }
 }
 
 /// What a prefix's policy adopts without a person (IPAM-15 "auto-adopt in network Z").
@@ -385,6 +412,10 @@ pub mod codes {
     pub const POLICY_INVALID: &str = "ipam.adoption.invalid";
     /// The reconciler does not run on this server (503).
     pub const RECONCILER_UNAVAILABLE: &str = "ipam.reconciler.unavailable";
+    /// Only an address conflict (two devices on one address, or an address used by
+    /// another device than the intended one) can be kept as intended (409). Params: `id`,
+    /// `rule`.
+    pub const NOT_KEEPABLE: &str = "ipam.proposal.not_keepable";
 }
 
 /// Audit actions of the area.
@@ -399,6 +430,8 @@ pub mod actions {
     pub const APPROVE: &str = "ipam.proposal.approve";
     /// A person rejected a proposal.
     pub const REJECT: &str = "ipam.proposal.reject";
+    /// A person kept an address conflict as intended ("keep both").
+    pub const KEEP: &str = "ipam.proposal.keep";
     /// A policy adopted a proposal.
     pub const ADOPT: &str = "ipam.proposal.adopt";
     /// An adoption failed.

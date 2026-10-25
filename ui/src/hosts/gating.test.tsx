@@ -3,6 +3,8 @@
 // casey sees every host and the views must hide the actions on those outside 203.0.113.0/24.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
+import { applyCommands, HOST_IDS } from "../api/mock/ipam/api";
+import type { IpamCommand } from "../api/types";
 import { paths } from "../app/paths";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
@@ -28,7 +30,7 @@ const listed = () => waitFor(() => expect(rows().length).toBeGreaterThan(20));
 const select = (...names: string[]) => {
   for (const name of names) fireEvent.click(within(rowOf(name)).getByRole("checkbox"));
 };
-const BAR = ["action-move", "action-mode", "action-lock"];
+const BAR = ["action-move", "action-mode", "action-lock", "action-decommission", "action-delete"];
 const barActions = () => BAR.filter((id) => screen.queryByTestId(id));
 
 /** The ids of the items of the row menu of a host. */
@@ -48,7 +50,7 @@ describe("gating of the hosts list", () => {
     expect(screen.getByTestId("hosts-create")).toBeTruthy();
     select(INSIDE, OUTSIDE);
     expect(barActions()).toEqual(BAR);
-    expect(await menuOf(OUTSIDE)).toEqual(["open", "move", "lock", "history", "restore", "delete"]);
+    expect(await menuOf(OUTSIDE)).toEqual(["open", "move", "lock", "history", "restore", "decommission", "delete"]);
   });
 
   it("shows a scoped operator the actions on the hosts of its grant only", async () => {
@@ -59,7 +61,7 @@ describe("gating of the hosts list", () => {
     expect(screen.queryByTestId("hosts-create")).toBeNull();
     select(INSIDE);
     expect(barActions()).toEqual(BAR);
-    expect(await menuOf(INSIDE)).toEqual(["open", "move", "lock", "history", "restore", "delete"]);
+    expect(await menuOf(INSIDE)).toEqual(["open", "move", "lock", "history", "restore", "decommission", "delete"]);
     // A host outside the scope in the selection hides the bulk write actions.
     select(OUTSIDE);
     expect(barActions()).toEqual([]);
@@ -89,7 +91,7 @@ describe("gating of the hosts list", () => {
 });
 
 describe("gating of the host view", () => {
-  const ACTIONS = ["host-edit", "host-mode", "host-lock", "host-move", "host-delete", "interface-add"];
+  const ACTIONS = ["host-edit", "host-mode", "host-lock", "host-move", "host-decommission", "host-delete", "interface-add"];
 
   async function shown(name: string) {
     renderRoute(HostView, { url: paths.host(name), path: "/ipam/hosts/:fqdn" });
@@ -141,5 +143,72 @@ describe("gating of the host view", () => {
     const page = await shown(INSIDE);
     expect(present(page)).toEqual([]);
     expect(await interfaceMenu()).toEqual([]);
+  });
+});
+
+describe("gating of the host lifecycle", () => {
+  const decommission = (name: string) =>
+    applyCommands([{ op: "decommission_host", args: { host: HOST_IDS[name], keep_dns: false } }] as unknown as IpamCommand[]);
+  const LIFECYCLE_BAR = ["action-decommission", "action-reinstate", "action-delete"];
+  const lifecycleBar = () => LIFECYCLE_BAR.filter((id) => screen.queryByTestId(id));
+
+  function renderWith(lifecycle: string) {
+    return renderRoute(HostsView, { url: `${paths.hosts()}?lifecycle=${lifecycle}`, path: "/ipam/hosts", routes: { "/ipam/hosts/:fqdn": () => <div /> } });
+  }
+
+  it("offers a scoped operator Reinstate and Delete on the decommissioned hosts of its grant only", async () => {
+    await signInScopedOperator();
+    decommission(INSIDE);
+    decommission(OUTSIDE);
+    renderWith("decommissioned");
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(await menuOf(INSIDE)).toEqual(["open", "move", "lock", "history", "restore", "reinstate", "delete"]);
+    expect(await menuOf(OUTSIDE)).toEqual(["open", "history"]);
+    select(INSIDE);
+    expect(lifecycleBar()).toEqual(["action-reinstate", "action-delete"]);
+    select(OUTSIDE);
+    expect(lifecycleBar()).toEqual([]);
+  });
+
+  it("shows an administrator Reinstate for decommissioned hosts and Decommission for active ones", async () => {
+    await signInAlex();
+    decommission(OUTSIDE);
+    renderWith("all");
+    await listed();
+    expect(await menuOf(OUTSIDE)).toEqual(["open", "move", "lock", "history", "restore", "reinstate", "delete"]);
+    expect(await menuOf(INSIDE)).toEqual(["open", "move", "lock", "history", "restore", "decommission", "delete"]);
+    select(OUTSIDE);
+    expect(lifecycleBar()).toEqual(["action-reinstate", "action-delete"]);
+    select(INSIDE);
+    // A mix of active and decommissioned hosts can be deleted, nothing else of the lifecycle.
+    expect(lifecycleBar()).toEqual(["action-delete"]);
+  });
+
+  async function banner(name: string) {
+    renderRoute(HostView, { url: paths.host(name), path: "/ipam/hosts/:fqdn" });
+    await screen.findByTestId("host-modes");
+    return await screen.findByTestId("host-decommissioned");
+  }
+
+  it("offers Reinstate on the banner to whoever may delete the host", async () => {
+    await signInScopedOperator();
+    decommission(INSIDE);
+    const shown = await banner(INSIDE);
+    expect(within(shown).getByTestId("host-reinstate")).toBeTruthy();
+  });
+
+  it.each([OUTSIDE, VIEWER_ONLY])("shows a scoped operator the banner of %s without Reinstate", async (name) => {
+    await signInScopedOperator();
+    decommission(name);
+    const shown = await banner(name);
+    expect(within(shown).queryByTestId("host-reinstate")).toBeNull();
+    expect(screen.queryByTestId("host-decommission")).toBeNull();
+  });
+
+  it("shows a viewer the banner without Reinstate", async () => {
+    await signInWithRoles(["viewer"]);
+    decommission(INSIDE);
+    const shown = await banner(INSIDE);
+    expect(within(shown).queryByTestId("host-reinstate")).toBeNull();
   });
 });

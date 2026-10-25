@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Added
+
+- Hosts have a lifecycle, and a stopped guest no longer raises an address conflict (IPAM-12, IPAM-15, IPAM-23): a host can be decommissioned (`POST /api/v1/hosts/{id}/decommission`, `tenko ipam host decommission`, on the host page, in the hosts list and from an address conflict on the Discovery page), which releases its addresses (they are unassigned, their DHCP reservation ends and their DNS names and records are removed unless the operator keeps them), stops its facts from raising proposals and hides it from the default hosts list; the list's lifecycle filter (Active, Decommissioned, All) shows when, by whom and why, with Reinstate (`POST /api/v1/hosts/{id}/reinstate`, which binds back the addresses that are still free) and Delete, one at a time or for a selection. The Proxmox VE connector reports each guest's power state, and the reconciler treats the configured addresses of a stopped guest as dormant claims: they raise no conflict against a running guest, a lease or a scan, and the host and address pages show them as configured on the stopped guest. An address conflict offers, beside Dismiss, Decommission for each host in it (preselecting a host whose claim comes only from a stopped guest) and Keep both (`POST /api/v1/proposals/{id}/keep`), which keeps the conflict quiet while the same devices share the address. Both lifecycle routes need the right to delete the host and are audited as `ipam.host.decommission` and `ipam.host.reinstate`; Keep both is audited as `ipam.proposal.keep`. The new host field and the optional field of the rejection row need no new data format.
+
 ## [0.0.7] - 2026-10-25
 
 ### Added

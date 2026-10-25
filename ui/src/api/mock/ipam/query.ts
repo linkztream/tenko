@@ -10,6 +10,7 @@ import { invalidQuery } from "./problems";
 import type { IpamData, KindTypes, MetaKind } from "./state";
 
 export type Deleted = "exclude" | "include" | "only";
+export type Lifecycle = "active" | "decommissioned" | "all";
 
 /** The parameters every list takes. */
 export const PAGING = ["limit", "cursor", "at_least"] as const;
@@ -102,6 +103,7 @@ export interface Filters {
   role: string | null;
   mode: AssignmentMode | null;
   locked: boolean | null;
+  lifecycle: Lifecycle;
   tag: string[];
   q: string;
   sort: SortKey[];
@@ -158,6 +160,7 @@ export function parseFilters(url: URL, spec: ParseSpec): Filters {
     role: has("role") ? query.oneOf("role", roles) : null,
     mode: has("mode") ? query.oneOf<AssignmentMode>("mode", ASSIGNMENT_MODES) : null,
     locked: has("locked") ? query.bool("locked") : null,
+    lifecycle: has("lifecycle") ? (query.oneOf<Lifecycle>("lifecycle", ["active", "decommissioned", "all"]) ?? "active") : "all",
     tag: has("tag") ? query.all("tag") : [],
     q: has("q") ? (query.one("q") ?? "").trim().toLowerCase() : "",
     sort: parseSort(query, spec.sorts),
@@ -289,13 +292,14 @@ export const ADDRESSES: ListSpec<"address"> = {
 
 export const HOSTS: ListSpec<"host"> = {
   kind: "host",
-  parse: { params: ["tenant", "site", "mode", "locked", ...COMMON], sorts: ["name", "mode"] },
+  parse: { params: ["tenant", "site", "mode", "locked", "lifecycle", ...COMMON], sorts: ["name", "mode"] },
   sorts: { name: (h) => h.name, mode: (h) => h.mode },
   matches: (h, f) =>
     (f.tenant === null || h.tenant === f.tenant) &&
     (f.site === null || h.site === f.site) &&
     (f.mode === null || h.mode === f.mode) &&
-    (f.locked === null || (h.lock ?? false) === f.locked),
+    (f.locked === null || (h.lock ?? false) === f.locked) &&
+    (f.lifecycle === "all" || (f.lifecycle === "decommissioned") === !!h.decommissioned),
   text: (h) => `${h.name} ${metaText(h.meta)}`,
 };
 

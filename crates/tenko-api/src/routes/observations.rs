@@ -590,6 +590,7 @@ mod tests {
             platform: Some("qemu".to_owned()),
             parent: Some("pve1".to_owned()),
             tags: Vec::new(),
+            power: None,
         }
     }
 

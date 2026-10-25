@@ -15,6 +15,7 @@ import { Icon } from "../../components/Icon";
 import { ErrorNotice } from "../../components/Notice";
 import { DeletedTag, DnsName, LockFlag, ModeBadge, StatusBadge, Tags, TimeAgo } from "../../grid/cells";
 import { createScopeIndex, mayReserve } from "../../dhcp/reservations/gate";
+import { AddressDormantNote } from "../../discovery/AddressDormantNote";
 import { t, withPacks } from "../../i18n";
 import { DeleteDialog, RestoreDialog } from "../DeleteDialog";
 import { CustomValues } from "../fields/CustomFieldsEditor";
@@ -216,6 +217,7 @@ export default function AddressView() {
                   </dd>
                 </dl>
                 <CustomValues values={a().meta.custom} />
+                <AddressDormantNote ip={a().ip} />
               </section>
               <AddressReservation address={a()} />
               <DnsRecords addresses={[a()]} />

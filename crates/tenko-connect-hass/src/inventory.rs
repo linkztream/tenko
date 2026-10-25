@@ -332,6 +332,7 @@ fn device_host(
             .map(str::to_owned),
         parent: None,
         tags,
+        power: None,
     };
     Some((host, text(device, "manufacturer").map(str::to_owned)))
 }
@@ -381,6 +382,7 @@ fn tracker_host(
         platform: None,
         parent: None,
         tags,
+        power: None,
     })
 }
 

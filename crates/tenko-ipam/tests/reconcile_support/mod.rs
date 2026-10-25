@@ -285,5 +285,6 @@ pub fn vm(id: &str, name: Option<&str>, host_mac: Option<&str>, ips: &[&str]) ->
         platform: Some("qemu".to_owned()),
         parent: Some("pve1".to_owned()),
         tags: Vec::new(),
+        power: None,
     }
 }

@@ -44,6 +44,7 @@
 //! hands every observed address to the jobs that wait for one (the job engine's
 //! observation wake-up), confirms waiting move steps at once, and schedules a run.
 
+pub(crate) mod dormant;
 pub mod moves;
 pub(crate) mod rules;
 pub mod scopes;

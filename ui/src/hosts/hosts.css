@@ -1,4 +1,11 @@
 /* The host views. Token roles only. */
+/* The lifecycle of a host: the badge, the muted rows of the list and the banner of the page. */
+.tag.decommissioned { border: 1px solid var(--ink-3); background: transparent; color: var(--ink-3); }
+.grid tr.decommissioned td { color: var(--ink-3); }
+.decommissioned-by { white-space: nowrap; }
+.decommission-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decommission-banner { display: grid; gap: var(--sp-4); }
+.decommission-banner .kv { margin: 0; }
 .host-body { max-width: 1200px; }
 .host-grid { position: relative; display: flex; flex-direction: column; height: 220px; border: 1px solid var(--line); border-radius: var(--r-3); overflow: hidden; }
 .host-grid .addr-link + .addr-link { margin-inline-start: var(--sp-4); }

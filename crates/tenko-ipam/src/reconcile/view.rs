@@ -625,9 +625,10 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
     let now = snapshot.now;
     let intent = &snapshot.intent;
     let mut pictures: BTreeMap<(VrfId, IpAddr), Picture> = BTreeMap::new();
-    // MAC addresses seen anywhere by a current fact.
+    // MAC addresses seen anywhere by a current fact. A stopped host's configured address
+    // is a dormant claim, not a sighting (`super::dormant`).
     let mut seen_macs: BTreeSet<MacAddr> = BTreeSet::new();
-    for pair in &snapshot.seen {
+    for pair in snapshot.seen.iter().filter(|pair| !pair.dormant) {
         let fact = &snapshot.facts[pair.fact];
         seen_macs.extend(pair.mac);
         let (Some(ip), Some(placement)) = (pair.ip, pair.placement) else {

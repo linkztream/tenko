@@ -16,7 +16,7 @@ use tenko_core::{
     ipam::{AssignmentMode, Status},
     ir::{Ir, IrAddress, IrHost, IrNetwork, IrVlan, LossEntry, LossReport, SourceLocation},
     net::{Duid, Fqdn, HostName},
-    observe::{Endpoint, LinkKind, ObservedHost},
+    observe::{Endpoint, LinkKind, ObservedHost, PowerState},
 };
 use zeroize::Zeroizing;
 
@@ -286,6 +286,11 @@ pub fn host_to_proto(host: &ObservedHost) -> v1::ObservedHost {
         platform: host.platform.clone(),
         parent: host.parent.clone(),
         tags: host.tags.clone(),
+        power: match host.power {
+            None => v1::PowerState::Unspecified,
+            Some(PowerState::Running) => v1::PowerState::Running,
+            Some(PowerState::Stopped) => v1::PowerState::Stopped,
+        } as i32,
     }
 }
 
@@ -344,6 +349,12 @@ pub fn host_from_proto(
             Err(error) => warnings.push(format!("{error}; the value is skipped")),
         }
     }
+    // An unknown power state (a newer plugin's) is no statement, not an error.
+    let power = match v1::PowerState::try_from(host.power) {
+        Ok(v1::PowerState::Running) => Some(PowerState::Running),
+        Ok(v1::PowerState::Stopped) => Some(PowerState::Stopped),
+        _ => None,
+    };
     Some(ObservedHost {
         external_id,
         name,
@@ -353,6 +364,7 @@ pub fn host_from_proto(
         platform,
         parent,
         tags,
+        power,
     })
 }
 

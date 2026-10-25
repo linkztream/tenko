@@ -265,6 +265,30 @@ pub struct ObservedHost {
     /// Tags from the source.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Whether the host runs, when the source tells (a hypervisor's guest). The addresses
+    /// of a stopped host are configured, not in use: the reconciler treats them as a
+    /// dormant claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<PowerState>,
+}
+
+impl ObservedHost {
+    /// Whether the source reports the host as stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.power == Some(PowerState::Stopped)
+    }
+}
+
+/// The power state of an observed host.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PowerState {
+    /// The host runs.
+    Running,
+    /// The host is stopped (powered off, or a template that never runs).
+    Stopped,
 }
 
 /// One end of a link.

@@ -335,6 +335,7 @@ fn lab_intent() -> (Intent, tenko_core::HostId, PrefixId) {
         mode: AssignmentMode::Reserved,
         lock: false,
         site: None,
+        decommissioned: None,
         meta: Meta::new(stamp.clone()),
     };
     let interface = Interface {

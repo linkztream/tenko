@@ -301,6 +301,10 @@ Observations without intent create proposals, never intent (IPAM-15). An unknown
 
 Intent wins for managed hosts (IPAM-16). A per-host `lock` flag stops all automation for that host.
 
+### Hosts and their lifecycle
+
+A host is active until a person decommissions it: an old guest kept as a fallback, a device waiting to be cleaned up. `decommissioned` is an optional field of the host row (when, by whom, why, whether the DNS names were kept, and the addresses it released), so no stored enum and no data format changed. A decommission (`POST /api/v1/hosts/{id}/decommission`, `tenko ipam host decommission`) releases the host's addresses in one plan: each is unassigned, which ends the DHCP reservation it made, and its DNS name is removed unless the operator keeps it, so the DNS actuator removes the records. The host keeps its interfaces, so its MAC addresses are known and its facts raise no proposals ([reconciliation.md](reconciliation.md) section 3.3.1); no address can be assigned to its interfaces while it is decommissioned (`ipam.host.decommissioned`). The default hosts list and the host pickers leave it out; the list's lifecycle filter (`lifecycle=active|decommissioned|all`) shows the decommissioned hosts with when, by whom and why, for a reinstatement or a delete. A reinstatement (`POST /api/v1/hosts/{id}/reinstate`) binds back the released addresses that are still free, with the DNS names they lost, and warns about the others (`ipam.host.reinstate_skipped`). Both need the rights of deleting the host and are audited as `ipam.host.decommission` and `ipam.host.reinstate`.
+
 ### Jobs
 
 Every change is a job with steps, a status, a timeout and rollback, visible in the UI and the API (IPAM-17). Nothing happens silently. Migration uses the same job engine (MIG-03). If a MAC address (DHCPv4) or DUID (DHCPv6) is missing, IPAM warns before a reservation can be created (IPAM-18).
@@ -421,7 +425,7 @@ The UI shows an interactive map with filters per VLAN and site. Clicking a node 
 
 ## Inventory sources
 
-All inventory sources implement one `InventorySource` interface (CONN-02). A source provides observed hosts with name, MAC addresses, IP addresses, OS, platform, parent host and tags. Sources are polled on a schedule, and webhooks are used where the platform offers them.
+All inventory sources implement one `InventorySource` interface (CONN-02). A source provides observed hosts with name, MAC addresses, IP addresses, OS, platform, parent host and tags, and the power state where the source knows it (a stopped guest's addresses are dormant claims, [reconciliation.md](reconciliation.md) section 3.3.1). Sources are polled on a schedule, and webhooks are used where the platform offers them.
 
 | Source | Phase | Method |
 |---|---|---|

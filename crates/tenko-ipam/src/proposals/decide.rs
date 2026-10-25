@@ -95,7 +95,7 @@ fn not_found(id: ProposalId) -> IpamError {
     .param("id", id)
 }
 
-fn check(proposal: &IntentProposal, expected: Option<Revision>) -> IpamResult<()> {
+pub(crate) fn check(proposal: &IntentProposal, expected: Option<Revision>) -> IpamResult<()> {
     if let Some(expected) = expected
         && expected != proposal.revision
     {
@@ -138,7 +138,7 @@ fn key_revision(view: &dyn ReadView, proposal: &IntentProposal) -> IpamResult<Op
 }
 
 /// Closes the open-key row of a proposal in `batch`, if the row still names it.
-fn close_key(
+pub(crate) fn close_key(
     view: &dyn ReadView,
     proposal: &IntentProposal,
     batch: &mut WriteBatch,
@@ -207,7 +207,7 @@ pub(crate) async fn run_write(
 }
 
 /// A short pause before trying again after a stale plan.
-async fn pause(attempt: u32) {
+pub(crate) async fn pause(attempt: u32) {
     let micros = 100u64 << attempt.min(8);
     tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
 }
@@ -473,6 +473,7 @@ pub async fn reject(
                 proposal: id,
                 stamp,
                 reason: reason.clone(),
+                kept: None,
             },
         )?;
         batch.expect_typed(&REJECTIONS, &proposal.key, remembered);

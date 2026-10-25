@@ -90,6 +90,9 @@ pub(crate) struct Intent {
     pub vlans: BTreeMap<VlanId, Vlan>,
     /// Live VLANs by site (`None`: global) and VLAN id.
     pub vlan_ids: BTreeMap<(Option<SiteId>, u16), VlanId>,
+    /// MAC addresses whose live interfaces all belong to decommissioned hosts: the facts
+    /// that name them raise nothing.
+    pub decommissioned_macs: BTreeSet<MacAddr>,
 }
 
 impl Intent {
@@ -190,6 +193,7 @@ impl Intent {
         if intent.default_vrf.is_none() && intent.vrfs.len() == 1 {
             intent.default_vrf = intent.vrfs.first().copied();
         }
+        intent.decommissioned_macs = super::dormant::decommissioned_macs(&intent);
         Ok(intent)
     }
 
@@ -304,6 +308,9 @@ pub(crate) struct Seen {
     pub placement: Option<Placement>,
     /// The name the source gives.
     pub name: Option<String>,
+    /// The fact is a host its source reports as stopped: the address is configured, not in
+    /// use, and the claim is dormant ([`Snapshot::dormant`]).
+    pub dormant: bool,
 }
 
 /// Whether an address is one IPAM tracks: unicast, not loopback, link-local, multicast or
@@ -355,6 +362,11 @@ pub(crate) struct Snapshot {
     pub scopes: Vec<ScanScope>,
     /// Indexes in [`Self::facts`] of the current networks network controllers report.
     pub networks: Vec<usize>,
+    /// The dormant claims that a live claim on the same address overrides: pairs of
+    /// stopped hosts at an address where a running host, a lease or a scan sees another
+    /// device (or a device without a MAC address). They are not in [`Self::seen`], so no rule
+    /// sees them; the views show them as configured on the stopped host.
+    pub dormant: Vec<Seen>,
 }
 
 impl Snapshot {
@@ -406,6 +418,12 @@ impl Snapshot {
             }
             seen.extend(pairs(index, fact, &intent));
         }
+        // The facts of decommissioned hosts raise nothing.
+        seen.retain(|pair| {
+            pair.mac
+                .is_none_or(|mac| !intent.decommissioned_macs.contains(&mac))
+        });
+        let (seen, dormant) = super::dormant::split(seen);
         let mut open = BTreeMap::new();
         for (key, id, revision) in
             view.scan_typed(&OPEN_KEYS, KeyRange::all(), usize::MAX, false)?
@@ -449,6 +467,7 @@ impl Snapshot {
             vendors,
             scopes: super::scopes::load(view)?,
             networks,
+            dormant,
         })
     }
 }
@@ -461,12 +480,14 @@ fn pairs(index: usize, fact: &ObservedFact, intent: &Intent) -> Vec<Seen> {
     let macs = fact.macs();
     let ips: Vec<IpAddr> = fact.ips().into_iter().filter(|ip| trackable(*ip)).collect();
     let hint = fact.vrf();
+    let dormant = matches!(&fact.observed, Observed::Host(host) if host.is_stopped());
     let seen = |mac: Option<MacAddr>, ip: Option<IpAddr>| Seen {
         fact: index,
         mac,
         ip,
         placement: ip.map(|ip| intent.place(ip, hint)),
         name: name.clone(),
+        dormant,
     };
     // A link names devices, not addresses; a name, a vendor or a network is not a sighting.
     if matches!(

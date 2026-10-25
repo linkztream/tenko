@@ -219,6 +219,10 @@ export type AddressPatch = S["AddressPatch"];
 export type AssignmentMode = S["AssignmentMode"];
 export const ASSIGNMENT_MODES: readonly AssignmentMode[] = ["reserved", "static", "dynamic", "unmanaged"];
 export type Host = S["Host"];
+export type Decommission = S["Decommission"];
+export type ReleasedAddress = S["ReleasedAddress"];
+/** The `lifecycle` filter of the host list. */
+export type HostLifecycle = "active" | "decommissioned" | "all";
 export type HostInput = S["HostInput"];
 export type HostPatch = S["HostPatch"];
 export type Interface = S["Interface"];

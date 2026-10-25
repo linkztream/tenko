@@ -389,6 +389,8 @@ fn bulk(kind: ObjectKind, body: Option<serde_json::Value>) -> Result<Vec<IpamCom
                 | IpamCommand::DeleteCustomField { .. }
                 | IpamCommand::SetLock { .. }
                 | IpamCommand::SetMode { .. }
+                | IpamCommand::DecommissionHost(_)
+                | IpamCommand::ReinstateHost { .. }
         ) || !accepted
         {
             return Err(not_queueable(format!(

@@ -89,6 +89,8 @@ pub mod dns;
 pub mod events;
 pub mod export;
 pub mod guardrails;
+// The lifecycle of a host: decommission and reinstate.
+pub mod host_lifecycle;
 pub mod hosts;
 pub mod i18n;
 pub mod import;
@@ -101,6 +103,8 @@ pub mod node_roles;
 pub mod nodes;
 pub mod observations;
 pub mod prefixes;
+// "Keep both" on an address conflict.
+pub mod proposal_keep;
 pub mod proposals;
 pub mod queue;
 pub mod reconciler;
@@ -247,12 +251,14 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
             .merge(prefixes::routes())
             .merge(addresses::routes())
             .merge(hosts::routes())
+            .merge(host_lifecycle::routes())
             .merge(common::routes())
             .merge(import::routes())
             .merge(export::routes())
             .merge(moves::routes())
             .merge(observations::routes())
             .merge(proposals::routes())
+            .merge(proposal_keep::routes())
             .merge(reconciler::routes())
             .merge(secrets::host_routes())
             .merge(remote::routes())

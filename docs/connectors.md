@@ -206,6 +206,8 @@ The answers become these hosts:
 
 **Addresses of a guest.** The plugin first looks for live addresses. For a running VM these are the addresses that the guest agent reports on interfaces whose hardware address is one of the VM's configured MAC addresses. For a running container they are the addresses of the interfaces with one of its MAC addresses. Interfaces inside the guest with other MAC addresses, such as `docker0`, bridges and VPN adapters, are left out. Only when there is no live address does the plugin use the static addresses of the configuration: the `ip` and `ip6` of the cloud-init entry `ipconfigN` of a VM, and the `ip` and `ip6` of a container's `netN`. The values `dhcp`, `auto` and `manual` are not addresses. Loopback, unspecified, multicast and link-local addresses and the IPv4 broadcast address are never reported. A stopped guest (with `include_stopped` on) therefore has its MAC addresses and its static addresses only.
 
+**Power state.** A guest carries its power state from the `status` of `/cluster/resources`: `running`, or `stopped` (a template too); another status, and a node, carry none. The reconciler treats the addresses of a stopped guest as dormant claims: an old guest kept as a fallback with the address of the guest that replaced it raises no address conflict while it is stopped, and the host page shows the address as configured on the stopped guest ([reconciliation.md](reconciliation.md) section 3.3.1). The tag `status:<status>` stays as before.
+
 **Guests the plugin cannot look into.** A guest on a node that is not online comes with what `/cluster/resources` says about it (name, status, pool and tags) and no MAC or IP address, because its configuration cannot be read.
 
 **Operating system.** A VM maps its `ostype`: `l26` is `Linux`, `l24` is `Linux 2.4`, `win11` is `Windows 11/2022/2025`, `win10` is `Windows 10/2016/2019`, `win8` is `Windows 8/2012/2012 R2`, `win7` is `Windows 7/2008 R2`, `w2k8` is `Windows Vista/2008`, `wvista` is `Windows Vista`, `w2k3` is `Windows 2003`, `w2k` is `Windows 2000`, `wxp` is `Windows XP`, `solaris` is `Solaris`; any other value (`other`) gives no OS. A container maps its distribution to `Linux (Debian)`, `Linux (Ubuntu)`, `Linux (Alpine)` and so on; an unmanaged container, or none given, is `Linux`, and a distribution the plugin does not know is `Linux (<ostype>)`.
@@ -232,6 +234,7 @@ An example of a guest as the plugin reports it (documentation values):
 | MAC addresses | `00:00:5e:00:53:01`, `00:00:5e:00:53:02` |
 | IP addresses | `198.51.100.10` |
 | OS, platform, parent | `Linux`, `qemu`, `node/pve-a` |
+| Power state | `running` |
 | Tags | `prod`, `web`, `status:running`, `pool:lab`, `vnet:vnet20`, `vlan:20`, `bridge:vmbr0`, `vlan:30` |
 
 **On the map.** A guest names its node as its parent, so the topology map draws a VM-to-host edge (`vm_host`) from the node, which becomes a hypervisor, to the VM or container. The platforms `qemu` and `lxc` make the guests `vm` and `container` nodes ([topology.md](topology.md#3-edges)).

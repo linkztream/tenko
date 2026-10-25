@@ -297,6 +297,7 @@ async fn reserved_host(
         mode: AssignmentMode::Reserved,
         lock: false,
         site: None,
+        decommissioned: None,
         meta: meta(),
     };
     let interface = Interface {

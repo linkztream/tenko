@@ -840,6 +840,7 @@ impl Planner<'_> {
         let iface = self.load_live::<Interface>(interface, "interface")?;
         let host = self.load_live::<Host>(iface.host, "interface")?;
         self.check_unlocked(&host)?;
+        Self::check_not_decommissioned(&host)?;
         Ok(host)
     }
 

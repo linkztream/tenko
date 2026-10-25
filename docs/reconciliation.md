@@ -50,7 +50,7 @@ A fact is stored once per source and subject, under the key (source key, subject
 
 | Subject type | Subject key | Reported by | What the fact names |
 |---|---|---|---|
-| `host` | `host:<external id>` | Inventory connectors | Name, MAC addresses, IP addresses, OS, platform, parent host, tags |
+| `host` | `host:<external id>` | Inventory connectors | Name, MAC addresses, IP addresses, OS, platform, parent host, tags, and the power state (`running` or `stopped`) when the source tells it, as the Proxmox VE connector does for its guests |
 | `address` | `address:<vrf>/<ip>` | Probes, DHCP leases | The address, the MAC address behind it when known, and the VRF of the source; for a lease the client's MAC address, `last_seen` the client's last transaction and `expires_at` the end of the binding (for a conflict, the MAC address that answered the probe, if any, until the hold ends) |
 | `attachment` | `attachment:<mac>` | Network controllers, SNMP probes | The client's switch or access point, port, SSID and VLAN |
 | `services` | `services:<ip>` | Probes | Open TCP ports, and the ones that answered a TLS handshake (SCAN-08) |
@@ -178,6 +178,17 @@ Every rule first places each address that a current fact names. A fact names an 
 
 The VRF comes from the source when the source names one, as probe `address` facts do. Otherwise Tenko looks at the VRFs that have a network containing the address: if there is exactly one, the address belongs there; if there is none, it is outside in the default VRF (the VRF `default` of the tenant `default`, or the only VRF), and unplaced when there is no default VRF; if there are several, it is unplaced.
 
+### 3.3.1 Dormant claims and decommissioned hosts
+
+A `host` fact whose power state is `stopped` names the addresses the host is configured with, not addresses in use: an old guest kept as a fallback still carries the address of the guest that replaced it. Its addresses are **dormant claims** (`tenko_ipam::reconcile::dormant`):
+
+- A dormant claim raises no conflict against a live claim: a running guest, a lease, a scan sighting. Where a live claim of another device (or of a device without a MAC address) sees the same address in the same VRF, the dormant claim is set aside before the rules run, so no rule reads it (no conflict, no discovered host, no address suggestion for it).
+- A dormant claim alone at its address stays a sighting for every rule except the conflicts: a stopped guest still makes a discovered host, records its last sighting and fills its address. It becomes a conflict only when both claims are live, so two stopped guests on one address are no conflict, and neither is a stopped guest configured with an address that intent gives another device.
+- The web UI shows a dormant claim on the host page and on the address page as "configured on the stopped guest `<name>`", from the facts' power state.
+- A DNS record is never a sighting (section 8), so it neither overrides a dormant claim nor conflicts with one.
+
+A **decommissioned host** (the lifecycle state of [ARCHITECTURE.md](ARCHITECTURE.md), "Hosts and their lifecycle") released its addresses, and its facts raise nothing: the pairs of a MAC address whose live interfaces all belong to decommissioned hosts are left out before the rules run, and the address rules skip a decommissioned host whose MAC address another host shares. Its interfaces still carry the MAC addresses, so the device is not proposed as a new host either.
+
 ### 3.4 Concurrency
 
 - Runs never overlap on one controller; a run waits for the one before it.
@@ -237,6 +248,8 @@ The fingerprint covers what the proposal says, not when or with which generated 
 
 **Rejection memory.** A rejection stores the fingerprint under the subject key. While the rules produce the same fingerprint for that key, the subject is not opened again and the run counts it as suppressed. When the evidence changes, the proposal opens again and the stored rejection is forgotten. A rejected conflict therefore stays quiet until the conflict looks different.
 
+**Kept conflicts.** "Keep both" on an address conflict (section 4.8) is a rejection that also stores the MAC addresses of the conflict (`kept` on the rejection row): the address is an exception, and the subject stays quiet while the same devices share it, even when another source starts to report them or a fact's observation changes, which would reopen a plain rejection. A conflict with another set of devices opens again, and the exception is forgotten with the rejection.
+
 **Host names.** A discovered host takes the first usable name any source gives, lowercased, with characters outside `a-z`, `0-9`, `-`, `_` and `.` replaced by `-` ("Web 01" becomes `web-01`). Without a name it is `host-<mac without separators>` or `host-<address with dashes>`. When the name is taken in the default tenant, or promised by another open proposal, a suffix `-2`, `-3` and so on is added.
 
 ### 4.4 Precedence: intent, lock and unmanaged
@@ -244,6 +257,7 @@ The fingerprint covers what the proposal says, not when or with which generated 
 - **Intent wins for managed hosts** (IPAM-16). An observation never changes a host by itself. When it disagrees with a `static` or `reserved` host, the proposal is a warning and only a person can apply it. When the host is `dynamic`, where IPAM only observes (IPAM-14), the disagreement is `info` and a policy with `adopt_all` may apply it.
 - **Locked hosts get no proposal that would change them.** The address rules (section 4.6) and the orphan rule skip a host with `lock` set, and the open address proposals of a host that is locked later expire at the next run. Conflicts carry no commands and change nothing, so they are still raised for a locked host. As a second line of defence the planner treats `system:reconciler` as automation and refuses a locked host with 423 `ipam.host.locked`. The lock stops automation, not people: a person who approves a proposal is not refused.
 - **`unmanaged` hosts get nothing.** No mismatch or orphan concerns them, no conflict is raised about a MAC address or an intended address that belongs to one, and a MAC address that any live interface carries is never proposed as a new host. An address seen only from the MAC address of an `unmanaged` host does not suggest a network either (section 4.9).
+- **Decommissioned hosts get nothing either.** Their facts are left out before the rules run (section 3.3.1), whatever the host's mode.
 
 ### 4.5 Discovered host
 
@@ -274,7 +288,7 @@ The rule measures time since the last sighting by any source, and it tells "gone
 
 ### 4.8 Conflicts
 
-A conflict is a contradiction between observations, or between an observation and intent (IPAM-23). Conflicts carry no commands, because the cause is a device or a decision that IPAM cannot settle. A person resolves the cause and then rejects the proposal to close it; approving one answers 409 `ipam.proposal.nothing_to_apply`. A conflict whose cause disappears expires by itself.
+A conflict is a contradiction between observations, or between an observation and intent (IPAM-23). Conflicts carry no commands, because the cause is a device or a decision that IPAM cannot settle. A person resolves the cause and then rejects the proposal to close it; approving one answers 409 `ipam.proposal.nothing_to_apply`. A conflict whose cause disappears expires by itself. Only live claims make a conflict; a stopped guest's configured address is a dormant claim (section 3.3.1).
 
 | Rule | When | Severity |
 |---|---|---|
@@ -283,6 +297,15 @@ A conflict is a contradiction between observations, or between an observation an
 | `ipam.reconcile.conflict_address_taken` | An address that intent assigns to an interface with a MAC address is seen with a MAC address that belongs to none of that host's interfaces | `warning` |
 
 A probe keeps one fact per address and method, so a second device on the same address shows up there only through another method or another source.
+
+**Resolving an address conflict.** The two address conflicts (`conflict_shared_address` and `conflict_address_taken`) carry the parameter `hosts`, the hosts of intent in the conflict (for a taken address the intended host first), and the taken address also `dormant_hosts`, the intended host when its own claim on the address is only dormant (its MAC address is seen there only from a stopped guest). Beside Dismiss (the rejection of section 5.2), the Discovery page offers:
+
+| Action | What it does |
+|---|---|
+| Decommission `<host>`, for each host of the conflict | `POST /api/v1/hosts/{id}/decommission` (rights of deleting the host): the host releases its addresses, its facts raise nothing, and the conflict expires at the next run; the address is then free for the other device, whose address proposal binds it. A host of `dormant_hosts` is preselected. The dialog removes the DNS names of the released addresses unless the operator keeps them |
+| Keep both | `POST /api/v1/proposals/{id}/keep` (section 5.2): the conflict is intended, such as a dormant fallback guest, and stays quiet while the same devices share the address |
+
+A merge ("the new host replaced the old one; carry over the old host's history, tags and custom fields") is not offered: tags and custom fields could be copied with one host update, but a host's history is keyed by its identifier and cannot move to another host without rewriting history rows, which the audit trail forbids. Decommission the old host and copy what is worth keeping by hand.
 
 ### 4.9 Outside known networks
 
@@ -315,6 +338,8 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 
 `POST /api/v1/proposals/{id}/reject` needs `approve` on proposals. The body is `{"reason": "..."}` and the reason is optional: it is trimmed, a blank reason counts as none, and it has at most 1,024 bytes and no control characters other than line breaks and tabs (400 `ipam.validation` otherwise). `If-Match` works as for approval. The proposal becomes `rejected`, and the rejection memory (section 4.3) is written in the same batch inside an inline job.
 
+**Keep both.** `POST /api/v1/proposals/{id}/keep` closes an open address conflict like a rejection, with the same body and `If-Match`, and stores the exception of section 4.3. It needs `approve` on proposals. A proposal that is not an address conflict answers 409 `ipam.proposal.not_keepable`.
+
 **Many at once.** `POST /api/v1/proposals/approve` and `POST /api/v1/proposals/reject` decide up to 500 proposals in one request. The body is `{"ids": [...]}`, and the rejection also takes the `reason` of the single route, which goes to every proposal (a bad reason is 400 `ipam.validation` for the whole request). Each proposal is decided in order with the logic of the single route and independently of the others: one that is no longer open, lies outside the caller's scope, has nothing to apply or is refused by any other check of the single route is `skipped` with that route's error code and message, and the rest are applied. The answer lists every id as `approved`, `rejected` or `skipped` and gives the three counts. The rights are those of the single route, checked for each proposal (a principal that may not approve proposals at all gets 403 at once), and there is no `dry_run`, `If-Match` or `acknowledge`: a plan that needs an acknowledgement is skipped (`ipam.plan.unacknowledged`). Each decision writes the audit records of the single route and nothing else; there is no record of the batch. An empty list is 422 `ipam.proposal.batch_empty` and more than 500 ids is 422 `ipam.proposal.batch_too_large`. In the web UI an administrator or operator selects rows of the inbox and approves or rejects them in one step.
 
 ### 5.3 Run now
@@ -333,6 +358,7 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 | `ipam.proposal.expire` | A proposal expired | `system:reconciler` |
 | `ipam.proposal.approve` | A person approved; names the proposal and the objects changed | The person |
 | `ipam.proposal.reject` | A person rejected; records the reason | The person |
+| `ipam.proposal.keep` | A person kept an address conflict; records the MAC addresses kept and the reason | The person |
 | `ipam.proposal.adopt` | A policy applied a proposal; records `policy_prefix` | `system:reconciler` |
 | `ipam.proposal.adopt_failed` | A policy's attempt failed; a failed record with the error | `system:reconciler` |
 | `ipam.adoption.set` | A person set a policy; records the old and the new value | The person |
@@ -432,7 +458,7 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.obs.last_seen` | Intent object (address or interface) | `IntentSighting`: time, source key and observation |
 | `ipam.proposals` | Proposal id | `IntentProposal` |
 | `ipam.proposal_keys` | Subject key | The id of the open proposal of that key |
-| `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason |
+| `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason, and for a kept conflict the MAC addresses kept |
 | `ipam.adoption` | Prefix id | `StoredPolicy`: policy, who set it and when |
 | `ipam.reconciler_settings` | None (one row) | `ReconcilerSettings` (section 3.1.1) |
 
@@ -448,6 +474,7 @@ The index tables follow their fact in the same batch.
 | `GET /api/v1/proposals/{id}` | `get_proposal` | `read`; returns an `ETag` |
 | `POST /api/v1/proposals/{id}/approve` | `approve_proposal` | `approve` on proposals, plus the right each command needs |
 | `POST /api/v1/proposals/{id}/reject` | `reject_proposal` | `approve` on proposals |
+| `POST /api/v1/proposals/{id}/keep` | `keep_proposal` | `approve` on proposals |
 | `POST /api/v1/proposals/approve` | `approve_proposals` | `approve` on proposals, plus the right each command needs, checked for each proposal |
 | `POST /api/v1/proposals/reject` | `reject_proposals` | `approve` on proposals, checked for each proposal |
 | `POST /api/v1/proposals/reconcile` | `reconcile_proposals` | `approve` on proposals |
@@ -496,7 +523,7 @@ An address's VRF comes from the fact when the source reports one (DHCP, probe ad
 | `rogue` | a current lease or sighting inside a network of intent, at an address without intent, of a device whose MAC address no interface carries | `newest_sighting`: the newer of the lease and the scan; the row links the open discovered-host proposal (IPAM-15, `discovered_host/mac:<mac>` or `discovered_host/ip:<vrf>/<ip>`) |
 | `orphan` | a DNS record of an address that no host holds | `orphan_rule` (intent) for a record IPAM wrote, linking Phase 2's `dns_orphaned_record` proposal; `manual_record` (DNS) for a record written by hand, which stays as written |
 | `ptr_mismatch` | a PTR name that is not the address's DNS name of intent or, without one, not a name of its forward records | `intent_managed` when a managed host holds the DNS name; `forward_record` (DNS) otherwise |
-| `conflict` | two or more MAC addresses on one address across the leases and the sightings, unless they all belong to one host's interfaces, or an address the `dhcp` role abandoned on a conflict (WP8.5) | `never_automatic`: no winner, never resolved automatically (IPAM-23) |
+| `conflict` | two or more MAC addresses on one address across the leases and the sightings, unless they all belong to one host's interfaces, or an address the `dhcp` role abandoned on a conflict (WP8.5); a stopped guest's configured address is a dormant claim and no sighting here, and the facts of decommissioned hosts are left out (section 3.3.1) | `never_automatic`: no winner, never resolved automatically (IPAM-23) |
 
 A conflict is not also listed as a rogue. An `unmanaged` host is never a ghost, and its leases and sightings agree with intent as long as they carry its MAC address. A row carries `rule` (the rule in English) beside `rule_id`; the web UI shows its own text of the rule.
 

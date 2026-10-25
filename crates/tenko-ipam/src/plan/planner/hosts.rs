@@ -74,6 +74,7 @@ impl Planner<'_> {
             mode: input.mode.unwrap_or(AssignmentMode::Static),
             lock: input.lock.unwrap_or(false),
             site: input.site,
+            decommissioned: None,
             meta,
         };
         self.write(&host)?;
@@ -280,7 +281,11 @@ impl Planner<'_> {
     // ----- interfaces -------------------------------------------------------------------
 
     /// The interfaces of a host (loaded, tracked).
-    fn interfaces_of(&mut self, host: HostId, with_deleted: bool) -> IpamResult<Vec<Interface>> {
+    pub(super) fn interfaces_of(
+        &mut self,
+        host: HostId,
+        with_deleted: bool,
+    ) -> IpamResult<Vec<Interface>> {
         let keys = self
             .ws
             .scan_keys(&HOST_INTERFACES, &KeyRange::prefix(encode_key(&host)))?;
@@ -296,7 +301,7 @@ impl Planner<'_> {
     }
 
     /// The addresses of an interface (loaded, tracked).
-    fn addresses_of(
+    pub(super) fn addresses_of(
         &mut self,
         interface: InterfaceId,
         with_deleted: bool,

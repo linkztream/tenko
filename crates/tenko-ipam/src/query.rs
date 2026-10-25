@@ -54,6 +54,31 @@ pub enum Deleted {
     Only,
 }
 
+/// Which hosts a list returns by their lifecycle state. The hosts list of the API shows
+/// active hosts unless it is asked for others.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostLifecycle {
+    /// Hosts that are not decommissioned.
+    #[default]
+    Active,
+    /// Decommissioned hosts only (the cleanup view).
+    Decommissioned,
+    /// Both.
+    All,
+}
+
+impl HostLifecycle {
+    /// Whether a host in this state belongs to the list.
+    pub fn admits(self, host: &Host) -> bool {
+        match self {
+            HostLifecycle::Active => !host.is_decommissioned(),
+            HostLifecycle::Decommissioned => host.is_decommissioned(),
+            HostLifecycle::All => true,
+        }
+    }
+}
+
 /// A list request. Every filter is optional; filters that do not apply to a kind are
 /// ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,6 +119,8 @@ pub struct ListQuery {
     pub mode: Option<AssignmentMode>,
     /// Host lock.
     pub locked: Option<bool>,
+    /// Host lifecycle state; every host when absent.
+    pub lifecycle: Option<HostLifecycle>,
 }
 
 /// A page of a list.
@@ -304,6 +331,7 @@ impl Listable for Host {
             && query.site.is_none_or(|s| self.site == Some(s))
             && query.mode.is_none_or(|m| m == self.mode)
             && query.locked.is_none_or(|l| l == self.lock)
+            && query.lifecycle.is_none_or(|l| l.admits(self))
     }
     fn text(&self) -> String {
         format!("{} {}", self.name, meta_text(&self.meta))

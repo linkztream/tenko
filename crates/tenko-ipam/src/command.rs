@@ -670,6 +670,27 @@ pub struct AllocatePrefix {
     pub hint: Option<IpNet>,
 }
 
+/// Decommissions a host: its addresses are released (unassigned, and their DNS names
+/// removed unless `keep_dns`), its facts raise no proposals and the default lists leave it
+/// out. A reinstatement binds the addresses again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DecommissionHost {
+    /// The host.
+    pub host: HostId,
+    /// Why, for the list of decommissioned hosts (at most 1,024 bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Keep the DNS names of the released addresses, so their records stay. By default the
+    /// names are removed and the DNS actuator removes the records.
+    #[serde(default)]
+    pub keep_dns: bool,
+    /// The revision the caller read (`If-Match`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<u64>)]
+    pub expected: Option<Revision>,
+}
+
 /// One change, as part of a plan.
 ///
 /// Adjacently tagged (`{"op": "create_prefix", "args": {...}}`) because arguments carry
@@ -758,6 +779,18 @@ pub enum IpamCommand {
         #[schema(value_type = Option<u64>)]
         expected: Option<Revision>,
     },
+    /// Decommissions a host (its lifecycle state).
+    DecommissionHost(DecommissionHost),
+    /// Reinstates a decommissioned host: the addresses it released and that are still free
+    /// are bound again, with the DNS names they lost.
+    ReinstateHost {
+        /// The host.
+        host: HostId,
+        /// The revision the caller read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<u64>)]
+        expected: Option<Revision>,
+    },
     /// Allocates and creates the next free address (IPAM-07).
     AllocateAddress(AllocateAddress),
     /// Allocates and creates the next free child prefix (IPAM-07).
@@ -795,7 +828,9 @@ impl IpamCommand {
             IpamCommand::CreateHost(_)
             | IpamCommand::UpdateHost(_)
             | IpamCommand::SetLock { .. }
-            | IpamCommand::SetMode { .. } => ObjectKind::Host,
+            | IpamCommand::SetMode { .. }
+            | IpamCommand::DecommissionHost(_)
+            | IpamCommand::ReinstateHost { .. } => ObjectKind::Host,
             IpamCommand::CreateInterface(_) | IpamCommand::UpdateInterface(_) => {
                 ObjectKind::Interface
             }

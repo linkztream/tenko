@@ -2,7 +2,8 @@
 //! IPAM-21, WP8.2): ghosts, rogues, orphans, PTR mismatches and conflicts, with the truth
 //! that wins per row. `tenko ipam address reserve`: reserving an address in DHCP
 //! (`POST /addresses/{id}/reserve`, or `POST /addresses/reserve` for an address given by
-//! value), the IPAM rows of the reservation in one batch.
+//! value), the IPAM rows of the reservation in one batch. `tenko ipam host
+//! decommission|reinstate`: the lifecycle of a host ([`super::ipam_host`]).
 
 use std::{fmt::Write as _, net::IpAddr, str::FromStr};
 
@@ -11,7 +12,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tenko_api::client::Client;
 
-use super::{ClientOpts, Failure, Output, Target, table};
+use super::{ClientOpts, Failure, Output, Target, ipam_host::HostCommand, table};
 
 /// Subcommands of `tenko ipam`.
 #[derive(Debug, Clone, Subcommand)]
@@ -23,6 +24,12 @@ pub enum IpamCommand {
         /// The `ipam address` subcommand to run.
         #[command(subcommand)]
         action: AddressCommand,
+    },
+    /// Act on one host.
+    Host {
+        /// The `ipam host` subcommand to run.
+        #[command(subcommand)]
+        action: HostCommand,
     },
 }
 
@@ -42,6 +49,7 @@ impl IpamCommand {
             Self::Address {
                 action: AddressCommand::Reserve(args),
             } => &args.client,
+            Self::Host { action } => action.client(),
         }
     }
 
@@ -52,6 +60,7 @@ impl IpamCommand {
             Self::Address {
                 action: AddressCommand::Reserve(_),
             } => "ipam address reserve",
+            Self::Host { action } => action.name(),
         }
     }
 }
@@ -174,6 +183,7 @@ pub async fn run(command: &IpamCommand) -> Result<Output, Failure> {
         IpamCommand::Address {
             action: AddressCommand::Reserve(args),
         } => reserve(&target, args).await,
+        IpamCommand::Host { action } => super::ipam_host::run(&target, action).await,
     }
 }
 
@@ -356,13 +366,17 @@ async fn prefix_id(client: &Client, text: &str) -> Result<String, Failure> {
         .ok_or_else(|| not_found("prefix", text))
 }
 
-/// The identifier of a host given by identifier or name.
-async fn host_id(client: &Client, text: &str) -> Result<String, Failure> {
+/// The identifier of a host given by identifier or name; a decommissioned host is found
+/// too.
+pub(super) async fn host_id(client: &Client, text: &str) -> Result<String, Failure> {
     if is_id(text) {
         return Ok(text.trim().to_owned());
     }
     let page: Value = client
-        .get_query("/hosts", &json!({ "q": text.trim(), "limit": 1000 }))
+        .get_query(
+            "/hosts",
+            &json!({ "q": text.trim(), "limit": 1000, "lifecycle": "all" }),
+        )
         .await?;
     page["items"]
         .as_array()
@@ -551,7 +565,9 @@ mod tests {
             IpamCommand::Address {
                 action: AddressCommand::Reserve(args),
             } => args,
-            IpamCommand::Reconcile(_) => unreachable!("parsed as reserve"),
+            IpamCommand::Reconcile(_) | IpamCommand::Host { .. } => {
+                unreachable!("parsed as reserve")
+            }
         }
     }
 

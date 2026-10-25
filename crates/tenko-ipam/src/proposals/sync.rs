@@ -20,8 +20,8 @@ use tenko_core::{
 use tenko_store::{Mutation, Precondition, WriteBatch};
 
 use super::model::{
-    IntentProposal, IntentProposalKind, IntentProposalState, OPEN_KEYS, PROPOSALS, REJECTIONS,
-    actions,
+    IntentProposal, IntentProposalKind, IntentProposalState, KeptConflict, OPEN_KEYS, PROPOSALS,
+    REJECTIONS, actions,
 };
 use crate::{error::IpamResult, reconcile::rules::Candidate, reconcile::snapshot::Snapshot};
 
@@ -216,7 +216,11 @@ pub(crate) fn sync(
         let open = snapshot.open.get(&candidate.key);
         if open.is_none()
             && let Some((rejection, _)) = snapshot.rejections.get(&candidate.key)
-            && rejection.fingerprint == fingerprint
+            && (rejection.fingerprint == fingerprint
+                || rejection
+                    .kept
+                    .as_ref()
+                    .is_some_and(|kept| *kept == KeptConflict::of(&candidate.evidence)))
         {
             plan.suppressed += 1;
             continue;

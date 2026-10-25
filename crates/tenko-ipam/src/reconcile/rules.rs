@@ -45,7 +45,10 @@ use tenko_core::{
     observe::Observed,
 };
 
-use super::snapshot::{Placement, Seen, Snapshot};
+use super::{
+    dormant,
+    snapshot::{Placement, Seen, Snapshot},
+};
 use crate::{
     command::{
         AddressInput, AddressPatch, HostInput, InterfaceInput, IpamCommand, PrefixInput,
@@ -650,7 +653,7 @@ fn mismatches(snapshot: &Snapshot) -> Vec<Candidate> {
         let Some(host) = intent.host_of(interface) else {
             continue;
         };
-        if host.lock || untouchable(host) {
+        if host.lock || untouchable(host) || host.is_decommissioned() {
             continue;
         }
         let intended: Vec<&Address> = intent
@@ -811,7 +814,8 @@ fn hosts_of_mac(snapshot: &Snapshot, mac: MacAddr) -> Vec<&Host> {
 /// device other than the one it is intended for.
 fn conflicts(snapshot: &Snapshot) -> Vec<Candidate> {
     let mut by_address: BTreeMap<(VrfId, IpAddr), Vec<&Seen>> = BTreeMap::new();
-    for pair in &snapshot.seen {
+    // A dormant claim (a stopped host's configured address) is never one side of a conflict.
+    for pair in snapshot.seen.iter().filter(|pair| dormant::live(pair)) {
         if let (Some(_), Some(ip), Some(placement)) = (pair.mac, pair.ip, pair.placement)
             && let Some(vrf) = placement.vrf()
         {
@@ -873,6 +877,7 @@ fn shared_addresses(
                 ("ip".to_owned(), ip.to_string()),
                 ("macs".to_owned(), join(&macs)),
                 ("count".to_owned(), macs.len().to_string()),
+                ("hosts".to_owned(), join(&hosts)),
             ]),
             evidence,
             commands: Vec::new(),
@@ -887,7 +892,7 @@ fn networks(snapshot: &Snapshot) -> Vec<Candidate> {
     let intent = &snapshot.intent;
     let mut out = Vec::new();
     let mut by_mac: BTreeMap<(MacAddr, Family), Vec<&Seen>> = BTreeMap::new();
-    for pair in &snapshot.seen {
+    for pair in snapshot.seen.iter().filter(|pair| dormant::live(pair)) {
         if let (Some(mac), Some(ip), Some(Placement::Network { .. })) =
             (pair.mac, pair.ip, pair.placement)
         {
@@ -1005,6 +1010,19 @@ fn taken_addresses(
         if users.is_empty() {
             continue;
         }
+        // Every host of the conflict, the intended one first, for the decommission action;
+        // and the intended host when its own claim on the address is only dormant.
+        let mut hosts = vec![host.id];
+        for other in users.iter().flat_map(|mac| hosts_of_mac(snapshot, *mac)) {
+            if !hosts.contains(&other.id) {
+                hosts.push(other.id);
+            }
+        }
+        let dormant_hosts = if dormant::only_dormant(snapshot, *vrf, *ip, &own) {
+            host.id.to_string()
+        } else {
+            String::new()
+        };
         out.push(Candidate {
             kind: IntentProposalKind::Conflict,
             rule: rule::CONFLICT_ADDRESS_TAKEN,
@@ -1029,6 +1047,8 @@ fn taken_addresses(
                 ("host".to_owned(), host.name.to_string()),
                 ("intended_mac".to_owned(), intended_mac.to_string()),
                 ("macs".to_owned(), join(&users)),
+                ("hosts".to_owned(), join(&hosts)),
+                ("dormant_hosts".to_owned(), dormant_hosts),
             ]),
             evidence: evidence(snapshot, &foreign),
             commands: Vec::new(),

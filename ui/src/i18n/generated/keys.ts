@@ -2032,6 +2032,12 @@ export type MessageKey =
   | "discovery.col.summary"
   | "discovery.col.type"
   | "discovery.col.updated"
+  | "discovery.conflict.decommission"
+  | "discovery.conflict.dormant"
+  | "discovery.conflict.keep"
+  | "discovery.conflict.keep_body"
+  | "discovery.conflict.keep_title"
+  | "discovery.conflict.kept"
   | "discovery.count"
   | "discovery.count_open"
   | "discovery.empty.body"
@@ -3566,8 +3572,11 @@ export type MessageKey =
   | "errors.ipam.bulk.too_large"
   | "errors.ipam.bulk.wrong_collection"
   | "errors.ipam.contended"
+  | "errors.ipam.host.decommissioned"
   | "errors.ipam.host.lock_manual_only"
   | "errors.ipam.host.locked"
+  | "errors.ipam.host.not_decommissioned"
+  | "errors.ipam.host.reinstate_skipped"
   | "errors.ipam.host.reservation_identifier"
   | "errors.ipam.id_taken"
   | "errors.ipam.idempotency_mismatch"
@@ -3602,6 +3611,7 @@ export type MessageKey =
   | "errors.ipam.proposal.batch_empty"
   | "errors.ipam.proposal.batch_too_large"
   | "errors.ipam.proposal.not_found"
+  | "errors.ipam.proposal.not_keepable"
   | "errors.ipam.proposal.not_open"
   | "errors.ipam.proposal.nothing_to_apply"
   | "errors.ipam.proposal.revision_mismatch"
@@ -3800,11 +3810,24 @@ export type MessageKey =
   | "guardrails.title"
   | "hosts.addresses.none"
   | "hosts.addresses.title"
+  | "hosts.banner.dns_kept"
+  | "hosts.banner.dns_removed"
+  | "hosts.banner.no_reason"
+  | "hosts.banner.reason"
+  | "hosts.banner.released"
+  | "hosts.banner.released_count"
+  | "hosts.banner.title"
+  | "hosts.banner.when"
+  | "hosts.bulk.decommission_title"
+  | "hosts.bulk.delete_title"
   | "hosts.bulk.lock_title"
   | "hosts.bulk.mode_title"
+  | "hosts.bulk.reinstate_title"
   | "hosts.bulk.unlock_title"
   | "hosts.col.addresses"
   | "hosts.col.client_id"
+  | "hosts.col.decommission_reason"
+  | "hosts.col.decommissioned"
   | "hosts.col.duid"
   | "hosts.col.interface"
   | "hosts.connect.closed_tip"
@@ -3862,6 +3885,19 @@ export type MessageKey =
   | "hosts.credentials.unbind_title"
   | "hosts.credentials.unbound"
   | "hosts.crumbs"
+  | "hosts.decommission.dns_kept"
+  | "hosts.decommission.dns_removed"
+  | "hosts.decommission.intro"
+  | "hosts.decommission.intro_many"
+  | "hosts.decommission.keep_dns"
+  | "hosts.decommission.keep_dns_hint"
+  | "hosts.decommission.reason"
+  | "hosts.decommission.reason_hint"
+  | "hosts.decommission.reason_too_long"
+  | "hosts.decommission.review"
+  | "hosts.decommission.title"
+  | "hosts.decommissioned.by"
+  | "hosts.decommissioned.tag"
   | "hosts.dns.col.address"
   | "hosts.dns.col.forward"
   | "hosts.dns.col.reverse"
@@ -3876,11 +3912,14 @@ export type MessageKey =
   | "hosts.dns.origin.transfer"
   | "hosts.dns.title"
   | "hosts.do.create"
+  | "hosts.do.decommission"
   | "hosts.do.lock"
+  | "hosts.do.reinstate"
   | "hosts.do.set_mode"
   | "hosts.do.toggle_lock"
   | "hosts.do.unlock"
   | "hosts.empty"
+  | "hosts.empty_decommissioned"
   | "hosts.facts.title"
   | "hosts.filter.label"
   | "hosts.filter.locked"
@@ -3911,6 +3950,10 @@ export type MessageKey =
   | "hosts.jobs.all"
   | "hosts.jobs.none"
   | "hosts.jobs.title"
+  | "hosts.lifecycle.active"
+  | "hosts.lifecycle.all"
+  | "hosts.lifecycle.decommissioned"
+  | "hosts.lifecycle.label"
   | "hosts.lock_failed"
   | "hosts.locked"
   | "hosts.mac.none"
@@ -3922,9 +3965,13 @@ export type MessageKey =
   | "hosts.mode.locked_note"
   | "hosts.mode.title"
   | "hosts.not_found"
+  | "hosts.observations.dormant"
   | "hosts.observations.empty"
   | "hosts.observations.open"
   | "hosts.observations.title"
+  | "hosts.reinstate.intro"
+  | "hosts.reinstate.skipped_title"
+  | "hosts.reinstate.title"
   | "hosts.undo"
   | "hosts.unlocked"
   | "hosts.warn.both"
@@ -4153,6 +4200,7 @@ export type MessageKey =
   | "ipam.action.update"
   | "ipam.address.claim_failed"
   | "ipam.address.claimed"
+  | "ipam.address.dormant"
   | "ipam.address.facts"
   | "ipam.address.in_several"
   | "ipam.address.interface"
@@ -7360,6 +7408,7 @@ export interface MessageArgs {
   "discovery.batch.reject_body": { kinds: string | number };
   "discovery.batch.reject_title": { count: number };
   "discovery.batch.skipped_title": { count: number };
+  "discovery.conflict.decommission": { name: string | number };
   "discovery.count": { count: number; more: string };
   "discovery.count_open": { count: number; more: string };
   "discovery.fact.address_mac": { ip: string | number; mac: string | number };
@@ -7629,6 +7678,7 @@ export interface MessageArgs {
   "errors.ipam.bulk.too_large": { count: number; limit: number };
   "errors.ipam.bulk.wrong_collection": { index: string | number };
   "errors.ipam.host.locked": { host: string | number };
+  "errors.ipam.host.reinstate_skipped": { cause: string; ip: string | number };
   "errors.ipam.immutable": { field: string | number };
   "errors.ipam.in_use": { count: number; kind: string | number };
   "errors.ipam.invalid_filter": { name: string | number };
@@ -7677,8 +7727,12 @@ export interface MessageArgs {
   "guardrails.path.port": { device: string | number; port: string | number };
   "guardrails.path.vlan": { vid: string | number };
   "guardrails.remove_label": { path: string | number };
+  "hosts.banner.released_count": { count: number };
+  "hosts.bulk.decommission_title": { count: number };
+  "hosts.bulk.delete_title": { count: number };
   "hosts.bulk.lock_title": { count: number };
   "hosts.bulk.mode_title": { count: number; mode: string | number };
+  "hosts.bulk.reinstate_title": { count: number };
   "hosts.bulk.unlock_title": { count: number };
   "hosts.connect.closed_tip": { port: string | number; time: string | number };
   "hosts.connect.ports": { time: string | number };
@@ -7691,6 +7745,9 @@ export interface MessageArgs {
   "hosts.credentials.unbind_label": { name: string | number };
   "hosts.credentials.unbind_title": { name: string | number };
   "hosts.credentials.unbound": { name: string | number };
+  "hosts.decommission.reason_hint": { max: number };
+  "hosts.decommission.reason_too_long": { max: number };
+  "hosts.decommission.title": { name: string | number };
   "hosts.dns.no_records": { zone: string | number };
   "hosts.form.created": { name: string | number };
   "hosts.form.edit_title": { name: string | number };
@@ -7705,6 +7762,9 @@ export interface MessageArgs {
   "hosts.mode.change_title": { mode: string | number; name: string | number };
   "hosts.mode.changed": { mode: string | number; name: string | number };
   "hosts.not_found": { name: string | number };
+  "hosts.observations.dormant": { ip: string | number; name: string | number };
+  "hosts.reinstate.skipped_title": { count: number };
+  "hosts.reinstate.title": { name: string | number };
   "hosts.unlocked": { name: string | number };
   "import.changes.first_rows": { shown: number; total: number };
   "import.changes.group": { action: string | number; count: number; kind: string | number };
@@ -7741,6 +7801,7 @@ export interface MessageArgs {
   "ipam.action.update": { count: number };
   "ipam.address.claim_failed": { ip: string | number };
   "ipam.address.claimed": { ip: string | number };
+  "ipam.address.dormant": { name: string | number };
   "ipam.address.in_several": { ip: string | number };
   "ipam.address.not_found": { ip: string | number };
   "ipam.address.renamed": { ip: string | number; name: string | number };
@@ -10338,6 +10399,12 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.col.summary",
   "discovery.col.type",
   "discovery.col.updated",
+  "discovery.conflict.decommission",
+  "discovery.conflict.dormant",
+  "discovery.conflict.keep",
+  "discovery.conflict.keep_body",
+  "discovery.conflict.keep_title",
+  "discovery.conflict.kept",
   "discovery.count",
   "discovery.count_open",
   "discovery.empty.body",
@@ -11872,8 +11939,11 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.bulk.too_large",
   "errors.ipam.bulk.wrong_collection",
   "errors.ipam.contended",
+  "errors.ipam.host.decommissioned",
   "errors.ipam.host.lock_manual_only",
   "errors.ipam.host.locked",
+  "errors.ipam.host.not_decommissioned",
+  "errors.ipam.host.reinstate_skipped",
   "errors.ipam.host.reservation_identifier",
   "errors.ipam.id_taken",
   "errors.ipam.idempotency_mismatch",
@@ -11908,6 +11978,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.proposal.batch_empty",
   "errors.ipam.proposal.batch_too_large",
   "errors.ipam.proposal.not_found",
+  "errors.ipam.proposal.not_keepable",
   "errors.ipam.proposal.not_open",
   "errors.ipam.proposal.nothing_to_apply",
   "errors.ipam.proposal.revision_mismatch",
@@ -12106,11 +12177,24 @@ export const messageKeys: readonly MessageKey[] = [
   "guardrails.title",
   "hosts.addresses.none",
   "hosts.addresses.title",
+  "hosts.banner.dns_kept",
+  "hosts.banner.dns_removed",
+  "hosts.banner.no_reason",
+  "hosts.banner.reason",
+  "hosts.banner.released",
+  "hosts.banner.released_count",
+  "hosts.banner.title",
+  "hosts.banner.when",
+  "hosts.bulk.decommission_title",
+  "hosts.bulk.delete_title",
   "hosts.bulk.lock_title",
   "hosts.bulk.mode_title",
+  "hosts.bulk.reinstate_title",
   "hosts.bulk.unlock_title",
   "hosts.col.addresses",
   "hosts.col.client_id",
+  "hosts.col.decommission_reason",
+  "hosts.col.decommissioned",
   "hosts.col.duid",
   "hosts.col.interface",
   "hosts.connect.closed_tip",
@@ -12168,6 +12252,19 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.credentials.unbind_title",
   "hosts.credentials.unbound",
   "hosts.crumbs",
+  "hosts.decommission.dns_kept",
+  "hosts.decommission.dns_removed",
+  "hosts.decommission.intro",
+  "hosts.decommission.intro_many",
+  "hosts.decommission.keep_dns",
+  "hosts.decommission.keep_dns_hint",
+  "hosts.decommission.reason",
+  "hosts.decommission.reason_hint",
+  "hosts.decommission.reason_too_long",
+  "hosts.decommission.review",
+  "hosts.decommission.title",
+  "hosts.decommissioned.by",
+  "hosts.decommissioned.tag",
   "hosts.dns.col.address",
   "hosts.dns.col.forward",
   "hosts.dns.col.reverse",
@@ -12182,11 +12279,14 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.dns.origin.transfer",
   "hosts.dns.title",
   "hosts.do.create",
+  "hosts.do.decommission",
   "hosts.do.lock",
+  "hosts.do.reinstate",
   "hosts.do.set_mode",
   "hosts.do.toggle_lock",
   "hosts.do.unlock",
   "hosts.empty",
+  "hosts.empty_decommissioned",
   "hosts.facts.title",
   "hosts.filter.label",
   "hosts.filter.locked",
@@ -12217,6 +12317,10 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.jobs.all",
   "hosts.jobs.none",
   "hosts.jobs.title",
+  "hosts.lifecycle.active",
+  "hosts.lifecycle.all",
+  "hosts.lifecycle.decommissioned",
+  "hosts.lifecycle.label",
   "hosts.lock_failed",
   "hosts.locked",
   "hosts.mac.none",
@@ -12228,9 +12332,13 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.mode.locked_note",
   "hosts.mode.title",
   "hosts.not_found",
+  "hosts.observations.dormant",
   "hosts.observations.empty",
   "hosts.observations.open",
   "hosts.observations.title",
+  "hosts.reinstate.intro",
+  "hosts.reinstate.skipped_title",
+  "hosts.reinstate.title",
   "hosts.undo",
   "hosts.unlocked",
   "hosts.warn.both",
@@ -12459,6 +12567,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.action.update",
   "ipam.address.claim_failed",
   "ipam.address.claimed",
+  "ipam.address.dormant",
   "ipam.address.facts",
   "ipam.address.in_several",
   "ipam.address.interface",

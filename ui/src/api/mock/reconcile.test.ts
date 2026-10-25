@@ -43,7 +43,7 @@ describe("the reconciler operations of the document", () => {
   const OPERATIONS = apiOperations.filter((o) => /^\/api\/v1\/(observations|proposals)(\/|$)|^\/api\/v1\/prefixes\/\{id\}\/adoption$/.test(o.path));
 
   it("are all answered, each after the session check", async () => {
-    expect(OPERATIONS.length).toBe(12);
+    expect(OPERATIONS.length).toBe(13);
     for (const operation of OPERATIONS) {
       const path = operation.path.replace("{id}", IPAM_IDS.prefix.lan).replace("{subject}", "00-00-5E-00-53-D1");
       const json = operation.method === "get" || operation.method === "delete" ? undefined : {};

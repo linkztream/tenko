@@ -361,6 +361,21 @@ const prefixRoutes: HttpHandler[] = [
 // Hosts and interfaces
 
 const hostRoutes: HttpHandler[] = [
+  handle("post", api("/hosts/{id}/decommission") as OperationPath<"post">, async (call) => {
+    const params = writeParams(call, false);
+    const id = idParam(call);
+    ensure("host", id);
+    const body = await readBody(call, ["keep_dns", "reason"]);
+    const command = { op: "decommission_host", args: { ...body, host: id, expected: ifMatch(call) } };
+    return writeReply(execute([command], { acknowledge: params.acknowledge, dryRun: params.dryRun }), false);
+  }),
+  handle("post", api("/hosts/{id}/reinstate") as OperationPath<"post">, (call) => {
+    const params = writeParams(call, false);
+    const id = idParam(call);
+    ensure("host", id);
+    const command = { op: "reinstate_host", args: { host: id, expected: ifMatch(call) } };
+    return writeReply(execute([command], { acknowledge: params.acknowledge, dryRun: params.dryRun }), false);
+  }),
   handle("get", api("/hosts/{id}/interfaces") as OperationPath<"get">, (call) => {
     const id = idParam(call);
     ensure("host", id);

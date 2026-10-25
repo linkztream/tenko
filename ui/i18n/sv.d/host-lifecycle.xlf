@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="host-lifecycle">
+      <unit id="hosts.lifecycle.label">
+        <notes><note category="description">Accessible name of the lifecycle filter of the hosts list.</note></notes>
+        <segment><source>Lifecycle</source><target>Livscykel</target></segment>
+      </unit>
+      <unit id="hosts.lifecycle.active">
+        <notes><note category="description">Option of the lifecycle filter: the hosts that are in use (the default).</note></notes>
+        <segment><source>Active</source><target>Aktiva</target></segment>
+      </unit>
+      <unit id="hosts.lifecycle.decommissioned">
+        <notes><note category="description">Option of the lifecycle filter: only the hosts that were decommissioned.</note></notes>
+        <segment><source>Decommissioned</source><target>Avvecklade</target></segment>
+      </unit>
+      <unit id="hosts.lifecycle.all">
+        <notes><note category="description">Option of the lifecycle filter: active and decommissioned hosts.</note></notes>
+        <segment><source>All</source><target>Alla</target></segment>
+      </unit>
+      <unit id="hosts.col.decommissioned">
+        <notes><note category="description">Column header in the hosts list: when a host was decommissioned and by whom.</note></notes>
+        <segment><source>Decommissioned</source><target>Avvecklad</target></segment>
+      </unit>
+      <unit id="hosts.col.decommission_reason">
+        <notes><note category="description">Column header in the hosts list: why a host was decommissioned.</note></notes>
+        <segment><source>Reason</source><target>Orsak</target></segment>
+      </unit>
+      <unit id="hosts.decommissioned.tag">
+        <notes><note category="description">Badge next to the name of a decommissioned host.</note></notes>
+        <segment><source>Decommissioned</source><target>Avvecklad</target></segment>
+      </unit>
+      <unit id="hosts.decommissioned.by">
+        <notes><note category="description">Between the time and the person in "3 days ago by Alex": who decommissioned the host.</note></notes>
+        <segment><source>by</source><target>av</target></segment>
+      </unit>
+      <unit id="hosts.do.decommission">
+        <notes><note category="description">Action that retires a host: its addresses are released and it leaves the default lists.</note></notes>
+        <segment><source>Decommission</source><target>Avveckla</target></segment>
+      </unit>
+      <unit id="hosts.do.reinstate">
+        <notes><note category="description">Action that brings a decommissioned host back into use.</note></notes>
+        <segment><source>Reinstate</source><target>Återaktivera</target></segment>
+      </unit>
+      <unit id="hosts.empty_decommissioned">
+        <notes><note category="description">Shown in the hosts list when the lifecycle filter is Decommissioned and no host was decommissioned.</note></notes>
+        <segment><source>No decommissioned hosts.</source><target>Inga avvecklade värdar.</target></segment>
+      </unit>
+      <unit id="hosts.bulk.decommission_title">
+        <notes><note category="description">Title and confirm button of the decommission of the selected hosts.</note></notes>
+        <segment><source>{count, plural, one {Decommission # host} other {Decommission # hosts}}</source><target>{count, plural, one {Avveckla # värd} other {Avveckla # värdar}}</target></segment>
+      </unit>
+      <unit id="hosts.bulk.reinstate_title">
+        <notes><note category="description">Title and confirm button of the reinstatement of the selected hosts.</note></notes>
+        <segment><source>{count, plural, one {Reinstate # host} other {Reinstate # hosts}}</source><target>{count, plural, one {Återaktivera # värd} other {Återaktivera # värdar}}</target></segment>
+      </unit>
+      <unit id="hosts.bulk.delete_title">
+        <notes><note category="description">Title and confirm button of the deletion of the selected hosts.</note></notes>
+        <segment><source>{count, plural, one {Delete # host} other {Delete # hosts}}</source><target>{count, plural, one {Ta bort # värd} other {Ta bort # värdar}}</target></segment>
+      </unit>
+      <unit id="hosts.decommission.title">
+        <notes><note category="description">Title of the dialog that decommissions one host, and its confirm button.</note></notes>
+        <segment><source>Decommission {name}</source><target>Avveckla {name}</target></segment>
+      </unit>
+      <unit id="hosts.decommission.intro">
+        <notes><note category="description">Explains what decommissioning one host does.</note></notes>
+        <segment><source>A decommissioned host is retired but kept on record. Its addresses are released, what is observed about it raises no proposals and the default lists leave it out. You can reinstate it later.</source><target>En avvecklad värd tas ur bruk men finns kvar i registret. Dess adresser frigörs, det som observeras om den ger inga förslag och standardlistorna döljer den. Du kan återaktivera den senare.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.intro_many">
+        <notes><note category="description">Explains what decommissioning several hosts does.</note></notes>
+        <segment><source>Decommissioned hosts are retired but kept on record. Their addresses are released, what is observed about them raises no proposals and the default lists leave them out. You can reinstate them later.</source><target>Avvecklade värdar tas ur bruk men finns kvar i registret. Deras adresser frigörs, det som observeras om dem ger inga förslag och standardlistorna döljer dem. Du kan återaktivera dem senare.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.reason">
+        <notes><note category="description">Label of the optional reason field of the decommission dialog.</note></notes>
+        <segment><source>Reason (optional)</source><target>Orsak (valfri)</target></segment>
+      </unit>
+      <unit id="hosts.decommission.reason_hint">
+        <notes><note category="description">Hint under the reason field; the number is the most bytes the reason may have.</note></notes>
+        <segment><source>Shown in the list of decommissioned hosts. At most {max, number} bytes.</source><target>Visas i listan över avvecklade värdar. Högst {max, number} byte.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.reason_too_long">
+        <notes><note category="description">Error under the reason field; the number is the most bytes the reason may have.</note></notes>
+        <segment><source>The reason is longer than {max, number} bytes.</source><target>Orsaken är längre än {max, number} byte.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.keep_dns">
+        <notes><note category="description">Check box of the decommission dialog: the DNS records of the released addresses stay.</note></notes>
+        <segment><source>Keep the DNS names</source><target>Behåll DNS-namnen</target></segment>
+      </unit>
+      <unit id="hosts.decommission.keep_dns_hint">
+        <notes><note category="description">Explains the check box that keeps the DNS names.</note></notes>
+        <segment><source>By default the DNS records of the released addresses are removed. Tick this to leave them in place.</source><target>Som standard tas DNS-posterna för de frigjorda adresserna bort. Markera rutan för att låta dem ligga kvar.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.review">
+        <notes><note category="description">Button of the first step of the decommission dialog; the next step previews the changes.</note></notes>
+        <segment><source>Review changes</source><target>Granska ändringar</target></segment>
+      </unit>
+      <unit id="hosts.decommission.dns_kept">
+        <notes><note category="description">Above the plan of a decommission: the DNS names stay.</note></notes>
+        <segment><source>The DNS names of the released addresses are kept.</source><target>DNS-namnen för de frigjorda adresserna behålls.</target></segment>
+      </unit>
+      <unit id="hosts.decommission.dns_removed">
+        <notes><note category="description">Above the plan of a decommission: the DNS names are removed.</note></notes>
+        <segment><source>The DNS names of the released addresses are removed.</source><target>DNS-namnen för de frigjorda adresserna tas bort.</target></segment>
+      </unit>
+      <unit id="hosts.reinstate.title">
+        <notes><note category="description">Title of the dialog that reinstates one host, and its confirm button.</note></notes>
+        <segment><source>Reinstate {name}</source><target>Återaktivera {name}</target></segment>
+      </unit>
+      <unit id="hosts.reinstate.intro">
+        <notes><note category="description">Explains what reinstating a host does.</note></notes>
+        <segment><source>The addresses the host released are bound to it again when they are still free, with their DNS names. The others are skipped and listed afterwards.</source><target>De adresser som värden frigjorde binds till den igen om de fortfarande är lediga, med sina DNS-namn. Övriga hoppas över och listas efteråt.</target></segment>
+      </unit>
+      <unit id="hosts.reinstate.skipped_title">
+        <notes><note category="description">Heading of the list of addresses a reinstatement could not bind again.</note></notes>
+        <segment><source>{count, plural, one {# address was not bound again} other {# addresses were not bound again}}</source><target>{count, plural, one {# adress kunde inte bindas igen} other {# adresser kunde inte bindas igen}}</target></segment>
+      </unit>
+      <unit id="hosts.banner.title">
+        <notes><note category="description">Title of the banner on the page of a decommissioned host.</note></notes>
+        <segment><source>This host is decommissioned</source><target>Den här värden är avvecklad</target></segment>
+      </unit>
+      <unit id="hosts.banner.when">
+        <notes><note category="description">Label in the banner: when and by whom the host was decommissioned.</note></notes>
+        <segment><source>Decommissioned</source><target>Avvecklad</target></segment>
+      </unit>
+      <unit id="hosts.banner.reason">
+        <notes><note category="description">Label in the banner: why the host was decommissioned.</note></notes>
+        <segment><source>Reason</source><target>Orsak</target></segment>
+      </unit>
+      <unit id="hosts.banner.no_reason">
+        <notes><note category="description">Shown in the banner when no reason was given.</note></notes>
+        <segment><source>No reason was given.</source><target>Ingen orsak angavs.</target></segment>
+      </unit>
+      <unit id="hosts.banner.released">
+        <notes><note category="description">Label in the banner: what the decommission released.</note></notes>
+        <segment><source>Released</source><target>Frigjort</target></segment>
+      </unit>
+      <unit id="hosts.banner.released_count">
+        <notes><note category="description">How many addresses the decommission released.</note></notes>
+        <segment><source>{count, plural, =0 {No addresses were released.} one {# address was released.} other {# addresses were released.}}</source><target>{count, plural, =0 {Inga adresser frigjordes.} one {# adress frigjordes.} other {# adresser frigjordes.}}</target></segment>
+      </unit>
+      <unit id="hosts.banner.dns_kept">
+        <notes><note category="description">In the banner: the DNS names of the released addresses stayed.</note></notes>
+        <segment><source>Their DNS names were kept.</source><target>Deras DNS-namn behölls.</target></segment>
+      </unit>
+      <unit id="hosts.banner.dns_removed">
+        <notes><note category="description">In the banner: the DNS names of the released addresses were removed.</note></notes>
+        <segment><source>Their DNS names were removed.</source><target>Deras DNS-namn togs bort.</target></segment>
+      </unit>
+      <unit id="hosts.observations.dormant">
+        <notes><note category="description">Line on the host page: an address that is configured on a guest that is stopped, so nothing uses it now.</note></notes>
+        <segment><source>{ip} is configured on the stopped guest {name}</source><target>{ip} är konfigurerad på den stoppade gästen {name}</target></segment>
+      </unit>
+      <unit id="ipam.address.dormant">
+        <notes><note category="description">Note on the address page: the address is configured on a guest that is stopped.</note></notes>
+        <segment><source>Configured on the stopped guest {name}</source><target>Konfigurerad på den stoppade gästen {name}</target></segment>
+      </unit>
+      <unit id="discovery.conflict.decommission">
+        <notes><note category="description">Button in the panel of an address conflict: decommission one of the hosts in the conflict.</note></notes>
+        <segment><source>Decommission {name}</source><target>Avveckla {name}</target></segment>
+      </unit>
+      <unit id="discovery.conflict.dormant">
+        <notes><note category="description">Beside the decommission button of a host whose claim on the address comes only from a stopped guest.</note></notes>
+        <segment><source>only on a stopped guest</source><target>finns bara på en stoppad gäst</target></segment>
+      </unit>
+      <unit id="discovery.conflict.keep">
+        <notes><note category="description">Button in the panel of an address conflict, and the confirm button of its dialog: accept both claims as they are.</note></notes>
+        <segment><source>Keep both</source><target>Behåll båda</target></segment>
+      </unit>
+      <unit id="discovery.conflict.keep_title">
+        <notes><note category="description">Title of the dialog that keeps both claims of an address conflict.</note></notes>
+        <segment><source>Keep both claims</source><target>Behåll båda anspråken</target></segment>
+      </unit>
+      <unit id="discovery.conflict.keep_body">
+        <notes><note category="description">Explains what keeping both claims does.</note></notes>
+        <segment><source>Both claims stay, and the conflict is not raised again while the same devices share the address. Another device on the address opens it again.</source><target>Båda anspråken får ligga kvar, och konflikten tas inte upp igen så länge samma enheter delar adressen. En ny enhet på adressen öppnar den igen.</target></segment>
+      </unit>
+      <unit id="discovery.conflict.kept">
+        <notes><note category="description">Toast after both claims of an address conflict were kept.</note></notes>
+        <segment><source>Kept both claims</source><target>Båda anspråken behölls</target></segment>
+      </unit>
+      <unit id="errors.ipam.host.decommissioned">
+        <notes><note category="description">The host cannot be decommissioned because it is decommissioned already.</note></notes>
+        <segment><source>The host is decommissioned already.</source><target>Värden är redan avvecklad.</target></segment>
+      </unit>
+      <unit id="errors.ipam.host.not_decommissioned">
+        <notes><note category="description">The host cannot be reinstated because it is not decommissioned.</note></notes>
+        <segment><source>The host is not decommissioned.</source><target>Värden är inte avvecklad.</target></segment>
+      </unit>
+      <unit id="errors.ipam.host.reinstate_skipped">
+        <notes><note category="description">Warning of a reinstatement: an address the host released was not bound to it again; the cause is deleted, assigned or interface_gone.</note></notes>
+        <segment><source>{ip} was not bound to the host again: {cause, select, deleted {the address is deleted} assigned {the address is assigned to another host} interface_gone {the interface is gone} other {{cause}}}.</source><target>{ip} kunde inte bindas till värden igen: {cause, select, deleted {adressen är borttagen} assigned {adressen är tilldelad en annan värd} interface_gone {gränssnittet finns inte längre} other {{cause}}}.</target></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.not_keepable">
+        <notes><note category="description">Keeping both claims is refused because the proposal is not an address conflict.</note></notes>
+        <segment><source>Only an address conflict can be kept as it is.</source><target>Bara en adresskonflikt kan behållas som den är.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>
