@@ -14,25 +14,25 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | ID | Priority | Tests | Measurements | Documents |
 |---|---|---|---|---|
 | DHCP-01 | Must | `ui/src/dhcp/reservations/ReserveDialog.test.tsx` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/reserve.rs`<br>`crates/tenko-api/src/routes/reserve/tests.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>and 4 more |
-| DHCP-02 | Must | - | - | `crates/tenko-core/src/dhcp/option.rs`<br>`crates/tenko-dhcp/src/config/options.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
+| DHCP-02 | Must | - | - | `crates/tenko-core/src/dhcp/option.rs`<br>`crates/tenko-dhcp/src/config/options.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 2 more |
 | DHCP-03 | Must | `crates/tenko-dhcp/tests/classes.rs` | - | `crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-04 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-05 | Must | `crates/tenko-dhcp/tests/classes.rs` | - | `crates/tenko-dhcp/src/v4/engine/boot.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
-| DHCP-06 | Must | `crates/tenko-dhcp/tests/conflict.rs` | `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md` | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/conflict/mod.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 2 more |
-| DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 3 more |
+| DHCP-06 | Must | `crates/tenko-dhcp/tests/conflict.rs` | `bench/phase3-dhcp/results/2026-10-22-m35-conflict-probe.md` | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/conflict/mod.rs`<br>`crates/tenko-dhcp/src/probe.rs`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
+| DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 5 more |
 | DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>and 7 more |
-| DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/ha-plan.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-11 | Should | - | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/v6/engine/mod.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
-| DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>and 1 more |
-| DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 9 more |
+| DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>and 3 more |
+| DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 10 more |
 | DHCP-14 | Should | `crates/tenko/tests/acceptance_reconcile.rs` | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/fingerprint.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-15 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
-| DHCP-16 | Must | `crates/tenko-ipam/tests/move_dhcp.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/dhcp.md`<br>`docs/moves.md`<br>and 2 more |
-| DHCP-17 | Should | - | - | `docs/plans/phase-3-plan.md` |
-| DHCP-18 | Must | - | - | `docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-16 | Must | `crates/tenko-ipam/tests/move_dhcp.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/dhcp.md`<br>`docs/moves.md`<br>and 3 more |
+| DHCP-17 | Should | - | - | `docs/plans/ha-plan.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-18 | Must | - | - | `docs/ROADMAP.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>`docs/adr/0025-dhcp-failover-and-data-plane-ha.md`<br>`docs/plans/ha-plan.md`<br>`docs/plans/phase-3-plan.md` |
 | DNS-03 | Should | - | - | `crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns/recursion.rs`<br>`crates/tenko-dns/src/recurse.rs`<br>`crates/tenko/src/config.rs`<br>`docs/CONFORMANCE.md`<br>and 8 more |
-| DNS-13 | Must | - | - | `crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/validate.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 6 more |
+| DNS-13 | Must | - | - | `crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/validate.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 7 more |
 | DNS-34 | Should | - | - | `crates/tenko-dns/src/cache/denial.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 4 more |
 | IPAM-21 | Must | `crates/tenko-ipam/tests/reconcile_view.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/reconcile.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`crates/tenko/src/client/ipam.rs`<br>`docs/ARCHITECTURE.md`<br>and 6 more |
 | MIG-16 | Must | `crates/tenko-api/tests/dhcp_export.rs`<br>`crates/tenko/tests/acceptance_kea_export.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/export.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/export.rs`<br>and 7 more |
