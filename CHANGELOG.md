@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-10-25
+
 ### Added
 
 - Prefix delegation in the API, the web UI and the Kea export (Phase 3, DHCP-09, DHCP-10): the IPAM range form makes a delegation pool on an IPv6 network with its delegated length, and the pools tab of a DHCPv6 scope lists and adds delegation pools with their prefixes and bound prefixes (`role`, `delegated_len` and sizes in prefixes on `GET /api/v1/dhcp/pools`, a `pd` block on the scope's utilization); the lease list shows a delegated prefix as `prefix/length` with the router's address lease (`address_lease`), filters by what a lease holds (`kind=na|pd`, `--kind` on `tenko dhcp lease list`) and finds leases by an IPv6 prefix; the history's MAC filter finds DHCPv6 clients behind an RFC 6939 relay whatever their DUID; `GET /api/v1/nodes/{id}/dhcp` reports the router advertisement check (`ra`) and the server DUID, which the leases page and the Nodes page show with the `dhcp.ra.*` findings in words; the Kea export writes `pd-pools` and the delegated prefixes in `kea-leases6.csv`, and `server-id` from the role's DUID when the role runs in the process.
@@ -21,6 +23,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The 5-second bars of the start page's Cache hit ratio and Answers tiles keep their place: the buckets were counted back from the newest sample, so each new second moved every edge by one sample and every bar was recomputed from other samples. A bar is now the bucket `floor(t / 5 s)` of the samples' own times, the chart shows six completed buckets and the one in progress (lighter), and it shifts one step only when a bucket completes. The percentage and the RCODE rates beside the bars are taken over the same completed buckets (a mean per second, with two decimals below one), so a quiet tile no longer reads 0/s beside bars of answers.
 - The Kea export of a configuration without classes, filters or boot options starts Kea: it wrote an empty `client-classes` list, which `kea-dhcp4` 2.6 refuses as a syntax error; the list is now left out when it is empty.
 - The row menu of an address has its final items the first time it opens: the address lists and a network's address grid show their rows once the DHCP scopes that decide "Reserve in DHCP" have been read (or have failed to read), instead of adding or leaving out the item when the answer arrives; the tests wait for that state instead of assuming it.
+
+### Action required
+
+- This release raises the data format from 4 to 5 (a delegation pool is an IPAM range of a new role). The update migrates the data directory on the first start and a binary of 0.0.6 or earlier then refuses it, so take a backup of the data directory before the update (`tenko backup`, or the node's own backup page) if you may want to go back; the restore path of `docs/upgrades.md` brings a 0.0.6 binary back on that backup.
 
 ## [0.0.6] - 2026-10-25
 
