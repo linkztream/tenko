@@ -37,6 +37,23 @@ Packages that stand on their own and are free to take, with where their specific
 
 To take one: open an issue with the feature-request form naming the package, and you get the package's brief there (the plan section, the files it owns, what done looks like, the checks). Then the rules of [CONTRIBUTING.md](../CONTRIBUTING.md): one branch per package, Conventional Commits in English, the checks before the pull request, a result file behind every performance claim, the Contributor License Agreement, and never a real network's names or addresses in the repository.
 
+## Releases
+
+A release is cut when one of three things happens: a milestone of the current plan closes, a week has passed with merged changes that an operator can see, or the lab needs a fix. The cost of a release is a version bump, one full gate and a tag, so a weekly cadence is cheap; the owner updates the lab node from the web UI after each one. Patch numbers carry fixes and partial packages, minor numbers closed milestones, and 1.0 waits for what the project has set aside on purpose: signed releases, measurements repeated on the released binary, and a documented support story. Every release whose changelog carries an "Action required" line is shown to the owner before the tag, and from 0.1.0 on the update flow takes the backup of ADR 0023 before it replaces the binary, so every later release has a restore point on the node.
+
+| Version | After | Carries |
+|---|---|---|
+| 0.0.6 | The installer's role change (prepare every role outside Hardened) | DHCPv6 IA_NA on the server side (WP9.1), reserving an address in DHCP, the reachable scan configuration, the installer change |
+| 0.0.7 | WP9.2, WP9.4 and the DHCPv6 half of WP9.3 | IA_PD and delegation pools, the RA check, the DHCPv6 UI and routes, the Kea `Dhcp6` export; E29 and E30 complete |
+| 0.1.0 | The Phase 3 exit (WP9.5) | DHCP complete and measured on one node |
+| 0.1.x | WP12.1 and WP12.2 of Slice 12 | The node store and `dns` and `dhcp` nodes that serve without a controller |
+| 0.2.0 | Slice 12 complete | The failover pair and its chaos test |
+| 0.2.x | The Kerberos line of Slice 13 | GSS-TSIG from Windows clients and domain controllers |
+| 0.3.0 | Slice 13 complete | Directory sign-in with OIDC, LDAP and Kerberos |
+| 1.0 | Signing, re-measurement and support | The first release recommended outside a lab |
+
+The versions after 0.1.0 follow the order decided on 2026-10-25: identity (Slice 13) is built before high availability (Slice 12) where the two compete for builders, because it is smaller, well specified and unblocks the Active Directory take-over; the table lists Slice 12 first only because its node-store packages can ship on their own.
+
 ## Overview
 
 | Phase | Name | Theme | Exit gate |
