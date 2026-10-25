@@ -754,7 +754,11 @@ impl ProbeBatch {
                         open_tcp,
                         tls_tcp,
                     },
-                    SightingSubject::Name { ip, name } => Observed::Name { ip, name },
+                    SightingSubject::Name { ip, name } => Observed::Name {
+                        ip,
+                        name,
+                        placeholder: false,
+                    },
                     SightingSubject::Vendor { mac, vendor } => Observed::Vendor { mac, vendor },
                     SightingSubject::Os {
                         ip,

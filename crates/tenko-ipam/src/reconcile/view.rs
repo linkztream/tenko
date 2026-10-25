@@ -647,7 +647,7 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
     }
     // The zones' records: names, not sightings.
     for fact in snapshot.facts.iter().filter(|fact| fact.is_current(now)) {
-        let (ObservationSource::DnsRecord { zone }, Observed::Name { ip, name }) =
+        let (ObservationSource::DnsRecord { zone }, Observed::Name { ip, name, .. }) =
             (&fact.source, &fact.observed)
         else {
             continue;

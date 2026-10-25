@@ -2016,6 +2016,7 @@ mod tests {
             params: BTreeMap::new(),
             evidence: Vec::new(),
             commands: Vec::new(),
+            choices: Vec::new(),
             fingerprint: Digest([1; 32]),
             created: at(),
             updated: at(),

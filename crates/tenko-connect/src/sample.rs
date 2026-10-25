@@ -221,6 +221,7 @@ pub fn sample_host(index: u16, site: &str, credential: bool) -> ObservedHost {
     ObservedHost {
         external_id: format!("sample/{index}"),
         name: Some(format!("host-{index}.example.test")),
+        name_placeholder: false,
         macs: vec![MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, low])],
         ips: vec![
             std::net::IpAddr::from([192, 0, 2, low.saturating_add(10)]),

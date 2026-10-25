@@ -1993,7 +1993,10 @@ export type MessageKey =
   | "discovery.action.open"
   | "discovery.action.reconcile"
   | "discovery.action.reject"
+  | "discovery.approve.choice"
   | "discovery.approve.confirm"
+  | "discovery.approve.remember_host"
+  | "discovery.approve.remember_source"
   | "discovery.approve.title"
   | "discovery.batch.approve"
   | "discovery.batch.approve_body"
@@ -2006,6 +2009,7 @@ export type MessageKey =
   | "discovery.batch.kind.address_mismatch"
   | "discovery.batch.kind.conflict"
   | "discovery.batch.kind.discovered_host"
+  | "discovery.batch.kind.host_name"
   | "discovery.batch.kind.orphaned_intent"
   | "discovery.batch.kind.outside_prefixes"
   | "discovery.batch.kind.prefix_vlan_mismatch"
@@ -2020,6 +2024,7 @@ export type MessageKey =
   | "discovery.col.first_seen"
   | "discovery.col.kind"
   | "discovery.col.last_seen"
+  | "discovery.col.names"
   | "discovery.col.observed"
   | "discovery.col.prefix"
   | "discovery.col.severity"
@@ -2051,6 +2056,7 @@ export type MessageKey =
   | "discovery.fact.link"
   | "discovery.fact.name"
   | "discovery.fact.network"
+  | "discovery.fact.no_name"
   | "discovery.fact.no_ports"
   | "discovery.fact.os"
   | "discovery.fact.parent"
@@ -2079,6 +2085,7 @@ export type MessageKey =
   | "discovery.kind.address_mismatch"
   | "discovery.kind.conflict"
   | "discovery.kind.discovered_host"
+  | "discovery.kind.host_name"
   | "discovery.kind.orphaned_intent"
   | "discovery.kind.outside_prefixes"
   | "discovery.kind.prefix_vlan_mismatch"
@@ -2099,6 +2106,21 @@ export type MessageKey =
   | "discovery.method.snmp"
   | "discovery.method.tcp_connect"
   | "discovery.method.tcp_syn"
+  | "discovery.name_rule.default"
+  | "discovery.name_rule.global"
+  | "discovery.name_rule.host"
+  | "discovery.name_rule.site"
+  | "discovery.name_source.dhcp"
+  | "discovery.name_source.dns"
+  | "discovery.name_source.home_assistant"
+  | "discovery.name_source.llmnr"
+  | "discovery.name_source.mdns"
+  | "discovery.name_source.other"
+  | "discovery.name_source.proxmox"
+  | "discovery.name_source.scan"
+  | "discovery.name_source.unifi"
+  | "discovery.name_source.windows"
+  | "discovery.names.seen"
   | "discovery.nav.label"
   | "discovery.nav.observations"
   | "discovery.nav.proposals"
@@ -2123,23 +2145,29 @@ export type MessageKey =
   | "discovery.panel.evidence"
   | "discovery.panel.evidence_count"
   | "discovery.panel.first_seen"
+  | "discovery.panel.given"
   | "discovery.panel.intent"
   | "discovery.panel.ip"
   | "discovery.panel.label"
   | "discovery.panel.last_seen"
   | "discovery.panel.mac"
   | "discovery.panel.name"
+  | "discovery.panel.names"
+  | "discovery.panel.names_count"
+  | "discovery.panel.names_hint"
   | "discovery.panel.network"
   | "discovery.panel.newer"
   | "discovery.panel.no_evidence"
   | "discovery.panel.nothing_hint"
   | "discovery.panel.opened"
   | "discovery.panel.prefix"
+  | "discovery.panel.proposed"
   | "discovery.panel.reason"
   | "discovery.panel.results"
   | "discovery.panel.sightings"
   | "discovery.panel.subject"
   | "discovery.panel.superseded_by"
+  | "discovery.panel.use_name"
   | "discovery.reconcile.failed"
   | "discovery.reject.body"
   | "discovery.reject.body_conflict"
@@ -2150,6 +2178,10 @@ export type MessageKey =
   | "discovery.reject.reason_too_long"
   | "discovery.reject.title"
   | "discovery.reject.title_conflict"
+  | "discovery.remember.host"
+  | "discovery.remember.label"
+  | "discovery.remember.once"
+  | "discovery.remember.source"
   | "discovery.report.adopted"
   | "discovery.report.adoption_failures"
   | "discovery.report.at"
@@ -2170,8 +2202,11 @@ export type MessageKey =
   | "discovery.rule.conflict_shared_address"
   | "discovery.rule.discovered_address"
   | "discovery.rule.discovered_mac"
+  | "discovery.rule.name_conflict"
   | "discovery.rule.orphaned_address"
   | "discovery.rule.outside_prefixes"
+  | "discovery.rule.placeholder_name"
+  | "discovery.rule.preferred_name"
   | "discovery.rule.prefix_vlan_differs"
   | "discovery.rule.prefix_vlan_unset"
   | "discovery.rule.vlan_discovered"
@@ -3592,6 +3627,7 @@ export type MessageKey =
   | "errors.ipam.move.l2_refused"
   | "errors.ipam.move.plan_changed"
   | "errors.ipam.move.unmanaged"
+  | "errors.ipam.name_authority.invalid"
   | "errors.ipam.name_taken"
   | "errors.ipam.not_deleted"
   | "errors.ipam.not_found"
@@ -3610,6 +3646,7 @@ export type MessageKey =
   | "errors.ipam.prefix.resize_orphans"
   | "errors.ipam.proposal.batch_empty"
   | "errors.ipam.proposal.batch_too_large"
+  | "errors.ipam.proposal.choice_invalid"
   | "errors.ipam.proposal.not_found"
   | "errors.ipam.proposal.not_keepable"
   | "errors.ipam.proposal.not_open"
@@ -5578,6 +5615,41 @@ export type MessageKey =
   | "reconciler.help.retention"
   | "reconciler.lede"
   | "reconciler.limits"
+  | "reconciler.names.add_choose"
+  | "reconciler.names.add_label"
+  | "reconciler.names.col_decided"
+  | "reconciler.names.col_host"
+  | "reconciler.names.col_name"
+  | "reconciler.names.col_source"
+  | "reconciler.names.default_help"
+  | "reconciler.names.default_tag"
+  | "reconciler.names.empty_order"
+  | "reconciler.names.forget"
+  | "reconciler.names.forget_label"
+  | "reconciler.names.forgotten"
+  | "reconciler.names.global_title"
+  | "reconciler.names.lede"
+  | "reconciler.names.move_down"
+  | "reconciler.names.move_up"
+  | "reconciler.names.order_label"
+  | "reconciler.names.prefs_empty"
+  | "reconciler.names.prefs_help"
+  | "reconciler.names.prefs_title"
+  | "reconciler.names.remove_rule"
+  | "reconciler.names.remove_source"
+  | "reconciler.names.reset"
+  | "reconciler.names.reset_done"
+  | "reconciler.names.saved"
+  | "reconciler.names.site_add"
+  | "reconciler.names.site_add_choose"
+  | "reconciler.names.site_add_label"
+  | "reconciler.names.site_none_left"
+  | "reconciler.names.site_removed"
+  | "reconciler.names.site_rule"
+  | "reconciler.names.site_saved"
+  | "reconciler.names.sites_empty"
+  | "reconciler.names.sites_title"
+  | "reconciler.names.title"
   | "reconciler.reloaded"
   | "reconciler.saved"
   | "reconciler.title"
@@ -7388,6 +7460,7 @@ export interface MessageArgs {
   "dhcp.v6.preferred_default": { seconds: string | number; valid: string | number };
   "dhcp.v6.saved": { network: string | number };
   "dhcp.v6.title": { network: string | number };
+  "discovery.approve.choice": { name: string | number };
   "discovery.approve.confirm": { count: number };
   "discovery.batch.approve": { count: number };
   "discovery.batch.approve_body": { kinds: string | number };
@@ -7399,6 +7472,7 @@ export interface MessageArgs {
   "discovery.batch.kind.address_mismatch": { count: number };
   "discovery.batch.kind.conflict": { count: number };
   "discovery.batch.kind.discovered_host": { count: number };
+  "discovery.batch.kind.host_name": { count: number };
   "discovery.batch.kind.orphaned_intent": { count: number };
   "discovery.batch.kind.outside_prefixes": { count: number };
   "discovery.batch.kind.prefix_vlan_mismatch": { count: number };
@@ -7427,11 +7501,15 @@ export interface MessageArgs {
   "discovery.fact.vendor": { mac: string | number; vendor: string | number };
   "discovery.filter.prefix": { prefix: string | number };
   "discovery.filter.remove": { filter: string | number };
+  "discovery.names.seen": { at: string | number };
   "discovery.panel.adoption_failed": { error: string | number };
   "discovery.panel.change_count": { count: number };
   "discovery.panel.evidence_count": { count: number };
+  "discovery.panel.given": { given: string | number };
+  "discovery.panel.names_count": { count: number };
   "discovery.panel.opened": { rule: string | number };
   "discovery.panel.sightings": { count: number };
+  "discovery.panel.use_name": { source: string | number };
   "discovery.reject.reason_too_long": { max: number };
   "discovery.report.at": { at: string | number };
   "discovery.rule.address_mismatch": { host: string | number; intended: string | number; ip: string | number };
@@ -7441,8 +7519,11 @@ export interface MessageArgs {
   "discovery.rule.conflict_shared_address": { count: number; ip: string | number; macs: string | number };
   "discovery.rule.discovered_address": { ips: string; mac: string; name: string | number; sources: number };
   "discovery.rule.discovered_mac": { ips: string; mac: string; name: string | number; sources: number };
+  "discovery.rule.name_conflict": { host: string | number; name: string | number; name_rule: string | number; name_source: string | number; other_names: string };
   "discovery.rule.orphaned_address": { host: string; ip: string | number; last_seen: string | number };
   "discovery.rule.outside_prefixes": { cidr: string | number; count: number };
+  "discovery.rule.placeholder_name": { host: string | number; name: string | number; name_rule: string | number; name_source: string | number; other_names: string };
+  "discovery.rule.preferred_name": { host: string | number; name: string | number; name_source: string | number; other_names: string };
   "discovery.rule.prefix_vlan_differs": { cidr: string | number; current: string | number; name: string | number; vid: string | number };
   "discovery.rule.prefix_vlan_unset": { cidr: string | number; name: string | number; vid: string | number };
   "discovery.rule.vlan_discovered": { name: string | number; vid: string | number };
@@ -8133,6 +8214,14 @@ export interface MessageArgs {
   "reconciler.error.range": { max: string | number; min: string | number };
   "reconciler.error.refresh": { retention: string | number };
   "reconciler.limits": { default: string | number; max: string | number; min: string | number };
+  "reconciler.names.forget_label": { host: string | number };
+  "reconciler.names.forgotten": { host: string | number };
+  "reconciler.names.move_down": { source: string | number };
+  "reconciler.names.move_up": { source: string | number };
+  "reconciler.names.remove_source": { source: string | number };
+  "reconciler.names.site_removed": { site: string | number };
+  "reconciler.names.site_rule": { site: string | number };
+  "reconciler.names.site_saved": { site: string | number };
   "scans.count": { count: number };
   "scans.diff.summary": { changed: string | number; gone: string | number; new: string | number };
   "scans.fact.address": { ip: string | number; mac: string | number };
@@ -10360,7 +10449,10 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.action.open",
   "discovery.action.reconcile",
   "discovery.action.reject",
+  "discovery.approve.choice",
   "discovery.approve.confirm",
+  "discovery.approve.remember_host",
+  "discovery.approve.remember_source",
   "discovery.approve.title",
   "discovery.batch.approve",
   "discovery.batch.approve_body",
@@ -10373,6 +10465,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.batch.kind.address_mismatch",
   "discovery.batch.kind.conflict",
   "discovery.batch.kind.discovered_host",
+  "discovery.batch.kind.host_name",
   "discovery.batch.kind.orphaned_intent",
   "discovery.batch.kind.outside_prefixes",
   "discovery.batch.kind.prefix_vlan_mismatch",
@@ -10387,6 +10480,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.col.first_seen",
   "discovery.col.kind",
   "discovery.col.last_seen",
+  "discovery.col.names",
   "discovery.col.observed",
   "discovery.col.prefix",
   "discovery.col.severity",
@@ -10418,6 +10512,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.fact.link",
   "discovery.fact.name",
   "discovery.fact.network",
+  "discovery.fact.no_name",
   "discovery.fact.no_ports",
   "discovery.fact.os",
   "discovery.fact.parent",
@@ -10446,6 +10541,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.kind.address_mismatch",
   "discovery.kind.conflict",
   "discovery.kind.discovered_host",
+  "discovery.kind.host_name",
   "discovery.kind.orphaned_intent",
   "discovery.kind.outside_prefixes",
   "discovery.kind.prefix_vlan_mismatch",
@@ -10466,6 +10562,21 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.method.snmp",
   "discovery.method.tcp_connect",
   "discovery.method.tcp_syn",
+  "discovery.name_rule.default",
+  "discovery.name_rule.global",
+  "discovery.name_rule.host",
+  "discovery.name_rule.site",
+  "discovery.name_source.dhcp",
+  "discovery.name_source.dns",
+  "discovery.name_source.home_assistant",
+  "discovery.name_source.llmnr",
+  "discovery.name_source.mdns",
+  "discovery.name_source.other",
+  "discovery.name_source.proxmox",
+  "discovery.name_source.scan",
+  "discovery.name_source.unifi",
+  "discovery.name_source.windows",
+  "discovery.names.seen",
   "discovery.nav.label",
   "discovery.nav.observations",
   "discovery.nav.proposals",
@@ -10490,23 +10601,29 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.panel.evidence",
   "discovery.panel.evidence_count",
   "discovery.panel.first_seen",
+  "discovery.panel.given",
   "discovery.panel.intent",
   "discovery.panel.ip",
   "discovery.panel.label",
   "discovery.panel.last_seen",
   "discovery.panel.mac",
   "discovery.panel.name",
+  "discovery.panel.names",
+  "discovery.panel.names_count",
+  "discovery.panel.names_hint",
   "discovery.panel.network",
   "discovery.panel.newer",
   "discovery.panel.no_evidence",
   "discovery.panel.nothing_hint",
   "discovery.panel.opened",
   "discovery.panel.prefix",
+  "discovery.panel.proposed",
   "discovery.panel.reason",
   "discovery.panel.results",
   "discovery.panel.sightings",
   "discovery.panel.subject",
   "discovery.panel.superseded_by",
+  "discovery.panel.use_name",
   "discovery.reconcile.failed",
   "discovery.reject.body",
   "discovery.reject.body_conflict",
@@ -10517,6 +10634,10 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.reject.reason_too_long",
   "discovery.reject.title",
   "discovery.reject.title_conflict",
+  "discovery.remember.host",
+  "discovery.remember.label",
+  "discovery.remember.once",
+  "discovery.remember.source",
   "discovery.report.adopted",
   "discovery.report.adoption_failures",
   "discovery.report.at",
@@ -10537,8 +10658,11 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.rule.conflict_shared_address",
   "discovery.rule.discovered_address",
   "discovery.rule.discovered_mac",
+  "discovery.rule.name_conflict",
   "discovery.rule.orphaned_address",
   "discovery.rule.outside_prefixes",
+  "discovery.rule.placeholder_name",
+  "discovery.rule.preferred_name",
   "discovery.rule.prefix_vlan_differs",
   "discovery.rule.prefix_vlan_unset",
   "discovery.rule.vlan_discovered",
@@ -11959,6 +12083,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.move.l2_refused",
   "errors.ipam.move.plan_changed",
   "errors.ipam.move.unmanaged",
+  "errors.ipam.name_authority.invalid",
   "errors.ipam.name_taken",
   "errors.ipam.not_deleted",
   "errors.ipam.not_found",
@@ -11977,6 +12102,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.prefix.resize_orphans",
   "errors.ipam.proposal.batch_empty",
   "errors.ipam.proposal.batch_too_large",
+  "errors.ipam.proposal.choice_invalid",
   "errors.ipam.proposal.not_found",
   "errors.ipam.proposal.not_keepable",
   "errors.ipam.proposal.not_open",
@@ -13945,6 +14071,41 @@ export const messageKeys: readonly MessageKey[] = [
   "reconciler.help.retention",
   "reconciler.lede",
   "reconciler.limits",
+  "reconciler.names.add_choose",
+  "reconciler.names.add_label",
+  "reconciler.names.col_decided",
+  "reconciler.names.col_host",
+  "reconciler.names.col_name",
+  "reconciler.names.col_source",
+  "reconciler.names.default_help",
+  "reconciler.names.default_tag",
+  "reconciler.names.empty_order",
+  "reconciler.names.forget",
+  "reconciler.names.forget_label",
+  "reconciler.names.forgotten",
+  "reconciler.names.global_title",
+  "reconciler.names.lede",
+  "reconciler.names.move_down",
+  "reconciler.names.move_up",
+  "reconciler.names.order_label",
+  "reconciler.names.prefs_empty",
+  "reconciler.names.prefs_help",
+  "reconciler.names.prefs_title",
+  "reconciler.names.remove_rule",
+  "reconciler.names.remove_source",
+  "reconciler.names.reset",
+  "reconciler.names.reset_done",
+  "reconciler.names.saved",
+  "reconciler.names.site_add",
+  "reconciler.names.site_add_choose",
+  "reconciler.names.site_add_label",
+  "reconciler.names.site_none_left",
+  "reconciler.names.site_removed",
+  "reconciler.names.site_rule",
+  "reconciler.names.site_saved",
+  "reconciler.names.sites_empty",
+  "reconciler.names.sites_title",
+  "reconciler.names.title",
   "reconciler.reloaded",
   "reconciler.saved",
   "reconciler.title",

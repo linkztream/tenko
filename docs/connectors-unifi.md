@@ -186,6 +186,14 @@ A `Poll` call reads the same endpoints and reports hosts. It always returns the 
 
 Each host has exactly one MAC address. A client whose MAC address is one of the controller's devices is reported as the device only. Offline clients are not reported: the controller lists connected clients.
 
+**Placeholder names.** A client that announced no host name and has no alias gets a name the controller makes up: `host-<IPv4 address with dashes>` (`host-192-0-2-10` for 192.0.2.10), built from the address it had when the controller first saw it, which may not be its address now; some releases show the MAC address instead. The plugin marks such a name as a placeholder (`name_placeholder` on the inventory host and on the topology's client, so both the `host` and the `name` fact carry it) when it is:
+
+- `host-` followed by any IPv4 address with dashes, or the client's own address with dashes with or without `host-`;
+- the client's MAC address with separators, or its twelve hexadecimal digits without them;
+- an IP address, `unknown`, an empty name, or any other form of the reconciler's rule ([reconciliation.md](reconciliation.md#411-names-placeholders-the-name-authority-and-the-operators-choice)).
+
+A placeholder never names a host and never conflicts with the name another source gives, such as the guest name of Proxmox VE; the facts view shows it as "no name" with the source. An alias an operator gave in the controller is a real name, whatever it looks like, unless it has one of those forms. The test is `model::placeholder_name` (unit test `the_controllers_placeholder_names_are_marked`).
+
 ### 4.4 The facts this yields
 
 The connector host turns what the plugin reports into observations ([reconciliation.md](reconciliation.md#27-what-the-connector-host-hands-over)). The inventory is filed under the source `inventory:<connector id>` and the topology under `network_controller:<connector id>`.

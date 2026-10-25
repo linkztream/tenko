@@ -454,6 +454,7 @@ pub fn guardrail_view_of(state: &ControllerAttachments) -> TopologySnapshot {
                 network: client.network.clone().map(NetworkRef),
                 vlan: client.vlan,
                 name: client.name.clone(),
+                name_placeholder: false,
                 vendor: None,
                 management: client.management,
             })
@@ -918,6 +919,7 @@ mod tests {
             network: Some(NetworkRef(network.to_owned())),
             vlan: Some(vlan),
             name: None,
+            name_placeholder: false,
             vendor: Some("Example Corp".to_owned()),
             management: false,
         }

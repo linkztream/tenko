@@ -25328,7 +25328,7 @@
           {
             "name": "kind",
             "in": "query",
-            "description": "Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`. Repeat the parameter or separate the kinds with commas.",
+            "description": "Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch` or `host_name`. Repeat the parameter or separate the kinds with commas.",
             "required": false,
             "schema": {
               "type": "string"
@@ -25748,6 +25748,23 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "Optional: for a proposal that offers names (`choices`), the name the host takes (`choice`) and what to remember of it (`remember`: `host` or `source`; `source` needs an administrator). Without a body the proposed name applies.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ApproveRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The decision: the accepted proposal, the revision, the inline job and the objects changed, with `ETag` of the proposal; on a dry run the proposal as it is and the plan, with nothing written",
@@ -25801,6 +25818,16 @@
           },
           "412": {
             "description": "If-Match is stale (`ipam.proposal.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The choice is not one of the proposal's `choices`, or the proposal offers none (`ipam.proposal.choice_invalid`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -29072,6 +29099,498 @@
           },
           "503": {
             "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/reconciler/name-authority": {
+      "get": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Get the name authority",
+        "operationId": "get_name_authority",
+        "responses": {
+          "200": {
+            "description": "The default order, the stored rules and the hosts' preferred sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameAuthorityView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Set the global name authority",
+        "operationId": "set_name_authority",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NameAuthorityRule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The global rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredAuthority"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The order is empty or names a kind twice (`ipam.name_authority.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Remove the global name authority",
+        "operationId": "clear_name_authority",
+        "responses": {
+          "204": {
+            "description": "The default order applies"
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/reconciler/name-authority/hosts/{host}": {
+      "delete": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Forget a host's preferred source",
+        "operationId": "clear_name_preference",
+        "parameters": [
+          {
+            "name": "host",
+            "in": "path",
+            "description": "Host identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The host prefers no source"
+          },
+          "400": {
+            "description": "The host identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The host prefers no source (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/settings/reconciler/name-authority/sites/{site}": {
+      "put": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Set a site's name authority",
+        "operationId": "set_site_name_authority",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "description": "Site identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NameAuthorityRule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The site's rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredAuthority"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or the site identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such site (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The order is empty or names a kind twice (`ipam.name_authority.invalid`, parameter `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "reconciler"
+        ],
+        "summary": "Remove a site's name authority",
+        "operationId": "clear_site_name_authority",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "description": "Site identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The global rule decides for the site"
+          },
+          "400": {
+            "description": "The site identifier is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A concurrent change won (`sys.store.precondition_failed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36633,6 +37152,31 @@
           }
         }
       },
+      "ApproveRequest": {
+        "type": "object",
+        "description": "The body of an approval: for a proposal that offers names (`choices`), which one the\nhost takes and what to remember. Every member is optional; without a body the proposed\nname applies.",
+        "properties": {
+          "choice": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One of the proposal's `choices` (compared without case); the proposed one when\nabsent."
+          },
+          "remember": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Remember",
+                "description": "What to remember of the choice: `host` (the host follows the chosen source) or\n`source` (the source goes first in the name authority)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "AssertionResponse": {
         "type": "object",
         "description": "The `response` member of an assertion (`AuthenticatorAssertionResponseJSON`).",
@@ -37869,6 +38413,17 @@
           "ids"
         ],
         "properties": {
+          "choices": {
+            "type": "object",
+            "description": "The choice of name per proposal, for proposals that offer names, as the single\napproval takes it (`choice`, `remember`); a proposal not named here takes its\nproposed name.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ApproveRequest"
+            },
+            "propertyNames": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           "ids": {
             "type": "array",
             "items": {
@@ -45713,6 +46268,39 @@
         },
         "additionalProperties": false
       },
+      "HostPreference": {
+        "type": "object",
+        "description": "A host's preferred source.",
+        "required": [
+          "host",
+          "host_name",
+          "source",
+          "name",
+          "decided"
+        ],
+        "properties": {
+          "decided": {
+            "$ref": "#/components/schemas/Stamp",
+            "description": "Who decided and when."
+          },
+          "host": {
+            "$ref": "#/components/schemas/HostId",
+            "description": "The host."
+          },
+          "host_name": {
+            "type": "string",
+            "description": "The host's name now."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name it chose then."
+          },
+          "source": {
+            "$ref": "#/components/schemas/NameSource",
+            "description": "The source it prefers."
+          }
+        }
+      },
       "HostStatus": {
         "type": "object",
         "description": "The host under the node, for `GET /system/status`. A figure that could not be read is absent;\nCPU and memory are read on Linux only.",
@@ -46707,6 +47295,13 @@
             ],
             "description": "The error code of the last failed adoption; the policy does not try again until\nthe proposal is replaced."
           },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameChoice"
+            },
+            "description": "The names the sources give the device when there is a name to choose: one entry per\nname, the proposed one first. An approval may choose another of them (`choice`)."
+          },
           "commands": {
             "type": "array",
             "items": {
@@ -46829,7 +47424,8 @@
           "conflict",
           "outside_prefixes",
           "vlan_discovered",
-          "prefix_vlan_mismatch"
+          "prefix_vlan_mismatch",
+          "host_name"
         ]
       },
       "IntentProposalState": {
@@ -53066,6 +53662,149 @@
           "default"
         ]
       },
+      "NameAuthorityRule": {
+        "type": "object",
+        "description": "The body of a change of a rule.",
+        "required": [
+          "order"
+        ],
+        "properties": {
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameSource"
+            },
+            "description": "The kinds of sources, the most trusted first: one to ten, each once."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NameAuthorityView": {
+        "type": "object",
+        "description": "The name authority as the API shows it: the order in force without a rule, the stored\nrules and the hosts' preferred sources.",
+        "required": [
+          "default_order",
+          "sources",
+          "sites",
+          "preferences"
+        ],
+        "properties": {
+          "default_order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameSource"
+            },
+            "description": "The order when no rule is stored ([`NameSource::DEFAULT_ORDER`])."
+          },
+          "global": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StoredAuthority",
+                "description": "The global rule; `null` while the default applies."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostPreference"
+            },
+            "description": "The hosts that prefer a source."
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiteAuthority"
+            },
+            "description": "The rules of sites, by site name."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameSource"
+            },
+            "description": "Every kind of source, for an editor."
+          }
+        }
+      },
+      "NameChoice": {
+        "type": "object",
+        "description": "One name a proposal offers: the name, the sources that give it and when they last saw\nthe device.",
+        "required": [
+          "name",
+          "proposed",
+          "sources",
+          "last_seen"
+        ],
+        "properties": {
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The newest sighting among them."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name as a host would take it (lowercase, unusual characters replaced by `-`)."
+          },
+          "proposed": {
+            "type": "boolean",
+            "description": "Whether the proposal suggests this name (the first entry)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameChoiceSource"
+            },
+            "description": "The sources that give it, the highest ranked first."
+          }
+        }
+      },
+      "NameChoiceSource": {
+        "type": "object",
+        "description": "One source of a [`NameChoice`].",
+        "required": [
+          "source",
+          "source_key",
+          "given",
+          "last_seen"
+        ],
+        "properties": {
+          "given": {
+            "type": "string",
+            "description": "The name as the source gives it."
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the source last saw the device."
+          },
+          "source": {
+            "$ref": "#/components/schemas/NameSource",
+            "description": "The kind of source the name authority ranks."
+          },
+          "source_key": {
+            "type": "string",
+            "description": "The canonical text of the source (`inventory:<connector id>`)."
+          }
+        }
+      },
+      "NameSource": {
+        "type": "string",
+        "description": "A kind of source, as the name authority ranks them.",
+        "enum": [
+          "proxmox",
+          "home_assistant",
+          "windows",
+          "dns",
+          "mdns",
+          "llmnr",
+          "unifi",
+          "scan",
+          "dhcp",
+          "other"
+        ]
+      },
       "NegativeTrustAnchor": {
         "type": "object",
         "description": "A negative trust anchor (RFC 7646, `dns.ntas`): names at or below `zone` are\n`insecure` instead of `bogus` until it expires.",
@@ -54709,6 +55448,10 @@
                   "name": {
                     "type": "string",
                     "description": "The name, such as `printer.example.net`."
+                  },
+                  "placeholder": {
+                    "type": "boolean",
+                    "description": "The name is a placeholder the source makes up for a device without a name\n([`is_placeholder_name`]): it never names a host. Set by the source, or at\ningest by the rule."
                   }
                 }
               },
@@ -54933,6 +55676,10 @@
               "null"
             ],
             "description": "Name as the source shows it."
+          },
+          "name_placeholder": {
+            "type": "boolean",
+            "description": "The name is a placeholder the source makes up for a device without a name, such as\nUniFi's `host-192-0-2-10` ([`is_placeholder_name`]): it never names a host. Set by\nthe source, or at ingest by the rule."
           },
           "os": {
             "type": [
@@ -58295,6 +59042,13 @@
                     "null"
                   ],
                   "description": "The error code of the last failed adoption; the policy does not try again until\nthe proposal is replaced."
+                },
+                "choices": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NameChoice"
+                  },
+                  "description": "The names the sources give the device when there is a name to choose: one entry per\nname, the proposed one first. An approval may choose another of them (`choice`)."
                 },
                 "commands": {
                   "type": "array",
@@ -66339,6 +67093,14 @@
           }
         }
       },
+      "Remember": {
+        "type": "string",
+        "description": "What the operator remembers of a choice of name.",
+        "enum": [
+          "host",
+          "source"
+        ]
+      },
       "RemoteHealth": {
         "type": "string",
         "description": "Health of a remote system.",
@@ -69957,6 +70719,27 @@
           }
         }
       },
+      "SiteAuthority": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StoredAuthority",
+            "description": "The rule."
+          },
+          {
+            "type": "object",
+            "required": [
+              "site_name"
+            ],
+            "properties": {
+              "site_name": {
+                "type": "string",
+                "description": "The site's name."
+              }
+            }
+          }
+        ],
+        "description": "The rule of one site, with the site's name."
+      },
       "SiteId": {
         "type": "string",
         "format": "uuid"
@@ -70947,6 +71730,44 @@
           "role": {
             "type": "string",
             "description": "`memory`, `leader`, `follower`, `learner`, `candidate` or `shutdown`."
+          }
+        }
+      },
+      "StoredAuthority": {
+        "type": "object",
+        "description": "A stored name authority rule: the global one (`site` empty) or one site's.",
+        "required": [
+          "order",
+          "updated"
+        ],
+        "properties": {
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameSource"
+            },
+            "description": "The kinds of sources, the most trusted first. Kinds left out rank after the listed\nones, in the order of [`NameSource::ALL`]."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Store revision (filled when read).",
+            "minimum": 0
+          },
+          "site": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SiteId",
+                "description": "The site; `null` for the global rule."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated": {
+            "$ref": "#/components/schemas/Stamp",
+            "description": "Who set it and when."
           }
         }
       },

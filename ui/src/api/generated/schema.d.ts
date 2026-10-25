@@ -4435,6 +4435,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/reconciler/name-authority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the name authority */
+        get: operations["get_name_authority"];
+        /** Set the global name authority */
+        put: operations["set_name_authority"];
+        post?: never;
+        /** Remove the global name authority */
+        delete: operations["clear_name_authority"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/reconciler/name-authority/hosts/{host}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget a host's preferred source */
+        delete: operations["clear_name_preference"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/reconciler/name-authority/sites/{site}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a site's name authority */
+        put: operations["set_site_name_authority"];
+        post?: never;
+        /** Remove a site's name authority */
+        delete: operations["clear_site_name_authority"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/security": {
         parameters: {
             query?: never;
@@ -5627,6 +5681,19 @@ export interface components {
             /** @description Plan warning codes acknowledged in addition to the mapping options. */
             acknowledge?: string[];
         };
+        /**
+         * @description The body of an approval: for a proposal that offers names (`choices`), which one the
+         *     host takes and what to remember. Every member is optional; without a body the proposed
+         *     name applies.
+         */
+        ApproveRequest: {
+            /**
+             * @description One of the proposal's `choices` (compared without case); the proposed one when
+             *     absent.
+             */
+            choice?: string | null;
+            remember?: components["schemas"]["Remember"] | null;
+        };
         /** @description The `response` member of an assertion (`AuthenticatorAssertionResponseJSON`). */
         AssertionResponse: {
             /** @description The authenticator data, base64url. */
@@ -6096,6 +6163,14 @@ export interface components {
         };
         /** @description The body of a batch approval. */
         BatchApproveRequest: {
+            /**
+             * @description The choice of name per proposal, for proposals that offer names, as the single
+             *     approval takes it (`choice`, `remember`); a proposal not named here takes its
+             *     proposed name.
+             */
+            choices?: {
+                [key: string]: components["schemas"]["ApproveRequest"];
+            };
             /** @description The proposals to approve, in the order they are applied: one to 500 identifiers. */
             ids: components["schemas"]["ProposalId"][];
         };
@@ -9196,6 +9271,19 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description A host's preferred source. */
+        HostPreference: {
+            /** @description Who decided and when. */
+            decided: components["schemas"]["Stamp"];
+            /** @description The host. */
+            host: components["schemas"]["HostId"];
+            /** @description The host's name now. */
+            host_name: string;
+            /** @description The name it chose then. */
+            name: string;
+            /** @description The source it prefers. */
+            source: components["schemas"]["NameSource"];
+        };
         /**
          * @description The host under the node, for `GET /system/status`. A figure that could not be read is absent;
          *     CPU and memory are read on Linux only.
@@ -9644,6 +9732,11 @@ export interface components {
              *     the proposal is replaced.
              */
             adoption_error?: string | null;
+            /**
+             * @description The names the sources give the device when there is a name to choose: one entry per
+             *     name, the proposed one first. An approval may choose another of them (`choice`).
+             */
+            choices?: components["schemas"]["NameChoice"][];
             /** @description The commands an approval applies (empty for conflicts, which a person resolves). */
             commands?: components["schemas"]["IpamCommand"][];
             /** @description When it was opened. */
@@ -9700,7 +9793,7 @@ export interface components {
          * @description What a proposal is about.
          * @enum {string}
          */
-        IntentProposalKind: "discovered_host" | "orphaned_intent" | "address_mismatch" | "conflict" | "outside_prefixes" | "vlan_discovered" | "prefix_vlan_mismatch";
+        IntentProposalKind: "discovered_host" | "orphaned_intent" | "address_mismatch" | "conflict" | "outside_prefixes" | "vlan_discovered" | "prefix_vlan_mismatch" | "host_name";
         /**
          * @description The decision state of a proposal.
          * @enum {string}
@@ -12111,6 +12204,56 @@ export interface components {
          * @enum {string}
          */
         MoveTimeoutSource: "request" | "lease" | "default";
+        /** @description The body of a change of a rule. */
+        NameAuthorityRule: {
+            /** @description The kinds of sources, the most trusted first: one to ten, each once. */
+            order: components["schemas"]["NameSource"][];
+        };
+        /**
+         * @description The name authority as the API shows it: the order in force without a rule, the stored
+         *     rules and the hosts' preferred sources.
+         */
+        NameAuthorityView: {
+            /** @description The order when no rule is stored ([`NameSource::DEFAULT_ORDER`]). */
+            default_order: components["schemas"]["NameSource"][];
+            global?: components["schemas"]["StoredAuthority"] | null;
+            /** @description The hosts that prefer a source. */
+            preferences: components["schemas"]["HostPreference"][];
+            /** @description The rules of sites, by site name. */
+            sites: components["schemas"]["SiteAuthority"][];
+            /** @description Every kind of source, for an editor. */
+            sources: components["schemas"]["NameSource"][];
+        };
+        /**
+         * @description One name a proposal offers: the name, the sources that give it and when they last saw
+         *     the device.
+         */
+        NameChoice: {
+            /** @description The newest sighting among them. */
+            last_seen: components["schemas"]["Timestamp"];
+            /** @description The name as a host would take it (lowercase, unusual characters replaced by `-`). */
+            name: string;
+            /** @description Whether the proposal suggests this name (the first entry). */
+            proposed: boolean;
+            /** @description The sources that give it, the highest ranked first. */
+            sources: components["schemas"]["NameChoiceSource"][];
+        };
+        /** @description One source of a [`NameChoice`]. */
+        NameChoiceSource: {
+            /** @description The name as the source gives it. */
+            given: string;
+            /** @description When the source last saw the device. */
+            last_seen: components["schemas"]["Timestamp"];
+            /** @description The kind of source the name authority ranks. */
+            source: components["schemas"]["NameSource"];
+            /** @description The canonical text of the source (`inventory:<connector id>`). */
+            source_key: string;
+        };
+        /**
+         * @description A kind of source, as the name authority ranks them.
+         * @enum {string}
+         */
+        NameSource: "proxmox" | "home_assistant" | "windows" | "dns" | "mdns" | "llmnr" | "unifi" | "scan" | "dhcp" | "other";
         /**
          * @description A negative trust anchor (RFC 7646, `dns.ntas`): names at or below `zone` are
          *     `insecure` instead of `bogus` until it expires.
@@ -12701,6 +12844,12 @@ export interface components {
                 ip: string;
                 /** @description The name, such as `printer.example.net`. */
                 name: string;
+                /**
+                 * @description The name is a placeholder the source makes up for a device without a name
+                 *     ([`is_placeholder_name`]): it never names a host. Set by the source, or at
+                 *     ingest by the rule.
+                 */
+                placeholder?: boolean;
             };
             /** @enum {string} */
             type: "name";
@@ -12797,6 +12946,12 @@ export interface components {
             macs?: components["schemas"]["MacAddr"][];
             /** @description Name as the source shows it. */
             name?: string | null;
+            /**
+             * @description The name is a placeholder the source makes up for a device without a name, such as
+             *     UniFi's `host-192-0-2-10` ([`is_placeholder_name`]): it never names a host. Set by
+             *     the source, or at ingest by the rule.
+             */
+            name_placeholder?: boolean;
             /** @description Operating system. */
             os?: string | null;
             /** @description The parent host's `external_id` (the hypervisor node of a VM). */
@@ -14052,6 +14207,11 @@ export interface components {
                  *     the proposal is replaced.
                  */
                 adoption_error?: string | null;
+                /**
+                 * @description The names the sources give the device when there is a name to choose: one entry per
+                 *     name, the proposed one first. An approval may choose another of them (`choice`).
+                 */
+                choices?: components["schemas"]["NameChoice"][];
                 /** @description The commands an approval applies (empty for conflicts, which a person resolves). */
                 commands?: components["schemas"]["IpamCommand"][];
                 /** @description When it was opened. */
@@ -17271,6 +17431,11 @@ export interface components {
             interface: components["schemas"]["InterfaceId"];
         };
         /**
+         * @description What the operator remembers of a choice of name.
+         * @enum {string}
+         */
+        Remember: "host" | "source";
+        /**
          * @description Health of a remote system.
          * @enum {string}
          */
@@ -18957,6 +19122,11 @@ export interface components {
             name: string;
             parent?: components["schemas"]["SiteId"] | null;
         };
+        /** @description The rule of one site, with the site's name. */
+        SiteAuthority: components["schemas"]["StoredAuthority"] & {
+            /** @description The site's name. */
+            site_name: string;
+        };
         /** Format: uuid */
         SiteId: string;
         /** @description A new site. */
@@ -19356,6 +19526,22 @@ export interface components {
             revision: components["schemas"]["Revision"];
             /** @description `memory`, `leader`, `follower`, `learner`, `candidate` or `shutdown`. */
             role: string;
+        };
+        /** @description A stored name authority rule: the global one (`site` empty) or one site's. */
+        StoredAuthority: {
+            /**
+             * @description The kinds of sources, the most trusted first. Kinds left out rank after the listed
+             *     ones, in the order of [`NameSource::ALL`].
+             */
+            order: components["schemas"]["NameSource"][];
+            /**
+             * Format: int64
+             * @description Store revision (filled when read).
+             */
+            revision?: number;
+            site?: components["schemas"]["SiteId"] | null;
+            /** @description Who set it and when. */
+            updated: components["schemas"]["Stamp"];
         };
         /**
          * @description The picture of one subject across sources, computed from its facts. Lists are sorted
@@ -40277,7 +40463,7 @@ export interface operations {
                 cursor?: string;
                 /** @description Read at least this store revision (read-your-writes after a write). */
                 at_least?: number;
-                /** @description Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`. Repeat the parameter or separate the kinds with commas. */
+                /** @description Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch` or `host_name`. Repeat the parameter or separate the kinds with commas. */
                 kind?: string;
                 /** @description Only proposals in these states: `open`, `accepted`, `rejected`, `expired` or `superseded`. Repeat the parameter or separate the states with commas. Every state when absent. */
                 state?: string;
@@ -40587,7 +40773,12 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Optional: for a proposal that offers names (`choices`), the name the host takes (`choice`) and what to remember of it (`remember`: `host` or `source`; `source` needs an administrator). Without a body the proposed name applies. */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApproveRequest"] | null;
+            };
+        };
         responses: {
             /** @description The decision: the accepted proposal, the revision, the inline job and the objects changed, with `ETag` of the proposal; on a dry run the proposal as it is and the plan, with nothing written */
             200: {
@@ -40636,6 +40827,15 @@ export interface operations {
             };
             /** @description If-Match is stale (`ipam.proposal.revision_mismatch`) */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The choice is not one of the proposal's `choices`, or the proposal offers none (`ipam.proposal.choice_invalid`) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -43111,6 +43311,416 @@ export interface operations {
                 };
             };
             /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_name_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The default order, the stored rules and the hosts' preferred sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameAuthorityView"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_name_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NameAuthorityRule"];
+            };
+        };
+        responses: {
+            /** @description The global rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredAuthority"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The order is empty or names a kind twice (`ipam.name_authority.invalid`, parameter `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_name_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The default order applies */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_name_preference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Host identifier */
+                host: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The host prefers no source */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The host identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The host prefers no source (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_site_name_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Site identifier */
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NameAuthorityRule"];
+            };
+        };
+        responses: {
+            /** @description The site's rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredAuthority"];
+                };
+            };
+            /** @description The body or the site identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such site (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The order is empty or names a kind twice (`ipam.name_authority.invalid`, parameter `field`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_site_name_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Site identifier */
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The global rule decides for the site */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The site identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

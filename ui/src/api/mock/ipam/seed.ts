@@ -463,6 +463,20 @@ export function buildSeed(now: number): IpamStore {
   // The deleted host with its interface and address, deleted together two days ago.
   addHost({ name: "old-printer", ip: "192.0.2.35", mode: "static", mac: "23" }, IPAM_IDS.vrf.default, P.lan, 2);
 
+  // A host adopted under the name a source made up for it (the placeholder of a UniFi client);
+  // a proposal of the reconciler renames it (reconcile-store.ts).
+  // It has no interface and no address yet, so that it takes nothing from the figures of the networks.
+  HOST_IDS["host-192-0-2-16"] = uid("b", 0x70);
+  add("host", {
+    id: HOST_IDS["host-192-0-2-16"],
+    tenant: IPAM_IDS.tenant.default,
+    name: "host-192-0-2-16",
+    mode: "dynamic",
+    lock: false,
+    site: null,
+    meta: makeMeta(now),
+  } satisfies Host);
+
   // The VRF isolated: two addresses that exist in the VRF default as well.
   const bench = (n: number, ip: string): Address => ({
     id: uid("7", 910 + n),

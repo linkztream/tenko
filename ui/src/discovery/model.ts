@@ -9,6 +9,9 @@ import { parseIp } from "../ipam/ip";
 import {
   PROPOSAL_KINDS,
   type ObservationSource,
+  type NameChoice,
+  type NameChoiceSource,
+  type NameSource,
   type Observed,
   type ObservedFact,
   type Proposal,
@@ -41,6 +44,8 @@ export function kindIcon(kind: ProposalKind): IconName {
       return "cable";
     case "prefix_vlan_mismatch":
       return "link";
+    case "host_name":
+      return "server";
   }
 }
 
@@ -98,13 +103,15 @@ export function ruleName(rule: string): string {
 
 /** Message arguments from the string parameters of a proposal; absent optional ones say `none`. */
 function ruleArgs(params: Readonly<Record<string, string>>): Record<string, string | number> {
-  const out: Record<string, string | number> = { mac: "none", ips: "none", host: "none" };
+  const out: Record<string, string | number> = { mac: "none", ips: "none", host: "none", other_names: "none" };
   for (const [key, value] of Object.entries(params)) {
     if (value === "") continue;
     if (key === "last_seen") {
       const at = Date.parse(value);
       out[key] = Number.isNaN(at) ? value : formatDateTime(at);
-    } else out[key] = /^\d+$/.test(value) ? Number(value) : value;
+    } else if (key === "name_source") out[key] = nameSourceWord(value);
+    else if (key === "name_rule") out[key] = nameRuleWord(value);
+    else out[key] = /^\d+$/.test(value) ? Number(value) : value;
   }
   return out;
 }
@@ -117,6 +124,44 @@ export function ruleText(p: Pick<Proposal, "rule" | "params" | "summary">): stri
   const key = `discovery.rule.${ruleName(p.rule)}`;
   const text = tDynamic(key, ruleArgs(p.params ?? {}));
   return text === undefined || text === key ? p.summary : text;
+}
+
+// ---------------------------------------------------------------------------------
+// Names
+
+/** The kind of source a name comes from, in words: "Proxmox VE", "UniFi", "DNS". A kind this build does not know stays as it is. */
+export function nameSourceWord(source: NameSource | string): string {
+  return tDynamic(`discovery.name_source.${source}`) ?? source;
+}
+
+/**
+ * What decided a name (the `name_rule` parameter: `default`, `global`, `site:<id>` or `host`), as
+ * a phrase: "by the default name authority". A value this build does not know stays as it is.
+ */
+export function nameRuleWord(rule: string): string {
+  const key = rule.startsWith("site:") ? "site" : rule;
+  return tDynamic(`discovery.name_rule.${key}`) ?? rule;
+}
+
+/** The names a proposal offers, the proposed one first; none for a proposal that offers no choice. */
+export function choicesOf(p: Pick<Proposal, "choices">): readonly NameChoice[] {
+  return p.choices ?? [];
+}
+
+/** The source of a choice that ranks highest, which the "use this name" button names. */
+export function choiceSource(choice: NameChoice): NameChoiceSource | undefined {
+  return choice.sources[0];
+}
+
+/** One candidate in a phrase: "postgresql · Proxmox VE" (each kind of source that gives the name once). */
+export function choiceText(choice: NameChoice): string {
+  const kinds = [...new Set(choice.sources.map((s) => nameSourceWord(s.source)))];
+  return kinds.length > 0 ? `${choice.name} · ${formatList(kinds)}` : choice.name;
+}
+
+/** Every candidate of a proposal in one line: "postgresql · Proxmox VE, db · UniFi". */
+export function choicesLine(p: Pick<Proposal, "choices">): string {
+  return choicesOf(p).map(choiceText).join(", ");
 }
 
 /** The short label of what a proposal is about: its name, MAC, address or network. */
@@ -191,12 +236,56 @@ export function isCurrent(fact: Pick<ObservedFact, "expires_at">, now = Date.now
   return !fact.expires_at || Date.parse(fact.expires_at) > now;
 }
 
-/** What a fact reports, in one line of words and identifiers. */
+/** Stands for a placeholder name while a line is built; `observedText` and `observedParts` replace it. */
+const NO_NAME = "";
+
+/** The name of a fact when the source made it up (a placeholder), else `null`. */
+export function placeholderName(observed: Observed): string | null {
+  if (observed.type === "host") return observed.data.name_placeholder && observed.data.name ? observed.data.name : null;
+  if (observed.type === "name") return observed.data.placeholder && observed.data.name ? observed.data.name : null;
+  return null;
+}
+
+/** What a fact reports, in one line of words and identifiers; a placeholder name reads "no name". */
 export function observedText(observed: Observed): string {
+  return observedLine(observed).replace(NO_NAME, t("discovery.fact.no_name"));
+}
+
+/**
+ * What a fact reports, cut at its placeholder name: the words before it, the name the source
+ * made up, and the words after it. The facts view shows the placeholder as a muted "no name"
+ * with the original in a tooltip. A fact without a placeholder is all `before`.
+ */
+export function observedParts(observed: Observed): { before: string; placeholder: string | null; after: string } {
+  const placeholder = placeholderName(observed);
+  const line = observedLine(observed);
+  const at = line.indexOf(NO_NAME);
+  if (placeholder === null || at < 0) return { before: observedText(observed), placeholder: null, after: "" };
+  return { before: line.slice(0, at), placeholder, after: line.slice(at + NO_NAME.length) };
+}
+
+/**
+ * The names a subject has, cut into the real ones and the placeholders: a name that the facts
+ * give only as a placeholder (UniFi's `host-192-0-2-10`) is no name of the device.
+ */
+export function splitNames(names: readonly string[], facts: readonly ObservedFact[]): { names: string[]; placeholders: string[] } {
+  const made = new Set<string>();
+  const real = new Set<string>();
+  for (const fact of facts) {
+    const o = fact.observed;
+    const placeholder = placeholderName(o);
+    if (placeholder !== null) made.add(placeholder);
+    else if ((o.type === "host" || o.type === "name") && o.data.name) real.add(o.data.name);
+  }
+  const hidden = (name: string) => made.has(name) && !real.has(name);
+  return { names: names.filter((n) => !hidden(n)), placeholders: names.filter(hidden) };
+}
+
+function observedLine(observed: Observed): string {
   switch (observed.type) {
     case "host": {
       const d = observed.data;
-      const parts = [d.name ?? d.external_id];
+      const parts = [placeholderName(observed) !== null ? NO_NAME : (d.name ?? d.external_id)];
       if (d.macs?.length) parts.push(formatList(d.macs));
       if (d.ips?.length) parts.push(formatList(d.ips));
       if (d.os) parts.push(d.os);
@@ -229,7 +318,9 @@ export function observedText(observed: Observed): string {
     }
     case "name":
       // What a probe found for an address; it is no sighting of the address.
-      return observed.data.ip && observed.data.name ? t("discovery.fact.name", { ip: observed.data.ip, name: observed.data.name }) : otherObservedText(observed);
+      return observed.data.ip && observed.data.name
+        ? t("discovery.fact.name", { ip: observed.data.ip, name: placeholderName(observed) !== null ? NO_NAME : observed.data.name })
+        : otherObservedText(observed);
     case "vendor":
       return observed.data.mac && observed.data.vendor ? t("discovery.fact.vendor", { mac: observed.data.mac, vendor: observed.data.vendor }) : otherObservedText(observed);
     case "network":
@@ -266,7 +357,8 @@ export function lookupSubject(fact: ObservedFact): string | null {
   const o = fact.observed;
   switch (o.type) {
     case "host":
-      return o.data.macs?.[0] ?? o.data.ips?.[0] ?? o.data.name ?? null;
+      // A name the source made up is no subject to look up.
+      return o.data.macs?.[0] ?? o.data.ips?.[0] ?? (placeholderName(o) === null ? o.data.name : null) ?? null;
     case "address":
       return o.data.mac ?? o.data.ip;
     case "services":

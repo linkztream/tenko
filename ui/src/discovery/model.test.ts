@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiEvent } from "../api/events";
 import { formatDateTime, setLocale } from "../i18n";
-import type { ObservationSource, Observed, ObservedFact, Proposal } from "./api";
+import type { NameSource, ObservationSource, Observed, ObservedFact, Proposal } from "./api";
 import {
   canApprove,
   factTypeWord,
@@ -13,6 +13,13 @@ import {
   kindWord,
   lastSeenOf,
   lookupSubject,
+  choiceText,
+  choicesLine,
+  nameRuleWord,
+  nameSourceWord,
+  observedParts,
+  placeholderName,
+  splitNames,
   NO_NAMES,
   kindSummary,
   observedText,
@@ -77,6 +84,7 @@ describe("the words of a proposal", () => {
     expect(kindWord("orphaned_intent")).toBe("Not seen any more");
     expect(kindWord("vlan_discovered")).toBe("VLAN discovered");
     expect(kindWord("prefix_vlan_mismatch")).toBe("Prefix VLAN differs");
+    expect(kindWord("host_name")).toBe("Host name");
 
     expect(kindIcon("discovered_host")).toBe("proposal");
     expect(kindIcon("conflict")).toBe("conflict");
@@ -85,6 +93,8 @@ describe("the words of a proposal", () => {
     expect(kindIcon("orphaned_intent")).toBe("clock");
     expect(kindIcon("vlan_discovered")).toBe("cable");
     expect(kindIcon("prefix_vlan_mismatch")).toBe("link");
+    expect(kindIcon("host_name")).toBe("server");
+    expect(kindClass("host_name")).toBe("proposal");
     expect(kindClass("vlan_discovered")).toBe("proposal");
     expect(kindClass("prefix_vlan_mismatch")).toBe("discrepancy");
 
@@ -327,6 +337,120 @@ describe("the text of a rule", () => {
 
     it("finds the message of a rule by its last part, whatever the prefix", () => {
       expect(text("custom.address_unrecorded", { host: "a", ip: "192.0.2.1" })).toBe("a is seen at 192.0.2.1, which its intent does not list; record it");
+    });
+  });
+});
+
+describe("the names of a device", () => {
+  it("has a word for every kind of source and keeps a kind it does not know", () => {
+    const words = ["proxmox", "home_assistant", "windows", "dns", "mdns", "llmnr", "unifi", "scan", "dhcp", "other"].map((s) => nameSourceWord(s));
+    expect(words).toEqual(["Proxmox VE", "Home Assistant", "Windows", "DNS", "mDNS", "LLMNR", "UniFi", "Scan", "DHCP", "Other connector"]);
+    expect(nameSourceWord("newsource")).toBe("newsource");
+  });
+
+  it("says in words what decided a name", () => {
+    expect(nameRuleWord("default")).toBe("by the default name authority");
+    expect(nameRuleWord("global")).toBe("by the global name authority");
+    expect(nameRuleWord("site:0190d1c2-0000-7000-8000-000000030001")).toBe("by the name authority of the site");
+    expect(nameRuleWord("host")).toBe("by the preferred source of the host");
+    expect(nameRuleWord("elsewhere")).toBe("elsewhere");
+  });
+
+  describe("the rules that rename a host", () => {
+    const params = { host: "host-192-0-2-16", name: "postgresql", name_source: "proxmox", name_rule: "default" };
+
+    it("names the placeholder, the new name, the source and what decided", () => {
+      expect(text("ipam.reconcile.placeholder_name", params)).toBe(
+        "Host host-192-0-2-16 has a placeholder name; rename it to postgresql (Proxmox VE, by the default name authority)",
+      );
+      expect(text("ipam.reconcile.placeholder_name", { ...params, name_rule: "global", other_names: "db, sql" })).toBe(
+        "Host host-192-0-2-16 has a placeholder name; rename it to postgresql (Proxmox VE, by the global name authority); also named db, sql",
+      );
+    });
+
+    it("names the preferred source of a host", () => {
+      expect(text("ipam.reconcile.preferred_name", { ...params, host: "db", name_source: "unifi", name_rule: "host" })).toBe(
+        "Host db follows its preferred source, UniFi, which names it postgresql; rename it to postgresql",
+      );
+    });
+
+    it("tells that the sources disagree and which one decided", () => {
+      expect(text("ipam.reconcile.name_conflict", { ...params, host: "db", name_rule: "site:0190d1c2-0000-7000-8000-000000030001", other_names: "sql" })).toBe(
+        "The sources name host db differently; rename it to postgresql (Proxmox VE, by the name authority of the site); also named sql",
+      );
+    });
+
+    it("reads the rules in Swedish", async () => {
+      await setLocale("sv");
+      expect(text("ipam.reconcile.placeholder_name", params)).toBe(
+        "Värden host-192-0-2-16 har ett låtsasnamn; döp om den till postgresql (Proxmox VE, enligt standardordningen för namnauktoritet)",
+      );
+    });
+
+    it("counts the renames in the phrase of a batch decision", () => {
+      expect(kindSummary([{ kind: "host_name" }, { kind: "host_name" }, { kind: "discovered_host" }])).toBe("1 discovered host and 2 host renames");
+    });
+  });
+
+  describe("the candidates of a proposal", () => {
+    const sources = (...list: [NameSource, string][]) =>
+      list.map(([source, given]) => ({ source, source_key: `${source}:x`, given, last_seen: "2026-10-01T00:00:00Z" }));
+    const choices: Proposal["choices"] = [
+      { name: "postgresql", proposed: true, sources: sources(["proxmox", "postgresql"], ["dns", "postgresql"]), last_seen: "2026-10-01T00:00:00Z" },
+      { name: "db", proposed: false, sources: sources(["unifi", "DB"]), last_seen: "2026-10-01T00:00:00Z" },
+    ];
+
+    it("writes a candidate with the kinds of source that give it, each once", () => {
+      expect(choiceText(choices![0]!)).toBe("postgresql · Proxmox VE and DNS");
+      expect(choiceText(choices![1]!)).toBe("db · UniFi");
+      expect(choiceText({ name: "x", proposed: false, sources: [], last_seen: "2026-10-01T00:00:00Z" })).toBe("x");
+    });
+
+    it("writes every candidate in one line, the proposed one first", () => {
+      expect(choicesLine({ choices })).toBe("postgresql · Proxmox VE and DNS, db · UniFi");
+      expect(choicesLine({})).toBe("");
+    });
+  });
+
+  describe("a name that a source made up", () => {
+    const host = (data: object) => ({ type: "host", data: { external_id: "client-1", macs: ["00:00:5e:00:53:10"], ips: ["192.0.2.16"], ...data } }) as Observed;
+
+    it("reads no name, and leaves the original to the tooltip", () => {
+      const placeholder = host({ name: "host-192-0-2-16", name_placeholder: true });
+      expect(placeholderName(placeholder)).toBe("host-192-0-2-16");
+      expect(observedText(placeholder)).toBe("no name · 00:00:5e:00:53:10 · 192.0.2.16");
+      expect(observedParts(placeholder)).toEqual({ before: "", placeholder: "host-192-0-2-16", after: " · 00:00:5e:00:53:10 · 192.0.2.16" });
+    });
+
+    it("leaves a real name as it is", () => {
+      const real = host({ name: "postgresql" });
+      expect(placeholderName(real)).toBeNull();
+      expect(observedText(real)).toBe("postgresql · 00:00:5e:00:53:10 · 192.0.2.16");
+      expect(observedParts(real)).toEqual({ before: "postgresql · 00:00:5e:00:53:10 · 192.0.2.16", placeholder: null, after: "" });
+    });
+
+    it("reads no name for the name a probe found, when it is a placeholder", () => {
+      const found = { type: "name", data: { ip: "192.0.2.16", name: "host-192-0-2-16", placeholder: true } } as Observed;
+      expect(observedText(found)).toBe("192.0.2.16 is called no name");
+      expect(observedParts(found).placeholder).toBe("host-192-0-2-16");
+      expect(observedText({ type: "name", data: { ip: "192.0.2.16", name: "gw" } })).toBe("192.0.2.16 is called gw");
+    });
+
+    it("reads it in Swedish", async () => {
+      await setLocale("sv");
+      expect(observedText(host({ name: "host-192-0-2-16", name_placeholder: true }))).toBe("inget namn · 00:00:5e:00:53:10 · 192.0.2.16");
+    });
+
+    it("is no subject to look up", () => {
+      expect(lookupSubject(fact({ type: "host", data: { external_id: "x", name: "host-192-0-2-16", name_placeholder: true } }))).toBeNull();
+      expect(lookupSubject(fact(host({ name: "host-192-0-2-16", name_placeholder: true })))).toBe("00:00:5e:00:53:10");
+    });
+
+    it("is kept out of the names of a subject unless a real fact gives the same name", () => {
+      const facts = [fact(host({ name: "host-192-0-2-16", name_placeholder: true })), fact(host({ name: "postgresql" }))];
+      expect(splitNames(["host-192-0-2-16", "postgresql"], facts)).toEqual({ names: ["postgresql"], placeholders: ["host-192-0-2-16"] });
+      expect(splitNames(["host-192-0-2-16"], [facts[0]!])).toEqual({ names: [], placeholders: ["host-192-0-2-16"] });
+      expect(splitNames(["host-192-0-2-16"], [fact(host({ name: "host-192-0-2-16" })), facts[0]!])).toEqual({ names: ["host-192-0-2-16"], placeholders: [] });
     });
   });
 });

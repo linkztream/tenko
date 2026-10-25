@@ -16,7 +16,7 @@ use tenko_core::{
 };
 use utoipa::ToSchema;
 
-use crate::command::IpamCommand;
+use crate::{command::IpamCommand, reconcile::names::NameSource};
 
 /// What a proposal is about.
 #[derive(
@@ -41,11 +41,16 @@ pub enum IntentProposalKind {
     /// A network controller carries a prefix's network on a VLAN the prefix is not linked
     /// to: the link is suggested.
     PrefixVlanMismatch,
+    /// A host of intent whose name the sources disagree with: a placeholder name that a
+    /// real name arrived for, a name its preferred source changed, or the names of several
+    /// sources that the name authority decides between. The rename is suggested, and the
+    /// operator may choose another of the names.
+    HostName,
 }
 
 impl IntentProposalKind {
     /// Every kind.
-    pub const ALL: [IntentProposalKind; 7] = [
+    pub const ALL: [IntentProposalKind; 8] = [
         IntentProposalKind::DiscoveredHost,
         IntentProposalKind::OrphanedIntent,
         IntentProposalKind::AddressMismatch,
@@ -53,6 +58,7 @@ impl IntentProposalKind {
         IntentProposalKind::OutsidePrefixes,
         IntentProposalKind::VlanDiscovered,
         IntentProposalKind::PrefixVlanMismatch,
+        IntentProposalKind::HostName,
     ];
 
     /// The `snake_case` name.
@@ -65,6 +71,7 @@ impl IntentProposalKind {
             IntentProposalKind::OutsidePrefixes => "outside_prefixes",
             IntentProposalKind::VlanDiscovered => "vlan_discovered",
             IntentProposalKind::PrefixVlanMismatch => "prefix_vlan_mismatch",
+            IntentProposalKind::HostName => "host_name",
         }
     }
 }
@@ -174,6 +181,33 @@ pub struct ProposalEvidence {
     pub sightings: u32,
 }
 
+/// One name a proposal offers: the name, the sources that give it and when they last saw
+/// the device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NameChoice {
+    /// The name as a host would take it (lowercase, unusual characters replaced by `-`).
+    pub name: String,
+    /// Whether the proposal suggests this name (the first entry).
+    pub proposed: bool,
+    /// The sources that give it, the highest ranked first.
+    pub sources: Vec<NameChoiceSource>,
+    /// The newest sighting among them.
+    pub last_seen: Timestamp,
+}
+
+/// One source of a [`NameChoice`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NameChoiceSource {
+    /// The kind of source the name authority ranks.
+    pub source: NameSource,
+    /// The canonical text of the source (`inventory:<connector id>`).
+    pub source_key: String,
+    /// The name as the source gives it.
+    pub given: String,
+    /// When the source last saw the device.
+    pub last_seen: Timestamp,
+}
+
 /// A suggestion of the reconciler: evidence, the commands that would resolve it, and the
 /// decision (IPAM-15). Stored in `ipam.proposals`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -204,6 +238,10 @@ pub struct IntentProposal {
     /// The commands an approval applies (empty for conflicts, which a person resolves).
     #[serde(default)]
     pub commands: Vec<IpamCommand>,
+    /// The names the sources give the device when there is a name to choose: one entry per
+    /// name, the proposed one first. An approval may choose another of them (`choice`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<NameChoice>,
     /// SHA-256 over the canonical CBOR of the kind, the subject key, the evidence
     /// identities (sources, subjects, paired addresses) and the commands: equal evidence,
     /// equal fingerprint. A rejection is remembered by it.
@@ -408,6 +446,9 @@ pub mod codes {
     /// A batch decision names more proposals than one request takes (422). Params:
     /// `count`, `limit`.
     pub const BATCH_TOO_LARGE: &str = "ipam.proposal.batch_too_large";
+    /// An approval chooses a name the proposal does not offer, or a proposal that offers
+    /// none (422). Params: `id`, `choice`.
+    pub const CHOICE_INVALID: &str = "ipam.proposal.choice_invalid";
     /// The adoption policy is invalid (400). Params: `field`.
     pub const POLICY_INVALID: &str = "ipam.adoption.invalid";
     /// The reconciler does not run on this server (503).
@@ -483,6 +524,7 @@ mod tests {
                 last_seen: at,
                 sightings: 2,
             }],
+            choices: Vec::new(),
             commands: vec![IpamCommand::CreateHost(HostInput {
                 id: None,
                 tenant: None,

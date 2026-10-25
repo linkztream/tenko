@@ -31,7 +31,7 @@
 //! # Proposals
 //!
 //! A proposal has a `kind` (`discovered_host`, `orphaned_intent`, `address_mismatch`,
-//! `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch`), a `severity`
+//! `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch`, `host_name`), a `severity`
 //! (`info`, `warning`, `critical`) and a `state`: `open`, `accepted` (approved by a person or
 //! adopted by a policy), `rejected`, `expired` (the observation no longer holds) or
 //! `superseded` (a newer proposal about the same subject replaced it). At most one proposal
@@ -54,6 +54,16 @@
 //! (a conflict, which a person resolves by hand) answers 409
 //! `ipam.proposal.nothing_to_apply`; reject it once it is resolved.
 //!
+//! A proposal that offers names (`choices`: a discovered host the sources name
+//! differently, a `host_name` proposal) takes an optional body `{"choice": "<name>",
+//! "remember": "host" | "source"}`: the host takes the chosen name instead of the proposed
+//! one (422 `ipam.proposal.choice_invalid` for a name it does not offer), the other names
+//! are recorded as rejected in the audit record, and the decision keeps the same names from
+//! opening a proposal again. `remember: host` makes the host follow the chosen source from
+//! then on; `remember: source` puts the source first in the name authority rule that
+//! decided, which needs [`Action::Administer`] on the system. Choosing the name a host
+//! already has changes no intent and only closes the proposal.
+//!
 //! A **rejection** records the reason (at most 1,024 bytes) and remembers the fingerprint of
 //! the proposal: the reconciler does not open the same subject again until its evidence
 //! changes.
@@ -65,7 +75,9 @@
 //! # Deciding many at once
 //!
 //! `POST /proposals/approve` and `POST /proposals/reject` take `{"ids": [...]}` (one to 500
-//! identifiers; the rejection also the `reason` of the single route, which applies to all)
+//! identifiers; the approval also `choices`, the body of the single approval keyed by
+//! proposal identifier; the rejection also the `reason` of the single route, which applies
+//! to all)
 //! and decide the proposals in order, each as the single route does and independently of
 //! the others: one that is not open any more, lies outside the caller's scope, has nothing
 //! to apply or is refused by any other check of the single route is `skipped` with the code
@@ -124,8 +136,8 @@ use tenko_core::{
 use tenko_ipam::{
     PlanOptions,
     proposals::{
-        self, AdoptionPolicy, Decision, IntentProposal, IntentProposalKind, IntentProposalState,
-        PolicyView, ProposalQuery, ProposalSeverity,
+        self, AdoptionPolicy, ApproveRequest, Decision, IntentProposal, IntentProposalKind,
+        IntentProposalState, PolicyView, ProposalQuery, ProposalSeverity, Remember,
         query::{self, SORTS},
     },
     reconcile::{ReconcileReport, Reconciler},
@@ -133,10 +145,12 @@ use tenko_ipam::{
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
+use super::auth::OptionalJson;
 use super::common::{
     IfMatch, Ipam, IpamHandle, IpamJson, IpamPath, ReadParams, WriteParams, authorize,
     command_access, enum_params, if_match, new_of, with_etag, write_args,
 };
+use super::system::system_object;
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -181,6 +195,11 @@ pub const MAX_BATCH: usize = 500;
 pub struct BatchApproveRequest {
     /// The proposals to approve, in the order they are applied: one to 500 identifiers.
     pub ids: Vec<ProposalId>,
+    /// The choice of name per proposal, for proposals that offer names, as the single
+    /// approval takes it (`choice`, `remember`); a proposal not named here takes its
+    /// proposed name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub choices: BTreeMap<ProposalId, ApproveRequest>,
 }
 
 /// The body of a batch rejection.
@@ -325,7 +344,7 @@ fn decided(decision: Decision) -> Response {
     summary = "List proposals",
     params(
         PageParams,
-        ("kind" = Option<String>, Query, description = "Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict` or `outside_prefixes`. Repeat the parameter or separate the kinds with commas."),
+        ("kind" = Option<String>, Query, description = "Only proposals of these kinds: `discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch` or `host_name`. Repeat the parameter or separate the kinds with commas."),
         ("state" = Option<String>, Query, description = "Only proposals in these states: `open`, `accepted`, `rejected`, `expired` or `superseded`. Repeat the parameter or separate the states with commas. Every state when absent."),
         ("severity" = Option<String>, Query, description = "Only proposals of these severities: `info`, `warning` or `critical`."),
         ("prefix" = Option<String>, Query, description = "Only proposals about this prefix (identifier): its own subject, an address or a network inside it, or the prefix among the involved objects."),
@@ -430,6 +449,7 @@ async fn get_proposal(
     operation_id = "approve_proposal",
     summary = "Approve a proposal",
     params(("id" = String, Path, description = "Proposal identifier"), WriteParams, IfMatch),
+    request_body(content = Option<ApproveRequest>, description = "Optional: for a proposal that offers names (`choices`), the name the host takes (`choice`) and what to remember of it (`remember`: `host` or `source`; `source` needs an administrator). Without a body the proposed name applies."),
     responses(
         (status = 200, description = "The decision: the accepted proposal, the revision, the inline job and the objects changed, with `ETag` of the proposal; on a dry run the proposal as it is and the plan, with nothing written", body = Decision),
         (status = 400, description = "A parameter is unknown or malformed (`sys.invalid_query`, `sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -437,6 +457,7 @@ async fn get_proposal(
         (status = 404, description = "No such proposal (`ipam.proposal.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The proposal is decided already (`ipam.proposal.not_open`), suggests no change (`ipam.proposal.nothing_to_apply`), a warning needs an acknowledgement (`ipam.plan.unacknowledged`), or the change conflicts with intent (`ipam.name_taken`, `ipam.address.duplicate`, `ipam.reference_missing`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "If-Match is stale (`ipam.proposal.revision_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The choice is not one of the proposal's `choices`, or the proposal offers none (`ipam.proposal.choice_invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 423, description = "A host of the change is locked (`ipam.host.locked`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -449,12 +470,21 @@ async fn approve_proposal(
     IpamPath(id): IpamPath<ProposalId>,
     headers: HeaderMap,
     filters: Filters,
+    OptionalJson(request): OptionalJson<ApproveRequest>,
 ) -> Result<Response, ApiError> {
     let args = write_args(&filters, false)?;
     let expected = if_match(&headers)?;
-    authorize_approval(&app, &cx, &ipam, id, &args.options).await?;
-    let decision =
-        proposals::approve(&ipam, id, &cx, &args.options, args.dry_run, expected).await?;
+    authorize_approval(&app, &cx, &ipam, id, &args.options, &request).await?;
+    let decision = proposals::approve_with(
+        &ipam,
+        id,
+        &cx,
+        &args.options,
+        args.dry_run,
+        expected,
+        &request,
+    )
+    .await?;
     if !decision.dry_run {
         nudge(reconciler.as_ref());
     }
@@ -470,8 +500,13 @@ async fn authorize_approval(
     ipam: &IpamHandle,
     id: ProposalId,
     options: &PlanOptions,
+    request: &ApproveRequest,
 ) -> Result<(), ApiError> {
     authorize(app, cx, Action::Approve, ObjectRef::from(id))?;
+    // Remembering the source changes the name authority, which only administrators set.
+    if request.remember == Some(Remember::Source) {
+        authorize(app, cx, Action::Administer, system_object())?;
+    }
     // The principal needs what each command needs on its own. The commands of a proposal
     // never change once it is open (a changed set supersedes it with a new proposal); the
     // approval applies them as the intent stands now, which only leaves out a VLAN another
@@ -556,9 +591,11 @@ async fn approve_proposals(
     let each = for_each_proposal(&cx);
     let mut results = Vec::with_capacity(request.ids.len());
     for id in request.ids {
+        let choice = request.choices.get(&id).cloned().unwrap_or_default();
         let outcome = async {
-            authorize_approval(&app, &each, &ipam, id, &options).await?;
-            let decision = proposals::approve(&ipam, id, &each, &options, false, None).await?;
+            authorize_approval(&app, &each, &ipam, id, &options, &choice).await?;
+            let decision =
+                proposals::approve_with(&ipam, id, &each, &options, false, None, &choice).await?;
             Ok::<_, ApiError>(decision)
         }
         .await;
@@ -1166,6 +1203,7 @@ mod tests {
         ObservedHost {
             external_id: id.to_owned(),
             name: Some(name.to_owned()),
+            name_placeholder: false,
             macs: vec![mac.parse().expect("mac")],
             ips: vec![ip.parse().expect("ip")],
             os: Some("Linux 6.x".to_owned()),
@@ -2696,5 +2734,208 @@ mod tests {
             }
         }
         assert!(ids.contains("get_adoption_policy") && ids.contains("get_prefix"));
+    }
+
+    /// Names a probe found by reverse lookup, seen now: `(address, name)`.
+    async fn reverse_names(lab: &Lab, names: &[(&str, &str)]) {
+        let when = Timestamp::now();
+        let source = ObservationSource::Probe {
+            node: tenko_core::NodeId(7),
+            method: tenko_core::observe::ProbeMethod::ReverseDns,
+        };
+        let observations = names
+            .iter()
+            .map(|(ip, name)| Observation {
+                id: ObservationId::generate(),
+                source: source.clone(),
+                subject: Observed::Name {
+                    ip: ip.parse().expect("ip"),
+                    name: (*name).to_owned(),
+                    placeholder: false,
+                },
+                observed_at: when,
+                received_at: when,
+                expires_at: when.checked_add(Duration::from_secs(900)),
+            })
+            .collect();
+        lab.reconciler
+            .ingest(IngestBatch {
+                source,
+                observations,
+                complete: false,
+                received_at: when,
+            })
+            .await
+            .expect("ingest");
+    }
+
+    /// Two devices that the inventory and reverse DNS name differently, and one run; the
+    /// identifiers of their proposals in order of creation.
+    async fn discover_two_names(lab: &Lab) -> Vec<String> {
+        lab.poll(vec![
+            vm("qemu/101", "web01", WEB_MAC, "192.0.2.10"),
+            vm("qemu/102", "db01", DB_MAC, "192.0.2.11"),
+        ])
+        .await;
+        reverse_names(
+            lab,
+            &[
+                ("192.0.2.10", "www.example.test"),
+                ("192.0.2.11", "sql.example.test"),
+            ],
+        )
+        .await;
+        assert_eq!(lab.reconcile().await.opened, 2);
+        open_ids(lab, "discovered_host").await
+    }
+
+    #[tokio::test]
+    async fn a_proposal_lists_its_names_and_an_approval_takes_the_chosen_one() {
+        let lab = Lab::new().await;
+        let ids = discover_two_names(&lab).await;
+        let path = format!("/proposals/{}", ids[0]);
+        let reply = lab.get(&path).await;
+        reply.assert_json(200);
+        let choices = reply.body["choices"].as_array().expect("choices");
+        let names: Vec<(&str, bool, &str)> = choices
+            .iter()
+            .map(|choice| {
+                (
+                    choice["name"].as_str().expect("name"),
+                    choice["proposed"].as_bool().expect("proposed"),
+                    choice["sources"][0]["source"].as_str().expect("source"),
+                )
+            })
+            .collect();
+        // DNS outranks a connector of no known kind in the default order.
+        assert_eq!(
+            names,
+            [("www.example.test", true, "dns"), ("web01", false, "other")],
+            "{}",
+            reply.body
+        );
+        assert!(choices[1]["last_seen"].is_string(), "{}", reply.body);
+        assert_eq!(reply.body["params"]["name_rule"], "default");
+
+        // A name the proposal does not offer, and an unknown member, are refused.
+        let approve = format!("{path}/approve");
+        let refused = lab
+            .with_json("POST", &approve, &[], &json!({ "choice": "mail" }))
+            .await;
+        refused.assert_problem(422, "ipam.proposal.choice_invalid");
+        assert_eq!(refused.body["params"]["choice"], "mail");
+        let malformed = lab
+            .with_json("POST", &approve, &[], &json!({ "name": "web01" }))
+            .await;
+        malformed.assert_problem(400, "sys.invalid_request");
+        lab.assert_no_hosts().await;
+
+        // The chosen name, with a dry run first.
+        let dry = lab
+            .with_json(
+                "POST",
+                &format!("{approve}?dry_run=true"),
+                &[],
+                &json!({ "choice": "WEB01" }),
+            )
+            .await;
+        dry.assert_json(200);
+        lab.assert_no_hosts().await;
+        let done = lab
+            .with_json("POST", &approve, &[], &json!({ "choice": "web01" }))
+            .await;
+        done.assert_json(200);
+        assert_eq!(done.body["proposal"]["state"], "accepted");
+        assert_eq!(lab.host_names().await, ["web01"]);
+
+        // Without a body the proposed name applies, as before.
+        let other = lab
+            .post(&format!("/proposals/{}/approve", ids[1]), &[])
+            .await;
+        other.assert_json(200);
+        let mut hosts = lab.host_names().await;
+        hosts.sort();
+        assert_eq!(hosts, ["sql.example.test", "web01"]);
+    }
+
+    #[tokio::test]
+    async fn a_batch_approval_takes_each_proposals_choice() {
+        let lab = Lab::new().await;
+        let ids = discover_two_names(&lab).await;
+        let reply = lab
+            .with_json(
+                "POST",
+                "/proposals/approve",
+                &[],
+                &json!({
+                    "ids": ids,
+                    "choices": {
+                        ids[0].clone(): { "choice": "web01", "remember": "host" },
+                        ids[1].clone(): { "choice": "nope" }
+                    }
+                }),
+            )
+            .await;
+        reply.assert_json(200);
+        assert_eq!(
+            outcomes(&reply),
+            [
+                (ids[0].clone(), "approved".to_owned(), None),
+                (
+                    ids[1].clone(),
+                    "skipped".to_owned(),
+                    Some("ipam.proposal.choice_invalid".to_owned())
+                ),
+            ]
+        );
+        assert_eq!(lab.host_names().await, ["web01"]);
+        let view = lab.service.view(None).await.expect("view");
+        let authority = tenko_ipam::reconcile::names::view_of(view.as_ref()).expect("authority");
+        assert_eq!(authority.preferences.len(), 1, "{authority:?}");
+        assert_eq!(authority.preferences[0].host_name, "web01");
+    }
+
+    #[tokio::test]
+    async fn remembering_the_source_needs_an_administrator() {
+        let lab = Lab::new().await;
+        let ids = discover_two_names(&lab).await;
+        let operator = lab.checked_by(Arc::new(Deny(vec![Action::Administer])));
+        let path = format!("/proposals/{}/approve", ids[0]);
+        let reply = operator
+            .with_json(
+                "POST",
+                &path,
+                &[],
+                &json!({ "choice": "web01", "remember": "source" }),
+            )
+            .await;
+        assert_eq!(reply.status.as_u16(), 403, "{}", reply.body);
+        lab.assert_no_hosts().await;
+        // Remembering for the host is the approval's own right.
+        let reply = operator
+            .with_json(
+                "POST",
+                &path,
+                &[],
+                &json!({ "choice": "web01", "remember": "host" }),
+            )
+            .await;
+        reply.assert_json(200);
+        // An administrator may: the source goes first in the global rule.
+        let reply = lab
+            .with_json(
+                "POST",
+                &format!("/proposals/{}/approve", ids[1]),
+                &[],
+                &json!({ "choice": "db01", "remember": "source" }),
+            )
+            .await;
+        reply.assert_json(200);
+        let view = lab.service.view(None).await.expect("view");
+        let authority = tenko_ipam::reconcile::names::view_of(view.as_ref()).expect("authority");
+        assert_eq!(
+            authority.global.expect("global").order[0],
+            tenko_ipam::reconcile::names::NameSource::Other
+        );
     }
 }

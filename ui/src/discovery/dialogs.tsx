@@ -10,18 +10,36 @@ import { Icon } from "../components/Icon";
 import { ErrorNotice } from "../components/Notice";
 import { formatDateTime, formatNumber, t, type MessageKey } from "../i18n";
 import { PlanDialog } from "../ipam/plan/PlanDialog";
-import { approveProposal, MAX_REASON_BYTES, type BatchDecision, type BatchItem, type Decision, type Proposal, type ReconcileReport } from "./api";
+import { approveProposal, MAX_REASON_BYTES, type ApproveRequest, type BatchDecision, type BatchItem, type Decision, type Proposal, type ReconcileReport } from "./api";
 import { kindSummary, ruleText } from "./model";
 
-/** Approves a proposal: the planner's preview of its commands, then the apply at the revision seen. */
-export function ApproveDialog(props: { proposal: Proposal; onDone: (decision: Decision) => void; onClose: () => void }) {
+/**
+ * Approves a proposal: the planner's preview of its commands, then the apply at the revision
+ * seen. A `request` names the one of the proposal's names that the host takes and what to
+ * remember; the preview and the apply both carry it.
+ */
+export function ApproveDialog(props: { proposal: Proposal; request?: ApproveRequest; onDone: (decision: Decision) => void; onClose: () => void }) {
   const count = () => props.proposal.commands?.length ?? 0;
   return (
     <PlanDialog<Decision>
       title={t("discovery.approve.title")}
       confirmLabel={t("discovery.approve.confirm", { count: count() })}
-      intro={<p class="muted">{ruleText(props.proposal)}</p>}
-      send={(o) => approveProposal(props.proposal, o)}
+      intro={
+        <>
+          <p class="muted">{ruleText(props.proposal)}</p>
+          <Show when={props.request?.choice}>
+            {(name) => (
+              <p data-testid="approve-choice">
+                {t("discovery.approve.choice", { name: name() })}
+                <Show when={props.request?.remember}>
+                  {(remember) => <span class="muted"> {t(`discovery.approve.remember_${remember()}`)}</span>}
+                </Show>
+              </p>
+            )}
+          </Show>
+        </>
+      }
+      send={(o) => approveProposal(props.proposal, o, props.request)}
       onDone={props.onDone}
       onClose={props.onClose}
       testid="dialog-approve"

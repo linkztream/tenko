@@ -351,6 +351,36 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // reconciler settings
     ("GET", "/settings/reconciler", "get_reconciler_settings"),
     ("PUT", "/settings/reconciler", "update_reconciler_settings"),
+    (
+        "GET",
+        "/settings/reconciler/name-authority",
+        "get_name_authority",
+    ),
+    (
+        "PUT",
+        "/settings/reconciler/name-authority",
+        "set_name_authority",
+    ),
+    (
+        "DELETE",
+        "/settings/reconciler/name-authority",
+        "clear_name_authority",
+    ),
+    (
+        "PUT",
+        "/settings/reconciler/name-authority/sites/{site}",
+        "set_site_name_authority",
+    ),
+    (
+        "DELETE",
+        "/settings/reconciler/name-authority/sites/{site}",
+        "clear_site_name_authority",
+    ),
+    (
+        "DELETE",
+        "/settings/reconciler/name-authority/hosts/{host}",
+        "clear_name_preference",
+    ),
     // guardrails
     ("GET", "/settings/guardrails", "get_guardrails"),
     ("PUT", "/settings/guardrails", "update_guardrails"),

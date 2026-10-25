@@ -223,6 +223,7 @@ fn probe_and_inventory_facts(inventory: ConnectorId) -> Vec<ObservedFact> {
             Observed::Name {
                 ip: ip("192.0.2.4"),
                 name: "core-sw".to_owned(),
+                placeholder: false,
             },
         ),
         fact(

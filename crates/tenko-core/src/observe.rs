@@ -178,6 +178,11 @@ pub enum Observed {
         ip: IpAddr,
         /// The name, such as `printer.example.net`.
         name: String,
+        /// The name is a placeholder the source makes up for a device without a name
+        /// ([`is_placeholder_name`]): it never names a host. Set by the source, or at
+        /// ingest by the rule.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        placeholder: bool,
     },
     /// The organisation a MAC address is registered to (its OUI), or the manufacturer a
     /// device reports.
@@ -246,6 +251,11 @@ pub struct ObservedHost {
     /// Name as the source shows it.
     #[serde(default)]
     pub name: Option<String>,
+    /// The name is a placeholder the source makes up for a device without a name, such as
+    /// UniFi's `host-192-0-2-10` ([`is_placeholder_name`]): it never names a host. Set by
+    /// the source, or at ingest by the rule.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_placeholder: bool,
     /// MAC addresses.
     #[serde(default)]
     pub macs: Vec<MacAddr>,
@@ -315,6 +325,78 @@ pub enum LinkKind {
     Wired,
     /// Wireless client attachment.
     Wireless,
+}
+
+/// Whether `name` is a placeholder that a source makes up for a device it has no name for,
+/// rather than a name of the device. Such a name never names a host, never conflicts with a
+/// real name and is shown as "no name".
+///
+/// The forms, compared without case on the first label (a placeholder under a domain, such
+/// as `host-192-0-2-10.example.net`, is one too):
+///
+/// | Form | Example | Who makes it up |
+/// |---|---|---|
+/// | empty or whitespace | `" "` | any source |
+/// | `unknown`, `localhost` | `Unknown`, `localhost.localdomain` | DHCP clients, guest agents |
+/// | a MAC address with separators | `00:00:5e:00:53:01`, `00-00-5E-00-53-01`, `0000.5e00.5301` | network controllers, DHCP clients |
+/// | an IP address | `192.0.2.10`, `2001:db8::10` | network controllers, reverse lookups |
+/// | an IPv4 address with dashes, alone or after `host-` or `ip-` | `host-192-0-2-10`, `192-0-2-10`, `ip-192-0-2-10` | UniFi, cloud images, Tenko's own fallback |
+/// | an IPv6 address with dashes after `host-` | `host-2001-db8--10` | Tenko's own fallback |
+/// | `host-` and twelve hexadecimal digits | `host-00005e005301` | Tenko's own fallback |
+///
+/// The `host-` forms may carry the `-2`, `-3`, ... suffix that Tenko adds to a name that is
+/// taken (`host-00005e005301-2`).
+pub fn is_placeholder_name(name: &str) -> bool {
+    let name = name.trim().trim_end_matches('.');
+    if name.is_empty() {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    if lower.parse::<IpAddr>().is_ok() || is_mac_text(&lower) {
+        return true;
+    }
+    let label = lower.split('.').next().unwrap_or_default();
+    if matches!(label, "unknown" | "(unknown)" | "<unknown>" | "localhost") {
+        return true;
+    }
+    dashed_placeholder(label)
+        || label
+            .rsplit_once('-')
+            .filter(|(_, suffix)| {
+                !suffix.is_empty()
+                    && suffix.len() <= 3
+                    && suffix.bytes().all(|b| b.is_ascii_digit())
+            })
+            .is_some_and(|(base, _)| base.starts_with("host-") && dashed_placeholder(base))
+}
+
+/// A MAC address with `:`, `-` or `.` separators.
+fn is_mac_text(text: &str) -> bool {
+    text.contains([':', '-', '.'])
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || matches!(b, b':' | b'-' | b'.'))
+        && text.parse::<MacAddr>().is_ok()
+}
+
+/// One label of the dashed forms: an IPv4 address with dashes (alone, or after `host-` or
+/// `ip-`), an IPv6 address with dashes after `host-`, or `host-` and twelve hex digits.
+fn dashed_placeholder(label: &str) -> bool {
+    let host = label.strip_prefix("host-");
+    let rest = host.or_else(|| label.strip_prefix("ip-")).unwrap_or(label);
+    let parts: Vec<&str> = rest.split('-').collect();
+    if parts.len() == 4
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.len() <= 3 && part.parse::<u8>().is_ok())
+    {
+        return true;
+    }
+    let Some(rest) = host else {
+        return false;
+    };
+    (rest.len() == 12 && rest.bytes().all(|b| b.is_ascii_hexdigit()))
+        || (rest.contains('-') && rest.replace('-', ":").parse::<std::net::Ipv6Addr>().is_ok())
 }
 
 /// A suggestion derived from observations, waiting for a decision (IPAM-15).
@@ -402,6 +484,51 @@ mod tests {
     };
 
     #[test]
+    fn placeholder_names_are_told_from_real_ones() {
+        for name in [
+            "",
+            "  ",
+            "unknown",
+            "Unknown",
+            "localhost",
+            "localhost.localdomain",
+            "00:00:5e:00:53:01",
+            "00-00-5E-00-53-01",
+            "0000.5e00.5301",
+            "192.0.2.10",
+            "2001:db8::10",
+            "host-192-0-2-10",
+            "HOST-192-0-2-10",
+            "host-192-0-2-10.example.net",
+            "192-0-2-10",
+            "ip-192-0-2-10",
+            "host-2001-db8--10",
+            "host-00005e005301",
+            "host-00005e005301-2",
+            "host-192-0-2-10-3",
+        ] {
+            assert!(is_placeholder_name(name), "{name:?} is a placeholder");
+        }
+        for name in [
+            "postgresql",
+            "web01",
+            "printer.example.net",
+            "host-a",
+            "hostname",
+            "host-192-0-2",
+            "192-0-2-300",
+            "cafe-babe",
+            "desk-plug",
+            "deadbeefcafe",
+            "ip-camera",
+            "unknown-device",
+            "web-01-2",
+        ] {
+            assert!(!is_placeholder_name(name), "{name:?} is a real name");
+        }
+    }
+
+    #[test]
     fn observations_round_trip() {
         let observation = Observation {
             id: ObservationId::generate(),
@@ -458,6 +585,7 @@ mod tests {
             Observed::Name {
                 ip: "192.0.2.10".parse().expect("ip"),
                 name: "printer.example.net".to_owned(),
+                placeholder: false,
             },
             Observed::Vendor {
                 mac: "00:00:5e:00:53:10".parse().expect("mac"),

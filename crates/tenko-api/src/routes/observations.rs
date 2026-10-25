@@ -584,6 +584,7 @@ mod tests {
         ObservedHost {
             external_id: id.to_owned(),
             name: Some(name.to_owned()),
+            name_placeholder: false,
             macs: vec![mac.parse().expect("mac")],
             ips: vec![ip.parse().expect("ip")],
             os: Some("Linux 6.x".to_owned()),

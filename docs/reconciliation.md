@@ -202,12 +202,13 @@ A **decommissioned host** (the lifecycle state of [ARCHITECTURE.md](ARCHITECTURE
 | Field | Meaning |
 |---|---|
 | `id`, `revision` | Identifier; the store revision, which is the `ETag` and the `If-Match` value of decisions |
-| `kind`, `rule`, `key` | The kind (`discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered` or `prefix_vlan_mismatch`), the stable code of the rule such as `ipam.reconcile.discovered_mac`, and the subject key (section 4.3) |
+| `kind`, `rule`, `key` | The kind (`discovered_host`, `orphaned_intent`, `address_mismatch`, `conflict`, `outside_prefixes`, `vlan_discovered`, `prefix_vlan_mismatch` or `host_name`), the stable code of the rule such as `ipam.reconcile.discovered_mac`, and the subject key (section 4.3) |
 | `severity`, `state` | `info`, `warning` or `critical`; and the state of section 4.2 |
 | `subject` | What it concerns: `mac`, `ip`, `cidr`, `vrf`, `prefix` (the most specific network of the address), `name` and the intent `objects` involved |
 | `summary`, `params` | A one-line English summary and the named values it was built from; the UI translates the rule with `params` |
 | `evidence` | The facts behind it, one entry per fact and pair: source, subject key, observation, MAC address, IP address, name, first and last sighting, counted sightings |
 | `commands`, `fingerprint` | The IPAM commands an approval applies (empty for conflicts and some mismatches); SHA-256 over the kind, the key, the evidence identities and the shape of the suggestion |
+| `choices` | The names on offer (section 4.11): one entry per name with `name`, `proposed` (the first), the `sources` that give it (`source`, `source_key`, the name as `given`, `last_seen`) and `last_seen`; absent when there is nothing to choose |
 | `created`, `updated`, `decided`, `reason` | Times, who decided and when, and the rejection or expiry reason |
 | `adopted_by`, `results`, `superseded_by`, `adoption_error` | The prefix whose policy adopted it, the objects its commands created or changed, the proposal that replaced it, and the error code of a failed adoption |
 
@@ -239,6 +240,7 @@ The subject key makes a proposal unique among the open ones. The rules produce t
 | `outside_prefixes` | `outside_prefixes/<vrf>/<cidr>` |
 | `vlan_discovered` | `vlan_discovered/<site or global>/<vid>` |
 | `prefix_vlan_unset`, `prefix_vlan_differs` | `prefix_vlan_mismatch/<prefix id>` |
+| `placeholder_name`, `preferred_name`, `name_conflict` | `host_name/host:<host id>` |
 
 The fingerprint covers what the proposal says, not when or with which generated identifiers: times, sighting counts and the identifiers of objects the commands would create do not count. Each run compares the candidate for a key with the open proposal of that key:
 
@@ -250,7 +252,7 @@ The fingerprint covers what the proposal says, not when or with which generated 
 
 **Kept conflicts.** "Keep both" on an address conflict (section 4.8) is a rejection that also stores the MAC addresses of the conflict (`kept` on the rejection row): the address is an exception, and the subject stays quiet while the same devices share it, even when another source starts to report them or a fact's observation changes, which would reopen a plain rejection. A conflict with another set of devices opens again, and the exception is forgotten with the rejection.
 
-**Host names.** A discovered host takes the first usable name any source gives, lowercased, with characters outside `a-z`, `0-9`, `-`, `_` and `.` replaced by `-` ("Web 01" becomes `web-01`). Without a name it is `host-<mac without separators>` or `host-<address with dashes>`. When the name is taken in the default tenant, or promised by another open proposal, a suffix `-2`, `-3` and so on is added.
+**Host names.** A discovered host takes the real name the sources give, lowercased, with characters outside `a-z`, `0-9`, `-`, `_` and `.` replaced by `-` ("Web 01" becomes `web-01`); when they give several, the name authority decides (section 4.11). A placeholder is no name. Without a real name it is `host-<mac without separators>` or `host-<address with dashes>`. When the name is taken in the default tenant, or promised by another open proposal, a suffix `-2`, `-3` and so on is added.
 
 ### 4.4 Precedence: intent, lock and unmanaged
 
@@ -320,6 +322,44 @@ The networks of the network controllers (`network` facts, section 2.2) are compa
 
 The untagged default network suggests nothing, nor does a network without a subnet suggest a link, nor a prefix whose matching networks disagree on the VLAN id. An approval applies the commands as the intent stands at that moment (section 5.1), so the two proposals can be approved in either order: approving the link first creates the VLAN and links the prefix, and the VLAN proposal expires on the next run; approving the VLAN first lets the link name it. A batch approval (section 5.1) decides them in the order of its ids the same way: the VLAN before the link approves both, the link before the VLAN approves the link and skips the VLAN proposal with `ipam.proposal.nothing_to_apply`. A rejected VLAN proposal leaves the link proposal open, and the other way round: they are subjects of their own. Adoption policies never adopt either kind (section 6.4).
 
+### 4.11 Names: placeholders, the name authority and the operator's choice
+
+Every source that names a device gives a name candidate: an inventory host's name, a network controller's client name, the name of a DHCP lease, a DNS record, a name a probe found (mDNS, LLMNR, reverse DNS, SNMP). The code is `tenko_ipam::reconcile::names`.
+
+**Placeholders.** Some sources make up a name for a device that has none. Such a name is a **placeholder**: it never names a host (neither a discovered host nor a rename), never conflicts with a real name, and the facts view shows it as "no name" with its source. A connector marks its own placeholders (`name_placeholder` on an inventory host and on a client of a network controller in the plugin protocol; the UniFi connector does, see [connectors-unifi.md](connectors-unifi.md#43-the-inventory)), and ingest marks the known forms of every source by a rule (`tenko_core::observe::is_placeholder_name`), so a fact stored before the mark existed is marked at its next refresh and the reconciler applies the rule to every fact it reads. The forms, compared without case on the first label:
+
+| Form | Example | Who makes it up |
+|---|---|---|
+| empty or whitespace | | any source |
+| `unknown`, `localhost` | `Unknown`, `localhost.localdomain` | DHCP clients, guest agents |
+| a MAC address with separators | `00:00:5e:00:53:01`, `00-00-5E-00-53-01`, `0000.5e00.5301` | network controllers, DHCP clients |
+| an IP address | `192.0.2.10`, `2001:db8::10` | network controllers, reverse lookups |
+| an IPv4 address with dashes, alone or after `host-` or `ip-` | `host-192-0-2-10`, `192-0-2-10`, `ip-192-0-2-10` | UniFi, cloud images, Tenko's own fallback |
+| an IPv6 address with dashes after `host-` | `host-2001-db8--10` | Tenko's own fallback |
+| `host-` and twelve hexadecimal digits | `host-00005e005301` | Tenko's own fallback |
+
+The `host-` forms may carry the `-2`, `-3` suffix Tenko adds to a taken name. A placeholder under a domain (`host-192-0-2-10.example.net`, a DNS record of a host that carries a placeholder) is one too.
+
+**Grouping.** Real candidates are grouped by their first label without case, so `postgresql` from Proxmox VE and `postgresql.example.net` from DNS are one name; the group takes the spelling of its best source. The DNS names of the host's own addresses (the records the DNS actuator wrote from intent) are left out of a host's candidates: they echo intent and are no observation.
+
+**The name authority.** When the groups differ, an ordered list of kinds of sources decides. The kinds are `proxmox`, `home_assistant`, `windows` and `unifi` (connectors by their plugin), `dns` (records of the zones, reverse lookups of a probe), `mdns`, `llmnr`, `dhcp` (leases, DHCP snooping), `scan` (any other probe method) and `other` (any other connector). The rule in force for a device is the rule of the site of its network (the host's own site for a host of intent), else the global rule, else the default order Proxmox VE, Home Assistant, Windows, DNS, mDNS, LLMNR, UniFi, scan. The kinds a rule leaves out rank after it, in that order followed by DHCP and other connectors. The group whose best source ranks highest wins; a tie goes to the newer sighting, then to the name. A host's **preferred source** (below) goes before every rule for that host. The proposals say what decided in `params`: `name_source` (the kind of the winning source), `name_rule` (`default`, `global`, `site:<id>` or `host`), `rule_site` (the site whose rule was in force) and `other_names`.
+
+Administrators set the rules in Settings → Reconciler, Name authority, or through the API: `GET /api/v1/settings/reconciler/name-authority` answers the default order, the global rule, the rules of sites and the hosts that prefer a source; `PUT` with `{"order": [...]}` sets the global rule and `DELETE` removes it; `PUT` and `DELETE .../sites/{site}` do the same for a site (404 `ipam.not_found` for an unknown site); `DELETE .../hosts/{host}` forgets a host's preferred source. An empty order or a kind listed twice answers 422 `ipam.name_authority.invalid`. A change runs the reconciler within the debounce, which supersedes the open proposals whose decision changes.
+
+**Discovered hosts.** A discovered host takes the decided name. When the sources give more than one name, the proposal's `choices` list every name with its sources and their last sightings, the summary names the others and what decided, and a change of the names or of what decided supersedes the proposal.
+
+**Host name proposals** (kind `host_name`, severity `info`, key `host_name/host:<host id>`) rename a host of intent, never a locked, `unmanaged` or decommissioned one. The candidates are the names of the facts that name the host's MAC addresses or addresses. The command renames the host to the decided name (with a suffix when it is taken), and `choices` list every name.
+
+| Rule | When |
+|---|---|
+| `ipam.reconcile.placeholder_name` | The host's name is a placeholder (adopted before a real name arrived) and a real name arrives: a one-time cleanup |
+| `ipam.reconcile.preferred_name` | The host prefers a source, and that source names it otherwise |
+| `ipam.reconcile.name_conflict` | The sources give two or more names and the host does not carry the one the authority decides |
+
+A single source naming a host otherwise than its intent raises nothing: intent wins (section 4.4).
+
+**The operator's choice.** The Discovery page shows every name of such a proposal with its sources and last sighting, and offers "Use this name from <source>" for each besides Dismiss. It approves the proposal with `{"choice": "<name>"}` (section 5.1): the host takes that name, the other names are recorded as rejected in the audit record, and the decision is kept (`ipam.name_choices`) so that the same names do not open a proposal again; only a name no source gave before does. Choosing the name the host already has changes no intent and only closes the proposal. "Remember for this host" (`remember: host`) makes the host prefer the chosen source from then on; "Always prefer <source>" (`remember: source`, administrators only) puts the source first in the rule that decided, the site's rule when one was in force, else the global rule. Both show in the rules page, where a preference can be forgotten. An approval without a choice records the proposed name the same way, and so does an adoption.
+
 ## 5. Decisions
 
 ### 5.1 Approve
@@ -329,6 +369,7 @@ The untagged default network suggests nothing, nor does a network without a subn
 - `dry_run=true`: plans the commands and answers with the plan and the warnings, and writes nothing.
 - `acknowledge=<code>,...`: acknowledges plan warnings, exactly like any other change. A warning that needs it and does not get it answers 409 `ipam.plan.unacknowledged`.
 - `If-Match: "<revision>"`: the `ETag` of the proposal. A proposal that changed since answers 412 `ipam.proposal.revision_mismatch`.
+- An optional body `{"choice": "<name>", "remember": "host" | "source"}` for a proposal that offers names (`choices`, section 4.11): the host takes the chosen name instead of the proposed one. A name the proposal does not offer, or a choice on a proposal that offers none, answers 422 `ipam.proposal.choice_invalid`. `remember: source` also needs administration of the system (403 otherwise). Without a body the proposed name applies, as before.
 
 The commands are planned as the approving person with the same planner and checks as any other change, so a taken name answers 409 `ipam.name_taken` and so on. The commands, the proposal's new state (`accepted`, `decided`, `results`), the removal of its open-key row and all audit records then commit in one batch inside one inline job (`job_id` in the answer): all of it or nothing. If the intent changed between planning and writing, Tenko plans again. A decided proposal answers 409 `ipam.proposal.not_open`. A proposal without commands answers 409 `ipam.proposal.nothing_to_apply`; reject it once it is resolved.
 
@@ -340,7 +381,7 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 
 **Keep both.** `POST /api/v1/proposals/{id}/keep` closes an open address conflict like a rejection, with the same body and `If-Match`, and stores the exception of section 4.3. It needs `approve` on proposals. A proposal that is not an address conflict answers 409 `ipam.proposal.not_keepable`.
 
-**Many at once.** `POST /api/v1/proposals/approve` and `POST /api/v1/proposals/reject` decide up to 500 proposals in one request. The body is `{"ids": [...]}`, and the rejection also takes the `reason` of the single route, which goes to every proposal (a bad reason is 400 `ipam.validation` for the whole request). Each proposal is decided in order with the logic of the single route and independently of the others: one that is no longer open, lies outside the caller's scope, has nothing to apply or is refused by any other check of the single route is `skipped` with that route's error code and message, and the rest are applied. The answer lists every id as `approved`, `rejected` or `skipped` and gives the three counts. The rights are those of the single route, checked for each proposal (a principal that may not approve proposals at all gets 403 at once), and there is no `dry_run`, `If-Match` or `acknowledge`: a plan that needs an acknowledgement is skipped (`ipam.plan.unacknowledged`). Each decision writes the audit records of the single route and nothing else; there is no record of the batch. An empty list is 422 `ipam.proposal.batch_empty` and more than 500 ids is 422 `ipam.proposal.batch_too_large`. In the web UI an administrator or operator selects rows of the inbox and approves or rejects them in one step.
+**Many at once.** `POST /api/v1/proposals/approve` and `POST /api/v1/proposals/reject` decide up to 500 proposals in one request. The body is `{"ids": [...]}`; the approval also takes `choices`, the body of the single approval keyed by proposal id (`{"ids": [...], "choices": {"<id>": {"choice": "db"}}}`), and a proposal not named there takes its proposed name. The rejection also takes the `reason` of the single route, which goes to every proposal (a bad reason is 400 `ipam.validation` for the whole request). Each proposal is decided in order with the logic of the single route and independently of the others: one that is no longer open, lies outside the caller's scope, has nothing to apply or is refused by any other check of the single route is `skipped` with that route's error code and message, and the rest are applied. The answer lists every id as `approved`, `rejected` or `skipped` and gives the three counts. The rights are those of the single route, checked for each proposal (a principal that may not approve proposals at all gets 403 at once), and there is no `dry_run`, `If-Match` or `acknowledge`: a plan that needs an acknowledgement is skipped (`ipam.plan.unacknowledged`). Each decision writes the audit records of the single route and nothing else; there is no record of the batch. An empty list is 422 `ipam.proposal.batch_empty` and more than 500 ids is 422 `ipam.proposal.batch_too_large`. In the web UI an administrator or operator selects rows of the inbox and approves or rejects them in one step.
 
 ### 5.3 Run now
 
@@ -363,6 +404,11 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 | `ipam.proposal.adopt_failed` | A policy's attempt failed; a failed record with the error | `system:reconciler` |
 | `ipam.adoption.set` | A person set a policy; records the old and the new value | The person |
 | `ipam.adoption.clear` | A person removed a policy; records the old value | The person |
+| `ipam.name_authority.set` | A rule of the name authority was set, by an administrator or by an approval with `remember: source`; records the old and the new order | The person |
+| `ipam.name_authority.clear` | A rule of the name authority was removed; records the old order | The person |
+| `ipam.name_preference.clear` | A host's preferred source was forgotten | The person |
+
+An approval of a proposal that offers names adds to `ipam.proposal.approve` the context `choice` (the name the host took), `rejected` (the other names on offer), `source` (the kind of source of the chosen name) and `remember` (`host` or `source`, when given).
 
 ## 6. Adoption policies
 
@@ -414,7 +460,7 @@ The policy in force for a prefix is its own, else the one of the nearest prefix 
 
 ### 6.4 What is never adopted
 
-Whatever the mode, a policy never adopts conflicts, orphaned intent, outside-prefix, VLAN-discovered or prefix-VLAN proposals, address changes of `static` and `reserved` hosts (intent wins), anything that touches a locked or `unmanaged` host, a proposal with no commands, a proposal without a prefix, or a proposal whose last adoption failed.
+Whatever the mode, a policy never adopts conflicts, orphaned intent, outside-prefix, VLAN-discovered, prefix-VLAN or host name proposals, address changes of `static` and `reserved` hosts (intent wins), anything that touches a locked or `unmanaged` host, a proposal with no commands, a proposal without a prefix, or a proposal whose last adoption failed.
 
 ### 6.5 Failures
 
@@ -461,6 +507,8 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason, and for a kept conflict the MAC addresses kept |
 | `ipam.adoption` | Prefix id | `StoredPolicy`: policy, who set it and when |
 | `ipam.reconciler_settings` | None (one row) | `ReconcilerSettings` (section 3.1.1) |
+| `ipam.name_authority` | Site id, or none for the global rule | `StoredAuthority`: the order of kinds of sources, who set it and when (section 4.11) |
+| `ipam.name_choices` | Host id | `HostNameChoice`: the name chosen, the names on offer, the kind of source, whether the host prefers it, who and when |
 
 The index tables follow their fact in the same batch.
 
@@ -483,6 +531,10 @@ The index tables follow their fact in the same batch.
 | `DELETE /api/v1/prefixes/{id}/adoption` | `clear_adoption_policy` | `update` on the prefix |
 | `GET /api/v1/settings/reconciler` | `get_reconciler_settings` | administrators; returns an `ETag` |
 | `PUT /api/v1/settings/reconciler` | `update_reconciler_settings` | administrators; `If-Match` |
+| `GET /api/v1/settings/reconciler/name-authority` | `get_name_authority` | administrators (section 4.11) |
+| `PUT`, `DELETE /api/v1/settings/reconciler/name-authority` | `set_name_authority`, `clear_name_authority` | administrators |
+| `PUT`, `DELETE /api/v1/settings/reconciler/name-authority/sites/{site}` | `set_site_name_authority`, `clear_site_name_authority` | administrators |
+| `DELETE /api/v1/settings/reconciler/name-authority/hosts/{host}` | `clear_name_preference` | administrators |
 
 `GET /api/v1/proposals` takes the filters `kind`, `state` and `severity` (each repeatable or comma-separated), `prefix` (proposals about the prefix, its addresses and its networks), `subject` (a MAC address, an IP address, an object identifier, or text of the subject name or key) and `sort` (`created`, `updated`, `severity`, `kind`, `state`, `last_seen`; `-created` by default), with the usual paging. A list is empty for a principal who may not read the kind.
 

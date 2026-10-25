@@ -6,6 +6,40 @@ import { ApiError, errorMessage } from "../../api/problem";
 import { formatDuration, t, tDynamic } from "../../i18n";
 
 export type ReconcilerSettings = components["schemas"]["ReconcilerSettings"];
+export type NameSource = components["schemas"]["NameSource"];
+export type NameAuthorityView = components["schemas"]["NameAuthorityView"];
+export type StoredAuthority = components["schemas"]["StoredAuthority"];
+export type SiteAuthority = components["schemas"]["SiteAuthority"];
+export type HostPreference = components["schemas"]["HostPreference"];
+
+// ---------------------------------------------------------------------------------
+// The name authority (docs/reconciliation.md): an order of the kinds of source, the most
+// trusted first. The editor works on a copy and these functions return changed copies.
+
+/** The order with the kind at `index` moved by `delta` places (-1 up, 1 down); the same order at an end. */
+export function moveSource(order: readonly NameSource[], index: number, delta: -1 | 1): NameSource[] {
+  const to = index + delta;
+  if (index < 0 || index >= order.length || to < 0 || to >= order.length) return [...order];
+  const out = [...order];
+  const [moved] = out.splice(index, 1);
+  out.splice(to, 0, moved as NameSource);
+  return out;
+}
+
+/** The order without the kind at `index`. */
+export function removeSourceAt(order: readonly NameSource[], index: number): NameSource[] {
+  return order.filter((_, i) => i !== index);
+}
+
+/** The kinds that are not in the order yet, in the order of the server's list. */
+export function sourcesLeft(all: readonly NameSource[], order: readonly NameSource[]): NameSource[] {
+  return all.filter((source) => !order.includes(source));
+}
+
+/** Whether two orders list the same kinds in the same places. */
+export function sameOrder(a: readonly NameSource[], b: readonly NameSource[]): boolean {
+  return a.length === b.length && a.every((source, i) => source === b[i]);
+}
 
 export type FieldId = "interval" | "debounce" | "refresh" | "purge" | "orphan" | "retention";
 type SecondsKey = Exclude<keyof ReconcilerSettings, "adopt" | "dns_actuator" | "dns_orphans">;

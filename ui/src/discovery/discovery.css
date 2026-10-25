@@ -82,3 +82,19 @@
 .evidence-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
 .evidence-list li { display: grid; gap: 2px; }
 .evidence-times { font-size: var(--fs-12); }
+
+/* ---------- Names (docs/reconciliation.md, the name authority) ---------- */
+.no-name { font-style: italic; }
+.name-choices { overflow: hidden; text-overflow: ellipsis; }
+.remember { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); border: 0; padding: 0; margin: 0; margin-block-end: var(--sp-4); }
+.remember legend { padding: 0; margin-block-end: var(--sp-2); font-size: var(--fs-12); color: var(--ink-3); }
+.remember label { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.remember input[type="radio"] { accent-color: var(--accent); }
+.name-choice-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
+.name-choice-list > li { display: grid; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); }
+.name-choice-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.name-choice-head strong { overflow-wrap: anywhere; }
+.name-choice-seen { margin-inline-start: auto; font-size: var(--fs-12); }
+.name-choice-sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.name-choice-sources li { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.tag.proposed { background: var(--proposal-wash); color: var(--proposal); }

@@ -142,6 +142,7 @@ impl World {
                 subject: Observed::Name {
                     ip: ip.parse().expect("ip"),
                     name: (*name).to_owned(),
+                    placeholder: false,
                 },
                 observed_at: when,
                 received_at: when,
@@ -279,6 +280,7 @@ pub fn vm(id: &str, name: Option<&str>, host_mac: Option<&str>, ips: &[&str]) ->
     ObservedHost {
         external_id: id.to_owned(),
         name: name.map(str::to_owned),
+        name_placeholder: false,
         macs: host_mac.map(mac).into_iter().collect(),
         ips: ips.iter().map(|ip| ip.parse().expect("ip")).collect(),
         os: Some("Linux 6.x".to_owned()),

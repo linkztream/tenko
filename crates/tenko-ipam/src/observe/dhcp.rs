@@ -457,7 +457,11 @@ impl LeaseFacts {
             ip,
             mac: lease.mac,
         };
-        let name = lease.name.clone().map(|name| Observed::Name { ip, name });
+        let name = lease.name.clone().map(|name| Observed::Name {
+            ip,
+            placeholder: tenko_core::observe::is_placeholder_name(&name),
+            name,
+        });
         let wanted = |observed: Observed| Wanted {
             observed,
             seen: lease.cltt.min(now),

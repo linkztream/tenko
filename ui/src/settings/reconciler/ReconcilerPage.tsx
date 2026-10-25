@@ -12,6 +12,7 @@ import { PageHead } from "../../components/PageHead";
 import { toast } from "../../components/toast";
 import { tDynamic, t } from "../../i18n";
 import { SettingsNav } from "../SettingsNav";
+import { NameAuthority } from "./NameAuthority";
 import { body, draftErrors, draftOf, FIELDS, limitsText, saveErrorText, unitText, type Draft, type FieldId, type ReconcilerSettings } from "./model";
 import "../settings.css";
 import "./reconciler.css";
@@ -61,6 +62,7 @@ export default function ReconcilerPage() {
             </>
           )}
         </Show>
+        <NameAuthority />
       </div>
     </div>
   );

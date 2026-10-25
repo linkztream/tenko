@@ -57,7 +57,9 @@ use crate::{
     dns::{DnsFinding, plan::record_text},
     net::{Family, contains_net},
     observe::model::{IntentSighting, ObservedFact},
-    proposals::model::{IntentProposalKind, ProposalEvidence, ProposalSeverity, ProposalSubject},
+    proposals::model::{
+        IntentProposalKind, NameChoice, ProposalEvidence, ProposalSeverity, ProposalSubject,
+    },
 };
 
 /// Rule codes.
@@ -118,6 +120,8 @@ pub(crate) struct Candidate {
     pub params: BTreeMap<String, String>,
     pub evidence: Vec<ProposalEvidence>,
     pub commands: Vec<IpamCommand>,
+    /// The names an approval may choose from (name proposals only).
+    pub choices: Vec<NameChoice>,
     /// What the suggestion does, without generated identifiers: with the evidence
     /// identities it makes the fingerprint.
     pub shape: Vec<String>,
@@ -141,6 +145,7 @@ pub(crate) fn candidates(
     let mut out = Vec::new();
     out.extend(dns(snapshot, dns_findings));
     out.extend(discovered(snapshot, &mut names));
+    out.extend(super::names::host_names(snapshot, &mut names));
     out.extend(mismatches(snapshot));
     out.extend(conflicts(snapshot));
     out.extend(outside(snapshot));
@@ -212,62 +217,76 @@ fn plural(count: usize, one: &str, many: &str) -> String {
 }
 
 /// Whether nothing may concern this host: it is `unmanaged`.
-fn untouchable(host: &Host) -> bool {
+pub(crate) fn untouchable(host: &Host) -> bool {
     host.mode == AssignmentMode::Unmanaged
 }
 
-/// Host names already used or promised: live intent names, and the names suggested by
-/// open proposals (reserved for their own key).
-struct NameBook {
-    intent: BTreeSet<String>,
+/// Host names already used or promised: live intent names per tenant, and the names
+/// suggested by open proposals (reserved for their own key).
+pub(crate) struct NameBook {
+    intent: BTreeSet<(TenantId, String)>,
+    default_tenant: Option<TenantId>,
     reserved: BTreeMap<String, String>,
 }
 
 impl NameBook {
-    fn new(snapshot: &Snapshot) -> Self {
-        let tenant: Option<TenantId> = snapshot.intent.default_tenant;
-        let intent = snapshot
-            .intent
-            .host_names
-            .iter()
-            .filter(|(owner, _)| Some(*owner) == tenant)
-            .map(|(_, name)| name.clone())
-            .collect();
+    pub(crate) fn new(snapshot: &Snapshot) -> Self {
+        let intent = snapshot.intent.host_names.clone();
         let mut reserved = BTreeMap::new();
         for (key, (proposal, _)) in &snapshot.open {
             for command in &proposal.commands {
-                if let IpamCommand::CreateHost(input) = command {
-                    reserved.insert(input.name.as_str().to_owned(), key.clone());
+                match command {
+                    IpamCommand::CreateHost(input) => {
+                        reserved.insert(input.name.as_str().to_owned(), key.clone());
+                    }
+                    IpamCommand::UpdateHost(update) => {
+                        if let Some(name) = &update.patch.name {
+                            reserved.insert(name.as_str().to_ascii_lowercase(), key.clone());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
-        Self { intent, reserved }
+        Self {
+            intent,
+            default_tenant: snapshot.intent.default_tenant,
+            reserved,
+        }
     }
 
-    /// A free name for `key`: the first usable observed name, else `fallback`, with a
-    /// `-2`, `-3`, ... suffix when taken.
+    /// A free name for `key` in the default tenant: the first usable observed name, else
+    /// `fallback`, with a `-2`, `-3`, ... suffix when taken.
     fn take(&mut self, key: &str, observed: &[String], fallback: &str) -> Option<HostName> {
         let base = observed
             .iter()
             .find_map(|name| sanitize(name))
             .or_else(|| sanitize(fallback))?;
+        self.free(key, self.default_tenant, &base)
+    }
+
+    /// A free name for `key` in `tenant` from `name`, with a `-2`, `-3`, ... suffix when
+    /// taken.
+    pub(crate) fn take_in(&mut self, key: &str, tenant: TenantId, name: &str) -> Option<HostName> {
+        let base = sanitize(name)?;
+        self.free(key, Some(tenant), &base)
+    }
+
+    fn free(&mut self, key: &str, tenant: Option<TenantId>, base: &str) -> Option<HostName> {
         for attempt in 1..100u32 {
             let text = if attempt == 1 {
-                base.clone()
+                base.to_owned()
             } else {
                 format!("{base}-{attempt}")
             };
             let Ok(name) = HostName::new(&text) else {
                 continue;
             };
-            let free = !self.intent.contains(name.as_str())
-                && self
-                    .reserved
-                    .get(name.as_str())
-                    .is_none_or(|owner| owner == key);
+            let lower = name.as_str().to_ascii_lowercase();
+            let free = tenant.is_none_or(|tenant| !self.intent.contains(&(tenant, lower.clone())))
+                && self.reserved.get(&lower).is_none_or(|owner| owner == key);
             if free {
-                self.reserved
-                    .insert(name.as_str().to_owned(), key.to_owned());
+                self.reserved.insert(lower, key.to_owned());
                 return Some(name);
             }
         }
@@ -278,7 +297,7 @@ impl NameBook {
 /// A host name from free text: lowercase, characters outside `a-z0-9-_.` become `-`, runs
 /// of `-` collapse, labels are trimmed of `-` and cut to 63 characters, at most 200
 /// characters in all. `None` when nothing usable remains.
-fn sanitize(text: &str) -> Option<String> {
+pub(crate) fn sanitize(text: &str) -> Option<String> {
     let lower = text.trim().to_ascii_lowercase();
     let mapped: String = lower
         .chars()
@@ -424,25 +443,28 @@ fn discovered_one(
     placed: &Placed,
     fallback: &str,
 ) -> Option<Candidate> {
-    // The names the sightings carry (inventory hosts) first, then the names probes found
-    // for the addresses of the device.
-    let mut observed_names: Vec<String> = pairs
+    // The real names of the sightings (inventory hosts) and the names found for the
+    // addresses of the device (probes, leases, records); the name authority of the site of
+    // its network decides between them. Placeholders name nothing: without a real name the
+    // device takes the fallback.
+    let site = placed
+        .create
         .iter()
-        .filter_map(|pair| pair.name.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let probed: BTreeSet<&String> = pairs
+        .map(|(_, prefix, _)| *prefix)
+        .chain(placed.bind.iter().map(|(_, prefix, _)| *prefix))
+        .next()
+        .and_then(|prefix| snapshot.intent.prefixes.get(&prefix))
+        .and_then(|prefix| prefix.site);
+    let facts = super::names::naming_facts(
+        snapshot,
+        pairs.iter().copied(),
+        pairs.iter().filter_map(|pair| pair.ip),
+    );
+    let decision = super::names::decide(snapshot, &facts, &BTreeSet::new(), site, None);
+    let observed_names: Vec<String> = decision
         .iter()
-        .filter_map(|pair| pair.ip)
-        .filter_map(|ip| snapshot.names.get(&ip))
-        .flatten()
+        .flat_map(|decision| decision.groups.iter().map(|group| group.name.clone()))
         .collect();
-    for name in probed {
-        if !observed_names.contains(name) {
-            observed_names.push(name.clone());
-        }
-    }
     let name = names.take(&key, &observed_names, fallback)?;
     let host = HostId::generate();
     let interface = InterfaceId::generate();
@@ -511,7 +533,7 @@ fn discovered_one(
         Some(mac) => format!("Unknown device {mac}"),
         None => "Unknown device".to_owned(),
     };
-    let summary = if ips.is_empty() {
+    let mut summary = if ips.is_empty() {
         format!(
             "{who} ({name}) seen by {}; adopt it as host {name}",
             plural(sources, "source", "sources")
@@ -523,8 +545,20 @@ fn discovered_one(
             plural(sources, "source", "sources")
         )
     };
+    let mut choices = Vec::new();
+    if let Some(decision) = &decision {
+        decision.params(&mut params);
+        // Several names: the proposal offers each of them, and a change of the names or
+        // of what decided between them is a new proposal.
+        if decision.groups.len() > 1 {
+            summary = format!("{summary} ({})", decision.sentence());
+            choices = decision.choices();
+            shape.extend(decision.shape());
+        }
+    }
     Some(Candidate {
         kind: IntentProposalKind::DiscoveredHost,
+        choices,
         rule,
         key,
         subject: ProposalSubject {
@@ -774,6 +808,7 @@ fn mismatches(snapshot: &Snapshot) -> Vec<Candidate> {
         };
         out.push(Candidate {
             kind: IntentProposalKind::AddressMismatch,
+            choices: Vec::new(),
             rule,
             key,
             subject: ProposalSubject {
@@ -860,6 +895,7 @@ fn shared_addresses(
         let objects: Vec<ObjectRef> = hosts.iter().map(|host| ObjectRef::from(*host)).collect();
         out.push(Candidate {
             kind: IntentProposalKind::Conflict,
+            choices: Vec::new(),
             rule: rule::CONFLICT_SHARED_ADDRESS,
             key: format!("conflict/shared:{vrf}/{ip}"),
             subject: ProposalSubject {
@@ -937,6 +973,7 @@ fn networks(snapshot: &Snapshot) -> Vec<Candidate> {
         objects.extend(networks.iter().map(|prefix| ObjectRef::from(*prefix)));
         out.push(Candidate {
             kind: IntentProposalKind::Conflict,
+            choices: Vec::new(),
             rule: rule::CONFLICT_NETWORKS,
             key: format!("conflict/networks:{mac}/{family_name}"),
             subject: ProposalSubject {
@@ -1025,6 +1062,7 @@ fn taken_addresses(
         };
         out.push(Candidate {
             kind: IntentProposalKind::Conflict,
+            choices: Vec::new(),
             rule: rule::CONFLICT_ADDRESS_TAKEN,
             key: format!("conflict/taken:{}", address.id),
             subject: ProposalSubject {
@@ -1127,6 +1165,7 @@ fn outside(snapshot: &Snapshot) -> Vec<Candidate> {
             let ips: BTreeSet<IpAddr> = pairs.iter().filter_map(|pair| pair.ip).collect();
             Candidate {
                 kind: IntentProposalKind::OutsidePrefixes,
+                choices: Vec::new(),
                 rule: rule::OUTSIDE_PREFIXES,
                 key: format!("outside_prefixes/{vrf}/{net}"),
                 subject: ProposalSubject {
@@ -1328,6 +1367,7 @@ fn vlan_candidates(missing: &MissingVlans<'_, '_>) -> Vec<Candidate> {
         }
         out.push(Candidate {
             kind: IntentProposalKind::VlanDiscovered,
+            choices: Vec::new(),
             rule: rule::VLAN_DISCOVERED,
             key: format!("vlan_discovered/{}/{vid}", site_text(*site)),
             subject: ProposalSubject {
@@ -1442,6 +1482,7 @@ fn link_candidates(
         let creates = commands.len() > 1;
         out.push(Candidate {
             kind: IntentProposalKind::PrefixVlanMismatch,
+            choices: Vec::new(),
             rule,
             key: format!("prefix_vlan_mismatch/{}", prefix.id),
             subject: ProposalSubject {
@@ -1519,6 +1560,7 @@ fn orphans(
         };
         out.push(Candidate {
             kind: IntentProposalKind::OrphanedIntent,
+            choices: Vec::new(),
             rule: rule::ORPHANED_ADDRESS,
             key: format!("orphaned_intent/address:{}", address.id),
             subject: ProposalSubject {
@@ -1605,6 +1647,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
                 let address = first_address(snapshot, addresses);
                 Candidate {
                     kind: IntentProposalKind::Conflict,
+                    choices: Vec::new(),
                     rule: rule::DNS_RECORD_HELD,
                     key: format!("conflict/dns:{zone}/{name}/{rtype}"),
                     subject: ProposalSubject {
@@ -1652,6 +1695,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
                 }
                 Candidate {
                     kind: IntentProposalKind::OrphanedIntent,
+                    choices: Vec::new(),
                     rule: rule::DNS_NO_ZONE,
                     key: "orphaned_intent/dns_no_zone".to_owned(),
                     subject: ProposalSubject {
@@ -1684,6 +1728,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
                     .collect();
                 Candidate {
                     kind: IntentProposalKind::OrphanedIntent,
+                    choices: Vec::new(),
                     rule: rule::DNS_ORPHANED_RECORD,
                     key: format!("orphaned_intent/dns_record:{zone}/{name}/{rtype}"),
                     subject: ProposalSubject {
@@ -1714,6 +1759,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
                 lines,
             } => Candidate {
                 kind: IntentProposalKind::OrphanedIntent,
+                choices: Vec::new(),
                 rule: rule::DNS_DELEGATION,
                 key: format!("orphaned_intent/dns_delegation:{zone}"),
                 subject: ProposalSubject {
@@ -1739,6 +1785,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
             },
             DnsFinding::ReverseOrphaned { zone, name, prefix } => Candidate {
                 kind: IntentProposalKind::OrphanedIntent,
+                choices: Vec::new(),
                 rule: rule::DNS_REVERSE_ORPHANED,
                 key: format!("orphaned_intent/dns_reverse_zone:{zone}"),
                 subject: ProposalSubject {
@@ -1764,6 +1811,7 @@ fn dns(snapshot: &Snapshot, findings: &[DnsFinding]) -> Vec<Candidate> {
                 let zones: Vec<String> = zones.iter().map(ToString::to_string).collect();
                 Candidate {
                     kind: IntentProposalKind::OrphanedIntent,
+                    choices: Vec::new(),
                     rule: rule::DNS_REVERSE_NO_SERVERS,
                     key: format!("orphaned_intent/dns_reverse_no_servers:{prefix}"),
                     subject: ProposalSubject {

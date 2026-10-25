@@ -447,6 +447,7 @@ pub fn topology(read: &Read, local: &Local, observed_at: Timestamp) -> TopologyS
                     network: network.map(|network| network.id.clone()),
                     vlan: network.and_then(|network| network.vlan),
                     name: client.name.clone(),
+                    name_placeholder: client_placeholder(client),
                     vendor: None,
                     management: false,
                 })
@@ -456,6 +457,16 @@ pub fn topology(read: &Read, local: &Local, observed_at: Timestamp) -> TopologyS
         profiles: Vec::new(),
         wlans: Vec::new(),
     }
+}
+
+/// Whether the name of an Integration API client is a placeholder
+/// ([`crate::model::placeholder_name`]).
+fn client_placeholder(client: &Client) -> bool {
+    let ips: Vec<std::net::IpAddr> = client.ip.into_iter().collect();
+    client
+        .name
+        .as_deref()
+        .is_some_and(|name| crate::model::placeholder_name(name, client.mac, &ips))
 }
 
 /// The inventory of an Integration API read.
@@ -477,6 +488,7 @@ pub fn inventory(read: &Read) -> Vec<ObservedHost> {
         .map(|client| ObservedHost {
             external_id: format!("client:{}", client.mac),
             name: client.name.clone(),
+            name_placeholder: client_placeholder(client),
             macs: vec![client.mac],
             ips: client.ip.into_iter().collect(),
             tags: vec![if client.wired {

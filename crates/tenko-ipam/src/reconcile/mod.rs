@@ -46,6 +46,7 @@
 
 pub(crate) mod dormant;
 pub mod moves;
+pub mod names;
 pub(crate) mod rules;
 pub mod scopes;
 pub mod settings;
@@ -1013,6 +1014,7 @@ impl Reconciler {
                 false,
                 None,
                 applier,
+                &decide::ApproveRequest::default(),
             )
             .await
             {

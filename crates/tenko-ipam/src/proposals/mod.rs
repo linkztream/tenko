@@ -31,11 +31,14 @@ pub mod query;
 pub(crate) mod sync;
 
 pub use adoption::{PolicyView, policy_view, set_policy};
-pub use decide::{Decision, approve, clean_reason, current_commands, reject};
+pub use decide::{
+    ApproveRequest, Decision, Remember, approve, approve_with, clean_reason, current_commands,
+    reject,
+};
 pub use keep::keep;
 pub use model::{
     AdoptionMode, AdoptionPolicy, IntentProposal, IntentProposalKind, IntentProposalState,
-    KeptConflict, ProposalEvidence, ProposalSeverity, ProposalSubject, Rejection, StoredPolicy,
-    actions, codes,
+    KeptConflict, NameChoice, NameChoiceSource, ProposalEvidence, ProposalSeverity,
+    ProposalSubject, Rejection, StoredPolicy, actions, codes,
 };
 pub use query::{ProposalPage, ProposalQuery};

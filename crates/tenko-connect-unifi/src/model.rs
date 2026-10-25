@@ -82,6 +82,51 @@ pub fn device_name(device: &Device) -> String {
     })
 }
 
+/// Whether the name the controller reports for a client is a placeholder rather than a name
+/// of the device, so that the host marks it (`name_placeholder`) and the reconciler never
+/// names a host with it.
+///
+/// The controller names a client that announced no host name and has no alias
+/// `host-<IPv4 address with dashes>` (`host-192-0-2-10` for 192.0.2.10), from the address
+/// it had when it first saw the client, which may not be the address it has now; some
+/// releases show the MAC address instead. Both forms, and the other forms of
+/// [`tenko_core::observe::is_placeholder_name`] (an IP address, `unknown`), are
+/// placeholders. A name equal to the client's MAC address or address in any spelling is one
+/// too.
+pub fn placeholder_name(name: &str, mac: MacAddr, ips: &[IpAddr]) -> bool {
+    let name = name.trim();
+    if tenko_core::observe::is_placeholder_name(name) {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    let hex: String = mac
+        .to_string()
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .collect();
+    lower == hex
+        || ips.iter().any(|ip| {
+            let dashed: String = ip
+                .to_string()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect();
+            lower == dashed || lower == format!("host-{dashed}")
+        })
+}
+
+/// Whether the name of a classic client record is a placeholder ([`placeholder_name`]).
+fn client_placeholder(client: &Client) -> bool {
+    let ips: Vec<IpAddr> = client
+        .ip
+        .into_iter()
+        .chain(client.ipv6.iter().copied())
+        .collect();
+    client
+        .display_name()
+        .is_some_and(|name| placeholder_name(name, client.mac, &ips))
+}
+
 /// A subnet text (`192.0.2.1/24`) as its network (`192.0.2.0/24`).
 pub fn subnet(text: &str) -> Option<IpNet> {
     text.trim().parse::<IpNet>().ok().map(|net| net.trunc())
@@ -360,6 +405,7 @@ impl<'a> View<'a> {
                 .or(client.vlan),
             network: network.map(NetworkRef),
             name: client.display_name().map(str::to_owned),
+            name_placeholder: client_placeholder(client),
             vendor: client.vendor.clone(),
             management: self.management_clients.contains(&client.mac),
         })
@@ -484,6 +530,7 @@ pub fn inventory(read: &Read) -> Vec<ObservedHost> {
             ObservedHost {
                 external_id: id,
                 name: client.display_name().map(str::to_owned),
+                name_placeholder: client_placeholder(client),
                 macs: vec![client.mac],
                 ips: client
                     .ip
@@ -638,5 +685,72 @@ mod tests {
         assert_eq!(lldp_port_index("Port 9"), Some(9));
         assert_eq!(lldp_port_index("local Port 23"), Some(23));
         assert_eq!(lldp_port_index("eth0"), None);
+    }
+
+    #[test]
+    fn the_controllers_placeholder_names_are_marked() {
+        let mac: MacAddr = "00:00:5e:00:53:30".parse().expect("mac");
+        let ip: IpAddr = "192.0.2.10".parse().expect("ip");
+        for name in [
+            "host-192-0-2-10",
+            "Host-192-0-2-10",
+            "host-198-51-100-7",
+            "00:00:5e:00:53:30",
+            "00005e005330",
+            "192.0.2.10",
+            "192-0-2-10",
+            "unknown",
+            " ",
+        ] {
+            assert!(
+                placeholder_name(name, mac, &[ip]),
+                "{name:?} is a placeholder"
+            );
+        }
+        for name in ["postgresql", "Desk plug", "host-a", "printer.example.net"] {
+            assert!(!placeholder_name(name, mac, &[ip]), "{name:?} is a name");
+        }
+
+        // The topology's name fact and the inventory host both carry the mark.
+        let mut read = read();
+        read.clients = [
+            json!({ "mac": "00:00:5e:00:53:30", "ip": "192.0.2.10", "is_wired": true,
+                    "sw_mac": "00:00:5e:00:53:10", "sw_port": 7, "network_id": "n-default",
+                    "hostname": "host-192-0-2-10" }),
+            json!({ "mac": "00:00:5e:00:53:32", "ip": "192.0.2.11", "is_wired": false,
+                    "ap_mac": "00:00:5e:00:53:20", "essid": "home.example", "hostname": "tenko" }),
+        ]
+        .iter()
+        .filter_map(Client::from_value)
+        .collect();
+        let hosts = inventory(&read);
+        let marked = |id: &str| {
+            hosts
+                .iter()
+                .find(|h| h.external_id == id)
+                .map(|h| (h.name.clone(), h.name_placeholder))
+        };
+        assert_eq!(
+            marked("client:00:00:5e:00:53:30"),
+            Some((Some("host-192-0-2-10".to_owned()), true))
+        );
+        assert_eq!(
+            marked("client:00:00:5e:00:53:32"),
+            Some((Some("tenko".to_owned()), false))
+        );
+        let local = Local {
+            controller: Vec::new(),
+            tenko: Vec::new(),
+        };
+        let snapshot = topology(&read, &local, Timestamp::now());
+        let client = |mac: &str| {
+            snapshot
+                .clients
+                .iter()
+                .find(|c| c.mac.to_string() == mac)
+                .map(|c| c.name_placeholder)
+        };
+        assert_eq!(client("00:00:5e:00:53:30"), Some(true));
+        assert_eq!(client("00:00:5e:00:53:32"), Some(false));
     }
 }

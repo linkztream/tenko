@@ -6,21 +6,22 @@ import { bridgeMockEvents } from "../audit/testkit";
 import { CONNECTOR_IDS } from "../api/mock/connectors-store";
 import { ADDRESS_IDS, HOST_IDS, IPAM_IDS, ipamState } from "../api/mock/ipam/api";
 import { server } from "../api/mock/node";
+import { nameAuthorityState } from "../api/mock/name-authority";
 import { RECONCILE_IDS, REASON_GONE, reconcileState } from "../api/mock/reconcile-store";
 import { paths } from "../app/paths";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
-import { confirmPlan, recordWrites } from "../ipam/testkit";
-import { rejectProposal } from "./api";
+import { applied, confirmPlan, recordWrites, type SentRequest } from "../ipam/testkit";
+import { approveProposal, rejectProposal } from "./api";
 import ProposalsView from "./ProposalsView";
 import { resetRefs } from "./refs";
 
 const P = RECONCILE_IDS.proposal;
 
 /** The open proposals of the seed, newest first (the order of `-created`). */
-const OPEN_NEWEST_FIRST = [P.printerTaken, P.outside, P.thermostat, P.iotAddress, P.hallSwitchClient, P.mediaPc];
+const OPEN_NEWEST_FIRST = [P.printerTaken, P.outside, P.thermostat, P.iotAddress, P.hallSwitchClient, P.mediaPc, P.renameDb];
 
 let stopBridge: (() => void) | undefined;
 
@@ -61,7 +62,7 @@ async function listed(count: number) {
 }
 
 /** Renders the inbox and waits until `count` proposals are listed. */
-async function openInbox(url: string = paths.discovery(), count = 6) {
+async function openInbox(url: string = paths.discovery(), count = 7) {
   const view = renderInbox(url);
   await listed(count);
   return view;
@@ -113,7 +114,7 @@ describe("the proposal list", () => {
 
     // The proposals that are decided already are not in the open list.
     for (const id of [P.guestPhone, P.speaker, P.oldTest]) expect(rowIds()).not.toContain(id);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("6 open proposals");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("7 open proposals");
     // Nothing is docked until a proposal is chosen.
     expect(screen.queryByTestId("proposal-panel")).toBeNull();
   });
@@ -196,11 +197,11 @@ describe("the proposal list", () => {
     expect(rows()).toHaveLength(0);
 
     choose("all");
-    await listed(9);
+    await listed(10);
     expect(rowIds()).toEqual(expect.arrayContaining([...OPEN_NEWEST_FIRST, P.guestPhone, P.speaker, P.oldTest]));
 
     choose("open");
-    await listed(6);
+    await listed(7);
     expect(rowIds()).toEqual(OPEN_NEWEST_FIRST);
   });
 
@@ -227,13 +228,13 @@ describe("the proposal list", () => {
     expect(view.location()).toBe("/discovery?severity=warning");
 
     fireEvent.click(chip("filter-severity-warning"));
-    await listed(6);
+    await listed(7);
     expect(view.location()).toBe("/discovery");
 
     fireEvent.click(chip("filter-severity-critical"));
     await waitFor(() => expect(screen.getByTestId("discovery-empty")).toBeTruthy());
     fireEvent.click(chip("filter-severity-critical"));
-    await listed(6);
+    await listed(7);
 
     fireEvent.click(chip("filter-kind-discovered_host"));
     await waitFor(() => expect(rowIds()).toEqual([P.iotAddress, P.hallSwitchClient, P.mediaPc]));
@@ -269,7 +270,7 @@ describe("the proposal list", () => {
     expect(screen.queryByTestId("discovery-empty")).toBeNull();
 
     fireEvent.click(within(chip).getByRole("button", { name: "Remove the network filter" }));
-    await listed(6);
+    await listed(7);
     expect(screen.queryByTestId("filter-prefix")).toBeNull();
     expect(view.location()).toBe("/discovery");
   });
@@ -278,7 +279,7 @@ describe("the proposal list", () => {
     const view = await openInbox();
     fireEvent.input(screen.getByTestId("filter-input"), { target: { value: "00:00:5e:00:53:29" } });
     // Not at once: the field waits for the typing to pause.
-    expect(rows()).toHaveLength(6);
+    expect(rows()).toHaveLength(7);
     await waitFor(() => expect(rowIds()).toEqual([P.thermostat]));
     expect(view.location()).toBe("/discovery?q=00%3A00%3A5e%3A00%3A53%3A29");
 
@@ -292,7 +293,7 @@ describe("the proposal list", () => {
     expect(screen.getByTestId("discovery-empty").textContent).not.toContain("The reconciler compares");
 
     fireEvent.keyDown(screen.getByTestId("filter-input"), { key: "Escape" });
-    await listed(6);
+    await listed(7);
     expect(view.location()).toBe("/discovery");
   });
 
@@ -317,7 +318,7 @@ describe("the proposal list", () => {
     await openInbox();
     fireEvent.click(within(screen.getByTestId("grid-proposals")).getByRole("button", { name: /^Severity/ }));
     // Ascending: info before warning, and within a severity the order of the list is kept.
-    await waitFor(() => expect(rows().map((r) => cell(r, "severity").trim().slice(0, 4))).toEqual(["Info", "Info", "Info", "Warn", "Warn", "Warn"]));
+    await waitFor(() => expect(rows().map((r) => cell(r, "severity").trim().slice(0, 4))).toEqual(["Info", "Info", "Info", "Info", "Warn", "Warn", "Warn"]));
   });
 });
 
@@ -353,7 +354,7 @@ describe("opening a proposal", () => {
 
   it("closes the panel with its button and with Esc, and keeps the filters", async () => {
     const view = await openPanel(P.mediaPc, "?severity=info");
-    await listed(3);
+    await listed(4);
     fireEvent.click(within(panel()).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByTestId("proposal-panel")).toBeNull());
     expect(view.location()).toBe("/discovery?severity=info");
@@ -494,7 +495,7 @@ describe("a decided proposal", () => {
 
 describe("approving", () => {
   it("applies the suggested change through the plan dialog and takes the proposal off the open list", async () => {
-    const view = await openInbox(paths.proposal(P.mediaPc), 6);
+    const view = await openInbox(paths.proposal(P.mediaPc), 7);
     await screen.findByTestId("plan-summary");
     fireEvent.click(screen.getByTestId("discovery-approve"));
 
@@ -513,7 +514,7 @@ describe("approving", () => {
     expect(stored(P.mediaPc).results?.some((r) => r.kind === "host")).toBe(true);
     // A toast names the result, and the proposal leaves the open list.
     expect(await screen.findByText("Proposal approved")).toBeTruthy();
-    await listed(5);
+    await listed(6);
     expect(rowIds()).not.toContain(P.mediaPc);
     expect(view.location()).toBe(`/discovery/${P.mediaPc}`);
     // The host exists now, with its interface and address.
@@ -586,7 +587,7 @@ describe("rejecting", () => {
     expect(rejected.state).toBe("rejected");
     expect(rejected.reason).toBe("A visitor's laptop");
     expect(await screen.findByText("Proposal rejected")).toBeTruthy();
-    await listed(5);
+    await listed(6);
     expect(rowIds()).not.toContain(P.hallSwitchClient);
   });
 
@@ -678,7 +679,7 @@ describe("a conflict", () => {
     expect(stored(P.printerTaken).state).toBe("rejected");
     expect(stored(P.printerTaken).reason).toBe("The printer got its address back");
     expect(await screen.findByText("Conflict dismissed")).toBeTruthy();
-    await listed(5);
+    await listed(6);
     expect(rowIds()).not.toContain(P.printerTaken);
   });
 
@@ -704,7 +705,7 @@ describe("reconcile now", () => {
     expect(counts()).toEqual({
       opened: "0",
       refreshed: "0",
-      unchanged: "5",
+      unchanged: "6",
       superseded: "0",
       expired: "1",
       suppressed: "0",
@@ -719,7 +720,7 @@ describe("reconcile now", () => {
     expect(stored(P.thermostat).reason).toBe(REASON_GONE);
 
     // The expired proposal leaves the open list behind the report.
-    await listed(5);
+    await listed(6);
     expect(rowIds()).not.toContain(P.thermostat);
 
     fireEvent.click(within(report).getByRole("button", { name: "Close" }));
@@ -731,9 +732,9 @@ describe("reconcile now", () => {
     fireEvent.click(screen.getByTestId("discovery-reconcile"));
     const report = await screen.findByTestId("dialog-reconcile-report");
     expect(report.textContent).toContain("Nothing changed.");
-    expect(within(report).getAllByTestId("report-count").find((c) => c.dataset.key === "unchanged")?.textContent).toBe("6");
+    expect(within(report).getAllByTestId("report-count").find((c) => c.dataset.key === "unchanged")?.textContent).toBe("7");
     expect(within(report).getAllByTestId("report-count").find((c) => c.dataset.key === "expired")?.textContent).toBe("0");
-    expect(rows()).toHaveLength(6);
+    expect(rows()).toHaveLength(7);
   });
 
   it("tells a failed run in a toast", async () => {
@@ -772,7 +773,7 @@ describe("deciding many at once", () => {
 
     // The header box selects the loaded rows, and a click on a box does not open the proposal.
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows in view" }));
-    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+    expect(buttons()).toEqual(["Approve 7", "Reject 7"]);
     expect(screen.queryByTestId("selection-loaded-only")).toBeNull();
     expect(screen.queryByTestId("proposal-panel")).toBeNull();
 
@@ -788,7 +789,7 @@ describe("deciding many at once", () => {
     expect(buttons()).toEqual(["Approve 2", "Reject 2"]);
     expect([box(P.printerTaken).checked, box(P.outside).checked, box(P.thermostat).checked]).toEqual([true, true, false]);
     fireEvent.keyDown(grid(), { key: "a", ctrlKey: true });
-    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+    expect(buttons()).toEqual(["Approve 7", "Reject 7"]);
     fireEvent.keyDown(grid(), { key: "Escape" });
     expect(bar()).toBeNull();
   });
@@ -801,10 +802,10 @@ describe("deciding many at once", () => {
   });
 
   it("does not offer a proposal that is decided already for selection", async () => {
-    await openInbox(`${paths.discovery()}?state=all`, 9);
+    await openInbox(`${paths.discovery()}?state=all`, 10);
     expect(within(rowOf(P.speaker)).queryByRole("checkbox")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows in view" }));
-    expect(buttons()).toEqual(["Approve 6", "Reject 6"]);
+    expect(buttons()).toEqual(["Approve 7", "Reject 7"]);
   });
 
   it("asks once, naming the count and the kinds, and approves them in one request", async () => {
@@ -834,8 +835,8 @@ describe("deciding many at once", () => {
     expect([...((batches[0]?.body?.ids as string[]) ?? [])].sort()).toEqual([P.hallSwitchClient, P.iotAddress, P.mediaPc].sort());
     for (const id of [P.mediaPc, P.hallSwitchClient, P.iotAddress]) expect(stored(id).state).toBe("accepted");
     expect(await screen.findByText("3 proposals approved")).toBeTruthy();
-    await listed(3);
-    expect(rowIds()).toEqual([P.printerTaken, P.outside, P.thermostat]);
+    await listed(4);
+    expect(rowIds()).toEqual([P.printerTaken, P.outside, P.thermostat, P.renameDb]);
     // The selection is gone with the rows, and nothing was skipped.
     expect(bar()).toBeNull();
     expect(screen.queryByTestId("dialog-skipped")).toBeNull();
@@ -864,7 +865,7 @@ describe("deciding many at once", () => {
       expect(stored(id).reason).toBe("Visitors' devices");
     }
     expect(await screen.findByText("2 proposals rejected")).toBeTruthy();
-    await listed(4);
+    await listed(5);
     expect(bar()).toBeNull();
   });
 
@@ -904,7 +905,7 @@ describe("deciding many at once", () => {
 
     fireEvent.click(within(skipped).getByTestId("skipped-keep"));
     await waitFor(() => expect(screen.queryByTestId("dialog-skipped")).toBeNull());
-    await listed(4);
+    await listed(5);
     expect(box(P.printerTaken).checked).toBe(true);
     expect(buttons()).toEqual(["Approve 1", "Reject 1"]);
   });
@@ -917,7 +918,7 @@ describe("deciding many at once", () => {
     const skipped = await screen.findByTestId("dialog-skipped");
     fireEvent.click(within(skipped).getByTestId("skipped-close"));
     await waitFor(() => expect(screen.queryByTestId("dialog-skipped")).toBeNull());
-    await listed(5);
+    await listed(6);
     expect(bar()).toBeNull();
   });
 
@@ -967,7 +968,7 @@ describe("who may decide", () => {
   it("shows a viewer the proposals but no way to decide them or to run the reconciler", async () => {
     await signInAs(["viewer"]);
     await openPanel(P.mediaPc);
-    await listed(6);
+    await listed(7);
     expect(screen.queryByTestId("discovery-reconcile")).toBeNull();
     expect(screen.queryByTestId("discovery-approve")).toBeNull();
     expect(screen.queryByTestId("discovery-reject")).toBeNull();
@@ -986,7 +987,7 @@ describe("who may decide", () => {
   it("lets an operator decide and run the reconciler", async () => {
     await signInAs(["operator"]);
     await openPanel(P.mediaPc);
-    await listed(6);
+    await listed(7);
     expect(screen.getByTestId("discovery-reconcile")).toBeTruthy();
     await screen.findByTestId("plan-summary");
     expect(screen.getByTestId("discovery-approve")).toBeTruthy();
@@ -1000,7 +1001,7 @@ describe("who may decide", () => {
 describe("live updates", () => {
   it("follows a decision made elsewhere in the row and in the open panel", async () => {
     stopBridge = bridgeMockEvents();
-    await openInbox(`${paths.proposal(P.mediaPc)}?state=all`, 9);
+    await openInbox(`${paths.proposal(P.mediaPc)}?state=all`, 10);
     await screen.findByTestId("plan-summary");
     expect(cell(rowOf(P.mediaPc), "state")).toBe("Open");
     expect(screen.getByTestId("discovery-approve")).toBeTruthy();
@@ -1025,22 +1026,22 @@ describe("live updates", () => {
     await resolveThermostatInIpam();
     // A run elsewhere (the server runs it on a schedule).
     await api.post("/api/v1/proposals/reconcile");
-    await waitFor(() => expect(rowIds()).toEqual([P.printerTaken, P.outside, P.iotAddress, P.hallSwitchClient, P.mediaPc]), { timeout: 4000 });
+    await waitFor(() => expect(rowIds()).toEqual([P.printerTaken, P.outside, P.iotAddress, P.hallSwitchClient, P.mediaPc, P.renameDb]), { timeout: 4000 });
   });
 });
 
 describe("accessibility", () => {
   it("has no violations with a proposal open", async () => {
     const view = await openPanel(P.mediaPc);
-    await listed(6);
+    await listed(7);
     await screen.findByTestId("plan-summary");
-    await waitFor(() => expect(within(panel()).getByText("Lab inventory (inventory)")).toBeTruthy());
+    await waitFor(() => expect(within(within(panel()).getByTestId("evidence")).getByText("Lab inventory (inventory)")).toBeTruthy());
     expect(await axeViolations(view.container)).toEqual([]);
   });
 
   it("has no violations with a decided proposal open", async () => {
     const view = await openPanel(P.speaker, "?state=all");
-    await listed(9);
+    await listed(10);
     await screen.findByTestId("proposal-decision");
     expect(await axeViolations(view.container)).toEqual([]);
   });
@@ -1055,5 +1056,199 @@ describe("accessibility", () => {
     await openInbox();
     fireEvent.click(screen.getByTestId("discovery-reconcile"));
     expect(await axeViolations(await screen.findByTestId("dialog-reconcile-report"))).toEqual([]);
+  });
+
+  it("has no violations with the names of a proposal listed", async () => {
+    const view = await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    await screen.findByTestId("plan-summary");
+    expect(await axeViolations(view.container)).toEqual([]);
+  });
+});
+
+describe("the names a proposal offers", () => {
+  const choices = () => screen.getAllByTestId("name-choice");
+  const choice = (name: string) => within(choices().find((c) => c.dataset.name === name) as HTMLElement);
+  /** The approvals that applied a single proposal: not the dry runs, not the batch. */
+  const approvals = (writes: () => SentRequest[]) =>
+    applied(writes()).filter((w) => /\/api\/v1\/proposals\/[^/]+\/approve/.test(w.url));
+
+  it("lists every name with its sources, the proposed one first, in the panel", async () => {
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    expect(choices().map((c) => c.dataset.name)).toEqual(["media-pc", "mediapc"]);
+    expect(choices().map((c) => c.dataset.proposed)).toEqual(["true", "false"]);
+    expect(choice("media-pc").getByTestId("name-proposed").textContent).toBe("Proposed");
+    expect(choice("mediapc").queryByTestId("name-proposed")).toBeNull();
+
+    // Each name has its source: the kind in words and the connector, when it was last seen, and
+    // the name as the source writes it when that differs.
+    expect(choice("media-pc").getByText("Proxmox VE")).toBeTruthy();
+    await waitFor(() => expect(choice("media-pc").getByText("Lab inventory (inventory)")).toBeTruthy());
+    expect(choice("media-pc").queryByTestId("name-given")).toBeNull();
+    expect(choice("mediapc").getByText("UniFi")).toBeTruthy();
+    expect(choice("mediapc").getByTestId("name-given").textContent).toBe("given as MediaPC");
+    expect(choice("mediapc").getAllByRole("time").length).toBeGreaterThan(0);
+
+    expect(choice("media-pc").getByTestId("use-name").textContent).toBe("Use this name from Proxmox VE");
+    expect(choice("mediapc").getByTestId("use-name").textContent).toBe("Use this name from UniFi");
+  });
+
+  it("shows no list of names for a proposal that offers none", async () => {
+    await openPanel(P.outside);
+    await screen.findByTestId("proposal-summary");
+    expect(screen.queryByTestId("proposal-names")).toBeNull();
+  });
+
+  it("approves by the name that is chosen, only this time", async () => {
+    const writes = recordWrites();
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    fireEvent.click(choice("mediapc").getByTestId("use-name"));
+
+    const dialog = await screen.findByTestId("dialog-approve");
+    expect(within(dialog).getByTestId("approve-choice").textContent).toBe("The host takes the name mediapc.");
+    await confirmPlan({ dialog: "dialog-approve" });
+    await waitFor(() => expect(stored(P.mediaPc).state).toBe("accepted"));
+    expect(approvals(writes)).toHaveLength(1);
+    expect(approvals(writes)[0]?.body).toEqual({ choice: "mediapc" });
+    expect([...ipamState().data.host.values()].some((h) => h.name === "mediapc")).toBe(true);
+    expect([...ipamState().data.host.values()].some((h) => h.name === "media-pc")).toBe(false);
+    expect(nameAuthorityState().preferences.size).toBe(1);
+  });
+
+  it("remembers the choice for the host when asked to", async () => {
+    const writes = recordWrites();
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    expect((screen.getByTestId("remember-once") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByTestId("remember-host"));
+    fireEvent.click(choice("mediapc").getByTestId("use-name"));
+
+    const dialog = await screen.findByTestId("dialog-approve");
+    expect(within(dialog).getByTestId("approve-choice").textContent).toContain("The choice is remembered for this host.");
+    await confirmPlan({ dialog: "dialog-approve" });
+    await waitFor(() => expect(stored(P.mediaPc).state).toBe("accepted"));
+    expect(approvals(writes)[0]?.body).toEqual({ choice: "mediapc", remember: "host" });
+    const preferred = [...nameAuthorityState().preferences.values()].find((p) => p.host_name === "mediapc");
+    expect(preferred).toMatchObject({ source: "unifi", name: "mediapc" });
+  });
+
+  it("offers an administrator to prefer the source for every host", async () => {
+    const writes = recordWrites();
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    fireEvent.click(screen.getByTestId("remember-source"));
+    fireEvent.click(choice("mediapc").getByTestId("use-name"));
+    await confirmPlan({ dialog: "dialog-approve" });
+    await waitFor(() => expect(stored(P.mediaPc).state).toBe("accepted"));
+    expect(approvals(writes)[0]?.body).toEqual({ choice: "mediapc", remember: "source" });
+    expect(nameAuthorityState().global?.order[0]).toBe("unifi");
+  });
+
+  it("does not offer an operator to prefer a source for every host", async () => {
+    await signInAs(["operator"]);
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    expect(screen.getByTestId("remember-once")).toBeTruthy();
+    expect(screen.getByTestId("remember-host")).toBeTruthy();
+    expect(screen.queryByTestId("remember-source")).toBeNull();
+    expect(screen.getByRole("group", { name: "Remember" })).toBeTruthy();
+  });
+
+  it("shows a viewer the names but no way to choose one", async () => {
+    await signInAs(["viewer"]);
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("proposal-names");
+    expect(choices()).toHaveLength(2);
+    expect(screen.queryByTestId("use-name")).toBeNull();
+    expect(screen.queryByTestId("remember")).toBeNull();
+  });
+
+  it("keeps the plain approval for the proposed name, with no body", async () => {
+    const writes = recordWrites();
+    await openPanel(P.mediaPc);
+    await screen.findByTestId("plan-summary");
+    fireEvent.click(screen.getByTestId("discovery-approve"));
+    await confirmPlan({ dialog: "dialog-approve" });
+    await waitFor(() => expect(stored(P.mediaPc).state).toBe("accepted"));
+    expect(approvals(writes)[0]?.body).toBeUndefined();
+    expect([...ipamState().data.host.values()].some((h) => h.name === "media-pc")).toBe(true);
+  });
+
+  it("refuses a name the proposal does not offer", async () => {
+    await openPanel(P.mediaPc);
+    await expect(approveProposal(stored(P.mediaPc), { dryRun: false, acknowledge: [] }, { choice: "nope" })).rejects.toMatchObject({ code: "ipam.proposal.choice_invalid" });
+    expect(stored(P.mediaPc).state).toBe("open");
+  });
+
+  it("lists every candidate in a row, with the last sighting in the tooltip", async () => {
+    await openInbox();
+    const names = cell(rowOf(P.mediaPc), "names");
+    expect(names).toBe("media-pc · Proxmox VE, mediapc · UniFi");
+    const spans = rowOf(P.mediaPc).querySelectorAll("[data-col='names'] .name-choice-text");
+    expect(spans).toHaveLength(2);
+    expect(spans[0]?.getAttribute("title")).toMatch(/^Last seen /);
+    // A proposal without a choice has no candidates.
+    expect(cell(rowOf(P.outside), "names")).toBe("–");
+  });
+
+  describe("a host that is renamed (host_name)", () => {
+    it("is listed with its kind and its rule in words", async () => {
+      await openInbox();
+      expect(cell(rowOf(P.renameDb), "kind").trim()).toBe("Host name");
+      expect(cell(rowOf(P.renameDb), "summary")).toBe(
+        "Host host-192-0-2-16 has a placeholder name; rename it to postgresql (Proxmox VE, by the default name authority)",
+      );
+      expect(cell(rowOf(P.renameDb), "names")).toBe("postgresql · Proxmox VE");
+      expect(rowOf(P.renameDb).classList.contains("proposal")).toBe(true);
+    });
+
+    it("is filtered by its kind", async () => {
+      await openInbox();
+      fireEvent.click(screen.getByTestId("filter-kind-host_name"));
+      await waitFor(() => expect(rowIds()).toEqual([P.renameDb]));
+    });
+
+    it("shows the rule, the name and the evidence in the panel, and renames the host when approved", async () => {
+      await openPanel(P.renameDb);
+      expect(screen.getByTestId("proposal-summary").textContent).toBe(
+        "Host host-192-0-2-16 has a placeholder name; rename it to postgresql (Proxmox VE, by the default name authority)",
+      );
+      expect(choices().map((c) => c.dataset.name)).toEqual(["postgresql"]);
+      expect(within(panel()).getAllByTestId("evidence")).toHaveLength(2);
+      const approve = await screen.findByTestId("discovery-approve");
+      fireEvent.click(approve);
+      await confirmPlan({ dialog: "dialog-approve" });
+      await waitFor(() => expect(stored(P.renameDb).state).toBe("accepted"));
+      expect(ipamState().data.host.get(HOST_IDS["host-192-0-2-16"] as string)?.name).toBe("postgresql");
+    });
+
+    it("renames the host by the other name when that is chosen", async () => {
+      reconcileState().proposals.set(P.renameDb, {
+        ...stored(P.renameDb),
+        rule: "ipam.reconcile.name_conflict",
+        params: { host: "host-192-0-2-16", name: "postgresql", name_source: "proxmox", name_rule: "global", other_names: "db" },
+        choices: [
+          ...(stored(P.renameDb).choices ?? []),
+          {
+            name: "db",
+            proposed: false,
+            sources: [{ source: "dns", source_key: "dns:example.test", given: "db.example.test", last_seen: "2026-10-01T00:00:00Z" }],
+            last_seen: "2026-10-01T00:00:00Z",
+          },
+        ],
+      });
+      await openPanel(P.renameDb);
+      expect(screen.getByTestId("proposal-summary").textContent).toBe(
+        "The sources name host host-192-0-2-16 differently; rename it to postgresql (Proxmox VE, by the global name authority); also named db",
+      );
+      await screen.findByTestId("proposal-names");
+      expect(choice("db").getByTestId("name-given").textContent).toBe("given as db.example.test");
+      fireEvent.click(choice("db").getByTestId("use-name"));
+      await confirmPlan({ dialog: "dialog-approve" });
+      await waitFor(() => expect(stored(P.renameDb).state).toBe("accepted"));
+      expect(ipamState().data.host.get(HOST_IDS["host-192-0-2-16"] as string)?.name).toBe("db");
+    });
   });
 });

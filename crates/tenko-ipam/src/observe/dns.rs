@@ -142,7 +142,11 @@ pub async fn ingest_zones(
                 batch.observations.push(Observation {
                     id: ObservationId::generate(),
                     source: source.clone(),
-                    subject: Observed::Name { ip, name },
+                    subject: Observed::Name {
+                        ip,
+                        placeholder: tenko_core::observe::is_placeholder_name(&name),
+                        name,
+                    },
                     observed_at: now,
                     received_at: now,
                     expires_at: None,

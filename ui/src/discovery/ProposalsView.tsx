@@ -27,7 +27,7 @@ import { sortParam, type RowAction, type SortState } from "../grid/types";
 import { t } from "../i18n";
 import { useWriteToast } from "../ipam/plan/PlanDialog";
 import { useCommands } from "../shell/commands";
-import { approveProposals, PROPOSAL_KINDS, PROPOSAL_STATES, reconcileNow, rejectProposal, rejectProposals, SEVERITIES, type BatchDecision, type Decision, type Proposal, type ProposalKind, type ProposalSeverity, type ProposalState, type ReconcileReport } from "./api";
+import { approveProposals, PROPOSAL_KINDS, PROPOSAL_STATES, reconcileNow, rejectProposal, rejectProposals, SEVERITIES, type ApproveRequest, type BatchDecision, type Decision, type Proposal, type ProposalKind, type ProposalSeverity, type ProposalState, type ReconcileReport } from "./api";
 import { proposalColumns } from "./columns";
 import { ApproveDialog, ApproveManyDialog, ReconcileReportDialog, RejectDialog, SkippedDialog } from "./dialogs";
 import { DiscoveryNav } from "./DiscoveryNav";
@@ -105,7 +105,7 @@ export default function ProposalsView() {
   const columnState = createColumnState("proposals", () => columns);
 
   const [dialog, setDialog] = createSignal<
-    | { kind: "approve"; proposal: Proposal }
+    | { kind: "approve"; proposal: Proposal; request?: ApproveRequest }
     | { kind: "reject"; proposal: Proposal }
     | { kind: "approve_many"; proposals: Proposal[] }
     | { kind: "reject_many"; proposals: Proposal[] }
@@ -355,7 +355,7 @@ export default function ProposalsView() {
               id={id}
               names={names()}
               decider={isDecider()}
-              onApprove={(p) => setDialog({ kind: "approve", proposal: p })}
+              onApprove={(p, request) => setDialog({ kind: "approve", proposal: p, request })}
               onReject={(p) => setDialog({ kind: "reject", proposal: p })}
               onClose={close}
             />
@@ -366,7 +366,7 @@ export default function ProposalsView() {
       <Show when={dialog()} keyed>
         {(d) => {
           if (d.kind === "approve") {
-            return <ApproveDialog proposal={d.proposal} onClose={() => setDialog(null)} onDone={(r) => decided(t("discovery.toast.approved"), r)} />;
+            return <ApproveDialog proposal={d.proposal} request={d.request} onClose={() => setDialog(null)} onDone={(r) => decided(t("discovery.toast.approved"), r)} />;
           }
           if (d.kind === "approve_many") {
             return (

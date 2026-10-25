@@ -88,7 +88,7 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   vault: ["vault."],
   backup: ["backup."],
   certificates: ["certificates."],
-  reconciler: ["reconciler."],
+  reconciler: ["reconciler.", "errors.ipam.name_authority."],
   guardrails: ["guardrails."],
   languages: ["languages.", "errors.i18n."],
   // The live metrics of the start page (WP3.5b), a lazy part of the dashboard for administrators.

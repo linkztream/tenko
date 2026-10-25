@@ -33,7 +33,7 @@ const post = <T>(path: string, json?: unknown, headers?: Record<string, string>)
 
 const V = "/api/v1";
 const P = RECONCILE_IDS.proposal;
-const OPEN = [P.mediaPc, P.hallSwitchClient, P.iotAddress, P.thermostat, P.outside, P.printerTaken];
+const OPEN = [P.mediaPc, P.hallSwitchClient, P.iotAddress, P.thermostat, P.outside, P.printerTaken, P.renameDb];
 
 beforeEach(() => {
   resetMockDb("signed-in");
@@ -61,7 +61,7 @@ describe("GET /proposals", () => {
   it("lists every state, newest first, and filters by state, kind, severity, prefix and subject", async () => {
     const all = await get<Page<S["IntentProposal"]>>(`${V}/proposals`);
     expect(all.status).toBe(200);
-    expect(all.body.items).toHaveLength(9);
+    expect(all.body.items).toHaveLength(10);
     const created = all.body.items.map((p) => p.created);
     expect(created).toEqual([...created].sort().reverse());
 
@@ -234,7 +234,7 @@ describe("observations", () => {
     const expired = (await get<Page<S["ObservedFact"]>>(`${V}/observations?current=false`)).body.items;
     expect(expired.map((f) => f.subject_key)).toEqual(["host:vm-200"]);
     const inventory = (await get<Page<S["ObservedFact"]>>(`${V}/observations?source=${RECONCILE_IDS.inventory}&q=debian`)).body.items;
-    expect(inventory.map((f) => f.subject_key)).toEqual(["host:vm-104"]);
+    expect(inventory.map((f) => f.subject_key)).toEqual(["host:vm-104", "host:vm-110"]);
     for (const query of ["type=vm", "mac=nope", "within=10.0.0.0/33", "current=yes", "sort=size", "colour=red"]) {
       expect((await get<Problem>(`${V}/observations?${query}`)).status, query).toBe(400);
     }
@@ -450,5 +450,128 @@ describe("adoption policies", () => {
   it("answers 404 for an unknown prefix and 409 for a deleted one", async () => {
     expect((await get<Problem>(path("0190d1c2-0000-7000-8000-0000e5ffffff"))).body.code).toBe("ipam.not_found");
     expect((await get<Problem>(path(IPAM_IDS.prefix.managementV6))).body.code).toBe("ipam.object_deleted");
+  });
+});
+
+describe("the names a proposal offers", () => {
+  const approve = (id: string, json?: unknown, query = "") => call<S["Decision"] & Problem>("POST", `${V}/proposals/${id}/approve${query}`, { json });
+  const hostNamed = (name: string) => [...ipamState().data.host.values()].some((h) => h.name === name && !h.meta.deleted);
+
+  it("gives a proposal two names and a host rename its one name", async () => {
+    const media = (await get<S["IntentProposal"]>(`${V}/proposals/${P.mediaPc}`)).body;
+    expect(media.choices?.map((c) => [c.name, c.proposed, c.sources.map((s) => s.source)])).toEqual([
+      ["media-pc", true, ["proxmox"]],
+      ["mediapc", false, ["unifi"]],
+    ]);
+    const rename = (await get<S["IntentProposal"]>(`${V}/proposals/${P.renameDb}`)).body;
+    expect(rename).toMatchObject({
+      kind: "host_name",
+      rule: "ipam.reconcile.placeholder_name",
+      params: { host: "host-192-0-2-16", name: "postgresql", name_source: "proxmox", name_rule: "default" },
+    });
+    expect((await get<Page<S["IntentProposal"]>>(`${V}/proposals?kind=host_name`)).body.items.map((p) => p.id)).toEqual([P.renameDb]);
+  });
+
+  it("applies the proposed name without a body", async () => {
+    expect((await approve(P.mediaPc)).status).toBe(200);
+    expect(hostNamed("media-pc")).toBe(true);
+  });
+
+  it("applies the chosen name to the host that the proposal creates, compared without case", async () => {
+    const plan = await approve(P.mediaPc, { choice: "MediaPC" }, "?dry_run=true");
+    expect(plan.status).toBe(200);
+    expect(hostNamed("mediapc")).toBe(false);
+    const done = await approve(P.mediaPc, { choice: "MediaPC" });
+    expect(done.status).toBe(200);
+    expect(hostNamed("mediapc")).toBe(true);
+    expect(hostNamed("media-pc")).toBe(false);
+    expect((await get<S["IntentProposal"]>(`${V}/proposals/${P.mediaPc}`)).body.state).toBe("accepted");
+  });
+
+  it("renames the host of a host_name proposal and remembers the choice for the host", async () => {
+    expect((await approve(P.renameDb, { choice: "postgresql", remember: "host" })).status).toBe(200);
+    expect(hostNamed("postgresql")).toBe(true);
+    expect(hostNamed("host-192-0-2-16")).toBe(false);
+    const view = (await get<S["NameAuthorityView"]>(`${V}/settings/reconciler/name-authority`)).body;
+    expect(view.preferences.find((p) => p.host === HOST_IDS["host-192-0-2-16"])).toMatchObject({ host_name: "postgresql", source: "proxmox", name: "postgresql" });
+  });
+
+  it("refuses a name the proposal does not offer, and a proposal that offers none", async () => {
+    const refused = await approve(P.mediaPc, { choice: "nope" });
+    expect(refused.status).toBe(422);
+    expect(refused.body).toMatchObject({ code: "ipam.proposal.choice_invalid" });
+    expect((await approve(P.outside, { choice: "x" })).body).toMatchObject({ code: "ipam.proposal.choice_invalid" });
+    expect(hostNamed("media-pc")).toBe(false);
+    expect((await get<S["IntentProposal"]>(`${V}/proposals/${P.mediaPc}`)).body.state).toBe("open");
+    expect((await approve(P.mediaPc, { choice: 3 })).status).toBe(400);
+    expect((await approve(P.mediaPc, { remember: "always" })).status).toBe(400);
+    expect((await approve(P.mediaPc, { other: 1 })).status).toBe(400);
+  });
+
+  it("takes the choice of each proposal of a batch", async () => {
+    const batch = await post<S["BatchDecision"]>(`${V}/proposals/approve`, { ids: [P.mediaPc, P.renameDb], choices: { [P.mediaPc]: { choice: "mediapc" } } });
+    expect(batch.body).toMatchObject({ approved: 2, skipped: 0 });
+    expect(hostNamed("mediapc")).toBe(true);
+    expect(hostNamed("postgresql")).toBe(true);
+    const invalid = await post<S["BatchDecision"]>(`${V}/proposals/approve`, { ids: [P.hallSwitchClient], choices: { [P.hallSwitchClient]: { choice: "nope" } } });
+    expect(invalid.body.results[0]).toMatchObject({ outcome: "skipped", code: "ipam.proposal.choice_invalid" });
+  });
+});
+
+describe("the name authority", () => {
+  const path = `${V}/settings/reconciler/name-authority`;
+  const view = async () => (await get<S["NameAuthorityView"]>(path)).body;
+
+  it("needs a session", async () => {
+    resetMockDb("signed-out");
+    expect((await get<Problem>(path)).status).toBe(401);
+  });
+
+  it("starts with the default order, no rule and one host that prefers a source", async () => {
+    const start = await view();
+    expect(start.default_order).toEqual(["proxmox", "home_assistant", "windows", "dns", "mdns", "llmnr", "unifi", "scan"]);
+    expect(start.sources).toHaveLength(10);
+    expect(start.global ?? null).toBeNull();
+    expect(start.sites).toEqual([]);
+    expect(start.preferences.map((p) => p.host_name)).toEqual(["nas"]);
+  });
+
+  it("stores and removes the global order", async () => {
+    const set = await call<S["StoredAuthority"]>("PUT", path, { json: { order: ["unifi", "proxmox"] } });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ order: ["unifi", "proxmox"], site: null });
+    expect((await view()).global?.order).toEqual(["unifi", "proxmox"]);
+    expect((await call("DELETE", path)).status).toBe(204);
+    expect((await view()).global ?? null).toBeNull();
+  });
+
+  it("refuses an empty order, a duplicate and a kind it does not know", async () => {
+    for (const order of [[], ["dns", "dns"], ["fax"], "dns", undefined]) {
+      const refused = await call<Problem>("PUT", path, { json: { order } });
+      expect(refused.status, JSON.stringify(order)).toBe(422);
+      expect(refused.body).toMatchObject({ code: "ipam.name_authority.invalid" });
+    }
+  });
+
+  it("stores the rule of a site with the name of the site, and removes it", async () => {
+    const site = IPAM_IDS.site.garage;
+    const set = await call<S["StoredAuthority"]>("PUT", `${path}/sites/${site}`, { json: { order: ["dns"] } });
+    expect(set.body).toMatchObject({ site, order: ["dns"] });
+    expect((await view()).sites).toMatchObject([{ site, site_name: "Garage", order: ["dns"] }]);
+    expect((await call("DELETE", `${path}/sites/${site}`)).status).toBe(204);
+    expect((await view()).sites).toEqual([]);
+    const unknown = await call<Problem>("PUT", `${path}/sites/0190d1c2-0000-7000-8000-0000e5ffffff`, { json: { order: ["dns"] } });
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.code).toBe("ipam.not_found");
+  });
+
+  it("forgets the preferred source of a host", async () => {
+    expect((await call("DELETE", `${path}/hosts/${HOST_IDS["nas"]}`)).status).toBe(204);
+    expect((await view()).preferences).toEqual([]);
+  });
+
+  it("moves a source to the front of the global order when an approval remembers it", async () => {
+    await call("POST", `${V}/proposals/${P.mediaPc}/approve`, { json: { choice: "mediapc", remember: "source" } });
+    expect((await view()).global?.order).toEqual(["unifi", "proxmox", "home_assistant", "windows", "dns", "mdns", "llmnr", "scan"]);
   });
 });

@@ -18,22 +18,24 @@ use tenko_core::{
     Coded, JobId, ObjectRef, PrefixId, ProposalId, RequestCtx, Revision, VlanId,
     audit::{AuditAction, AuditDraft},
     ipam::{AssignmentMode, Stamp, Vlan},
+    net::HostName,
 };
 use tenko_jobs::JobState;
 use tenko_store::{ReadConsistency, ReadView, ReadViewExt, WriteBatch};
 use utoipa::ToSchema;
 
 use super::model::{
-    IntentProposal, IntentProposalState, OPEN_KEYS, PROPOSALS, REJECTIONS, Rejection, actions,
-    codes,
+    IntentProposal, IntentProposalKind, IntentProposalState, OPEN_KEYS, PROPOSALS, REJECTIONS,
+    Rejection, actions, codes,
 };
 use crate::{
     command::IpamCommand,
     error::{IpamError, IpamResult},
     jobs::{WriteStepParams, committed_revision, edit_job, with_batch},
     plan::{PlanOptions, PlanView, PlanWarning},
+    reconcile::names::{self, HostNameChoice, NameSource},
     service::IpamService,
-    tables::{VLAN_VIDS, VLANS},
+    tables::{HOSTS, VLAN_VIDS, VLANS},
 };
 
 /// Longest rejection reason in bytes.
@@ -303,10 +305,330 @@ pub async fn approve(
     dry_run: bool,
     expected: Option<Revision>,
 ) -> IpamResult<Decision> {
-    apply(ipam, id, cx, options, dry_run, expected, Applier::Person).await
+    apply(
+        ipam,
+        id,
+        cx,
+        options,
+        dry_run,
+        expected,
+        Applier::Person,
+        &ApproveRequest::default(),
+    )
+    .await
+}
+
+/// Approves a proposal as [`approve`] does, with the operator's choice of name and what
+/// to remember of it ([`ApproveRequest`]).
+///
+/// # Errors
+///
+/// Those of [`approve`], and 422 `ipam.proposal.choice_invalid` for a choice the proposal
+/// does not offer; with `remember: source` also 422 `ipam.name_authority.invalid`.
+pub async fn approve_with(
+    ipam: &IpamService,
+    id: ProposalId,
+    cx: &RequestCtx,
+    options: &PlanOptions,
+    dry_run: bool,
+    expected: Option<Revision>,
+    request: &ApproveRequest,
+) -> IpamResult<Decision> {
+    apply(
+        ipam,
+        id,
+        cx,
+        options,
+        dry_run,
+        expected,
+        Applier::Person,
+        request,
+    )
+    .await
+}
+
+/// What the operator remembers of a choice of name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Remember {
+    /// The host follows the chosen source from now on (a preference of the host).
+    Host,
+    /// The chosen source goes first in the name authority rule that decided (the site's
+    /// rule, else the global one).
+    Source,
+}
+
+/// The body of an approval: for a proposal that offers names (`choices`), which one the
+/// host takes and what to remember. Every member is optional; without a body the proposed
+/// name applies.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApproveRequest {
+    /// One of the proposal's `choices` (compared without case); the proposed one when
+    /// absent.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// What to remember of the choice: `host` (the host follows the chosen source) or
+    /// `source` (the source goes first in the name authority).
+    #[serde(default)]
+    pub remember: Option<Remember>,
+}
+
+/// The name an approval gives a host and the decision it records.
+#[derive(Debug, Clone)]
+struct Naming {
+    host: tenko_core::HostId,
+    /// The name the host takes.
+    name: HostName,
+    /// The host's name now, for a host of intent.
+    current: Option<String>,
+    /// The kind of source of the chosen name.
+    source: Option<NameSource>,
+    /// Every name on offer.
+    offered: Vec<String>,
+    /// The names not chosen.
+    rejected: Vec<String>,
+    remember: Option<Remember>,
+    /// The site whose rule decided (`remember: source` puts the source first there).
+    rule_site: Option<tenko_core::SiteId>,
+}
+
+fn choice_invalid(proposal: &IntentProposal, detail: impl Into<String>, choice: &str) -> IpamError {
+    IpamError::new(codes::CHOICE_INVALID, 422, detail)
+        .titled("The proposal does not offer that name")
+        .param("id", proposal.id)
+        .param("choice", choice)
+}
+
+impl Naming {
+    /// The naming of an approval of `proposal` with `request`; `None` for a proposal that
+    /// offers no names.
+    fn of(
+        view: &dyn ReadView,
+        proposal: &IntentProposal,
+        commands: &[IpamCommand],
+        request: &ApproveRequest,
+    ) -> IpamResult<Option<Self>> {
+        let named = matches!(
+            proposal.kind,
+            IntentProposalKind::DiscoveredHost | IntentProposalKind::HostName
+        ) && !proposal.choices.is_empty();
+        let asked = request.choice.as_deref().map(str::trim);
+        if !named {
+            if request.choice.is_some() || request.remember.is_some() {
+                return Err(choice_invalid(
+                    proposal,
+                    format!("proposal {} offers no names to choose from", proposal.id),
+                    asked.unwrap_or_default(),
+                ));
+            }
+            return Ok(None);
+        }
+        let chosen = match asked {
+            None => &proposal.choices[0],
+            Some(asked) => proposal
+                .choices
+                .iter()
+                .find(|choice| choice.name.eq_ignore_ascii_case(asked))
+                .ok_or_else(|| {
+                    let offered: Vec<&str> = proposal
+                        .choices
+                        .iter()
+                        .map(|choice| choice.name.as_str())
+                        .collect();
+                    choice_invalid(
+                        proposal,
+                        format!(
+                            "proposal {} offers {}, not {asked}",
+                            proposal.id,
+                            offered.join(", ")
+                        ),
+                        asked,
+                    )
+                })?,
+        };
+        let mut host = None;
+        let mut proposed_name = None;
+        for command in commands {
+            match command {
+                IpamCommand::CreateHost(input) => {
+                    host = input.id;
+                    proposed_name = Some(input.name.clone());
+                }
+                IpamCommand::UpdateHost(update) => {
+                    host = Some(update.id);
+                    proposed_name.clone_from(&update.patch.name);
+                }
+                _ => {}
+            }
+        }
+        let Some(host) = host else {
+            return Ok(None);
+        };
+        // The proposed name is the command's own (it may carry a suffix that keeps it
+        // unique); another choice is taken as it is offered.
+        let name = match (chosen.proposed, proposed_name) {
+            (true, Some(name)) => name,
+            _ => names::host_name(&chosen.name).ok_or_else(|| {
+                choice_invalid(
+                    proposal,
+                    format!("{} is no usable host name", chosen.name),
+                    &chosen.name,
+                )
+            })?,
+        };
+        let current = view
+            .get_typed(&HOSTS, &host)?
+            .filter(|(record, _)| !record.meta.is_deleted())
+            .map(|(record, _)| record.name.to_string());
+        let rule_site = proposal
+            .params
+            .get("rule_site")
+            .and_then(|site| site.parse().ok());
+        Ok(Some(Self {
+            host,
+            current,
+            source: chosen.sources.first().map(|source| source.source),
+            offered: proposal
+                .choices
+                .iter()
+                .map(|choice| choice.name.clone())
+                .collect(),
+            rejected: proposal
+                .choices
+                .iter()
+                .filter(|choice| choice.name != chosen.name)
+                .map(|choice| choice.name.clone())
+                .collect(),
+            name,
+            remember: request.remember,
+            rule_site,
+        }))
+    }
+
+    /// The commands with the chosen name; a rename to the name the host has is left out.
+    fn commands(&self, commands: Vec<IpamCommand>) -> Vec<IpamCommand> {
+        commands
+            .into_iter()
+            .filter_map(|mut command| {
+                match &mut command {
+                    IpamCommand::CreateHost(input) => input.name = self.name.clone(),
+                    IpamCommand::UpdateHost(update) => {
+                        if self
+                            .current
+                            .as_deref()
+                            .is_some_and(|current| current.eq_ignore_ascii_case(self.name.as_str()))
+                        {
+                            return None;
+                        }
+                        update.patch.name = Some(self.name.clone());
+                    }
+                    _ => {}
+                }
+                Some(command)
+            })
+            .collect()
+    }
+
+    /// Adds the decision (and, with `remember: source`, the rule) to `batch` and its
+    /// context to the approval's audit record.
+    fn stage(
+        &self,
+        view: &dyn ReadView,
+        cx: &RequestCtx,
+        batch: &mut WriteBatch,
+        draft: AuditDraft,
+    ) -> IpamResult<AuditDraft> {
+        names::stage_choice(
+            view,
+            batch,
+            &HostNameChoice {
+                host: self.host,
+                name: self.name.to_string(),
+                offered: self.offered.clone(),
+                source: self.source,
+                prefer: self.remember == Some(Remember::Host),
+                decided: Stamp::new(cx.now, cx.principal.clone()),
+                revision: Revision::ZERO,
+            },
+        )?;
+        let mut draft = draft
+            .with_context("choice", self.name.to_string())
+            .with_context("rejected", self.rejected.join(", "));
+        if let Some(source) = self.source {
+            draft = draft.with_context("source", source.as_str());
+        }
+        match self.remember {
+            Some(Remember::Host) => draft = draft.with_context("remember", "host"),
+            Some(Remember::Source) => {
+                let Some(source) = self.source else {
+                    return Ok(draft);
+                };
+                let (site, order) = names::rule_at(view, self.rule_site)?;
+                let mut order: Vec<NameSource> =
+                    order.into_iter().filter(|other| *other != source).collect();
+                order.insert(0, source);
+                names::stage_rule(view, cx, site, order, batch)?;
+                draft = draft.with_context("remember", "source");
+            }
+            None => {}
+        }
+        Ok(draft)
+    }
+}
+
+/// Accepts a name proposal whose chosen name the host has already: writes the decision
+/// and the proposal's state, and changes no intent.
+async fn keep_name(
+    ipam: &IpamService,
+    view: std::sync::Arc<dyn ReadView>,
+    proposal: &IntentProposal,
+    naming: &Naming,
+    cx: &RequestCtx,
+) -> IpamResult<Decision> {
+    let mut accepted = proposal.clone();
+    accepted.state = IntentProposalState::Accepted;
+    accepted.decided = Some(Stamp::new(cx.now, cx.principal.clone()));
+    accepted.updated = cx.now;
+    accepted.revision = Revision::ZERO;
+    let mut batch = WriteBatch::new(cx.principal.clone(), cx.now);
+    batch.request = Some(cx.request);
+    batch.put_typed(&PROPOSALS, &proposal.id, &accepted)?;
+    batch.expect_typed(&PROPOSALS, &proposal.id, Some(proposal.revision));
+    close_key(view.as_ref(), proposal, &mut batch)?;
+    let draft = AuditDraft::success(
+        AuditAction::from_static(actions::APPROVE),
+        vec![ObjectRef::from(proposal.id), ObjectRef::from(naming.host)],
+    )
+    .with_source_ip(cx.source_ip)
+    .with_context("kind", proposal.kind.as_str())
+    .with_context("key", proposal.key.clone());
+    let draft = naming.stage(view.as_ref(), cx, &mut batch, draft)?;
+    batch.audit(draft);
+    drop(view);
+    let (revision, job_id) = run_write(
+        ipam,
+        batch,
+        vec!["1 proposal approved".to_owned()],
+        vec![ObjectRef::from(proposal.id)],
+        cx,
+    )
+    .await?;
+    accepted.revision = revision;
+    Ok(Decision {
+        proposal: accepted,
+        dry_run: false,
+        revision: Some(revision),
+        job_id,
+        results: Vec::new(),
+        warnings: Vec::new(),
+        plan: None,
+    })
 }
 
 /// Applies a proposal for `applier` (see [`approve`]).
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // One decision: plan, the proposal's state and the name.
 pub(crate) async fn apply(
     ipam: &IpamService,
     id: ProposalId,
@@ -315,6 +637,7 @@ pub(crate) async fn apply(
     dry_run: bool,
     expected: Option<Revision>,
     applier: Applier,
+    request: &ApproveRequest,
 ) -> IpamResult<Decision> {
     let attempts = ipam.config().max_attempts.max(1);
     for attempt in 0..attempts {
@@ -327,14 +650,46 @@ pub(crate) async fn apply(
         let proposal = load(view.as_ref(), id)?;
         check(&proposal, expected)?;
         let commands = current_commands(view.as_ref(), &proposal.commands)?;
+        let naming = Naming::of(view.as_ref(), &proposal, &commands, request)?;
+        let commands = match &naming {
+            Some(naming) => naming.commands(commands),
+            None => commands,
+        };
         if commands.is_empty() {
-            return Err(IpamError::new(
-                codes::NOTHING_TO_APPLY,
-                409,
-                format!("proposal {id} suggests no change; resolve it and reject it to close it"),
-            )
-            .titled("Nothing to apply")
-            .param("id", id));
+            match naming {
+                // The operator keeps the name the host has: only the decision is written.
+                Some(naming) if !dry_run => {
+                    match keep_name(ipam, view, &proposal, &naming, cx).await {
+                        Err(error) if error.is(crate::codes::PLAN_STALE) => {
+                            pause(attempt).await;
+                            continue;
+                        }
+                        outcome => return outcome,
+                    }
+                }
+                Some(_) => {
+                    return Ok(Decision {
+                        proposal,
+                        dry_run: true,
+                        revision: None,
+                        job_id: None,
+                        results: Vec::new(),
+                        warnings: Vec::new(),
+                        plan: None,
+                    });
+                }
+                None => {
+                    return Err(IpamError::new(
+                        codes::NOTHING_TO_APPLY,
+                        409,
+                        format!(
+                            "proposal {id} suggests no change; resolve it and reject it to close it"
+                        ),
+                    )
+                    .titled("Nothing to apply")
+                    .param("id", id));
+                }
+            }
         }
         let commands = commands_for(commands, applier);
         let mut plan = ipam.plan(view.as_ref(), cx, options, &commands)?;
@@ -373,8 +728,12 @@ pub(crate) async fn apply(
         if let Some(prefix) = prefix {
             draft = draft.with_context("policy_prefix", prefix.to_string());
         }
+        if let Some(naming) = &naming {
+            draft = naming.stage(view.as_ref(), cx, &mut extra, draft)?;
+        }
         drop(view);
         plan.mutations.extend(extra.mutations);
+        plan.audit.extend(extra.audit);
         plan.preconditions.extend(extra.preconditions);
         plan.audit.push(draft);
         match ipam.apply(&plan, cx).await {

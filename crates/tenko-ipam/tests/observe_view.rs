@@ -1501,6 +1501,7 @@ async fn probe_names_and_vendors_join_the_view_of_their_device() {
             vec![Observed::Name {
                 ip: ip("192.0.2.40"),
                 name: "Printer.Example.Test".to_owned(),
+                placeholder: false,
             }],
         ),
         (

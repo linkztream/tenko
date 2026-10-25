@@ -1,11 +1,14 @@
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { db } from "../../api/mock/db";
+import { HOST_IDS, IPAM_IDS } from "../../api/mock/ipam/api";
+import { nameAuthorityState } from "../../api/mock/name-authority";
 import { server } from "../../api/mock/node";
 import { reconcilerState } from "../../api/mock/routes-reconciler";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
+import { recordWrites } from "../../ipam/testkit";
 import { setSessionForTest } from "../../auth/session";
 import { setLocale } from "../../i18n";
 import { signInAs } from "../testkit";
@@ -120,6 +123,214 @@ describe("the reconciler settings page", () => {
     await setLocale("sv");
     await waitFor(() => expect(screen.getByTestId("page-reconciler").textContent).toContain("Körintervall"));
     expect(document.getElementById("rc-interval-limits")?.textContent).toBe("30 s till 1 d, standard 5 min");
+  });
+});
+
+describe("the name authority", () => {
+  const section = () => screen.getByTestId("name-authority");
+  const global = () => screen.getByTestId("name-global");
+  const orderOf = (id: string) =>
+    within(screen.getByTestId(`${id}-order`))
+      .queryAllByTestId("name-source")
+      .map((li) => li.dataset.source);
+  const rowOf = (id: string, source: string) =>
+    within(screen.getByTestId(`${id}-order`))
+      .getAllByTestId("name-source")
+      .find((li) => li.dataset.source === source) as HTMLElement;
+  const DEFAULT = ["proxmox", "home_assistant", "windows", "dns", "mdns", "llmnr", "unifi", "scan"];
+  const HOME = IPAM_IDS.site.home;
+  const by = { kind: "system", component: "ipam" } as never;
+
+  async function openNames() {
+    const view = await openPage();
+    await screen.findByTestId("name-global");
+    return view;
+  }
+
+  it("shows the default order, marked as the default, while no rule is stored", async () => {
+    await openNames();
+    expect(orderOf("name-global")).toEqual(DEFAULT);
+    expect(global().textContent).toContain("Proxmox VE");
+    expect(screen.getByTestId("default-tag").textContent).toBe("default");
+    // Nothing to reset, and no site has a rule.
+    expect(within(global()).queryByTestId("remove-rule")).toBeNull();
+    expect(screen.getByTestId("name-sites-empty")).toBeTruthy();
+    // The kinds that the default leaves out can be added.
+    const add = within(global()).getByTestId("add-source") as HTMLSelectElement;
+    expect([...add.options].map((o) => o.value)).toEqual(["", "dhcp", "other"]);
+    expect(section().textContent).toContain("Kinds left out of a rule rank after the listed ones.");
+  });
+
+  it("moves a kind up and saves the new order with a PUT", async () => {
+    await openNames();
+    fireEvent.click(within(rowOf("name-global", "unifi")).getByRole("button", { name: "Move UniFi up" }));
+    const moved = ["proxmox", "home_assistant", "windows", "dns", "mdns", "unifi", "llmnr", "scan"];
+    expect(orderOf("name-global")).toEqual(moved);
+    // The first and the last row cannot move out of the list.
+    expect((within(rowOf("name-global", "proxmox")).getByRole("button", { name: "Move Proxmox VE up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(rowOf("name-global", "scan")).getByRole("button", { name: "Move Scan down" }) as HTMLButtonElement).disabled).toBe(true);
+    // Nothing is stored before Save.
+    expect(nameAuthorityState().global).toBeNull();
+
+    const writes = recordWrites();
+    fireEvent.click(within(global()).getByTestId("save-rule"));
+    await waitFor(() => expect(nameAuthorityState().global?.order).toEqual(moved));
+    const put = writes().find((w) => w.method === "PUT" && w.url.endsWith("/api/v1/settings/reconciler/name-authority"));
+    expect(put?.body).toEqual({ order: moved });
+    expect(await screen.findByText("Name authority saved.")).toBeTruthy();
+    // A stored rule is not the default any more, and can be reset.
+    await waitFor(() => expect(screen.queryByTestId("default-tag")).toBeNull());
+    expect(within(global()).getByTestId("remove-rule").textContent).toBe("Reset to default");
+  });
+
+  it("keeps the focus on the button that moved a kind", async () => {
+    await openNames();
+    const down = within(rowOf("name-global", "proxmox")).getByRole("button", { name: "Move Proxmox VE down" });
+    down.focus();
+    fireEvent.click(down);
+    await waitFor(() => expect(orderOf("name-global").slice(0, 2)).toEqual(["home_assistant", "proxmox"]));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(rowOf("name-global", "proxmox")).getByRole("button", { name: "Move Proxmox VE down" })),
+    );
+  });
+
+  it("removes a kind and adds one that was not in the list", async () => {
+    await openNames();
+    fireEvent.click(within(rowOf("name-global", "windows")).getByRole("button", { name: "Remove Windows from the list" }));
+    expect(orderOf("name-global")).toEqual(["proxmox", "home_assistant", "dns", "mdns", "llmnr", "unifi", "scan"]);
+    // Choosing adds nothing; the button does.
+    fireEvent.change(within(global()).getByTestId("add-source"), { target: { value: "dhcp" } });
+    expect(orderOf("name-global")).not.toContain("dhcp");
+    fireEvent.click(within(global()).getByTestId("add-source-button"));
+    const next = ["proxmox", "home_assistant", "dns", "mdns", "llmnr", "unifi", "scan", "dhcp"];
+    expect(orderOf("name-global")).toEqual(next);
+    expect([...(within(global()).getByTestId("add-source") as HTMLSelectElement).options].map((o) => o.value)).toEqual(["", "windows", "other"]);
+
+    fireEvent.click(within(global()).getByTestId("save-rule"));
+    await waitFor(() => expect(nameAuthorityState().global?.order).toEqual(next));
+  });
+
+  it("does not save an empty order", async () => {
+    await openNames();
+    for (const source of DEFAULT) fireEvent.click(within(rowOf("name-global", source)).getByRole("button", { name: /^Remove / }));
+    expect(orderOf("name-global")).toEqual([]);
+    expect(screen.getByTestId("order-empty").textContent).toBe("The order needs at least one kind of source.");
+    expect((within(global()).getByTestId("save-rule") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("resets to the default order with a DELETE", async () => {
+    nameAuthorityState().global = { site: null, order: ["dns", "proxmox"], updated: { at: "2026-10-01T00:00:00Z", by }, revision: 1 };
+    await openNames();
+    expect(orderOf("name-global")).toEqual(["dns", "proxmox"]);
+    expect(screen.queryByTestId("default-tag")).toBeNull();
+
+    const writes = recordWrites();
+    fireEvent.click(within(global()).getByTestId("remove-rule"));
+    await waitFor(() => expect(nameAuthorityState().global).toBeNull());
+    expect(writes().some((w) => w.method === "DELETE" && w.url.endsWith("/api/v1/settings/reconciler/name-authority"))).toBe(true);
+    await waitFor(() => expect(orderOf("name-global")).toEqual(DEFAULT));
+    expect(screen.getByTestId("default-tag")).toBeTruthy();
+    expect(await screen.findByText("The default order applies again.")).toBeTruthy();
+  });
+
+  it("shows the refusal of the server the way the page shows its other errors", async () => {
+    server.use(
+      http.put("/api/v1/settings/reconciler/name-authority", () =>
+        HttpResponse.json(
+          { type: "about:blank", status: 422, code: "ipam.name_authority.invalid", title: "x", detail: "x", params: { field: "order" } },
+          { status: 422, headers: { "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+    await openNames();
+    fireEvent.click(within(global()).getByTestId("save-rule"));
+    const notice = await within(global()).findByTestId("error-notice");
+    expect(notice.getAttribute("data-code")).toBe("ipam.name_authority.invalid");
+    expect(notice.textContent).toBe("The order must list one to ten kinds of source, each once.");
+  });
+
+  it("adds a rule for a site, saves it, and removes it again", async () => {
+    await openNames();
+    const pick = screen.getByTestId("add-site") as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.textContent)).toEqual(["Choose a site…", "Garage", "Home", "Lab"]);
+    fireEvent.change(pick, { target: { value: HOME } });
+    fireEvent.click(screen.getByTestId("add-site-button"));
+
+    const id = `name-site-${HOME}`;
+    const block = await screen.findByTestId(id);
+    expect(block.textContent).toContain("Site Home");
+    // It starts from the order in force and is not stored until it is saved.
+    expect(orderOf(id)).toEqual(DEFAULT);
+    expect(nameAuthorityState().sites.size).toBe(0);
+    expect(within(block).getByTestId("cancel-rule")).toBeTruthy();
+    // The site has its rule now, so it is not offered again.
+    expect([...(screen.getByTestId("add-site") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Choose a site…", "Garage", "Lab"]);
+
+    fireEvent.click(within(rowOf(id, "dns")).getByRole("button", { name: "Move DNS up" }));
+    const writes = recordWrites();
+    fireEvent.click(within(block).getByTestId("save-rule"));
+    const moved = ["proxmox", "home_assistant", "dns", "windows", "mdns", "llmnr", "unifi", "scan"];
+    await waitFor(() => expect(nameAuthorityState().sites.get(HOME)?.order).toEqual(moved));
+    expect(writes().find((w) => w.method === "PUT" && w.url.endsWith(`/name-authority/sites/${HOME}`))?.body).toEqual({ order: moved });
+    expect(await screen.findByText("The rule of site Home is saved.")).toBeTruthy();
+    await waitFor(() => {
+      const remove = within(screen.getByTestId(id)).getByTestId("remove-rule") as HTMLButtonElement;
+      expect(remove.textContent).toBe("Remove rule");
+      expect(remove.disabled).toBe(false);
+    });
+
+    fireEvent.click(within(screen.getByTestId(id)).getByTestId("remove-rule"));
+    await waitFor(() => expect(nameAuthorityState().sites.size).toBe(0));
+    await waitFor(() => expect(screen.queryByTestId(id)).toBeNull());
+    expect(writes().some((w) => w.method === "DELETE" && w.url.endsWith(`/name-authority/sites/${HOME}`))).toBe(true);
+  });
+
+  it("drops a rule for a site that was not saved", async () => {
+    await openNames();
+    fireEvent.change(screen.getByTestId("add-site"), { target: { value: IPAM_IDS.site.lab } });
+    fireEvent.click(screen.getByTestId("add-site-button"));
+    const block = await screen.findByTestId(`name-site-${IPAM_IDS.site.lab}`);
+    fireEvent.click(within(block).getByTestId("cancel-rule"));
+    expect(screen.queryByTestId(`name-site-${IPAM_IDS.site.lab}`)).toBeNull();
+    expect(nameAuthorityState().sites.size).toBe(0);
+  });
+
+  it("lists the stored rules of sites by the name of the site", async () => {
+    nameAuthorityState().sites.set(IPAM_IDS.site.garage, { site: IPAM_IDS.site.garage, order: ["unifi", "dns"], updated: { at: "2026-10-01T00:00:00Z", by }, revision: 1 });
+    await openNames();
+    const block = await screen.findByTestId(`name-site-${IPAM_IDS.site.garage}`);
+    expect(block.textContent).toContain("Site Garage");
+    expect(orderOf(`name-site-${IPAM_IDS.site.garage}`)).toEqual(["unifi", "dns"]);
+    expect(screen.queryByTestId("name-sites-empty")).toBeNull();
+  });
+
+  it("lists the hosts that prefer a source and forgets one", async () => {
+    await openNames();
+    const row = await screen.findByTestId("name-preference");
+    expect(row.dataset.host).toBe(HOST_IDS["nas"]);
+    expect(row.textContent).toContain("Proxmox VE");
+    expect(within(row).getByRole("link", { name: "nas" }).getAttribute("href")).toContain("/ipam/hosts/nas");
+
+    const writes = recordWrites();
+    fireEvent.click(within(row).getByRole("button", { name: "Forget the preferred source of nas" }));
+    await waitFor(() => expect(nameAuthorityState().preferences.size).toBe(0));
+    expect(writes().some((w) => w.method === "DELETE" && w.url.endsWith(`/name-authority/hosts/${HOST_IDS["nas"]}`))).toBe(true);
+    await waitFor(() => expect(screen.getByTestId("name-preferences-empty").textContent).toBe("No host prefers a source."));
+    expect(await screen.findByText("The preferred source of nas is forgotten.")).toBeTruthy();
+  });
+
+  it("works in Swedish", async () => {
+    await openNames();
+    await setLocale("sv");
+    await waitFor(() => expect(screen.getByTestId("name-authority").textContent).toContain("Namnauktoritet"));
+    expect(screen.getByTestId("default-tag").textContent).toBe("standard");
+    expect(within(rowOf("name-global", "scan")).getByRole("button", { name: "Flytta upp Skanning" })).toBeTruthy();
+  });
+
+  it("has no accessibility violations", async () => {
+    const view = await openNames();
+    await screen.findByTestId("name-preference");
+    expect(await axeViolations(view.container, NO_SHELL)).toEqual([]);
   });
 });
 

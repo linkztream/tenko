@@ -4,3 +4,15 @@
 .rc-group > h3 { font-size: var(--fs-14); }
 .rc-unit { color: var(--ink-3); }
 .rc-notices { display: grid; gap: var(--sp-3); margin-block-end: var(--sp-4); }
+
+/* The name authority: the global order, the rules of sites and the hosts that prefer a source. */
+.rc-names { display: grid; gap: var(--sp-5); max-width: 720px; margin-block-start: var(--sp-7); }
+.rc-names > h2 { font-size: var(--fs-16); }
+.rc-rule { display: grid; gap: var(--sp-4); padding: var(--sp-5); }
+.rc-rule > h3 { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-14); }
+.rc-editor { display: grid; gap: var(--sp-4); }
+.rc-order { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.rc-order li { display: flex; align-items: center; gap: var(--sp-2); padding-block: var(--sp-2); padding-inline: var(--sp-4) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-2); }
+.rc-order .rc-source-name { flex: 1; min-width: 0; }
+.rc-sites, .rc-prefs { display: grid; gap: var(--sp-4); }
+.rc-sites > h3, .rc-prefs > h3 { font-size: var(--fs-14); }

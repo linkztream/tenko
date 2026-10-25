@@ -68,7 +68,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
     await openDashboard();
     const proposals = await screen.findByTestId("dashboard-proposals");
     expect(within(proposals).getByRole("heading", { name: "Open proposals" })).toBeTruthy();
-    await shows("dashboard-proposals", "6");
+    await shows("dashboard-proposals", "7");
     const link = within(proposals).getByTestId("dashboard-proposals-link");
     expect(link.getAttribute("href")).toBe(paths.discovery());
     expect(link.getAttribute("href")).toBe("/discovery");
@@ -78,7 +78,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
 
     // The same numbers as the inbox has.
     const open = await listProposals({ state: ["open"] });
-    expect(open).toHaveLength(6);
+    expect(open).toHaveLength(7);
     expect(open.filter((p) => p.kind === "conflict")).toHaveLength(1);
   });
 
@@ -104,7 +104,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
 
   it("has no accessibility violations", async () => {
     await openDashboard();
-    await shows("dashboard-proposals", "6");
+    await shows("dashboard-proposals", "7");
     await shows("dashboard-connectors", "1");
     await shows("dashboard-nodes", "1");
     expect(await axeViolations(screen.getByTestId("page-dashboard"))).toEqual([]);
@@ -117,7 +117,7 @@ describe("the tiles for discovery, connectors and nodes", () => {
       },
     });
     await openDashboard();
-    await shows("dashboard-proposals", "6");
+    await shows("dashboard-proposals", "7");
     await shows("dashboard-connectors", "1");
     await shows("dashboard-nodes", "1");
   });
@@ -220,7 +220,7 @@ describe("the tiles and the modules", () => {
   it("shows the tile for the proposals while the discovery module runs", async () => {
     setModulesForTest(["discovery"]);
     await openDashboard();
-    await shows("dashboard-proposals", "6");
+    await shows("dashboard-proposals", "7");
   });
 
   it("keeps the connector and node tiles when only the discovery module runs", async () => {
@@ -258,11 +258,11 @@ describe("the tiles follow their topics", () => {
   it("drops a proposal that is decided elsewhere, and the conflict with it", async () => {
     stopBridge = bridgeMockEvents();
     await openDashboard();
-    await shows("dashboard-proposals", "6");
+    await shows("dashboard-proposals", "7");
     const conflict = (await listProposals({ state: ["open"] })).find((p) => p.kind === "conflict");
     if (!conflict) throw new Error("the seed has no open conflict");
     await rejectProposal(conflict, "");
-    await shows("dashboard-proposals", "5");
+    await shows("dashboard-proposals", "6");
     expect(hintOf("dashboard-proposals")).toBe("no conflict");
   });
 

@@ -501,7 +501,7 @@ fn add_facts(builder: &mut Builder, facts: &[&ObservedFact]) {
                     source: fact.source_key.clone(),
                 });
             }
-            Observed::Name { ip, name } => {
+            Observed::Name { ip, name, .. } => {
                 let id = builder.alias(Alias::Ip(*ip));
                 builder.label(id, label::PROBE_NAME, name);
                 // The polled device of an SNMP probe goes by its name in the probe's

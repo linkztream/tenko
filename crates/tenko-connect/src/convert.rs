@@ -280,6 +280,7 @@ pub fn host_to_proto(host: &ObservedHost) -> v1::ObservedHost {
     v1::ObservedHost {
         external_id: host.external_id.clone(),
         name: host.name.clone(),
+        name_placeholder: host.name_placeholder,
         macs: host.macs.iter().map(ToString::to_string).collect(),
         ips: host.ips.iter().map(ToString::to_string).collect(),
         os: host.os.clone(),
@@ -355,9 +356,11 @@ pub fn host_from_proto(
         Ok(v1::PowerState::Stopped) => Some(PowerState::Stopped),
         _ => None,
     };
+    let name_placeholder = name.is_some() && host.name_placeholder;
     Some(ObservedHost {
         external_id,
         name,
+        name_placeholder,
         macs,
         ips,
         os,
@@ -773,6 +776,7 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                 name: client.name.clone(),
                 vendor: client.vendor.clone(),
                 management: client.management,
+                name_placeholder: client.name_placeholder,
             })
             .collect(),
         networks: topology
@@ -899,6 +903,7 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                     .map(|value| vlan(&format!("{at}.vlan"), value))
                     .transpose()?,
                 name: opt_text(&format!("{at}.name"), client.name)?,
+                name_placeholder: client.name_placeholder,
                 vendor: opt_text(&format!("{at}.vendor"), client.vendor)?,
                 management: client.management,
             })
@@ -1584,6 +1589,7 @@ mod tests {
                 name: Some("printer.example.test".to_owned()),
                 vendor: Some("Example Devices".to_owned()),
                 management: true,
+                name_placeholder: false,
             }],
             networks: vec![ControllerNetwork {
                 id: NetworkRef("lan".to_owned()),

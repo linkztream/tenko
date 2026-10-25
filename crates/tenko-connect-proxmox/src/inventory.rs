@@ -373,6 +373,7 @@ pub fn node_host(node: &Node, snapshot: &Snapshot) -> ObservedHost {
     }
     ObservedHost {
         external_id: node.external_id(),
+        name_placeholder: false,
         name: Some(node.name.clone()),
         macs: Vec::new(),
         ips: ips.into_iter().filter(|ip| net::usable(*ip)).collect(),
@@ -480,6 +481,7 @@ pub fn guest_host(guest: &Guest, answers: Option<&GuestAnswers>, sdn: &Sdn) -> O
     tags.retain(|tag| seen.insert(tag.clone()));
     ObservedHost {
         external_id: guest.external_id(),
+        name_placeholder: false,
         name: guest.name.clone(),
         macs,
         ips: ips.into_iter().collect(),

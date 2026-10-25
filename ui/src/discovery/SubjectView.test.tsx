@@ -105,6 +105,30 @@ describe("the picture of a device", () => {
     );
   });
 
+  it("leaves a name that a source made up out of the names, and shows it as no name in the facts", async () => {
+    await openSubject("00:00:5e:00:53:10");
+    // Proxmox VE names the device postgresql; the controller lists it under its placeholder.
+    expect(text("subject-names")).toBe("postgresql");
+    expect(screen.queryByTestId("subject-no-name")).toBeNull();
+    const placeholder = within(screen.getAllByTestId("fact").find((f) => f.dataset.key?.includes("client-00005e005310")) as HTMLElement).getByTestId("no-name");
+    expect(placeholder.textContent).toBe("no name");
+    expect(placeholder.getAttribute("title")).toBe("host-192-0-2-16");
+  });
+
+  it("says no name when the only name is a placeholder", async () => {
+    const facts = reconcileState().facts;
+    facts.splice(
+      0,
+      facts.length,
+      ...facts.filter((f) => f.subject_key !== "host:vm-110"),
+    );
+    await openSubject("00:00:5e:00:53:10");
+    expect(screen.queryByTestId("subject-names")).toBeNull();
+    const none = screen.getByTestId("subject-no-name");
+    expect(none.textContent).toBe("no name");
+    expect(none.getAttribute("title")).toBe("host-192-0-2-16");
+  });
+
   it("looks a device up by name, without regard to case", async () => {
     await openSubject("Media-PC");
     expect(screen.getByTestId("page-discovery-subject").textContent).toContain("Name · seen now");

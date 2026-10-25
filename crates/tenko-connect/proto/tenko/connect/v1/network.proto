@@ -129,6 +129,9 @@ message ClientAttachment {
   // Whether this client is the controller itself or the host Tenko runs on. The host never
   // changes its VLAN.
   bool management = 10;
+  // Whether `name` is a placeholder the controller makes up for a client without a name
+  // (for example `host-192-0-2-10`); such a name never names a host.
+  bool name_placeholder = 11;
 }
 
 // The DHCP service of the controller for a network: Tenko serves DHCP, so it is off or

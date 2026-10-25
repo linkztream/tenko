@@ -16,7 +16,7 @@ import { getSubject, listProposals, type Proposal, type SubjectView as Picture }
 import { KindBadge, StateBadge } from "./columns";
 import { DiscoveryNav } from "./DiscoveryNav";
 import { FactTable } from "./FactTable";
-import { isProposalEvent, ruleText, sourceKeyText, subjectKind, type SourceNames } from "./model";
+import { isProposalEvent, ruleText, sourceKeyText, splitNames, subjectKind, type SourceNames } from "./model";
 import { ObjectLink, useSourceNames } from "./refs";
 import "./discovery.css";
 
@@ -111,6 +111,8 @@ function PictureCards(props: { picture: Picture; proposals: Proposal[]; names: S
   // A summary without these members (an older server) has none.
   const tls = () => s().tls_tcp ?? [];
   const vendors = () => s().vendors ?? [];
+  // A name that the facts give only as a placeholder is no name of the device.
+  const names = () => splitNames(s().names, props.picture.facts);
   const intent = () => props.picture.intent;
   const intentRefs = () => [
     ...intent().hosts.map((id) => ({ kind: "host" as const, id })),
@@ -148,7 +150,11 @@ function PictureCards(props: { picture: Picture; proposals: Proposal[]; names: S
             </dd>
             <dt>{t("discovery.subject.names")}</dt>
             <dd>
-              <Values values={s().names} testid="subject-names" />
+              <Show when={names().placeholders.length > 0 && names().names.length === 0} fallback={<Values values={names().names} testid="subject-names" />}>
+                <span class="muted no-name" title={names().placeholders.join(", ")} data-testid="subject-no-name">
+                  {t("discovery.fact.no_name")}
+                </span>
+              </Show>
             </dd>
             <dt>{t("discovery.subject.os")}</dt>
             <dd>

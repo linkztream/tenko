@@ -879,13 +879,13 @@ describe("lists", () => {
   it("sorts hosts by name in both directions", async () => {
     const asc = await get<Page<Host>>(`${V}/hosts?limit=1000`);
     const names = asc.body.items.map((h) => h.name);
-    expect(names).toHaveLength(35);
+    expect(names).toHaveLength(36);
     expect(names).toEqual([...names].sort());
     const desc = await get<Page<Host>>(`${V}/hosts?sort=-name&limit=1000`);
     expect(desc.body.items.map((h) => h.name)).toEqual([...names].reverse());
     expect(desc.body.items[0]?.name).toBe("tv-living");
     const byMode = await get<Page<Host>>(`${V}/hosts?sort=mode,-name&limit=4`);
-    expect(byMode.body.items.map((h) => h.name)).toEqual(["tv-living", "laptop-ak", "thermostat-1", "speaker-den"]);
+    expect(byMode.body.items.map((h) => h.name)).toEqual(["tv-living", "laptop-ak", "host-192-0-2-16", "thermostat-1"]);
     const recent = await get<Page<Host>>(`${V}/hosts?sort=-updated&limit=1`);
     expect(recent.body.items[0]?.name).toBe("nas");
   });
@@ -928,17 +928,17 @@ describe("lists", () => {
       pages += 1;
     } while (cursor);
     expect(pages).toBe(4);
-    expect(seen).toHaveLength(35);
-    expect(new Set(seen).size).toBe(35);
-    const last = await get<Page<Host>>(`${V}/hosts?limit=35`);
+    expect(seen).toHaveLength(36);
+    expect(new Set(seen).size).toBe(36);
+    const last = await get<Page<Host>>(`${V}/hosts?limit=36`);
     expect(last.body.next_cursor).toBeNull();
   });
 
   it("filters hosts", async () => {
     const names = async (query: string) => (await get<Page<Host>>(`${V}/hosts?${query}&limit=100`)).body.items.map((h) => h.name);
     expect(await names("locked=true")).toEqual(["nas"]);
-    expect(await names("locked=false")).toHaveLength(34);
-    expect(await names("mode=dynamic")).toEqual(["laptop-ak", "tv-living"]);
+    expect(await names("locked=false")).toHaveLength(35);
+    expect(await names("mode=dynamic")).toEqual(["host-192-0-2-16", "laptop-ak", "tv-living"]);
     expect(await names("mode=unmanaged")).toEqual(["legacy-ups"]);
     expect(await names("q=NAS")).toEqual(["nas"]);
     expect(await names("q=storage")).toEqual(["nas"]);

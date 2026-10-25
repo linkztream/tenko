@@ -71,6 +71,9 @@ message ObservedHost {
   // stopped host are configured, not in use, and the reconciler treats them as a dormant
   // claim. Unspecified when the source does not tell.
   PowerState power = 9;
+  // Whether `name` is a placeholder the source makes up for a device without a name (for
+  // example `host-192-0-2-10` or the MAC address); such a name never names a host.
+  bool name_placeholder = 10;
 }
 
 enum PowerState {

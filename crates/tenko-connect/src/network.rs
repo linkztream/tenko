@@ -313,6 +313,10 @@ pub struct ClientAttachment {
     /// The name on the controller.
     #[serde(default)]
     pub name: Option<String>,
+    /// Whether the name is a placeholder the controller makes up for a client without a
+    /// name ([`tenko_core::observe::is_placeholder_name`]); it never names a host.
+    #[serde(default)]
+    pub name_placeholder: bool,
     /// The vendor of the MAC address.
     #[serde(default)]
     pub vendor: Option<String>,
@@ -595,6 +599,7 @@ mod tests {
                 name: Some("controller.example.test".to_owned()),
                 vendor: None,
                 management: true,
+                name_placeholder: false,
             }],
             networks: vec![ControllerNetwork {
                 id: NetworkRef("mgmt".to_owned()),

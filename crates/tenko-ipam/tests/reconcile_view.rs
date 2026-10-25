@@ -259,6 +259,7 @@ impl Lab {
         let name = |ip: &str, name: &str| Observed::Name {
             ip: ip.parse().expect("ip"),
             name: name.to_owned(),
+            placeholder: false,
         };
         lab.ingest(
             ObservationSource::DnsRecord {

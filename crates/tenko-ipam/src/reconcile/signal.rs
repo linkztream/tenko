@@ -45,6 +45,7 @@ use tenko_store::{
 };
 use tokio::sync::Notify;
 
+use super::names::{NAME_AUTHORITY, NAME_CHOICES};
 use crate::{dns::REVERSE_TEMPLATES, observe::tables::FACTS, proposals::model::ADOPTION, tables};
 
 /// What one change set means to the reconciler.
@@ -156,7 +157,10 @@ pub(crate) fn classify(changes: &ChangeSet, view: &dyn ReadView) -> Relevance {
             if rrset_matters(key.rtype, origin) {
                 out.join(Relevance::EVERYTHING);
             }
-        } else if change.table == *ADOPTION.name() {
+        } else if change.table == *ADOPTION.name()
+            || change.table == *NAME_AUTHORITY.name()
+            || change.table == *NAME_CHOICES.name()
+        {
             out.join(Relevance::RULES);
         } else if change.table == *tenko_core::dns::tables::ZONES.name() {
             out.join(Relevance::EVERYTHING);
@@ -235,6 +239,8 @@ impl DerivedIndex for ChangeSignal {
                 tables::HOSTS.name(),
                 tables::INTERFACES.name(),
                 ADOPTION.name(),
+                NAME_AUTHORITY.name(),
+                NAME_CHOICES.name(),
                 FACTS.name(),
                 REVERSE_TEMPLATES.name(),
                 tenko_core::dns::tables::ZONES.name(),

@@ -28,6 +28,11 @@ export type AdoptionPolicy = S["AdoptionPolicy"];
 export type AdoptionMode = S["AdoptionMode"];
 export type PolicyView = S["PolicyView"];
 export type FactType = S["FactSubject"]["type"];
+export type NameChoice = S["NameChoice"];
+export type NameChoiceSource = S["NameChoiceSource"];
+export type NameSource = S["NameSource"];
+export type ApproveRequest = S["ApproveRequest"];
+export type Remember = S["Remember"];
 
 export const PROPOSAL_KINDS: readonly ProposalKind[] = [
   "discovered_host",
@@ -37,10 +42,13 @@ export const PROPOSAL_KINDS: readonly ProposalKind[] = [
   "orphaned_intent",
   "vlan_discovered",
   "prefix_vlan_mismatch",
+  "host_name",
 ];
 export const PROPOSAL_STATES: readonly ProposalState[] = ["open", "accepted", "rejected", "expired", "superseded"];
 export const SEVERITIES: readonly ProposalSeverity[] = ["critical", "warning", "info"];
 export const FACT_TYPES: readonly FactType[] = ["host", "address", "attachment", "services", "os", "link", "name", "vendor", "network"];
+/** The kinds of source the name authority ranks, in the order of the server's list. */
+export const NAME_SOURCES: readonly NameSource[] = ["proxmox", "home_assistant", "windows", "dns", "mdns", "llmnr", "unifi", "scan", "dhcp", "other"];
 export const ADOPTION_MODES: readonly AdoptionMode[] = ["manual", "adopt_hosts", "adopt_all"];
 
 /** The most bytes a rejection reason may have (docs/reconciliation.md, section 5.2). */
@@ -61,15 +69,19 @@ export async function listProposals(query: { state?: ProposalState[]; prefix?: s
 
 /**
  * Approves a proposal: a dry run plans its commands and writes nothing; the real run applies
- * them with the acknowledged warning codes, at the revision the person saw.
+ * them with the acknowledged warning codes, at the revision the person saw. A proposal that
+ * offers names (`choices`) takes the one named in `request` and remembers what it asks to;
+ * without a request the proposed name applies.
  */
 export function approveProposal(
   proposal: Pick<Proposal, "id" | "revision">,
   options: { dryRun: boolean; acknowledge: readonly string[] },
+  request?: ApproveRequest,
 ): Promise<Decision> {
   return api.post("/api/v1/proposals/{id}/approve", {
     path: { id: proposal.id },
     query: writeQuery(options.dryRun, options.acknowledge),
+    ...(request ? { body: request } : {}),
     ifMatch: proposal.revision ?? ANY_REVISION,
   });
 }

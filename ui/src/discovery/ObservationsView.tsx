@@ -17,7 +17,7 @@ import { sortParam, type Column, type SortState } from "../grid/types";
 import { formatNumber, t } from "../i18n";
 import { FACT_TYPES, type FactType, type ObservedFact } from "./api";
 import { DiscoveryNav } from "./DiscoveryNav";
-import { FactState } from "./FactTable";
+import { FactState, ObservedLine } from "./FactTable";
 import { factTypeWord, isCurrent, lookupSubject, observedText, sourceKeyText, sourceText, type SourceNames } from "./model";
 import { useSourceNames } from "./refs";
 import "./discovery.css";
@@ -53,7 +53,11 @@ function factColumns(names: () => SourceNames): Column<ObservedFact>[] {
       width: 360,
       fixed: true,
       text: (f) => observedText(f.observed),
-      render: (f) => <span class="mono fact-observed">{observedText(f.observed)}</span>,
+      render: (f) => (
+        <span class="mono fact-observed">
+          <ObservedLine observed={f.observed} />
+        </span>
+      ),
     },
     {
       id: "source",

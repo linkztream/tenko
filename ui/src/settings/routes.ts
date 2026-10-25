@@ -40,7 +40,7 @@ const PAGE_ROUTES: readonly AppRoute[] = [
   },
   {
     path: "/settings/reconciler",
-    component: lazy(withPacks(["settings", "reconciler"], () => import("./reconciler/ReconcilerPage"))),
+    component: lazy(withPacks(["settings", "reconciler", "discovery"],() => import("./reconciler/ReconcilerPage"))),
     access: "admin",
     title: "reconciler.title",
   },

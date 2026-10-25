@@ -298,6 +298,34 @@ pub fn observed_name(observed: &Observed) -> Option<&str> {
     name.map(str::trim).filter(|name| !name.is_empty())
 }
 
+/// Whether the name an observation gives is a placeholder: the source marked it, or it has
+/// one of the forms of [`tenko_core::observe::is_placeholder_name`]. `false` without a
+/// name.
+pub fn observed_placeholder(observed: &Observed) -> bool {
+    match observed {
+        Observed::Host(host) => host.name.as_deref().is_some_and(|name| {
+            host.name_placeholder || tenko_core::observe::is_placeholder_name(name)
+        }),
+        Observed::Name {
+            name, placeholder, ..
+        } => *placeholder || tenko_core::observe::is_placeholder_name(name),
+        _ => false,
+    }
+}
+
+/// The observation with its placeholder flag set by the rule when the source did not set
+/// it ([`observed_placeholder`]); ingest stores facts this way.
+pub(crate) fn with_placeholder(observed: &Observed) -> Observed {
+    let mut observed = observed.clone();
+    let marked = observed_placeholder(&observed);
+    match &mut observed {
+        Observed::Host(host) => host.name_placeholder = marked,
+        Observed::Name { placeholder, .. } => *placeholder = marked,
+        _ => {}
+    }
+    observed
+}
+
 /// Observations of one run of one source, as the connector host or a probe hands them
 /// over.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,6 +447,7 @@ mod tests {
         let name = Observed::Name {
             ip,
             name: " printer.example.net ".to_owned(),
+            placeholder: false,
         };
         assert_eq!(FactSubject::of(&name).key(), "name:192.0.2.40");
         assert_eq!(FactSubject::of(&name).type_name(), "name");

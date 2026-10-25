@@ -39,7 +39,7 @@ use super::{
     ObserveConfig,
     model::{
         FactSubject, IngestBatch, IngestReport, ObservedFact, observed_ips, observed_macs,
-        observed_name, source_connector, source_key,
+        observed_name, source_connector, source_key, with_placeholder,
     },
     tables::{BY_IP, BY_MAC, BY_NAME, FACTS},
 };
@@ -259,6 +259,7 @@ fn plan_ingest(
             .get(source)
             .and_then(|facts| facts.get(subject_key));
         let rows = IndexRows::of(&observation.subject);
+        let subject = with_placeholder(&observation.subject);
         match stored {
             None => {
                 let fact = ObservedFact {
@@ -266,7 +267,7 @@ fn plan_ingest(
                     source_key: source.clone(),
                     subject: FactSubject::of(&observation.subject),
                     subject_key: subject_key.clone(),
-                    observed: observation.subject.clone(),
+                    observed: subject,
                     observation: observation.id,
                     first_seen: observation.observed_at,
                     last_seen: observation.observed_at,
@@ -282,7 +283,7 @@ fn plan_ingest(
                 report.new += 1;
             }
             Some(old) => {
-                let changed = old.observed != observation.subject;
+                let changed = old.observed != subject;
                 let revived = !old.is_current(received);
                 let due = refresh_due(
                     old,
@@ -300,7 +301,7 @@ fn plan_ingest(
                     || observation.observed_at.saturating_since(counted_since) >= config.refresh;
                 let mut fact = old.clone();
                 fact.source = observation.source.clone();
-                fact.observed = observation.subject.clone();
+                fact.observed = subject;
                 if changed {
                     fact.observation = observation.id;
                 }

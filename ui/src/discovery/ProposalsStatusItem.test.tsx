@@ -29,16 +29,16 @@ describe("the open proposals in the status bar", () => {
   it("counts the open proposals and links to the inbox", async () => {
     render();
     const item = await screen.findByTestId("status-proposals");
-    expect(item.textContent).toContain("6 open proposals");
+    expect(item.textContent).toContain("7 open proposals");
     expect(item.getAttribute("href")).toBe(paths.discovery());
   });
 
   it("follows a decision without a reload", async () => {
     stopBridge = bridgeMockEvents();
     render();
-    await screen.findByText("6 open proposals");
+    await screen.findByText("7 open proposals");
     await rejectProposal({ id: RECONCILE_IDS.proposal.mediaPc, revision: undefined }, "");
-    await waitFor(() => expect(screen.getByTestId("status-proposals").textContent).toContain("5 open proposals"));
+    await waitFor(() => expect(screen.getByTestId("status-proposals").textContent).toContain("6 open proposals"));
   });
 
   it("shows nothing while no proposal is open", async () => {

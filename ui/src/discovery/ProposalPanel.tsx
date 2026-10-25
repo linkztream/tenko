@@ -5,7 +5,7 @@
 // once its cause is resolved. The panel follows the `ipam` topic, so a decision made elsewhere
 // or a newer proposal that supersedes this one shows up at once.
 import { A } from "@solidjs/router";
-import { createResource, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
+import { createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
 import { Addr, Mac } from "../components/Addr";
@@ -17,10 +17,11 @@ import { TimeAgo } from "../grid/cells";
 import { t, tDynamic } from "../i18n";
 import { PlanPreview } from "../ipam/plan/PlanPreview";
 import { isTyping } from "../shell/keyboard";
+import { isAdmin } from "../auth/session";
 import { AddressConflictActions } from "./AddressConflictActions";
-import { approveProposal, getProposal, type Proposal } from "./api";
+import { approveProposal, getProposal, type ApproveRequest, type Proposal, type Remember } from "./api";
 import { KindBadge, SeverityBadge, StateBadge } from "./columns";
-import { canApprove, isOpen, ruleText, sourceText, type SourceNames } from "./model";
+import { canApprove, choiceSource, choicesOf, isOpen, nameSourceWord, ruleText, sourceKeyText, sourceText, type SourceNames } from "./model";
 import { ObjectLink, PrefixRef } from "./refs";
 
 export interface ProposalPanelProps {
@@ -28,7 +29,8 @@ export interface ProposalPanelProps {
   names: SourceNames;
   /** Whether this person may decide proposals (administrators and operators). */
   decider: boolean;
-  onApprove: (proposal: Proposal) => void;
+  /** Approves the proposal; with a request, takes the name it chooses and remembers what it asks to. */
+  onApprove: (proposal: Proposal, request?: ApproveRequest) => void;
   onReject: (proposal: Proposal) => void;
   onClose: () => void;
 }
@@ -43,6 +45,14 @@ export function ProposalPanel(props: ProposalPanelProps) {
     },
   });
   const proposal = () => live.latest();
+
+  // What an approval by a chosen name remembers: nothing, the choice for this host, or the
+  // source for every host (administrators only: it changes the name authority).
+  const [remember, setRemember] = createSignal<Remember | null>(null);
+  const useName = (p: Proposal, name: string) => {
+    const choice = remember();
+    props.onApprove(p, choice ? { choice: name, remember: choice } : { choice: name });
+  };
 
   // The suggested change as the planner would run it now: a dry run of the approval. Read
   // once per revision, and only for a person who may approve.
@@ -222,6 +232,80 @@ export function ProposalPanel(props: ProposalPanelProps) {
                   </Show>
                 </dl>
               </section>
+
+              <Show when={choicesOf(p()).length > 0}>
+                <section class="section" aria-labelledby="proposal-names" data-testid="proposal-names">
+                  <h3 id="proposal-names">
+                    {t("discovery.panel.names")}
+                    <span class="more muted">{t("discovery.panel.names_count", { count: choicesOf(p()).length })}</span>
+                  </h3>
+                  <p class="muted">{t("discovery.panel.names_hint")}</p>
+                  <Show when={props.decider && isOpen(p())}>
+                    <fieldset class="remember" data-testid="remember">
+                      <legend>{t("discovery.remember.label")}</legend>
+                      <label>
+                        <input type="radio" name="remember" checked={remember() === null} data-testid="remember-once" onChange={() => setRemember(null)} />
+                        {t("discovery.remember.once")}
+                      </label>
+                      <label>
+                        <input type="radio" name="remember" checked={remember() === "host"} data-testid="remember-host" onChange={() => setRemember("host")} />
+                        {t("discovery.remember.host")}
+                      </label>
+                      <Show when={isAdmin()}>
+                        <label>
+                          <input type="radio" name="remember" checked={remember() === "source"} data-testid="remember-source" onChange={() => setRemember("source")} />
+                          {t("discovery.remember.source")}
+                        </label>
+                      </Show>
+                    </fieldset>
+                  </Show>
+                  <ul class="name-choice-list" aria-label={t("discovery.panel.names")}>
+                    <For each={choicesOf(p())}>
+                      {(c, i) => (
+                        <li data-testid="name-choice" data-name={c.name} data-proposed={c.proposed ? "true" : "false"}>
+                          <div class="name-choice-head">
+                            <strong class="mono">{c.name}</strong>
+                            <Show when={c.proposed || i() === 0}>
+                              <span class="tag proposed" data-testid="name-proposed">
+                                {t("discovery.panel.proposed")}
+                              </span>
+                            </Show>
+                            <span class="muted name-choice-seen">
+                              {t("discovery.panel.last_seen")} <TimeAgo at={c.last_seen} />
+                            </span>
+                          </div>
+                          <ul class="name-choice-sources">
+                            <For each={c.sources}>
+                              {(s) => (
+                                <li data-testid="name-choice-source" data-source={s.source_key}>
+                                  <strong>{nameSourceWord(s.source)}</strong>
+                                  <span class="muted">{sourceKeyText(s.source_key, props.names)}</span>
+                                  <Show when={s.given !== c.name}>
+                                    <span class="muted" data-testid="name-given">
+                                      {t("discovery.panel.given", { given: s.given })}
+                                    </span>
+                                  </Show>
+                                  <span class="muted">
+                                    <TimeAgo at={s.last_seen} />
+                                  </span>
+                                </li>
+                              )}
+                            </For>
+                          </ul>
+                          <Show when={props.decider && isOpen(p())}>
+                            <div class="row-actions">
+                              <button type="button" class="btn" data-testid="use-name" data-name={c.name} onClick={() => useName(p(), c.name)}>
+                                <Icon name="check" />
+                                {t("discovery.panel.use_name", { source: nameSourceWord(choiceSource(c)?.source ?? "other") })}
+                              </button>
+                            </div>
+                          </Show>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </section>
+              </Show>
 
               <section class="section" aria-labelledby="proposal-evidence">
                 <h3 id="proposal-evidence">

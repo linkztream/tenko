@@ -20,7 +20,7 @@ use crate::{
     error::IpamResult,
     net::{Family, contains_ip, contains_net, ip_to_u128},
     observe::{
-        model::{IntentSighting, ObservedFact},
+        model::{IntentSighting, ObservedFact, observed_placeholder},
         tables::{FACTS, LAST_SEEN},
     },
     proposals::model::{
@@ -343,9 +343,12 @@ pub(crate) struct Snapshot {
     /// The pairs the current facts report. Name and vendor facts are not sightings and
     /// report none.
     pub seen: Vec<Seen>,
-    /// The names current name facts of probes give addresses (reverse DNS, mDNS, LLMNR,
-    /// SNMP), for naming proposals only: a name is not a sighting of its address.
-    pub names: BTreeMap<IpAddr, BTreeSet<String>>,
+    /// Indexes in [`Self::facts`] of the current name facts of each address (probes,
+    /// network controllers, leases, records), for naming proposals only: a name is not a
+    /// sighting of its address.
+    pub name_facts: BTreeMap<IpAddr, Vec<usize>>,
+    /// The name authority rules, the hosts' name decisions and the kinds of connectors.
+    pub authorities: super::names::Authorities,
     /// Open proposals by subject key, with the revision of their key row.
     pub open: BTreeMap<String, (IntentProposal, Revision)>,
     /// Remembered rejections by subject key, with their revision.
@@ -389,7 +392,7 @@ impl Snapshot {
             })
             .collect();
         let mut seen = Vec::new();
-        let mut names: BTreeMap<IpAddr, BTreeSet<String>> = BTreeMap::new();
+        let mut name_facts: BTreeMap<IpAddr, Vec<usize>> = BTreeMap::new();
         let mut vendors: BTreeMap<MacAddr, BTreeSet<String>> = BTreeMap::new();
         let mut networks = Vec::new();
         for (index, fact) in facts.iter().enumerate() {
@@ -409,10 +412,9 @@ impl Snapshot {
                 }
                 continue;
             }
-            if let Observed::Name { ip, name } = &fact.observed {
-                let name = name.trim();
-                if !name.is_empty() && trackable(*ip) {
-                    names.entry(*ip).or_default().insert(name.to_owned());
+            if let Observed::Name { ip, .. } = &fact.observed {
+                if trackable(*ip) && !observed_placeholder(&fact.observed) {
+                    name_facts.entry(*ip).or_default().push(index);
                 }
                 continue;
             }
@@ -459,7 +461,8 @@ impl Snapshot {
             intent,
             facts,
             seen,
-            names,
+            name_facts,
+            authorities: super::names::Authorities::load(view)?,
             open,
             rejections,
             policies,
@@ -476,7 +479,11 @@ impl Snapshot {
 /// each of its addresses; with several, the pairing is unknown, so each MAC address and
 /// each address stands alone.
 fn pairs(index: usize, fact: &ObservedFact, intent: &Intent) -> Vec<Seen> {
-    let name = fact.name().map(str::to_owned);
+    // A placeholder names nothing.
+    let name = fact
+        .name()
+        .filter(|_| !observed_placeholder(&fact.observed))
+        .map(str::to_owned);
     let macs = fact.macs();
     let ips: Vec<IpAddr> = fact.ips().into_iter().filter(|ip| trackable(*ip)).collect();
     let hint = fact.vrf();

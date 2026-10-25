@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="names">
+      <unit id="discovery.kind.host_name">
+        <notes><note category="description">Kind of a proposal that renames a host of intent after the names the sources give it.</note></notes>
+        <segment><source>Host name</source><target>Värdnamn</target></segment>
+      </unit>
+      <unit id="discovery.batch.kind.host_name">
+        <notes><note category="description">A part of the phrase that names the kinds of the selected proposals.</note></notes>
+        <segment><source>{count, plural, one {# host rename} other {# host renames}}</source><target>{count, plural, one {# namnbyte på värd} other {# namnbyten på värdar}}</target></segment>
+      </unit>
+      <unit id="discovery.rule.placeholder_name">
+        <notes><note category="description">Text of a proposal: the host's name is a placeholder that a source made up, and a source gives a real one. The source and the rule that decided are words, the others names.</note></notes>
+        <segment><source>Host {host} has a placeholder name; rename it to {name} ({name_source}, {name_rule}){other_names, select, none {} other {; also named {other_names}}}</source><target>Värden {host} har ett låtsasnamn; döp om den till {name} ({name_source}, {name_rule}){other_names, select, none {} other {; kallas även {other_names}}}</target></segment>
+      </unit>
+      <unit id="discovery.rule.preferred_name">
+        <notes><note category="description">Text of a proposal: the host follows the source it prefers, and that source names it otherwise.</note></notes>
+        <segment><source>Host {host} follows its preferred source, {name_source}, which names it {name}; rename it to {name}{other_names, select, none {} other {; also named {other_names}}}</source><target>Värden {host} följer sin föredragna källa, {name_source}, som kallar den {name}; döp om den till {name}{other_names, select, none {} other {; kallas även {other_names}}}</target></segment>
+      </unit>
+      <unit id="discovery.rule.name_conflict">
+        <notes><note category="description">Text of a proposal: the sources give the host different names and the name authority decides between them.</note></notes>
+        <segment><source>The sources name host {host} differently; rename it to {name} ({name_source}, {name_rule}){other_names, select, none {} other {; also named {other_names}}}</source><target>Källorna kallar värden {host} olika saker; döp om den till {name} ({name_source}, {name_rule}){other_names, select, none {} other {; kallas även {other_names}}}</target></segment>
+      </unit>
+      <unit id="discovery.name_source.proxmox">
+        <notes><note category="description">A kind of source of names, as the name authority ranks them.</note></notes>
+        <segment><source>Proxmox VE</source><target>Proxmox VE</target></segment>
+      </unit>
+      <unit id="discovery.name_source.home_assistant">
+        <segment><source>Home Assistant</source><target>Home Assistant</target></segment>
+      </unit>
+      <unit id="discovery.name_source.windows">
+        <segment><source>Windows</source><target>Windows</target></segment>
+      </unit>
+      <unit id="discovery.name_source.dns">
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="discovery.name_source.mdns">
+        <segment><source>mDNS</source><target>mDNS</target></segment>
+      </unit>
+      <unit id="discovery.name_source.llmnr">
+        <segment><source>LLMNR</source><target>LLMNR</target></segment>
+      </unit>
+      <unit id="discovery.name_source.unifi">
+        <segment><source>UniFi</source><target>UniFi</target></segment>
+      </unit>
+      <unit id="discovery.name_source.scan">
+        <segment><source>Scan</source><target>Skanning</target></segment>
+      </unit>
+      <unit id="discovery.name_source.dhcp">
+        <segment><source>DHCP</source><target>DHCP</target></segment>
+      </unit>
+      <unit id="discovery.name_source.other">
+        <segment><source>Other connector</source><target>Annan koppling</target></segment>
+      </unit>
+      <unit id="discovery.name_rule.default">
+        <notes><note category="description">What decided a name, as a phrase after the name: the order of the name authority that applies without a rule.</note></notes>
+        <segment><source>by the default name authority</source><target>enligt standardordningen för namnauktoritet</target></segment>
+      </unit>
+      <unit id="discovery.name_rule.global">
+        <segment><source>by the global name authority</source><target>enligt den globala namnauktoriteten</target></segment>
+      </unit>
+      <unit id="discovery.name_rule.site">
+        <segment><source>by the name authority of the site</source><target>enligt platsens namnauktoritet</target></segment>
+      </unit>
+      <unit id="discovery.name_rule.host">
+        <segment><source>by the preferred source of the host</source><target>enligt värdens föredragna källa</target></segment>
+      </unit>
+      <unit id="discovery.fact.no_name">
+        <notes><note category="description">Shown in place of a name that a source made up for a device that has none, such as host-192-0-2-10. The made-up text is in the tooltip.</note></notes>
+        <segment><source>no name</source><target>inget namn</target></segment>
+      </unit>
+      <unit id="discovery.col.names">
+        <notes><note category="description">Column of the proposal inbox: the names a proposal offers to choose from.</note></notes>
+        <segment><source>Names</source><target>Namn</target></segment>
+      </unit>
+      <unit id="discovery.names.seen">
+        <notes><note category="description">Tooltip of a name a proposal offers: when its sources last saw the device.</note></notes>
+        <segment><source>Last seen {at}</source><target>Senast sedd {at}</target></segment>
+      </unit>
+      <unit id="discovery.panel.names">
+        <notes><note category="description">Heading of the section of the proposal panel that lists the names the sources give the device.</note></notes>
+        <segment><source>Names</source><target>Namn</target></segment>
+      </unit>
+      <unit id="discovery.panel.names_count">
+        <segment><source>{count, plural, one {# name} other {# names}}</source><target>{count, plural, one {# namn} other {# namn}}</target></segment>
+      </unit>
+      <unit id="discovery.panel.names_hint">
+        <segment><source>The sources give this device different names. The proposed name is the one the name authority ranks highest; choose another to give the host that name instead.</source><target>Källorna ger enheten olika namn. Det föreslagna namnet är det som namnauktoriteten rankar högst; välj ett annat för att ge värden det namnet i stället.</target></segment>
+      </unit>
+      <unit id="discovery.panel.proposed">
+        <notes><note category="description">Tag on the name that the proposal suggests.</note></notes>
+        <segment><source>Proposed</source><target>Föreslaget</target></segment>
+      </unit>
+      <unit id="discovery.panel.given">
+        <notes><note category="description">The name as the source writes it, when it differs from the name a host would take.</note></notes>
+        <segment><source>given as {given}</source><target>angivet som {given}</target></segment>
+      </unit>
+      <unit id="discovery.panel.use_name">
+        <notes><note category="description">Button on a name of a proposal; the source is the kind of source that ranks highest among those giving the name.</note></notes>
+        <segment><source>Use this name from {source}</source><target>Använd namnet från {source}</target></segment>
+      </unit>
+      <unit id="discovery.remember.label">
+        <notes><note category="description">Legend of the choice of what an approval by a chosen name remembers.</note></notes>
+        <segment><source>Remember</source><target>Kom ihåg</target></segment>
+      </unit>
+      <unit id="discovery.remember.once">
+        <segment><source>Only this time</source><target>Bara denna gång</target></segment>
+      </unit>
+      <unit id="discovery.remember.host">
+        <segment><source>Remember for this host</source><target>Kom ihåg för den här värden</target></segment>
+      </unit>
+      <unit id="discovery.remember.source">
+        <notes><note category="description">Only for administrators: it changes the name authority for every host.</note></notes>
+        <segment><source>Always prefer this source</source><target>Föredra alltid den här källan</target></segment>
+      </unit>
+      <unit id="discovery.approve.choice">
+        <segment><source>The host takes the name {name}.</source><target>Värden får namnet {name}.</target></segment>
+      </unit>
+      <unit id="discovery.approve.remember_host">
+        <segment><source>The choice is remembered for this host.</source><target>Valet kommer ihåg för den här värden.</target></segment>
+      </unit>
+      <unit id="discovery.approve.remember_source">
+        <segment><source>The source is preferred from now on.</source><target>Källan föredras från och med nu.</target></segment>
+      </unit>
+      <unit id="errors.ipam.proposal.choice_invalid">
+        <segment><source>The name is not one of the names the proposal offers. Look at the proposal again.</source><target>Namnet är inte ett av de namn som förslaget erbjuder. Titta på förslaget igen.</target></segment>
+      </unit>
+      <unit id="errors.ipam.name_authority.invalid">
+        <segment><source>The order must list one to ten kinds of source, each once.</source><target>Ordningen måste ange en till tio källtyper, var och en en gång.</target></segment>
+      </unit>
+      <unit id="reconciler.names.title">
+        <notes><note category="description">Heading of the name authority section of the reconciler settings page.</note></notes>
+        <segment><source>Name authority</source><target>Namnauktoritet</target></segment>
+      </unit>
+      <unit id="reconciler.names.lede">
+        <segment><source>When the sources give a device different names, the order of the kinds of source decides which name the host takes. Kinds left out of a rule rank after the listed ones. A rule of a site decides for the devices in the networks of the site.</source><target>När källorna ger en enhet olika namn avgör ordningen mellan källtyperna vilket namn värden får. Källtyper som lämnats utanför en regel rankas efter de angivna. En regel för en plats gäller enheterna i platsens nätverk.</target></segment>
+      </unit>
+      <unit id="reconciler.names.global_title">
+        <segment><source>Global order</source><target>Global ordning</target></segment>
+      </unit>
+      <unit id="reconciler.names.default_tag">
+        <notes><note category="description">Tag on the order that applies while no rule is stored.</note></notes>
+        <segment><source>default</source><target>standard</target></segment>
+      </unit>
+      <unit id="reconciler.names.default_help">
+        <segment><source>No rule is stored, so the default order applies. Save to store this order as the rule.</source><target>Ingen regel är sparad, så standardordningen gäller. Spara för att lagra den här ordningen som regel.</target></segment>
+      </unit>
+      <unit id="reconciler.names.order_label">
+        <segment><source>Order of the kinds of source, the most trusted first</source><target>Ordning mellan källtyperna, den mest betrodda först</target></segment>
+      </unit>
+      <unit id="reconciler.names.move_up">
+        <segment><source>Move {source} up</source><target>Flytta upp {source}</target></segment>
+      </unit>
+      <unit id="reconciler.names.move_down">
+        <segment><source>Move {source} down</source><target>Flytta ner {source}</target></segment>
+      </unit>
+      <unit id="reconciler.names.remove_source">
+        <segment><source>Remove {source} from the list</source><target>Ta bort {source} från listan</target></segment>
+      </unit>
+      <unit id="reconciler.names.add_label">
+        <segment><source>Add a kind of source</source><target>Lägg till en källtyp</target></segment>
+      </unit>
+      <unit id="reconciler.names.add_choose">
+        <segment><source>Choose a kind…</source><target>Välj en typ…</target></segment>
+      </unit>
+      <unit id="reconciler.names.empty_order">
+        <segment><source>The order needs at least one kind of source.</source><target>Ordningen behöver minst en källtyp.</target></segment>
+      </unit>
+      <unit id="reconciler.names.reset">
+        <segment><source>Reset to default</source><target>Återställ till standard</target></segment>
+      </unit>
+      <unit id="reconciler.names.remove_rule">
+        <segment><source>Remove rule</source><target>Ta bort regeln</target></segment>
+      </unit>
+      <unit id="reconciler.names.saved">
+        <segment><source>Name authority saved.</source><target>Namnauktoriteten är sparad.</target></segment>
+      </unit>
+      <unit id="reconciler.names.reset_done">
+        <segment><source>The default order applies again.</source><target>Standardordningen gäller igen.</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_saved">
+        <segment><source>The rule of site {site} is saved.</source><target>Regeln för platsen {site} är sparad.</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_removed">
+        <segment><source>The rule of site {site} is removed.</source><target>Regeln för platsen {site} är borttagen.</target></segment>
+      </unit>
+      <unit id="reconciler.names.sites_title">
+        <segment><source>Rules of sites</source><target>Regler för platser</target></segment>
+      </unit>
+      <unit id="reconciler.names.sites_empty">
+        <segment><source>No site has a rule of its own.</source><target>Ingen plats har en egen regel.</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_rule">
+        <notes><note category="description">Heading of the rule of one site.</note></notes>
+        <segment><source>Site {site}</source><target>Plats {site}</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_add_label">
+        <segment><source>Add a rule for a site</source><target>Lägg till en regel för en plats</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_add_choose">
+        <segment><source>Choose a site…</source><target>Välj en plats…</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_add">
+        <segment><source>Add rule</source><target>Lägg till regel</target></segment>
+      </unit>
+      <unit id="reconciler.names.site_none_left">
+        <segment><source>Every site has a rule already.</source><target>Alla platser har redan en regel.</target></segment>
+      </unit>
+      <unit id="reconciler.names.prefs_title">
+        <segment><source>Hosts that prefer a source</source><target>Värdar som föredrar en källa</target></segment>
+      </unit>
+      <unit id="reconciler.names.prefs_help">
+        <segment><source>A host prefers a source when someone chose a name for it and asked to remember the choice. Forget the preference to let the name authority decide again.</source><target>En värd föredrar en källa när någon valt ett namn åt den och bett om att valet ska kommas ihåg. Glöm preferensen så att namnauktoriteten avgör igen.</target></segment>
+      </unit>
+      <unit id="reconciler.names.prefs_empty">
+        <segment><source>No host prefers a source.</source><target>Ingen värd föredrar en källa.</target></segment>
+      </unit>
+      <unit id="reconciler.names.col_host">
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="reconciler.names.col_source">
+        <segment><source>Preferred source</source><target>Föredragen källa</target></segment>
+      </unit>
+      <unit id="reconciler.names.col_name">
+        <segment><source>Name chosen</source><target>Valt namn</target></segment>
+      </unit>
+      <unit id="reconciler.names.col_decided">
+        <segment><source>Decided</source><target>Beslutat</target></segment>
+      </unit>
+      <unit id="reconciler.names.forget">
+        <segment><source>Forget</source><target>Glöm</target></segment>
+      </unit>
+      <unit id="reconciler.names.forget_label">
+        <segment><source>Forget the preferred source of {host}</source><target>Glöm den föredragna källan för {host}</target></segment>
+      </unit>
+      <unit id="reconciler.names.forgotten">
+        <segment><source>The preferred source of {host} is forgotten.</source><target>Den föredragna källan för {host} är glömd.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

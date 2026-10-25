@@ -183,6 +183,7 @@ fn new_proposal(candidate: &Candidate, fingerprint: Digest, now: Timestamp) -> I
         params: candidate.params.clone(),
         evidence: candidate.evidence.clone(),
         commands: candidate.commands.clone(),
+        choices: candidate.choices.clone(),
         fingerprint,
         created: now,
         updated: now,
@@ -255,6 +256,7 @@ pub(crate) fn sync(
                 refreshed.evidence.clone_from(&candidate.evidence);
                 refreshed.summary.clone_from(&candidate.summary);
                 refreshed.params.clone_from(&candidate.params);
+                refreshed.choices.clone_from(&candidate.choices);
                 refreshed.severity = candidate.severity;
                 refreshed.updated = now;
                 refreshed.revision = Revision::ZERO;

@@ -320,6 +320,7 @@ fn device_host(
     }
     let host = ObservedHost {
         external_id: format!("device/{id}"),
+        name_placeholder: false,
         name: text(device, "name_by_user")
             .or_else(|| text(device, "name"))
             .map(str::to_owned),
@@ -372,6 +373,7 @@ fn tracker_host(
     tags.push("domain:device_tracker".to_owned());
     Some(ObservedHost {
         external_id: format!("entity/{entity_id}"),
+        name_placeholder: false,
         name: text(attributes, "friendly_name")
             .or_else(|| text(attributes, "host_name"))
             .or_else(|| text(attributes, "hostname"))

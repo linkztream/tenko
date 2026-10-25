@@ -12,10 +12,11 @@ import { containsCidr, containsIp, parseCidr, parseIp } from "../../ipam/ip";
 import type { components } from "../generated/schema";
 import { appendAudit, principalNow } from "./audit-store";
 import { requireSession, type Principal } from "./auth";
-import { db, recordEvent } from "./db";
+import { db, isAdmin, recordEvent } from "./db";
 import { parseMac } from "./import-shape";
 import { applyCommands, ipamState } from "./ipam/api";
 import { notFound, objectDeleted } from "./ipam/problems";
+import { checkRemember, chooseName, rememberChoice, type ApproveRequest } from "./name-authority";
 import { Problem, ok } from "./reply";
 import { paginate, route } from "./route";
 import { REASON_GONE, RECONCILER, reconcileState, type AdoptionPolicy, type IntentProposal, type ObservedFact } from "./reconcile-store";
@@ -318,7 +319,7 @@ const observation = route("get", "/api/v1/observations/{subject}", (ctx) => {
 // ---------------------------------------------------------------------------------
 // Proposals
 
-const KINDS = ["discovered_host", "orphaned_intent", "address_mismatch", "conflict", "outside_prefixes", "vlan_discovered", "prefix_vlan_mismatch"] as const;
+const KINDS = ["discovered_host", "orphaned_intent", "address_mismatch", "conflict", "outside_prefixes", "vlan_discovered", "prefix_vlan_mismatch", "host_name"] as const;
 const STATES = ["open", "accepted", "rejected", "expired", "superseded"] as const;
 const SEVERITIES = ["info", "warning", "critical"] as const;
 const SEVERITY_RANK: Record<string, number> = { info: 0, warning: 1, critical: 2 };
@@ -423,10 +424,45 @@ function commit(p: IntentProposal): IntentProposal {
   return next;
 }
 
+/** The body of an approval, checked: `choice` is text, `remember` is `host` or `source`. */
+function readApprove(body: Record<string, unknown>): ApproveRequest {
+  for (const key of Object.keys(body)) {
+    if (key !== "choice" && key !== "remember") {
+      throw new Problem("sys.invalid_request", { status: 400, detail: `unknown field \`${key}\``, params: { part: "body" } });
+    }
+  }
+  const { choice, remember } = body;
+  if (choice !== undefined && choice !== null && typeof choice !== "string") {
+    throw new Problem("sys.invalid_request", { status: 400, detail: "`choice` must be text", params: { part: "body" } });
+  }
+  if (remember !== undefined && remember !== null && remember !== "host" && remember !== "source") {
+    throw new Problem("sys.invalid_request", { status: 400, detail: "`remember` must be `host` or `source`", params: { part: "body" } });
+  }
+  return { choice: (choice as string | null | undefined) ?? null, remember: (remember as ApproveRequest["remember"]) ?? null };
+}
+
+/** The commands with the host named `name`: the host a proposal creates or renames takes the chosen name. */
+function namedCommands(commands: readonly S["IpamCommand"][], name: string): S["IpamCommand"][] {
+  return commands.map((c) => {
+    if (c.op === "create_host") return { ...c, args: { ...c.args, name } };
+    if (c.op === "update_host") return { ...c, args: { ...c.args, patch: { ...c.args.patch, name } } };
+    return c;
+  });
+}
+
 /** Plans (a dry run) or applies the commands of an open proposal and marks it accepted. */
-function approveOne(found: IntentProposal, ifMatch: number | "*" | null, dryRun: boolean, acknowledge: readonly string[]): S["Decision"] {
+function approveOne(
+  found: IntentProposal,
+  ifMatch: number | "*" | null,
+  dryRun: boolean,
+  acknowledge: readonly string[],
+  request: ApproveRequest = {},
+): S["Decision"] {
   decidable(found, ifMatch);
-  const commands = found.commands ?? [];
+  // A choice must be one of the names the proposal offers; the host takes the chosen name.
+  const chosen = chooseName(found.choices ?? [], request);
+  checkRemember(request, isAdmin(requireSession().user));
+  const commands = chosen ? namedCommands(found.commands ?? [], chosen.name) : (found.commands ?? []);
   if (commands.length === 0) {
     throw new Problem("ipam.proposal.nothing_to_apply", {
       status: 409,
@@ -438,9 +474,13 @@ function approveOne(found: IntentProposal, ifMatch: number | "*" | null, dryRun:
   if (dryRun) {
     return { dry_run: true, proposal: found, plan: outcome.plan, warnings: outcome.warnings, results: [], revision: null, job_id: null };
   }
+  const renamed = commands.find((c) => c.op === "update_host");
+  const hostId = outcome.results.find((r) => r.kind === "host")?.id ?? (renamed?.op === "update_host" ? renamed.args.id : undefined);
+  rememberChoice(request, chosen, hostId && chosen ? { id: hostId, name: chosen.name } : null);
   const accepted = commit({
     ...found,
     state: "accepted",
+    commands,
     decided: { at: new Date().toISOString(), by: principalNow() },
     results: outcome.results,
     updated: new Date().toISOString(),
@@ -457,7 +497,7 @@ function approveOne(found: IntentProposal, ifMatch: number | "*" | null, dryRun:
   };
 }
 
-const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
+const approve = route("post", "/api/v1/proposals/{id}/approve", async (ctx) => {
   const principal = requireSession();
   onlyQuery(ctx.url, ["dry_run", "acknowledge"]);
   const found = findProposal(ctx.params.id);
@@ -467,7 +507,8 @@ const approve = route("post", "/api/v1/proposals/{id}/approve", (ctx) => {
     .split(",")
     .map((c) => c.trim())
     .filter(Boolean);
-  const decision = approveOne(found, ctx.ifMatch(), dryRun, acknowledge);
+  const request = readApprove(await ctx.optionalBody());
+  const decision = approveOne(found, ctx.ifMatch(), dryRun, acknowledge, request);
   return ok(decision, etag(decision.proposal.revision));
 });
 
@@ -592,9 +633,16 @@ function batchDecision(results: S["BatchItem"][]): S["BatchDecision"] {
 const approveMany = route("post", "/api/v1/proposals/approve", async (ctx) => {
   const principal = requireSession();
   onlyQuery(ctx.url, []);
-  const ids = batchIds(await ctx.body(), ["ids"]);
+  const body = await ctx.body();
+  const ids = batchIds(body, ["ids", "choices"]);
   requireDecider(principal);
-  return ok(batchDecision(ids.map((id) => batchItem(id, "approved", () => void approveOne(findProposal(id), null, false, [])))));
+  // The choice of name per proposal; a proposal not named takes its proposed name.
+  const choices = body.choices;
+  if (choices !== undefined && (typeof choices !== "object" || choices === null || Array.isArray(choices))) {
+    throw new Problem("sys.invalid_request", { status: 400, detail: "`choices` must be an object by proposal", params: { part: "body" } });
+  }
+  const requests = new Map(Object.entries((choices ?? {}) as Record<string, Record<string, unknown>>).map(([id, r]) => [id, readApprove(r)]));
+  return ok(batchDecision(ids.map((id) => batchItem(id, "approved", () => void approveOne(findProposal(id), null, false, [], requests.get(id))))));
 });
 
 const rejectMany = route("post", "/api/v1/proposals/reject", async (ctx) => {

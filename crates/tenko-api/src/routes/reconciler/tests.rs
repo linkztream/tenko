@@ -132,3 +132,135 @@ async fn only_administrators_may_read_or_change() {
             .all(|draft| { draft.action.as_str() != "ipam.reconciler.settings.update" })
     );
 }
+
+const NAMES: &str = "/settings/reconciler/name-authority";
+
+#[tokio::test]
+async fn the_name_authority_starts_at_the_default_order() {
+    let (h, admin) = lab().await;
+    let reply = h.call("GET", NAMES, Cookie(&admin), None).await;
+    reply.assert_status(200);
+    assert_eq!(
+        reply.body["default_order"],
+        json!([
+            "proxmox",
+            "home_assistant",
+            "windows",
+            "dns",
+            "mdns",
+            "llmnr",
+            "unifi",
+            "scan"
+        ])
+    );
+    assert_eq!(reply.body["sources"].as_array().map(Vec::len), Some(10));
+    assert_eq!(reply.body["global"], Value::Null);
+    assert_eq!(reply.body["sites"], json!([]));
+    assert_eq!(reply.body["preferences"], json!([]));
+}
+
+#[tokio::test]
+async fn the_global_rule_is_set_audited_and_removed() {
+    let (h, admin) = lab().await;
+    let body = json!({ "order": ["unifi", "proxmox"] });
+    let reply = h.call("PUT", NAMES, Cookie(&admin), Some(&body)).await;
+    reply.assert_status(200);
+    assert_eq!(reply.body["order"], json!(["unifi", "proxmox"]));
+    assert_eq!(reply.body["site"], Value::Null);
+    let read = h.call("GET", NAMES, Cookie(&admin), None).await;
+    assert_eq!(read.body["global"]["order"], json!(["unifi", "proxmox"]));
+    // The same order again changes nothing.
+    h.call("PUT", NAMES, Cookie(&admin), Some(&body))
+        .await
+        .assert_status(200);
+    let sets = h
+        .audit()
+        .await
+        .into_iter()
+        .filter(|draft| draft.action.as_str() == "ipam.name_authority.set")
+        .count();
+    assert_eq!(sets, 1);
+
+    h.call("DELETE", NAMES, Cookie(&admin), None)
+        .await
+        .assert_status(204);
+    let read = h.call("GET", NAMES, Cookie(&admin), None).await;
+    assert_eq!(read.body["global"], Value::Null);
+    assert!(
+        h.audit()
+            .await
+            .iter()
+            .any(|draft| draft.action.as_str() == "ipam.name_authority.clear")
+    );
+}
+
+#[tokio::test]
+async fn a_bad_rule_an_unknown_site_and_an_unknown_preference_are_refused() {
+    let (h, admin) = lab().await;
+    for order in [json!([]), json!(["dns", "dns"])] {
+        let reply = h
+            .call(
+                "PUT",
+                NAMES,
+                Cookie(&admin),
+                Some(&json!({ "order": order })),
+            )
+            .await;
+        reply.assert_problem(422, "ipam.name_authority.invalid");
+        assert_eq!(reply.body["params"]["field"], "order");
+    }
+    h.call(
+        "PUT",
+        NAMES,
+        Cookie(&admin),
+        Some(&json!({ "order": ["nis"] })),
+    )
+    .await
+    .assert_problem(400, "sys.invalid_request");
+    let unknown = "0192f000-0000-7000-8000-000000000001";
+    h.call(
+        "PUT",
+        &format!("{NAMES}/sites/{unknown}"),
+        Cookie(&admin),
+        Some(&json!({ "order": ["dns"] })),
+    )
+    .await
+    .assert_problem(404, "ipam.not_found");
+    h.call(
+        "DELETE",
+        &format!("{NAMES}/sites/{unknown}"),
+        Cookie(&admin),
+        None,
+    )
+    .await
+    .assert_status(204);
+    h.call(
+        "DELETE",
+        &format!("{NAMES}/hosts/{unknown}"),
+        Cookie(&admin),
+        None,
+    )
+    .await
+    .assert_problem(404, "ipam.not_found");
+}
+
+#[tokio::test]
+async fn only_administrators_see_or_change_the_name_authority() {
+    let (h, admin) = lab().await;
+    h.create_user(&admin, "alice", PIN, &["operator"]).await;
+    let alice = h.login("alice", PIN).await;
+    h.call("GET", NAMES, Cookie(&alice), None)
+        .await
+        .assert_problem(403, "auth.forbidden");
+    h.call(
+        "PUT",
+        NAMES,
+        Cookie(&alice),
+        Some(&json!({ "order": ["dns"] })),
+    )
+    .await
+    .assert_problem(403, "auth.forbidden");
+    h.call("DELETE", NAMES, Cookie(&alice), None)
+        .await
+        .assert_problem(403, "auth.forbidden");
+}

@@ -237,6 +237,7 @@ pub fn topology(
             observations.push(observation(Observed::Name {
                 ip,
                 name: name.to_owned(),
+                placeholder: client.name_placeholder,
             }));
         }
     }
@@ -371,6 +372,7 @@ mod tests {
             name: name.map(str::to_owned),
             vendor: vendor.map(str::to_owned),
             management: false,
+            name_placeholder: false,
         };
         let topology = TopologySnapshot {
             observed_at: now,
@@ -408,7 +410,7 @@ mod tests {
         );
         assert!(normalized.observations.iter().any(|o| matches!(
             &o.subject,
-            Observed::Name { ip, name } if *ip == std::net::IpAddr::from([192, 0, 2, 0x31]) && name == "printer.example.test"
+            Observed::Name { ip, name, .. } if *ip == std::net::IpAddr::from([192, 0, 2, 0x31]) && name == "printer.example.test"
         )));
         assert!(normalized.observations.iter().any(|o| matches!(
             &o.subject,

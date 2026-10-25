@@ -116,6 +116,7 @@ fn attachment(client: &str, device: &str) -> ClientAttachment {
         network: None,
         vlan: None,
         name: None,
+        name_placeholder: false,
         vendor: None,
         management: false,
     }

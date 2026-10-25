@@ -6,8 +6,8 @@ import { For, Show } from "solid-js";
 import { paths } from "../app/paths";
 import { TimeAgo } from "../grid/cells";
 import { formatNumber, t } from "../i18n";
-import type { ObservedFact } from "./api";
-import { factTypeWord, isCurrent, lookupSubject, observedText, sourceText, type SourceNames } from "./model";
+import type { Observed, ObservedFact } from "./api";
+import { factTypeWord, isCurrent, lookupSubject, observedParts, sourceText, type SourceNames } from "./model";
 
 export function FactState(props: { fact: ObservedFact }) {
   const current = () => isCurrent(props.fact);
@@ -15,6 +15,29 @@ export function FactState(props: { fact: ObservedFact }) {
     <span class={`tag fact-state ${current() ? "current" : "expired"}`} data-state={current() ? "current" : "expired"}>
       {current() ? t("discovery.fact.current") : t("discovery.fact.expired")}
     </span>
+  );
+}
+
+/**
+ * What a fact reports as one line. A name the source made up (UniFi's `host-192-0-2-10`) is
+ * no name of the device: it reads as a muted "no name" and the original is in the tooltip.
+ */
+export function ObservedLine(props: { observed: Observed }) {
+  const parts = () => observedParts(props.observed);
+  return (
+    <>
+      {parts().before}
+      <Show when={parts().placeholder}>
+        {(original) => (
+          <>
+            <span class="muted no-name" title={original()} data-testid="no-name">
+              {t("discovery.fact.no_name")}
+            </span>
+            {parts().after}
+          </>
+        )}
+      </Show>
+    </>
   );
 }
 
@@ -48,8 +71,12 @@ export function FactTable(props: {
                 <td>{sourceText(fact.source, props.names)}</td>
                 <td>{factTypeWord(fact.observed.type)}</td>
                 <td class="fact-observed mono">
-                  <Show when={props.links && lookupSubject(fact)} fallback={observedText(fact.observed)}>
-                    {(subject) => <A href={paths.observation(subject())}>{observedText(fact.observed)}</A>}
+                  <Show when={props.links && lookupSubject(fact)} fallback={<ObservedLine observed={fact.observed} />}>
+                    {(subject) => (
+                      <A href={paths.observation(subject())}>
+                        <ObservedLine observed={fact.observed} />
+                      </A>
+                    )}
                   </Show>
                 </td>
                 <td>

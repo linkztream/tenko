@@ -29,11 +29,14 @@ const OUTSIDE = `${PROBE}:arp|address:0190d1c2-0000-7000-8000-000000020001/203.0
 const PRINTER_TAKEN = `${PROBE}:arp|address:0190d1c2-0000-7000-8000-000000020001/192.0.2.30`;
 const GUEST_PHONE = `${CONTROLLER}|attachment:00:00:5e:00:53:c3`;
 const OLD_TEST = `${INVENTORY}|host:vm-200`;
+/** One device under two names: the guest of Proxmox VE, and the client the controller lists under a placeholder. */
+const DB_GUEST = `${INVENTORY}|host:vm-110`;
+const DB_CLIENT = `${CONTROLLER}|host:client-00005e005310`;
 /** What a probe found for an address (reverse DNS), and the vendor of a MAC address (ARP). */
 const SPEAKER_NAME = `${PROBE}:reverse_dns|name:192.0.2.44`;
 const OUTSIDE_VENDOR = `${PROBE}:arp|vendor:00:00:5e:00:53:d5`;
 
-/** The twelve facts that are current in the seed. */
+/** The fourteen facts that are current in the seed. */
 const CURRENT = [
   MEDIA_PC,
   MEDIA_SERVICES,
@@ -47,6 +50,8 @@ const CURRENT = [
   GUEST_PHONE,
   SPEAKER_NAME,
   OUTSIDE_VENDOR,
+  DB_GUEST,
+  DB_CLIENT,
 ];
 
 let stopBridge: (() => void) | undefined;
@@ -110,6 +115,19 @@ describe("the observations", () => {
     expect(screen.getByTestId("filter-current-expired").getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("shows a name that a source made up as no name, with the original in the tooltip", async () => {
+    await openObservations();
+    const observed = cell(rowOf(DB_CLIENT), "observed");
+    expect(observed).toBe("no name · 00:00:5e:00:53:10 · 192.0.2.16");
+    const muted = rowOf(DB_CLIENT).querySelector("[data-testid='no-name']");
+    expect(muted?.textContent).toBe("no name");
+    expect(muted?.getAttribute("title")).toBe("host-192-0-2-16");
+    expect(muted?.classList.contains("muted")).toBe(true);
+    // The real name of the same device is shown as it is, with no mark.
+    expect(cell(rowOf(DB_GUEST), "observed")).toBe("postgresql · 00:00:5e:00:53:10 · 192.0.2.16 · Debian 12 · qemu · on pve1");
+    expect(rowOf(DB_GUEST).querySelector("[data-testid='no-name']")).toBeNull();
+  });
+
   it("says in words what each source reported", async () => {
     await openObservations();
     const observed = (id: string) => cell(rowOf(id), "observed");
@@ -164,7 +182,7 @@ describe("the observations", () => {
     expect(chip("attachment").getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(chip("host"));
-    await waitFor(() => expect(rowIds()).toEqual([MEDIA_PC]));
+    await waitFor(() => expect(sortedIds()).toEqual([MEDIA_PC, DB_GUEST, DB_CLIENT].sort()));
     fireEvent.click(chip("services"));
     await waitFor(() => expect(rowIds()).toEqual([MEDIA_SERVICES]));
     fireEvent.click(chip("os"));
@@ -290,8 +308,8 @@ describe("the observations", () => {
 
 describe("the filters of the URL", () => {
   it("shows the connector a link from its page names, and the chip removes the filter", async () => {
-    const view = await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.inventory}`, 1);
-    expect(rowIds()).toEqual([MEDIA_PC]);
+    const view = await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.inventory}`, 2);
+    expect(sortedIds()).toEqual([MEDIA_PC, DB_GUEST].sort());
     // The name arrives with the list of connectors; the chip is drawn again when it does.
     await waitFor(() => expect(screen.getByTestId("filter-source").textContent).toContain("Lab inventory"));
     const chip = screen.getByTestId("filter-source");
@@ -304,8 +322,8 @@ describe("the filters of the URL", () => {
   });
 
   it("matches a connector with both of its sources", async () => {
-    await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.controller}`, 3);
-    expect(sortedIds()).toEqual([HALL_CLIENT, THERMOSTAT_ATTACHED, GUEST_PHONE].sort());
+    await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.controller}`, 4);
+    expect(sortedIds()).toEqual([HALL_CLIENT, THERMOSTAT_ATTACHED, GUEST_PHONE, DB_CLIENT].sort());
     await waitFor(() => expect(screen.getByTestId("filter-source").textContent).toContain("Home network"));
   });
 
@@ -445,7 +463,7 @@ describe("accessibility", () => {
   });
 
   it("has no violations with filters applied", async () => {
-    const view = await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.inventory}&current=all&type=host`, 2);
+    const view = await openObservations(`/discovery/observations?source=${CONNECTOR_IDS.inventory}&current=all&type=host`, 3);
     await waitFor(() => expect(screen.getByTestId("filter-source").textContent).toContain("Lab inventory"));
     expect(await axeViolations(view.container)).toEqual([]);
   });

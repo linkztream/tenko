@@ -90,6 +90,7 @@ fn guest(id: &str, mac: &str, ip: &str, power: PowerState) -> ObservedHost {
     ObservedHost {
         external_id: id.to_owned(),
         name: Some(id.to_owned()),
+        name_placeholder: false,
         macs: vec![mac.parse().expect("mac")],
         ips: vec![ip.parse().expect("ip")],
         os: Some("Linux 6.x".to_owned()),

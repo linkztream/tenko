@@ -43,6 +43,7 @@ export const RECONCILE_IDS = {
     guestPhone: "0190d1c2-0000-7000-8000-00000d000007",
     speaker: "0190d1c2-0000-7000-8000-00000d000008",
     oldTest: "0190d1c2-0000-7000-8000-00000d000009",
+    renameDb: "0190d1c2-0000-7000-8000-00000d00000a",
   },
   /** Identifiers the commands of the open proposals give the objects they create. */
   created: {
@@ -219,6 +220,28 @@ function buildSeed(now: number, revision: number): ReconcileState {
     { type: "vendor", data: { mac: "00:00:5e:00:53:d5", vendor: "ICANN, IANA Department" } },
     { first: 4 * HOUR_MS, last: 18 * MINUTE, sightings: 2 },
   );
+  // One device under two names: Proxmox VE knows the guest as postgresql, and the network
+  // controller lists the client under the placeholder it makes up for a device without a name.
+  const dbGuest = fact(
+    inventory,
+    { type: "host", data: { external_id: "vm-110" } },
+    "host:vm-110",
+    {
+      type: "host",
+      data: { external_id: "vm-110", name: "postgresql", macs: ["00:00:5e:00:53:10"], ips: ["192.0.2.16"], os: "Debian 12", platform: "qemu", parent: "pve1", tags: [] },
+    },
+    { first: 4 * DAY_MS, last: 12 * MINUTE, sightings: 20 },
+  );
+  const dbClient = fact(
+    controller,
+    { type: "host", data: { external_id: "client-00005e005310" } },
+    "host:client-00005e005310",
+    {
+      type: "host",
+      data: { external_id: "client-00005e005310", name: "host-192-0-2-16", name_placeholder: true, macs: ["00:00:5e:00:53:10"], ips: ["192.0.2.16"], tags: [] },
+    },
+    { first: 4 * DAY_MS, last: 6 * MINUTE, sightings: 31 },
+  );
   const facts = [
     mediaPc,
     mediaServices,
@@ -233,6 +256,8 @@ function buildSeed(now: number, revision: number): ReconcileState {
     guestPhone,
     speakerName,
     outsideVendor,
+    dbGuest,
+    dbClient,
   ];
 
   const evidence = (f: ObservedFact, pair: { mac?: string | null; ip?: string | null; name?: string | null }): S["ProposalEvidence"] => ({
@@ -273,6 +298,22 @@ function buildSeed(now: number, revision: number): ReconcileState {
       summary: "Unknown device 00:00:5e:00:53:d1 (media-pc) seen at 192.0.2.150 by 1 source; adopt it as host media-pc",
       params: { mac: "00:00:5e:00:53:d1", name: "media-pc", sources: "1", ips: "192.0.2.150" },
       evidence: [evidence(mediaPc, { mac: "00:00:5e:00:53:d1", ip: "192.0.2.150", name: "media-pc" })],
+      // The sources disagree: Proxmox VE (ranked first by the default name authority) knows the
+      // guest as media-pc, the network controller lists the client as MediaPC.
+      choices: [
+        {
+          name: "media-pc",
+          proposed: true,
+          sources: [{ source: "proxmox", source_key: mediaPc.source_key, given: "media-pc", last_seen: mediaPc.last_seen }],
+          last_seen: mediaPc.last_seen,
+        },
+        {
+          name: "mediapc",
+          proposed: false,
+          sources: [{ source: "unifi", source_key: hallClient.source_key, given: "MediaPC", last_seen: hallClient.last_seen }],
+          last_seen: hallClient.last_seen,
+        },
+      ],
       commands: [
         {
           op: "create_host",
@@ -463,6 +504,37 @@ function buildSeed(now: number, revision: number): ReconcileState {
       decided: { at: ago(DAY_MS), by: RECONCILER },
       created: ago(12 * DAY_MS),
       updated: ago(DAY_MS),
+    }),
+    // A host adopted under a placeholder name, and the real name a source gives it now.
+    proposal({
+      id: ids.renameDb,
+      kind: "host_name",
+      rule: "ipam.reconcile.placeholder_name",
+      key: `host_name/host:${HOST_IDS["host-192-0-2-16"]}`,
+      severity: "info",
+      state: "open",
+      subject: {
+        mac: "00:00:5e:00:53:10",
+        ip: "192.0.2.16",
+        name: "host-192-0-2-16",
+        prefix: IPAM_IDS.prefix.lan,
+        vrf,
+        objects: [{ kind: "host", id: HOST_IDS["host-192-0-2-16"]! }],
+      },
+      summary: "Host host-192-0-2-16 has a placeholder name; Proxmox VE names it postgresql, chosen by the default name authority; rename it to postgresql",
+      params: { host: "host-192-0-2-16", name: "postgresql", name_source: "proxmox", name_rule: "default" },
+      evidence: [evidence(dbGuest, { mac: "00:00:5e:00:53:10", ip: "192.0.2.16", name: "postgresql" }), evidence(dbClient, { mac: "00:00:5e:00:53:10", ip: "192.0.2.16" })],
+      choices: [
+        {
+          name: "postgresql",
+          proposed: true,
+          sources: [{ source: "proxmox", source_key: dbGuest.source_key, given: "postgresql", last_seen: dbGuest.last_seen }],
+          last_seen: dbGuest.last_seen,
+        },
+      ],
+      commands: [{ op: "update_host", args: { id: HOST_IDS["host-192-0-2-16"]!, patch: { name: "postgresql" } } }],
+      created: ago(4 * DAY_MS),
+      updated: ago(6 * MINUTE),
     }),
   ];
 

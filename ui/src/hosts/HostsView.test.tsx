@@ -124,7 +124,7 @@ describe("the hosts list", () => {
     renderList();
     await listed();
     typeFilter("mode:dynamic");
-    await waitFor(() => expect(names()).toEqual(["laptop-ak", "tv-living"]), DEBOUNCED);
+    await waitFor(() => expect(names()).toEqual(["host-192-0-2-16", "laptop-ak", "tv-living"]), DEBOUNCED);
     typeFilter("mode:static sw");
     await waitFor(() => expect(names()).toEqual(["sw-core", "sw-desk"]), DEBOUNCED);
     typeFilter("mode:unmanaged");

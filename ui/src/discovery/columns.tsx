@@ -6,9 +6,9 @@ import { Addr, Mac } from "../components/Addr";
 import { Icon } from "../components/Icon";
 import { TimeAgo } from "../grid/cells";
 import type { Column } from "../grid/types";
-import { t } from "../i18n";
+import { formatDateTime, t } from "../i18n";
 import type { Proposal, ProposalEvidence } from "./api";
-import { kindClass, kindIcon, kindWord, lastSeenOf, ruleText, severityIcon, severityWord, sourceText, stateWord, type SourceNames } from "./model";
+import { choiceText, choicesLine, choicesOf, kindClass, kindIcon, kindWord, lastSeenOf, ruleText, severityIcon, severityWord, sourceText, stateWord, type SourceNames } from "./model";
 import { PrefixRef } from "./refs";
 
 export function SeverityBadge(props: { severity: Proposal["severity"] }) {
@@ -72,6 +72,30 @@ export function SourceBadges(props: { evidence: readonly ProposalEvidence[]; nam
   );
 }
 
+/**
+ * The names a proposal offers, each with the kinds of source that give it ("postgresql ·
+ * Proxmox VE, db · UniFi"); the last sighting of a name is in its tooltip. Nothing for a
+ * proposal that offers no choice.
+ */
+export function NameChoices(props: { proposal: Proposal }) {
+  return (
+    <Show when={choicesOf(props.proposal).length > 0} fallback={<span class="muted">–</span>}>
+      <span class="name-choices" data-testid="name-choices">
+        <For each={choicesOf(props.proposal)}>
+          {(c, i) => (
+            <>
+              {i() > 0 ? ", " : ""}
+              <span class="name-choice-text" title={t("discovery.names.seen", { at: formatDateTime(c.last_seen) })} data-name={c.name}>
+                {choiceText(c)}
+              </span>
+            </>
+          )}
+        </For>
+      </span>
+    </Show>
+  );
+}
+
 export function proposalColumns(names: () => SourceNames): Column<Proposal>[] {
   return [
     {
@@ -101,6 +125,13 @@ export function proposalColumns(names: () => SourceNames): Column<Proposal>[] {
           {ruleText(p)}
         </span>
       ),
+    },
+    {
+      id: "names",
+      header: () => t("discovery.col.names"),
+      width: 220,
+      text: (p) => choicesLine(p),
+      render: (p) => <NameChoices proposal={p} />,
     },
     {
       id: "subject",

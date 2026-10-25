@@ -34,9 +34,13 @@ use crate::{
     state::AppState,
 };
 
-/// The routes of the area: `/settings/reconciler`.
+mod names;
+
+/// The routes of the area: `/settings/reconciler` and its name authority ([`names`]).
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_reconciler_settings, update_reconciler_settings))
+    OpenApiRouter::new()
+        .routes(routes!(get_reconciler_settings, update_reconciler_settings))
+        .merge(names::routes())
 }
 
 /// Shows the settings of the reconciler in force: the stored ones, else the defaults.
