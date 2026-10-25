@@ -16,6 +16,10 @@
 .connect-targets { display: grid; gap: var(--sp-2); }
 .connect-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--sp-4); align-items: center; }
 .connect-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The open ports and the web interface of the Connect panel. */
+.connect-row .connect-ports { grid-column: 1 / -1; margin: 0; }
+.connect-row .connect-unscanned { grid-column: 2 / -1; }
+.connect-web { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
 .host-credentials { display: grid; gap: var(--sp-3); margin-top: var(--sp-5); }
 .credentials-title { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-13); margin: 0; }
 .credentials-title .aside-btn { margin-inline-start: auto; }

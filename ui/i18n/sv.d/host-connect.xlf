@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="host-connect">
+      <unit id="hosts.connect.loading">
+        <notes><note category="description">Shown in the Connect panel while the open ports of the host are being read.</note></notes>
+        <segment><source>Reading the open ports of this host.</source><target>Läser av värdens öppna portar.</target></segment>
+      </unit>
+      <unit id="hosts.connect.unknown">
+        <notes><note category="description">Shown in the Connect panel when the open ports could not be read from the observations.</note></notes>
+        <segment><source>The open ports of this host could not be read.</source><target>Värdens öppna portar kunde inte läsas.</target></segment>
+      </unit>
+      <unit id="hosts.connect.no_scan">
+        <notes><note category="description">One line in the Connect panel when no scan has reported open ports for any address of the host.</note></notes>
+        <segment><source>No port scan has reached this host yet.</source><target>Ingen portskanning har nått den här värden ännu.</target></segment>
+      </unit>
+      <unit id="hosts.connect.no_scan_link">
+        <notes><note category="description">Link next to the no-scan line to the nodes page, where a probe node has its scan configuration.</note></notes>
+        <segment><source>Set up the scan of a probe</source><target>Ställ in skanningen för en sond</target></segment>
+      </unit>
+      <unit id="hosts.connect.unscanned">
+        <notes><note category="description">Shown in the row of an address that no port scan has reported.</note></notes>
+        <segment><source>Not scanned</source><target>Inte skannad</target></segment>
+      </unit>
+      <unit id="hosts.connect.closed_tip">
+        <notes><note category="description">Tooltip of a disabled connect button; the time is the last scan of the address.</note></notes>
+        <segment><source>Port {port} was not seen open when this address was last scanned, {time}.</source><target>Port {port} sågs inte öppen när adressen skannades senast, {time}.</target></segment>
+      </unit>
+      <unit id="hosts.connect.ports">
+        <notes><note category="description">Label before the list of open ports under a connect row; the time is relative.</note></notes>
+        <segment><source>Open at the last scan, {time}</source><target>Öppna vid senaste skanningen, {time}</target></segment>
+      </unit>
+      <unit id="hosts.connect.ports_none">
+        <notes><note category="description">Label under a connect row when the last scan found no open port.</note></notes>
+        <segment><source>No open port at the last scan, {time}</source><target>Ingen öppen port vid senaste skanningen, {time}</target></segment>
+      </unit>
+      <unit id="hosts.connect.tls">
+        <notes><note category="description">Mark after an open port that answered a TLS handshake.</note></notes>
+        <segment><source>TLS</source><target>TLS</target></segment>
+      </unit>
+      <unit id="hosts.connect.web">
+        <notes><note category="description">Button that opens the web interface of the host in a new tab.</note></notes>
+        <segment><source>Web interface</source><target>Webbgränssnitt</target></segment>
+      </unit>
+      <unit id="hosts.connect.web_http">
+        <notes><note category="description">Secondary link to the plain HTTP web interface, next to the HTTPS button.</note></notes>
+        <segment><source>HTTP</source><target>HTTP</target></segment>
+      </unit>
+      <unit id="hosts.connect.web_ip">
+        <notes><note category="description">Secondary link that opens the web interface by IP address instead of by DNS name.</note></notes>
+        <segment><source>by address</source><target>via adress</target></segment>
+      </unit>
+      <unit id="hosts.connect.web_more">
+        <notes><note category="description">Label before the links to the other web ports found open.</note></notes>
+        <segment><source>More</source><target>Fler</target></segment>
+      </unit>
+      <unit id="hosts.connect.web_open">
+        <notes><note category="description">Tooltip of a web interface link.</note></notes>
+        <segment><source>Open {url} in a new tab</source><target>Öppna {url} i en ny flik</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

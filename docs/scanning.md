@@ -216,6 +216,8 @@ The controller turns each sighting into a fact. Facts of different sources are n
 
 A batch carries each subject once; when a run sees a subject twice, the later sighting wins.
 
+The `services` fact is what the Connect panel of the host page reads (`GET /observations/{ip}`, the current facts of every method joined): it offers the RDP and SSH buttons and the link to the web interface only for ports seen open, says "No port scan has reached this host yet" for a host none of whose addresses has a fact, and disables a button, with the time of the last scan, for a port that was not open. An address with no open port has no `services` fact at all. See [secrets.md](secrets.md#5-remote-access-hand-off).
+
 ### 3.2 Expiry
 
 Every sighting carries a lifetime, and the fact expires that long after the time the probe saw it. The lifetime is `ttl_secs` of the method. The default is three intervals of the method, but at least 15 minutes and at most seven days, so one missed run does not age a device out: 15 minutes for `arp` and `nd`, 90 minutes for `icmp`, 45 minutes for `mdns` and `snmp`, 3 hours for `llmnr` and `reverse_dns`, 18 hours for `tcp_connect`. An explicit `ttl_secs` can be 60 seconds to 30 days. The controller refreshes and keeps facts as described in [reconciliation.md](reconciliation.md#23-ingest).

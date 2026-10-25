@@ -399,7 +399,7 @@ export default function HostView() {
 
               <section class="page-section" aria-labelledby="host-connect-title">
                 <h2 id="host-connect-title">{t("hosts.connect.title")}</h2>
-                <Connect host={h()} addresses={addresses()} />
+                <Connect host={h()} addresses={addresses()} loading={!data()} />
                 <HostCredentialsSection host={h()} />
               </section>
 

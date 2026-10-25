@@ -497,3 +497,52 @@ function buildSeed(now: number, revision: number): ReconcileState {
 }
 
 export { REASON_GONE };
+
+export interface ServicesOptions {
+  /** The open ports that answered a TLS handshake. */
+  tls?: number[];
+  /** The probe method that reported them (default `tcp_connect`). */
+  method?: S["ProbeMethod"];
+  /** How long ago the last scan was, in milliseconds (default 20 minutes). */
+  ago?: number;
+  /** Whether the fact has expired already. */
+  expired?: boolean;
+}
+
+let servicesNo = 0;
+
+/**
+ * Sets what the probe saw open at an address (the `services` fact of docs/scanning.md): the
+ * fact of that address from the same method is replaced by a new one. For the tests of the
+ * host page's Connect panel.
+ */
+export function putServices(ip: string, openTcp: number[], options: ServicesOptions = {}): ObservedFact {
+  const method = options.method ?? "tcp_connect";
+  const now = Date.now();
+  const seen = iso(now - (options.ago ?? 20 * MINUTE));
+  const source: S["ObservationSource"] = { type: "probe", node: RECONCILE_IDS.probeNode, method };
+  const key = `probe:${RECONCILE_IDS.probeNode}:${method}`;
+  const facts = reconcileState().facts;
+  for (let i = facts.length - 1; i >= 0; i--) {
+    const f = facts[i] as ObservedFact;
+    if (f.source_key === key && f.observed.type === "services" && f.observed.data.ip === ip) facts.splice(i, 1);
+  }
+  servicesNo += 1;
+  const added: ObservedFact = {
+    source,
+    source_key: key,
+    subject: { type: "services", data: { ip } },
+    subject_key: `services:${ip}`,
+    observed: { type: "services", data: { ip, open_tcp: openTcp, ...(options.tls ? { tls_tcp: options.tls } : {}) } },
+    observation: `0190d1c2-0000-7000-8000-00000f${servicesNo.toString(16).padStart(6, "0")}`,
+    first_seen: seen,
+    last_seen: seen,
+    received_at: seen,
+    expires_at: options.expired ? iso(now - MINUTE) : iso(now + 6 * HOUR_MS),
+    sightings: 1,
+    counted_at: seen,
+    revision: db.revision,
+  };
+  facts.push(added);
+  return added;
+}

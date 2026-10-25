@@ -3749,16 +3749,30 @@ export type MessageKey =
   | "hosts.col.client_id"
   | "hosts.col.duid"
   | "hosts.col.interface"
+  | "hosts.connect.closed_tip"
   | "hosts.connect.failed"
   | "hosts.connect.hint"
+  | "hosts.connect.loading"
+  | "hosts.connect.no_scan"
+  | "hosts.connect.no_scan_link"
+  | "hosts.connect.ports"
+  | "hosts.connect.ports_none"
   | "hosts.connect.rdp"
   | "hosts.connect.rdp_port"
   | "hosts.connect.ssh"
   | "hosts.connect.ssh_port"
   | "hosts.connect.target"
   | "hosts.connect.title"
+  | "hosts.connect.tls"
+  | "hosts.connect.unknown"
+  | "hosts.connect.unscanned"
   | "hosts.connect.user"
   | "hosts.connect.user_placeholder"
+  | "hosts.connect.web"
+  | "hosts.connect.web_http"
+  | "hosts.connect.web_ip"
+  | "hosts.connect.web_more"
+  | "hosts.connect.web_open"
   | "hosts.credentials.audit_hint"
   | "hosts.credentials.bind"
   | "hosts.credentials.bind_title"
@@ -7582,6 +7596,10 @@ export interface MessageArgs {
   "hosts.bulk.lock_title": { count: number };
   "hosts.bulk.mode_title": { count: number; mode: string | number };
   "hosts.bulk.unlock_title": { count: number };
+  "hosts.connect.closed_tip": { port: string | number; time: string | number };
+  "hosts.connect.ports": { time: string | number };
+  "hosts.connect.ports_none": { time: string | number };
+  "hosts.connect.web_open": { url: string | number };
   "hosts.credentials.bind_title": { host: string | number };
   "hosts.credentials.option": { name: string | number; user: string | number };
   "hosts.credentials.revealed_by": { user: string | number; when: string | number };
@@ -11948,16 +11966,30 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.col.client_id",
   "hosts.col.duid",
   "hosts.col.interface",
+  "hosts.connect.closed_tip",
   "hosts.connect.failed",
   "hosts.connect.hint",
+  "hosts.connect.loading",
+  "hosts.connect.no_scan",
+  "hosts.connect.no_scan_link",
+  "hosts.connect.ports",
+  "hosts.connect.ports_none",
   "hosts.connect.rdp",
   "hosts.connect.rdp_port",
   "hosts.connect.ssh",
   "hosts.connect.ssh_port",
   "hosts.connect.target",
   "hosts.connect.title",
+  "hosts.connect.tls",
+  "hosts.connect.unknown",
+  "hosts.connect.unscanned",
   "hosts.connect.user",
   "hosts.connect.user_placeholder",
+  "hosts.connect.web",
+  "hosts.connect.web_http",
+  "hosts.connect.web_ip",
+  "hosts.connect.web_more",
+  "hosts.connect.web_open",
   "hosts.credentials.audit_hint",
   "hosts.credentials.bind",
   "hosts.credentials.bind_title",

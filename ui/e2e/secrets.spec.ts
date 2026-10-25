@@ -45,6 +45,7 @@ import type { Locator, Page, Response } from "@playwright/test";
 import { ApiError, type Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
+import { ProbeNode } from "./support/probe";
 import type { TenkoServer } from "./support/server";
 import type { Authenticator } from "./support/totp";
 import { withId, withKey } from "./support/ui";
@@ -531,158 +532,212 @@ test("TGL-24 changes on the settings page while the vault holds a secret, and MF
   ]);
 });
 
-test("a secret is bound to a host, revealed from its page, handed off over SSH and RDP, and unbound", async ({
-  page,
-  api,
-  server,
-  signedIn,
-}) => {
-  expect(signedIn.session.strength).toBe("pin");
-  await strongSession(api);
-  // TGL-24 with the host binding of the Hardened profile: a secret is revealed only from the
-  // view of a host it is bound to.
-  const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
-  await api.patch("/settings/security", { secret_reveal: { step_up: "session", bound_host_only: true } });
-  const host = await arrangeHost(api);
-  await grantClipboard(page, server);
+// The host binding and the hand-off need a probe that saw the ports open: the Connect panel offers
+// a button for a port in the `services` fact only. The controller has a cluster port and a probe
+// node reports the facts (`tenko node inject`, as in nodes.spec.ts).
+test.describe("the hand-off from the host page", () => {
+  test.use({ transport: "internal_ca", serverOptions: { cluster: true } });
 
-  await page.goto(`/ipam/hosts/${HOST}`);
-  await expect(page.getByTestId("page-host")).toBeVisible();
-  const credentials = page.getByTestId("host-credentials");
-  await expect(credentials.getByTestId("credentials-empty")).toBeVisible();
+  let probe: ProbeNode | undefined;
+  test.afterEach(async () => {
+    await probe?.stop();
+    probe = undefined;
+  });
 
-  // Bind the secret as the administrative login of the host.
-  await credentials.getByTestId("credential-bind").click();
-  const bind = page.getByTestId("dialog-credential-bind");
-  await bind.getByTestId("field-secret").selectOption(secret.id);
-  await bind.getByTestId("field-role").selectOption("admin");
-  await bind.getByTestId("form-submit").click();
-  await expect(bind).toHaveCount(0);
-  const credential = withId(credentials, "credential", secret.id);
-  await expect(credential).toHaveAttribute("data-key", NAS.name);
-  await expect(credential).toHaveAttribute("data-role", "admin");
+  /** Enrols a probe node and has it report the open TCP ports of addresses (the `services` facts). */
+  async function probeSaw(api: Api, server: TenkoServer, seen: Record<string, { open: number[]; tls?: number[] }>): Promise<void> {
+    const token = await api.post<Schemas["CreatedEnrolment"]>("/nodes/enrolments", { roles: ["probe"], name: "probe-lab" }, { idempotencyKey: null });
+    probe = await ProbeNode.create();
+    const enrolled = await probe.enrol(server, token.token, { name: "probe-lab", address: "192.0.2.20" });
+    expect(enrolled.code, enrolled.stderr).toBe(0);
+    await probe.serve();
+    const now = new Date().toISOString();
+    await probe.inject({
+      method: "tcp_connect",
+      complete: false,
+      collected_at: now,
+      sightings: Object.entries(seen).map(([ip, ports]) => ({
+        observed_at: now,
+        subject: { type: "services", data: { ip, open_tcp: ports.open, tls_tcp: ports.tls ?? [] } },
+      })),
+    });
+    await expect
+      .poll(async () => (await api.get<Schemas["Page_ObservedFact"]>("/observations", { type: "services" })).items.length, {
+        message: "the services facts to reach the reconciler",
+        timeout: 30_000,
+      })
+      .toBe(Object.keys(seen).length);
+  }
 
-  const bound = await api.get<Schemas["HostCredentialsView"]>(`/hosts/${host}/credentials`);
-  expect(bound.items.map((item) => [item.secret.id, item.role])).toEqual([[secret.id, "admin"]]);
-  expect(JSON.stringify(bound)).not.toContain(NAS.value);
-  const bindings = await auditOf(api, "vault.host.credentials");
-  expect(bindings).toHaveLength(1);
-  expect(bindings[0]!.draft.outcome).toEqual({ kind: "success" });
-  expect(bindings[0]!.draft.objects).toContainEqual({ kind: "host", id: host });
-  expect(bindings[0]!.draft.objects).toContainEqual({ kind: "secret", id: secret.id });
-  const added = bindings[0]!.draft.details?.changes ?? [];
-  expect(added).toHaveLength(1);
-  expect(added[0]).toMatchObject({ field: "role", new: "admin" });
-  expect(added[0]!.old ?? null).toBeNull();
+  test("a secret is bound to a host, revealed from its page, handed off over SSH and RDP, and unbound", async ({
+    page,
+    api,
+    server,
+    signedIn,
+  }) => {
+    expect(signedIn.session.strength).toBe("pin");
+    await strongSession(api);
+    // TGL-24 with the host binding of the Hardened profile: a secret is revealed only from the
+    // view of a host it is bound to.
+    const secret = await createSecret(api, { name: NAS.name, value: NAS.value, username: NAS.username });
+    await api.patch("/settings/security", { secret_reveal: { step_up: "session", bound_host_only: true } });
+    const host = await arrangeHost(api);
+    // The probe saw SSH and RDP open at both addresses, the alternative ports the test types
+    // below, and HTTPS with TLS at the first one.
+    await probeSaw(api, server, {
+      "192.0.2.10": { open: [22, 443, 2222, 3389, 3390], tls: [443] },
+      "2001:db8::10": { open: [22, 2222, 3389, 3390] },
+    });
+    await grantClipboard(page, server);
 
-  // The secret lists the host that binds it, and the secrets page cannot reveal it: no host is in view.
-  expect((await api.get<Secret>(`/secrets/${secret.id}`)).hosts).toEqual([{ host, role: "admin" }]);
-  await page.goto(`/settings/secrets/${secret.id}`);
-  await expect(withKey(page.getByTestId("secret-references"), "secret-host", HOST)).toBeVisible();
-  const refusal = page.getByTestId("dialog-reveal");
-  const [refused] = await Promise.all([
-    page.waitForResponse(isReveal(secret.id)),
-    withId(page, "secret", secret.id).getByTestId("secret-reveal").click(),
-  ]);
-  expect(refused.status()).toBe(403);
-  expect((await problemOf(refused)).code).toBe("vault.reveal.host_required");
-  await expect(refusal.getByTestId("reveal-status")).toHaveAttribute("data-state", "failed");
-  await expect(refusal.getByTestId("reveal-value")).toHaveCount(0);
-  await refusal.getByTestId("reveal-close").click();
-  await expect(refusal).toHaveCount(0);
+    await page.goto(`/ipam/hosts/${HOST}`);
+    await expect(page.getByTestId("page-host")).toBeVisible();
+    const credentials = page.getByTestId("host-credentials");
+    await expect(credentials.getByTestId("credentials-empty")).toBeVisible();
 
-  // Reveal from the host view: the reveal names the host.
-  await page.goto(`/ipam/hosts/${HOST}`);
-  await expect(credential).toBeVisible();
-  const [revealed] = await Promise.all([page.waitForResponse(isReveal(secret.id)), credential.getByTestId("credential-copy").click()]);
-  expect(revealed.status()).toBe(200);
-  expect(revealed.request().postDataJSON()).toEqual({ host });
-  const dialog = page.getByTestId("dialog-reveal");
-  await expect(dialog.getByTestId("reveal-status")).toHaveAttribute("data-state", "copied");
-  await expect(dialog.getByTestId("reveal-username")).toHaveText(NAS.username);
-  await dialog.getByTestId("reveal-show").click();
-  await expect(dialog.getByTestId("reveal-value")).toHaveText(NAS.value);
-  expect(await clipboardText(page)).toBe(NAS.value);
-  await dialog.getByTestId("reveal-close").click();
-  await expect(dialog).toHaveCount(0);
+    // Bind the secret as the administrative login of the host.
+    await credentials.getByTestId("credential-bind").click();
+    const bind = page.getByTestId("dialog-credential-bind");
+    await bind.getByTestId("field-secret").selectOption(secret.id);
+    await bind.getByTestId("field-role").selectOption("admin");
+    await bind.getByTestId("form-submit").click();
+    await expect(bind).toHaveCount(0);
+    const credential = withId(credentials, "credential", secret.id);
+    await expect(credential).toHaveAttribute("data-key", NAS.name);
+    await expect(credential).toHaveAttribute("data-role", "admin");
 
-  const reveals = await auditOf(api, "vault.secret.reveal");
-  expect(reveals.map((record) => record.draft.outcome.kind)).toEqual(["denied", "success"]);
-  expect(contextOf(reveals[0]!).code).toBe("vault.reveal.host_required");
-  expect(reveals[0]!.draft.objects).toEqual([{ kind: "secret", id: secret.id }]);
-  expect(reveals[1]!.draft.objects).toContainEqual({ kind: "host", id: host });
-  expect(reveals[1]!.draft.objects).toContainEqual({ kind: "secret", id: secret.id });
-  expect(contextOf(reveals[1]!).host).toBe(host);
-  expect((await api.get<Secret>(`/secrets/${secret.id}`)).last_revealed?.host).toBe(host);
+    const bound = await api.get<Schemas["HostCredentialsView"]>(`/hosts/${host}/credentials`);
+    expect(bound.items.map((item) => [item.secret.id, item.role])).toEqual([[secret.id, "admin"]]);
+    expect(JSON.stringify(bound)).not.toContain(NAS.value);
+    const bindings = await auditOf(api, "vault.host.credentials");
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]!.draft.outcome).toEqual({ kind: "success" });
+    expect(bindings[0]!.draft.objects).toContainEqual({ kind: "host", id: host });
+    expect(bindings[0]!.draft.objects).toContainEqual({ kind: "secret", id: secret.id });
+    const added = bindings[0]!.draft.details?.changes ?? [];
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ field: "role", new: "admin" });
+    expect(added[0]!.old ?? null).toBeNull();
 
-  // The hand-off: one row per address, the DNS name where there is one.
-  const connect = page.getByTestId("host-connect");
-  await expect(connect.getByTestId("remote-target")).toHaveCount(2);
-  await expect(withKey(connect, "remote-target", HOST)).toBeVisible();
-  await expect(withKey(connect, "remote-target", "2001:db8::10")).toBeVisible();
+    // The secret lists the host that binds it, and the secrets page cannot reveal it: no host is in view.
+    expect((await api.get<Secret>(`/secrets/${secret.id}`)).hosts).toEqual([{ host, role: "admin" }]);
+    await page.goto(`/settings/secrets/${secret.id}`);
+    await expect(withKey(page.getByTestId("secret-references"), "secret-host", HOST)).toBeVisible();
+    const refusal = page.getByTestId("dialog-reveal");
+    const [refused] = await Promise.all([
+      page.waitForResponse(isReveal(secret.id)),
+      withId(page, "secret", secret.id).getByTestId("secret-reveal").click(),
+    ]);
+    expect(refused.status()).toBe(403);
+    expect((await problemOf(refused)).code).toBe("vault.reveal.host_required");
+    await expect(refusal.getByTestId("reveal-status")).toHaveAttribute("data-state", "failed");
+    await expect(refusal.getByTestId("reveal-value")).toHaveCount(0);
+    await refusal.getByTestId("reveal-close").click();
+    await expect(refusal).toHaveCount(0);
 
-  // SSH: the page hands `ssh://user@target` to the operating system.
-  const sshLinks = await captureSshLinks(page);
-  await withKey(connect, "host-ssh", HOST).click();
-  await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`]);
-  const ssh = await api.get<Schemas["SshHandoff"]>(`/hosts/${host}/remote`, { protocol: "ssh", address: HOST });
-  expect(ssh).toMatchObject({ uri: `ssh://admin@${HOST}`, host: HOST, port: 22, username: "admin" });
+    // Reveal from the host view: the reveal names the host.
+    await page.goto(`/ipam/hosts/${HOST}`);
+    await expect(credential).toBeVisible();
+    const [revealed] = await Promise.all([page.waitForResponse(isReveal(secret.id)), credential.getByTestId("credential-copy").click()]);
+    expect(revealed.status()).toBe(200);
+    expect(revealed.request().postDataJSON()).toEqual({ host });
+    const dialog = page.getByTestId("dialog-reveal");
+    await expect(dialog.getByTestId("reveal-status")).toHaveAttribute("data-state", "copied");
+    await expect(dialog.getByTestId("reveal-username")).toHaveText(NAS.username);
+    await dialog.getByTestId("reveal-show").click();
+    await expect(dialog.getByTestId("reveal-value")).toHaveText(NAS.value);
+    expect(await clipboardText(page)).toBe(NAS.value);
+    await dialog.getByTestId("reveal-close").click();
+    await expect(dialog).toHaveCount(0);
 
-  // RDP: a file download with the target, the port and the user name, and no password.
-  const [download] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", HOST).click()]);
-  expect(download.suggestedFilename()).toBe(`${HOST}.rdp`);
-  const file = await readFile(await download.path(), "utf8");
-  const lines = file.split("\r\n");
-  expect(lines).toContain(`full address:s:${HOST}:3389`);
-  expect(lines).toContain(`username:s:${NAS.username}`);
-  expect(lines).toContain("prompt for credentials:i:1");
-  expect(lines.at(-1)).toBe("");
-  expect(file.replaceAll("\r\n", "")).not.toContain("\n");
-  expect(file).not.toMatch(/password/i);
-  expect(file).not.toContain(NAS.value);
-  const rdp = await api.text(`/hosts/${host}/remote?${new URLSearchParams({ protocol: "rdp", address: HOST })}`);
-  expect(file).toBe(rdp);
-  // Without an address the API picks the same first target.
-  expect(await api.text(`/hosts/${host}/remote?protocol=rdp`)).toBe(rdp);
+    const reveals = await auditOf(api, "vault.secret.reveal");
+    expect(reveals.map((record) => record.draft.outcome.kind)).toEqual(["denied", "success"]);
+    expect(contextOf(reveals[0]!).code).toBe("vault.reveal.host_required");
+    expect(reveals[0]!.draft.objects).toEqual([{ kind: "secret", id: secret.id }]);
+    expect(reveals[1]!.draft.objects).toContainEqual({ kind: "host", id: host });
+    expect(reveals[1]!.draft.objects).toContainEqual({ kind: "secret", id: secret.id });
+    expect(contextOf(reveals[1]!).host).toBe(host);
+    expect((await api.get<Secret>(`/secrets/${secret.id}`)).last_revealed?.host).toBe(host);
 
-  // An IPv6 address without a DNS name is a target of its own, in brackets.
-  const [download6] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", "2001:db8::10").click()]);
-  const file6 = await readFile(await download6.path(), "utf8");
-  expect(file6.split("\r\n")).toContain("full address:s:[2001:db8::10]:3389");
-  expect(file6.split("\r\n")).toContain(`username:s:${NAS.username}`);
+    // The hand-off: one row per address, the DNS name where there is one.
+    const connect = page.getByTestId("host-connect");
+    await expect(connect.getByTestId("remote-target")).toHaveCount(2);
+    await expect(withKey(connect, "remote-target", HOST)).toBeVisible();
+    await expect(withKey(connect, "remote-target", "2001:db8::10")).toBeVisible();
 
-  // Unbind: the row goes, the secret keeps existing, and the hand-off loses the user name.
-  await credential.getByTestId("credential-unbind").click();
-  await page.getByTestId("dialog-confirm").getByTestId("confirm-ok").click();
-  await expect(credential).toHaveCount(0);
-  await expect(credentials.getByTestId("credentials-empty")).toBeVisible();
-  const unbound = await api.get<Schemas["HostCredentialsView"]>(`/hosts/${host}/credentials`);
-  expect(unbound.items).toEqual([]);
-  expect((await api.get<Secret>(`/secrets/${secret.id}`)).hosts).toEqual([]);
-  const changes = await auditOf(api, "vault.host.credentials");
-  expect(changes).toHaveLength(2);
-  const removed = changes[1]!.draft.details?.changes ?? [];
-  expect(removed).toHaveLength(1);
-  expect(removed[0]).toMatchObject({ field: "role", old: "admin" });
-  expect(removed[0]!.new ?? null).toBeNull();
+    // What the probe saw open decides the panel: the ports line with the TLS mark, no "not scanned"
+    // line, and the web interface by the DNS name with the address as the fallback.
+    await expect(connect.getByTestId("connect-no-scan")).toHaveCount(0);
+    await expect(withKey(connect, "remote-target", HOST).getByTestId("connect-ports")).toContainText("443 TLS");
+    const web = connect.getByTestId("web-primary");
+    await expect(web).toHaveAttribute("href", `https://${HOST}/`);
+    await expect(web).toHaveAttribute("target", "_blank");
+    await expect(web).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(connect.getByTestId("web-address")).toHaveAttribute("href", "https://192.0.2.10/");
 
-  await withKey(connect, "host-ssh", HOST).click();
-  await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`, `ssh://${HOST}`]);
-  const plain = await api.get<Schemas["SshHandoff"]>(`/hosts/${host}/remote`, { protocol: "ssh", address: HOST });
-  expect(plain.uri).toBe(`ssh://${HOST}`);
-  expect(plain.username ?? null).toBeNull();
+    // SSH: the page hands `ssh://user@target` to the operating system.
+    const sshLinks = await captureSshLinks(page);
+    await withKey(connect, "host-ssh", HOST).click();
+    await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`]);
+    const ssh = await api.get<Schemas["SshHandoff"]>(`/hosts/${host}/remote`, { protocol: "ssh", address: HOST });
+    expect(ssh).toMatchObject({ uri: `ssh://admin@${HOST}`, host: HOST, port: 22, username: "admin" });
 
-  // A user name and ports typed into the panel go into the link and the file.
-  await connect.getByTestId("field-user").fill("operator");
-  await connect.getByTestId("field-ssh_port").fill("2222");
-  await connect.getByTestId("field-rdp_port").fill("3390");
-  await withKey(connect, "host-ssh", HOST).click();
-  await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`, `ssh://${HOST}`, `ssh://operator@${HOST}:2222`]);
-  const [typed] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", HOST).click()]);
-  const typedLines = (await readFile(await typed.path(), "utf8")).split("\r\n");
-  expect(typedLines).toContain(`full address:s:${HOST}:3390`);
-  expect(typedLines).toContain("username:s:operator");
-  expect(await wholeLog(api)).not.toContain(NAS.value);
+    // RDP: a file download with the target, the port and the user name, and no password.
+    const [download] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", HOST).click()]);
+    expect(download.suggestedFilename()).toBe(`${HOST}.rdp`);
+    const file = await readFile(await download.path(), "utf8");
+    const lines = file.split("\r\n");
+    expect(lines).toContain(`full address:s:${HOST}:3389`);
+    expect(lines).toContain(`username:s:${NAS.username}`);
+    expect(lines).toContain("prompt for credentials:i:1");
+    expect(lines.at(-1)).toBe("");
+    expect(file.replaceAll("\r\n", "")).not.toContain("\n");
+    expect(file).not.toMatch(/password/i);
+    expect(file).not.toContain(NAS.value);
+    const rdp = await api.text(`/hosts/${host}/remote?${new URLSearchParams({ protocol: "rdp", address: HOST })}`);
+    expect(file).toBe(rdp);
+    // Without an address the API picks the same first target.
+    expect(await api.text(`/hosts/${host}/remote?protocol=rdp`)).toBe(rdp);
+
+    // An IPv6 address without a DNS name is a target of its own, in brackets.
+    const [download6] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", "2001:db8::10").click()]);
+    const file6 = await readFile(await download6.path(), "utf8");
+    expect(file6.split("\r\n")).toContain("full address:s:[2001:db8::10]:3389");
+    expect(file6.split("\r\n")).toContain(`username:s:${NAS.username}`);
+
+    // Unbind: the row goes, the secret keeps existing, and the hand-off loses the user name.
+    await credential.getByTestId("credential-unbind").click();
+    await page.getByTestId("dialog-confirm").getByTestId("confirm-ok").click();
+    await expect(credential).toHaveCount(0);
+    await expect(credentials.getByTestId("credentials-empty")).toBeVisible();
+    const unbound = await api.get<Schemas["HostCredentialsView"]>(`/hosts/${host}/credentials`);
+    expect(unbound.items).toEqual([]);
+    expect((await api.get<Secret>(`/secrets/${secret.id}`)).hosts).toEqual([]);
+    const changes = await auditOf(api, "vault.host.credentials");
+    expect(changes).toHaveLength(2);
+    const removed = changes[1]!.draft.details?.changes ?? [];
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatchObject({ field: "role", old: "admin" });
+    expect(removed[0]!.new ?? null).toBeNull();
+
+    await withKey(connect, "host-ssh", HOST).click();
+    await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`, `ssh://${HOST}`]);
+    const plain = await api.get<Schemas["SshHandoff"]>(`/hosts/${host}/remote`, { protocol: "ssh", address: HOST });
+    expect(plain.uri).toBe(`ssh://${HOST}`);
+    expect(plain.username ?? null).toBeNull();
+
+    // A user name and ports typed into the panel go into the link and the file.
+    await connect.getByTestId("field-user").fill("operator");
+    await connect.getByTestId("field-ssh_port").fill("2222");
+    await connect.getByTestId("field-rdp_port").fill("3390");
+    await withKey(connect, "host-ssh", HOST).click();
+    await expect.poll(sshLinks).toEqual([`ssh://admin@${HOST}`, `ssh://${HOST}`, `ssh://operator@${HOST}:2222`]);
+    const [typed] = await Promise.all([page.waitForEvent("download"), withKey(connect, "host-rdp", HOST).click()]);
+    const typedLines = (await readFile(await typed.path(), "utf8")).split("\r\n");
+    expect(typedLines).toContain(`full address:s:${HOST}:3390`);
+    expect(typedLines).toContain("username:s:operator");
+    expect(await wholeLog(api)).not.toContain(NAS.value);
+  });
 });
 
 test.describe("a Swedish browser", () => {

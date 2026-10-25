@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ANY_REVISION } from "../api/client";
 import { HOST_IDS, INTERFACE_IDS, IPAM_IDS, ipamState } from "../api/mock/ipam/api";
 import { server } from "../api/mock/node";
+import { putServices } from "../api/mock/reconcile-store";
 import { SEED_SECRET_VALUES } from "../api/mock/secrets-store";
 import type { Address, Host, HostInput } from "../api/types";
 import { paths } from "../app/paths";
@@ -22,6 +23,8 @@ beforeEach(async () => {
 });
 
 const MODE_DIALOG = "dialog-host-mode";
+/** What the probe saw open: the usual ports of both protocols, the alternatives and the bounds that the port tests type. */
+const SEEN_OPEN = [1, 22, 2222, 3389, 3390, 65535];
 /** The links to the two addresses of gw; they name the VRF, as an address needs it. */
 const ADDRESS_LINKS = [paths.address("192.0.2.1", IPAM_IDS.vrf.default), paths.address("2001:db8:0:10::1", IPAM_IDS.vrf.default)];
 
@@ -34,6 +37,8 @@ async function openHost(name: string, interfaces = 1): Promise<ReturnType<typeof
   const view = renderHost(name);
   await screen.findByTestId("host-modes");
   await waitFor(() => expect(interfaceRows()).toHaveLength(interfaces));
+  // The Connect panel reads the open ports of the addresses.
+  await waitFor(() => expect(screen.queryByTestId("connect-loading")).toBeNull());
   return view;
 }
 
@@ -334,6 +339,8 @@ describe("remote access hand-off", () => {
     downloads = [];
     clicked = [];
     remote = [];
+    // The probe saw SSH and RDP open at the addresses of the hosts these tests use.
+    for (const ip of ["192.0.2.1", "2001:db8:0:10::1", "192.0.2.10", "192.0.2.11"]) putServices(ip, SEEN_OPEN);
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -390,7 +397,10 @@ describe("remote access hand-off", () => {
   async function hostWith(name: string, ips: string[]): Promise<Host> {
     const host = await createHost({ name, mode: "static", interfaces: [{ name: "eth0" }] });
     const iface = await interfaceIdOf(host);
-    for (const ip of ips) await addAddress(ip, iface);
+    for (const ip of ips) {
+      await addAddress(ip, iface);
+      putServices(ip, SEEN_OPEN);
+    }
     return host;
   }
 
@@ -448,16 +458,13 @@ describe("remote access hand-off", () => {
       expect(buttons("ssh").map((b) => b.dataset.key)).toEqual(["192.0.2.71", "2001:db8:0:10::71"]);
     });
 
-    it("has one row with the host name for a host without addresses, and asks for no address", async () => {
-      const host = await createHost({ name: "kiosk.example.test", mode: "static", interfaces: [{ name: "eth0" }] });
+    it("has no row for a host without addresses, no scan can have reached it", async () => {
+      await createHost({ name: "kiosk.example.test", mode: "static", interfaces: [{ name: "eth0" }] });
       await openHost("kiosk.example.test");
-      expect(keys()).toEqual(["kiosk.example.test"]);
-      expect(button("rdp").dataset.key).toBe("kiosk.example.test");
-      expect(button("ssh").dataset.key).toBe("kiosk.example.test");
-
-      const lines = await hand("rdp");
-      expect(remote).toEqual([{ host: host.id, query: { protocol: "rdp" } }]);
-      expect(lines[0]).toBe("full address:s:kiosk.example.test:3389");
+      expect(screen.queryAllByTestId("remote-target")).toEqual([]);
+      expect(screen.queryAllByTestId("host-rdp")).toEqual([]);
+      expect(screen.getByTestId("connect-no-scan")).toBeTruthy();
+      expect(remote).toEqual([]);
     });
 
     it("leaves out a deleted address, and a host whose addresses are all deleted falls back to its name", () => {
@@ -559,6 +566,8 @@ describe("remote access hand-off", () => {
           u.roles = ["viewer"];
         },
       });
+      // Signing in again starts the mock afresh.
+      putServices("192.0.2.11", SEEN_OPEN);
       await openHost("nas");
       const lines = await hand("rdp");
       expect(lines[0]).toBe("full address:s:nas.example.test:3389");
@@ -804,6 +813,10 @@ describe("remote access hand-off", () => {
 });
 
 describe("the connect section", () => {
+  beforeEach(() => {
+    putServices("192.0.2.11", SEEN_OPEN);
+  });
+
   const section = () => document.querySelector("[aria-labelledby='host-connect-title']") as HTMLElement;
 
   it("holds the remote access rows and then the credentials of the host", async () => {
@@ -823,6 +836,7 @@ describe("the connect section", () => {
         u.roles = ["viewer"];
       },
     });
+    putServices("192.0.2.11", SEEN_OPEN);
     await openHost("nas");
     await waitFor(() => expect(screen.queryByTestId("host-credentials")).toBeNull());
     expect([...section().children].map((el) => el.tagName)).toEqual(["H2", "DIV"]);
