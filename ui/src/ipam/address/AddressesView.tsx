@@ -160,7 +160,7 @@ export default function AddressesView() {
           label={t("ipam.nav.addresses")}
           columns={columns}
           columnState={columnState}
-          rows={source.rows()}
+          rows={scopes.settled() ? source.rows() : []}
           rowId={(a) => a.id}
           rowKey={(a) => a.ip}
           rowLabel={(a) => a.ip}
@@ -169,8 +169,8 @@ export default function AddressesView() {
           selection={selection}
           sort={sort()}
           onSort={setSort}
-          loading={source.loading()}
-          initial={source.initial()}
+          loading={source.loading() || !scopes.settled()}
+          initial={source.initial() || !scopes.settled()}
           hasMore={source.hasMore()}
           onLoadMore={source.loadMore}
           error={source.error()}

@@ -1,6 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
 import { ADDRESS_IDS, IPAM_IDS, ipamState } from "../api/mock/ipam/api";
+import { server } from "../api/mock/node";
+import { listScopes } from "../dhcp/api";
 import type { Vrf } from "../api/types";
 import { paths } from "../app/paths";
 import { axeViolations } from "../app/testing/axe";
@@ -785,10 +788,42 @@ describe("acting on selected addresses of the prefix", () => {
     expect(within(rowOf("192.0.2.6")).queryByRole("button", { name: /^Actions for/ })).toBeNull();
     fireEvent.click(within(rowOf("192.0.2.30")).getByRole("button", { name: "Actions for 192.0.2.30" }));
     const menu = await screen.findByTestId("row-menu");
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "reserve", "delete"]);
+    // The DHCP scopes the item depends on arrive in a request of their own; the grid shows its rows
+    // only once they are in (see the next tests), and the assertion does not rely on that alone.
+    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "reserve", "delete"]));
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
     const dialog = await screen.findByTestId("dialog-delete");
     expect(within(dialog).getByRole("heading", { name: "Delete address 192.0.2.30" })).toBeTruthy();
+  });
+
+  it("shows the addresses once the DHCP scopes are read, so the row menu is complete the first time it opens", async () => {
+    const scopes = await listScopes();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.get("/api/v1/dhcp/scopes", async () => {
+        await gate;
+        return HttpResponse.json(scopes);
+      }),
+    );
+    renderIpam(paths.prefix("192.0.2.0/24"));
+    await paneOf("192.0.2.0/24");
+    // The addresses are on their way too, and wait for the scopes the row menu is judged by.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(addressRows()).toHaveLength(0);
+    release();
+    await waitFor(() => expect(addressRows().length).toBeGreaterThan(0));
+    fireEvent.click(within(rowOf("192.0.2.30")).getByRole("button", { name: "Actions for 192.0.2.30" }));
+    const menu = await screen.findByTestId("row-menu");
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "reserve", "delete"]);
+  });
+
+  it("shows the addresses without the reserve item when the DHCP scopes cannot be read", async () => {
+    server.use(http.get("/api/v1/dhcp/scopes", () => HttpResponse.json({ type: "about:blank", status: 500, code: "sys.internal", title: "Internal Server Error", params: {} }, { status: 500 })));
+    await openNetwork("192.0.2.0/24");
+    fireEvent.click(within(rowOf("192.0.2.30")).getByRole("button", { name: "Actions for 192.0.2.30" }));
+    const menu = await screen.findByTestId("row-menu");
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "delete"]);
   });
 
   describe("exporting the selection as CSV", () => {

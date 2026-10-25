@@ -405,7 +405,7 @@ export function PrefixPane(props: PrefixPaneProps) {
               label={t("ipam.addresses.grid", { cidr: props.prefix.cidr })}
               columns={columns}
               columnState={columnState}
-              rows={rows()}
+              rows={scopes.settled() ? rows() : []}
               rowId={addressRowId}
               rowKey={addressRowKey}
               rowLabel={(r) => addressRowKey(r)}
@@ -438,8 +438,8 @@ export function PrefixPane(props: PrefixPaneProps) {
                   </span>
                 ) : null
               }
-              loading={source.loading()}
-              initial={source.initial()}
+              loading={source.loading() || !scopes.settled()}
+              initial={source.initial() || !scopes.settled()}
               hasMore={source.hasMore()}
               onLoadMore={source.loadMore}
               error={source.error()}

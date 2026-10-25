@@ -9,8 +9,14 @@ import { may } from "../../auth/gate";
 import { mayWriteDhcp } from "../access";
 import { listScopes, type Scope } from "../api";
 
-/** The DHCP scopes by the prefix they serve; empty when they cannot be read. */
-export function createScopeIndex(): Accessor<ReadonlyMap<string, Scope>> {
+/** The scopes by prefix, and whether the answer (empty when they cannot be read) has arrived. */
+export type ScopeIndex = Accessor<ReadonlyMap<string, Scope>> & { settled: Accessor<boolean> };
+
+/**
+ * The DHCP scopes by the prefix they serve; empty when they cannot be read. A view shows the rows
+ * the gate judges only once `settled()`, so a row menu has its final shape the first time it opens.
+ */
+export function createScopeIndex(): ScopeIndex {
   const [scopes] = createResource(async () => {
     if (!mayWriteDhcp()) return new Map<string, Scope>();
     try {
@@ -19,7 +25,10 @@ export function createScopeIndex(): Accessor<ReadonlyMap<string, Scope>> {
       return new Map<string, Scope>();
     }
   });
-  return () => (scopes.error ? new Map() : (scopes.latest ?? new Map()));
+  // eslint-disable-next-line solid/reactivity -- accessors: the caller reads them inside its own tracked scope
+  return Object.assign(() => (scopes.error ? new Map<string, Scope>() : (scopes.latest ?? new Map<string, Scope>())), {
+    settled: () => !scopes.loading,
+  });
 }
 
 /** Whether the views offer to reserve the address of this prefix. */

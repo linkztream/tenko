@@ -361,7 +361,10 @@ describe("filtering the address list", () => {
       return state;
     };
     expect(await switchedOff("192.0.2.35")).toEqual({ open: false, move: true, history: false, restore: false, delete: true });
-    expect(await switchedOff("192.0.2.41")).toEqual({ open: false, move: false, history: false, reserve: false, restore: true, delete: false });
+    // "Reserve in DHCP" depends on the DHCP scopes, which are read in a request of their own.
+    await waitFor(async () =>
+      expect(await switchedOff("192.0.2.41")).toEqual({ open: false, move: false, history: false, reserve: false, restore: true, delete: false }),
+    );
   });
 
   it("deletes an address from its row menu and restores it from the deleted ones", async () => {

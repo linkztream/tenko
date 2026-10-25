@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Fixed
+
+- The row menu of an address has its final items the first time it opens: the address lists and a network's address grid show their rows once the DHCP scopes that decide "Reserve in DHCP" have been read (or have failed to read), instead of adding or leaving out the item when the answer arrives; the tests wait for that state instead of assuming it.
+
 ## [0.0.6] - 2026-10-25
 
 ### Added
