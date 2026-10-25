@@ -195,7 +195,7 @@ Decision P3-Q6, recorded in ADR 0020. Option 81 (RFC 4702) and the DHCID record 
 | DDNS from DHCP (proposed new row, P3-Q6 as decided) | Always writes into the scope's zones | Only where the zone's policy allows | Only where the zone's policy allows; name protection cannot be switched off | Always writes | WP8.3 |
 | Lease history retention (proposed new row, P3-Q13) | 30 days | 90 days | Per policy, default 90 days, exported with the audit stream | 7 days | WP7.2 |
 
-The failover shared secret (IAM-16, NEVER-01) gets its vault purpose `dhcp.failover` declared in WP7.0 and used in Phase 5. No DHCP setting weakens a never-off item.
+There is no failover shared secret: the pair channel is mutually authenticated TLS between enrolled nodes, and the vault purpose `dhcp.failover` declared in WP7.0 is withdrawn (ADR 0025, HA-Q8). No DHCP setting weakens a never-off item.
 
 ### 2.12 Single node first, cluster-aware
 

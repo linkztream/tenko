@@ -15,6 +15,7 @@ Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). It
 | 2 DNS | Complete, two measurements carried over (M23 idle memory, deviations 145 and 146) | [phase-2-status.md](plans/phase-2-status.md), [phase-2-exit.md](plans/phase-2-exit.md) |
 | 3 DHCP | In progress: the DHCPv4 engine, the `dhcp` role, reservations from intent, DDNS, classes and policies, conflict detection, the UI and the Kea export (DHCPv4) are merged; DHCPv6 (WP9.1, WP9.2, WP9.4) and the exit (WP9.5) are open | [phase-3-plan.md](plans/phase-3-plan.md), [phase-3-status.md](plans/phase-3-status.md) |
 | Recursion (Slice 10, beside Phase 3) | In progress: the contracts and the iterative engine with the lab root are merged; validation (WP10.2) is being built; WP10.3 to WP10.5 are open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
+| High availability of the data plane (Slice 12, after Phase 3) | Planned: the plan is accepted and ADR 0025 is Accepted (2026-10-25); WP12.0 to WP12.8 are open | [ha-plan.md](plans/ha-plan.md), [ADR 0025](adr/0025-dhcp-failover-and-data-plane-ha.md) |
 | 4 AD integration and migration | Not started | [MIGRATION.md](MIGRATION.md) |
 | 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
 
@@ -193,11 +194,12 @@ From this phase the move job's DNS step is automatic.
 
 - **DHCPv4**: scopes, pools, exclusions, reservations, options at all levels, classes and policies, relay and option 82, shared networks, PXE/UEFI, conflict detection, MAC filter, lease WAL and lease history (DHCP-01 to DHCP-08).
 - **DHCPv6**: IA_NA, IA_PD, DUID, relay and RFC 6939 correlation (DHCP-09, DHCP-11).
-- **Failover**: hash split, MCLT, hot-standby and load-balance modes, partner-down state and lease sync between pairs (DHCP-12).
+- **Failover** (Slice 12): pairs in load balance (hash split) or hot standby, a node in several pairs, MCLT, partner-down on evidence or by hand, and lease sync over the cluster port (DHCP-12).
 - **DDNS**: option 81, DHCID and name protection, PTR records, and updates on commit, expire and release (DHCP-13).
 - **IPAM reconciliation**: leases, DNS, scans and intent in one view with conflict rules (IPAM-21). Fingerprinting from options 55 and 60 feeds the OS field (DHCP-14).
 - **Tenko DHCP as actuator**: reservations are created directly from IPAM intent, and leases become observations without polling (DHCP-16).
 - **Recursive resolver** (Slice 10, the owner's decision REC-Q1 of 2026-10-22, moved here from Phase 5): Tenko's own recursive resolver from the root hints with DNSSEC validation, QNAME minimization, aggressive NSEC and RFC 5011 trust anchor maintenance (DNS-03, DNS-13, DNS-34), planned in [dns-recursion-plan.md](plans/dns-recursion-plan.md) and ADR 0021; until it ships, recursion is served by the forwarder, cache and RPZ combination from Phase 2.
+- **High availability of the data plane** (Slice 12, the owner's decisions HA-Q1 to HA-Q15 of 2026-10-25, moved here from Phase 5): `dns` and `dhcp` nodes without a controller, fed by node sync into a node store; leases held by the serving node and published to the controllers; DHCP failover pairs; the health hooks of OPS-17; split scopes beside Windows DHCP (DHCP-07, DHCP-12, DHCP-18, OPS-17, OPS-26), planned in [ha-plan.md](plans/ha-plan.md) and ADR 0025.
 
 The move job becomes fully automatic for `reserved` hosts (the DNS step was already automatic in Phase 2). This is where the IoT move becomes one click.
 
@@ -242,7 +244,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 
 ### Deliverables
 
-- **Multi-node data plane**: `dns` and `dhcp` nodes fed by the controllers through node sync, DHCP failover pairs, the cluster labs on VMs (E9, M2, M4 and M7 of Phase 1, deviation 74 of its exit document), the single-node figures of Phases 2 and 3 compared against the cluster (owner's direction of 2026-10-17: single node first).
+- **Multi-node data plane**: the cluster labs on VMs (E9, M2, M4 and M7 of Phase 1, deviation 74 of its exit document), the single-node figures of Phases 2 and 3 compared against the cluster (owner's direction of 2026-10-17: single node first).
 - **Multi-site ownership**: site-local Raft groups for the objects a site owns, so a cut-off site keeps changing its own prefixes, scopes and zones (OPS-27).
 - **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).
 - **Scaling hooks**: anycast health hooks (BGP withdrawal) and autoscaling hooks for the Kubernetes, Nomad and Proxmox APIs (OPS-17, OPS-18).

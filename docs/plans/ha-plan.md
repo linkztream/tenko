@@ -1,12 +1,12 @@
 # High availability plan: DHCP failover and a data plane that outlives a node
 
-- Status: Draft for the owner's review on 2026-10-25. Every decision of section 7 (HA-Q1 to HA-Q15) is a recommendation until the owner answers; the plan binds once the owner accepts it and then changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md), section 2.12 of [phase-3-plan.md](phase-3-plan.md)), is what this plan builds on: Phase 3 built one node and the fields and traits a pair needs; this plan says what the pair is
+- Status: Accepted on 2026-10-25: the owner decided every question of section 7 (HA-Q1 to HA-Q15) as recommended. The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md), section 2.12 of [phase-3-plan.md](phase-3-plan.md)), is what this plan builds on: Phase 3 built one node and the fields and traits a pair needs; this plan says what the pair is
 - Date: 2026-10-25
-- Scope: DHCP-12 (failover), DHCP-18 (its chaos test), the DHCP half of OPS-02 and OPS-26, the "Multi-node data plane" bullet of Phase 5 in [ROADMAP.md](../ROADMAP.md) as far as DNS and DHCP need it to survive the loss of one node, and the health hooks of OPS-17. Written against `main` at `3bee0354`, with DHCPv4 complete, DHCPv6 IA_NA merged as WP9.1 and IA_PD open as WP9.2 ([phase-3-status.md](phase-3-status.md)). Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md), RFC targets to [CONFORMANCE.md](../CONFORMANCE.md). The decision is recorded as [ADR 0025](../adr/0025-dhcp-failover-and-data-plane-ha.md) (Proposed)
+- Scope: DHCP-12 (failover), DHCP-18 (its chaos test), the DHCP half of OPS-02 and OPS-26, the "Multi-node data plane" bullet of Phase 5 in [ROADMAP.md](../ROADMAP.md) as far as DNS and DHCP need it to survive the loss of one node, and the health hooks of OPS-17. Written against `main` at `3bee0354`, with DHCPv4 complete, DHCPv6 IA_NA merged as WP9.1 and IA_PD open as WP9.2 ([phase-3-status.md](phase-3-status.md)). Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md), RFC targets to [CONFORMANCE.md](../CONFORMANCE.md). The decision is recorded as [ADR 0025](../adr/0025-dhcp-failover-and-data-plane-ha.md) (Accepted)
 
 The owner compared Tenko with Infoblox, BlueCat and EfficientIP and named two gaps that keep Tenko out of production: high availability of the data plane, above all DHCP failover, and identity. Both are to be done right from the start. This plan covers the first; identity has a plan of its own, written at the same time. The plan has the form of [dns-recursion-plan.md](dns-recursion-plan.md): the goal, the exit criteria as checks, the designs compared and the one recommended, the decisions the packages share, the work packages with their acceptance, the order, the measurements, the owner's decisions, the requirement rows touched, the risks, the owner's actions and the sources. "(proposed)" marks a choice the documents leave open. Sizes are in builder-days.
 
-**Numbering.** Exit criteria, measurements and risks continue the project's series but start at E60, M60 and R100, so that the identity plan written beside this one can take the next free numbers (E43, M45 and R87 onward) without a clash; the lead closes the gap when both plans are accepted. The slice is called Slice 12 and its packages WP12.x, provisionally: Phase 4's slices were to start at 11 (recursion plan, section 1.3), and the identity plan may take 11. Where the slice sits in the calendar is HA-Q1, and the lead renumbers once that is decided.
+**Numbering.** Exit criteria, measurements and risks continue the project's series but start at E60, M60 and R100, so that the identity plan written beside this one can take the next free numbers (E43, M45 and R87 onward) without a clash; the lead closes the gap when both plans are accepted. The slice is called Slice 12 and its packages WP12.x, provisionally: Phase 4's slices were to start at 11 (recursion plan, section 1.3), and the identity plan may take 11. Where the slice sits in the calendar was HA-Q1, decided on 2026-10-25, and the lead renumbers accordingly.
 
 Contents:
 
@@ -456,80 +456,95 @@ Each question lists its options, the trade-offs and the recommendation. The docu
 - Options: (a) after the Phase 3 exit (WP9.5) and before Phase 4, as the last slice of Phase 3 ("3 (Slice 12)", as the recursion slice became "3 (Slice 10)"), with WP12.0 allowed to start beside WP9.2; (b) in Phase 5 with the cluster work, as P3-Q2 decided; (c) beside Slice 9 now.
 - Trade-offs: (a) follows the owner's direction that this gap is closed right from the start, meets the ROADMAP's Phase 3 "Done when" line for the failover pair instead of recording it as a deviation, and gives Phase 4's Windows migration a pair to map failover relationships onto; it delays Phase 4 by the slice. (b) keeps the plan's order and leaves the disqualifying gap open through Phase 4. (c) competes with Slice 9 for `crates/tenko-dhcp/**`, which one owner holds at a time.
 - **Recommendation: (a).** P3-Q2 is reversed; DHCP-12 and DHCP-18 keep Phase 3 with "(Slice 12)", and the trace script lists this plan as Phase 3's third source (section 11).
+- **Decided (2026-10-25): (a), after the Phase 3 exit as "3 (Slice 12)".**
 
 **HA-Q2. Where does the authoritative lease live?**
 - Options: (a) in the serving node's node store for every deployment, published to the controllers; (b) in the controllers' store for an unpaired scope on a controller node (P3-Q1 as built), in the node store for pairs and data-plane nodes; (c) in the controllers' store always (design (b) of section 2.3).
 - Trade-offs: (a) is one model, gives a lone node I4, and costs a second, batched write per lease (M62). (b) keeps the measured single-node path but has two homes for leases and a migration whenever a scope joins a pair or a controller joins a cluster. (c) breaks I3, I4 and I5.
 - **Recommendation: (a)**, with (b) as the fallback if M62 misses its threshold.
+- **Decided (2026-10-25): (a), the serving node's store, with (b) as the fallback if M62 misses its threshold.**
 
 **HA-Q3. When does the partner hear of a binding?**
 - Options: (a) after the ACK (the draft's lazy update), bounded by the MCLT; (b) before every ACK (Kea): the partner's acknowledgement is part of the answer, and an unreachable partner stops answers until partner-down; (c) lazy, but a new binding waits up to `ack_wait_ms` (50 ms) for the partner's acknowledgement in normal, so new clients get the full lease time and their binding is on two disks; renewals never wait.
 - Trade-offs: (a) keeps the ACK's latency independent of the partner and the link, and its first leases are short (the MCLT). (b) is the strongest durability, but doubles latency on every renewal, makes partner-down detection the only guard of availability, and stops new and renewing clients during the detection window. (c) costs a LAN round trip on new bindings only, falls back to (a) by itself when the partner is slow or gone, and gives I2 against disk loss for every binding the partner acknowledged.
 - **Recommendation: (c).**
+- **Decided (2026-10-25): (c), lazy with a bounded wait for new bindings.**
 
 **HA-Q4. The default mode of a new pair?**
 - Options: (a) load balance 50/50 (Windows' default); (b) hot standby with a 5 percent reserve; (c) no default, the operator chooses.
 - Trade-offs: (a) uses both machines, splits the load and gives each partner half the pool, which lasts long in communications-interrupted. (b) is the simpler picture and right for a central standby across a WAN, but leaves the standby a small reserve in communications-interrupted. (c) asks a home user a question they cannot answer.
 - **Recommendation: (a)** for two nodes at one site; the dialog proposes (b) when the two nodes are at different IPAM sites.
+- **Decided (2026-10-25): (a), load balance 50/50 for two nodes at one site; the dialog proposes hot standby across sites.**
 
 **HA-Q5. How are addresses split between partners?**
 - Options: (a) a fixed function of the address (its hash into 256 buckets by the split), with no messages; (b) the draft's dynamic pools: the primary owns free addresses and hands the secondary a share with POOLREQ, rebalanced over time; (c) contiguous halves of each pool.
 - Trade-offs: (a) needs no state, both nodes agree by computation, resizing a pool moves nothing, and load balance drains the two shares at the same rate; a small pool's split is uneven, which the rule for pools under 64 addresses handles. (b) adapts to uneven demand at the cost of a protocol, state per free address and its recovery. (c) is easy to read but moves ownership when a pool is resized.
 - **Recommendation: (a)**, with the row's `share` reserved for rebalancing later.
+- **Decided (2026-10-25): (a), a fixed function of the address.**
 
 **HA-Q6. When may a node take over its partner's share?**
 - Options: (a) by hand only; (b) automatically after a safe period without contact; (c) automatically after a safe period and only with evidence (the controllers' witness or the partner's clients waiting), and by hand always.
 - Trade-offs: (a) is the draft's safest reading and Windows' default, but a home without an operator at hand runs on half a pool until someone acts. (b) is simple, but a partition that leaves both partners reaching the clients makes both take over: duplicates after the MCLT. (c) takes over only when the partner is not serving, which E61 tests; its cost is the delayed answer to the partner's clients in communications-interrupted.
 - **Recommendation: (c)**, with the profile values of section 3.7.
+- **Decided (2026-10-25): (c), automatic only with evidence, and by hand always.**
 
 **HA-Q7. The default MCLT?**
 - Options: (a) one hour (Windows' and ISC's default); (b) 15 minutes; (c) derived from the scope's lease time.
 - Trade-offs: a shorter MCLT shortens the wait before partner-down takes the partner's share and after a disk loss, and makes clients renew more often while the partner is gone; a longer one the reverse. (c) makes one setting mean different things per scope.
 - **Recommendation: (a)**, settable per pair from 5 minutes to a day.
+- **Decided (2026-10-25): (a), one hour, settable per pair from 5 minutes to a day.**
 
 **HA-Q8. How is the pair channel secured?**
 - Options: (a) the cluster port's mutual TLS between enrolled nodes, accepted only from the named partner, with no shared secret; (b) the draft's TCP 647 with an HMAC shared secret from the vault (purpose `dhcp.failover`); (c) both.
 - Trade-offs: (a) reuses the transport, enrolment, revocation and version negotiation every node has, and adds no secret to distribute and rotate; a compromised node can lie only to its partner about the pair's scopes, which a secret would not prevent, because the compromised node holds it. (b) is a second transport and a secret with its own distribution, needed only for a peer that does not exist. (c) costs (b) and adds nothing (a) lacks.
 - **Recommendation: (a)**; the purpose `dhcp.failover` is withdrawn and IAM-16 and NEVER-01 are edited.
+- **Decided (2026-10-25): (a), the cluster port's mutual TLS with no shared secret.**
 
 **HA-Q9. DHCPv6: RFC 8156 or not?**
 - Options: (a) RFC 8156 on the wire (TCP 647, its framing over bulk leasequery); (b) RFC 8156's model (states, MCLT, independent allocation for addresses, a fixed split for prefixes) on Tenko's pair channel; (c) a static split with no lease sync (RFC 6853), as BlueCat does.
 - Trade-offs: (a) interoperates with no existing server (Kea, ISC dhcpd and Windows do not implement it) and adds a second protocol beside DHCPv4's. (b) gives RFC 8156's behaviour over one channel. (c) is simple, but every client of a dead server renumbers at its rebind.
 - **Recommendation: (b).** CONFORMANCE.md's RFC 8156 row becomes "Partial: the model, not the wire protocol, deliberately".
+- **Decided (2026-10-25): (b), RFC 8156's model on Tenko's pair channel.**
 
 **HA-Q10. Pairs only, or groups?**
 - Options: (a) pairs, with a node in any number of pairs; (b) groups of N servers per scope (EfficientIP's clusters, or design (b) of section 2.3); (c) pairs now, groups later if asked.
 - Trade-offs: (a) covers the two-box home, a pair per site and one central standby for many branches. (b) needs a different model of ownership and partition, and either breaks I3 or needs consensus among the servers on the DORA path.
 - **Recommendation: (a)**, which is (c) without the promise.
+- **Decided (2026-10-25): (a), pairs, with a node in any number of pairs.**
 
 **HA-Q11. How are `dns` and `dhcp` nodes fed?**
 - Options: (a) node sync of the role's subset into a node store (paged snapshots, the existing feeds over it); (b) the node as a non-voting Raft learner of the controllers' group; (c) node sync into `state.cbor`, as the probe has it.
 - Trade-offs: (a) gives a node only its subset, works over slow links (OPS-28) and reuses the feeds unchanged. (b) is the least code, but every learner receives every table (users, audit, the vault's sealed values, all of IPAM), which widens what a compromised data-plane node holds far beyond its role, and the leader replicates every write to every node. (c) rewrites one file per change and holds everything in memory, which does not scale to large zones.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), node sync of the role's subset into a node store.**
 
 **HA-Q12. Client failover for DNS: what does Tenko do itself?**
 - Options: (a) two addresses in option 6 by default, and a health check (`tenko node health`, the readiness route) that the operator's keepalived or routing daemon reads, with examples; (b) a built-in VRRP; (c) a built-in BGP speaker for anycast.
 - Trade-offs: (a) adds no privilege and no protocol to the data plane and fits every network. (b) and (c) need `CAP_NET_ADMIN` or raw sockets in the serving process (ADR 0023 grants only what the roles need), duplicate mature daemons, and move routing into Tenko's attack surface.
 - **Recommendation: (a)**; the health-hook half of OPS-17 moves into this slice.
+- **Decided (2026-10-25): (a), two addresses in option 6 and a health check for the operator's tools; the health-hook half of OPS-17 moves into the slice.**
 
 **HA-Q13. What does a node do while every controller is gone?**
 - Options: (a) everything that does not change configuration: DHCP in full (new leases included, by its pair state), DNS from its copy, updates and DDNS refused until a controller is back, publications and observations queued; (b) the same, and DDNS written into the node's own copy of the zone and merged later; (c) DHCP refuses new leases (P3-Q14 as built).
 - Trade-offs: (a) keeps the control plane the only writer of zones, so there is nothing to merge (OPS-26's principle); the names of new clients wait. (b) needs a merge of zone data, which the control plane's design avoids, and is OPS-27's job. (c) breaks OPS-02.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), everything that does not change configuration.**
 
 **HA-Q14. Coexistence with Windows DHCP during a migration?**
 - Options: (a) split scopes with exclusions, a non-authoritative Tenko scope and an offer delay on the server that should answer second; (b) exclusions only; (c) no coexistence: scopes move whole at a cut-over.
 - Trade-offs: (a) is the arrangement Windows itself documents for split scopes, and keeps Tenko from refusing Windows' clients. (b) lets an authoritative Tenko scope NAK clients that hold Windows leases. (c) is what the home cut-over did, fine for a home and too abrupt for an enterprise.
 - **Recommendation: (a)**, with (c) still available.
+- **Decided (2026-10-25): (a), split scopes with a non-authoritative Tenko scope and an offer delay, with (c) still available.**
 
 **HA-Q15. History: published or node-local?**
 - Options: (a) published to the controllers with the leases, the controllers keeping the retention of P3-Q13 (the purge stays a leader service), the node keeping only what it has not published; (b) node-local only, read through `dhcp.history.read`.
 - Trade-offs: (a) keeps P3-Q13 and the backup unchanged and keeps "who had this address on Tuesday" answerable when the node is gone; it doubles the history writes. (b) is less traffic but loses history with a node.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), published to the controllers with the leases.**
 
 ## 8. Requirement rows and documents touched
 
-Proposed changes to the lead's files; no new requirement IDs.
+Changes to the lead's files, applied on 2026-10-25 after the decisions; no new requirement IDs.
 
 | Row or file | Proposed change |
 |---|---|
@@ -575,7 +590,7 @@ Proposed changes to the lead's files; no new requirement IDs.
 
 | When | Action |
 |---|---|
-| Before WP12.0 | Read the plan; answer HA-Q1 to HA-Q15 |
+| Before WP12.0 | Read the plan; answer HA-Q1 to HA-Q15 (done on 2026-10-25) |
 | Before WP12.7 | A second node VM on the lab host (a clone of the node VM: 4 vCPU, 4 GiB, its own disk on SSD), on the same bridge; the lead gives the commands. perfdhcp is already on the load VM |
 | Before E64 | Check whether the reference gateway can relay each network to two DHCP servers (two relay targets per network); if it cannot, the lab uses the floating-address fallback and the home stays on hot standby |
 | E64 at home (optional, owner-run) | Enrol the second box as in section 3.17, pair the scopes, add the second relay target and the second option 6 address, then pull each box's power once on a quiet evening and watch the Pairs page and a client |
@@ -585,7 +600,7 @@ Proposed changes to the lead's files; no new requirement IDs.
 
 | Document | Package |
 |---|---|
-| ADR 0025: DHCP failover and data-plane high availability; supersedes ADR 0019 point 3 | Written as Proposed with this plan; refined by WP12.0; Accepted with the exit document |
+| ADR 0025: DHCP failover and data-plane high availability; supersedes ADR 0019 point 3 | Written as Proposed with this plan; Accepted on 2026-10-25 with the decisions; refined by WP12.0 |
 | `docs/dhcp.md` sections 8 and 10 (the node store, the publication, the role without a controller) and a new section 20 (pairs: the states, the MCLT, partner-down, the operator's steps) | WP12.2, WP12.3, WP12.5 |
 | `docs/dhcp-contracts.md` (pairs, the messages, the codes, the metrics) | WP12.0 |
 | `docs/node-sync.md` (the node store, paged snapshots, the `dns` and `dhcp` subsets, `Leases.Publish`) and `docs/cluster.md` (a node's cluster port for the pair) | WP12.1, WP12.2, WP12.3 |
@@ -595,7 +610,7 @@ Proposed changes to the lead's files; no new requirement IDs.
 | `docs/plans/ha-status.md` (the hand-over file), `docs/plans/ha-exit.md` | the lead; WP12.7 |
 | CONFORMANCE.md, REQUIREMENTS.md, ROADMAP.md, ARCHITECTURE.md, SECURITY-PROFILES.md and MIGRATION.md as section 8 lists; CHANGELOG entries per package | the lead; every package |
 
-**The trace.** `scripts/requirement-trace.mjs` reads Phase 3's exit criteria from `phase-3-plan.md` and `dns-recursion-plan.md` (`PHASES`). E60 to E71 live here and are not traced until the lead adds this plan as a third source of Phase 3 (if HA-Q1 is answered (a)), with WP12.0, as was done for Slice 10. Until then the traces count this document among those that name the requirements, which is correct.
+**The trace.** `scripts/requirement-trace.mjs` reads Phase 3's exit criteria from `phase-3-plan.md` and `dns-recursion-plan.md` (`PHASES`). E60 to E71 live here; HA-Q1 was answered (a), and this plan is the third source of Phase 3 in `PHASES`, as the recursion plan was made the second for Slice 10.
 
 ## 12. Sources
 

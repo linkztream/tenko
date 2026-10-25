@@ -579,9 +579,14 @@ describe("phases", () => {
     assert.deepEqual(PHASES[2]?.plans, ["docs/plans/phase-2-plan.md"]);
     // WP7.0: Phase 3.
     assert.equal(PHASES[3]?.trace, "docs/plans/phase-3-trace.md");
-    // WP10.0: the recursion plan is a second source of Phase 3's criteria.
-    assert.deepEqual(PHASES[3]?.plans, ["docs/plans/phase-3-plan.md", "docs/plans/dns-recursion-plan.md"]);
-    assert.equal(PHASES[3]?.exits, "E22 to E42");
+    // WP10.0: the recursion plan is a second source of Phase 3's criteria; HA-Q1: the high
+    // availability plan is a third.
+    assert.deepEqual(PHASES[3]?.plans, [
+      "docs/plans/phase-3-plan.md",
+      "docs/plans/dns-recursion-plan.md",
+      "docs/plans/ha-plan.md",
+    ]);
+    assert.equal(PHASES[3]?.exits, "E22 to E42 and E60 to E71");
     assert.throws(() => phaseConfig(4), /phase 4 is not traced/);
   });
 
@@ -603,7 +608,7 @@ describe("phases", () => {
   });
 
   // WP7.0, WP10.0
-  describe("Phase 3 with two plans", () => {
+  describe("Phase 3 with three plans", () => {
     const PHASE_3_PLAN = [
       "# Phase 3 plan",
       "",
@@ -626,6 +631,16 @@ describe("phases", () => {
       "| E35 | QNAME minimisation on the wire | DNS-34 | WP10.3 |",
       "",
     ].join("\n");
+    const HA_PLAN = [
+      "# HA plan",
+      "",
+      "### 1.3 Exit criteria",
+      "",
+      "| # | Check | Requirements | Package |",
+      "|---|---|---|---|",
+      "| E60 | Kill under load | DHCP-12, DHCP-07 | WP12.7 |",
+      "",
+    ].join("\n");
     const REQUIREMENTS_3 = REQUIREMENTS.replace(
       "| MIG-14 | Re-import. | 1 | Must |",
       [
@@ -642,27 +657,28 @@ describe("phases", () => {
       "docs/REQUIREMENTS.md": REQUIREMENTS_3,
       "docs/plans/phase-3-plan.md": PHASE_3_PLAN,
       "docs/plans/dns-recursion-plan.md": RECURSION_PLAN,
+      "docs/plans/ha-plan.md": HA_PLAN,
       "crates/tenko-dhcp/tests/crash.rs":
         "#[test]\nfn e24_no_lease_lost() {}\n\n/// DHCP-07.\n#[test]\nfn rows_are_committed() {}\n",
       "crates/tenko-dns/tests/validate.rs":
         "#[test]\nfn e33_lab_root_chain() {}\n\n/// DNS-13.\n#[test]\nfn chain_is_secure() {}\n",
     };
 
-    test("the criteria of both plans are merged in ID order and rendered with both plans", () => {
+    test("the criteria of all plans are merged in ID order and rendered with all plans", () => {
       const root = makeTree(TREE_3);
       const trace = buildTrace(root, 3);
       assert.equal(trace.phase, 3);
-      assert.deepEqual(trace.exits.map((e) => e.id), ["E22", "E24", "E33", "E35"]);
+      assert.deepEqual(trace.exits.map((e) => e.id), ["E22", "E24", "E33", "E35", "E60"]);
       const text = renderTrace(trace);
       assert.match(text, /^# Phase 3 requirement trace\n/);
       assert.match(
         text,
-        /the exit criteria E22 to E42 of `docs\/plans\/phase-3-plan\.md` and `docs\/plans\/dns-recursion-plan\.md`/,
+        /the exit criteria E22 to E42 and E60 to E71 of `docs\/plans\/phase-3-plan\.md` and `docs\/plans\/dns-recursion-plan\.md` and `docs\/plans\/ha-plan\.md`/,
       );
       assert.match(text, /\| E24 \| Leases survive the node \| DHCP-07 \| `crates\/tenko-dhcp\/tests\/crash\.rs::e24_no_lease_lost` \|/);
       assert.match(text, /\| E33 \| Validation from the lab root \| DNS-13, DHCP-12 \| `crates\/tenko-dns\/tests\/validate\.rs::e33_lab_root_chain` \|/);
       assert.match(text, /\| DHCP-07 \| Must \| `crates\/tenko-dhcp\/tests\/crash\.rs::rows_are_committed` \|/);
-      const order = ["| E22 |", "| E24 |", "| E33 |", "| E35 |"].map((m) => text.indexOf(m));
+      const order = ["| E22 |", "| E24 |", "| E33 |", "| E35 |", "| E60 |"].map((m) => text.indexOf(m));
       assert.deepEqual(order, [...order].sort((a, b) => a - b));
     });
 

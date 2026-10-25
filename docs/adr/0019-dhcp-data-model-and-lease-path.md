@@ -1,6 +1,6 @@
 # ADR 0019: DHCP data model and lease path
 
-- Status: Proposed
+- Status: Proposed (point 3 is superseded by ADR 0025 for where a lease lives, and the fallback of point 4 becomes the production path)
 - Date: 2026-10-21
 
 ## Context

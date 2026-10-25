@@ -113,7 +113,7 @@ The UI shows the local queue and these records with their conflicts. A re-apply 
 ## 6. Probes, DNS and DHCP nodes
 
 - **Probes** keep scanning. A controller without quorum refuses `Observations.Ingest` with `cluster.no_quorum`; the probe keeps the batch in its disk buffer and tries the next controller it knows, so a probe that can still reach a controller of the majority delivers there, and one that reaches none delivers after the heal. The in-process probe of an isolated controller keeps its batches in the relay buffer. The details, including configuration and commands, are in [node-sync.md](node-sync.md#10-what-a-partition-does). Observations are facts, not intent: they merge per source as in [reconciliation.md](reconciliation.md) and need no queue.
-- **`dns` and `dhcp` nodes** serve from the configuration they hold whatever the controllers' state (OPS-28). DHCP leases across a partition are merged by the DHCP failover protocol with MCLT (Phase 3), not by this mechanism.
+- **`dns` and `dhcp` nodes** serve from the configuration they hold whatever the controllers' state (OPS-28). DHCP leases across a partition are merged by the DHCP failover protocol with MCLT (Slice 12), not by this mechanism; a serving node publishes its leases to the controllers' store after the answer, and the publications wait on the node while no controller is reachable (ADR 0025).
 
 ## 7. Files, limits, audit and error codes
 

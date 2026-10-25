@@ -64,7 +64,7 @@ AXFR alone loses what is not part of the zone data on the wire: record ownership
 | Proxmox VE | REST API | Proxmox runs no DNS of its own. A DNS server in a VM or container on Proxmox is imported through its own adapter (BIND, dnsmasq, Windows). Proxmox itself is an inventory source: VM and container names, MAC addresses, IP addresses via the guest agent, SDN vnets. Later, a NetBox-compatible API lets Proxmox SDN use Tenko as its IPAM plugin | CONN-03, CONN-17 |
 | dnsmasq / Pi-hole | Config files and `/etc/hosts` | `dhcp-host`, `address=`, `host-record`, blocklists (imported as RPZ) | MIG-11 |
 | Kea / ISC dhcpd | Kea JSON plus lease file or database; `dhcpd.conf` plus `dhcpd.leases` | Subnets, pools, reservations, classes, options | MIG-12 |
-| Windows DHCP | `Export-DhcpServer -Leases` (XML) plus `Get-DhcpServerv4*` cmdlets | Scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings, failover relationships (the shared secret is recreated, not exported) | MIG-08 |
+| Windows DHCP | `Export-DhcpServer -Leases` (XML) plus `Get-DhcpServerv4*` cmdlets | Scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings, failover relationships, mapped to a Tenko pair (the shared secret is neither exported nor needed) | MIG-08 |
 | Generic | CSV or Excel (an existing IPAM spreadsheet, Phase 1), hosts files, NetBox and phpIPAM APIs | Hosts, networks and addresses from the foreign inventory | IPAM-11, MIG-13 |
 
 ### Windows DNS (both storage modes)
@@ -78,7 +78,7 @@ Query Resolution Policies require Windows Server 2016 or later. Older servers ha
 
 ### Windows DHCP
 
-Windows DHCP failover is a proprietary protocol and is not interoperable with any other implementation (CON-05). Tenko therefore cannot join a Windows failover relationship. During coexistence, Tenko and Windows DHCP serve split scopes: the address range of a scope is divided so that the two servers never offer the same address. The Windows failover relationship is read into the IR and re-created as a Tenko failover pair (DHCP-12); its shared secret is created anew and stored in the vault (IAM-16).
+Windows DHCP failover is a proprietary protocol and is not interoperable with any other implementation (CON-05). Tenko therefore cannot join a Windows failover relationship. During coexistence, Tenko and Windows DHCP serve split scopes: the address range of a scope is divided so that the two servers never offer the same address. The Windows failover relationship is read into the IR and re-created as a Tenko pair (DHCP-12); its shared secret is not recreated, because the pair channel is mutually authenticated TLS between enrolled nodes and needs none (ADR 0025).
 
 ## Pipeline: plan, apply, verify
 
@@ -106,7 +106,7 @@ The mode is chosen per zone or scope in the UI (MIG-04). It controls who is auth
 | Forward | Forwards selected zones to the old server while taking over others | Authoritative for the forwarded zones | Allows a zone-by-zone cut-over under a single resolver address. |
 | Flip | Primary | Secondary to Tenko, or switched off after a rollback window | The cut-over. The rollback window keeps the old server available until Tenko is confirmed. |
 
-For DHCP the equivalent is split scopes (CON-05), described under Windows DHCP above. DHCP scopes are moved in the same per-scope fashion: the range handed to Tenko grows while the range left on the old server shrinks.
+For DHCP the equivalent is split scopes (CON-05), described under Windows DHCP above. DHCP scopes are moved in the same per-scope fashion: the range handed to Tenko grows while the range left on the old server shrinks. The Tenko scope of a split scope is set non-authoritative, so that it never refuses a client that holds a lease from the old server, and the server that should answer second waits: the offer delay on the Tenko scope, the delay setting on the Windows secondary.
 
 During coexistence, changes made in IPAM must still reach the server that clients actually use. The external actuators for coexistence cover this: Windows DHCP via PowerShell and Kea via its Control Agent (CONN-12), and RFC 2136 or Windows DNS via PowerShell (CONN-13). Both ship in Phase 4.
 
@@ -245,5 +245,5 @@ Not a migration source; listed here because it uses the same WinRM and PowerShel
 |---|---|---|
 | Record owner ACLs | Not exposed by the DnsServer cmdlets; only available through LDAP as security descriptors on `dnsNode` objects. File-backed zones have no per-record ACLs. | Read through LDAP and mapped to per-RRset ownership (DNS-28) |
 | DNSSEC private keys | Not exportable from the Windows key storage | Tenko signs with new keys. A signed zone needs a planned key rollover and a DS update at the parent. |
-| DHCP failover shared secret | Not exported | Recreated and stored in the vault (IAM-16) |
+| DHCP failover shared secret | Not exported | Not needed: the pair channel is mutually authenticated TLS between enrolled nodes (ADR 0025) |
 | DDNS credential password (the account the Windows DHCP server uses for dynamic DNS updates) | The password cannot be read back | Re-entered into the vault, or replaced by Tenko DHCP's own DDNS path (DHCP-13) |

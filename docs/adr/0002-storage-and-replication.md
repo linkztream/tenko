@@ -2,6 +2,7 @@
 
 - Status: Accepted with conditions (Spike A gate passed 2026-10-09)
 - Date: 2026-10-09
+- Superseded in part by ADR 0025 for the lease path
 
 ## Context
 

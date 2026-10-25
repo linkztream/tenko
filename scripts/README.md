@@ -110,7 +110,8 @@ whose phase cell names the phase: the cell, or a part of it after a `;`, starts 
 `2 and 3 (DNS and DHCP modules)`, `1 (delta sync, Slice 3); 2 (IXFR)`, not `1 (write: 2)`), and
 the exit criteria of the table under "Exit criteria" of the phase's plan: E1 to E12 of
 `docs/plans/phase-1-execution.md`, E13 to E21 of `docs/plans/phase-2-plan.md`, E22 to E32 of
-`docs/plans/phase-3-plan.md` and E33 to E42 of `docs/plans/dns-recursion-plan.md` (a phase may
+`docs/plans/phase-3-plan.md`, E33 to E42 of `docs/plans/dns-recursion-plan.md` and E60 to E71 of
+`docs/plans/ha-plan.md` (a phase may
 name several plans: their criteria are merged in ID order, and an ID defined in two plans is an
 error, exit code 2; a phase cell such as `3 (Slice 10)` names Phase 3). `--phase`
 defaults to 1, so the Phase 1 command and its output are unchanged. The generated trace files

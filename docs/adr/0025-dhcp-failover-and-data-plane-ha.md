@@ -1,6 +1,6 @@
 # ADR 0025: DHCP failover and data-plane high availability
 
-- Status: Proposed
+- Status: Accepted (the owner decided HA-Q1 to HA-Q15 of the plan on 2026-10-25)
 - Date: 2026-10-25
 
 ## Context
@@ -18,7 +18,7 @@ What constrains the design:
 
 Three designs were compared (plan section 2): a failover pair after the draft; the replicated store as the only arbiter, with two nodes serving one scope behind conditional writes; and a hybrid that uses the store while it has a quorum and the draft's behaviour when it has not. The second breaks rule 5 and fails with two machines; the third builds both and runs its safety-critical path only during failures.
 
-Once accepted, this ADR supersedes point 3 of ADR 0019 for where a lease lives (ADR 0019 is Proposed; its status line will name the change) and reverses P3-Q2's placement of failover in Phase 5 if the owner answers HA-Q1 as recommended. ADR 0002 point 4 stays in force.
+This ADR supersedes point 3 of ADR 0019 for where a lease lives (ADR 0019 is Proposed; its status line names the change) and reverses P3-Q2's placement of failover in Phase 5, as the owner decided in HA-Q1 on 2026-10-25. ADR 0002 point 4 stays in force.
 
 ## Decision
 

@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-30 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-31 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -63,6 +63,7 @@ Reading the matrix:
 | TGL-28 | Negative trust anchor lifetime | At most 7 days | At most 7 days | Expiry required, at most 7 days | At most 7 days | 3 (Slice 10) | DNS-13 |
 | TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
 | TGL-30 | Bug report link from the web UI to GitHub ("Report a bug": the new-issue page prefilled with the redacted diagnostics, filed under the person's own account) | On | On | Off: the dialog copies the diagnostics to the clipboard only, no outbound link from the interface | On | 3 | OPS-05 |
+| TGL-31 | Automatic partner-down in a DHCP failover pair | Automatic with evidence after 600 s | Automatic with evidence after 600 s | Automatic on the controllers' witness only, else by hand | Automatic with evidence after 60 s | 3 (Slice 12) | DHCP-12 |
 
 Notes:
 
@@ -79,7 +80,7 @@ These controls cannot be switched off in any profile, including Lab.
 
 | ID | Control | Why |
 |---|---|---|
-| NEVER-01 | Secrets encrypted at rest (envelope encryption, IAM-15) | The vault holds TSIG keys, failover secrets, SNMPv3 and DDNS credentials and connector credentials (IAM-16). A plaintext copy in the store, a backup or a snapshot would turn any read access into a compromise of AD, hypervisors and network controllers. |
+| NEVER-01 | Secrets encrypted at rest (envelope encryption, IAM-15) | The vault holds TSIG keys, SNMPv3 and DDNS credentials and connector credentials (IAM-16). A plaintext copy in the store, a backup or a snapshot would turn any read access into a compromise of AD, hypervisors and network controllers. |
 | NEVER-02 | Audit log (immutable, hash-chained, IAM-18) | Insecure configuration needs a trail more than a secure one. Toggle changes, secret reveals and every other change must stay reconstructable and tamper-evident. |
 | NEVER-03 | Admin action attribution (IAM-19) | Every change must be attributable to an authenticated principal. An audit entry without an identity has no forensic value, so anonymous administrative changes are not possible, even in Lab. |
 

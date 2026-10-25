@@ -11,8 +11,9 @@
 // phase cell names the phase (isInPhase), and the exit criteria table of the phase's plan:
 // E1 to E12 in section 1.2 of docs/plans/phase-1-execution.md for Phase 1, E13 to E21 in
 // section 1.2 of docs/plans/phase-2-plan.md for Phase 2, E22 to E32 in section 1.2 of
-// docs/plans/phase-3-plan.md and E33 to E42 in section 1.2 of docs/plans/dns-recursion-plan.md
-// for Phase 3 (PHASES; a phase may name several plans). Without --phase the script
+// docs/plans/phase-3-plan.md, E33 to E42 in section 1.2 of docs/plans/dns-recursion-plan.md
+// and E60 to E71 in section 1.3 of docs/plans/ha-plan.md for Phase 3 (PHASES; a phase may
+// name several plans). Without --phase the script
 // traces Phase 1. scripts/README.md lists the scan rules.
 // Node's standard library only. The output is deterministic: sorted, no timestamps,
 // `/`-separated repository-relative paths, LF line endings.
@@ -46,10 +47,11 @@ export const PHASES = Object.freeze({
   2: { trace: "docs/plans/phase-2-trace.md", plans: ["docs/plans/phase-2-plan.md"], exits: "E13 to E21" },
   // WP7.0
   // WP10.0: Phase 3 has a second plan, the recursion plan (E33 to E42, Slice 10).
+  // HA-Q1: Phase 3 has a third plan, the high availability plan (E60 to E71, Slice 12).
   3: {
     trace: "docs/plans/phase-3-trace.md",
-    plans: ["docs/plans/phase-3-plan.md", "docs/plans/dns-recursion-plan.md"],
-    exits: "E22 to E42",
+    plans: ["docs/plans/phase-3-plan.md", "docs/plans/dns-recursion-plan.md", "docs/plans/ha-plan.md"],
+    exits: "E22 to E42 and E60 to E71",
   },
 });
 
