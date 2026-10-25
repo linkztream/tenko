@@ -23,13 +23,20 @@ async fn the_catalog_lists_the_built_in_and_the_server_managed_codes() {
     assert_eq!(find(6)["array"], true);
     assert_eq!(find(6)["server_managed"], false);
     assert_eq!(find(51)["server_managed"], true);
-    let codes: Vec<u64> = entries
+    // WP9.4: the DHCPv4 catalog, then the DHCPv6 one, each by code.
+    let keys: Vec<(u8, u64)> = entries
         .iter()
-        .map(|e| e["code"].as_u64().expect("code"))
+        .map(|e| {
+            (
+                u8::from(e["space"] == "dhcp6"),
+                e["code"].as_u64().expect("code"),
+            )
+        })
         .collect();
-    let mut sorted = codes.clone();
+    let mut sorted = keys.clone();
     sorted.sort_unstable();
-    assert_eq!(codes, sorted);
+    assert_eq!(keys, sorted);
+    assert!(keys.iter().any(|(space, code)| *space == 1 && *code == 23));
 }
 
 #[tokio::test]

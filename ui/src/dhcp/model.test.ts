@@ -1,20 +1,24 @@
 // The pure helpers of the DHCP area: lease times in human units, option values to and from the
 // typed data of the API, hexadecimal values, MAC patterns, the drafts of matches and terms, the
-// local check of an exclusion, the order of policies, and the words for matches, conditions and actions.
+// local check of an exclusion, the order of policies, the words for matches, conditions and actions,
+// and the helpers of a DHCPv6 scope (the preferred lifetime, the size of a large pool).
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale } from "../i18n";
 import {
   ARCHITECTURES,
   architectureOfText,
+  bitsOfSize,
   checkExclusion,
   checkMac,
   checkMacPattern,
   dataText,
+  defaultPreferred,
   draftOfLease,
   draftOfMatch,
   draftOfTerm,
   emptyMatch,
   isKnownArchitecture,
+  isV6,
   kindOfData,
   leaseOfDraft,
   matchKind,
@@ -24,6 +28,8 @@ import {
   parseOptionText,
   percentOf,
   policyOrder,
+  preferredOfText,
+  rangeBits,
   sameLease,
   secsOf,
   spanOf,
@@ -33,7 +39,7 @@ import {
   type OptionShape,
 } from "./model";
 import type { Match, Policy, Term } from "./types";
-import { actionWords, conditionWords, ddnsWords, kindWords, leaseWords, matchesWords, matchWords } from "./words";
+import { actionWords, conditionWords, ddnsWords, kindWords, leaseWords, matchesWords, matchWords, poolCountWords } from "./words";
 
 afterEach(async () => {
   await setLocale("en");
@@ -353,5 +359,52 @@ describe("exclusions and policies", () => {
 
   it("rounds the used share to a whole percent within 0 to 100", () => {
     expect([percentOf(0), percentOf(0.444), percentOf(0.445), percentOf(1.2), percentOf(-1)]).toEqual([0, 44, 45, 100, 0]);
+  });
+});
+
+// WP9.4: the helpers of a DHCPv6 scope.
+describe("DHCPv6 helpers", () => {
+  it("tells the family of a scope from the family the API says", () => {
+    expect(isV6({ family: "v6" })).toBe(true);
+    expect([isV6({ family: "v4" }), isV6({}), isV6(undefined), isV6(null)]).toEqual([false, false, false, false]);
+  });
+
+  it("takes five eighths of the valid lifetime, in whole seconds, as the default preferred lifetime", () => {
+    expect([defaultPreferred(86_400), defaultPreferred(3600), defaultPreferred(7200), defaultPreferred(100)]).toEqual([54_000, 2250, 4500, 62]);
+  });
+
+  it("reads the preferred lifetime: empty is the default, whole seconds up to the valid lifetime", () => {
+    expect(preferredOfText("", 86_400)).toEqual({ ok: true, secs: null });
+    expect(preferredOfText("  ", 86_400)).toEqual({ ok: true, secs: null });
+    expect(preferredOfText("3600", 86_400)).toEqual({ ok: true, secs: 3600 });
+    expect(preferredOfText(" 86400 ", 86_400)).toEqual({ ok: true, secs: 86_400 });
+    expect(preferredOfText("86401", 86_400)).toEqual({ ok: false, problem: "above" });
+    for (const text of ["0", "-1", "1.5", "1h", "soon", "12345678901"]) expect(preferredOfText(text, 86_400), text).toEqual({ ok: false, problem: "number" });
+  });
+
+  it("says the size of a range as a power of two from 2^32 up", () => {
+    expect(bitsOfSize(4_294_967_295n)).toBeNull();
+    expect(bitsOfSize(4_294_967_296n)).toBe(32);
+    expect(bitsOfSize((1n << 64n) - 1n)).toBe(63);
+    expect(bitsOfSize(1n << 64n)).toBe(64);
+    expect(rangeBits("2001:db8::", "2001:db8::ffff:fffe")).toBeNull();
+    expect(rangeBits("2001:db8::", "2001:db8::1:0:0")).toBe(32);
+    expect(rangeBits("2001:db8:0:10::", "2001:db8:0:10:ffff:ffff:ffff:ffff")).toBe(64);
+    expect(rangeBits("x", "2001:db8::")).toBeNull();
+  });
+
+  it("checks an exclusion of an IPv6 network with IPv6 addresses inside it", () => {
+    const net6 = networkOf("2001:db8:0:10::/64");
+    expect(checkExclusion("2001:db8:0:10::1", "2001:db8:0:10::ff", net6)).toBeNull();
+    expect(checkExclusion("192.0.2.1", "2001:db8:0:10::ff", net6)).toBe("first");
+    expect(checkExclusion("2001:db8:0:10::1", "192.0.2.9", net6)).toBe("last");
+    expect(checkExclusion("2001:db8:0:10::ff", "2001:db8:0:10::1", net6)).toBe("order");
+    expect(checkExclusion("2001:db8:0:11::1", "2001:db8:0:11::9", net6)).toBe("outside");
+  });
+
+  it("words the size of a large pool as a power of two", () => {
+    expect(poolCountWords(256, null)).toBe("256");
+    expect(poolCountWords(256, undefined)).toBe("256");
+    expect(poolCountWords(18_446_744_073_709_552_000, 64)).toBe("At least 2^64");
   });
 });

@@ -1,7 +1,10 @@
 // The editor of one option set (the options of the server, of a scope, and of any other owner the
 // later packages add): one row per option with its code, its name and a value input by the type
 // of the option. Codes come from the catalog and the custom definitions (the codes the server sets
-// itself are not offered); a code without a known type is edited as hexadecimal. The whole set is
+// itself are not offered); a code without a known type is edited as hexadecimal. The codes on
+// offer are those of one option space: `dhcp4` by default, `dhcp6` for the set of a DHCPv6 scope
+// (WP9.4), or both (the set of the server); the rows already in the set show whatever their space.
+// The whole set is
 // saved with `PUT /dhcp/option-sets/{owner}` and the revision read. The errors of the server show
 // under the row they name (`params.code`) or at the top.
 import { createEffect, createMemo, createResource, createSignal, For, Match, on, Show, Switch, untrack } from "solid-js";
@@ -37,8 +40,17 @@ interface Known extends OptionShape {
 
 const keyOf = (space: string, code: number) => `${space}:${code}`;
 
-/** The shape of every option the editor can type: the catalog and the custom definitions. */
-function createShapes() {
+/** Which option spaces the editor offers codes of: one, or both (the set of the server holds values of both). */
+export type EditorSpace = "dhcp4" | "dhcp6" | "both";
+
+/** Whether the editor offers codes of a space; a vendor space (option 43 sub-options) belongs to `dhcp4`. */
+function offered(mode: EditorSpace, space: string): boolean {
+  if (mode === "both") return true;
+  return mode === "dhcp6" ? space === "dhcp6" : space !== "dhcp6";
+}
+
+/** The shape of every option the editor can type (the catalog of both spaces and the custom definitions) and the codes it offers in `mode`. */
+function createShapes(mode: () => EditorSpace) {
   const [catalog] = createResource(() => listCatalog());
   // The definitions follow the configuration: a code defined meanwhile is offered at once.
   const defsQuery = createLiveQuery({
@@ -58,8 +70,8 @@ function createShapes() {
   const managed = createMemo(() => new Set((catalog.latest ?? []).filter((c) => c.server_managed).map((c) => keyOf(c.space, c.code))));
   const choices = createMemo(() => {
     const out: { space: string; code: number; name: string }[] = [];
-    for (const c of catalog.latest ?? []) if (!c.server_managed) out.push({ space: c.space, code: c.code, name: c.name });
-    for (const d of defs()) out.push({ space: d.space, code: d.code, name: d.name });
+    for (const c of catalog.latest ?? []) if (!c.server_managed && offered(mode(), c.space)) out.push({ space: c.space, code: c.code, name: c.name });
+    for (const d of defs()) if (offered(mode(), d.space)) out.push({ space: d.space, code: d.code, name: d.name });
     return out.sort((a, b) => (a.space === b.space ? a.code - b.code : a.space < b.space ? -1 : 1));
   });
   return {
@@ -95,6 +107,8 @@ export function OptionSetEditor(props: {
   owner: string;
   /** Names the editor for assistive technology. */
   label: string;
+  /** The option space whose codes are offered: `dhcp4` (the default), `dhcp6` for a DHCPv6 scope, or `both`. */
+  space?: EditorSpace | undefined;
   canWrite: boolean;
   /** A value that changes when the definitions changed on the page around the editor: they are read again. */
   refresh?: unknown;
@@ -102,7 +116,8 @@ export function OptionSetEditor(props: {
   onSaved?: () => void;
   testid?: string;
 }) {
-  const shapes = createShapes();
+  const mode = (): EditorSpace => props.space ?? "dhcp4";
+  const shapes = createShapes(mode);
   createEffect(on(() => props.refresh, () => shapes.reload(), { defer: true }));
   const [set, { refetch }] = createResource(
     () => props.owner,
@@ -139,16 +154,18 @@ export function OptionSetEditor(props: {
   const addCode = () => {
     const text = codeText().trim();
     const code = Number(text);
-    if (!/^\d+$/.test(text) || code < 1 || code > 254) {
-      setCodeError(t("dhcp.optset.check.code"));
+    // A code typed in is of the editor's space (`dhcp4` when it offers both); DHCPv6 codes are 16 bits wide.
+    const space = mode() === "dhcp6" ? "dhcp6" : "dhcp4";
+    if (!/^\d+$/.test(text) || code < 1 || code > (space === "dhcp6" ? 65_535 : 254)) {
+      setCodeError(t(space === "dhcp6" ? "dhcp.optset.check.code6" : "dhcp.optset.check.code"));
       return;
     }
-    if (shapes.managed().has(keyOf("dhcp4", code))) {
+    if (shapes.managed().has(keyOf(space, code))) {
       setCodeError(t("dhcp.optset.check.managed"));
       return;
     }
     setCodeError(undefined);
-    add("dhcp4", code);
+    add(space, code);
     setCodeText("");
   };
 
@@ -226,7 +243,13 @@ export function OptionSetEditor(props: {
                     return (
                       <>
                         <tr data-testid="optset-row" data-key={row.key} data-code={row.code}>
-                          <td class="mono">{row.code}</td>
+                          <td class="mono">
+                            {row.code}
+                            {/* WP9.4: a row that is not of the editor's own family says which it is. */}
+                            <Show when={mode() === "dhcp6" ? row.space !== "dhcp6" : row.space === "dhcp6"}>
+                              <span class="muted"> {row.space === "dhcp6" ? t("dhcp.family.v6") : row.space}</span>
+                            </Show>
+                          </td>
                           <td>
                             <span class="mono">{label(row)}</span>
                             <Show when={shape()}>{(s) => <span class="muted"> {kindWords(s().kind, s().array)}</span>}</Show>
@@ -329,7 +352,21 @@ export function OptionSetEditor(props: {
               }}
             >
               <option value="">{t("dhcp.optset.add")}</option>
-              <For each={available()}>{(c) => <option value={`${c.space}|${c.code}`}>{`${c.code} ${c.name}`}</option>}</For>
+              <Show
+                when={mode() === "both"}
+                fallback={<For each={available()}>{(c) => <option value={`${c.space}|${c.code}`}>{`${c.code} ${c.name}`}</option>}</For>}
+              >
+                {/* WP9.4: the server's set holds values of both spaces. */}
+                <For each={["dhcp4", "dhcp6"] as const}>
+                  {(space) => (
+                    <optgroup label={space === "dhcp6" ? t("dhcp.family.v6") : t("dhcp.family.v4")}>
+                      <For each={available().filter((c) => (space === "dhcp6" ? c.space === "dhcp6" : c.space !== "dhcp6"))}>
+                        {(c) => <option value={`${c.space}|${c.code}`}>{`${c.code} ${c.name}`}</option>}
+                      </For>
+                    </optgroup>
+                  )}
+                </For>
+              </Show>
             </select>
             <span class="dhcp-optset-code">
               <input

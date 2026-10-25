@@ -12,7 +12,7 @@
 import type { components } from "../generated/schema";
 import { compareIp, containsIp, formatIp, parseCidr, parseIp } from "../../ipam/ip";
 import { canonical, validName } from "../../dns/model";
-import { checkMacPattern, parseHex, validDhcpName } from "../../dhcp/model";
+import { bitsOfSize, checkMacPattern, parseHex, validDhcpName } from "../../dhcp/model";
 import { MAX_LEASE_SECS, NIL_ID } from "../../dhcp/types";
 import type {
   CatalogEntry,
@@ -36,6 +36,7 @@ import type {
   PolicyAction,
   Pool,
   Scope,
+  Scope6Settings,
   Settings,
   SharedNetwork,
   Term,
@@ -131,8 +132,12 @@ export const DHCP_IDS = {
   lan: "0190d1c2-0000-7000-8000-0000000a0001",
   /** The IPAM prefix 198.51.100.0/24 (IPAM_IDS.prefix.iot): a network without a scope. */
   iot: "0190d1c2-0000-7000-8000-0000000a0002",
+  /** The IPAM prefix 2001:db8:0:10::/64 (IPAM_IDS.prefix.lanV6): the seeded DHCPv6 scope (WP9.4). */
+  lanV6: "0190d1c2-0000-7000-8000-0000000a0008",
   /** The IPAM pool of the LAN (IPAM_IDS.range.pool). */
   lanPool: "0190d1c2-0000-7000-8000-000000050002",
+  /** The IPAM pool of the v6 LAN (IPAM_IDS.range.lanV6Pool). */
+  lanV6Pool: "0190d1c2-0000-7000-8000-000000050004",
   sharedNetwork: "0190d1c2-0000-7000-8000-00000000e301",
   exclusion: "0190d1c2-0000-7000-8000-00000000e401",
   optionDef: "0190d1c2-0000-7000-8000-00000000e501",
@@ -278,6 +283,33 @@ function checkSharedNetwork(state: DhcpState, id: unknown): string | undefined {
   return id;
 }
 
+/**
+ * WP9.4: the DHCPv6 settings of a scope (docs/dhcp.md 19.2). They belong to an IPv6 prefix; the
+ * preferred lifetime is a whole number of seconds that is not above the valid lifetime, which is
+ * the default lease time in force; the Interface-Id is text of 1 to 64 characters.
+ */
+function checkV6(value: unknown, family: string, validSecs: number): Scope6Settings {
+  if (family !== "v6") return invalid("dhcp.scope.invalid", "v6", "only a scope on an IPv6 prefix takes DHCPv6 settings");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid("dhcp.scope.invalid", "v6", "an object is required");
+  const raw = value as Obj;
+  const out: Scope6Settings = {};
+  if (raw.preferred_secs !== undefined && raw.preferred_secs !== null) {
+    const secs = raw.preferred_secs;
+    if (typeof secs !== "number" || !Number.isInteger(secs) || secs < 1) return invalid("dhcp.scope.invalid", "v6.preferred_secs", "a whole number of seconds is required");
+    if (secs > validSecs) return invalid("dhcp.scope.invalid", "v6.preferred_secs", "the preferred lifetime is above the valid lifetime");
+    out.preferred_secs = secs;
+  }
+  if (raw.rapid_commit !== undefined && raw.rapid_commit !== null) {
+    if (typeof raw.rapid_commit !== "boolean") return invalid("dhcp.scope.invalid", "v6.rapid_commit", "true or false is required");
+    out.rapid_commit = raw.rapid_commit;
+  }
+  if (raw.interface_id !== undefined && raw.interface_id !== null) {
+    if (typeof raw.interface_id !== "string" || raw.interface_id === "" || raw.interface_id.length > 64) return invalid("dhcp.scope.invalid", "v6.interface_id", "text of 1 to 64 characters is required");
+    out.interface_id = raw.interface_id;
+  }
+  return out;
+}
+
 export function createScope(state: DhcpState, ctx: DhcpContext, body: Obj): Scope {
   const prefixId = str(body.prefix) ?? invalid("dhcp.scope.invalid", "prefix", "a prefix identifier is required");
   const prefix = ctx.ipam.prefix(prefixId) ?? fail(404, "ipam.not_found", { kind: "prefix", id: prefixId });
@@ -295,6 +327,7 @@ export function createScope(state: DhcpState, ctx: DhcpContext, body: Obj): Scop
     revision: 0,
   };
   if (body.lease !== undefined && body.lease !== null) row.lease = checkLease(body.lease, "lease");
+  if (body.v6 !== undefined && body.v6 !== null) row.v6 = checkV6(body.v6, row.family, row.lease?.default_secs ?? (state.settings.lease?.default_secs ?? 86_400));
   if (typeof body.authoritative === "boolean") row.authoritative = body.authoritative;
   const serverId = checkServerId(body.server_id);
   if (serverId) row.server_id = serverId;
@@ -314,6 +347,9 @@ export function updateScope(state: DhcpState, ctx: DhcpContext, prefix: string, 
   if (typeof body.enabled === "boolean") next.enabled = body.enabled;
   if (body.clear_lease === true) delete next.lease;
   else if (body.lease !== undefined && body.lease !== null) next.lease = checkLease(body.lease, "lease");
+  // WP9.4: `v6` replaces the DHCPv6 settings whole, `clear_v6` drops them.
+  if (body.clear_v6 === true) delete next.v6;
+  else if (body.v6 !== undefined && body.v6 !== null) next.v6 = checkV6(body.v6, next.family, next.lease?.default_secs ?? (state.settings.lease?.default_secs ?? 86_400));
   if (typeof body.authoritative === "boolean") next.authoritative = body.authoritative;
   const serverId = checkServerId(body.server_id);
   if (serverId) next.server_id = serverId;
@@ -350,30 +386,39 @@ export function deleteScope(state: DhcpState, ctx: DhcpContext, prefix: string, 
   return shown;
 }
 
+/** The largest count the API says (2^64 - 1): a DHCPv6 pool can hold more. */
+const COUNT_MAX = (1n << 64n) - 1n;
+
 export function utilization(state: DhcpState, ctx: DhcpContext, prefix: string): Utilization {
-  findScopeRow(state, prefix);
+  const row = findScopeRow(state, prefix);
   const exclusions = state.exclusions.filter((e) => e.scope === prefix);
-  let size = 0;
+  let size = 0n;
   for (const pool of ctx.ipam.pools(prefix)) size += poolSize(pool.first, pool.last, exclusions);
-  const leased = Math.min(state.leases.get(prefix) ?? 0, size);
+  const count = BigInt(state.leases.get(prefix) ?? 0);
+  const leased = count < size ? count : size;
+  // `pool_bits`: the size as a power of two, rounded down, from 2^32 up.
+  const bits = bitsOfSize(size);
+  const clamp = (n: bigint) => Number(n < COUNT_MAX ? n : COUNT_MAX);
   return {
     prefix,
-    pool_size: size,
-    leased,
+    family: row.family,
+    pool_size: clamp(size),
+    leased: Number(leased),
     reserved: 0,
     abandoned: 0,
-    free: size - leased,
-    utilization: size === 0 ? 0 : leased / size,
+    free: clamp(size - leased),
+    utilization: size === 0n ? 0 : Number((leased * 10_000n) / size) / 10_000,
+    ...(bits === null ? {} : { pool_bits: bits }),
     at: new Date(ctx.now()).toISOString(),
   };
 }
 
-/** The addresses of a range that no exclusion covers. */
-function poolSize(first: string, last: string, exclusions: readonly Exclusion[]): number {
+/** The addresses of a range that no exclusion covers (a 128-bit count). */
+function poolSize(first: string, last: string, exclusions: readonly Exclusion[]): bigint {
   const a = parseIp(first);
   const b = parseIp(last);
-  if (!a || !b) return 0;
-  let size = Number(b.value - a.value) + 1;
+  if (!a || !b || b.value < a.value) return 0n;
+  let size = b.value - a.value + 1n;
   const covered: [bigint, bigint][] = [];
   for (const e of exclusions) {
     const lo = parseIp(e.first);
@@ -388,11 +433,11 @@ function poolSize(first: string, last: string, exclusions: readonly Exclusion[])
   for (const [from, to] of covered) {
     const start = from > end ? from : end + 1n;
     if (to >= start) {
-      size -= Number(to - start) + 1;
+      size -= to - start + 1n;
       end = to;
     }
   }
-  return Math.max(size, 0);
+  return size < 0n ? 0n : size;
 }
 
 // ---------------------------------------------------------------------------------
@@ -512,9 +557,10 @@ export function deleteSharedNetwork(state: DhcpState, ctx: DhcpContext, id: stri
 function poolView(state: DhcpState, ctx: DhcpContext, prefix: string, range: { id: string; first: string; last: string; lease_secs?: number | null }): Pool {
   const settings = state.pools.find((p) => p.range === range.id);
   const exclusions = state.exclusions.filter((e) => e.scope === prefix);
-  const size = poolSize(range.first, range.last, exclusions);
+  const wide = poolSize(range.first, range.last, exclusions);
+  const size = Number(wide < COUNT_MAX ? wide : COUNT_MAX);
   const pools = ctx.ipam.pools(prefix);
-  const share = pools.reduce((n, p) => n + poolSize(p.first, p.last, exclusions), 0);
+  const share = pools.reduce((n, p) => n + Number(poolSize(p.first, p.last, exclusions)), 0);
   const leased = share === 0 ? 0 : Math.round(((state.leases.get(prefix) ?? 0) * size) / share);
   const out: Pool = { range: range.id, prefix, first: range.first, last: range.last, size, leased, revision: settings?.revision ?? 0 };
   if (range.lease_secs != null) out.lease_secs = range.lease_secs;
@@ -613,10 +659,69 @@ export const CATALOG: readonly CatalogEntry[] = [
   entry(252, "wpad", "string", false),
 ];
 
-const SERVER_MANAGED = new Set(CATALOG.filter((c) => c.server_managed).map((c) => c.code));
+const entry6 = (code: number, name: string, kind: OptionKind, array: boolean, server_managed = false): CatalogEntry => ({ space: "dhcp6", code, name, kind, array, server_managed });
 
-export function catalog(): CatalogEntry[] {
-  return CATALOG.map((c) => ({ ...c }));
+/** WP9.4: the built-in DHCPv6 catalog (tenko_core::dhcp::CATALOG_V6 and SERVER_MANAGED_V6), with Kea's names. */
+export const CATALOG6: readonly CatalogEntry[] = [
+  entry6(1, "clientid", "binary", false, true),
+  entry6(2, "serverid", "binary", false, true),
+  entry6(3, "ia-na", "binary", false, true),
+  entry6(4, "ia-ta", "binary", false, true),
+  entry6(5, "iaaddr", "binary", false, true),
+  entry6(6, "oro", "u16", true, true),
+  entry6(7, "preference", "u8", false, true),
+  entry6(8, "elapsed-time", "u16", false, true),
+  entry6(9, "relay-msg", "binary", false, true),
+  entry6(11, "auth", "binary", false, true),
+  entry6(12, "unicast", "ipv6_address", false, true),
+  entry6(13, "status-code", "binary", false, true),
+  entry6(14, "rapid-commit", "empty", false, true),
+  entry6(18, "interface-id", "binary", false, true),
+  entry6(19, "reconf-msg", "u8", false, true),
+  entry6(20, "reconf-accept", "empty", false, true),
+  entry6(21, "sip-server-dns", "fqdn", true),
+  entry6(22, "sip-server-addr", "ipv6_address", true),
+  entry6(23, "dns-servers", "ipv6_address", true),
+  entry6(24, "domain-search", "fqdn", true),
+  entry6(25, "ia-pd", "binary", false, true),
+  entry6(26, "iaprefix", "binary", false, true),
+  entry6(27, "nis-servers", "ipv6_address", true),
+  entry6(28, "nisp-servers", "ipv6_address", true),
+  entry6(29, "nis-domain-name", "fqdn", true),
+  entry6(30, "nisp-domain-name", "fqdn", true),
+  entry6(31, "sntp-servers", "ipv6_address", true),
+  entry6(32, "information-refresh-time", "u32", false),
+  entry6(37, "remote-id", "binary", false, true),
+  entry6(39, "client-fqdn", "binary", false, true),
+  entry6(41, "new-posix-timezone", "string", false),
+  entry6(42, "new-tzdb-timezone", "string", false),
+  entry6(56, "ntp-server", "ipv6_address", true),
+  entry6(59, "bootfile-url", "string", false),
+  entry6(60, "bootfile-param", "binary", false),
+  entry6(64, "aftr-name", "fqdn", false),
+  entry6(79, "client-linklayer-addr", "binary", false, true),
+  entry6(82, "sol-max-rt", "u32", false),
+  entry6(83, "inf-max-rt", "u32", false),
+];
+
+/** The built-in options of a space, or of both (`dhcp4` first) when no space is named. */
+export function catalog(space?: string): CatalogEntry[] {
+  const all = space === "dhcp4" ? CATALOG : space === "dhcp6" ? CATALOG6 : [...CATALOG, ...CATALOG6];
+  return all.map((c) => ({ ...c }));
+}
+
+/** Whether a space is one the catalog has. */
+export function isCatalogSpace(space: string): boolean {
+  return space === "dhcp4" || space === "dhcp6";
+}
+
+function builtIn(space: string, code: number): CatalogEntry | undefined {
+  return (space === "dhcp4" ? CATALOG : space === "dhcp6" ? CATALOG6 : []).find((c) => c.code === code);
+}
+
+/** Whether the server sets the option itself, so that no option set holds it. */
+function serverManaged(space: string, code: number): boolean {
+  return builtIn(space, code)?.server_managed === true;
 }
 
 // ---------------------------------------------------------------------------------
@@ -651,7 +756,7 @@ export function createOptionDef(state: DhcpState, ctx: DhcpContext, body: Obj): 
   const space = typeof body.space === "string" && body.space !== "" ? body.space : "dhcp4";
   const code = body.code;
   if (typeof code !== "number" || !Number.isInteger(code) || code < 1 || code > (space === "dhcp6" ? 65_535 : 254)) return invalid("dhcp.option.invalid", "code", "the code is 1 to 254");
-  if (space === "dhcp4" && (CATALOG.some((c) => c.code === code) || SERVER_MANAGED.has(code))) {
+  if (builtIn(space, code)) {
     return fail(409, "dhcp.option.code_reserved", { space, code: String(code), reason: "the built-in catalog defines this code" }, `option ${space} ${code}: the built-in catalog defines this code`);
   }
   if (typeof body.name !== "string" || !validDhcpName(body.name)) return invalid("dhcp.option.invalid", "name", "1 to 64 characters of a-z, 0-9 and -");
@@ -772,13 +877,15 @@ export function encodeData(kind: OptionKind, array: boolean, data: OptionData): 
   }
   if ("ipv6" in data) {
     if (kind !== "ipv6_address") return bad("the data does not match the type of the option");
+    const err = single(data.ipv6.values.length);
+    if (err) return err;
     const bytes: number[] = [];
     for (const v of data.ipv6.values) {
       const b = ipv6Bytes(v);
       if (!b) return bad("an address is not an IPv6 address");
       bytes.push(...b);
     }
-    return { hex: hexOf(bytes) };
+    return bytes.length === 0 ? bad("an address is required") : { hex: hexOf(bytes) };
   }
   if ("ipv6_prefix" in data) {
     if (kind !== "ipv6_prefix") return bad("the data does not match the type of the option");
@@ -985,10 +1092,8 @@ function checkOwner(state: DhcpState, ctx: DhcpContext, path: string): string {
 }
 
 function shapeOf(state: DhcpState, space: string, code: number): { name: string; kind: OptionKind; array: boolean } | undefined {
-  if (space === "dhcp4") {
-    const found = CATALOG.find((c) => c.code === code);
-    if (found) return { name: found.name, kind: found.kind, array: found.array };
-  }
+  const found = builtIn(space, code);
+  if (found) return { name: found.name, kind: found.kind, array: found.array };
   const def = state.optionDefs.find((d) => d.space === space && d.code === code);
   return def ? { name: def.name, kind: def.kind, array: def.array ?? false } : undefined;
 }
@@ -1038,7 +1143,7 @@ export function putOptionSet(state: DhcpState, ctx: DhcpContext, path: string, b
     const where = { space, code: String(code) };
     if (typeof code !== "number" || !Number.isInteger(code) || code < 1) return invalid("dhcp.option.invalid", "code", "a code is required");
     if (values.some((v) => v.space === space && v.code === code)) return fail(400, "dhcp.option.invalid", { ...where, field: "values", reason: "an option appears twice" }, "values: an option appears twice", ["values"]);
-    if (space === "dhcp4" && SERVER_MANAGED.has(code)) {
+    if (serverManaged(space, code)) {
       return fail(409, "dhcp.option.code_reserved", { ...where, reason: "the server sets this option itself" }, `option ${space} ${code}: the server sets this option itself`);
     }
     const shape = shapeOf(state, space, code);
@@ -1482,7 +1587,11 @@ export function deleteFilter(state: DhcpState, ctx: DhcpContext, id: string, ifM
 // ---------------------------------------------------------------------------------
 // The seed
 
-/** One scope on the LAN of the IPAM seed with a pool, an exclusion, options at two levels, a class, a policy and a filter. */
+/**
+ * One scope on the LAN of the IPAM seed with a pool, an exclusion, options at two levels, a class, a
+ * policy and a filter; and (WP9.4) a DHCPv6 scope on the IPv6 LAN with the pool IPAM_IDS.range.lanV6Pool,
+ * three leases and the dhcp6 options 23 and 24.
+ */
 export function seedDhcp(ctx: DhcpContext): DhcpState {
   const at = ctx.now() - 20 * 86_400_000;
   const by = ctx.principal();
@@ -1506,7 +1615,10 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
     classes: [],
     policies: [],
     filters: [],
-    leases: new Map([[DHCP_IDS.lan, 12]]),
+    leases: new Map([
+      [DHCP_IDS.lan, 12],
+      [DHCP_IDS.lanV6, 3],
+    ]),
   };
   state.sharedNetworks.push({ id: DHCP_IDS.sharedNetwork, name: "home-links", description: "The links of the house", created: stampAt(), updated: stampAt(), revision: rev() });
   state.classes.push({
@@ -1527,6 +1639,20 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
     restricted: false,
     classes: [],
     description: "House LAN",
+    created: stampAt(),
+    updated: stampAt(),
+    revision: rev(),
+  });
+  // WP9.4: a DHCPv6 scope on the IPv6 LAN, its pool is the range IPAM_IDS.range.lanV6Pool.
+  state.scopes.push({
+    prefix: DHCP_IDS.lanV6,
+    family: "v6",
+    enabled: true,
+    ddns: {},
+    restricted: false,
+    classes: [],
+    description: "House LAN, IPv6",
+    v6: { rapid_commit: true },
     created: stampAt(),
     updated: stampAt(),
     revision: rev(),
@@ -1553,6 +1679,12 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
     { space: "dhcp4", code: 15, data: "hex" in domain ? domain.hex : "" },
   ]);
   set(`scope:${DHCP_IDS.lan}`, [{ space: "dhcp4", code: 3, data: "hex" in routers ? routers.hex : "" }]);
+  const dns6 = encodeData("ipv6_address", true, { ipv6: { values: ["2001:db8:0:10::53"] } });
+  const search6 = encodeData("fqdn", true, { names: ["example.net"] });
+  set(`scope:${DHCP_IDS.lanV6}`, [
+    { space: "dhcp6", code: 23, data: "hex" in dns6 ? dns6.hex : "" },
+    { space: "dhcp6", code: 24, data: "hex" in search6 ? search6.hex : "" },
+  ]);
   state.policies.push({
     id: DHCP_IDS.policy,
     name: "pxe-boot",

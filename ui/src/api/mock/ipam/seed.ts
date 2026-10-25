@@ -74,7 +74,13 @@ export const IPAM_IDS = {
     /** 192.0.2.0/24 in the VRF isolated. */
     workshop: uid("a", 11),
   },
-  range: { infrastructure: uid("5", 1), pool: uid("5", 2), iotPool: uid("5", 3) },
+  range: {
+    infrastructure: uid("5", 1),
+    pool: uid("5", 2),
+    iotPool: uid("5", 3),
+    /** 2001:db8:0:10::100 to 2001:db8:0:10::1ff, the pool of the DHCPv6 scope on the v6 LAN (WP9.4). */
+    lanV6Pool: uid("5", 4),
+  },
   field: { assetTag: uid("8", 1), rack: uid("8", 2), warrantyUntil: uid("8", 3) },
 } as const;
 
@@ -373,6 +379,8 @@ export function buildSeed(now: number): IpamStore {
     range(IPAM_IDS.range.infrastructure, P.lan, "192.0.2.1", "192.0.2.19", "infrastructure"),
     range(IPAM_IDS.range.pool, P.lan, "192.0.2.100", "192.0.2.199", "dhcp_pool", 86_400),
     range(IPAM_IDS.range.iotPool, P.iot, "198.51.100.100", "198.51.100.199", "dhcp_pool", 3_600),
+    // WP9.4: the pool of the seeded DHCPv6 scope.
+    range(IPAM_IDS.range.lanV6Pool, P.lanV6, "2001:db8:0:10::100", "2001:db8:0:10::1ff", "dhcp_pool"),
   ].forEach((r) => add("range", r));
 
   // Hosts, interfaces and addresses.

@@ -73,7 +73,8 @@ describe("the leases", () => {
     expect(within(row(GRID, "192.0.2.102")).getByTestId("lease-reserved")).toBeTruthy();
     expect(within(row(GRID, "192.0.2.109")).getByTestId("lease-state").dataset.key).toBe("expired");
     expect(within(row(GRID, "192.0.2.111")).getByTestId("lease-state").dataset.key).toBe("abandoned");
-    expect(rows(GRID).map((r) => r.dataset.key)).toEqual(Array.from({ length: 12 }, (_, i) => `192.0.2.${100 + i}`));
+    // The twelve DHCPv4 leases by address, then the four DHCPv6 leases (WP9.4).
+    expect(rows(GRID).map((r) => r.dataset.key)).toEqual([...Array.from({ length: 12 }, (_, i) => `192.0.2.${100 + i}`), ...[0, 1, 2, 3].map((n) => `2001:db8:0:10::10${n}`)]);
     expect(await axeViolations(view.container)).toEqual([]);
   });
 
@@ -108,7 +109,7 @@ describe("the leases", () => {
     fireEvent.change(screen.getByTestId("filter-name"), { target: { value: "" } });
     fireEvent.change(screen.getByTestId("filter-state"), { target: { value: "expired" } });
     await waitFor(() => expect(last().get("state")).toBe("expired"));
-    await waitFor(() => expect(rows(GRID).map((r) => r.dataset.key)).toEqual(["192.0.2.109"]));
+    await waitFor(() => expect(rows(GRID).map((r) => r.dataset.key)).toEqual(["192.0.2.109", "2001:db8:0:10::103"]));
 
     fireEvent.change(screen.getByTestId("filter-state"), { target: { value: "" } });
     await waitFor(() => expect(last().get("state")).toBeNull());
@@ -280,11 +281,12 @@ describe("the leases", () => {
       expect(within(strip).getByTestId("strip-serving").textContent).toBe("Serving");
       expect(within(strip).getByTestId("strip-accepting").textContent).toBe("Accepting lease writes");
       expect(within(strip).getByTestId("strip-probe").textContent).toBe("Conflict detection on");
-      expect(within(strip).getByTestId("strip-listeners").textContent).toBe("1 listener");
-      expect(within(strip).getByTestId("strip-scopes").textContent).toBe("1 scope");
+      // The node serves both families (WP9.4): 1 DHCPv4 listener, none for DHCPv6; one scope of each.
+      expect(within(strip).getByTestId("strip-listeners").textContent).toBe("1 DHCPv4 and 0 DHCPv6 listeners");
+      expect(within(strip).getByTestId("strip-scopes").textContent).toBe("1 DHCPv4 and 1 DHCPv6 scopes");
       const counts = Object.fromEntries(within(strip).getAllByTestId("strip-leases").map((el) => [el.dataset.key, el.textContent]));
-      expect(counts.active).toContain("9");
-      expect(counts.expired).toContain("1");
+      expect(counts.active).toBe("9 DHCPv4 and 3 DHCPv6 active leases");
+      expect(counts.expired).toContain("2");
       expect(within(strip).getByTestId("strip-commit").textContent).toBe("Last commit 1.4 ms");
       expect(within(strip).getByTestId("strip-revision").textContent).toContain("Revision");
     });
@@ -354,8 +356,9 @@ describe("the leases", () => {
         expect(within(strip).getByTestId("leases-scope-name").textContent).toBe("All scopes");
         expect(within(strip).queryByTestId("leases-scope-link")).toBeNull();
         expect(within(strip).queryByTestId("leases-utilization")).toBeNull();
-        const bar = await within(strip).findByTestId("leases-scope-bar");
-        expect(bar.dataset.key).toBe(LAN);
+        // One bar for the DHCPv4 scope and one for the DHCPv6 scope (WP9.4).
+        await waitFor(() => expect(within(strip).getAllByTestId("leases-scope-bar")).toHaveLength(2));
+        const bar = within(strip).getAllByTestId("leases-scope-bar").find((b) => b.dataset.key === LAN)!;
         // 12 of the 90 addresses of the pool.
         expect((await within(bar).findByTestId("scope-util")).dataset.key).toBe("13");
         expect(within(strip).queryByTestId("leases-scope-more")).toBeNull();
@@ -402,11 +405,12 @@ describe("the leases", () => {
         const spy = vi.spyOn(globalThis, "fetch");
         open();
         await loaded();
-        fireEvent.click(await screen.findByTestId("leases-scope-bar"));
+        const bars = await screen.findAllByTestId("leases-scope-bar");
+        fireEvent.click(bars.find((b) => b.dataset.key === LAN)!);
         await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("scope")).toBe(LAN_ID));
         fireEvent.change(screen.getByTestId("filter-scope"), { target: { value: "" } });
         await waitFor(() => expect(screen.getByTestId("leases-live-strip").dataset.scope).toBe(""));
-        expect(await screen.findByTestId("leases-scope-bar")).toBeTruthy();
+        expect((await screen.findAllByTestId("leases-scope-bar")).length).toBeGreaterThan(0);
       });
     });
 

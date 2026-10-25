@@ -8,6 +8,7 @@ type S = components["schemas"];
 export type Scope = S["DhcpScopeItem"];
 export type ScopeCreate = S["DhcpScopeCreate"];
 export type ScopePatch = S["DhcpScopePatch"];
+export type Scope6Settings = S["Scope6Settings"];
 export type Utilization = S["DhcpScopeUtilization"];
 export type Settings = S["DhcpSettingsItem"];
 export type SettingsUpdate = S["DhcpSettingsUpdate"];

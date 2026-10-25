@@ -1,7 +1,8 @@
-// The DHCP scopes (/dhcp): one row per IPAM network that is served, with its pools, its active
-// leases and how full it is (read per row for the rows in view), and the scope's description. Create
-// a scope for a network that has none, open one, delete one. A 409 `dhcp.module.disabled` or a 404
-// of the route shows the module-off state, a 501 the not-available notice.
+// The DHCP scopes (/dhcp): one row per IPAM network that is served, with its family (DHCPv4 or
+// DHCPv6), its pools, its active leases and how full it is (read per row for the rows in view), and
+// the scope's description. Create a scope for a network that has none, open one, delete one. A 409
+// `dhcp.module.disabled` or a 404 of the route shows the module-off state, a 501 the not-available
+// notice.
 import { A, useNavigate } from "@solidjs/router";
 import { createSignal, Show } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
@@ -13,6 +14,7 @@ import { formatNumber, t } from "../i18n";
 import { mayWriteDhcp } from "./access";
 import { listScopes, type Scope } from "./api";
 import { DhcpNav } from "./DhcpNav";
+import { isV6 } from "./model";
 import { DhcpProblem, unavailable } from "./Parts";
 import { dhcpPaths } from "./paths";
 import { CreateScopeDialog, DeleteScopeDialog } from "./ScopeDialogs";
@@ -47,6 +49,18 @@ export default function ScopesPage() {
         <A class="mono" href={dhcpPaths.scope(s.prefix)} data-testid="scope-link">
           {s.cidr}
         </A>
+      ),
+    },
+    // WP9.4: the family, DHCPv4 or DHCPv6.
+    {
+      id: "family",
+      header: () => t("dhcp.col.family"),
+      width: 100,
+      text: (s) => (isV6(s) ? t("dhcp.family.v6") : t("dhcp.family.v4")),
+      render: (s) => (
+        <span class="tag" data-testid="scope-family" data-key={isV6(s) ? "v6" : "v4"}>
+          {isV6(s) ? t("dhcp.family.v6") : t("dhcp.family.v4")}
+        </span>
       ),
     },
     {

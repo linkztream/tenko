@@ -48,9 +48,11 @@ import { mockUpdates } from "./routes-updates";
 import type { Term } from "../../dhcp/types";
 
 const NOW = Date.UTC(2026, 9, 17, 12);
+const IOT_V6 = "0190d1c2-0000-7000-8000-0000000a0009";
 const POOL = DHCP_IDS.lanPool;
 const SUPERNET = "0190d1c2-0000-7000-8000-0000000a00f1";
 const WIFI = "0190d1c2-0000-7000-8000-0000000a00f2";
+const V6_POOL = DHCP_IDS.lanV6Pool;
 
 let rev = 0;
 let ids = 0;
@@ -63,6 +65,8 @@ const NETWORKS: Record<string, { cidr: string; role: "network" | "supernet" }> =
   [DHCP_IDS.iot]: { cidr: "198.51.100.0/24", role: "network" },
   [SUPERNET]: { cidr: "203.0.113.0/24", role: "supernet" },
   [WIFI]: { cidr: "203.0.113.0/25", role: "network" },
+  [DHCP_IDS.lanV6]: { cidr: "2001:db8:0:10::/64", role: "network" },
+  [IOT_V6]: { cidr: "2001:db8:0:30::/64", role: "network" },
 };
 
 beforeEach(() => {
@@ -75,7 +79,14 @@ beforeEach(() => {
     newId: () => `0190d1c2-0000-7000-8000-${String(++ids).padStart(12, "0")}`,
     ipam: {
       prefix: (id) => (NETWORKS[id] ? { id, vrf: "vrf", ...(NETWORKS[id] as { cidr: string; role: "network" | "supernet" }) } : undefined),
-      pools: (prefix) => (prefix === DHCP_IDS.lan ? [{ id: POOL, first: "192.0.2.100", last: "192.0.2.199", lease_secs: 86_400 }] : []),
+      pools: (prefix) =>
+        prefix === DHCP_IDS.lan
+          ? [{ id: POOL, first: "192.0.2.100", last: "192.0.2.199", lease_secs: 86_400 }]
+          : prefix === DHCP_IDS.lanV6
+            ? [{ id: V6_POOL, first: "2001:db8:0:10::100", last: "2001:db8:0:10::1ff" }]
+            : prefix === IOT_V6
+              ? [{ id: "range-wide", first: "2001:db8:0:30::", last: "2001:db8:0:30:ffff:ffff:ffff:ffff" }]
+              : [],
       range: (id) => (id === POOL ? { id, prefix: DHCP_IDS.lan, role: "dhcp_pool" } : id === "range-reserved" ? { id, prefix: DHCP_IDS.lan, role: "reserved" } : undefined),
       reservation: (mac) => (mac === "00:00:5e:00:53:04" ? "0190d1c2-0000-7000-8000-000000000999" : undefined),
     },
@@ -98,7 +109,16 @@ const LEASE = { default_secs: 7200, min_secs: 600, max_secs: 86_400 };
 
 describe("seedDhcp", () => {
   it("makes one scope on the LAN with a pool, an exclusion, options, a class, a policy and a filter", () => {
-    expect(listScopes(state, ctx).map((s) => [s.cidr, s.pools, s.leases])).toEqual([["192.0.2.0/24", 1, 12]]);
+    expect(listScopes(state, ctx).map((s) => [s.cidr, s.family, s.pools, s.leases])).toEqual([
+      ["192.0.2.0/24", "v4", 1, 12],
+      ["2001:db8:0:10::/64", "v6", 1, 3],
+    ]);
+    // WP9.4: the DHCPv6 scope has rapid commit set and the DNS servers and the search list as dhcp6 options.
+    expect(listScopes(state, ctx)[1]).toMatchObject({ v6: { rapid_commit: true }, description: "House LAN, IPv6" });
+    expect(getOptionSet(state, ctx, `scope:${DHCP_IDS.lanV6}`).values.map((v) => [v.space, v.code, v.name, v.typed])).toEqual([
+      ["dhcp6", 23, "dns-servers", { ipv6: { values: ["2001:db8:0:10::53"] } }],
+      ["dhcp6", 24, "domain-search", { names: ["example.net"] }],
+    ]);
     expect(listExclusions(state, DHCP_IDS.lan).map((e) => [e.first, e.last])).toEqual([["192.0.2.150", "192.0.2.159"]]);
     expect(getOptionSet(state, ctx, "server").values.map((v) => [v.code, v.name])).toEqual([
       [6, "domain-name-servers"],
@@ -159,8 +179,9 @@ describe("scopes", () => {
     setPool(state, ctx, POOL, { classes: [DHCP_IDS.class] }, 0);
     putOptionSet(state, ctx, `pool:${POOL}`, { values: [{ code: 3, typed: { ipv4: { values: ["192.0.2.1"] } } }] }, 0);
     deleteScope(state, ctx, DHCP_IDS.lan, "*");
-    expect([state.scopes, state.exclusions, state.pools, state.policies].map((x) => x.length)).toEqual([0, 0, 0, 0]);
-    expect([...state.optionSets.keys()]).toEqual(["server"]);
+    // The DHCPv6 scope of the seed and its options stay.
+    expect([state.scopes, state.exclusions, state.pools, state.policies].map((x) => x.length)).toEqual([1, 0, 0, 0]);
+    expect([...state.optionSets.keys()].sort()).toEqual([`scope:${DHCP_IDS.lanV6}`, "server"]);
     expect(state.classes).toHaveLength(1);
   });
 
@@ -460,6 +481,93 @@ describe("MAC filters", () => {
   });
 });
 
+describe("DHCPv6 (WP9.4)", () => {
+  it("creates a scope on an IPv6 network with its DHCPv6 settings and says the family of every scope", () => {
+    const scope = createScope(state, ctx, { prefix: IOT_V6, v6: { preferred_secs: 3600, rapid_commit: false, interface_id: "eth1" } });
+    expect([scope.family, scope.cidr, scope.v6]).toEqual(["v6", "2001:db8:0:30::/64", { preferred_secs: 3600, rapid_commit: false, interface_id: "eth1" }]);
+    expect(createScope(state, ctx, { prefix: DHCP_IDS.iot }).family).toBe("v4");
+    expect(createScope(state, ctx, { prefix: WIFI }).v6).toBeUndefined();
+  });
+
+  it("refuses the DHCPv6 settings on an IPv4 prefix, a preferred lifetime above the valid lifetime and a long Interface-Id", () => {
+    const v4 = failure(() => createScope(state, ctx, { prefix: DHCP_IDS.iot, v6: { rapid_commit: true } }));
+    expect([v4.status, v4.code, v4.params.field]).toEqual([400, "dhcp.scope.invalid", "v6"]);
+    expect(failure(() => updateScope(state, ctx, DHCP_IDS.lan, { v6: { rapid_commit: true } }, "*")).params.field).toBe("v6");
+    // The valid lifetime is the default lease time in force: the server's 24 hours, then the scope's 2 hours.
+    expect(failure(() => updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { preferred_secs: 86_401 } }, "*")).params.field).toBe("v6.preferred_secs");
+    expect(updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { preferred_secs: 86_400 } }, "*").v6).toEqual({ preferred_secs: 86_400 });
+    updateScope(state, ctx, DHCP_IDS.lanV6, { lease: LEASE }, "*");
+    expect(failure(() => updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { preferred_secs: 7201 } }, "*")).code).toBe("dhcp.scope.invalid");
+    for (const secs of [0, -1, 1.5, "3600"]) {
+      expect(failure(() => updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { preferred_secs: secs } }, "*")).params.field, String(secs)).toBe("v6.preferred_secs");
+    }
+    expect(failure(() => updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { interface_id: "x".repeat(65) } }, "*")).params.field).toBe("v6.interface_id");
+    expect(updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { interface_id: "x".repeat(64) } }, "*").v6?.interface_id).toHaveLength(64);
+  });
+
+  it("replaces the DHCPv6 settings whole on a change and drops them with clear_v6", () => {
+    updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { preferred_secs: 3600, interface_id: "eth1" } }, "*");
+    expect(updateScope(state, ctx, DHCP_IDS.lanV6, { v6: { rapid_commit: false } }, "*").v6).toEqual({ rapid_commit: false });
+    expect(updateScope(state, ctx, DHCP_IDS.lanV6, { description: "Other" }, "*").v6).toEqual({ rapid_commit: false });
+    const cleared = updateScope(state, ctx, DHCP_IDS.lanV6, { clear_v6: true }, "*");
+    expect([cleared.v6, cleared.description]).toEqual([undefined, "Other"]);
+  });
+
+  it("counts the pools of a DHCPv6 scope with 128-bit sizes and says the size of a large one as a power of two", () => {
+    const small = utilization(state, ctx, DHCP_IDS.lanV6);
+    expect([small.family, small.pool_size, small.leased, small.free, small.pool_bits]).toEqual(["v6", 256, 3, 253, undefined]);
+    expect(utilization(state, ctx, DHCP_IDS.lan)).toMatchObject({ family: "v4" });
+    createScope(state, ctx, { prefix: IOT_V6 });
+    // A /64 pool: 2^64 addresses, which the count stops at 2^64 - 1 (it reads as 2^64 in a double).
+    const wide = utilization(state, ctx, IOT_V6);
+    expect([wide.family, wide.pool_bits, wide.pool_size, wide.leased, wide.free]).toEqual(["v6", 64, Number((1n << 64n) - 1n), 0, Number((1n << 64n) - 1n)]);
+    // An exclusion of half the pool leaves 2^63 addresses: the size rounded down is 63.
+    createExclusion(state, ctx, IOT_V6, { first: "2001:db8:0:30:8000::", last: "2001:db8:0:30:ffff:ffff:ffff:ffff" });
+    expect(utilization(state, ctx, IOT_V6).pool_bits).toBe(63);
+  });
+
+  it("has the built-in DHCPv6 catalog, with the codes the server sets itself", () => {
+    const six = catalog("dhcp6");
+    expect(six.every((c) => c.space === "dhcp6")).toBe(true);
+    expect(six.filter((c) => c.server_managed).map((c) => c.code)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 18, 19, 20, 25, 26, 37, 39, 79]);
+    expect(six.filter((c) => !c.server_managed).map((c) => c.code)).toEqual([21, 22, 23, 24, 27, 28, 29, 30, 31, 32, 41, 42, 56, 59, 60, 64, 82, 83]);
+    expect(six.find((c) => c.code === 23)).toMatchObject({ name: "dns-servers", kind: "ipv6_address", array: true });
+    expect(six.find((c) => c.code === 24)).toMatchObject({ name: "domain-search", kind: "fqdn", array: true });
+    expect(catalog("dhcp4").every((c) => c.space === "dhcp4")).toBe(true);
+    const both = catalog();
+    expect(both.slice(0, catalog("dhcp4").length).every((c) => c.space === "dhcp4")).toBe(true);
+    expect(both).toHaveLength(catalog("dhcp4").length + six.length);
+  });
+
+  it("saves dhcp6 option values typed, refuses a server-managed code, a type that does not fit and a code without a definition", () => {
+    const path = `scope:${DHCP_IDS.lanV6}`;
+    const revision = state.optionSets.get(path)?.revision ?? 0;
+    const saved = putOptionSet(
+      state,
+      ctx,
+      path,
+      { values: [{ space: "dhcp6", code: 23, typed: { ipv6: { values: ["2001:db8:0:10::53", "2001:db8:0:10::54"] } } }, { space: "dhcp6", code: 32, typed: { unsigned: [86_400] } }] },
+      revision,
+    );
+    expect(saved.values.map((v) => [v.space, v.code, v.name, v.data])).toEqual([
+      ["dhcp6", 23, "dns-servers", "20010db8000000100000000000000053" + "20010db8000000100000000000000054"],
+      ["dhcp6", 32, "information-refresh-time", "00015180"],
+    ]);
+    const reserved = failure(() => putOptionSet(state, ctx, path, { values: [{ space: "dhcp6", code: 3, data: "" }] }, "*"));
+    expect([reserved.status, reserved.code]).toEqual([409, "dhcp.option.code_reserved"]);
+    expect(failure(() => putOptionSet(state, ctx, path, { values: [{ space: "dhcp6", code: 23, typed: { ipv4: { values: ["192.0.2.1"] } } }] }, "*")).code).toBe("dhcp.option.invalid");
+    expect(failure(() => putOptionSet(state, ctx, path, { values: [{ space: "dhcp6", code: 23, typed: { ipv6: { values: [] } } }] }, "*")).code).toBe("dhcp.option.invalid");
+    expect(failure(() => putOptionSet(state, ctx, path, { values: [{ space: "dhcp6", code: 99, data: "00" }] }, "*")).code).toBe("dhcp.option.unknown");
+    // The same code number in the other space is another option: dhcp4 option 3 is the routers.
+    expect(putOptionSet(state, ctx, path, { values: [{ code: 3, typed: { ipv4: { values: ["192.0.2.1"] } } }] }, "*").values.map((v) => [v.space, v.code])).toEqual([["dhcp4", 3]]);
+  });
+
+  it("refuses a custom definition of a dhcp6 catalog code", () => {
+    expect(failure(() => createOptionDef(state, ctx, { space: "dhcp6", code: 23, name: "mine", kind: "string" })).code).toBe("dhcp.option.code_reserved");
+    expect(createOptionDef(state, ctx, { space: "dhcp6", code: 200, name: "site-six", kind: "string" })).toMatchObject({ space: "dhcp6", code: 200 });
+  });
+});
+
 describe("the routes", () => {
   beforeEach(async () => {
     await signInAlex();
@@ -480,10 +588,58 @@ describe("the routes", () => {
 
   it("lists a page and audits a write", async () => {
     const page = await api.get("/api/v1/dhcp/scopes");
-    expect(page.items.map((s) => s.cidr)).toEqual(["192.0.2.0/24"]);
+    expect(page.items.map((s) => s.cidr)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64"]);
     const before = audit.records.length;
     await api.post("/api/v1/dhcp/filters", { body: { mac: "02:00:00:00:00:*", kind: "deny" } });
     expect(audit.records.slice(before).map((r) => r.draft.action)).toEqual(["dhcp.filter.create"]);
+  });
+
+  it("answers the option catalog by space, both with dhcp4 first, and refuses another space", async () => {
+    const six = await api.get("/api/v1/dhcp/option-catalog", { query: { space: "dhcp6" } });
+    expect(six.every((c) => c.space === "dhcp6")).toBe(true);
+    expect(six.some((c) => c.code === 23)).toBe(true);
+    const four = await api.get("/api/v1/dhcp/option-catalog", { query: { space: "dhcp4" } });
+    expect(four.every((c) => c.space === "dhcp4")).toBe(true);
+    const both = await api.get("/api/v1/dhcp/option-catalog");
+    expect(both).toHaveLength(four.length + six.length);
+    expect(both[0]?.space).toBe("dhcp4");
+    expect(both[both.length - 1]?.space).toBe("dhcp6");
+    await expect(api.get("/api/v1/dhcp/option-catalog", { query: { space: "dhcp5" } })).rejects.toMatchObject({ status: 400, code: "sys.invalid_query" });
+  });
+
+  it("changes the DHCPv6 settings of a scope with the revision, drops them, and refuses them on an IPv4 scope", async () => {
+    const scope = await api.get("/api/v1/dhcp/scopes/{prefix}", { path: { prefix: DHCP_IDS.lanV6 } });
+    expect([scope.family, scope.v6]).toEqual(["v6", { rapid_commit: true }]);
+    const changed = await api.patch("/api/v1/dhcp/scopes/{prefix}", {
+      path: { prefix: DHCP_IDS.lanV6 },
+      body: { v6: { preferred_secs: 3600, rapid_commit: false, interface_id: "eth1" } },
+      ifMatch: scope.revision,
+    });
+    expect(changed.v6).toEqual({ preferred_secs: 3600, rapid_commit: false, interface_id: "eth1" });
+    const cleared = await api.patch("/api/v1/dhcp/scopes/{prefix}", { path: { prefix: DHCP_IDS.lanV6 }, body: { clear_v6: true }, ifMatch: changed.revision });
+    expect(cleared.v6).toBeUndefined();
+    const err = await api.patch("/api/v1/dhcp/scopes/{prefix}", { path: { prefix: DHCP_IDS.lan }, body: { v6: { rapid_commit: true } }, ifMatch: "*" as never }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect([(err as ApiError).status, (err as ApiError).code, (err as ApiError).params.field]).toEqual([400, "dhcp.scope.invalid", "v6"]);
+  });
+
+  it("answers the utilization of a DHCPv6 scope with its family", async () => {
+    const u = await api.get("/api/v1/dhcp/scopes/{prefix}/utilization", { path: { prefix: DHCP_IDS.lanV6 } });
+    expect([u.family, u.pool_size, u.leased]).toEqual(["v6", 256, 3]);
+  });
+
+  it("puts and reads the dhcp6 options of a DHCPv6 scope", async () => {
+    const owner = `scope:${DHCP_IDS.lanV6}`;
+    const set = await api.get("/api/v1/dhcp/option-sets/{owner}", { path: { owner } });
+    const saved = await api.put("/api/v1/dhcp/option-sets/{owner}", {
+      path: { owner },
+      body: { values: [{ space: "dhcp6", code: 23, typed: { ipv6: { values: ["2001:db8::53"] } } }] },
+      ifMatch: set.revision,
+    });
+    expect(saved.values.map((v) => [v.space, v.code, v.typed])).toEqual([["dhcp6", 23, { ipv6: { values: ["2001:db8::53"] } }]]);
+    await expect(
+      api.put("/api/v1/dhcp/option-sets/{owner}", { path: { owner }, body: { values: [{ space: "dhcp6", code: 1, data: "00" }] }, ifMatch: saved.revision }),
+    ).rejects.toMatchObject({ status: 409, code: "dhcp.option.code_reserved" });
   });
 
   it("answers a refusal as a problem with the field under errors", async () => {

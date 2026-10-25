@@ -3,6 +3,7 @@
 // server's message) and the read-only catalog with the codes the server sets itself.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { catalog } from "../../api/mock/dhcp-model";
 import { dhcpState } from "../../api/mock/routes-dhcp";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -40,6 +41,39 @@ describe("the options page", () => {
     expect(within(row("dhcp-catalog", "dhcp4:6")).queryByTestId("catalog-managed")).toBeNull();
     expect(cell(row("dhcp-catalog", "dhcp4:6"), "kind").textContent).toBe("IPv4 address, list");
     expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  // WP9.4: the catalog of both spaces, and the set of the server holds values of both.
+  it("lists the DHCPv6 catalog after the DHCPv4 one and offers both spaces for the options of the server", async () => {
+    const writes = recordIfMatch();
+    open();
+    await loaded();
+    // The grid shows the rows in view; its row count says both catalogs are in it (the header counts one).
+    await waitFor(() => expect(screen.getByTestId("grid-dhcp-catalog").querySelector("[aria-rowcount]")?.getAttribute("aria-rowcount")).toBe(String(catalog().length + 1)));
+    expect(catalog().some((c) => c.space === "dhcp6")).toBe(true);
+
+    const server = await screen.findByTestId("server-optset");
+    await waitFor(() => expect(within(server).getAllByTestId("optset-row")).toHaveLength(2));
+    const add = within(server).getByTestId("optset-add") as HTMLSelectElement;
+    expect(Array.from(add.querySelectorAll("optgroup")).map((g) => g.label)).toEqual(["DHCPv4", "DHCPv6"]);
+    const offered = Array.from(add.options).map((o) => o.value);
+    expect(offered).toContain("dhcp4|3");
+    expect(offered).toContain("dhcp6|23");
+    expect(offered).not.toContain("dhcp6|3");
+    fireEvent.change(add, { target: { value: "dhcp6|23" } });
+    const dns = await waitFor(() => within(server).getAllByTestId("optset-row").find((r) => r.dataset.key === "dhcp6:23") as HTMLElement);
+    // A row of the other family says which one it is.
+    expect(dns.textContent).toContain("DHCPv6");
+    fireEvent.input(within(dns).getByTestId("optset-value"), { target: { value: "2001:db8::53" } });
+    fireEvent.click(within(server).getByTestId("optset-save"));
+    await waitFor(() => expect(dhcpState().optionSets.get("server")?.values.map((v) => `${v.space}:${v.code}`)).toEqual(["dhcp4:6", "dhcp4:15", "dhcp6:23"]));
+    expect(writes().find((w) => w.method === "PUT")?.body).toEqual({
+      values: [
+        { code: 6, typed: { ipv4: { values: ["192.0.2.53"] } } },
+        { code: 15, typed: { text: "example.test" } },
+        { space: "dhcp6", code: 23, typed: { ipv6: { values: ["2001:db8::53"] } } },
+      ],
+    });
   });
 
   it("defines an option after the local checks and shows the refusals of the server under the field", async () => {

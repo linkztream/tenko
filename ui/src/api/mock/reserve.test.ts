@@ -74,6 +74,33 @@ describe("reserving an address", () => {
     expect((await refusal(() => reserve(ADDRESS_IDS["192.0.2.30"] as string, { mac: "02:00:5e:10:00:30" }))).status).toBe(403);
   });
 
+  /** A DHCPv6 lease of the client with the DUID-LL of docMac(0x10) outside the pool, where a reservation may be. */
+  function leaseAt(addr: string) {
+    const template = dhcpLeaseState().leases.find((l) => l.addr === "2001:db8:0:10::100")!;
+    const lease = { ...template, addr };
+    dhcpLeaseState().leases.push(lease);
+    return lease;
+  }
+
+  it("marks a DHCPv6 lease as its client's reservation when the reserved interface has the client's MAC address (WP9.4)", async () => {
+    leaseAt("2001:db8:0:10::41");
+    const result = await api.post("/api/v1/addresses/reserve", { body: { ip: "2001:db8:0:10::41", new_host: "pc-1", mac: "00:00:5e:00:53:10" } as never });
+    expect(result.address?.ip).toBe("2001:db8:0:10::41");
+    const page = await api.get("/api/v1/dhcp/leases", { query: { family: "v6", addr: "2001:db8:0:10::41" } });
+    expect(page.items[0]?.reserved).toBe(true);
+    expect(page.items[0]?.host).toBe(result.host?.id);
+    expect(dhcpLeaseState().leases.find((l) => l.addr === "2001:db8:0:10::41")?.reserved).toBe(false);
+  });
+
+  it("does not mark a DHCPv6 lease whose client has another MAC address than the reserved interface", async () => {
+    leaseAt("2001:db8:0:10::42");
+    const result = await api.post("/api/v1/addresses/reserve", { body: { ip: "2001:db8:0:10::42", new_host: "pc-9", mac: "02:00:5e:10:00:09" } as never });
+    const page = await api.get("/api/v1/dhcp/leases", { query: { family: "v6", addr: "2001:db8:0:10::42" } });
+    expect(page.items[0]?.reserved).toBe(false);
+    expect(page.items[0]?.host).toBeUndefined();
+    expect(result.host?.mode).toBe("reserved");
+  });
+
   it("marks the lease of a reserved client as its reservation, with the host", async () => {
     grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
     const page = await api.get("/api/v1/dhcp/leases", { query: { addr: "192.0.2.41" } });

@@ -422,7 +422,8 @@ async fn a_malformed_path_is_refused_before_anything_else() {
         ("POST", "/dhcp/leases/not-an-address/release"),
         ("GET", "/nodes/0/dhcp"),
         ("GET", "/nodes/x/dhcp/history"),
-        ("POST", "/nodes/1001/dhcp/leases/2001:db8::1/release"),
+        // WP9.4: an IPv6 address is a lease address; a malformed one is not.
+        ("POST", "/nodes/1001/dhcp/leases/2001:db8::zz/release"),
     ] {
         send(&router, method, path)
             .await

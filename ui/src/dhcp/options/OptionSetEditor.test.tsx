@@ -24,11 +24,11 @@ afterEach(async () => {
   await setLocale("en");
 });
 
-function mount(props: { owner?: string; canWrite?: boolean } = {}) {
+function mount(props: { owner?: string; canWrite?: boolean; space?: "dhcp4" | "dhcp6" | "both" } = {}) {
   const view = render(() => (
     <>
       <IconSprite />
-      <OptionSetEditor owner={props.owner ?? "server"} label="Options of the server" canWrite={props.canWrite ?? true} />
+      <OptionSetEditor owner={props.owner ?? "server"} label="Options of the server" canWrite={props.canWrite ?? true} space={props.space} />
       <Toasts />
     </>
   ));
@@ -204,5 +204,92 @@ describe("the option set editor", () => {
     await loaded();
     expect(screen.getByTestId("optset-save").textContent).toBe("Spara alternativen");
     expect(rowOf("dhcp4:6").textContent).toContain("IPv4-adress, lista");
+  });
+});
+
+// WP9.4: the option space whose codes the editor offers.
+describe("the option space of the editor", () => {
+  const lan6 = `scope:${DHCP_IDS.lanV6}`;
+  const offered = () => Array.from((screen.getByTestId("optset-add") as HTMLSelectElement).options).map((o) => o.value).filter((v) => v !== "");
+
+  it("offers the DHCPv4 catalog by default and none of the DHCPv6 one", async () => {
+    mount();
+    await loaded();
+    expect(offered().every((v) => v.startsWith("dhcp4|"))).toBe(true);
+    expect(offered()).toContain("dhcp4|3");
+  });
+
+  it("offers the DHCPv6 catalog and the definitions of the space for dhcp6, without the codes the server writes", async () => {
+    dhcpState().optionDefs.push({ id: "def-six", space: "dhcp6", code: 200, name: "site-six", kind: "string", array: false, created: dhcpState().optionDefs[0]!.created, updated: dhcpState().optionDefs[0]!.updated, revision: 1 });
+    mount({ owner: lan6, space: "dhcp6" });
+    await loaded();
+    const codes = offered();
+    expect(codes.every((v) => v.startsWith("dhcp6|"))).toBe(true);
+    expect(codes).toEqual(expect.arrayContaining(["dhcp6|21", "dhcp6|22", "dhcp6|31", "dhcp6|56", "dhcp6|82", "dhcp6|200"]));
+    // 23 and 24 are in the set; 1 to 14, 18 to 20, 25, 26, 37, 39 and 79 are the server's.
+    for (const code of [23, 24, 1, 2, 3, 6, 14, 18, 25, 26, 37, 39, 79]) expect(codes, String(code)).not.toContain(`dhcp6|${code}`);
+    // The options of the DHCPv4 set stay out, the kind of each option is the catalog's.
+    expect(rowsOf().map((r) => r.dataset.key)).toEqual(["dhcp6:23", "dhcp6:24"]);
+    expect(rowOf("dhcp6:24").textContent).toContain("Domain name, list");
+  });
+
+  it("types a dhcp6 value by its catalog type and sends it with its space", async () => {
+    const writes = recordIfMatch();
+    mount({ owner: lan6, space: "dhcp6" });
+    await loaded();
+    add("dhcp6|32");
+    type("dhcp6:32", "3600");
+    add("dhcp6|64");
+    type("dhcp6:64", "aftr.example.net");
+    fireEvent.click(screen.getByTestId("optset-save"));
+    await waitFor(() => expect(dhcpState().optionSets.get(lan6)?.values.map((v) => v.code)).toEqual([23, 24, 32, 64]));
+    expect(writes().find((w) => w.method === "PUT")?.body).toEqual({
+      values: [
+        { space: "dhcp6", code: 23, typed: { ipv6: { values: ["2001:db8:0:10::53"] } } },
+        { space: "dhcp6", code: 24, typed: { names: ["example.net"] } },
+        { space: "dhcp6", code: 32, typed: { unsigned: [3600] } },
+        { space: "dhcp6", code: 64, typed: { names: ["aftr.example.net"] } },
+      ],
+    });
+  });
+
+  it("refuses an IPv4 address for an IPv6 option, and a number for a name, before it sends", async () => {
+    const writes = recordIfMatch();
+    mount({ owner: lan6, space: "dhcp6" });
+    await loaded();
+    type("dhcp6:23", "192.0.2.53");
+    type("dhcp6:24", "not a name!");
+    fireEvent.click(screen.getByTestId("optset-save"));
+    await waitFor(() => expect(screen.getAllByTestId("optset-row-error").map((e) => e.dataset.key)).toEqual(["dhcp6:23", "dhcp6:24"]));
+    expect(screen.getAllByTestId("optset-row-error")[0]?.textContent).toBe("Enter IPv6 addresses.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("takes a DHCPv6 code typed in up to 65535 and not a code the server writes", async () => {
+    mount({ owner: lan6, space: "dhcp6" });
+    await loaded();
+    const go = (code: string) => {
+      fireEvent.input(screen.getByTestId("optset-add-code"), { target: { value: code } });
+      fireEvent.click(screen.getByTestId("optset-add-code-go"));
+    };
+    go("70000");
+    expect(screen.getByTestId("optset-code-error").textContent).toBe("Enter a code from 1 to 65535.");
+    go("3");
+    expect(screen.getByTestId("optset-code-error").textContent).toBe("The server sets this option itself.");
+    go("300");
+    await waitFor(() => expect(rowsOf().map((r) => r.dataset.key)).toEqual(["dhcp6:23", "dhcp6:24", "dhcp6:300"]));
+    expect(screen.queryByTestId("optset-code-error")).toBeNull();
+  });
+
+  it("offers both spaces in groups, DHCPv4 first, and says a DHCPv6 row is one", async () => {
+    mount({ owner: "server", space: "both" });
+    await loaded();
+    const groups = Array.from((screen.getByTestId("optset-add") as HTMLSelectElement).querySelectorAll("optgroup"));
+    expect(groups.map((g) => g.label)).toEqual(["DHCPv4", "DHCPv6"]);
+    expect(Array.from(groups[0]?.querySelectorAll("option") ?? []).every((o) => o.value.startsWith("dhcp4|"))).toBe(true);
+    expect(Array.from(groups[1]?.querySelectorAll("option") ?? []).every((o) => o.value.startsWith("dhcp6|"))).toBe(true);
+    add("dhcp6|23");
+    expect(rowOf("dhcp6:23").textContent).toContain("DHCPv6");
+    expect(rowOf("dhcp4:6").textContent).not.toContain("DHCPv6");
   });
 });

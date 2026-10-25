@@ -1082,7 +1082,7 @@ export interface paths {
         };
         /**
          * Read the DHCP lease history
-         * @description Scope: `dhcp.read`. The rows of `dhcp.history`, newest first; the node command `dhcp.history.read` of the one node. Reading the history is audited (`dhcp.lease.read`).
+         * @description Scope: `dhcp.read`. The rows of `dhcp.history` and `dhcp.history6`, newest first (`family` keeps one); the node command `dhcp.history.read` of the one node. Reading the history is audited (`dhcp.lease.read`).
          */
         get: operations["list_dhcp_history"];
         put?: never;
@@ -1102,7 +1102,7 @@ export interface paths {
         };
         /**
          * List DHCP leases
-         * @description Scope: `dhcp.read`. The leases of the dhcp role's table in address order, filtered; the node command `dhcp.leases.list` of the one node. Reading leases is audited (`dhcp.lease.read`).
+         * @description Scope: `dhcp.read`. The leases of the dhcp role's tables, filtered: the DHCPv4 leases in address order, then the DHCPv6 leases (`family` keeps one); each names the client's lease of the other family with the same MAC address (`peer`). The node command `dhcp.leases.list` of the one node. Reading leases is audited (`dhcp.lease.read`).
          */
         get: operations["list_dhcp_leases"];
         put?: never;
@@ -1144,7 +1144,7 @@ export interface paths {
         put?: never;
         /**
          * Release a DHCP lease (the address returns to the pool)
-         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release` of the one node: the active lease becomes `released` now (history kind `reclaimed`); the client keeps using the address until it renews and is refused. Audited (`dhcp.lease.release`).
+         * @description Scope: `dhcp.write`. The node command `dhcp.lease.release` (an IPv4 address) or `dhcp.lease6.release` (an IPv6 address) of the one node: the active lease becomes `released` now (history kind `reclaimed`); the client keeps using the address until it renews and is refused. Audited (`dhcp.lease.release`).
          */
         post: operations["release_dhcp_lease"];
         delete?: never;
@@ -1162,7 +1162,7 @@ export interface paths {
         };
         /**
          * List the built-in DHCP options
-         * @description Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors with their types, and the codes the server sets itself, which no option set holds.
+         * @description Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors (space `dhcp4`) and the DHCPv6 options of RFC 8415 and the option RFCs (space `dhcp6`) with their types, and the codes the server sets itself, which no option set holds; `space` keeps one of them.
          */
         get: operations["list_dhcp_option_catalog"];
         put?: never;
@@ -1538,7 +1538,7 @@ export interface paths {
         };
         /**
          * Get how full a DHCP scope is
-         * @description Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses.
+         * @description Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.
          */
         get: operations["get_dhcp_scope_utilization"];
         put?: never;
@@ -3131,7 +3131,7 @@ export interface paths {
         };
         /**
          * Get the DHCP role of a node
-         * @description Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image.
+         * @description Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image; the DHCPv6 listeners, scopes and leases in `listeners6`, `scopes6` and `leases6`.
          */
         get: operations["get_node_dhcp_status"];
         put?: never;
@@ -7275,6 +7275,11 @@ export interface components {
              */
             losses?: components["schemas"]["LossEntry"][];
         };
+        /**
+         * @description The address family of a lease or a history row.
+         * @enum {string}
+         */
+        DhcpFamily: "v4" | "v6";
         /** @description `POST /dhcp/filters`. */
         DhcpFilterCreate: {
             /** @description Allow or deny. */
@@ -7296,8 +7301,53 @@ export interface components {
             /** @description Why; an empty string clears it. */
             note?: string | null;
         };
-        /** @description One row of the lease history. */
-        DhcpHistoryItem: components["schemas"]["LeaseEvent"];
+        /**
+         * @description One row of the lease history: an event of `dhcp.history` (`family` `v4`) or of
+         *     `dhcp.history6` (`family` `v6`).
+         */
+        DhcpHistoryItem: {
+            /**
+             * @description The address.
+             * @example 192.0.2.50
+             */
+            addr: string;
+            /** @description When. */
+            at: components["schemas"]["Timestamp"];
+            client?: components["schemas"]["ClientKey"] | null;
+            duid?: components["schemas"]["Duid"] | null;
+            /** @description The end of that state. */
+            ends: components["schemas"]["Timestamp"];
+            /** @description The family. */
+            family: components["schemas"]["DhcpFamily"];
+            /** @description DHCPv4: the host name the client sent. */
+            hostname?: string | null;
+            /**
+             * Format: int32
+             * @description DHCPv6: the identity association.
+             */
+            iaid?: number | null;
+            /** @description What. */
+            kind: components["schemas"]["LeaseEventKind"];
+            /**
+             * @description The client's MAC address where the row says it: the Ethernet hardware address of a
+             *     DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+             * @example 00:00:5e:00:53:01
+             */
+            mac?: string | null;
+            /** @description The node that wrote it. */
+            node: components["schemas"]["NodeId"];
+            /**
+             * Format: int32
+             * @description DHCPv6: the prefix length, 128 for an address.
+             */
+            prefix_len?: number | null;
+            /** @description The scope. */
+            scope: components["schemas"]["PrefixId"];
+            /** @description The state after the event. */
+            state: components["schemas"]["BindingState"];
+            /** @description The VRF. */
+            vrf: components["schemas"]["VrfId"];
+        };
         /** @description The number of leases in one state. */
         DhcpLeaseCount: {
             /**
@@ -7308,13 +7358,102 @@ export interface components {
             /** @description The state. */
             state: components["schemas"]["BindingState"];
         };
-        /** @description A lease as the API reads it. */
-        DhcpLeaseItem: components["schemas"]["Lease"] & {
+        /**
+         * @description A lease as the API reads it: a DHCPv4 lease (`family` `v4`, the fields of
+         *     `dhcp.leases`) or a DHCPv6 lease (`family` `v6`, the fields of `dhcp.leases6`).
+         */
+        DhcpLeaseItem: {
+            /**
+             * @description The address (a delegated prefix's first address for a DHCPv6 `pd` lease).
+             * @example 192.0.2.50
+             */
+            addr: string;
+            atsfp?: components["schemas"]["Timestamp"] | null;
+            client?: components["schemas"]["ClientKey"] | null;
+            /** @description The client's last transaction time. */
+            cltt: components["schemas"]["Timestamp"];
+            /** @description The DDNS outcome. */
+            ddns?: components["schemas"]["DdnsState"];
+            ddns_policy?: components["schemas"]["DdnsPolicy"] | null;
+            duid?: components["schemas"]["Duid"] | null;
+            /** @description When the state ends (the valid lifetime's end of a DHCPv6 binding). */
+            ends: components["schemas"]["Timestamp"];
+            /** @description The family. */
+            family: components["schemas"]["DhcpFamily"];
+            fingerprint?: components["schemas"]["Fingerprint"] | null;
+            /** @description The name the client sent: option 81 of DHCPv4, option 39 of DHCPv6 (RFC 4704). */
+            fqdn?: string | null;
+            /**
+             * Format: int32
+             * @description The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).
+             */
+            fqdn_flags?: number | null;
             host?: components["schemas"]["HostId"] | null;
+            /** @description DHCPv4: the host name the client sent (option 12). */
+            hostname?: string | null;
+            /**
+             * Format: int32
+             * @description DHCPv6: the identity association.
+             */
+            iaid?: number | null;
+            kind?: components["schemas"]["Lease6Kind"] | null;
+            link_layer?: components["schemas"]["HexBytes"] | null;
+            /**
+             * Format: int32
+             * @description DHCPv6: the hardware type of `link_layer` (1 for Ethernet).
+             */
+            link_layer_type?: number | null;
+            /**
+             * @description The client's MAC address, where it is known: the Ethernet hardware address of a
+             *     DHCPv4 client, the link-layer address of a DHCPv6 client (RFC 6939, or its DUID-LLT
+             *     or DUID-LL).
+             * @example 00:00:5e:00:53:01
+             */
+            mac?: string | null;
+            /** @description The node that wrote the row. */
+            node: components["schemas"]["NodeId"];
+            observed_at?: components["schemas"]["Timestamp"] | null;
+            peer?: components["schemas"]["DhcpLeasePeer"] | null;
+            preferred_ends?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int32
+             * @description DHCPv6: the prefix length, 128 for an address.
+             */
+            prefix_len?: number | null;
+            relay?: components["schemas"]["RelayInfo"] | null;
+            relay6?: components["schemas"]["Relay6Info"] | null;
             /** @description Whether the address is the client's reservation. */
             reserved: boolean;
             /** @description The store revision of the row. */
             revision: components["schemas"]["Revision"];
+            /** @description The scope, by its prefix. */
+            scope: components["schemas"]["PrefixId"];
+            share?: components["schemas"]["PoolShare"] | null;
+            /** @description The binding state. */
+            state: components["schemas"]["BindingState"];
+            tsfp?: components["schemas"]["Timestamp"] | null;
+            tstp?: components["schemas"]["Timestamp"] | null;
+            /** @description The VRF of the scope's prefix. */
+            vrf: components["schemas"]["VrfId"];
+        };
+        /**
+         * @description The lease of the other family whose client has the same MAC address (DHCP-11): an
+         *     active one when there is one, else the one that ends last.
+         */
+        DhcpLeasePeer: {
+            /**
+             * @description Its address.
+             * @example 2001:db8::50
+             */
+            addr: string;
+            /** @description When that state ends. */
+            ends: components["schemas"]["Timestamp"];
+            /** @description Its family. */
+            family: components["schemas"]["DhcpFamily"];
+            /** @description Its binding state. */
+            state: components["schemas"]["BindingState"];
+            /** @description Its VRF. */
+            vrf: components["schemas"]["VrfId"];
         };
         /** @description `POST /dhcp/leases/{addr}/release`. */
         DhcpLeaseRelease: {
@@ -7360,8 +7499,12 @@ export interface components {
             last_commit_ms?: number | null;
             /** @description The leases by state. */
             leases: components["schemas"]["DhcpLeaseCount"][];
+            /** @description The DHCPv6 leases by state. */
+            leases6?: components["schemas"]["DhcpLeaseCount"][];
             /** @description The listeners. */
             listeners: components["schemas"]["DhcpListenerItem"][];
+            /** @description The DHCPv6 listeners (port 547). */
+            listeners6?: components["schemas"]["DhcpListenerItem"][];
             /** @description The node. */
             node: components["schemas"]["NodeId"];
             /** @description Whether conflict detection runs (a `probe` role in the process). */
@@ -7373,6 +7516,11 @@ export interface components {
              * @description The scopes served.
              */
             scopes: number;
+            /**
+             * Format: int32
+             * @description The DHCPv6 scopes served.
+             */
+            scopes6?: number;
             /** @description Whether the role serves. */
             serving: boolean;
         };
@@ -7558,6 +7706,12 @@ export interface components {
             /** @description When the role's table was read. */
             at: components["schemas"]["Timestamp"];
             /**
+             * @description `v4` for a DHCPv4 scope, `v6` for a DHCPv6 one, whose pools may hold more addresses
+             *     than `pool_size` can say (it stops at 2^64 - 1; `pool_bits` gives the size).
+             * @example v4
+             */
+            family: string;
+            /**
              * Format: int64
              * @description Pool addresses free now.
              */
@@ -7567,6 +7721,12 @@ export interface components {
              * @description Pool addresses with an active lease.
              */
             leased: number;
+            /**
+             * Format: int32
+             * @description The pool size as a power of two, rounded down, when it is at least 2^32 (a DHCPv6
+             *     pool of a /64 has 64); absent for a smaller pool.
+             */
+            pool_bits?: number | null;
             /**
              * Format: int64
              * @description Addresses in the pools, exclusions taken out.
@@ -10210,31 +10370,10 @@ export interface components {
             vrf: components["schemas"]["VrfId"];
         };
         /**
-         * @description One row of `dhcp.history` (key: time, VRF, address), written in the batch of the lease
-         *     change; bounded by the retention of P3-Q13.
+         * @description What a DHCPv6 lease binds (Slice 9).
+         * @enum {string}
          */
-        LeaseEvent: {
-            /** @description The address. */
-            addr: string;
-            /** @description When. */
-            at: components["schemas"]["Timestamp"];
-            /** @description The client. */
-            client: components["schemas"]["ClientKey"];
-            /** @description The end of that state. */
-            ends: components["schemas"]["Timestamp"];
-            /** @description The host name the client sent. */
-            hostname?: string | null;
-            /** @description What. */
-            kind: components["schemas"]["LeaseEventKind"];
-            /** @description The node that wrote it. */
-            node: components["schemas"]["NodeId"];
-            /** @description The scope. */
-            scope: components["schemas"]["PrefixId"];
-            /** @description The state after the event. */
-            state: components["schemas"]["BindingState"];
-            /** @description The VRF. */
-            vrf: components["schemas"]["VrfId"];
-        };
+        Lease6Kind: "na" | "pd";
         /**
          * @description What happened to a lease (`dhcp.history`).
          * @enum {string}
@@ -13099,7 +13238,49 @@ export interface components {
          */
         Page_DhcpHistoryItem: {
             /** @description The items of this page, at most `limit` of them. */
-            items: components["schemas"]["LeaseEvent"][];
+            items: {
+                /**
+                 * @description The address.
+                 * @example 192.0.2.50
+                 */
+                addr: string;
+                /** @description When. */
+                at: components["schemas"]["Timestamp"];
+                client?: components["schemas"]["ClientKey"] | null;
+                duid?: components["schemas"]["Duid"] | null;
+                /** @description The end of that state. */
+                ends: components["schemas"]["Timestamp"];
+                /** @description The family. */
+                family: components["schemas"]["DhcpFamily"];
+                /** @description DHCPv4: the host name the client sent. */
+                hostname?: string | null;
+                /**
+                 * Format: int32
+                 * @description DHCPv6: the identity association.
+                 */
+                iaid?: number | null;
+                /** @description What. */
+                kind: components["schemas"]["LeaseEventKind"];
+                /**
+                 * @description The client's MAC address where the row says it: the Ethernet hardware address of a
+                 *     DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+                 * @example 00:00:5e:00:53:01
+                 */
+                mac?: string | null;
+                /** @description The node that wrote it. */
+                node: components["schemas"]["NodeId"];
+                /**
+                 * Format: int32
+                 * @description DHCPv6: the prefix length, 128 for an address.
+                 */
+                prefix_len?: number | null;
+                /** @description The scope. */
+                scope: components["schemas"]["PrefixId"];
+                /** @description The state after the event. */
+                state: components["schemas"]["BindingState"];
+                /** @description The VRF. */
+                vrf: components["schemas"]["VrfId"];
+            }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -13115,13 +13296,80 @@ export interface components {
          */
         Page_DhcpLeaseItem: {
             /** @description The items of this page, at most `limit` of them. */
-            items: (components["schemas"]["Lease"] & {
+            items: {
+                /**
+                 * @description The address (a delegated prefix's first address for a DHCPv6 `pd` lease).
+                 * @example 192.0.2.50
+                 */
+                addr: string;
+                atsfp?: components["schemas"]["Timestamp"] | null;
+                client?: components["schemas"]["ClientKey"] | null;
+                /** @description The client's last transaction time. */
+                cltt: components["schemas"]["Timestamp"];
+                /** @description The DDNS outcome. */
+                ddns?: components["schemas"]["DdnsState"];
+                ddns_policy?: components["schemas"]["DdnsPolicy"] | null;
+                duid?: components["schemas"]["Duid"] | null;
+                /** @description When the state ends (the valid lifetime's end of a DHCPv6 binding). */
+                ends: components["schemas"]["Timestamp"];
+                /** @description The family. */
+                family: components["schemas"]["DhcpFamily"];
+                fingerprint?: components["schemas"]["Fingerprint"] | null;
+                /** @description The name the client sent: option 81 of DHCPv4, option 39 of DHCPv6 (RFC 4704). */
+                fqdn?: string | null;
+                /**
+                 * Format: int32
+                 * @description The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).
+                 */
+                fqdn_flags?: number | null;
                 host?: components["schemas"]["HostId"] | null;
+                /** @description DHCPv4: the host name the client sent (option 12). */
+                hostname?: string | null;
+                /**
+                 * Format: int32
+                 * @description DHCPv6: the identity association.
+                 */
+                iaid?: number | null;
+                kind?: components["schemas"]["Lease6Kind"] | null;
+                link_layer?: components["schemas"]["HexBytes"] | null;
+                /**
+                 * Format: int32
+                 * @description DHCPv6: the hardware type of `link_layer` (1 for Ethernet).
+                 */
+                link_layer_type?: number | null;
+                /**
+                 * @description The client's MAC address, where it is known: the Ethernet hardware address of a
+                 *     DHCPv4 client, the link-layer address of a DHCPv6 client (RFC 6939, or its DUID-LLT
+                 *     or DUID-LL).
+                 * @example 00:00:5e:00:53:01
+                 */
+                mac?: string | null;
+                /** @description The node that wrote the row. */
+                node: components["schemas"]["NodeId"];
+                observed_at?: components["schemas"]["Timestamp"] | null;
+                peer?: components["schemas"]["DhcpLeasePeer"] | null;
+                preferred_ends?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * Format: int32
+                 * @description DHCPv6: the prefix length, 128 for an address.
+                 */
+                prefix_len?: number | null;
+                relay?: components["schemas"]["RelayInfo"] | null;
+                relay6?: components["schemas"]["Relay6Info"] | null;
                 /** @description Whether the address is the client's reservation. */
                 reserved: boolean;
                 /** @description The store revision of the row. */
                 revision: components["schemas"]["Revision"];
-            })[];
+                /** @description The scope, by its prefix. */
+                scope: components["schemas"]["PrefixId"];
+                share?: components["schemas"]["PoolShare"] | null;
+                /** @description The binding state. */
+                state: components["schemas"]["BindingState"];
+                tsfp?: components["schemas"]["Timestamp"] | null;
+                tstp?: components["schemas"]["Timestamp"] | null;
+                /** @description The VRF of the scope's prefix. */
+                vrf: components["schemas"]["VrfId"];
+            }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -16602,6 +16850,30 @@ export interface components {
              *     line breaks and tabs. Blank counts as no reason.
              */
             reason?: string | null;
+        };
+        /**
+         * @description What the relay agent closest to a DHCPv6 client said about it (RFC 8415 section 9,
+         *     RFC 4649, RFC 6221), kept on the lease (WP9.1).
+         */
+        Relay6Info: {
+            /**
+             * Format: int32
+             * @description The relays the request passed, one for a single relay.
+             */
+            hops: number;
+            interface_id?: components["schemas"]["HexBytes"] | null;
+            /**
+             * @description The link address of the relay closest to the client (zero for a lightweight relay
+             *     of RFC 6221).
+             * @example 2001:db8:1::1
+             */
+            link_address: string;
+            /**
+             * @description The client's address as the relay saw it (its link-local address).
+             * @example fe80::200:5eff:fe00:5301
+             */
+            peer_address: string;
+            remote_id?: components["schemas"]["HexBytes"] | null;
         };
         /**
          * @description What a relay agent said about the client (RFC 3046, RFC 3527, RFC 5107), kept on the
@@ -26166,6 +26438,10 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 1000; 100 by default. */
                 limit?: number;
+                /** @description Only this family (`v4`, `v6`); both when absent, merged newest first. */
+                family?: components["schemas"]["DhcpFamily"];
+                /** @description Only DHCPv6 events of this client DUID (hexadecimal, separators allowed). */
+                duid?: string;
             };
             header?: never;
             path?: never;
@@ -26237,6 +26513,10 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 1000; 100 by default. */
                 limit?: number;
+                /** @description Only this family (`v4`, `v6`); both when absent, the DHCPv4 leases first. */
+                family?: components["schemas"]["DhcpFamily"];
+                /** @description Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed). */
+                duid?: string;
             };
             header?: never;
             path?: never;
@@ -26299,7 +26579,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description IPv4 address of the lease */
+                /** @description IPv4 or IPv6 address of the lease */
                 addr: string;
             };
             cookie?: never;
@@ -26367,7 +26647,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description IPv4 address of the lease */
+                /** @description IPv4 or IPv6 address of the lease */
                 addr: string;
             };
             cookie?: never;
@@ -26445,20 +26725,35 @@ export interface operations {
     };
     list_dhcp_option_catalog: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Only this space: `dhcp4` (RFC 2132 and its successors) or `dhcp6` (RFC 8415 and the
+                 *     option RFCs); both when absent, `dhcp4` first.
+                 */
+                space?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The built-in options in code order */
+            /** @description The built-in options by space (`dhcp4` first) and code */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["OptionCatalogItem"][];
+                };
+            };
+            /** @description The space is neither `dhcp4` nor `dhcp6` (`sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             /** @description No valid session or token */
@@ -36388,6 +36683,10 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 1000; 100 by default. */
                 limit?: number;
+                /** @description Only this family (`v4`, `v6`); both when absent, merged newest first. */
+                family?: components["schemas"]["DhcpFamily"];
+                /** @description Only DHCPv6 events of this client DUID (hexadecimal, separators allowed). */
+                duid?: string;
             };
             header?: never;
             path: {
@@ -36471,6 +36770,10 @@ export interface operations {
                 cursor?: string;
                 /** @description Items per page, 1 to 1000; 100 by default. */
                 limit?: number;
+                /** @description Only this family (`v4`, `v6`); both when absent, the DHCPv4 leases first. */
+                family?: components["schemas"]["DhcpFamily"];
+                /** @description Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed). */
+                duid?: string;
             };
             header?: never;
             path: {
@@ -36544,7 +36847,7 @@ export interface operations {
             path: {
                 /** @description Node id */
                 id: number;
-                /** @description IPv4 address of the lease */
+                /** @description IPv4 or IPv6 address of the lease */
                 addr: string;
             };
             cookie?: never;

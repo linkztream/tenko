@@ -306,13 +306,18 @@ pub(super) async fn delete_dhcp_scope(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// The pool size as a power of two, rounded down, from 2^32 up.
+fn pool_bits(size: u128) -> Option<u8> {
+    (size >= 1 << 32).then(|| u8::try_from(size.ilog2()).unwrap_or(u8::MAX))
+}
+
 #[utoipa::path(
     get,
     path = "/dhcp/scopes/{prefix}/utilization",
     tag = "dhcp",
     operation_id = "get_dhcp_scope_utilization",
     summary = "Get how full a DHCP scope is",
-    description = "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses.",
+    description = "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.",
     params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
     responses(
         (status = 200, description = "The figures of the scope", body = DhcpScopeUtilization),
@@ -334,6 +339,23 @@ pub(super) async fn get_dhcp_scope_utilization(
     let service = configs.get()?;
     let view = service.view(None).await?;
     let at = Timestamp::now();
+    // WP9.4: a DHCPv6 scope counts its DHCPv6 leases over 128-bit pools.
+    if let Some(figures) = ConfigService::utilization6(view.as_ref(), prefix, at)? {
+        let clamp = |value: u128| u64::try_from(value).unwrap_or(u64::MAX);
+        return Ok(Json(DhcpScopeUtilization {
+            prefix,
+            pool_size: clamp(figures.pool_size),
+            leased: figures.leased,
+            reserved: figures.reserved,
+            abandoned: figures.abandoned,
+            free: clamp(figures.free),
+            utilization: figures.utilization,
+            at,
+            family: "v6".to_owned(),
+            pool_bits: pool_bits(figures.pool_size),
+        })
+        .into_response());
+    }
     let figures = ConfigService::utilization(view.as_ref(), prefix, at)?;
     Ok(Json(DhcpScopeUtilization {
         prefix,
@@ -344,6 +366,8 @@ pub(super) async fn get_dhcp_scope_utilization(
         free: figures.free,
         utilization: figures.utilization,
         at,
+        family: "v4".to_owned(),
+        pool_bits: pool_bits(u128::from(figures.pool_size)),
     })
     .into_response())
 }

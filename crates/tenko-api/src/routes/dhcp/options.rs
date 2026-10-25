@@ -12,7 +12,10 @@ use axum::{
 use tenko_auth::authz::anywhere;
 use tenko_core::{
     Action, ObjectKind, ObjectRef, Principal,
-    dhcp::{OptionDef, OptionDefId, OptionOwner, OptionSet, OptionSpace},
+    dhcp::{
+        CATALOG_V6, OptionDef, OptionDefId, OptionKind, OptionOwner, OptionSet, OptionSpace,
+        SERVER_MANAGED_V6, catalog_v6,
+    },
 };
 use tenko_dhcp::config::{
     ConfigService,
@@ -23,9 +26,9 @@ use tenko_dhcp::config::{
 use tenko_store::ReadView;
 
 use super::{
-    Configs, OptionCatalogItem, OptionDefCreate, OptionDefItem, OptionDefPatch, OptionSetFilter,
-    OptionSetItem, OptionSetPut, OptionValueItem, owner_object, page_of, parse_id, parse_owner,
-    with_etag,
+    Configs, OptionCatalogItem, OptionCatalogParams, OptionDefCreate, OptionDefItem,
+    OptionDefPatch, OptionSetFilter, OptionSetItem, OptionSetPut, OptionValueItem, owner_object,
+    page_of, parse_id, parse_owner, with_etag,
 };
 use crate::{
     dto::Page,
@@ -58,12 +61,86 @@ fn set_item(row: OptionSetRow, defs: &[OptionDef]) -> OptionSetItem {
             .into_iter()
             .map(|value| {
                 let (name, typed) = describe(&value, defs);
+                // WP9.4: the DHCPv6 catalog names its codes.
+                let name = name.or_else(|| name6(&value.space, value.code));
                 OptionValueItem { value, name, typed }
             })
             .collect(),
         updated,
         revision: row.revision,
     }
+}
+
+// WP9.4: the DHCPv6 catalog and the codes a DHCPv6 server writes itself, with Kea's names.
+/// The names and types of [`SERVER_MANAGED_V6`], as Kea names them.
+const MANAGED_V6: [(u16, &str, OptionKind, bool); 21] = [
+    (1, "clientid", OptionKind::Binary, false),
+    (2, "serverid", OptionKind::Binary, false),
+    (3, "ia-na", OptionKind::Binary, false),
+    (4, "ia-ta", OptionKind::Binary, false),
+    (5, "iaaddr", OptionKind::Binary, false),
+    (6, "oro", OptionKind::U16, true),
+    (7, "preference", OptionKind::U8, false),
+    (8, "elapsed-time", OptionKind::U16, false),
+    (9, "relay-msg", OptionKind::Binary, false),
+    (11, "auth", OptionKind::Binary, false),
+    (12, "unicast", OptionKind::Ipv6Address, false),
+    (13, "status-code", OptionKind::Binary, false),
+    (14, "rapid-commit", OptionKind::Empty, false),
+    (18, "interface-id", OptionKind::Binary, false),
+    (19, "reconf-msg", OptionKind::U8, false),
+    (20, "reconf-accept", OptionKind::Empty, false),
+    (25, "ia-pd", OptionKind::Binary, false),
+    (26, "iaprefix", OptionKind::Binary, false),
+    (37, "remote-id", OptionKind::Binary, false),
+    (39, "client-fqdn", OptionKind::Binary, false),
+    (79, "client-linklayer-addr", OptionKind::Binary, false),
+];
+
+/// The name of a `dhcp6` code of the built-in catalog or of the server-managed codes.
+fn name6(space: &OptionSpace, code: u16) -> Option<String> {
+    if !space.is_dhcp6() {
+        return None;
+    }
+    catalog_v6(code)
+        .map(|entry| entry.name)
+        .or_else(|| {
+            MANAGED_V6
+                .iter()
+                .find(|(managed, ..)| *managed == code)
+                .map(|(_, name, ..)| *name)
+        })
+        .map(str::to_owned)
+}
+
+/// The DHCPv6 catalog with the server-managed codes, by code.
+fn catalog6() -> Vec<OptionCatalogItem> {
+    let mut items: Vec<OptionCatalogItem> = CATALOG_V6
+        .iter()
+        .map(|entry| OptionCatalogItem {
+            space: OptionSpace::dhcp6(),
+            code: entry.code,
+            name: entry.name.to_owned(),
+            kind: entry.kind,
+            array: entry.array,
+            server_managed: false,
+        })
+        .chain(
+            MANAGED_V6
+                .iter()
+                .filter(|(code, ..)| SERVER_MANAGED_V6.contains(code))
+                .map(|(code, name, kind, array)| OptionCatalogItem {
+                    space: OptionSpace::dhcp6(),
+                    code: *code,
+                    name: (*name).to_owned(),
+                    kind: *kind,
+                    array: *array,
+                    server_managed: true,
+                }),
+        )
+        .collect();
+    items.sort_by_key(|item| item.code);
+    items
 }
 
 fn all_defs(view: &dyn ReadView) -> Result<Vec<OptionDef>, ApiError> {
@@ -112,9 +189,11 @@ fn may_read(
     tag = "dhcp",
     operation_id = "list_dhcp_option_catalog",
     summary = "List the built-in DHCP options",
-    description = "Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors with their types, and the codes the server sets itself, which no option set holds.",
+    description = "Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors (space `dhcp4`) and the DHCPv6 options of RFC 8415 and the option RFCs (space `dhcp6`) with their types, and the codes the server sets itself, which no option set holds; `space` keeps one of them.",
+    params(OptionCatalogParams),
     responses(
-        (status = 200, description = "The built-in options in code order", body = Vec<OptionCatalogItem>),
+        (status = 200, description = "The built-in options by space (`dhcp4` first) and code", body = Vec<OptionCatalogItem>),
+        (status = 400, description = "The space is neither `dhcp4` nor `dhcp6` (`sys.invalid_query`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `dhcp.read`", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -122,23 +201,36 @@ fn may_read(
 pub(super) async fn list_dhcp_option_catalog(
     State(app): State<AppState>,
     Ctx(cx): Ctx,
+    Query(params): Query<OptionCatalogParams>,
 ) -> Result<Response, ApiError> {
     app.authorize(
         &cx.principal,
         Action::Read,
         &anywhere(ObjectKind::DhcpOptionDef),
     )?;
-    let items: Vec<OptionCatalogItem> = catalog()
-        .into_iter()
-        .map(|entry| OptionCatalogItem {
+    let (v4, v6) = match params.space.as_deref().map(str::trim) {
+        None | Some("") => (true, true),
+        Some(OptionSpace::DHCP4) => (true, false),
+        Some(OptionSpace::DHCP6) => (false, true),
+        Some(_) => {
+            return Err(ApiError::invalid_query("space", "must be dhcp4 or dhcp6"));
+        }
+    };
+    let mut items: Vec<OptionCatalogItem> = Vec::new();
+    if v4 {
+        items.extend(catalog().into_iter().map(|entry| OptionCatalogItem {
             space: entry.space,
             code: entry.code,
             name: entry.name.to_owned(),
             kind: entry.kind,
             array: entry.array,
             server_managed: entry.server_managed,
-        })
-        .collect();
+        }));
+    }
+    // WP9.4: the DHCPv6 catalog.
+    if v6 {
+        items.extend(catalog6());
+    }
     Ok(Json(items).into_response())
 }
 

@@ -8,11 +8,11 @@
       </unit>
       <unit id="dhcp.reservations.help">
         <notes><note category="description">Introduction of the DHCP reservations section on the host page.</note></notes>
-        <segment><source>The reservation of an address follows the identity of its interface: the client identifier when the interface has one, else the MAC address.</source><target>Reservationen för en adress följer gränssnittets identitet: klientidentifieraren om gränssnittet har en, annars MAC-adressen.</target></segment>
+        <segment><source>The reservation of an address follows the identity of its interface. DHCPv4: the client identifier when the interface has one, else the MAC address. DHCPv6: the DUID when the interface has one, else the MAC address.</source><target>Reservationen för en adress följer gränssnittets identitet. DHCPv4: klientidentifieraren om gränssnittet har en, annars MAC-adressen. DHCPv6: DUID om gränssnittet har ett, annars MAC-adressen.</target></segment>
       </unit>
       <unit id="dhcp.reservations.empty">
-        <notes><note category="description">Shown when the reserved host has no IPv4 address on a live interface.</note></notes>
-        <segment><source>This host has no active or planned IPv4 address on an interface, so there is nothing to reserve.</source><target>Värden har ingen aktiv eller planerad IPv4-adress på ett gränssnitt, så det finns inget att reservera.</target></segment>
+        <notes><note category="description">Shown when the reserved host has no address on a live interface.</note></notes>
+        <segment><source>This host has no active or planned address on an interface, so there is nothing to reserve.</source><target>Värden har ingen aktiv eller planerad adress på ett gränssnitt, så det finns inget att reservera.</target></segment>
       </unit>
       <unit id="dhcp.reservations.col_identity">
         <notes><note category="description">Column header: what the reservation is keyed by.</note></notes>
@@ -73,10 +73,6 @@
       <unit id="dhcp.reservations.lease_other">
         <notes><note category="description">Warning: the lease is held by another client than the reservation is for; {client} is its hardware address.</note></notes>
         <segment><source>Held by another client: {client}</source><target>Hålls av en annan klient: {client}</target></segment>
-      </unit>
-      <unit id="dhcp.reservations.ipv6_later">
-        <notes><note category="description">Shown when the host has IPv6 addresses.</note></notes>
-        <segment><source>IPv6 addresses get no DHCP reservation yet; that comes in a later version.</source><target>IPv6-adresser får ingen DHCP-reservation ännu; det kommer i en senare version.</target></segment>
       </unit>
     </group>
   </file>

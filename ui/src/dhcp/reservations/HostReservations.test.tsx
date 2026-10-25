@@ -1,7 +1,9 @@
 // The DHCP reservations block of a reserved host: a host with a MAC address in a served scope with
 // an active lease, a lease held by another client, an address in no scope, an interface without
 // identity, a disabled scope, a server where the dhcp role does not run, the block hiding itself
-// where DHCP is off or not readable, and a lease that arrives while the page is open.
+// where DHCP is off or not readable, and a lease that arrives while the page is open. DHCPv6 (WP9.4):
+// a reservation keyed by the interface's DUID, one keyed by its MAC address, an address without
+// either, and a lease held by another DUID or another MAC address.
 import { screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,7 +106,7 @@ describe("a reserved host with a MAC address in a served scope", () => {
   it("compares the client identifier when the reservation is keyed by one", async () => {
     // The lease of the client with this identifier is the right one even from another hardware address.
     const lease = grantMockLease({ mac: OTHER_MAC, addr: "192.0.2.41" });
-    lease.client.client_id = "0100005e005329";
+    lease.client!.client_id = "0100005e005329";
     show([eth0({ client_id: "01:00:00:5e:00:53:29" })], [addr("192.0.2.41")]);
     await loaded();
     await settled("192.0.2.41");
@@ -143,10 +145,13 @@ describe("a reserved host with a MAC address in a served scope", () => {
     await waitFor(() => expect(rowOf("192.0.2.41").dataset.lease).toBe("active"));
   });
 
-  it("names IPv6 addresses once, as not reserved yet, and lists only the IPv4 ones", async () => {
-    show([eth0()], [addr("192.0.2.41"), addr("2001:db8:0:10::41")]);
-    await loaded();
-    expect(screen.getByTestId("host-reservations-ipv6").textContent).toBe("IPv6 addresses get no DHCP reservation yet; that comes in a later version.");
+  it("lists the IPv4 address before the IPv6 one, each with its family, and no longer says IPv6 gets no reservation", async () => {
+    show([eth0()], [addr("2001:db8:0:10::41"), addr("192.0.2.41")]);
+    await loaded(2);
+    expect(rows().map((r) => r.dataset.key)).toEqual(["192.0.2.41", "2001:db8:0:10::41"]);
+    expect(within(rowOf("192.0.2.41")).getByTestId("host-reservation-family").textContent).toBe("DHCPv4");
+    expect(within(rowOf("2001:db8:0:10::41")).getByTestId("host-reservation-family").dataset.key).toBe("v6");
+    expect(screen.queryByTestId("host-reservations-ipv6")).toBeNull();
   });
 
   it("links the address to its page", async () => {
@@ -154,6 +159,111 @@ describe("a reserved host with a MAC address in a served scope", () => {
     await loaded();
     const link = within(rowOf("192.0.2.41")).getAllByRole("link")[0] as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe(`/ipam/addresses/192.0.2.41?vrf=${VRF}`);
+  });
+});
+
+const DUID_LL = "00:03:00:01:00:00:5e:00:53:10";
+const DUID_EN = "00:02:00:00:00:09:0c:0c:0c:0c:01";
+
+describe("a DHCPv6 reservation", () => {
+  it("is keyed by the DUID of the interface, with the scope, that it is served and the lease on the address", async () => {
+    show([eth0({ duid: DUID_LL, mac: null })], [addr("2001:db8:0:10::100")]);
+    await loaded();
+    await settled("2001:db8:0:10::100");
+    const row = rowOf("2001:db8:0:10::100");
+    expect(row.dataset.state).toBe("served");
+    expect(row.dataset.lease).toBe("active");
+    expect(row.dataset.mismatch).toBeUndefined();
+    expect(within(row).getByTestId("host-reservation-identity").dataset.kind).toBe("duid");
+    expect(within(row).getByTestId("host-reservation-identity").textContent).toBe(`DUID ${DUID_LL}`);
+    const scope = within(row).getByTestId("host-reservation-scope");
+    expect(scope.textContent).toBe("2001:db8:0:10::/64");
+    expect(scope.getAttribute("href")).toBe(`/dhcp/scopes/${DHCP_IDS.lanV6}`);
+    expect(within(row).getByTestId("host-reservation-state-tag").textContent).toBe("Served");
+    expect(within(row).getByTestId("host-reservation-lease-state").textContent).toBe("Active");
+    expect(within(row).getByTestId("host-reservation-history").getAttribute("href")).toBe("/dhcp/history?addr=2001%3Adb8%3A0%3A10%3A%3A100");
+  });
+
+  it("prefers the DUID to the MAC address when the interface has both", async () => {
+    show([eth0({ duid: DUID_LL, mac: OTHER_MAC })], [addr("2001:db8:0:10::100")]);
+    await loaded();
+    await settled("2001:db8:0:10::100");
+    const row = rowOf("2001:db8:0:10::100");
+    expect(within(row).getByTestId("host-reservation-identity").dataset.kind).toBe("duid");
+    expect(row.dataset.mismatch).toBeUndefined();
+  });
+
+  it("is keyed by the MAC address when the interface has no DUID, and compares it with the link-layer address of the lease", async () => {
+    show([eth0({ mac: docMac(0x12) })], [addr("2001:db8:0:10::102")]);
+    await loaded();
+    await settled("2001:db8:0:10::102");
+    const row = rowOf("2001:db8:0:10::102");
+    expect(row.dataset.state).toBe("served");
+    expect(within(row).getByTestId("host-reservation-identity").dataset.kind).toBe("mac");
+    expect(within(row).getByTestId("host-reservation-identity").textContent).toBe("MAC address 00:00:5e:00:53:12");
+    expect(row.dataset.lease).toBe("active");
+    expect(row.dataset.mismatch).toBeUndefined();
+  });
+
+  it("says an address on an interface with neither a DUID nor a MAC address has no reservation", async () => {
+    show([eth0({ mac: null, duid: null })], [addr("2001:db8:0:10::100")]);
+    await loaded();
+    const row = rowOf("2001:db8:0:10::100");
+    expect(row.dataset.state).toBe("no_identity");
+    expect(row.dataset.lease).toBe("none");
+    expect(within(row).getByTestId("host-reservation-identity").dataset.kind).toBe("none");
+    expect(within(row).getByTestId("host-reservation-identity").textContent).toBe("No DUID or MAC address: no reservation");
+  });
+
+  it("warns when the lease is held by another DUID, and names it", async () => {
+    // The lease at ::100 belongs to the client with the DUID-LL; the interface has another DUID.
+    show([eth0({ duid: DUID_EN })], [addr("2001:db8:0:10::100")]);
+    await loaded();
+    await settled("2001:db8:0:10::100");
+    const row = rowOf("2001:db8:0:10::100");
+    expect(row.dataset.mismatch).toBe("true");
+    expect(row.dataset.lease).toBe("active");
+    expect(within(row).getByTestId("host-reservation-mismatch").textContent).toBe(`Held by another client: ${DUID_LL}`);
+  });
+
+  it("warns when a MAC-keyed reservation sits on a lease of another MAC address", async () => {
+    show([eth0({ mac: OTHER_MAC })], [addr("2001:db8:0:10::100")]);
+    await loaded();
+    await settled("2001:db8:0:10::100");
+    const row = rowOf("2001:db8:0:10::100");
+    expect(row.dataset.mismatch).toBe("true");
+    expect(within(row).getByTestId("host-reservation-mismatch").textContent).toBe("Held by another client: 00:00:5e:00:53:10");
+  });
+
+  it("does not warn about a lease whose client has no MAC address when the reservation is keyed by one", async () => {
+    // The lease at ::101 has a DUID-EN: there is no link-layer address to compare.
+    show([eth0({ mac: OTHER_MAC })], [addr("2001:db8:0:10::101")]);
+    await loaded();
+    await settled("2001:db8:0:10::101");
+    expect(rowOf("2001:db8:0:10::101").dataset.lease).toBe("active");
+    expect(rowOf("2001:db8:0:10::101").dataset.mismatch).toBeUndefined();
+  });
+
+  it("shows a lease that is not active by its state, without a warning", async () => {
+    show([eth0({ duid: DUID_LL })], [addr("2001:db8:0:10::103")]);
+    await loaded();
+    await settled("2001:db8:0:10::103");
+    const row = rowOf("2001:db8:0:10::103");
+    expect(row.dataset.lease).toBe("expired");
+    expect(row.dataset.mismatch).toBeUndefined();
+  });
+
+  it("says there is no lease yet at an address nobody holds", async () => {
+    show([eth0({ duid: DUID_LL })], [addr("2001:db8:0:10::150")]);
+    await loaded();
+    await settled("2001:db8:0:10::150");
+    expect(rowOf("2001:db8:0:10::150").dataset.lease).toBe("none");
+  });
+
+  it("says an IPv6 address outside every scope has none", async () => {
+    show([eth0({ duid: DUID_LL })], [addr("2001:db8:0:99::5")]);
+    await loaded();
+    expect(rowOf("2001:db8:0:99::5").dataset.state).toBe("no_scope");
   });
 });
 
@@ -226,8 +336,8 @@ describe("a reservation that is not served", () => {
     expect(rowOf("192.0.2.41").dataset.lease).toBe("none");
   });
 
-  it("says a host without IPv4 addresses has nothing to reserve", async () => {
-    show([eth0()], [addr("2001:db8:0:10::41")]);
+  it("says a host without addresses has nothing to reserve", async () => {
+    show([eth0()], []);
     await screen.findByTestId("host-reservations");
     expect(await screen.findByTestId("host-reservations-empty")).toBeTruthy();
     expect(screen.getByTestId("host-reservations").dataset.count).toBe("0");

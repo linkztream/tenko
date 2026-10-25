@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../api/problem";
 import type { Scope } from "../api";
-import { barPlan, byNetwork, countOf, hidesCounter, newHref, newQuery, NEW_LIMIT, SCOPE_BARS } from "./overview";
+import { barPlan, byNetwork, countOf, hasV6, hidesCounter, leaseTotals, newHref, newQuery, NEW_LIMIT, SCOPE_BARS } from "./overview";
 
 const SINCE = "2026-03-01T10:15:30.250Z";
 
@@ -74,5 +74,49 @@ describe("the scope bars", () => {
     expect(barPlan(many, read).shown.map((s) => s.prefix)).toEqual([3, 1, 4, 0, 2, 5].map(id));
     // The scopes beyond the six are never part of the order, however full they are.
     expect(barPlan(many, { [id(8)]: 100 }).shown.map((s) => s.prefix)).toEqual([0, 1, 2, 3, 4, 5].map(id));
+  });
+
+  it("puts a DHCPv6 scope behind the DHCPv4 ones", () => {
+    const mixed = [scope("2001:db8:0:10::/64"), scope("192.0.2.0/24")];
+    expect(barPlan(mixed, {}).shown.map((s) => s.cidr)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64"]);
+  });
+});
+
+describe("the leases of both families in the status strip", () => {
+  const v4 = [
+    { state: "active" as const, count: 12 },
+    { state: "expired" as const, count: 1 },
+  ];
+
+  it("serves DHCPv6 when it has a scope, a listener or a lease of that family, and not when the server says nothing of it", () => {
+    expect(hasV6({})).toBe(false);
+    expect(hasV6({ scopes6: 0, listeners6: [], leases6: [] })).toBe(false);
+    expect(hasV6({ scopes6: 1 })).toBe(true);
+    expect(hasV6({ listeners6: [{ address: "2001:db8::1", mode: "relay", port: 547, workers: 1 }] })).toBe(true);
+    expect(hasV6({ leases6: [{ state: "active", count: 1 }] })).toBe(true);
+  });
+
+  it("lists the states of DHCPv4 only as they are when the node serves no DHCPv6", () => {
+    expect(leaseTotals({ leases: v4 })).toEqual([
+      { state: "active", v4: 12, v6: 0 },
+      { state: "expired", v4: 1, v6: 0 },
+    ]);
+  });
+
+  it("puts both families side by side, and the states only DHCPv6 has behind the others", () => {
+    const totals = leaseTotals({ leases: v4, leases6: [{ state: "active", count: 3 }, { state: "released", count: 2 }], scopes6: 1 });
+    expect(totals).toEqual([
+      { state: "active", v4: 12, v6: 3 },
+      { state: "expired", v4: 1, v6: 0 },
+      { state: "released", v4: 0, v6: 2 },
+    ]);
+  });
+
+  it("always has the active state when DHCPv6 is served, even with no lease of either family", () => {
+    expect(leaseTotals({ leases: [], leases6: [], scopes6: 1 })).toEqual([{ state: "active", v4: 0, v6: 0 }]);
+    expect(leaseTotals({ leases: [{ state: "expired", count: 1 }], scopes6: 1 })).toEqual([
+      { state: "expired", v4: 1, v6: 0 },
+      { state: "active", v4: 0, v6: 0 },
+    ]);
   });
 });

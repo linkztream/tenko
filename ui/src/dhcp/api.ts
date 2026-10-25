@@ -172,8 +172,9 @@ export async function deleteSharedNetwork(network: Pick<SharedNetwork, "id" | "r
 // ---------------------------------------------------------------------------------
 // Options
 
-export function listCatalog(signal?: AbortSignal): Promise<CatalogEntry[]> {
-  return api.get("/api/v1/dhcp/option-catalog", { signal });
+/** The built-in options: those of one space (`dhcp4` or `dhcp6`), or of both, `dhcp4` first. */
+export function listCatalog(signal?: AbortSignal, space?: "dhcp4" | "dhcp6"): Promise<CatalogEntry[]> {
+  return api.get("/api/v1/dhcp/option-catalog", { query: { space }, signal });
 }
 
 export function listOptionDefs(signal?: AbortSignal): Promise<Listed<OptionDef>> {

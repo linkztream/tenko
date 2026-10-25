@@ -254,6 +254,38 @@ impl Collect for Utilization {
                 value: Value::Gauge(used as f64 / size as f64),
             });
         }
+        // WP9.4: the DHCPv6 scopes, over their 128-bit pools.
+        let image6 = image.v6();
+        let mut bound6: BTreeMap<tenko_core::PrefixId, u64> = BTreeMap::new();
+        {
+            let table = node.leases6().read();
+            for lease in table.iter() {
+                if lease.state == BindingState::Active
+                    && lease.ends > now
+                    && image6
+                        .scope(lease.scope)
+                        .is_some_and(|scope| scope.is_dynamic(lease.addr6()))
+                {
+                    *bound6.entry(lease.scope).or_default() += 1;
+                }
+            }
+        }
+        for scope in image6.scopes() {
+            let size: u128 = scope
+                .pools
+                .iter()
+                .map(crate::v6::image::Pool6Image::size)
+                .fold(0, u128::saturating_add);
+            if size == 0 {
+                continue;
+            }
+            let used = bound6.get(&scope.prefix).copied().unwrap_or(0);
+            #[allow(clippy::cast_precision_loss, reason = "a share for people")]
+            out.push(Series {
+                labels: Labels::owned(&[&scope.network.to_string()]),
+                value: Value::Gauge(used as f64 / size as f64),
+            });
+        }
     }
 }
 

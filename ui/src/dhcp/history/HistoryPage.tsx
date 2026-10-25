@@ -1,6 +1,6 @@
-// The lease history (/dhcp/history, WP7.5): what happened to the leases, newest first, in a grid
-// read page by page. Filters for the address, the MAC address, the scope, the kind of event and a
-// time range live in the URL, so the lease list links to the history of one address. Like the lease
+// The lease history (/dhcp/history, WP7.5): what happened to the leases of both address families
+// (WP9.4), newest first, in a grid read page by page. Filters for the address, the MAC address, the
+// DUID of a DHCPv6 client, the address family, the scope, the kind of event and a time range live in the URL, so the lease list links to the history of one address. Like the lease
 // list the view is live and sampled; the Live toggle pauses it.
 import { A, useSearchParams } from "@solidjs/router";
 import { createMemo, createResource, For, Show } from "solid-js";
@@ -18,12 +18,17 @@ import { createLiveRefresh, HISTORY_TABLE, LiveControls } from "../leases/live";
 import {
   anyFilter,
   eventKey,
+  clientMac,
+  colons,
+  duidProblem,
   EVENT_KINDS,
+  familyName,
+  FAMILIES,
   HISTORY_FILTER_NAMES,
   historyQuery,
-  macOf,
   macProblem,
   readHistoryFilters,
+  shortDuid,
   type LeaseEvent,
 } from "../leases/model";
 import "../dhcp.css";
@@ -96,7 +101,33 @@ export default function HistoryPage() {
         </A>
       ),
     },
-    { id: "mac", header: () => t("dhcp.col.client_mac"), width: 150, text: (e) => macOf(e.client), render: (e) => <span class="mono">{macOf(e.client)}</span> },
+    {
+      id: "family",
+      header: () => t("dhcp.leases6.col_family"),
+      width: 100,
+      text: (e) => familyName(e.family),
+      render: (e) => (
+        <span class="tag" data-testid="event-family" data-key={e.family}>
+          {familyName(e.family)}
+        </span>
+      ),
+    },
+    { id: "mac", header: () => t("dhcp.col.client_mac"), width: 150, text: clientMac, render: (e) => <span class="mono">{clientMac(e)}</span> },
+    {
+      id: "duid",
+      header: () => t("dhcp.leases6.col_duid"),
+      width: 200,
+      text: (e) => (e.duid ? colons(e.duid) : ""),
+      render: (e) => (
+        <Show when={e.duid}>
+          {(duid) => (
+            <span class="mono" title={colons(duid())} data-testid="event-duid" data-key={duid()}>
+              {shortDuid(duid())}
+            </span>
+          )}
+        </Show>
+      ),
+    },
     {
       id: "state",
       header: () => t("dhcp.col.state_after"),
@@ -155,6 +186,27 @@ export default function HistoryPage() {
             problem={macProblem(filters().mac) ? t("dhcp.lfilter.mac_invalid") : undefined}
             onCommit={(v) => change("mac", v)}
           />
+          <TextFilter
+            id="duid"
+            label={t("dhcp.leases6.lfilter_duid")}
+            value={filters().duid}
+            placeholder={t("dhcp.leases6.lfilter_duid_placeholder")}
+            mono
+            problem={duidProblem(filters().duid) ? t("dhcp.leases6.lfilter_duid_invalid") : undefined}
+            onCommit={(v) => change("duid", v)}
+          />
+          <SelectFilter id="family" label={t("dhcp.leases6.lfilter_family")} onCommit={(v) => change("family", v)}>
+            <option value="" selected={filters().family === ""}>
+              {t("dhcp.leases6.lfilter_family_any")}
+            </option>
+            <For each={FAMILIES}>
+              {(family) => (
+                <option value={family} selected={filters().family === family}>
+                  {familyName(family)}
+                </option>
+              )}
+            </For>
+          </SelectFilter>
           <SelectFilter id="scope" label={t("dhcp.lfilter.scope")} onCommit={(v) => change("scope", v)}>
             <option value="" selected={filters().scope === ""}>
               {t("dhcp.lfilter.scope_any")}

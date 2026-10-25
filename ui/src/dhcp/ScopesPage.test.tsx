@@ -1,5 +1,6 @@
-// The DHCP scope list: the scope of the seed with its pools, active leases and utilization, creating
-// a scope for a network that has none (the local checks first, then the server's refusal), deleting
+// The DHCP scope list: the scopes of the seed (DHCPv4 and DHCPv6, each tagged with its family) with
+// their pools, active leases and utilization, creating a scope for a network that has none, IPv4 or
+// IPv6 (the local checks first, then the server's refusal), deleting
 // one with the confirmation that says the prefix stays, who sees what, the module-off and
 // not-available states, Swedish, and accessibility.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
@@ -24,6 +25,9 @@ afterEach(async () => {
   await setLocale("en");
 });
 
+/** The IPAM prefix 2001:db8:0:30::/64 (IoT, IPv6): a network without a scope. */
+const IOT_V6 = "0190d1c2-0000-7000-8000-0000000a0009";
+
 const open = () => renderRoute(ScopesPage, { url: "/dhcp", path: "/dhcp" });
 const loaded = () => waitFor(() => expect(rows("dhcp-scopes").length).toBeGreaterThan(0));
 
@@ -47,7 +51,7 @@ describe("the scope list", () => {
 });
 
 describe("creating a scope", () => {
-  it("lists the IPv4 networks without a scope, checks the form, and creates the scope", async () => {
+  it("lists the networks without a scope, checks the form, and creates the scope", async () => {
     const writes = recordWrites();
     open();
     await loaded();
@@ -59,7 +63,9 @@ describe("creating a scope", () => {
     expect(labels.some((l) => l.startsWith("198.51.100.0/24"))).toBe(true);
     // The LAN has a scope; the same network of the other VRF (the workshop) has none.
     expect(Array.from(prefix.options).some((o) => o.value === DHCP_IDS.lan)).toBe(false);
-    expect(labels.some((l) => l.includes(":"))).toBe(false);
+    // WP9.4: the IPv6 networks are offered too, those that have a scope are not.
+    expect(labels.some((l) => l.startsWith("2001:db8:0:30::/64"))).toBe(true);
+    expect(Array.from(prefix.options).some((o) => o.value === DHCP_IDS.lanV6)).toBe(false);
 
     fireEvent.click(within(dialog).getByTestId("form-submit"));
     expect((await within(dialog).findByTestId("field-error")).dataset.field).toBe("prefix");
@@ -87,7 +93,7 @@ describe("creating a scope", () => {
     fireEvent.input(within(dialog).getByTestId("field-description"), { target: { value: "Things" } });
     fireEvent.click(within(dialog).getByTestId("form-submit"));
 
-    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "198.51.100.0/24"]));
+    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "198.51.100.0/24", "2001:db8:0:10::/64"]));
     const sent = writes().find((w) => w.method === "POST" && w.url.endsWith("/api/v1/dhcp/scopes"));
     expect(sent?.body).toEqual({
       prefix: DHCP_IDS.iot,
@@ -99,6 +105,29 @@ describe("creating a scope", () => {
     });
     expect(dhcpState().scopes.map((s) => s.prefix)).toContain(DHCP_IDS.iot);
     expect(await screen.findByText("Scope for 198.51.100.0/24 created")).toBeTruthy();
+  });
+
+  // WP9.4: a scope for an IPv6 network has no server identifier.
+  it("creates a scope for an IPv6 network, without a server identifier", async () => {
+    const writes = recordWrites();
+    open();
+    await loaded();
+    fireEvent.click(screen.getByTestId("dhcp-scope-create"));
+    const dialog = await screen.findByTestId("dialog-scope-form");
+    const prefix = within(dialog).getByTestId("field-prefix") as HTMLSelectElement;
+    await waitFor(() => expect(prefix.options.length).toBeGreaterThan(2));
+    expect(within(dialog).getByTestId("field-server_id")).toBeTruthy();
+    fireEvent.input(within(dialog).getByTestId("field-server_id"), { target: { value: "not an address" } });
+    fireEvent.change(prefix, { target: { value: IOT_V6 } });
+    await waitFor(() => expect(within(dialog).queryByTestId("field-server_id")).toBeNull());
+    fireEvent.input(within(dialog).getByTestId("field-description"), { target: { value: "IoT, IPv6" } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64", "2001:db8:0:30::/64"]));
+    // The server identifier typed for the IPv4 network was not sent.
+    expect(writes().find((w) => w.method === "POST" && w.url.endsWith("/api/v1/dhcp/scopes"))?.body).toEqual({ prefix: IOT_V6, description: "IoT, IPv6" });
+    expect(dhcpState().scopes.find((s) => s.prefix === IOT_V6)?.family).toBe("v6");
+    expect(within(cell(row("dhcp-scopes", "2001:db8:0:30::/64"), "family")).getByTestId("scope-family").dataset.key).toBe("v6");
+    expect(await screen.findByText("Scope for 2001:db8:0:30::/64 created")).toBeTruthy();
   });
 
   it("shows the refusal of the server when the network got a scope meanwhile", async () => {
@@ -121,6 +150,8 @@ describe("creating a scope", () => {
 
 describe("deleting a scope", () => {
   it("says the prefix and its ranges stay, and deletes the scope", async () => {
+    // The DHCPv6 scope of the seed would stay in the list; the empty list is what this checks.
+    dhcpState().scopes = dhcpState().scopes.filter((s) => s.prefix !== DHCP_IDS.lanV6);
     open();
     await loaded();
     await rowAction(row("dhcp-scopes", "192.0.2.0/24"), "delete");
@@ -149,6 +180,23 @@ describe("who sees what", () => {
     await loaded();
     expect(screen.getByTestId("dhcp-scope-create")).toBeTruthy();
     expect(await rowActions(row("dhcp-scopes", "192.0.2.0/24"))).toEqual(["open", "delete"]);
+  });
+
+  // WP9.4: the family of every scope, and the utilization of a DHCPv6 scope.
+  it("tags every scope DHCPv4 or DHCPv6", async () => {
+    open();
+    await loaded();
+    const lan = row("dhcp-scopes", "192.0.2.0/24");
+    const lan6 = row("dhcp-scopes", "2001:db8:0:10::/64");
+    expect(within(cell(lan, "family")).getByTestId("scope-family").dataset.key).toBe("v4");
+    expect(within(cell(lan, "family")).getByTestId("scope-family").textContent).toBe("DHCPv4");
+    expect(within(cell(lan6, "family")).getByTestId("scope-family").dataset.key).toBe("v6");
+    expect(within(cell(lan6, "family")).getByTestId("scope-family").textContent).toBe("DHCPv6");
+    expect(within(cell(lan6, "network")).getByTestId("scope-link").getAttribute("href")).toBe(`/dhcp/scopes/${DHCP_IDS.lanV6}`);
+    expect(cell(lan6, "leases").textContent).toBe("3");
+    // 3 of the 256 addresses of the pool are leased.
+    const util = await within(lan6).findByTestId("scope-util");
+    expect(util.dataset.key).toBe("1");
   });
 
   it("says the module is switched off and links to the settings", async () => {

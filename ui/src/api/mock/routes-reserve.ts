@@ -15,6 +15,7 @@ import type { Lease } from "../../dhcp/leases/model";
 import type { Address, Host, Interface, Status } from "../types";
 import { requireSession } from "./auth";
 import { isAdmin } from "./db";
+import { sameAddr } from "./dhcp-leases-model";
 import { isJson, type Json } from "./ipam/input";
 import { execute, itemOf, type RawCommand } from "./ipam/planner";
 import { store } from "./ipam/state";
@@ -53,9 +54,21 @@ export function interfaceIdentity(iface: Pick<Interface, "mac" | "client_id">): 
   return iface.mac ? `01${iface.mac.replace(/[:-]/g, "").toLowerCase()}` : undefined;
 }
 
-/** The client identity of a lease: its client identifier, else `01` and its hardware address. */
-function leaseIdentity(lease: Pick<Lease, "client">): string {
-  return lease.client.client_id ? lease.client.client_id.toLowerCase() : `01${lease.client.chaddr.toLowerCase()}`;
+/** The client identity of a DHCPv4 lease: its client identifier, else `01` and its hardware address. */
+function leaseIdentity(lease: Pick<Lease, "client">): string | undefined {
+  const client = lease.client;
+  if (!client) return undefined;
+  return client.client_id ? client.client_id.toLowerCase() : `01${client.chaddr.toLowerCase()}`;
+}
+
+function digits(text: string | null | undefined): string {
+  return (text ?? "").replace(/[^0-9a-f]/gi, "").toLowerCase();
+}
+
+// WP9.4: whether an interface is the DHCPv6 client of a lease: by its DUID, else by its MAC address.
+function interfaceHoldsLease6(iface: Pick<Interface, "duid" | "mac">, lease: Pick<Lease, "duid" | "mac">): boolean {
+  if (digits(iface.duid) !== "") return digits(iface.duid) === digits(lease.duid);
+  return digits(iface.mac) !== "" && digits(iface.mac) === digits(lease.mac);
 }
 
 function reserves(status: Status): boolean {
@@ -269,18 +282,22 @@ export const reserveRoutes: HttpHandler[] = [
 /**
  * Whether a lease is its client's reservation, and the host IPAM knows for the client: the
  * reserved host whose interface on the lease's address presents the lease's identity, else the host
- * of an interface with the lease's MAC address.
+ * of an interface with the lease's MAC address. A DHCPv6 lease is its client's reservation when the
+ * interface has its DUID, or, without a DUID, its MAC address.
  */
-export function leaseReservation(lease: Pick<Lease, "addr" | "vrf" | "scope" | "client">): { reserved: boolean; host?: string } {
+export function leaseReservation(lease: Pick<Lease, "addr" | "vrf" | "scope" | "client" | "duid" | "mac" | "family">): { reserved: boolean; host?: string } {
   const data = store.data;
-  const key = leaseIdentity(lease);
-  const address = [...data.address.values()].find((a) => !a.meta.deleted && a.ip === lease.addr && a.vrf === lease.vrf);
+  const v6 = lease.family === "v6";
+  const key = v6 ? undefined : leaseIdentity(lease);
+  const address = [...data.address.values()].find((a) => !a.meta.deleted && sameAddr(a.ip, lease.addr) && a.vrf === lease.vrf);
   const iface = address?.interface ? live(data.interface.get(address.interface)) : undefined;
   const host = iface ? live(data.host.get(iface.host)) : undefined;
-  if (address && iface && host && host.mode === "reserved" && reserves(address.status) && scopeServes(address.prefix) && interfaceIdentity(iface) === key) {
-    return { reserved: true, host: host.id };
+  if (address && iface && host && host.mode === "reserved" && reserves(address.status) && scopeServes(address.prefix)) {
+    const held = v6 ? interfaceHoldsLease6(iface, lease) : key !== undefined && interfaceIdentity(iface) === key;
+    if (held) return { reserved: true, host: host.id };
   }
-  const mac = lease.client.chaddr.toLowerCase();
+  const mac = lease.client ? lease.client.chaddr.toLowerCase() : digits(lease.mac);
+  if (mac === "") return { reserved: false };
   const known = [...data.interface.values()].find((i) => !i.meta.deleted && i.mac && i.mac.replace(/[:-]/g, "").toLowerCase() === mac);
   return known ? { reserved: false, host: known.host } : { reserved: false };
 }

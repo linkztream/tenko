@@ -1,7 +1,7 @@
 // The DHCP reservations of a host of mode `reserved`, on the host page (docs/dhcp.md, section
-// 12.1): one row per live IPv4 address of the host on a live interface, with what the reservation
-// is keyed by (the interface's client identifier, else its MAC address), the scope the address
-// falls in, whether the reservation is served (the scope is enabled and the dhcp role of this
+// 12.1): one row per live address of the host on a live interface, with what the reservation is
+// keyed by (DHCPv4: the interface's client identifier, else its MAC address; DHCPv6, WP9.4: its
+// DUID, else its MAC address), the scope the address falls in, whether the reservation is served (the scope is enabled and the dhcp role of this
 // server answers) and the lease on the address with its end, and a warning when another client
 // holds it. The block loads lazily with the dhcp words; it follows the `dhcp` topic, and it hides
 // itself for a principal who may not read DHCP and where the DHCP routes are not there.
@@ -18,10 +18,10 @@ import { formatRelative, t } from "../../i18n";
 import { mayWriteDhcp } from "../access";
 import { listScopes, type Scope } from "../api";
 import { thisNodeDhcp } from "../leases/api";
-import { colons, historyHref, macOf, type Lease } from "../leases/model";
+import { colons, familyName, historyHref, holderOf, type Lease } from "../leases/model";
 import { unavailable } from "../Parts";
 import { dhcpPaths } from "../paths";
-import { hasLeaseToRead, hexDigits, reservationRows, sameClient, type ReservationRow } from "./model";
+import { hasLeaseToRead, heldByReserved, hexDigits, reservationRows, type Identity, type ReservationRow } from "./model";
 import "./reservations.css";
 
 /** The lease on an address as the lookup found it: the lease, none, or a read that failed. */
@@ -71,7 +71,27 @@ function leaseKind(row: ReservationRow, result: LeaseResult | undefined): string
 /** Whether an active lease on the address is held by another client than the one the reservation is for. */
 function heldByOther(row: ReservationRow, result: LeaseResult | undefined): Lease | undefined {
   if (result?.kind !== "lease" || result.lease.state !== "active" || !row.identity) return undefined;
-  return sameClient(row.identity, row.iface, result.lease.client) ? undefined : result.lease;
+  return heldByReserved(row.identity, row.iface, result.lease) ? undefined : result.lease;
+}
+
+/** Who holds the lease that is not the reservation's client: the DUID when the reservation is keyed by one, else the MAC address (or the DUID of a client without one). */
+function otherClient(row: ReservationRow, lease: Lease): string {
+  return row.identity?.kind === "duid" && lease.duid ? colons(lease.duid) : holderOf(lease);
+}
+
+function noIdentity(row: ReservationRow): string {
+  return row.family === "v6" ? t("dhcp.reservations.identity_none6") : t("dhcp.reservations.identity_none");
+}
+
+function identityWord(kind: Identity["kind"]): string {
+  switch (kind) {
+    case "client_id":
+      return t("dhcp.reservations.identity_client_id");
+    case "duid":
+      return t("dhcp.reservations.identity_duid");
+    default:
+      return t("dhcp.reservations.identity_mac");
+  }
 }
 
 function IdentityCell(props: { row: ReservationRow }) {
@@ -80,13 +100,13 @@ function IdentityCell(props: { row: ReservationRow }) {
       when={props.row.identity}
       fallback={
         <span data-testid="host-reservation-identity" data-kind="none">
-          {t("dhcp.reservations.identity_none")}
+          {noIdentity(props.row)}
         </span>
       }
     >
       {(identity) => (
         <span data-testid="host-reservation-identity" data-kind={identity().kind}>
-          <span class="muted">{identity().kind === "client_id" ? t("dhcp.reservations.identity_client_id") : t("dhcp.reservations.identity_mac")}</span>{" "}
+          <span class="muted">{identityWord(identity().kind)}</span>{" "}
           <Show when={identity().kind === "mac"} fallback={<span class="mono">{colons(hexDigits(identity().value))}</span>}>
             <Mac value={identity().value} />
           </Show>
@@ -177,7 +197,7 @@ function LeaseCell(props: { row: ReservationRow; result: LeaseResult | undefined
         <Show when={heldByOther(props.row, props.result)}>
           {(other) => (
             <div class="note warn" role="status" data-testid="host-reservation-mismatch">
-              {t("dhcp.reservations.lease_other", { client: macOf(other().client) })}
+              {t("dhcp.reservations.lease_other", { client: otherClient(props.row, other()) })}
             </div>
           )}
         </Show>
@@ -203,7 +223,7 @@ export default function HostReservations(props: { host: Host; interfaces: readon
   // What the rows are made of changes with the host's interfaces and addresses: the leases are read again.
   const signature = createMemo(() =>
     JSON.stringify([
-      props.interfaces.map((i) => [i.id, i.mac, i.client_id, i.meta.deleted ? 1 : 0]),
+      props.interfaces.map((i) => [i.id, i.mac, i.client_id, i.duid, i.meta.deleted ? 1 : 0]),
       props.addresses.map((a) => [a.id, a.ip, a.vrf, a.interface, a.status, a.meta.deleted ? 1 : 0]),
     ]),
   );
@@ -263,7 +283,10 @@ export default function HostReservations(props: { host: Host; interfaces: readon
                               <td>
                                 <A href={paths.address(row.address.ip, row.address.vrf)} class="addr-link">
                                   <Addr value={row.address.ip} />
-                                </A>
+                                </A>{" "}
+                                <span class="tag" data-testid="host-reservation-family" data-key={row.family}>
+                                  {familyName(row.family)}
+                                </span>
                               </td>
                               <td>
                                 <IdentityCell row={row} />
@@ -291,11 +314,6 @@ export default function HostReservations(props: { host: Host; interfaces: readon
                     </tbody>
                   </table>
                 </div>
-              </Show>
-              <Show when={v().ipv6 > 0}>
-                <p class="muted" data-testid="host-reservations-ipv6">
-                  {t("dhcp.reservations.ipv6_later")}
-                </p>
               </Show>
             </>
           )}

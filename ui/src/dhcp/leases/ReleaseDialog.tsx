@@ -8,12 +8,19 @@ import { ErrorNotice } from "../../components/Notice";
 import { toast } from "../../components/toast";
 import { t } from "../../i18n";
 import { releaseLease } from "./api";
-import { macOf, type Lease } from "./model";
+import { clientMac, colons, type Lease } from "./model";
 
 export function ReleaseDialog(props: { lease: Lease; onClose: () => void; onDone: () => void; onRefused: () => void }) {
   const [reason, setReason] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
+  // A client with a MAC address is named by it; a DHCPv6 client whose DUID holds none, by the DUID.
+  const body = () => {
+    const mac = clientMac(props.lease);
+    return mac !== "" || !props.lease.duid
+      ? t("dhcp.lease.release_body", { addr: props.lease.addr, mac })
+      : t("dhcp.leases6.release_body_duid", { addr: props.lease.addr, duid: colons(props.lease.duid) });
+  };
   return (
     <ConfirmDialog
       title={t("dhcp.lease.release_title", { addr: props.lease.addr })}
@@ -40,7 +47,7 @@ export function ReleaseDialog(props: { lease: Lease; onClose: () => void; onDone
       }}
       body={
         <>
-          <p>{t("dhcp.lease.release_body", { addr: props.lease.addr, mac: macOf(props.lease.client) })}</p>
+          <p data-testid="release-body">{body()}</p>
           <div class="field dhcp-reason">
             <label for="dhcp-lease-reason">{t("dhcp.lease.reason")}</label>
             <input

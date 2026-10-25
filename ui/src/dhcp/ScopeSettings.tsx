@@ -1,6 +1,8 @@
 // The settings tab of a scope: enabled, the lease times with "use the server's", authoritative,
 // the server identifier, the shared network, restricted, the classes the scope admits and the
 // description, saved with the scope's revision; DDNS as read-only text; and how full the scope is.
+// A DHCPv6 scope (WP9.4) has neither a server identifier nor admitted classes (both are DHCPv4
+// only; a line says so) and shows a pool of 2^32 addresses or more as a power of two.
 // Only what changed is sent. The server cannot take back an authoritative setting or a server
 // identifier once the scope has one, so the form does not offer to.
 import { A } from "@solidjs/router";
@@ -13,12 +15,13 @@ import { parseIp } from "../ipam/ip";
 import { mayWriteDhcp } from "./access";
 import { getSettings, getUtilization, listClasses, listSharedNetworks, updateScope, type Scope, type ScopePatch } from "./api";
 import { LeaseChoice, leaseProblem } from "./LeaseFields";
-import { draftOfLease, leaseOfDraft, percentOf, sameLease, type LeaseDraft, type LeaseField } from "./model";
+import { draftOfLease, isV6, leaseOfDraft, percentOf, sameLease, type LeaseDraft, type LeaseField } from "./model";
 import { Check, describedBy, errorFor, Field, fieldErrors, hasField } from "./Parts";
 import { dhcpPaths } from "./paths";
 import { boolOf, triOf, TriSelect, type Tri } from "./ScopeDialogs";
 import { NIL_ID } from "./types";
-import { leaseWords } from "./words";
+import { V4Only } from "./v6/V4Only";
+import { leaseWords, poolCountWords } from "./words";
 
 const SERVER_LEASE = { default_secs: 86_400, min_secs: 3600, max_secs: 604_800 };
 
@@ -35,12 +38,12 @@ function Utilization(props: { prefix: string }) {
         {(u) => (
           <>
             <dl class="kv dhcp-kv">
-              <For each={[["pool_size", u().pool_size], ["leased", u().leased], ["reserved", u().reserved], ["abandoned", u().abandoned], ["free", u().free]] as const}>
-                {([key, value]) => (
+              <For each={[["pool_size", u().pool_size, u().pool_bits], ["leased", u().leased], ["reserved", u().reserved], ["abandoned", u().abandoned], ["free", u().free, u().pool_bits]] as const}>
+                {([key, value, bits]) => (
                   <>
                     <dt>{t(`dhcp.util.${key}`)}</dt>
-                    <dd class="num" data-testid={`util-${key}`} data-value={String(value)}>
-                      {formatNumber(value)}
+                    <dd class="num" data-testid={`util-${key}`} data-value={String(value)} data-bits={bits === null || bits === undefined ? undefined : String(bits)}>
+                      {poolCountWords(value, bits)}
                     </dd>
                   </>
                 )}
@@ -154,6 +157,14 @@ export function SettingsTab(props: { scope: Scope; onSaved: (scope: Scope) => vo
             errors={{ ...leaseErrors(), ...(errorFor(errors(), "lease") && !leaseErrors().default ? { default: errorFor(errors(), "lease") } : {}) }}
             serverWords={t("dhcp.lease.server_now", { lease: leaseWords(serverLease()) })}
           />
+          <Show when={isV6(props.scope)}>
+            <p class="muted" data-testid="scope-v6-lease-note">
+              {t("dhcp.v6.lease_note")}{" "}
+              <A href={dhcpPaths.scope(props.scope.prefix, "v6")} data-testid="scope-v6-link">
+                {t("dhcp.v6.lease_link")}
+              </A>
+            </p>
+          </Show>
           <TriSelect
             id="authoritative"
             label={t("dhcp.scope.field.authoritative")}
@@ -163,20 +174,22 @@ export function SettingsTab(props: { scope: Scope; onSaved: (scope: Scope) => vo
             disabled={!writable()}
             help={t("dhcp.scope.field.authoritative_help")}
           />
-          <Field id="server_id" label={t("dhcp.scope.field.server_id")} error={errorFor(errors(), "server_id")} help={t("dhcp.scope.field.server_id_help")}>
-            <input
-              id="dhcp-f-server_id"
-              class="input mono"
-              value={serverId()}
-              disabled={!writable()}
-              spellcheck={false}
-              autocomplete="off"
-              aria-invalid={errors().server_id ? "true" : undefined}
-              aria-describedby={describedBy("server_id", errors().server_id, "help")}
-              data-testid="field-server_id"
-              onInput={(ev) => setServerId(ev.currentTarget.value)}
-            />
-          </Field>
+          <Show when={!isV6(props.scope)} fallback={<V4Only part="server_id" text={t("dhcp.v6.no_server_id")} />}>
+            <Field id="server_id" label={t("dhcp.scope.field.server_id")} error={errorFor(errors(), "server_id")} help={t("dhcp.scope.field.server_id_help")}>
+              <input
+                id="dhcp-f-server_id"
+                class="input mono"
+                value={serverId()}
+                disabled={!writable()}
+                spellcheck={false}
+                autocomplete="off"
+                aria-invalid={errors().server_id ? "true" : undefined}
+                aria-describedby={describedBy("server_id", errors().server_id, "help")}
+                data-testid="field-server_id"
+                onInput={(ev) => setServerId(ev.currentTarget.value)}
+              />
+            </Field>
+          </Show>
           <Field id="shared_network" label={t("dhcp.scope.field.shared_network")} error={errorFor(errors(), "shared_network")}>
             <select id="dhcp-f-shared_network" class="select" value={network()} disabled={!writable()} data-testid="field-shared_network" onChange={(ev) => setNetwork(ev.currentTarget.value)}>
               <option value="">{t("dhcp.scope.shared_none")}</option>
@@ -184,27 +197,29 @@ export function SettingsTab(props: { scope: Scope; onSaved: (scope: Scope) => vo
             </select>
           </Field>
           <Check id="restricted" label={t("dhcp.scope.field.restricted")} checked={restricted()} onChange={setRestricted} disabled={!writable()} help={t("dhcp.scope.field.restricted_help")} />
-          <fieldset class="dhcp-classes" data-testid="scope-classes">
-            <legend>{t("dhcp.scope.field.classes")}</legend>
-            <Show when={(classes.latest?.items ?? []).length > 0 && !classes.error} fallback={<p class="muted">{t("dhcp.scope.no_classes")}</p>}>
-              <For each={classes.latest?.items ?? []}>
-                {(c) => (
-                  <label class="choice">
-                    <input
-                      type="checkbox"
-                      checked={admitted().includes(c.id)}
-                      disabled={!writable()}
-                      data-testid="scope-class"
-                      data-key={c.name}
-                      onChange={(ev) => toggleClass(c.id, ev.currentTarget.checked)}
-                    />{" "}
-                    <span class="mono">{c.name}</span>
-                  </label>
-                )}
-              </For>
-              <span class="help">{t("dhcp.scope.field.classes_help")}</span>
-            </Show>
-          </fieldset>
+          <Show when={!isV6(props.scope)} fallback={<V4Only part="classes" />}>
+            <fieldset class="dhcp-classes" data-testid="scope-classes">
+              <legend>{t("dhcp.scope.field.classes")}</legend>
+              <Show when={(classes.latest?.items ?? []).length > 0 && !classes.error} fallback={<p class="muted">{t("dhcp.scope.no_classes")}</p>}>
+                <For each={classes.latest?.items ?? []}>
+                  {(c) => (
+                    <label class="choice">
+                      <input
+                        type="checkbox"
+                        checked={admitted().includes(c.id)}
+                        disabled={!writable()}
+                        data-testid="scope-class"
+                        data-key={c.name}
+                        onChange={(ev) => toggleClass(c.id, ev.currentTarget.checked)}
+                      />{" "}
+                      <span class="mono">{c.name}</span>
+                    </label>
+                  )}
+                </For>
+                <span class="help">{t("dhcp.scope.field.classes_help")}</span>
+              </Show>
+            </fieldset>
+          </Show>
           <Field id="description" label={t("dhcp.field.description")} error={errorFor(errors(), "description")}>
             <input id="dhcp-f-description" class="input" value={description()} disabled={!writable()} data-testid="field-description" onInput={(ev) => setDescription(ev.currentTarget.value)} />
           </Field>

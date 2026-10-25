@@ -5,6 +5,7 @@ import { createEffect, createResource, Show } from "solid-js";
 import { formatDateTime, formatNumber, t } from "../i18n";
 import { getUtilization } from "./api";
 import { percentOf } from "./model";
+import { poolCountWords } from "./words";
 
 const READ_AT: Intl.DateTimeFormatOptions = { timeStyle: "medium" };
 
@@ -49,10 +50,10 @@ export function UtilizationBar(props: {
                   {t("dhcp.util.abandoned")} <b>{formatNumber(u().abandoned)}</b>
                 </span>
                 <span class="dhcp-fact" data-testid="util-fact" data-key="free">
-                  {t("dhcp.util.free")} <b>{formatNumber(u().free)}</b>
+                  {t("dhcp.util.free")} <b>{poolCountWords(u().free, u().pool_bits)}</b>
                 </span>
                 <span class="dhcp-fact" data-testid="util-fact" data-key="pool_size">
-                  {t("dhcp.util.pool_size")} <b>{formatNumber(u().pool_size)}</b>
+                  {t("dhcp.util.pool_size")} <b>{poolCountWords(u().pool_size, u().pool_bits)}</b>
                 </span>
                 <span class="dhcp-fact muted" data-testid="util-at">
                   {t("dhcp.util.at", { time: formatDateTime(u().at, READ_AT) })}

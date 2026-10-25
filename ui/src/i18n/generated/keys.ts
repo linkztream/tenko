@@ -1265,6 +1265,7 @@ export type MessageKey =
   | "dhcp.col.enabled"
   | "dhcp.col.ends"
   | "dhcp.col.event"
+  | "dhcp.col.family"
   | "dhcp.col.filter_kind"
   | "dhcp.col.first"
   | "dhcp.col.host_name"
@@ -1419,6 +1420,8 @@ export type MessageKey =
   | "dhcp.exclusions.empty"
   | "dhcp.exclusions.empty_body"
   | "dhcp.exclusions.title"
+  | "dhcp.family.v4"
+  | "dhcp.family.v6"
   | "dhcp.field.description"
   | "dhcp.field.name_help"
   | "dhcp.filter.create"
@@ -1488,6 +1491,25 @@ export type MessageKey =
   | "dhcp.leases.state.reset"
   | "dhcp.leases.sub"
   | "dhcp.leases.title"
+  | "dhcp.leases6.col_duid"
+  | "dhcp.leases6.col_family"
+  | "dhcp.leases6.col_kind"
+  | "dhcp.leases6.col_same_client"
+  | "dhcp.leases6.iaid"
+  | "dhcp.leases6.kind_address"
+  | "dhcp.leases6.kind_prefix"
+  | "dhcp.leases6.lfilter_duid"
+  | "dhcp.leases6.lfilter_duid_invalid"
+  | "dhcp.leases6.lfilter_duid_placeholder"
+  | "dhcp.leases6.lfilter_family"
+  | "dhcp.leases6.lfilter_family_any"
+  | "dhcp.leases6.peer_also"
+  | "dhcp.leases6.peer_title"
+  | "dhcp.leases6.release_body_duid"
+  | "dhcp.leases6.strip_active"
+  | "dhcp.leases6.strip_listeners"
+  | "dhcp.leases6.strip_scopes"
+  | "dhcp.leases6.strip_state_title"
   | "dhcp.level.host"
   | "dhcp.level.policy"
   | "dhcp.level.pool"
@@ -1596,6 +1618,7 @@ export type MessageKey =
   | "dhcp.optset.add_code"
   | "dhcp.optset.check.bool"
   | "dhcp.optset.check.code"
+  | "dhcp.optset.check.code6"
   | "dhcp.optset.check.count"
   | "dhcp.optset.check.empty"
   | "dhcp.optset.check.hex"
@@ -1695,9 +1718,10 @@ export type MessageKey =
   | "dhcp.reservations.empty"
   | "dhcp.reservations.help"
   | "dhcp.reservations.identity_client_id"
+  | "dhcp.reservations.identity_duid"
   | "dhcp.reservations.identity_mac"
   | "dhcp.reservations.identity_none"
-  | "dhcp.reservations.ipv6_later"
+  | "dhcp.reservations.identity_none6"
   | "dhcp.reservations.lease_ends"
   | "dhcp.reservations.lease_failed"
   | "dhcp.reservations.lease_none"
@@ -1813,6 +1837,7 @@ export type MessageKey =
   | "dhcp.scope.tab.options"
   | "dhcp.scope.tab.pools"
   | "dhcp.scope.tab.settings"
+  | "dhcp.scope.tab.v6"
   | "dhcp.scope.tabs"
   | "dhcp.scope.title"
   | "dhcp.scope.unchanged"
@@ -1878,6 +1903,7 @@ export type MessageKey =
   | "dhcp.unit.minutes"
   | "dhcp.util.abandoned"
   | "dhcp.util.at"
+  | "dhcp.util.bits"
   | "dhcp.util.free"
   | "dhcp.util.label"
   | "dhcp.util.leased"
@@ -1885,6 +1911,27 @@ export type MessageKey =
   | "dhcp.util.pool_size"
   | "dhcp.util.reserved"
   | "dhcp.util.title"
+  | "dhcp.v6.check.interface_id"
+  | "dhcp.v6.check.preferred_above"
+  | "dhcp.v6.check.preferred_number"
+  | "dhcp.v6.defaults"
+  | "dhcp.v6.field.interface_id"
+  | "dhcp.v6.field.interface_id_help"
+  | "dhcp.v6.field.preferred"
+  | "dhcp.v6.field.preferred_help"
+  | "dhcp.v6.field.rapid_commit"
+  | "dhcp.v6.field.rapid_commit_help"
+  | "dhcp.v6.help"
+  | "dhcp.v6.lease_link"
+  | "dhcp.v6.lease_note"
+  | "dhcp.v6.no_effective"
+  | "dhcp.v6.no_server_id"
+  | "dhcp.v6.options_help"
+  | "dhcp.v6.preferred_default"
+  | "dhcp.v6.save"
+  | "dhcp.v6.saved"
+  | "dhcp.v6.title"
+  | "dhcp.v6.v4_only"
   | "discovery.action.approve"
   | "discovery.action.dismiss"
   | "discovery.action.open"
@@ -7087,6 +7134,14 @@ export interface MessageArgs {
   "dhcp.lease.server_now": { lease: string | number };
   "dhcp.lease.unit": { name: string | number };
   "dhcp.lease.words": { default: string | number; max: string | number; min: string | number };
+  "dhcp.leases6.iaid": { iaid: string | number };
+  "dhcp.leases6.peer_also": { family: string | number };
+  "dhcp.leases6.peer_title": { family: string | number; state: string | number };
+  "dhcp.leases6.release_body_duid": { addr: string | number; duid: string | number };
+  "dhcp.leases6.strip_active": { v4: string | number; v6: string | number };
+  "dhcp.leases6.strip_listeners": { v4: string | number; v6: string | number };
+  "dhcp.leases6.strip_scopes": { v4: string | number; v6: string | number };
+  "dhcp.leases6.strip_state_title": { v4: string | number; v6: string | number };
   "dhcp.live.folded": { count: number };
   "dhcp.live.new": { count: number };
   "dhcp.live.new_capped": { count: string | number };
@@ -7180,7 +7235,13 @@ export interface MessageArgs {
   "dhcp.term.remove": { n: string | number };
   "dhcp.term.row": { n: string | number };
   "dhcp.util.at": { time: string | number };
+  "dhcp.util.bits": { bits: string | number };
   "dhcp.util.label": { percent: string | number };
+  "dhcp.v6.check.interface_id": { max: string | number };
+  "dhcp.v6.check.preferred_above": { valid: string | number };
+  "dhcp.v6.preferred_default": { seconds: string | number; valid: string | number };
+  "dhcp.v6.saved": { network: string | number };
+  "dhcp.v6.title": { network: string | number };
   "discovery.approve.confirm": { count: number };
   "discovery.batch.approve": { count: number };
   "discovery.batch.approve_body": { kinds: string | number };
@@ -9402,6 +9463,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.col.enabled",
   "dhcp.col.ends",
   "dhcp.col.event",
+  "dhcp.col.family",
   "dhcp.col.filter_kind",
   "dhcp.col.first",
   "dhcp.col.host_name",
@@ -9556,6 +9618,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.exclusions.empty",
   "dhcp.exclusions.empty_body",
   "dhcp.exclusions.title",
+  "dhcp.family.v4",
+  "dhcp.family.v6",
   "dhcp.field.description",
   "dhcp.field.name_help",
   "dhcp.filter.create",
@@ -9625,6 +9689,25 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.leases.state.reset",
   "dhcp.leases.sub",
   "dhcp.leases.title",
+  "dhcp.leases6.col_duid",
+  "dhcp.leases6.col_family",
+  "dhcp.leases6.col_kind",
+  "dhcp.leases6.col_same_client",
+  "dhcp.leases6.iaid",
+  "dhcp.leases6.kind_address",
+  "dhcp.leases6.kind_prefix",
+  "dhcp.leases6.lfilter_duid",
+  "dhcp.leases6.lfilter_duid_invalid",
+  "dhcp.leases6.lfilter_duid_placeholder",
+  "dhcp.leases6.lfilter_family",
+  "dhcp.leases6.lfilter_family_any",
+  "dhcp.leases6.peer_also",
+  "dhcp.leases6.peer_title",
+  "dhcp.leases6.release_body_duid",
+  "dhcp.leases6.strip_active",
+  "dhcp.leases6.strip_listeners",
+  "dhcp.leases6.strip_scopes",
+  "dhcp.leases6.strip_state_title",
   "dhcp.level.host",
   "dhcp.level.policy",
   "dhcp.level.pool",
@@ -9733,6 +9816,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.optset.add_code",
   "dhcp.optset.check.bool",
   "dhcp.optset.check.code",
+  "dhcp.optset.check.code6",
   "dhcp.optset.check.count",
   "dhcp.optset.check.empty",
   "dhcp.optset.check.hex",
@@ -9832,9 +9916,10 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.reservations.empty",
   "dhcp.reservations.help",
   "dhcp.reservations.identity_client_id",
+  "dhcp.reservations.identity_duid",
   "dhcp.reservations.identity_mac",
   "dhcp.reservations.identity_none",
-  "dhcp.reservations.ipv6_later",
+  "dhcp.reservations.identity_none6",
   "dhcp.reservations.lease_ends",
   "dhcp.reservations.lease_failed",
   "dhcp.reservations.lease_none",
@@ -9950,6 +10035,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.scope.tab.options",
   "dhcp.scope.tab.pools",
   "dhcp.scope.tab.settings",
+  "dhcp.scope.tab.v6",
   "dhcp.scope.tabs",
   "dhcp.scope.title",
   "dhcp.scope.unchanged",
@@ -10015,6 +10101,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.unit.minutes",
   "dhcp.util.abandoned",
   "dhcp.util.at",
+  "dhcp.util.bits",
   "dhcp.util.free",
   "dhcp.util.label",
   "dhcp.util.leased",
@@ -10022,6 +10109,27 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.util.pool_size",
   "dhcp.util.reserved",
   "dhcp.util.title",
+  "dhcp.v6.check.interface_id",
+  "dhcp.v6.check.preferred_above",
+  "dhcp.v6.check.preferred_number",
+  "dhcp.v6.defaults",
+  "dhcp.v6.field.interface_id",
+  "dhcp.v6.field.interface_id_help",
+  "dhcp.v6.field.preferred",
+  "dhcp.v6.field.preferred_help",
+  "dhcp.v6.field.rapid_commit",
+  "dhcp.v6.field.rapid_commit_help",
+  "dhcp.v6.help",
+  "dhcp.v6.lease_link",
+  "dhcp.v6.lease_note",
+  "dhcp.v6.no_effective",
+  "dhcp.v6.no_server_id",
+  "dhcp.v6.options_help",
+  "dhcp.v6.preferred_default",
+  "dhcp.v6.save",
+  "dhcp.v6.saved",
+  "dhcp.v6.title",
+  "dhcp.v6.v4_only",
   "discovery.action.approve",
   "discovery.action.dismiss",
   "discovery.action.open",

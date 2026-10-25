@@ -4,7 +4,8 @@
 //! registered when the role starts).
 //!
 //! - `leases_per_second`: the change of `tenko_dhcp_packets_total{type="request",
-//!   outcome="answered"}`, the REQUESTs answered with an ACK.
+//!   outcome="answered"}`, the REQUESTs answered with an ACK, and of the DHCPv6 RENEWs and
+//!   REBINDs answered (WP9.4).
 //! - `ack_p99_ms`: the change of `tenko_dhcp_exchange_duration_seconds{step="ack"}`.
 //! - `naks_per_second`, `declines_per_second`: the change of `tenko_dhcp_naks_total` and
 //!   `tenko_dhcp_declines_total`.
@@ -62,10 +63,24 @@ impl DhcpTotals {
     pub(super) fn of(snapshot: &Snapshot) -> Option<Self> {
         snapshot.family(DHCP_PACKETS)?;
         Some(Self {
+            // WP9.4: a DHCPv6 binding is granted on REQUEST and extended on RENEW and
+            // REBIND, which DHCPv4 answers as REQUESTs.
             acks: counter_where(
                 snapshot,
                 DHCP_PACKETS,
                 &[("type", "request"), ("outcome", "answered")],
+            ) + counter_where(
+                snapshot,
+                DHCP_PACKETS,
+                &[("family", "v6"), ("type", "renew"), ("outcome", "answered")],
+            ) + counter_where(
+                snapshot,
+                DHCP_PACKETS,
+                &[
+                    ("family", "v6"),
+                    ("type", "rebind"),
+                    ("outcome", "answered"),
+                ],
             ),
             ack_durations: histogram_where(snapshot, DHCP_EXCHANGE, ("step", "ack")),
             naks: counter_where(snapshot, DHCP_NAKS, &[]),
@@ -245,6 +260,10 @@ mod tests {
             &["v4", "request", "answered"],
             &["v4", "request", "nak"],
             &["v4", "inform", "answered"],
+            // WP9.4: DHCPv6 grants and renewals count, SOLICITs do not.
+            &["v6", "request", "answered"],
+            &["v6", "renew", "answered"],
+            &["v6", "solicit", "answered"],
         ],
     );
     static EXCHANGE: HistogramVec = HistogramVec::fixed(
@@ -297,12 +316,16 @@ mod tests {
     }
 
     /// Two seconds: 100 ACKs (90 below 1 ms, 10 between 10 and 100 ms), 30 OFFERs, 4 NAKs, 2
-    /// DECLINEs, 12 INFORMs answered (which are no leases), and DDNS change sets.
+    /// DECLINEs, 12 INFORMs answered (which are no leases), 30 DHCPv6 REPLYs to a REQUEST or
+    /// RENEW and 50 SOLICITs answered (which are no leases), and DDNS change sets.
     fn two_seconds_of_dhcp() {
         PACKETS.add(0, 30);
         PACKETS.add(1, 100);
         PACKETS.add(2, 4);
         PACKETS.add(3, 12);
+        PACKETS.add(4, 10);
+        PACKETS.add(5, 20);
+        PACKETS.add(6, 50);
         for _ in 0..30 {
             EXCHANGE.observe(0, 50_000);
         }
@@ -355,7 +378,7 @@ mod tests {
         );
         let dhcp = second.dhcp.clone().expect("dhcp");
         let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
-        assert!(near(dhcp.leases_per_second, 50.0), "{dhcp:?}");
+        assert!(near(dhcp.leases_per_second, 65.0), "{dhcp:?}");
         assert!(near(dhcp.naks_per_second, 2.0));
         assert!(near(dhcp.declines_per_second, 1.0));
         // The 99th of the 100 ACKs: 9 of the 10 in the 10 to 100 ms bucket; the OFFERs' times
@@ -397,7 +420,7 @@ mod tests {
         assert_eq!(dhcp.active_leases, 812);
 
         let json = serde_json::to_value(&second).expect("json");
-        assert_eq!(json["dhcp"]["leases_per_second"], 50.0);
+        assert_eq!(json["dhcp"]["leases_per_second"], 65.0);
         assert_eq!(json["dhcp"]["fullest"][0]["scope"], "192.0.2.64/26");
         assert_eq!(json["dhcp"]["ddns"]["queue"], 7);
         let back: MetricsSample = serde_json::from_value(json).expect("back");

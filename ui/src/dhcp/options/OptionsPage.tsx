@@ -271,7 +271,7 @@ export default function OptionsPage() {
           <section class="page-section" aria-labelledby="dhcp-server-options-title" data-testid="options-server">
             <h2 id="dhcp-server-options-title">{t("dhcp.options.server")}</h2>
             <p class="muted">{t("dhcp.options.server_help")}</p>
-            <OptionSetEditor owner="server" label={t("dhcp.options.server")} canWrite={mayWriteDhcp()} testid="server-optset" refresh={latest(defs)} onSaved={() => defs.refetch()} />
+            <OptionSetEditor owner="server" label={t("dhcp.options.server")} space="both" canWrite={mayWriteDhcp()} testid="server-optset" refresh={latest(defs)} onSaved={() => defs.refetch()} />
           </section>
           <section class="page-section" aria-labelledby="dhcp-defs-title" data-testid="options-defs">
             <div class="dhcp-section-head">

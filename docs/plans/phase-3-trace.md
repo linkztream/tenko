@@ -23,7 +23,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>and 7 more |
 | DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/ha-plan.md`<br>`docs/plans/phase-3-plan.md` |
 | DHCP-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
-| DHCP-11 | Should | - | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/v6/engine/mod.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
+| DHCP-11 | Should | - | - | `crates/tenko-api/src/routes/dhcp/leases.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/role/commands.rs`<br>`crates/tenko-dhcp/src/role/leases6.rs`<br>and 7 more |
 | DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 4 more |
 | DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 10 more |
 | DHCP-14 | Should | `crates/tenko/tests/acceptance_reconcile.rs` | - | `crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/fingerprint.rs`<br>`crates/tenko-ipam/src/observe/dhcp.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`docs/ROADMAP.md`<br>and 2 more |

@@ -299,10 +299,10 @@
         <segment><source>The range must lie inside the network of the scope.</source><target>Intervallet måste ligga inom omfångets nätverk.</target></segment>
       </unit>
       <unit id="dhcp.check.exclusion_first">
-        <segment><source>The first address must be an IPv4 address in {network}.</source><target>Den första adressen måste vara en IPv4-adress i {network}.</target></segment>
+        <segment><source>The first address must be an address of {network}.</source><target>Den första adressen måste vara en adress i {network}.</target></segment>
       </unit>
       <unit id="dhcp.check.exclusion_last">
-        <segment><source>The last address must be an IPv4 address in {network}.</source><target>Den sista adressen måste vara en IPv4-adress i {network}.</target></segment>
+        <segment><source>The last address must be an address of {network}.</source><target>Den sista adressen måste vara en adress i {network}.</target></segment>
       </unit>
       <unit id="dhcp.check.exclusion_order">
         <segment><source>The first address must not be after the last, both in {network}.</source><target>Den första adressen får inte vara efter den sista, båda i {network}.</target></segment>
@@ -371,13 +371,13 @@
         <segment><source>Network</source><target>Nätverk</target></segment>
       </unit>
       <unit id="dhcp.scope.field.prefix_help">
-        <segment><source>Only IPv4 networks of IPAM that have no scope are listed.</source><target>Bara IPv4-nätverk i IPAM som saknar omfång visas.</target></segment>
+        <segment><source>Only networks of IPAM, IPv4 or IPv6, that have no scope are listed.</source><target>Bara nätverk i IPAM, IPv4 eller IPv6, som saknar omfång visas.</target></segment>
       </unit>
       <unit id="dhcp.scope.field.prefix_pick">
         <segment><source>Choose a network</source><target>Välj ett nätverk</target></segment>
       </unit>
       <unit id="dhcp.scope.no_networks">
-        <segment><source>Every IPv4 network of IPAM has a scope already.</source><target>Alla IPv4-nätverk i IPAM har redan ett omfång.</target></segment>
+        <segment><source>Every network of IPAM has a scope already.</source><target>Alla nätverk i IPAM har redan ett omfång.</target></segment>
       </unit>
       <unit id="dhcp.scope.field.authoritative">
         <segment><source>Authoritative</source><target>Auktoritativt</target></segment>

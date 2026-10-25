@@ -1,6 +1,6 @@
 // The words for the DHCP objects: a match, a condition, an action and lease times as a sentence in
 // the language of the UI. The pure helpers they build on are in model.ts.
-import { formatDuration, formatList, t } from "../i18n";
+import { formatDuration, formatList, formatNumber, t } from "../i18n";
 import { normalizedDdns } from "./ddns/model";
 import { isKnownArchitecture, matchKind } from "./model";
 import type { Condition, DdnsPolicy, LeaseTimes, Match, OptionKind, PolicyAction, Term } from "./types";
@@ -54,6 +54,11 @@ export function leaseWords(lease: LeaseTimes): string {
     min: formatDuration(lease.min_secs),
     max: formatDuration(lease.max_secs),
   });
+}
+
+/** A count of addresses; a pool of 2^32 or more says its size as a power of two (`pool_bits`), since the figure itself stops at 2^64 - 1. */
+export function poolCountWords(value: number, bits: number | null | undefined): string {
+  return bits === null || bits === undefined ? formatNumber(value) : t("dhcp.util.bits", { bits });
 }
 
 /** The type of an option in words: `IPv4 address, list`. */

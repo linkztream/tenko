@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dhcp6-scope">
+      <unit id="dhcp.family.v4">
+        <notes><note category="description">Name of the DHCPv4 family on a scope: the tag in the scope list and on the scope page, and the group of codes in the option menu.</note></notes>
+        <segment><source>DHCPv4</source></segment>
+      </unit>
+      <unit id="dhcp.family.v6">
+        <notes><note category="description">Name of the DHCPv6 family on a scope: the tag in the scope list and on the scope page, and the group of codes in the option menu.</note></notes>
+        <segment><source>DHCPv6</source></segment>
+      </unit>
+      <unit id="dhcp.col.family">
+        <notes><note category="description">Column header of the scope list: whether the scope serves DHCPv4 or DHCPv6.</note></notes>
+        <segment><source>Family</source></segment>
+      </unit>
+      <unit id="dhcp.scope.tab.v6">
+        <notes><note category="description">Tab of a DHCPv6 scope with its DHCPv6 settings; only a scope on an IPv6 network has it.</note></notes>
+        <segment><source>DHCPv6</source></segment>
+      </unit>
+      <unit id="dhcp.util.bits">
+        <notes><note category="description">The size of a very large pool (2^32 addresses or more), as a power of two rounded down; {bits} is the exponent.</note></notes>
+        <segment><source>At least 2^{bits}</source></segment>
+      </unit>
+      <unit id="dhcp.v6.title">
+        <notes><note category="description">Heading of the DHCPv6 tab; {network} is the IPv6 network of the scope.</note></notes>
+        <segment><source>DHCPv6 settings of {network}</source></segment>
+      </unit>
+      <unit id="dhcp.v6.help">
+        <notes><note category="description">Introduction on the DHCPv6 tab.</note></notes>
+        <segment><source>These settings apply to the DHCPv6 clients of this scope (RFC 8415). The valid lifetime of an address is the lease time of the scope.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.preferred">
+        <notes><note category="description">Label of the field for the preferred lifetime of an address, in seconds.</note></notes>
+        <segment><source>Preferred lifetime (seconds)</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.preferred_help">
+        <notes><note category="description">Help under the preferred lifetime field.</note></notes>
+        <segment><source>How long a client prefers an address for new connections. Never above the valid lifetime.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.preferred_default">
+        <notes><note category="description">What an empty preferred lifetime means; {seconds} is the default in seconds as a formatted number, {valid} the valid lifetime (the scope's default lease time) as a duration.</note></notes>
+        <segment><source>Empty: five eighths of the valid lifetime, {seconds} s for this scope's default lease time of {valid}.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.rapid_commit">
+        <notes><note category="description">Label of the Rapid Commit switch (RFC 8415 section 18.3.1). Rapid Commit is the name of the DHCPv6 option.</note></notes>
+        <segment><source>Rapid Commit</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.rapid_commit_help">
+        <notes><note category="description">Help under the Rapid Commit switch.</note></notes>
+        <segment><source>A SOLICIT with Rapid Commit gets a committed REPLY at once, without ADVERTISE and REQUEST (RFC 8415 section 18.3.1).</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.interface_id">
+        <notes><note category="description">Label of the field for the Interface-Id (option 18) that a relay sends for the link of the scope.</note></notes>
+        <segment><source>Relay Interface-Id</source></segment>
+      </unit>
+      <unit id="dhcp.v6.field.interface_id_help">
+        <notes><note category="description">Help under the Interface-Id field.</note></notes>
+        <segment><source>The Interface-Id (option 18, as text) that a relay sends for this link. A relayed request that carries it selects this scope before its link address does.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.check.preferred_number">
+        <notes><note category="description">Local check of the preferred lifetime: it is not a whole number of seconds.</note></notes>
+        <segment><source>Enter a whole number of seconds, 1 or more, or leave the field empty.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.check.preferred_above">
+        <notes><note category="description">Local check of the preferred lifetime: it is above the valid lifetime; {valid} is the valid lifetime in seconds as a formatted number.</note></notes>
+        <segment><source>The preferred lifetime cannot be above the valid lifetime of {valid} s.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.check.interface_id">
+        <notes><note category="description">Local check of the Interface-Id: it is too long; {max} is the longest length in characters.</note></notes>
+        <segment><source>The Interface-Id is at most {max} characters.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.save">
+        <notes><note category="description">Button that saves the DHCPv6 settings of the scope.</note></notes>
+        <segment><source>Save DHCPv6 settings</source></segment>
+      </unit>
+      <unit id="dhcp.v6.defaults">
+        <notes><note category="description">Button that drops the DHCPv6 settings of the scope so the defaults apply.</note></notes>
+        <segment><source>Use the defaults</source></segment>
+      </unit>
+      <unit id="dhcp.v6.saved">
+        <notes><note category="description">Toast after the DHCPv6 settings were saved; {network} is the IPv6 network of the scope.</note></notes>
+        <segment><source>DHCPv6 settings of {network} saved</source></segment>
+      </unit>
+      <unit id="dhcp.v6.v4_only">
+        <notes><note category="description">Muted line where a DHCPv4-only part of the scope page would be for a DHCPv6 scope: the network boot tab, the admitted classes of the scope and of a pool.</note></notes>
+        <segment><source>Classes, policies and network boot are DHCPv4 only; a DHCPv6 client is matched by its scope and its reservation.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.no_server_id">
+        <notes><note category="description">Muted line in place of the server identifier field of a DHCPv6 scope. DUID is the DHCPv6 identifier of a server or client.</note></notes>
+        <segment><source>The server identifier is a DHCPv4 option; a DHCPv6 server identifies itself with its DUID.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.lease_note">
+        <notes><note category="description">Muted line under the lease times of a DHCPv6 scope.</note></notes>
+        <segment><source>For a DHCPv6 scope the lease times are the valid lifetime of an address.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.lease_link">
+        <notes><note category="description">Link from the lease note to the DHCPv6 tab.</note></notes>
+        <segment><source>Preferred lifetime and Rapid Commit</source></segment>
+      </unit>
+      <unit id="dhcp.v6.options_help">
+        <notes><note category="description">Introduction on the options tab of a DHCPv6 scope.</note></notes>
+        <segment><source>These DHCPv6 options go to every client of the scope and replace the same codes in the options of the server.</source></segment>
+      </unit>
+      <unit id="dhcp.v6.no_effective">
+        <notes><note category="description">Muted line in place of the effective options view on the options tab of a DHCPv6 scope.</note></notes>
+        <segment><source>The effective options of a client are shown for DHCPv4 only. A DHCPv6 client gets the options above merged with those of the server, per code.</source></segment>
+      </unit>
+      <unit id="dhcp.optset.check.code6">
+        <notes><note category="description">Local check of a DHCPv6 option code typed into the option set editor.</note></notes>
+        <segment><source>Enter a code from 1 to 65535.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

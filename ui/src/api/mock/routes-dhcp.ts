@@ -42,6 +42,7 @@ import {
   getOptionSet,
   getPolicy,
   getSettings,
+  isCatalogSpace,
   listClasses,
   listExclusions,
   listFilters,
@@ -338,7 +339,14 @@ const pools = [
 // Options
 
 const optionRoutes = [
-  route("get", "/api/v1/dhcp/option-catalog", () => guard("dhcp.read", () => ok(catalog()) as never)),
+  route("get", "/api/v1/dhcp/option-catalog", (ctx) =>
+    guard("dhcp.read", () => {
+      // WP9.4: `space` keeps one space; both answer when it is absent.
+      const space = query(ctx.url, "space");
+      if (space !== null && !isCatalogSpace(space)) throw new Problem("sys.invalid_query", { params: { name: "space", value: space } });
+      return ok(catalog(space ?? undefined)) as never;
+    }),
+  ),
   route("get", "/api/v1/dhcp/option-defs", (ctx) => guard("dhcp.read", () => ok(paginate(listOptionDefs(state), ctx.url, db.revision)) as never)),
   route("post", "/api/v1/dhcp/option-defs", async (ctx) => {
     const body = await ctx.body();

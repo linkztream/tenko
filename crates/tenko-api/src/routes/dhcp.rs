@@ -122,7 +122,7 @@ mod export;
 #[cfg(test)]
 mod tests;
 
-use std::{net::Ipv4Addr, sync::Arc};
+use std::{net::IpAddr, sync::Arc};
 
 use axum::{
     Json,
@@ -142,16 +142,17 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use model::{
     DhcpClassCreate, DhcpClassItem, DhcpClassPatch, DhcpCommandAccepted, DhcpExport,
-    DhcpExportParams, DhcpFilterCreate, DhcpFilterItem, DhcpFilterPatch, DhcpHistoryFilters,
-    DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters, DhcpLeaseItem, DhcpLeaseParams,
-    DhcpLeaseRelease, DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, DhcpPolicyCreate,
-    DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch, DhcpPoolItem, DhcpPoolSet,
-    DhcpReservationItem, DhcpScopeCreate, DhcpScopeFilter, DhcpScopeItem, DhcpScopePatch,
-    DhcpScopeUtilization, DhcpSettingsItem, DhcpSettingsUpdate, EffectiveOption, EffectiveOptions,
-    EffectiveOptionsParams, ExclusionCreate, ExclusionItem, OptionCatalogItem, OptionDefCreate,
-    OptionDefItem, OptionDefPatch, OptionSetFilter, OptionSetItem, OptionSetPut, OptionValueInput,
-    OptionValueItem, ReconcileFilters, ReconcileKind, ReconcileRow, SharedNetworkCreate,
-    SharedNetworkItem, SharedNetworkPatch, Truth,
+    DhcpExportParams, DhcpFamily, DhcpFilterCreate, DhcpFilterItem, DhcpFilterPatch,
+    DhcpHistoryFilters, DhcpHistoryItem, DhcpLeaseCount, DhcpLeaseFilters, DhcpLeaseItem,
+    DhcpLeaseParams, DhcpLeasePeer, DhcpLeaseRelease, DhcpListenMode, DhcpListenerItem,
+    DhcpNodeStatus, DhcpPolicyCreate, DhcpPolicyFilter, DhcpPolicyItem, DhcpPolicyPatch,
+    DhcpPoolItem, DhcpPoolSet, DhcpReservationItem, DhcpScopeCreate, DhcpScopeFilter,
+    DhcpScopeItem, DhcpScopePatch, DhcpScopeUtilization, DhcpSettingsItem, DhcpSettingsUpdate,
+    EffectiveOption, EffectiveOptions, EffectiveOptionsParams, ExclusionCreate, ExclusionItem,
+    OptionCatalogItem, OptionCatalogParams, OptionDefCreate, OptionDefItem, OptionDefPatch,
+    OptionSetFilter, OptionSetItem, OptionSetPut, OptionValueInput, OptionValueItem,
+    ReconcileFilters, ReconcileKind, ReconcileRow, SharedNetworkCreate, SharedNetworkItem,
+    SharedNetworkPatch, Truth,
 };
 
 use super::not_implemented;
@@ -187,10 +188,11 @@ fn parse_node(raw: &str) -> Result<NodeId, ApiError> {
         .ok_or_else(|| invalid("id", "the node identifier is not a positive number"))
 }
 
-/// An IPv4 address from the path.
-fn parse_addr(raw: &str) -> Result<Ipv4Addr, ApiError> {
+// WP9.4: a lease address of either family.
+/// An IPv4 or IPv6 address from the path.
+fn parse_addr(raw: &str) -> Result<IpAddr, ApiError> {
     raw.parse()
-        .map_err(|_| invalid("addr", "the address is not an IPv4 address"))
+        .map_err(|_| invalid("addr", "the address is not an IPv4 or IPv6 address"))
 }
 
 /// An option set owner from the path (`server`, `scope:<id>`, `shared_network:<id>`,

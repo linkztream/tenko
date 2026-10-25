@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Address, Interface } from "../../api/types";
 import type { Scope } from "../types";
-import { hasLeaseToRead, hexDigits, identityOf, reservationRows, sameClient, scopeFor, stateOf } from "./model";
+import { hasLeaseToRead, heldByReserved, hexDigits, identity6Of, identityOf, reservationRows, sameClient, sameClient6, scopeFor, stateOf } from "./model";
 
 const VRF = "0190d1c2-0000-7000-8000-000000000001";
 const OTHER_VRF = "0190d1c2-0000-7000-8000-000000000002";
@@ -62,8 +62,8 @@ describe("the state of a reservation", () => {
 
 describe("the rows of a host", () => {
   const eth0 = iface("eth0", { mac: MAC });
-  it("has one row per live IPv4 address of status active or planned on a live interface, by address", () => {
-    const { rows, ipv6 } = reservationRows(
+  it("has one row per live address of status active or planned on a live interface, the IPv4 ones first, by address", () => {
+    const { rows } = reservationRows(
       [eth0, iface("eth1", { mac: "00:00:5e:00:53:2a" }, true), iface("eth2")],
       [
         address("192.0.2.50", "eth0", { status: "planned" }),
@@ -80,12 +80,28 @@ describe("the rows of a host", () => {
       [LAN],
       true,
     );
-    expect(rows.map((r) => [r.address.ip, r.state])).toEqual([
-      ["192.0.2.41", "served"],
-      ["192.0.2.47", "no_identity"],
-      ["192.0.2.50", "served"],
+    expect(rows.map((r) => [r.address.ip, r.family, r.state])).toEqual([
+      ["192.0.2.41", "v4", "served"],
+      ["192.0.2.47", "v4", "no_identity"],
+      ["192.0.2.50", "v4", "served"],
+      ["2001:db8:0:10::41", "v6", "no_scope"],
+      ["2001:db8:0:10::42", "v6", "no_scope"],
     ]);
-    expect(ipv6).toBe(2);
+  });
+
+  it("keys an IPv6 address by the DUID of the interface, else its MAC address, inside a DHCPv6 scope", () => {
+    const lan6 = scope("lan6", "2001:db8:0:10::/64");
+    const { rows } = reservationRows(
+      [iface("eth0", { mac: MAC, duid: "00:03:00:01:00:00:5e:00:53:29" }), iface("eth1", { mac: "00:00:5e:00:53:2a" }), iface("eth2")],
+      [address("2001:db8:0:10::1", "eth0"), address("2001:db8:0:10::2", "eth1"), address("2001:db8:0:10::3", "eth2"), address("2001:db8:0:10::4", "eth0", { status: "deprecated" })],
+      [LAN, lan6],
+      true,
+    );
+    expect(rows.map((r) => [r.address.ip, r.identity?.kind, r.state, r.scope?.prefix])).toEqual([
+      ["2001:db8:0:10::1", "duid", "served", "lan6"],
+      ["2001:db8:0:10::2", "mac", "served", "lan6"],
+      ["2001:db8:0:10::3", undefined, "no_identity", "lan6"],
+    ]);
   });
 
   it("keys the reservation by the client identifier when the interface has one", () => {
@@ -101,6 +117,38 @@ describe("the rows of a host", () => {
       ["198.51.100.7", "scope_disabled"],
       ["203.0.113.9", "no_scope"],
     ]);
+  });
+});
+
+describe("the identity of an interface for DHCPv6", () => {
+  it("prefers the DUID to the MAC address and ignores the client identifier", () => {
+    expect(identity6Of({ duid: "00:03:00:01:00:00:5e:00:53:29", mac: MAC })).toEqual({ kind: "duid", value: "00:03:00:01:00:00:5e:00:53:29" });
+    expect(identity6Of({ mac: MAC })).toEqual({ kind: "mac", value: MAC });
+    expect(identity6Of({ duid: null, mac: "" })).toBeUndefined();
+    expect(identity6Of({})).toBeUndefined();
+  });
+});
+
+describe("whether a DHCPv6 lease is held by the client of the reservation", () => {
+  const duid = { kind: "duid", value: "00:03:00:01:00:00:5e:00:53:29" } as const;
+  const mac = { kind: "mac", value: MAC } as const;
+  it("compares the DUIDs when the reservation is keyed by one", () => {
+    expect(sameClient6(duid, {}, { duid: "00030001" + "00005e005329" })).toBe(true);
+    expect(sameClient6(duid, {}, { duid: "00030001" + "00005e00532b" })).toBe(false);
+  });
+
+  it("compares the MAC address with the lease's otherwise, and trusts a lease that has none", () => {
+    expect(sameClient6(mac, { mac: MAC }, { mac: "00:00:5E:00:53:29" })).toBe(true);
+    expect(sameClient6(mac, { mac: MAC }, { mac: "00:00:5e:00:53:2b" })).toBe(false);
+    expect(sameClient6(mac, { mac: MAC }, { duid: "0002000000090c0c0c0c01" })).toBe(true);
+  });
+
+  it("picks the rule by the family of the lease, and a lease without a client key counts as the same", () => {
+    expect(heldByReserved(mac, { mac: MAC }, { family: "v6", mac: "00:00:5e:00:53:2b" })).toBe(false);
+    expect(heldByReserved(mac, { mac: MAC }, { family: "v4", client: { htype: 1, chaddr: "00005e00532b" } })).toBe(false);
+    expect(heldByReserved(mac, { mac: MAC }, { family: "v4" })).toBe(true);
+    expect(sameClient(mac, { mac: MAC }, undefined)).toBe(true);
+    expect(sameClient(mac, { mac: MAC }, null)).toBe(true);
   });
 });
 

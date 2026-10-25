@@ -3,7 +3,7 @@
 
 use std::{
     collections::BTreeMap,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 use tenko_core::{
@@ -183,6 +183,43 @@ fn active_leases(view: &dyn ReadView, range: KeyRange) -> ConfigResult<BTreeMap<
     Ok(counts)
 }
 
+// WP9.4: the DHCPv6 leases per scope.
+/// Adds the active DHCPv6 leases per scope to `counts`.
+fn active_leases6(view: &dyn ReadView, counts: &mut BTreeMap<PrefixId, u64>) -> ConfigResult<()> {
+    for (_, lease, _) in view.scan_typed(
+        &tenko_core::dhcp::tables::LEASES6,
+        KeyRange::all(),
+        usize::MAX,
+        false,
+    )? {
+        let lease: tenko_core::dhcp::Lease6 = lease;
+        if lease.state == BindingState::Active {
+            *counts.entry(lease.scope).or_default() += 1;
+        }
+    }
+    Ok(())
+}
+
+/// The active DHCPv6 leases of a scope's network; none for an IPv4 network.
+fn active_leases6_of(view: &dyn ReadView, prefix: &Prefix) -> ConfigResult<usize> {
+    let ipnet::IpNet::V6(net) = prefix.cidr else {
+        return Ok(0);
+    };
+    Ok(view
+        .scan_typed(
+            &tenko_core::dhcp::tables::LEASES6,
+            address_range(prefix.vrf, net.network(), net.broadcast()),
+            usize::MAX,
+            false,
+        )?
+        .into_iter()
+        .filter(|(_, lease, _)| {
+            let lease: &tenko_core::dhcp::Lease6 = lease;
+            lease.scope == prefix.id && lease.state == BindingState::Active
+        })
+        .count())
+}
+
 /// The leases of a scope's network.
 pub(crate) fn leases_of(view: &dyn ReadView, prefix: &Prefix) -> ConfigResult<Vec<Lease>> {
     let ipnet::IpNet::V4(net) = prefix.cidr else {
@@ -260,7 +297,9 @@ impl ConfigService {
     ///
     /// The store's error.
     pub fn scopes(view: &dyn ReadView) -> ConfigResult<Vec<ScopeRow>> {
-        let leases = active_leases(view, KeyRange::all())?;
+        let mut leases = active_leases(view, KeyRange::all())?;
+        // WP9.4: a DHCPv6 scope counts its DHCPv6 leases.
+        active_leases6(view, &mut leases)?;
         let mut rows = Vec::new();
         for (prefix, scope, revision) in
             view.scan_typed(&SCOPES, KeyRange::all(), usize::MAX, false)?
@@ -297,7 +336,9 @@ impl ConfigService {
         let leases = leases_of(view, &cidr_row)?
             .iter()
             .filter(|lease| lease.state == BindingState::Active)
-            .count();
+            .count()
+            // WP9.4: and the DHCPv6 leases of an IPv6 network.
+            + active_leases6_of(view, &cidr_row)?;
         row(
             view,
             scope,
@@ -714,5 +755,141 @@ impl ConfigService {
             free,
             utilization,
         })
+    }
+}
+
+// WP9.4: how full a DHCPv6 scope is.
+/// How full a DHCPv6 scope is: the figures of [`Utilization`] over addresses of 128 bits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Utilization6 {
+    /// Pool addresses a client can hold: the dynamic ones and the reserved ones.
+    pub pool_size: u128,
+    /// Dynamic pool addresses with an active lease.
+    pub leased: u64,
+    /// Pool addresses held by a reservation.
+    pub reserved: u64,
+    /// Dynamic pool addresses abandoned after a DECLINE.
+    pub abandoned: u64,
+    /// Pool addresses free now.
+    pub free: u128,
+    /// `(pool_size - free) / pool_size`, 0 for an empty pool.
+    pub utilization: f64,
+}
+
+/// The dynamic addresses of a DHCPv6 pool: neither excluded nor the Subnet-Router anycast
+/// address.
+fn dynamic_size6(scope: &crate::v6::image::Scope6Image, first: Ipv6Addr, last: Ipv6Addr) -> u128 {
+    let span = |first: Ipv6Addr, last: Ipv6Addr| {
+        u128::from(last)
+            .saturating_sub(u128::from(first))
+            .saturating_add(1)
+    };
+    let mut size = span(first, last);
+    for (from, to) in &scope.excluded {
+        let low = (*from).max(first);
+        let high = (*to).min(last);
+        if low <= high {
+            size = size.saturating_sub(span(low, high));
+        }
+    }
+    let anycast = scope.network.network();
+    if first <= anycast
+        && anycast <= last
+        && !scope
+            .excluded
+            .iter()
+            .any(|(a, b)| *a <= anycast && anycast <= *b)
+    {
+        size = size.saturating_sub(1);
+    }
+    size
+}
+
+impl ConfigService {
+    /// How full a DHCPv6 scope is now, from its image (built as if the scope were enabled)
+    /// and the DHCPv6 leases of its network; none for a scope on an IPv4 prefix.
+    ///
+    /// # Errors
+    ///
+    /// `dhcp.scope.not_found`, or the store's error.
+    pub fn utilization6(
+        view: &dyn ReadView,
+        prefix: PrefixId,
+        now: Timestamp,
+    ) -> ConfigResult<Option<Utilization6>> {
+        let mut data = scope_data(view, prefix)?;
+        let Some(scope) = data.scopes.get_mut(&prefix) else {
+            return Err(scope_not_found(prefix));
+        };
+        scope.enabled = true;
+        let Some(row) = data.prefixes.get(&prefix).cloned() else {
+            return Ok(None);
+        };
+        let ipnet::IpNet::V6(net) = row.cidr else {
+            return Ok(None);
+        };
+        let built = build(&data);
+        let image6 = built.image.v6();
+        let Some(image) = image6.scope(prefix) else {
+            return Ok(Some(Utilization6 {
+                pool_size: 0,
+                leased: 0,
+                reserved: 0,
+                abandoned: 0,
+                free: 0,
+                utilization: 0.0,
+            }));
+        };
+        let mut pool_size: u128 = image
+            .pools
+            .iter()
+            .map(|pool| dynamic_size6(image, pool.first, pool.last))
+            .fold(0, u128::saturating_add);
+        let mut reserved = 0u64;
+        for reservation in image6.reservations().iter().filter(|r| r.scope == prefix) {
+            if image.pool_of(reservation.addr).is_some() {
+                reserved += 1;
+                if image.is_excluded(reservation.addr) {
+                    pool_size = pool_size.saturating_add(1);
+                }
+            }
+        }
+        let (mut leased, mut abandoned) = (0u64, 0u64);
+        for (_, lease, _) in view.scan_typed(
+            &tenko_core::dhcp::tables::LEASES6,
+            address_range(row.vrf, net.network(), net.broadcast()),
+            usize::MAX,
+            false,
+        )? {
+            let lease: tenko_core::dhcp::Lease6 = lease;
+            let addr = lease.addr6();
+            if lease.scope != prefix
+                || !image.is_dynamic(addr)
+                || image6.reserved_at(prefix, addr).is_some()
+            {
+                continue;
+            }
+            match lease.state {
+                BindingState::Active if lease.ends > now => leased += 1,
+                BindingState::Abandoned => abandoned += 1,
+                _ => {}
+            }
+        }
+        let used = u128::from(leased) + u128::from(reserved) + u128::from(abandoned);
+        let free = pool_size.saturating_sub(used);
+        #[allow(clippy::cast_precision_loss, reason = "a ratio for display")]
+        let utilization = if pool_size == 0 {
+            0.0
+        } else {
+            (pool_size - free) as f64 / pool_size as f64
+        };
+        Ok(Some(Utilization6 {
+            pool_size,
+            leased,
+            reserved,
+            abandoned,
+            free,
+            utilization,
+        }))
     }
 }

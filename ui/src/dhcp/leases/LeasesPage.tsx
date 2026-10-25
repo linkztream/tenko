@@ -1,6 +1,8 @@
-// The leases (/dhcp/leases, WP7.5): every lease the server holds, by address, in a grid read page
-// by page, with filters for the scope, the address (a prefix of its text), the MAC address, the
-// name and the state; they live in the URL. A status strip shows what this node's role does. The
+// The leases (/dhcp/leases, WP7.5): every lease the server holds, DHCPv4 first and then DHCPv6 (WP9.4),
+// by address, in a grid read page by page, with filters for the scope, the address family, the
+// address (a prefix of its text), the MAC address, the DUID of a DHCPv6 client, the name and the
+// state; they live in the URL. A client that has a lease in both families shows the address of the
+// other one as a link to the list narrowed to it (the peer, correlated by MAC address). A status strip shows what this node's role does. The
 // view is live: it follows the `dhcp` event topic and reads the visible page again when the lease
 // table changed, sampled (sampler.ts), and says how many changes it folded when the server is
 // busier than the page can follow; the Live toggle pauses it. The live strip (WP8.6) names the
@@ -34,14 +36,22 @@ import {
   anyFilter,
   BINDING_STATES,
   clientIdOf,
+  clientMac,
+  colons,
+  displayAddr,
+  duidProblem,
+  familyName,
+  FAMILIES,
   historyHref,
+  kindOf,
   leaseKey,
   leaseQuery,
   LEASE_FILTER_NAMES,
-  macOf,
   macProblem,
   nameOf,
+  peerHref,
   readLeaseFilters,
+  shortDuid,
   type Lease,
 } from "./model";
 import { NodeStrip } from "./NodeStrip";
@@ -107,8 +117,10 @@ export default function LeasesPage() {
   const scopeList = () => (scopes.error ? [] : (scopes.latest ?? []));
   const networkOf = (id: string) => scopeList().find((s) => s.prefix === id)?.cidr ?? id;
   const scopeIndex = createMemo(() => new Map(scopeList().map((s) => [s.prefix, s] as const)));
+  // WP9.4: the reserve dialog keys a reservation by a MAC address or a client identifier of DHCPv4; a
+  // DHCPv6 lease is reserved from the host page (the interface's DUID), so the row menu hides it.
   /** Whether the row menu offers to reserve the lease's address. */
-  const mayReserveLease = (l: Lease) => !l.reserved && mayReserveIn(l.scope, scopeIndex());
+  const mayReserveLease = (l: Lease) => l.family === "v4" && !l.reserved && mayReserveIn(l.scope, scopeIndex());
   const openHost = async (l: Lease) => {
     const name = l.host ? await hostName(l.host) : undefined;
     if (name) navigate(paths.host(name));
@@ -141,11 +153,33 @@ export default function LeasesPage() {
       header: () => t("dhcp.col.address"),
       width: 150,
       fixed: true,
-      text: (l) => l.addr,
+      text: displayAddr,
       render: (l) => (
         <A class="mono" href={historyHref(l.addr)} title={t("dhcp.lease.history_link")} data-testid="lease-history-link">
-          {l.addr}
+          {displayAddr(l)}
         </A>
+      ),
+    },
+    {
+      id: "family",
+      header: () => t("dhcp.leases6.col_family"),
+      width: 100,
+      text: (l) => familyName(l.family),
+      render: (l) => (
+        <span class="tag" data-testid="lease-family" data-key={l.family}>
+          {familyName(l.family)}
+        </span>
+      ),
+    },
+    {
+      id: "kind",
+      header: () => t("dhcp.leases6.col_kind"),
+      width: 100,
+      text: (l) => t(`dhcp.leases6.kind_${kindOf(l)}`),
+      render: (l) => (
+        <span data-testid="lease-kind" data-key={kindOf(l)}>
+          {t(`dhcp.leases6.kind_${kindOf(l)}`)}
+        </span>
       ),
     },
     {
@@ -159,7 +193,30 @@ export default function LeasesPage() {
         </span>
       ),
     },
-    { id: "mac", header: () => t("dhcp.col.client_mac"), width: 150, text: (l) => macOf(l.client), render: (l) => <span class="mono">{macOf(l.client)}</span> },
+    { id: "mac", header: () => t("dhcp.col.client_mac"), width: 150, text: clientMac, render: (l) => <span class="mono">{clientMac(l)}</span> },
+    {
+      id: "duid",
+      header: () => t("dhcp.leases6.col_duid"),
+      width: 200,
+      text: (l) => (l.duid ? colons(l.duid) : ""),
+      render: (l) => (
+        <Show when={l.duid}>
+          {(duid) => (
+            <span>
+              <span class="mono" title={colons(duid())} data-testid="lease-duid" data-key={duid()}>
+                {shortDuid(duid())}
+              </span>
+              <Show when={l.iaid !== null && l.iaid !== undefined}>
+                {" "}
+                <span class="muted" data-testid="lease-iaid" data-key={String(l.iaid)}>
+                  {t("dhcp.leases6.iaid", { iaid: l.iaid ?? 0 })}
+                </span>
+              </Show>
+            </span>
+          )}
+        </Show>
+      ),
+    },
     {
       id: "client_id",
       header: () => t("dhcp.col.client_id"),
@@ -187,6 +244,33 @@ export default function LeasesPage() {
       },
     },
     { id: "scope", header: () => t("dhcp.col.scope"), width: 150, text: (l) => networkOf(l.scope), render: (l) => <span class="mono">{networkOf(l.scope)}</span> },
+    {
+      id: "peer",
+      header: () => t("dhcp.leases6.col_same_client"),
+      width: 260,
+      text: (l) => (l.peer ? `${familyName(l.peer.family)} ${l.peer.addr}` : ""),
+      render: (l) => (
+        <Show when={l.peer}>
+          {(peer) => (
+            <span data-testid="lease-peer" data-family={peer().family} data-state={peer().state}>
+              <span class="muted">{t("dhcp.leases6.peer_also", { family: familyName(peer().family) })}</span>{" "}
+              <A
+                class="mono"
+                href={peerHref(peer())}
+                title={t("dhcp.leases6.peer_title", { family: familyName(peer().family), state: t(`dhcp.leases.state.${peer().state}`) })}
+                data-testid="lease-peer-link"
+              >
+                {peer().addr}
+              </A>
+              <Show when={peer().state !== "active"}>
+                {" "}
+                <span class="muted">({t(`dhcp.leases.state.${peer().state}`)})</span>
+              </Show>
+            </span>
+          )}
+        </Show>
+      ),
+    },
     {
       id: "ends",
       header: () => t("dhcp.col.ends"),
@@ -219,8 +303,8 @@ export default function LeasesPage() {
       id: "relay",
       header: () => t("dhcp.col.relay"),
       width: 130,
-      text: (l) => l.relay?.giaddr ?? "",
-      render: (l) => <span class="mono muted">{l.relay?.giaddr ?? ""}</span>,
+      text: (l) => l.relay?.giaddr ?? l.relay6?.link_address ?? "",
+      render: (l) => <span class="mono muted">{l.relay?.giaddr ?? l.relay6?.link_address ?? ""}</span>,
     },
   ];
 
@@ -291,6 +375,18 @@ export default function LeasesPage() {
               </option>
             </Show>
           </SelectFilter>
+          <SelectFilter id="family" label={t("dhcp.leases6.lfilter_family")} onCommit={(v) => change("family", v)}>
+            <option value="" selected={filters().family === ""}>
+              {t("dhcp.leases6.lfilter_family_any")}
+            </option>
+            <For each={FAMILIES}>
+              {(family) => (
+                <option value={family} selected={filters().family === family}>
+                  {familyName(family)}
+                </option>
+              )}
+            </For>
+          </SelectFilter>
           <TextFilter id="addr" label={t("dhcp.lfilter.addr")} value={filters().addr} placeholder={t("dhcp.lfilter.addr_placeholder")} mono onCommit={(v) => change("addr", v)} />
           <TextFilter
             id="mac"
@@ -300,6 +396,15 @@ export default function LeasesPage() {
             mono
             problem={macProblem(filters().mac) ? t("dhcp.lfilter.mac_invalid") : undefined}
             onCommit={(v) => change("mac", v)}
+          />
+          <TextFilter
+            id="duid"
+            label={t("dhcp.leases6.lfilter_duid")}
+            value={filters().duid}
+            placeholder={t("dhcp.leases6.lfilter_duid_placeholder")}
+            mono
+            problem={duidProblem(filters().duid) ? t("dhcp.leases6.lfilter_duid_invalid") : undefined}
+            onCommit={(v) => change("duid", v)}
           />
           <TextFilter id="name" label={t("dhcp.lfilter.name")} value={filters().name} placeholder={t("dhcp.lfilter.name_placeholder")} onCommit={(v) => change("name", v)} />
           <SelectFilter id="state" label={t("dhcp.lfilter.state")} onCommit={(v) => change("state", v)}>

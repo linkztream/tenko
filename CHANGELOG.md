@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Added
+
+- DHCPv6 in the API, the command line and the web UI (DHCP-09, DHCP-11): the lease list and the history show both families with a family and a DUID filter (`family` and `duid` on `GET /api/v1/dhcp/leases` and `/dhcp/history`, `--family` and `--duid` on `tenko dhcp lease list` and `tenko dhcp history`), each lease with its MAC address where it is known, a DHCPv6 lease with its DUID and IAID, and a link to the client's lease of the other family with the same MAC address (`peer`); a DHCPv6 lease is shown and released by its IPv6 address; the history merges both tables newest first. A DHCPv6 scope's utilization counts its DHCPv6 leases (`family`, and `pool_bits` for a pool too large to count), its page has a DHCPv6 tab for the preferred lifetime, Rapid Commit and the relay Interface-Id and leaves out the DHCPv4-only parts with a line saying why, and its options tab edits `dhcp6` options with the DHCPv6 catalog, which `GET /api/v1/dhcp/option-catalog` now serves beside the DHCPv4 one (`space` keeps one). The host page lists a reserved host's DHCPv6 reservations, keyed by the interface's DUID or MAC address, with their leases; `GET /api/v1/nodes/{id}/dhcp` reports `listeners6`, `scopes6` and `leases6`; the start page's DHCP tiles count both families. Lease and history items replace the flattened DHCPv4 lease row with one shape for both families: `client` is present on DHCPv4 items only, and a lease or history cursor of an earlier release is refused. See `docs/dhcp.md` sections 7 and 19.8.
+
 ### Fixed
 
 - The row menu of an address has its final items the first time it opens: the address lists and a network's address grid show their rows once the DHCP scopes that decide "Reserve in DHCP" have been read (or have failed to read), instead of adding or leaving out the item when the answer arrives; the tests wait for that state instead of assuming it.

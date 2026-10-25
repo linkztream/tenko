@@ -299,10 +299,10 @@
         <segment><source>The range must lie inside the network of the scope.</source></segment>
       </unit>
       <unit id="dhcp.check.exclusion_first">
-        <segment><source>The first address must be an IPv4 address in {network}.</source></segment>
+        <segment><source>The first address must be an address of {network}.</source></segment>
       </unit>
       <unit id="dhcp.check.exclusion_last">
-        <segment><source>The last address must be an IPv4 address in {network}.</source></segment>
+        <segment><source>The last address must be an address of {network}.</source></segment>
       </unit>
       <unit id="dhcp.check.exclusion_order">
         <segment><source>The first address must not be after the last, both in {network}.</source></segment>
@@ -371,13 +371,13 @@
         <segment><source>Network</source></segment>
       </unit>
       <unit id="dhcp.scope.field.prefix_help">
-        <segment><source>Only IPv4 networks of IPAM that have no scope are listed.</source></segment>
+        <segment><source>Only networks of IPAM, IPv4 or IPv6, that have no scope are listed.</source></segment>
       </unit>
       <unit id="dhcp.scope.field.prefix_pick">
         <segment><source>Choose a network</source></segment>
       </unit>
       <unit id="dhcp.scope.no_networks">
-        <segment><source>Every IPv4 network of IPAM has a scope already.</source></segment>
+        <segment><source>Every network of IPAM has a scope already.</source></segment>
       </unit>
       <unit id="dhcp.scope.field.authoritative">
         <segment><source>Authoritative</source></segment>

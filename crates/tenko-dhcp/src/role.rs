@@ -28,6 +28,8 @@
 //! the engine's per-worker counters and the lazy gauges under the contracts' names.
 
 pub mod commands;
+// WP9.4: the lease commands over both families.
+mod leases6;
 pub mod metrics;
 // WP8.1: the role as a move job reaches it.
 pub mod moves;
@@ -184,6 +186,8 @@ pub struct LocalNode {
     server6: RwLock<Option<Arc<Dhcp6Server>>>,
     leases6: SharedLeases6,
     lease_store6: StoreLeases6,
+    // WP9.4: the DHCPv6 observation hook, for the operator's release of a DHCPv6 lease.
+    observations6: Arc<dyn Observation6Hook>,
 }
 
 impl std::fmt::Debug for LocalNode {
@@ -403,6 +407,8 @@ impl LocalNode {
         commands::LeaseRow {
             reserved: reservation.is_some_and(|held| held.addr == lease.addr),
             host: reservation.map(|held| held.host),
+            // WP9.4: set by the list from the DHCPv6 table.
+            peer: None,
             revision,
             lease,
         }
@@ -452,7 +458,12 @@ impl LocalNode {
             .collect();
         CommandResult::done(
             format!("{} lease(s) read", items.len()),
-            Output::Leases(commands::LeasePage { items, next }),
+            Output::Leases(Box::new(commands::LeasePage {
+                items,
+                next,
+                items6: Vec::new(),
+                next6: None,
+            })),
         )
     }
 
@@ -469,10 +480,14 @@ impl LocalNode {
             Ok(view) => view,
             Err(error) => return CommandResult::failed(error.to_string()),
         };
-        match commands::read_history(view.as_ref(), &args) {
+        // WP9.4: both history tables, merged newest first.
+        match commands::read_history_both(view.as_ref(), &args) {
             Ok(page) => CommandResult::done(
-                format!("{} lease event(s) read", page.items.len()),
-                Output::History(page),
+                format!(
+                    "{} lease event(s) read",
+                    page.items.len() + page.items6.len()
+                ),
+                Output::History(Box::new(page)),
             ),
             Err(error) => CommandResult::failed(error.to_string()),
         }
@@ -556,8 +571,10 @@ impl DhcpNode for LocalNode {
 
     async fn execute(&self, kind: &str, args: &[u8]) -> CommandResult {
         match kind {
-            commands::LEASES_LIST => self.list(args),
+            // WP9.4: the list over both families, the DHCPv6 release.
+            commands::LEASES_LIST => self.list_both(args),
             commands::LEASE_RELEASE => self.release(args).await,
+            commands::LEASE6_RELEASE => self.release6(args).await,
             commands::HISTORY_READ => self.history(args).await,
             commands::STATS => {
                 let stats = self.stats();
@@ -830,7 +847,7 @@ impl Role {
             leases6.clone(),
             node,
             settings.commit,
-            observations6,
+            Arc::clone(&observations6),
             lease_store.gate_handle(),
         );
         let stop = CancellationToken::new();
@@ -942,6 +959,7 @@ impl Role {
             server6: RwLock::new(server6),
             leases6,
             lease_store6,
+            observations6,
         });
         let mut tasks = vec![follow, wake, reporter, committer, committer6];
         tasks.extend(wake6);

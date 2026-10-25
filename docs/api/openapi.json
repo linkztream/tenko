@@ -6672,7 +6672,7 @@
           "dhcp"
         ],
         "summary": "Read the DHCP lease history",
-        "description": "Scope: `dhcp.read`. The rows of `dhcp.history`, newest first; the node command `dhcp.history.read` of the one node. Reading the history is audited (`dhcp.lease.read`).",
+        "description": "Scope: `dhcp.read`. The rows of `dhcp.history` and `dhcp.history6`, newest first (`family` keeps one); the node command `dhcp.history.read` of the one node. Reading the history is audited (`dhcp.lease.read`).",
         "operationId": "list_dhcp_history",
         "parameters": [
           {
@@ -6748,6 +6748,24 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "description": "Only this family (`v4`, `v6`); both when absent, merged newest first.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DhcpFamily"
+            }
+          },
+          {
+            "name": "duid",
+            "in": "query",
+            "description": "Only DHCPv6 events of this client DUID (hexadecimal, separators allowed).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6810,7 +6828,7 @@
           "dhcp"
         ],
         "summary": "List DHCP leases",
-        "description": "Scope: `dhcp.read`. The leases of the dhcp role's table in address order, filtered; the node command `dhcp.leases.list` of the one node. Reading leases is audited (`dhcp.lease.read`).",
+        "description": "Scope: `dhcp.read`. The leases of the dhcp role's tables, filtered: the DHCPv4 leases in address order, then the DHCPv6 leases (`family` keeps one); each names the client's lease of the other family with the same MAC address (`peer`). The node command `dhcp.leases.list` of the one node. Reading leases is audited (`dhcp.lease.read`).",
         "operationId": "list_dhcp_leases",
         "parameters": [
           {
@@ -6876,6 +6894,24 @@
               "type": "integer",
               "format": "int32",
               "minimum": 0
+            }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "description": "Only this family (`v4`, `v6`); both when absent, the DHCPv4 leases first.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DhcpFamily"
+            }
+          },
+          {
+            "name": "duid",
+            "in": "query",
+            "description": "Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed).",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -6945,7 +6981,7 @@
           {
             "name": "addr",
             "in": "path",
-            "description": "IPv4 address of the lease",
+            "description": "IPv4 or IPv6 address of the lease",
             "required": true,
             "schema": {
               "type": "string"
@@ -7031,13 +7067,13 @@
           "dhcp"
         ],
         "summary": "Release a DHCP lease (the address returns to the pool)",
-        "description": "Scope: `dhcp.write`. The node command `dhcp.lease.release` of the one node: the active lease becomes `released` now (history kind `reclaimed`); the client keeps using the address until it renews and is refused. Audited (`dhcp.lease.release`).",
+        "description": "Scope: `dhcp.write`. The node command `dhcp.lease.release` (an IPv4 address) or `dhcp.lease6.release` (an IPv6 address) of the one node: the active lease becomes `released` now (history kind `reclaimed`); the client keeps using the address until it renews and is refused. Audited (`dhcp.lease.release`).",
         "operationId": "release_dhcp_lease",
         "parameters": [
           {
             "name": "addr",
             "in": "path",
-            "description": "IPv4 address of the lease",
+            "description": "IPv4 or IPv6 address of the lease",
             "required": true,
             "schema": {
               "type": "string"
@@ -7134,11 +7170,22 @@
           "dhcp"
         ],
         "summary": "List the built-in DHCP options",
-        "description": "Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors with their types, and the codes the server sets itself, which no option set holds.",
+        "description": "Scope: `dhcp.read`. The DHCPv4 options of RFC 2132 and its successors (space `dhcp4`) and the DHCPv6 options of RFC 8415 and the option RFCs (space `dhcp6`) with their types, and the codes the server sets itself, which no option set holds; `space` keeps one of them.",
         "operationId": "list_dhcp_option_catalog",
+        "parameters": [
+          {
+            "name": "space",
+            "in": "query",
+            "description": "Only this space: `dhcp4` (RFC 2132 and its successors) or `dhcp6` (RFC 8415 and the\noption RFCs); both when absent, `dhcp4` first.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "The built-in options in code order",
+            "description": "The built-in options by space (`dhcp4` first) and code",
             "content": {
               "application/json": {
                 "schema": {
@@ -7146,6 +7193,16 @@
                   "items": {
                     "$ref": "#/components/schemas/OptionCatalogItem"
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The space is neither `dhcp4` nor `dhcp6` (`sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -10030,7 +10087,7 @@
           "dhcp"
         ],
         "summary": "Get how full a DHCP scope is",
-        "description": "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses.",
+        "description": "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.",
         "operationId": "get_dhcp_scope_utilization",
         "parameters": [
           {
@@ -20366,7 +20423,7 @@
           "dhcp"
         ],
         "summary": "Get the DHCP role of a node",
-        "description": "Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image.",
+        "description": "Scope: `dhcp.read`. The report `dhcp.status` of the node's DHCP role: whether it answers and the store takes its lease writes, its listeners and workers, the scopes it serves, its leases by state, the last commit's time and the revision of its configuration image; the DHCPv6 listeners, scopes and leases in `listeners6`, `scopes6` and `leases6`.",
         "operationId": "get_node_dhcp_status",
         "parameters": [
           {
@@ -20538,6 +20595,24 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "description": "Only this family (`v4`, `v6`); both when absent, merged newest first.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DhcpFamily"
+            }
+          },
+          {
+            "name": "duid",
+            "in": "query",
+            "description": "Only DHCPv6 events of this client DUID (hexadecimal, separators allowed).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20688,6 +20763,24 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "description": "Only this family (`v4`, `v6`); both when absent, the DHCPv4 leases first.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DhcpFamily"
+            }
+          },
+          {
+            "name": "duid",
+            "in": "query",
+            "description": "Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20777,7 +20870,7 @@
           {
             "name": "addr",
             "in": "path",
-            "description": "IPv4 address of the lease",
+            "description": "IPv4 or IPv6 address of the lease",
             "required": true,
             "schema": {
               "type": "string"
@@ -40432,6 +40525,14 @@
           }
         }
       },
+      "DhcpFamily": {
+        "type": "string",
+        "description": "The address family of a lease or a history row.",
+        "enum": [
+          "v4",
+          "v6"
+        ]
+      },
       "DhcpFilterCreate": {
         "type": "object",
         "description": "`POST /dhcp/filters`.",
@@ -40514,13 +40615,113 @@
         }
       },
       "DhcpHistoryItem": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/LeaseEvent",
-            "description": "The event."
-          }
+        "type": "object",
+        "description": "One row of the lease history: an event of `dhcp.history` (`family` `v4`) or of\n`dhcp.history6` (`family` `v6`).",
+        "required": [
+          "family",
+          "at",
+          "kind",
+          "addr",
+          "vrf",
+          "scope",
+          "state",
+          "ends",
+          "node"
         ],
-        "description": "One row of the lease history."
+        "properties": {
+          "addr": {
+            "type": "string",
+            "description": "The address.",
+            "example": "192.0.2.50"
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When."
+          },
+          "client": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientKey",
+                "description": "DHCPv4: the client."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Duid",
+                "description": "DHCPv6: the client's DUID."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ends": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The end of that state."
+          },
+          "family": {
+            "$ref": "#/components/schemas/DhcpFamily",
+            "description": "The family."
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "DHCPv4: the host name the client sent."
+          },
+          "iaid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6: the identity association.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LeaseEventKind",
+            "description": "What."
+          },
+          "mac": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.",
+            "example": "00:00:5e:00:53:01"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node that wrote it."
+          },
+          "prefix_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6: the prefix length, 128 for an address.",
+            "minimum": 0
+          },
+          "scope": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The scope."
+          },
+          "state": {
+            "$ref": "#/components/schemas/BindingState",
+            "description": "The state after the event."
+          },
+          "vrf": {
+            "$ref": "#/components/schemas/VrfId",
+            "description": "The VRF."
+          }
+        }
       },
       "DhcpLeaseCount": {
         "type": "object",
@@ -40543,41 +40744,335 @@
         }
       },
       "DhcpLeaseItem": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Lease",
-            "description": "The lease."
-          },
-          {
-            "type": "object",
-            "required": [
-              "reserved",
-              "revision"
-            ],
-            "properties": {
-              "host": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/HostId",
-                    "description": "The host IPAM knows for the client, if any."
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "reserved": {
-                "type": "boolean",
-                "description": "Whether the address is the client's reservation."
-              },
-              "revision": {
-                "$ref": "#/components/schemas/Revision",
-                "description": "The store revision of the row."
-              }
-            }
-          }
+        "type": "object",
+        "description": "A lease as the API reads it: a DHCPv4 lease (`family` `v4`, the fields of\n`dhcp.leases`) or a DHCPv6 lease (`family` `v6`, the fields of `dhcp.leases6`).",
+        "required": [
+          "family",
+          "addr",
+          "vrf",
+          "scope",
+          "state",
+          "cltt",
+          "ends",
+          "node",
+          "reserved",
+          "revision"
         ],
-        "description": "A lease as the API reads it."
+        "properties": {
+          "addr": {
+            "type": "string",
+            "description": "The address (a delegated prefix's first address for a DHCPv6 `pd` lease).",
+            "example": "192.0.2.50"
+          },
+          "atsfp": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "DHCPv4: the lease end the partner acknowledged (Phase 5)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientKey",
+                "description": "DHCPv4: the client."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cltt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "The client's last transaction time."
+          },
+          "ddns": {
+            "$ref": "#/components/schemas/DdnsState",
+            "description": "The DDNS outcome."
+          },
+          "ddns_policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DdnsPolicy",
+                "description": "DHCPv4: the DDNS settings of the policy that decided the names."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duid": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Duid",
+                "description": "DHCPv6: the client's DUID."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ends": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the state ends (the valid lifetime's end of a DHCPv6 binding)."
+          },
+          "family": {
+            "$ref": "#/components/schemas/DhcpFamily",
+            "description": "The family."
+          },
+          "fingerprint": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Fingerprint",
+                "description": "DHCPv4: the client's fingerprint."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fqdn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the client sent: option 81 of DHCPv4, option 39 of DHCPv6 (RFC 4704)."
+          },
+          "fqdn_flags": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).",
+            "minimum": 0
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host IPAM knows for the client, if any."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "DHCPv4: the host name the client sent (option 12)."
+          },
+          "iaid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6: the identity association.",
+            "minimum": 0
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Lease6Kind",
+                "description": "DHCPv6: what the lease binds, `na` (an address) or `pd` (a delegated prefix)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "link_layer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HexBytes",
+                "description": "DHCPv6: the client's link-layer address as it came."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "link_layer_type": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6: the hardware type of `link_layer` (1 for Ethernet).",
+            "minimum": 0
+          },
+          "mac": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's MAC address, where it is known: the Ethernet hardware address of a\nDHCPv4 client, the link-layer address of a DHCPv6 client (RFC 6939, or its DUID-LLT\nor DUID-LL).",
+            "example": "00:00:5e:00:53:01"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "The node that wrote the row."
+          },
+          "observed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the IPAM observation fact of the lease was last written."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "peer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DhcpLeasePeer",
+                "description": "The client's lease of the other family with the same MAC address (DHCP-11), when the\nnode holds one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preferred_ends": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "DHCPv6: the preferred lifetime's end."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prefix_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6: the prefix length, 128 for an address.",
+            "minimum": 0
+          },
+          "relay": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RelayInfo",
+                "description": "DHCPv4: what the relay said."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relay6": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Relay6Info",
+                "description": "DHCPv6: what the relay closest to the client said."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reserved": {
+            "type": "boolean",
+            "description": "Whether the address is the client's reservation."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "The store revision of the row."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/PrefixId",
+            "description": "The scope, by its prefix."
+          },
+          "share": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PoolShare",
+                "description": "DHCPv4: the pool share the address came from (Phase 5)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/BindingState",
+            "description": "The binding state."
+          },
+          "tsfp": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "DHCPv4: the lease end the partner told this node (Phase 5)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tstp": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "DHCPv4: the lease end told to the partner (Phase 5)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "$ref": "#/components/schemas/VrfId",
+            "description": "The VRF of the scope's prefix."
+          }
+        }
+      },
+      "DhcpLeasePeer": {
+        "type": "object",
+        "description": "The lease of the other family whose client has the same MAC address (DHCP-11): an\nactive one when there is one, else the one that ends last.",
+        "required": [
+          "family",
+          "vrf",
+          "addr",
+          "state",
+          "ends"
+        ],
+        "properties": {
+          "addr": {
+            "type": "string",
+            "description": "Its address.",
+            "example": "2001:db8::50"
+          },
+          "ends": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When that state ends."
+          },
+          "family": {
+            "$ref": "#/components/schemas/DhcpFamily",
+            "description": "Its family."
+          },
+          "state": {
+            "$ref": "#/components/schemas/BindingState",
+            "description": "Its binding state."
+          },
+          "vrf": {
+            "$ref": "#/components/schemas/VrfId",
+            "description": "Its VRF."
+          }
+        }
       },
       "DhcpLeaseRelease": {
         "type": "object",
@@ -40685,12 +41180,26 @@
             },
             "description": "The leases by state."
           },
+          "leases6": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DhcpLeaseCount"
+            },
+            "description": "The DHCPv6 leases by state."
+          },
           "listeners": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DhcpListenerItem"
             },
             "description": "The listeners."
+          },
+          "listeners6": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DhcpListenerItem"
+            },
+            "description": "The DHCPv6 listeners (port 547)."
           },
           "node": {
             "$ref": "#/components/schemas/NodeId",
@@ -40708,6 +41217,12 @@
             "type": "integer",
             "format": "int32",
             "description": "The scopes served.",
+            "minimum": 0
+          },
+          "scopes6": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The DHCPv6 scopes served.",
             "minimum": 0
           },
           "serving": {
@@ -41292,7 +41807,8 @@
           "abandoned",
           "free",
           "utilization",
-          "at"
+          "at",
+          "family"
         ],
         "properties": {
           "abandoned": {
@@ -41305,6 +41821,11 @@
             "$ref": "#/components/schemas/Timestamp",
             "description": "When the role's table was read."
           },
+          "family": {
+            "type": "string",
+            "description": "`v4` for a DHCPv4 scope, `v6` for a DHCPv6 one, whose pools may hold more addresses\nthan `pool_size` can say (it stops at 2^64 - 1; `pool_bits` gives the size).",
+            "example": "v4"
+          },
           "free": {
             "type": "integer",
             "format": "int64",
@@ -41315,6 +41836,15 @@
             "type": "integer",
             "format": "int64",
             "description": "Pool addresses with an active lease.",
+            "minimum": 0
+          },
+          "pool_bits": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The pool size as a power of two, rounded down, when it is at least 2^32 (a DHCPv6\npool of a /64 has 64); absent for a smaller pool.",
             "minimum": 0
           },
           "pool_size": {
@@ -48418,65 +48948,13 @@
           }
         }
       },
-      "LeaseEvent": {
-        "type": "object",
-        "description": "One row of `dhcp.history` (key: time, VRF, address), written in the batch of the lease\nchange; bounded by the retention of P3-Q13.",
-        "required": [
-          "at",
-          "kind",
-          "addr",
-          "vrf",
-          "scope",
-          "client",
-          "state",
-          "ends",
-          "node"
-        ],
-        "properties": {
-          "addr": {
-            "type": "string",
-            "description": "The address."
-          },
-          "at": {
-            "$ref": "#/components/schemas/Timestamp",
-            "description": "When."
-          },
-          "client": {
-            "$ref": "#/components/schemas/ClientKey",
-            "description": "The client."
-          },
-          "ends": {
-            "$ref": "#/components/schemas/Timestamp",
-            "description": "The end of that state."
-          },
-          "hostname": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The host name the client sent."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/LeaseEventKind",
-            "description": "What."
-          },
-          "node": {
-            "$ref": "#/components/schemas/NodeId",
-            "description": "The node that wrote it."
-          },
-          "scope": {
-            "$ref": "#/components/schemas/PrefixId",
-            "description": "The scope."
-          },
-          "state": {
-            "$ref": "#/components/schemas/BindingState",
-            "description": "The state after the event."
-          },
-          "vrf": {
-            "$ref": "#/components/schemas/VrfId",
-            "description": "The VRF."
-          }
-        }
+      "Lease6Kind": {
+        "type": "string",
+        "description": "What a DHCPv6 lease binds (Slice 9).",
+        "enum": [
+          "na",
+          "pd"
+        ]
       },
       "LeaseEventKind": {
         "type": "string",
@@ -55556,13 +56034,113 @@
           "items": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/LeaseEvent",
-                  "description": "The event."
-                }
+              "type": "object",
+              "description": "One row of the lease history: an event of `dhcp.history` (`family` `v4`) or of\n`dhcp.history6` (`family` `v6`).",
+              "required": [
+                "family",
+                "at",
+                "kind",
+                "addr",
+                "vrf",
+                "scope",
+                "state",
+                "ends",
+                "node"
               ],
-              "description": "One row of the lease history."
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "The address.",
+                  "example": "192.0.2.50"
+                },
+                "at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When."
+                },
+                "client": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ClientKey",
+                      "description": "DHCPv4: the client."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "duid": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Duid",
+                      "description": "DHCPv6: the client's DUID."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "ends": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "The end of that state."
+                },
+                "family": {
+                  "$ref": "#/components/schemas/DhcpFamily",
+                  "description": "The family."
+                },
+                "hostname": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "DHCPv4: the host name the client sent."
+                },
+                "iaid": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "DHCPv6: the identity association.",
+                  "minimum": 0
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/LeaseEventKind",
+                  "description": "What."
+                },
+                "mac": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.",
+                  "example": "00:00:5e:00:53:01"
+                },
+                "node": {
+                  "$ref": "#/components/schemas/NodeId",
+                  "description": "The node that wrote it."
+                },
+                "prefix_len": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "DHCPv6: the prefix length, 128 for an address.",
+                  "minimum": 0
+                },
+                "scope": {
+                  "$ref": "#/components/schemas/PrefixId",
+                  "description": "The scope."
+                },
+                "state": {
+                  "$ref": "#/components/schemas/BindingState",
+                  "description": "The state after the event."
+                },
+                "vrf": {
+                  "$ref": "#/components/schemas/VrfId",
+                  "description": "The VRF."
+                }
+              }
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -55590,41 +56168,301 @@
           "items": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Lease",
-                  "description": "The lease."
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "reserved",
-                    "revision"
-                  ],
-                  "properties": {
-                    "host": {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/HostId",
-                          "description": "The host IPAM knows for the client, if any."
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "reserved": {
-                      "type": "boolean",
-                      "description": "Whether the address is the client's reservation."
-                    },
-                    "revision": {
-                      "$ref": "#/components/schemas/Revision",
-                      "description": "The store revision of the row."
-                    }
-                  }
-                }
+              "type": "object",
+              "description": "A lease as the API reads it: a DHCPv4 lease (`family` `v4`, the fields of\n`dhcp.leases`) or a DHCPv6 lease (`family` `v6`, the fields of `dhcp.leases6`).",
+              "required": [
+                "family",
+                "addr",
+                "vrf",
+                "scope",
+                "state",
+                "cltt",
+                "ends",
+                "node",
+                "reserved",
+                "revision"
               ],
-              "description": "A lease as the API reads it."
+              "properties": {
+                "addr": {
+                  "type": "string",
+                  "description": "The address (a delegated prefix's first address for a DHCPv6 `pd` lease).",
+                  "example": "192.0.2.50"
+                },
+                "atsfp": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "DHCPv4: the lease end the partner acknowledged (Phase 5)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "client": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ClientKey",
+                      "description": "DHCPv4: the client."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cltt": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "The client's last transaction time."
+                },
+                "ddns": {
+                  "$ref": "#/components/schemas/DdnsState",
+                  "description": "The DDNS outcome."
+                },
+                "ddns_policy": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DdnsPolicy",
+                      "description": "DHCPv4: the DDNS settings of the policy that decided the names."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "duid": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Duid",
+                      "description": "DHCPv6: the client's DUID."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "ends": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the state ends (the valid lifetime's end of a DHCPv6 binding)."
+                },
+                "family": {
+                  "$ref": "#/components/schemas/DhcpFamily",
+                  "description": "The family."
+                },
+                "fingerprint": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Fingerprint",
+                      "description": "DHCPv4: the client's fingerprint."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "fqdn": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The name the client sent: option 81 of DHCPv4, option 39 of DHCPv6 (RFC 4704)."
+                },
+                "fqdn_flags": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).",
+                  "minimum": 0
+                },
+                "host": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HostId",
+                      "description": "The host IPAM knows for the client, if any."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hostname": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "DHCPv4: the host name the client sent (option 12)."
+                },
+                "iaid": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "DHCPv6: the identity association.",
+                  "minimum": 0
+                },
+                "kind": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Lease6Kind",
+                      "description": "DHCPv6: what the lease binds, `na` (an address) or `pd` (a delegated prefix)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "link_layer": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HexBytes",
+                      "description": "DHCPv6: the client's link-layer address as it came."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "link_layer_type": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "DHCPv6: the hardware type of `link_layer` (1 for Ethernet).",
+                  "minimum": 0
+                },
+                "mac": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The client's MAC address, where it is known: the Ethernet hardware address of a\nDHCPv4 client, the link-layer address of a DHCPv6 client (RFC 6939, or its DUID-LLT\nor DUID-LL).",
+                  "example": "00:00:5e:00:53:01"
+                },
+                "node": {
+                  "$ref": "#/components/schemas/NodeId",
+                  "description": "The node that wrote the row."
+                },
+                "observed_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "When the IPAM observation fact of the lease was last written."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "peer": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DhcpLeasePeer",
+                      "description": "The client's lease of the other family with the same MAC address (DHCP-11), when the\nnode holds one."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "preferred_ends": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "DHCPv6: the preferred lifetime's end."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "prefix_len": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "DHCPv6: the prefix length, 128 for an address.",
+                  "minimum": 0
+                },
+                "relay": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RelayInfo",
+                      "description": "DHCPv4: what the relay said."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "relay6": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Relay6Info",
+                      "description": "DHCPv6: what the relay closest to the client said."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reserved": {
+                  "type": "boolean",
+                  "description": "Whether the address is the client's reservation."
+                },
+                "revision": {
+                  "$ref": "#/components/schemas/Revision",
+                  "description": "The store revision of the row."
+                },
+                "scope": {
+                  "$ref": "#/components/schemas/PrefixId",
+                  "description": "The scope, by its prefix."
+                },
+                "share": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PoolShare",
+                      "description": "DHCPv4: the pool share the address came from (Phase 5)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "$ref": "#/components/schemas/BindingState",
+                  "description": "The binding state."
+                },
+                "tsfp": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "DHCPv4: the lease end the partner told this node (Phase 5)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tstp": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "DHCPv4: the lease end told to the partner (Phase 5)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "vrf": {
+                  "$ref": "#/components/schemas/VrfId",
+                  "description": "The VRF of the scope's prefix."
+                }
+              }
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -64320,6 +65158,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "Relay6Info": {
+        "type": "object",
+        "description": "What the relay agent closest to a DHCPv6 client said about it (RFC 8415 section 9,\nRFC 4649, RFC 6221), kept on the lease (WP9.1).",
+        "required": [
+          "link_address",
+          "peer_address",
+          "hops"
+        ],
+        "properties": {
+          "hops": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The relays the request passed, one for a single relay.",
+            "minimum": 0
+          },
+          "interface_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HexBytes",
+                "description": "The Interface-Id of the closest relay that sent one (option 18)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "link_address": {
+            "type": "string",
+            "description": "The link address of the relay closest to the client (zero for a lightweight relay\nof RFC 6221).",
+            "example": "2001:db8:1::1"
+          },
+          "peer_address": {
+            "type": "string",
+            "description": "The client's address as the relay saw it (its link-local address).",
+            "example": "fe80::200:5eff:fe00:5301"
+          },
+          "remote_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HexBytes",
+                "description": "The Remote-Id of the closest relay that sent one (option 37, RFC 4649): the\nenterprise number and the identifier."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "RelayInfo": {
         "type": "object",

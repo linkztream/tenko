@@ -4,7 +4,7 @@
 // problems are short codes that the views translate (`dhcp.check.<code>`); the words for a
 // match, a condition and an action are in words.ts.
 import { canonical, validName } from "../dns/model";
-import { compareIp, containsIp, formatCidr, formatIp, parseCidr, parseIp, type Cidr } from "../ipam/ip";
+import { compareIp, containsIp, formatCidr, formatIp, parseCidr, parseIp, rangeSize, type Cidr } from "../ipam/ip";
 import type {
   LeaseTimes,
   Match,
@@ -419,12 +419,13 @@ export function actionIsEmpty(action: PolicyAction | undefined): boolean {
 
 export type ExclusionProblem = "first" | "last" | "order" | "outside";
 
-/** The local check of an exclusion: two IPv4 addresses, the first not after the last, both inside the network. */
+/** The local check of an exclusion: two addresses of the family of the network (IPv4 without one), the first not after the last, both inside the network. */
 export function checkExclusion(first: string, last: string, network: Cidr | null): ExclusionProblem | null {
   const a = parseIp(first);
   const b = parseIp(last);
-  if (!a || a.version !== 4) return "first";
-  if (!b || b.version !== 4) return "last";
+  const version = network?.version ?? 4;
+  if (!a || a.version !== version) return "first";
+  if (!b || b.version !== version) return "last";
   if (compareIp(a, b) > 0) return "order";
   if (network && (!containsIp(network, a) || !containsIp(network, b))) return "outside";
   return null;
@@ -435,7 +436,7 @@ export function networkOf(cidr: string): Cidr | null {
   return parseCidr(cidr);
 }
 
-/** Whether a prefix is an IPv4 network, the only family the server serves in Phase 3. */
+/** Whether a prefix is an IPv4 network. */
 export function isIpv4(cidr: string): boolean {
   return !cidr.includes(":");
 }
@@ -446,4 +447,43 @@ export function isIpv4(cidr: string): boolean {
 /** The used share of a scope as a whole percent. */
 export function percentOf(share: number): number {
   return Math.max(0, Math.min(100, Math.round(share * 100)));
+}
+
+// ---------------------------------------------------------------------------------
+// DHCPv6 (WP9.4)
+
+/** The family of a scope as the API says it; anything but `v6` is DHCPv4. */
+export function isV6(scope: { family?: string | undefined } | null | undefined): boolean {
+  return scope?.family === "v6";
+}
+
+/** The preferred lifetime a scope uses when it sets none: five eighths of the valid lifetime, in whole seconds (docs/dhcp.md 19.2). */
+export function defaultPreferred(validSecs: number): number {
+  return Math.floor((validSecs * 5) / 8);
+}
+
+export type PreferredProblem = "number" | "above";
+
+/** The preferred lifetime as typed: empty is none (`null`, the default applies), else whole seconds from 1 up to the valid lifetime. */
+export function preferredOfText(text: string, validSecs: number): { ok: true; secs: number | null } | { ok: false; problem: PreferredProblem } {
+  const s = text.trim();
+  if (s === "") return { ok: true, secs: null };
+  if (!/^\d{1,9}$/.test(s) || Number(s) < 1) return { ok: false, problem: "number" };
+  const secs = Number(s);
+  return secs > validSecs ? { ok: false, problem: "above" } : { ok: true, secs };
+}
+
+/** The longest relay Interface-Id the server takes, in characters. */
+export const MAX_INTERFACE_ID = 64;
+
+/** The size of an address range as a power of two, rounded down, from 2^32 up; null below. */
+export function bitsOfSize(size: bigint): number | null {
+  return size >= 1n << 32n ? size.toString(2).length - 1 : null;
+}
+
+/** The size of the range `first` to `last` as a power of two (see `bitsOfSize`); null for a small or unreadable range. */
+export function rangeBits(first: string, last: string): number | null {
+  const a = parseIp(first);
+  const b = parseIp(last);
+  return a && b ? bitsOfSize(rangeSize(a, b)) : null;
 }

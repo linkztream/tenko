@@ -2,11 +2,14 @@
 // accepting lease writes, conflict detection, listeners, scopes, leases by state, the last commit
 // and the revision of the configuration image. A node that does not run the role says so; any other
 // failure (no node, no permission, an older server) hides the strip, the page works without it.
+// A node that serves DHCPv6 (WP9.4) counts both families: the listeners, the scopes and the leases
+// ("12 DHCPv4 and 3 DHCPv6 active leases"); a node without it keeps the plain counts.
 import { createResource, For, Match, Show, Switch } from "solid-js";
 import { ApiError } from "../../api/problem";
 import { Notice } from "../../components/Notice";
 import { formatNumber, t } from "../../i18n";
 import { thisNodeDhcp } from "./api";
+import { hasV6, leaseTotals } from "./overview";
 
 function notDhcp(err: unknown): boolean {
   return err instanceof ApiError && err.code === "dhcp.node.not_dhcp";
@@ -39,15 +42,37 @@ export function NodeStrip(props: { version: () => number }) {
               {node().probe ? t("dhcp.strip.probe_on") : t("dhcp.strip.probe_off")}
             </span>
             <span class="dhcp-fact" data-testid="strip-listeners">
-              {t("dhcp.strip.listeners", { count: node().listeners.length })}
+              <Show when={hasV6(node())} fallback={t("dhcp.strip.listeners", { count: node().listeners.length })}>
+                {t("dhcp.leases6.strip_listeners", { v4: node().listeners.length, v6: node().listeners6?.length ?? 0 })}
+              </Show>
             </span>
             <span class="dhcp-fact" data-testid="strip-scopes">
-              {t("dhcp.strip.scopes", { count: node().scopes })}
+              <Show when={hasV6(node())} fallback={t("dhcp.strip.scopes", { count: node().scopes })}>
+                {t("dhcp.leases6.strip_scopes", { v4: node().scopes, v6: node().scopes6 ?? 0 })}
+              </Show>
             </span>
-            <For each={node().leases}>
+            <For each={leaseTotals(node())}>
               {(entry) => (
-                <span class="dhcp-fact" data-testid="strip-leases" data-key={entry.state}>
-                  {t(`dhcp.leases.state.${entry.state}`)} <b>{formatNumber(entry.count)}</b>
+                <span class="dhcp-fact" data-testid="strip-leases" data-key={entry.state} data-v4={String(entry.v4)} data-v6={String(entry.v6)}>
+                  <Show
+                    when={hasV6(node())}
+                    fallback={
+                      <>
+                        {t(`dhcp.leases.state.${entry.state}`)} <b>{formatNumber(entry.v4)}</b>
+                      </>
+                    }
+                  >
+                    <Show
+                      when={entry.state === "active"}
+                      fallback={
+                        <span title={t("dhcp.leases6.strip_state_title", { v4: formatNumber(entry.v4), v6: formatNumber(entry.v6) })}>
+                          {t(`dhcp.leases.state.${entry.state}`)} <b>{formatNumber(entry.v4 + entry.v6)}</b>
+                        </span>
+                      }
+                    >
+                      {t("dhcp.leases6.strip_active", { v4: formatNumber(entry.v4), v6: formatNumber(entry.v6) })}
+                    </Show>
+                  </Show>
                 </span>
               )}
             </For>

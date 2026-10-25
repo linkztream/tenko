@@ -1,5 +1,5 @@
-// The dialogs of a scope: create one for an IPAM network that has none, and delete one (the prefix
-// and its ranges stay in IPAM).
+// The dialogs of a scope: create one for an IPAM network that has none (IPv4 or, WP9.4, IPv6), and
+// delete one (the prefix and its ranges stay in IPAM).
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { ConfirmDialog, Dialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
@@ -67,11 +67,16 @@ export function CreateScopeDialog(props: { scopes: readonly Scope[]; onClose: ()
   const [error, setError] = createSignal<unknown>();
   const [busy, setBusy] = createSignal(false);
 
-  // The networks of IPAM (IPv4) that no scope serves yet.
+  // The networks of IPAM, IPv4 and IPv6 (WP9.4), that no scope serves yet.
   const free = createMemo(() => {
     const taken = new Set(props.scopes.map((s) => s.prefix));
-    return (networks.latest ?? []).filter((p) => !p.meta.deleted && p.role === "network" && isIpv4(p.cidr) && !taken.has(p.id));
+    return (networks.latest ?? []).filter((p) => !p.meta.deleted && p.role === "network" && !taken.has(p.id));
   });
+  // A DHCPv6 scope has no server identifier (option 54 is DHCPv4).
+  const chosenV6 = () => {
+    const picked = free().find((p) => p.id === prefix());
+    return picked !== undefined && !isIpv4(picked.cidr);
+  };
   const serverLease = () => (settings.error ? undefined : settings.latest?.lease);
 
   const toggleInherit = (on: boolean) => {
@@ -86,7 +91,7 @@ export function CreateScopeDialog(props: { scopes: readonly Scope[]; onClose: ()
     const e: Record<string, string> = {};
     const body: ScopeCreate = { prefix: prefix() };
     if (prefix() === "") e.prefix = t("dhcp.check.prefix");
-    if (serverId().trim() !== "") {
+    if (!chosenV6() && serverId().trim() !== "") {
       const ip = parseIp(serverId());
       if (!ip || ip.version !== 4) e.server_id = t("dhcp.check.server_id");
       else body.server_id = serverId().trim();
@@ -149,19 +154,21 @@ export function CreateScopeDialog(props: { scopes: readonly Scope[]; onClose: ()
           serverWords={inherit() && serverLease() ? t("dhcp.lease.server_now", { lease: leaseWords(serverLease() as LeaseTimes) }) : undefined}
         />
         <TriSelect id="authoritative" label={t("dhcp.scope.field.authoritative")} value={authoritative()} onChange={setAuthoritative} />
-        <Field id="server_id" label={t("dhcp.scope.field.server_id")} error={errorFor(errors(), "server_id")} help={t("dhcp.scope.field.server_id_help")}>
-          <input
-            id="dhcp-f-server_id"
-            class="input mono"
-            value={serverId()}
-            spellcheck={false}
-            autocomplete="off"
-            aria-invalid={errors().server_id ? "true" : undefined}
-            aria-describedby={describedBy("server_id", errors().server_id, "help")}
-            data-testid="field-server_id"
-            onInput={(e) => setServerId(e.currentTarget.value)}
-          />
-        </Field>
+        <Show when={!chosenV6()}>
+          <Field id="server_id" label={t("dhcp.scope.field.server_id")} error={errorFor(errors(), "server_id")} help={t("dhcp.scope.field.server_id_help")}>
+            <input
+              id="dhcp-f-server_id"
+              class="input mono"
+              value={serverId()}
+              spellcheck={false}
+              autocomplete="off"
+              aria-invalid={errors().server_id ? "true" : undefined}
+              aria-describedby={describedBy("server_id", errors().server_id, "help")}
+              data-testid="field-server_id"
+              onInput={(e) => setServerId(e.currentTarget.value)}
+            />
+          </Field>
+        </Show>
         <Field id="shared_network" label={t("dhcp.scope.field.shared_network")}>
           <select id="dhcp-f-shared_network" class="select" value={network()} data-testid="field-shared_network" onChange={(e) => setNetwork(e.currentTarget.value)}>
             <option value="">{t("dhcp.scope.shared_none")}</option>

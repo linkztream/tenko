@@ -25,7 +25,12 @@
 //! the answer) by [`DhcpCommand::request`], which does the validation and needs no network;
 //! [`run`] then sends it.
 
-use std::{fmt::Write as _, net::Ipv4Addr, path::PathBuf, str::FromStr as _};
+use std::{
+    fmt::Write as _,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+    str::FromStr as _,
+};
 
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use serde_json::{Map, Value, json};
@@ -769,6 +774,13 @@ pub struct LeaseListArgs {
     /// `reset` or `backup`.
     #[arg(long, value_name = "STATE")]
     pub state: Option<String>,
+    // WP9.4: the DHCPv6 leases.
+    /// Only DHCPv4 (`v4`) or DHCPv6 (`v6`) leases; both when absent.
+    #[arg(long, value_enum, value_name = "FAMILY")]
+    pub family: Option<LeaseFamily>,
+    /// Only DHCPv6 leases of this client DUID (hexadecimal, colons allowed).
+    #[arg(long, value_name = "HEX")]
+    pub duid: Option<String>,
     /// Show one page of at most this many leases (and the cursor of the next one) instead
     /// of all of them.
     #[arg(long, value_name = "N")]
@@ -776,6 +788,25 @@ pub struct LeaseListArgs {
     /// Continue after the cursor an earlier page printed.
     #[arg(long, value_name = "CURSOR")]
     pub cursor: Option<String>,
+}
+
+// WP9.4: the families of the lease and history commands.
+/// The address family of `--family`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LeaseFamily {
+    /// DHCPv4.
+    V4,
+    /// DHCPv6.
+    V6,
+}
+
+impl LeaseFamily {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::V4 => "v4",
+            Self::V6 => "v6",
+        }
+    }
 }
 
 /// Arguments of `tenko dhcp lease show`.
@@ -830,6 +861,13 @@ pub struct HistoryArgs {
     /// Only events before this time (RFC 3339).
     #[arg(long, value_name = "TIME")]
     pub to: Option<String>,
+    // WP9.4: the DHCPv6 history.
+    /// Only DHCPv4 (`v4`) or DHCPv6 (`v6`) events; both when absent.
+    #[arg(long, value_enum, value_name = "FAMILY")]
+    pub family: Option<LeaseFamily>,
+    /// Only DHCPv6 events of this client DUID (hexadecimal, colons allowed).
+    #[arg(long, value_name = "HEX")]
+    pub duid: Option<String>,
     /// Show one page of at most this many events (and the cursor of the next one) instead
     /// of all of them.
     #[arg(long, value_name = "N")]
@@ -1185,16 +1223,21 @@ const RESERVATION_COLUMNS: Columns = &[
 ];
 const LEASE_COLUMNS: Columns = &[
     ("ADDRESS", "addr"),
+    ("FAMILY", "family"),
     ("STATE", "state"),
     ("ENDS", "ends"),
+    ("MAC", "mac"),
     ("HOSTNAME", "hostname"),
+    ("FQDN", "fqdn"),
     ("SCOPE", "scope"),
 ];
 const HISTORY_COLUMNS: Columns = &[
     ("AT", "at"),
     ("EVENT", "kind"),
     ("ADDRESS", "addr"),
+    ("FAMILY", "family"),
     ("STATE", "state"),
+    ("MAC", "mac"),
     ("HOSTNAME", "hostname"),
 ];
 
@@ -1674,16 +1717,18 @@ fn lease(action: &LeaseCommand) -> Result<Request, Failure> {
                         .map(|text| snake_enum::<BindingState>("lease state", text))
                         .transpose()?,
                 )
+                .with_query("family", args.family.map(|family| family.api().to_owned()))
+                .with_query("duid", args.duid.as_deref().map(duid).transpose()?)
                 .with_query("limit", args.limit.map(|limit| limit.to_string()))
                 .with_query("cursor", args.cursor.clone()))
         }
         LeaseCommand::Show(args) => Ok(Request::get(
-            format!("/dhcp/leases/{}", ipv4("address", &args.addr)?),
+            format!("/dhcp/leases/{}", ip("address", &args.addr)?),
             Present::Item,
         )
         .with_query("vrf", optional_id("VRF", args.vrf.as_deref())?)),
         LeaseCommand::Release(args) => {
-            let addr = ipv4("address", &args.addr)?;
+            let addr = ip("address", &args.addr)?;
             let mut body = Map::new();
             insert(&mut body, "vrf", optional_id("VRF", args.vrf.as_deref())?);
             insert(&mut body, "reason", args.reason.as_deref());
@@ -1709,6 +1754,8 @@ fn history(args: &HistoryArgs) -> Result<Request, Failure> {
         .with_query("scope", optional_id("scope", args.scope.as_deref())?)
         .with_query("from", args.from.as_deref().map(time).transpose()?)
         .with_query("to", args.to.as_deref().map(time).transpose()?)
+        .with_query("family", args.family.map(|family| family.api().to_owned()))
+        .with_query("duid", args.duid.as_deref().map(duid).transpose()?)
         .with_query("limit", args.limit.map(|limit| limit.to_string()))
         .with_query("cursor", args.cursor.clone()))
 }
@@ -1770,6 +1817,24 @@ fn ids(what: &str, texts: &[String]) -> Result<Vec<String>, Failure> {
 fn ipv4(what: &str, text: &str) -> Result<Ipv4Addr, Failure> {
     Ipv4Addr::from_str(text.trim())
         .map_err(|_| usage(format!("`{text}` is not an IPv4 address ({what})")))
+}
+
+// WP9.4: a lease address of either family, a DUID.
+fn ip(what: &str, text: &str) -> Result<IpAddr, Failure> {
+    IpAddr::from_str(text.trim())
+        .map_err(|_| usage(format!("`{text}` is not an IPv4 or IPv6 address ({what})")))
+}
+
+/// A DUID as the API takes it: lowercase hexadecimal without separators, 2 to 130 octets.
+fn duid(text: &str) -> Result<String, Failure> {
+    let digits: String = text
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ':' | '-'))
+        .collect();
+    tenko_core::net::Duid::from_str(&digits)
+        .map(|duid| to_hex(duid.as_bytes()))
+        .map_err(|error| usage(format!("--duid: {error}")))
 }
 
 fn server_id(text: Option<&str>) -> Result<Option<String>, Failure> {
@@ -2992,15 +3057,47 @@ mod tests {
             "/dhcp/leases/192.0.2.50/release",
             Some(json!({"vrf": OTHER, "reason": "device retired"})),
         );
+        // WP9.4: the DHCPv6 leases.
+        let v6 = check(
+            &[
+                "lease",
+                "list",
+                "--family",
+                "v6",
+                "--duid",
+                "00:03:00:01:00:00:5E:00:53:01",
+            ],
+            Method::Get,
+            "/dhcp/leases",
+            None,
+        );
+        assert_eq!(
+            query(&v6),
+            [("family", "v6"), ("duid", "0003000100005e005301")]
+        );
+        check(
+            &["lease", "show", "2001:db8::50"],
+            Method::Get,
+            "/dhcp/leases/2001:db8::50",
+            None,
+        );
+        check(
+            &["lease", "release", "2001:db8::50"],
+            Method::Post,
+            "/dhcp/leases/2001:db8::50/release",
+            Some(json!({})),
+        );
         for bad in [
             &["lease", "list", "--state", "leased"][..],
             &["lease", "list", "--mac", "nope"],
+            &["lease", "list", "--duid", "zz"],
             &["lease", "show", "host"],
-            &["lease", "release", "2001:db8::1"],
+            &["lease", "release", "2001:db8::zz"],
             &["lease", "show", "192.0.2.50", "--vrf", "default"],
         ] {
             assert_eq!(refused(bad).status, exit::USAGE, "{bad:?}");
         }
+        assert!(parse(&["lease", "list", "--family", "v5"]).is_err());
 
         let history = check(&["history"], Method::Get, "/dhcp/history", None);
         assert_eq!(history.query, Vec::new());
@@ -3039,6 +3136,25 @@ mod tests {
             refused(&["history", "--from", "yesterday"]).status,
             exit::USAGE
         );
+        let v6 = check(
+            &[
+                "history",
+                "--family",
+                "v6",
+                "--duid",
+                "0003000100005e005301",
+            ],
+            Method::Get,
+            "/dhcp/history",
+            None,
+        );
+        assert_eq!(
+            v6.query,
+            [
+                ("family", "v6".to_owned()),
+                ("duid", "0003000100005e005301".to_owned())
+            ]
+        );
     }
 
     #[test]
@@ -3066,20 +3182,20 @@ mod tests {
     #[test]
     fn answers_are_shown_as_tables_and_lines() {
         let items = vec![
-            json!({"addr": "192.0.2.50", "state": "active", "hostname": "laptop", "scope": PREFIX}),
-            json!({"addr": "192.0.2.51", "state": "released"}),
+            json!({"addr": "192.0.2.50", "family": "v4", "state": "active", "hostname": "laptop", "scope": PREFIX}),
+            json!({"addr": "192.0.2.51", "family": "v4", "state": "released"}),
         ];
         let text = render_table(LEASE_COLUMNS, &items);
         let mut lines = text.lines();
         assert_eq!(
             lines.next().expect("header"),
-            "ADDRESS     STATE     ENDS  HOSTNAME  SCOPE"
+            "ADDRESS     FAMILY  STATE     ENDS  MAC  HOSTNAME  FQDN  SCOPE"
         );
         assert_eq!(
             lines.next().expect("row"),
-            format!("192.0.2.50  active          laptop    {PREFIX}")
+            format!("192.0.2.50  v4      active               laptop          {PREFIX}")
         );
-        assert_eq!(lines.next().expect("row"), "192.0.2.51  released");
+        assert_eq!(lines.next().expect("row"), "192.0.2.51  v4      released");
 
         let item = json!({
             "prefix": PREFIX,

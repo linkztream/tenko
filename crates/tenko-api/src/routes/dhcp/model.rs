@@ -9,15 +9,15 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     HostId, InterfaceId, NodeId, PrefixId, RangeId, Revision, Timestamp, VrfId,
     dhcp::{
-        BindingState, Class, ClassId, Condition, DdnsPolicy, DhcpSettings, ExclusionRange, Filter,
-        FilterKind, Lease, LeaseEvent, LeaseEventKind, LeaseTimes, MacPattern, Match, OptionData,
-        OptionDef, OptionKind, OptionLevel, OptionOwner, OptionSpace, OptionValue, Policy,
-        PolicyAction, PolicyId, PoolSettings, ReservationWarning, Scope, SharedNetwork,
-        SharedNetworkId,
+        BindingState, Class, ClassId, ClientKey, Condition, DdnsPolicy, DdnsState, DhcpSettings,
+        ExclusionRange, Filter, FilterKind, Fingerprint, Lease, Lease6Kind, LeaseEventKind,
+        LeaseTimes, MacPattern, Match, OptionData, OptionDef, OptionKind, OptionLevel, OptionOwner,
+        OptionSpace, OptionValue, Policy, PolicyAction, PolicyId, PoolSettings, PoolShare,
+        Relay6Info, RelayInfo, ReservationWarning, Scope, SharedNetwork, SharedNetworkId,
     },
     ipam::Stamp,
     ir::LossEntry,
-    net::{HostName, MacAddr},
+    net::{Duid, HostName, MacAddr},
     serde_util::HexBytes,
 };
 use utoipa::{IntoParams, ToSchema};
@@ -188,6 +188,15 @@ pub struct DhcpScopeUtilization {
     pub utilization: f64,
     /// When the role's table was read.
     pub at: Timestamp,
+    // WP9.4: a DHCPv6 scope counts its DHCPv6 leases.
+    /// `v4` for a DHCPv4 scope, `v6` for a DHCPv6 one, whose pools may hold more addresses
+    /// than `pool_size` can say (it stops at 2^64 - 1; `pool_bits` gives the size).
+    #[schema(example = "v4")]
+    pub family: String,
+    /// The pool size as a power of two, rounded down, when it is at least 2^32 (a DHCPv6
+    /// pool of a /64 has 64); absent for a smaller pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_bits: Option<u8>,
 }
 
 /// The client of `GET /dhcp/scopes/{prefix}/effective-options`.
@@ -438,6 +447,16 @@ pub struct OptionCatalogItem {
     pub server_managed: bool,
 }
 
+// WP9.4: the DHCPv6 catalog beside the DHCPv4 one.
+/// The filter of `GET /dhcp/option-catalog`.
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct OptionCatalogParams {
+    /// Only this space: `dhcp4` (RFC 2132 and its successors) or `dhcp6` (RFC 8415 and the
+    /// option RFCs); both when absent, `dhcp4` first.
+    pub space: Option<String>,
+}
+
 /// One option of a set as the API reads it.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OptionValueItem {
@@ -686,12 +705,124 @@ pub struct DhcpReservationItem {
 // ---------------------------------------------------------------------------------------
 // Leases and history
 
-/// A lease as the API reads it.
+// WP9.4: the leases of both families in one shape.
+/// The address family of a lease or a history row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DhcpFamily {
+    /// DHCPv4.
+    V4,
+    /// DHCPv6.
+    V6,
+}
+
+/// The lease of the other family whose client has the same MAC address (DHCP-11): an
+/// active one when there is one, else the one that ends last.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpLeasePeer {
+    /// Its family.
+    pub family: DhcpFamily,
+    /// Its VRF.
+    pub vrf: VrfId,
+    /// Its address.
+    #[schema(value_type = String, example = "2001:db8::50")]
+    pub addr: IpAddr,
+    /// Its binding state.
+    pub state: BindingState,
+    /// When that state ends.
+    pub ends: Timestamp,
+}
+
+/// A lease as the API reads it: a DHCPv4 lease (`family` `v4`, the fields of
+/// `dhcp.leases`) or a DHCPv6 lease (`family` `v6`, the fields of `dhcp.leases6`).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DhcpLeaseItem {
-    /// The lease.
-    #[serde(flatten)]
-    pub lease: Lease,
+    /// The family.
+    pub family: DhcpFamily,
+    /// The address (a delegated prefix's first address for a DHCPv6 `pd` lease).
+    #[schema(value_type = String, example = "192.0.2.50")]
+    pub addr: IpAddr,
+    /// The VRF of the scope's prefix.
+    pub vrf: VrfId,
+    /// The scope, by its prefix.
+    pub scope: PrefixId,
+    /// The binding state.
+    pub state: BindingState,
+    /// The client's last transaction time.
+    pub cltt: Timestamp,
+    /// When the state ends (the valid lifetime's end of a DHCPv6 binding).
+    pub ends: Timestamp,
+    /// The node that wrote the row.
+    pub node: NodeId,
+    /// DHCPv6: what the lease binds, `na` (an address) or `pd` (a delegated prefix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<Lease6Kind>,
+    /// DHCPv6: the prefix length, 128 for an address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_len: Option<u8>,
+    /// DHCPv4: the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<ClientKey>,
+    /// The client's MAC address, where it is known: the Ethernet hardware address of a
+    /// DHCPv4 client, the link-layer address of a DHCPv6 client (RFC 6939, or its DUID-LLT
+    /// or DUID-LL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "00:00:5e:00:53:01")]
+    pub mac: Option<MacAddr>,
+    /// DHCPv6: the identity association.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iaid: Option<u32>,
+    /// DHCPv6: the client's DUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duid: Option<Duid>,
+    /// DHCPv6: the client's link-layer address as it came.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_layer: Option<HexBytes>,
+    /// DHCPv6: the hardware type of `link_layer` (1 for Ethernet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_layer_type: Option<u16>,
+    /// DHCPv6: the preferred lifetime's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_ends: Option<Timestamp>,
+    /// DHCPv4: the lease end told to the partner (Phase 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tstp: Option<Timestamp>,
+    /// DHCPv4: the lease end the partner told this node (Phase 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tsfp: Option<Timestamp>,
+    /// DHCPv4: the lease end the partner acknowledged (Phase 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atsfp: Option<Timestamp>,
+    /// DHCPv4: the pool share the address came from (Phase 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<PoolShare>,
+    /// DHCPv4: the host name the client sent (option 12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    /// The name the client sent: option 81 of DHCPv4, option 39 of DHCPv6 (RFC 4704).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fqdn: Option<String>,
+    /// The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fqdn_flags: Option<u8>,
+    /// DHCPv4: the DDNS settings of the policy that decided the names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ddns_policy: Option<DdnsPolicy>,
+    /// The DDNS outcome.
+    #[serde(default)]
+    pub ddns: DdnsState,
+    /// DHCPv4: the client's fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<Fingerprint>,
+    /// DHCPv4: what the relay said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<RelayInfo>,
+    /// DHCPv6: what the relay closest to the client said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay6: Option<Relay6Info>,
+    /// When the IPAM observation fact of the lease was last written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<Timestamp>,
     /// The host IPAM knows for the client, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostId>,
@@ -699,6 +830,10 @@ pub struct DhcpLeaseItem {
     pub reserved: bool,
     /// The store revision of the row.
     pub revision: Revision,
+    /// The client's lease of the other family with the same MAC address (DHCP-11), when the
+    /// node holds one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<DhcpLeasePeer>,
 }
 
 /// The filters of `GET /dhcp/leases`.
@@ -720,6 +855,11 @@ pub struct DhcpLeaseFilters {
     pub cursor: Option<String>,
     /// Items per page, 1 to 1000; 100 by default.
     pub limit: Option<u32>,
+    // WP9.4: the family and the DUID.
+    /// Only this family (`v4`, `v6`); both when absent, the DHCPv4 leases first.
+    pub family: Option<DhcpFamily>,
+    /// Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed).
+    pub duid: Option<String>,
 }
 
 /// The VRF of an address in the path; the default VRF when absent.
@@ -741,12 +881,49 @@ pub struct DhcpLeaseRelease {
     pub reason: Option<String>,
 }
 
-/// One row of the lease history.
+/// One row of the lease history: an event of `dhcp.history` (`family` `v4`) or of
+/// `dhcp.history6` (`family` `v6`).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DhcpHistoryItem {
-    /// The event.
-    #[serde(flatten)]
-    pub event: LeaseEvent,
+    /// The family.
+    pub family: DhcpFamily,
+    /// When.
+    pub at: Timestamp,
+    /// What.
+    pub kind: LeaseEventKind,
+    /// The address.
+    #[schema(value_type = String, example = "192.0.2.50")]
+    pub addr: IpAddr,
+    /// DHCPv6: the prefix length, 128 for an address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_len: Option<u8>,
+    /// The VRF.
+    pub vrf: VrfId,
+    /// The scope.
+    pub scope: PrefixId,
+    /// DHCPv4: the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<ClientKey>,
+    /// The client's MAC address where the row says it: the Ethernet hardware address of a
+    /// DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, example = "00:00:5e:00:53:01")]
+    pub mac: Option<MacAddr>,
+    /// DHCPv6: the identity association.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iaid: Option<u32>,
+    /// DHCPv6: the client's DUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duid: Option<Duid>,
+    /// The state after the event.
+    pub state: BindingState,
+    /// The end of that state.
+    pub ends: Timestamp,
+    /// DHCPv4: the host name the client sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    /// The node that wrote it.
+    pub node: NodeId,
 }
 
 /// The filters of `GET /dhcp/history`.
@@ -770,6 +947,11 @@ pub struct DhcpHistoryFilters {
     pub cursor: Option<String>,
     /// Items per page, 1 to 1000; 100 by default.
     pub limit: Option<u32>,
+    // WP9.4: the family and the DUID.
+    /// Only this family (`v4`, `v6`); both when absent, merged newest first.
+    pub family: Option<DhcpFamily>,
+    /// Only DHCPv6 events of this client DUID (hexadecimal, separators allowed).
+    pub duid: Option<String>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -878,6 +1060,16 @@ pub struct DhcpNodeStatus {
     pub last_commit_ms: Option<f64>,
     /// The revision of the configuration image served.
     pub revision: Revision,
+    // WP9.4: the DHCPv6 side of the report.
+    /// The DHCPv6 listeners (port 547).
+    #[serde(default)]
+    pub listeners6: Vec<DhcpListenerItem>,
+    /// The DHCPv6 scopes served.
+    #[serde(default)]
+    pub scopes6: u32,
+    /// The DHCPv6 leases by state.
+    #[serde(default)]
+    pub leases6: Vec<DhcpLeaseCount>,
 }
 
 /// A node command was accepted; its outcome follows on the node command's record.

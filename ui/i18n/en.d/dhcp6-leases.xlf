@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dhcp6-leases">
+      <unit id="dhcp.leases6.col_family">
+        <notes><note category="description">Column header of the leases and the history: the address family of the row (DHCPv4 or DHCPv6).</note></notes>
+        <segment><source>Family</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.col_kind">
+        <notes><note category="description">Column header of the leases: what the lease holds, an address or a delegated prefix.</note></notes>
+        <segment><source>Holds</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.col_duid">
+        <notes><note category="description">Column header of the leases and the history: the DUID of a DHCPv6 client (RFC 8415).</note></notes>
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.col_same_client">
+        <notes><note category="description">Column header of the leases: the lease of the same client in the other address family.</note></notes>
+        <segment><source>Same client</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.kind_address">
+        <notes><note category="description">What a lease holds: a single address (DHCPv4, and the non-temporary addresses of DHCPv6).</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.kind_prefix">
+        <notes><note category="description">What a lease holds: a delegated prefix of DHCPv6 prefix delegation.</note></notes>
+        <segment><source>Prefix</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.iaid">
+        <notes><note category="description">The identity association of a DHCPv6 lease, under its DUID; {iaid} is the number.</note></notes>
+        <segment><source>IAID {iaid}</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.peer_also">
+        <notes><note category="description">Before the address of the client's lease in the other family, in the leases list; {family} is DHCPv4 or DHCPv6.</note></notes>
+        <segment><source>Also {family}:</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.peer_title">
+        <notes><note category="description">Tooltip of the link to the client's lease in the other family; {family} is DHCPv4 or DHCPv6, {state} the binding state of that lease.</note></notes>
+        <segment><source>Show the {family} lease of this client ({state})</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_family">
+        <notes><note category="description">Label of the filter that chooses the address family of the leases or the history.</note></notes>
+        <segment><source>Address family</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_family_any">
+        <notes><note category="description">The entry of the family filter that shows both families.</note></notes>
+        <segment><source>DHCPv4 and DHCPv6</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_duid">
+        <notes><note category="description">Label of the filter for the DUID of a DHCPv6 client.</note></notes>
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_duid_placeholder">
+        <notes><note category="description">Example in the DUID filter: a DUID-LL over an example MAC address.</note></notes>
+        <segment><source>00:03:00:01:00:00:5e:00:53:01</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_duid_invalid">
+        <notes><note category="description">Shown under the DUID filter when its text is no DUID.</note></notes>
+        <segment><source>That is not a DUID: use hexadecimal digits in pairs, with or without colons.</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.release_body_duid">
+        <notes><note category="description">Body of the release dialog for a DHCPv6 lease whose client has no known MAC address; {addr} is the address, {duid} the DUID of the client.</note></notes>
+        <segment><source>The lease of {addr} held by the client with the DUID {duid} ends now. The client can ask for an address again.</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.strip_listeners">
+        <notes><note category="description">Fact in the status strip of the DHCP role: the listeners of both families; {v4} and {v6} are the numbers.</note></notes>
+        <segment><source>{v4} DHCPv4 and {v6} DHCPv6 listeners</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.strip_scopes">
+        <notes><note category="description">Fact in the status strip of the DHCP role: the scopes of both families; {v4} and {v6} are the numbers.</note></notes>
+        <segment><source>{v4} DHCPv4 and {v6} DHCPv6 scopes</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.strip_active">
+        <notes><note category="description">Fact in the status strip of the DHCP role: the active leases of both families; {v4} and {v6} are the formatted numbers.</note></notes>
+        <segment><source>{v4} DHCPv4 and {v6} DHCPv6 active leases</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.strip_state_title">
+        <notes><note category="description">Tooltip of the count of leases in one state when both families have leases; {v4} and {v6} are the formatted numbers.</note></notes>
+        <segment><source>{v4} DHCPv4 and {v6} DHCPv6</source></segment>
+      </unit>
+      <unit id="dhcp.reservations.identity_duid">
+        <notes><note category="description">Before the DUID a DHCPv6 reservation is keyed by, on the host page.</note></notes>
+        <segment><source>DUID</source></segment>
+      </unit>
+      <unit id="dhcp.reservations.identity_none6">
+        <notes><note category="description">Shown instead of the identity of a DHCPv6 reservation when the interface has neither a DUID nor a MAC address.</note></notes>
+        <segment><source>No DUID or MAC address: no reservation</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>
