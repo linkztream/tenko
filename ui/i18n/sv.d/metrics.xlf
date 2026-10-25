@@ -17,8 +17,8 @@
         <segment><source>{name} over the last minute: {values}</source><target>{name} den senaste minuten: {values}</target></segment>
       </unit>
       <unit id="metrics.bars">
-        <notes><note category="description">Tooltip of the small bar chart of a tile: the tile title, the length of a bucket in seconds and the share of each bucket over the last minute (buckets without queries left out), oldest first.</note></notes>
-        <segment><source>{name} per {seconds} s bucket over the last minute: {values}</source><target>{name} per {seconds}-sekundersfönster den senaste minuten: {values}</target></segment>
+        <notes><note category="description">Tooltip of the small bar chart of a tile: the tile title, the length of a bucket in seconds and the share of each bucket (buckets without queries left out), oldest first; the newest bar is a bucket that is still filling.</note></notes>
+        <segment><source>{name} per {seconds} s bucket, the newest still filling: {values}</source><target>{name} per {seconds}-sekundersfönster, det senaste fylls ännu: {values}</target></segment>
       </unit>
       <unit id="metrics.unit.per_second">
         <notes><note category="description">Unit after a rate, such as requests per second.</note></notes>
@@ -140,7 +140,7 @@
         <segment><source>{entries} entries, {stale} stale/s</source><target>{entries} poster, {stale} föråldrade/s</target></segment>
       </unit>
       <unit id="metrics.dns.cache_window">
-        <notes><note category="description">The line under the figure of the cache tile: the number is the hit ratio over the last 30 seconds (hits over hits and misses, not an average of per-second ratios) and each bar of the chart is the same ratio over a bucket of 5 seconds, twelve buckets for the last minute.</note></notes>
+        <notes><note category="description">The line under the figure of the cache tile: the number is the hit ratio over the last 30 seconds (hits over hits and misses, not an average of per-second ratios) and each bar of the chart is the same ratio over a bucket of 5 seconds with fixed edges (six completed buckets and the one in progress, drawn lighter); the number is the ratio over the six completed buckets and changes when a bucket completes. The cache hint line gives the stale answers per second as the mean over the same 30 seconds.</note></notes>
         <segment><source>Last 30 s; bars per 5 s</source><target>Senaste 30 s; staplar per 5 s</target></segment>
       </unit>
       <unit id="metrics.dns.answers">
@@ -148,15 +148,15 @@
         <segment><source>Answers</source><target>Svar</target></segment>
       </unit>
       <unit id="metrics.dns.answers_hint">
-        <notes><note category="description">The line under the figure of the answers tile: the number is the share of the answers with the response code NOERROR over the last 30 seconds and each bar of the chart is the same share over a bucket of 5 seconds, twelve buckets for the last minute; the rows list each response code per second.</note></notes>
-        <segment><source>NOERROR share, last 30 s; bars per 5 s</source><target>Andel NOERROR, senaste 30 s; staplar per 5 s</target></segment>
+        <notes><note category="description">The line under the figure of the answers tile: the number is the share of the answers with the response code NOERROR over the last 30 seconds and each bar of the chart is the same share over a bucket of 5 seconds with fixed edges (six completed buckets and the one in progress, drawn lighter). The rows list each response code per second as the mean over those 30 seconds.</note></notes>
+        <segment><source>NOERROR share and rates, last 30 s; bars per 5 s</source><target>Andel NOERROR och frekvens, senaste 30 s; staplar per 5 s</target></segment>
       </unit>
       <unit id="metrics.dns.rcode_other">
         <notes><note category="description">Every other DNS response code than NOERROR, NXDOMAIN, SERVFAIL and REFUSED.</note></notes>
         <segment><source>Other</source><target>Övriga</target></segment>
       </unit>
       <unit id="metrics.dns.rate">
-        <notes><note category="description">A rate per second after a row of a tile; {rate} is a number with one decimal.</note></notes>
+        <notes><note category="description">A rate per second after a row of a tile; {rate} is a number with one decimal, two below one.</note></notes>
         <segment><source>{rate}/s</source><target>{rate}/s</target></segment>
       </unit>
       <unit id="metrics.dns.blocked">

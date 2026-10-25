@@ -12,6 +12,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The 5-second bars of the start page's Cache hit ratio and Answers tiles keep their place: the buckets were counted back from the newest sample, so each new second moved every edge by one sample and every bar was recomputed from other samples. A bar is now the bucket `floor(t / 5 s)` of the samples' own times, the chart shows six completed buckets and the one in progress (lighter), and it shifts one step only when a bucket completes. The percentage and the RCODE rates beside the bars are taken over the same completed buckets (a mean per second, with two decimals below one), so a quiet tile no longer reads 0/s beside bars of answers.
 - The Kea export of a configuration without classes, filters or boot options starts Kea: it wrote an empty `client-classes` list, which `kea-dhcp4` 2.6 refuses as a syntax error; the list is now left out when it is empty.
 - The row menu of an address has its final items the first time it opens: the address lists and a network's address grid show their rows once the DHCP scopes that decide "Reserve in DHCP" have been read (or have failed to read), instead of adding or leaving out the item when the answer arrives; the tests wait for that state instead of assuming it.
 

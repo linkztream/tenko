@@ -285,11 +285,11 @@ describe("DNS tiles", () => {
     expect(tile("dns-cache").textContent).toContain("Last 30 s; bars per 5 s");
     expect(within(tile("dns-cache")).queryByTestId("metrics-sparkline-dns-cache")).toBeNull();
     const bars = within(tile("dns-cache")).getByTestId("metrics-bars");
-    expect(bars.getAttribute("data-buckets")).toBe("12");
+    expect(bars.getAttribute("data-buckets")).toBe("7");
     expect(bars.getAttribute("aria-hidden")).toBe("true");
     expect(bars.querySelectorAll("rect")).toHaveLength(1);
-    expect(tile("dns-answers").textContent).toContain("NOERROR share, last 30 s; bars per 5 s");
-    expect(within(tile("dns-answers")).getByTestId("metrics-bars").getAttribute("data-buckets")).toBe("12");
+    expect(tile("dns-answers").textContent).toContain("NOERROR share and rates, last 30 s; bars per 5 s");
+    expect(within(tile("dns-answers")).getByTestId("metrics-bars").getAttribute("data-buckets")).toBe("7");
     expect(within(tile("dns-queries")).queryByTestId("metrics-bars")).toBeNull();
     expect(tile("dns-answers").dataset.value).toBe("80");
     const rcodes = within(tile("dns-answers")).getAllByTestId("metrics-dns-rcode");
@@ -405,6 +405,60 @@ describe("DNS tiles", () => {
     expect(bar?.getAttribute("height")).toBe("5");
   });
 
+  it("keep their bars in place inside a bucket, shift them one step at a boundary and draw the bucket in progress lighter", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const t0 = Date.parse("2026-10-14T12:00:00Z");
+    const cache = (hits: number, misses: number) => ({ hit_ratio: null, hits_per_second: hits, misses_per_second: misses, stale_per_second: 0, entries: 10 });
+    const feed = (seconds: number, hits: number, misses: number) => {
+      const own = sample(1, { at: new Date(t0 + seconds * 1000).toISOString(), dns: dnsPart({ cache: cache(hits, misses) }) });
+      send(source, snapshot([own], own));
+    };
+    const rects = () => [...within(tile("dns-cache")).getByTestId("metrics-bars").querySelectorAll("rect")].map((r) => [r.getAttribute("x"), r.getAttribute("height"), r.classList.contains("partial")]);
+    // Bucket 0 all hits (seconds 0 to 4), bucket 1 half hits (5 to 9): one second of the next bucket opens a bar in progress.
+    for (let s = 0; s < 5; s++) feed(s, 2, 0);
+    for (let s = 5; s < 10; s++) feed(s, 1, 1);
+    feed(10, 0, 4);
+    await waitFor(() => expect(rects()).toHaveLength(3));
+    const settled = rects();
+    // Slots 4, 5 and 6 of seven: the two completed bars are solid, the newest is the lighter bar in progress.
+    expect(settled.map((r) => r[2])).toEqual([false, false, true]);
+    expect(settled.map((r) => r[1])).toEqual(["20", "10", "1"]);
+    // The headline is the share of the two completed buckets: 15 hits of 20 answers.
+    expect(tile("dns-cache").dataset.value).toBe("75");
+    // A tick inside the bucket in progress changes that bar only, and not the headline.
+    feed(11, 4, 0);
+    await waitFor(() => expect(rects()[2]?.[1]).not.toBe(settled[2]?.[1]));
+    expect(rects().slice(0, 2)).toEqual(settled.slice(0, 2));
+    expect(tile("dns-cache").dataset.value).toBe("75");
+    // The next bucket shifts every bar by exactly one slot (10 units).
+    feed(15, 1, 0);
+    await waitFor(() => expect(rects()).toHaveLength(4));
+    const shifted = rects();
+    expect(shifted.slice(0, 2).map((r) => r[1])).toEqual(settled.slice(0, 2).map((r) => r[1]));
+    for (const i of [0, 1, 2]) expect(Number(shifted[i]![0])).toBe(Number(settled[i]![0]) - 10);
+    expect(shifted.map((r) => r[2])).toEqual([false, false, false, true]);
+  });
+
+  it("show the answer rates over the 30 seconds of the bars, so a quiet tile does not read zero beside bars of answers", async () => {
+    mount();
+    await waitFor(() => expect(FakeSource.all).toHaveLength(1));
+    const source = FakeSource.last();
+    const t0 = Date.parse("2026-10-14T12:00:00Z");
+    const none = { noerror: 0, nxdomain: 0, servfail: 0, refused: 0, other: 0 };
+    // One NOERROR answer in 12 seconds, in the first completed bucket; the newest second is quiet.
+    for (let s = 0; s < 12; s++) {
+      const own = sample(1, { at: new Date(t0 + s * 1000).toISOString(), dns: dnsPart({ rcodes: s === 2 ? { ...none, noerror: 1 } : none }) });
+      send(source, snapshot([own], own));
+    }
+    await waitFor(() => expect(tile("dns-answers").dataset.value).toBe("100"));
+    const noerror = within(tile("dns-answers")).getAllByTestId("metrics-dns-rcode")[0]!;
+    expect(noerror.dataset.rate).toBe("0.1");
+    expect(noerror.textContent).toBe("NOERROR0.1/s");
+    expect(tile("dns-answers").textContent).toContain("NOERROR share and rates, last 30 s");
+  });
+
   it("speak Swedish", async () => {
     await setLocale("sv");
     mount();
@@ -416,7 +470,7 @@ describe("DNS tiles", () => {
     expect(screen.getByTestId("metrics-dns-log-dropped").textContent).toContain("poster i frågeloggen kastade per sekund");
     expect(tile("dns-cache").textContent).toContain("Träffandel i cachen");
     expect(tile("dns-cache").textContent).toContain("Senaste 30 s; staplar per 5 s");
-    expect(tile("dns-answers").textContent).toContain("Andel NOERROR, senaste 30 s; staplar per 5 s");
+    expect(tile("dns-answers").textContent).toContain("Andel NOERROR och frekvens, senaste 30 s; staplar per 5 s");
     expect(tile("dns-answers").textContent).toContain("Övriga");
     expect(tile("dns-blocked").textContent).toContain("5 listor har blockerat frågor");
     expect(tile("dns-upstreams").textContent).toContain("Svarstid p99 42 ms");

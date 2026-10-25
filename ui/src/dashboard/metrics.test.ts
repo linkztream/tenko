@@ -7,9 +7,11 @@ import {
   memoryUsed,
   pushSnapshot,
   ratioBuckets,
+  RCODES,
   RECURSION_TILES,
   tileValue,
   VALIDATION_STATES,
+  windowRate,
   windowRatio,
   type MetricsDns,
   type MetricsHistory,
@@ -32,10 +34,14 @@ function dns(hits: number, misses: number, noerror = 0, nxdomain = 0): MetricsDn
   };
 }
 
-function sample(part: MetricsDns | null): MetricsSample {
+/** 2026-10-14T12:00:00Z, a multiple of every bucket length; the tests count seconds from it. */
+const T0 = Date.parse("2026-10-14T12:00:00Z");
+const clock = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
+
+function sample(part: MetricsDns | null, seconds = 0): MetricsSample {
   return {
     node: null,
-    at: "2026-10-14T12:00:00Z",
+    at: clock(seconds),
     interval_ms: 1000,
     api: { requests_per_second: 0, p50_ms: 0, p99_ms: 0 },
     store: { data_bytes: 0, commit_p99_ms: null },
@@ -48,28 +54,48 @@ function sample(part: MetricsDns | null): MetricsSample {
   };
 }
 
-function historyOf(parts: (MetricsDns | null)[]): MetricsHistory {
-  return parts.reduce((h, part) => pushSnapshot(h, { nodes: [], cluster: sample(part) }), emptyHistory());
+/** A history of one sample per second from second `from`, the parts in order. */
+function historyOf(parts: (MetricsDns | null)[], from = 0): MetricsHistory {
+  return parts.reduce((h, part, i) => pushSnapshot(h, { nodes: [], cluster: sample(part, from + i) }), emptyHistory());
+}
+
+/** A history with samples at the given seconds (fractions allowed), oldest first. */
+function historyAt(entries: readonly (readonly [number, MetricsDns | null])[]): MetricsHistory {
+  return entries.reduce((h, [seconds, part]) => pushSnapshot(h, { nodes: [], cluster: sample(part, seconds) }), emptyHistory());
 }
 
 const quiet = (n: number) => Array.from({ length: n }, () => dns(0, 0));
 
 describe("windowRatio", () => {
   it("sums hits and misses over the window instead of averaging per-second ratios", () => {
-    // 1 of 1 in one second, 0 of 99 in the next: 1 percent, not the mean of 100 and 0.
+    // 1 of 1 in one second, 0 of 99 in the next, both in a bucket that has completed: 1 percent, not the mean of 100 and 0.
+    expect(windowRatio(historyAt([[0, dns(1, 0)], [1, dns(0, 99)], [5, dns(0, 0)]]), "dns-cache")).toBeCloseTo(1, 10);
+  });
+
+  it("takes the bucket in progress while no bucket has completed (the page just opened)", () => {
     expect(windowRatio(historyOf([dns(1, 0), dns(0, 99)]), "dns-cache")).toBeCloseTo(1, 10);
   });
 
   it("is absent while no query fell in the window and present when one did, however quiet the rest", () => {
     expect(windowRatio(emptyHistory(), "dns-cache")).toBeNull();
     expect(windowRatio(historyOf([dns(0, 0), null, dns(0, 0)]), "dns-cache")).toBeNull();
-    expect(windowRatio(historyOf([dns(2, 2), ...quiet(29)]), "dns-cache")).toBe(50);
-    expect(windowRatio(historyOf([dns(2, 2), ...quiet(30)]), "dns-cache")).toBeNull();
+    // Seconds 0 to 34: the newest bucket is the seventh, the first is still among the six completed ones.
+    expect(windowRatio(historyOf([dns(2, 2), ...quiet(34)]), "dns-cache")).toBe(50);
+    // Second 35 opens the eighth bucket: the first leaves the window.
+    expect(windowRatio(historyOf([dns(2, 2), ...quiet(35)]), "dns-cache")).toBeNull();
   });
 
-  it("looks at the last 30 samples only", () => {
-    const h = historyOf([dns(0, 100), ...Array.from({ length: 30 }, () => dns(3, 1))]);
-    expect(windowRatio(h, "dns-cache")).toBe(75);
+  it("moves only when a bucket completes, not with every sample", () => {
+    const base = [...Array.from({ length: 5 }, () => dns(1, 0)), dns(0, 1), dns(0, 1), dns(0, 1)];
+    // Seconds 0 to 7: bucket 0 is complete (5 hits), bucket 1 is in progress and not counted.
+    expect(windowRatio(historyOf(base), "dns-cache")).toBe(100);
+    expect(windowRatio(historyOf([...base, dns(0, 9)]), "dns-cache")).toBe(100);
+    // Second 10 opens bucket 2: buckets 0 and 1 count, 5 hits of 8.
+    expect(windowRatio(historyOf([...base, dns(0, 0), dns(0, 0), dns(0, 0)]), "dns-cache")).toBe(62.5);
+  });
+
+  it("is empty after a gap of more than the window", () => {
+    expect(windowRatio(historyAt([[0, dns(2, 2)], [40, dns(0, 0)]]), "dns-cache")).toBeNull();
   });
 
   it("gives the NOERROR share of all response codes for the answers tile", () => {
@@ -79,33 +105,124 @@ describe("windowRatio", () => {
 });
 
 describe("ratioBuckets", () => {
+  const SEVEN = 7;
+  const bars = (h: MetricsHistory, tile: "dns-cache" | "dns-answers" = "dns-cache") => ratioBuckets(h, 5, SEVEN, tile);
+  // The bucket 0 (seconds 0 to 4) only misses, the bucket 2 (10 to 14) half hits, the newest, bucket 6 (30 to 34), 4 of 5.
+  const base = [
+    [0, dns(0, 2)],
+    [12, dns(1, 1)],
+    [31, dns(0.8, 0.2)],
+  ] as const;
+
   it("is all empty without samples", () => {
-    expect(ratioBuckets(emptyHistory(), 5, 12)).toEqual(Array(12).fill(null));
+    expect(bars(emptyHistory())).toEqual(Array(SEVEN).fill(null));
   });
 
-  it("makes twelve buckets of five seconds, the newest ending at the newest sample", () => {
-    // 60 samples: the oldest bucket only misses, then idle, the newest bucket 4 of 5 queries hit.
-    const parts = Array.from({ length: 60 }, (_, i) => (i < 5 ? dns(0, 2) : i >= 55 ? dns(0.8, 0.2) : dns(0, 0)));
-    const buckets = ratioBuckets(historyOf(parts), 5, 12);
-    expect(buckets).toHaveLength(12);
-    expect(buckets[0]).toBe(0);
-    expect(buckets.slice(1, 11)).toEqual(Array(10).fill(null));
-    expect(buckets[11]).toBeCloseTo(0.8, 10);
+  it("puts samples at known seconds into the bars of their own buckets, the newest last", () => {
+    const out = bars(historyAt(base));
+    expect(out).toHaveLength(SEVEN);
+    expect(out[0]).toBe(0);
+    expect(out.slice(1, 6)).toEqual([null, 0.5, null, null, null]);
+    expect(out[6]).toBeCloseTo(0.8, 10);
   });
 
-  it("computes each bucket from sums and leaves the early buckets empty while the history is short", () => {
-    // 7 samples: the newest bucket holds the last 5, the one before it the first 2.
-    const parts = [dns(1, 0), dns(0, 1), dns(1, 0), dns(0, 3), dns(0, 3), dns(0, 3), dns(0, 3)];
-    const buckets = ratioBuckets(historyOf(parts), 5, 12);
-    expect(buckets.slice(0, 10)).toEqual(Array(10).fill(null));
-    expect(buckets[10]).toBe(0.5);
-    expect(buckets[11]).toBeCloseTo(1 / 13, 10);
+  it("sums a bucket's samples instead of averaging their shares", () => {
+    // 1 of 1 then 0 of 3 in the same bucket is a quarter, not the mean of 1 and 0.
+    const out = bars(historyAt([[30, dns(1, 0)], [31, dns(0, 3)]]));
+    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
+    expect(out[6]).toBe(0.25);
+  });
+
+  it("changes only the last bar when a sample falls inside the bucket in progress", () => {
+    const before = bars(historyAt(base));
+    const after = bars(historyAt([...base, [33, dns(0, 1)]]));
+    expect(after.slice(0, 6)).toEqual(before.slice(0, 6));
+    expect(after[6]).toBeCloseTo(0.8 / 2, 10);
+    // And a tick every second for the whole bucket never moves the older bars.
+    let h = historyAt(base);
+    for (let s = 32; s < 35; s++) {
+      h = pushSnapshot(h, { nodes: [], cluster: sample(dns(0, 1), s) });
+      expect(bars(h).slice(0, 6)).toEqual(before.slice(0, 6));
+    }
+  });
+
+  it("shifts by exactly one step when a sample of the next bucket arrives", () => {
+    const before = bars(historyAt(base));
+    const after = bars(historyAt([...base, [33, dns(0, 1)], [35, dns(1, 1)]]));
+    // The bar in progress became a completed bar (with the sample of second 33 in it) and a new bar was born.
+    expect(after.slice(0, 5)).toEqual(before.slice(1, 6));
+    expect(after[5]).toBeCloseTo(0.4, 10);
+    expect(after[6]).toBe(0.5);
+  });
+
+  it("puts a sample in the bucket of its own time however the samples are spaced", () => {
+    // 4.999 s and 5.000 s are a bucket apart; 0.4 s and 4.9 s are not.
+    const out = bars(historyAt([[0.4, dns(1, 0)], [4.9, dns(1, 0)], [4.999, dns(1, 0)], [5, dns(0, 1)]]));
+    expect(out.slice(0, 5)).toEqual(Array(5).fill(null));
+    expect(out[5]).toBe(1);
+    expect(out[6]).toBe(0);
+  });
+
+  it("empties the ring after a gap of more than the 30 seconds it holds", () => {
+    const out = bars(historyAt([...base, [75, dns(0, 1)]]));
+    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
+    expect(out[6]).toBe(0);
+  });
+
+  it("ignores a sample from a later bucket than the newest (the clock stepped back)", () => {
+    const out = bars(historyAt([[100, dns(1, 0)], [50, dns(0, 1)]]));
+    expect(out.slice(0, 6)).toEqual(Array(6).fill(null));
+    expect(out[6]).toBe(0);
   });
 
   it("follows the answers tile when asked", () => {
-    const buckets = ratioBuckets(historyOf([dns(0, 0, 3, 1)]), 5, 12, "dns-answers");
-    expect(buckets[11]).toBe(0.75);
-    expect(buckets[10]).toBeNull();
+    const out = bars(historyAt([[0, dns(0, 0, 3, 1)]]), "dns-answers");
+    expect(out[6]).toBe(0.75);
+    expect(out[5]).toBeNull();
+  });
+});
+
+describe("the figures beside the bars", () => {
+  // One NOERROR answer in the first bucket and one NXDOMAIN in the second: every sample's own rate is
+  // zero but two, and the newest second reads zero.
+  const sparse = historyOf(
+    Array.from({ length: 12 }, (_, s) => (s === 2 ? dns(0, 0, 1, 0) : s === 7 ? dns(0, 0, 0, 1) : dns(0, 0))),
+  );
+
+  it("agree: the mean rates are the counts of the samples behind the headline and the bars", () => {
+    expect(sparse.cluster[sparse.cluster.length - 1]?.dns?.rcodes.noerror).toBe(0);
+    // The window is seconds 0 to 9 (buckets 0 and 1 completed, bucket 2 in progress).
+    expect(windowRate(sparse, (d) => d.rcodes.noerror)).toBeCloseTo(0.1, 10);
+    expect(windowRate(sparse, (d) => d.rcodes.nxdomain)).toBeCloseTo(0.1, 10);
+    expect(windowRate(sparse, (d) => d.rcodes.servfail)).toBe(0);
+    expect(windowRatio(sparse, "dns-answers")).toBe(50);
+    // The share of the headline is the share of the rates...
+    const noerror = windowRate(sparse, (d) => d.rcodes.noerror)!;
+    const all = RCODES.reduce((sum, code) => sum + windowRate(sparse, (d) => d.rcodes[code])!, 0);
+    expect((noerror * 100) / all).toBeCloseTo(windowRatio(sparse, "dns-answers")!, 10);
+    // ... and the bars before the one in progress are the shares of the buckets the rates are made of.
+    expect(ratioBuckets(sparse, 5, 7, "dns-answers").slice(5)).toEqual([0, null]);
+    expect(ratioBuckets(sparse, 5, 7, "dns-answers")[4]).toBe(1);
+  });
+
+  it("move with the headline, once per bucket, not with every sample", () => {
+    const next = pushSnapshot(sparse, { nodes: [], cluster: sample(dns(0, 0, 4, 0), 12) });
+    expect(windowRate(next, (d) => d.rcodes.noerror)).toBe(windowRate(sparse, (d) => d.rcodes.noerror));
+    const later = pushSnapshot(next, { nodes: [], cluster: sample(dns(0, 0), 15) });
+    expect(windowRate(later, (d) => d.rcodes.noerror)).toBeCloseTo((1 + 4) / 13, 10);
+  });
+
+  it("weigh a sample by the seconds it spans", () => {
+    const slow = { ...sample(dns(0, 0, 3, 0), 0), interval_ms: 3000 };
+    const fast = { ...sample(dns(0, 0, 0, 0), 4), interval_ms: 1000 };
+    const h = [slow, fast, sample(dns(0, 0), 5)].reduce((acc, s) => pushSnapshot(acc, { nodes: [], cluster: s }), emptyHistory());
+    // 9 answers in the 3 seconds, 0 in the next second: 9 over 4 seconds.
+    expect(windowRate(h, (d) => d.rcodes.noerror)).toBeCloseTo(9 / 4, 10);
+  });
+
+  it("are absent without a dns sample", () => {
+    expect(windowRate(emptyHistory(), (d) => d.rcodes.noerror)).toBeNull();
+    expect(windowRate(historyOf([null, null]), (d) => d.rcodes.noerror)).toBeNull();
   });
 });
 

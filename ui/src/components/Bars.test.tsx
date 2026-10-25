@@ -21,6 +21,20 @@ describe("bar rectangles", () => {
   });
 });
 
+describe("the bucket in progress", () => {
+  it("marks only the newest bar as partial, and only when asked", () => {
+    expect(barRects([0.5, 1], 3, true).map((r) => r.partial)).toEqual([undefined, true]);
+    expect(barRects([0.5, 1], 3).map((r) => r.partial)).toEqual([undefined, undefined]);
+    // A newest bucket without a value leaves the older bars solid.
+    expect(barRects([0.5, null], 3, true).map((r) => r.partial)).toEqual([undefined]);
+  });
+
+  it("draws the partial bar with the class that makes it lighter", () => {
+    const { container } = render(() => <Bars values={[0.2, 1]} buckets={3} partialLast title="t" />);
+    expect([...container.querySelectorAll("rect")].map((r) => r.classList.contains("partial"))).toEqual([false, true]);
+  });
+});
+
 describe("Bars", () => {
   it("is hidden from assistive technology, has a fixed viewBox and a bar per present bucket", () => {
     const { container } = render(() => <Bars values={[0.2, null, 1]} buckets={12} title="Hit ratio" testId="metrics-bars" />);

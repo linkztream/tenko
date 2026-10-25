@@ -23,8 +23,8 @@
 // The group headings are `metrics-group-controller` and `metrics-group-dns`.
 // While the cluster's sample has `dns` (a controller runs the `dns` role) the DNS tiles follow:
 // `metrics-tile-dns-queries` (with `metrics-dns-log-dropped`, always present: `data-state` dropping
-// or idle, hidden while idle; the second line of the footer), `-dns-cache` (the hit ratio of the last 30 seconds in percent, and a `metrics-bars` chart of 12 buckets of 5 seconds),
-// `-dns-answers` (the NOERROR share of the last 30 seconds, with the same `metrics-bars`, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`), `-dns-blocked` (the top
+// or idle, hidden while idle; the second line of the footer), `-dns-cache` (the hit ratio over the six completed buckets of 5 seconds in percent, and a `metrics-bars` chart of those six and the bucket in progress, drawn lighter; the buckets have fixed edges on the controller's clock and the chart shifts one step when a bucket completes),
+// `-dns-answers` (the NOERROR share of the same 30 seconds, with the same `metrics-bars`, and `metrics-dns-rcode` per RCODE with `data-rcode` and `data-rate`, the mean per second over those 30 seconds), `-dns-blocked` (the top
 // three lists as `metrics-dns-list` with `data-list` and `data-rate`), `-dns-upstreams`, and
 // `-dns-encrypted` (without a number while the role serves neither DoT nor DoH).
 //
@@ -67,10 +67,12 @@ import {
   sampleState,
   snapshotOf,
   tileValue,
+  windowRate,
   windowRatio,
   topLists,
   // WP10.4
   VALIDATION_STATES,
+  type MetricsDns,
   type MetricsHistory,
   type RatioTile,
   type MetricsSample,
@@ -81,6 +83,17 @@ import "./metrics.css";
 /** A quantile or rate in milliseconds or per second, with one decimal below ten. */
 function decimal(value: number): string {
   return formatNumber(value, { maximumFractionDigits: Math.abs(value) < 10 ? 1 : 0 });
+}
+
+/**
+ * A mean rate per second: as `decimal`, but a rate below one keeps two decimals and a rate that is
+ * not zero never reads as zero, so a tile with a few answers in half a minute does not show "0/s"
+ * beside bars that show those answers.
+ */
+function rate(value: number): string {
+  if (value > 0 && value < 0.01) return `<${formatNumber(0.01, { minimumFractionDigits: 2 })}`;
+  if (value > 0 && value < 1) return formatNumber(value, { maximumFractionDigits: 2 });
+  return decimal(value);
 }
 
 function Tile(props: {
@@ -132,7 +145,7 @@ function Tile(props: {
             when={props.bars}
             fallback={<Sparkline values={props.series ?? []} title={t("metrics.sparkline", { name: props.title, values: values() })} testId={`metrics-sparkline-${props.name}`} />}
           >
-            {(bars) => <Bars values={bars()} buckets={BUCKETS} title={t("metrics.bars", { name: props.title, seconds: BUCKET_SECONDS, values: shares() })} testId="metrics-bars" />}
+            {(bars) => <Bars values={bars()} buckets={BUCKETS} partialLast title={t("metrics.bars", { name: props.title, seconds: BUCKET_SECONDS, values: shares() })} testId="metrics-bars" />}
           </Show>
         </div>
         {props.children}
@@ -181,6 +194,9 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   const series = (name: TileName) => history().cluster.map((sample) => tileValue(name, sample));
   const ratioValue = (name: RatioTile) => (cluster()?.dns ? windowRatio(history(), name) : null);
   const ratioBars = (name: RatioTile) => ratioBuckets(history(), BUCKET_SECONDS, BUCKETS, name);
+  // The rates beside the ratio tiles are means over the window of the headline (the completed buckets
+  // of the last 30 seconds), so the numbers and the bars are made of the same samples.
+  const meanRate = (pick: (dns: MetricsDns) => number) => windowRate(history(), pick) ?? 0;
   const value = (name: TileName) => {
     const sample = cluster();
     return sample ? tileValue(name, sample) : null;
@@ -383,7 +399,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 unit={t("metrics.unit.percent")}
                 bars={ratioBars("dns-cache")}
                 windowHint={t("metrics.dns.cache_window")}
-                hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: decimal(d().cache.stale_per_second) })}
+                hint={t("metrics.dns.cache_hint", { entries: si(d().cache.entries, locale()), stale: rate(meanRate((x) => x.cache.stale_per_second)) })}
               />
               <Tile
                 name="dns-answers"
@@ -397,9 +413,9 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
                 <ul class="metrics-rows metrics-rows-pairs">
                   <For each={RCODES}>
                     {(rcode) => (
-                      <li data-testid="metrics-dns-rcode" data-rcode={rcode} data-rate={d().rcodes[rcode]}>
+                      <li data-testid="metrics-dns-rcode" data-rcode={rcode} data-rate={meanRate((x) => x.rcodes[rcode])}>
                         <span class={rcode === "other" ? undefined : "mono"}>{rcode === "other" ? t("metrics.dns.rcode_other") : rcode.toUpperCase()}</span>
-                        <span class="rate">{t("metrics.dns.rate", { rate: decimal(d().rcodes[rcode]) })}</span>
+                        <span class="rate">{t("metrics.dns.rate", { rate: rate(meanRate((x) => x.rcodes[rcode])) })}</span>
                       </li>
                     )}
                   </For>
