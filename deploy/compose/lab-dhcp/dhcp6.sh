@@ -11,7 +11,8 @@
 # Witnesses: the clients' own results (dhclient's script writes /run/lab/events6, networkd
 # writes /run/systemd/netif), the node's metrics (tenko_dhcp_packets_total{family="v6"}),
 # the IPAM observations of the leases (GET /observations) and the records DDNS wrote
-# (GET /dns/zones/{id}/records).
+# (GET /dns/zones/{id}/records). The round ends with E30's DHCPv6 rows (WP9.3): Kea's
+# kea-dhcp6 from the node's export.
 
 v6_project=tenkodhcp6lab
 v6_compose_file="$here/compose.dhcp6.yml"
@@ -50,7 +51,7 @@ v6_started=0
 v6_work=""
 declare -A v6_ip=()
 
-c6() { docker compose -p "$v6_project" -f "$v6_compose_file" --profile networkd "$@"; }
+c6() { docker compose -p "$v6_project" -f "$v6_compose_file" --profile networkd --profile kea "$@"; }
 v6_healthy() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$(c6 ps -q tenko)")" == healthy ]]; }
 # Both relay agents of the gateway run.
 v6_relays_up() {
@@ -390,6 +391,124 @@ v6_fqdn_released_ok() {
     within 15 v6_zone_lacks "$v6_zone_rev" "$v6_reverse" PTR
 }
 
+# ---------------------------------------------------------------------------------------
+# WP9.3: E30's DHCPv6 rows (docs/dhcp.md section 18). The node's configuration as the rows
+# above left it (two scopes, the server's options 23, 24 and 56, the reservation by DUID,
+# DDNS on lan6) and a lease of a DUID-EN client on iot6 are exported through
+# GET /dhcp/export; `kea-dhcp6 -t` checks the Dhcp6 document and the golden file of the
+# unit tests; the report names the relay listener, whose address the operator names in
+# interfaces-config (the rows do it as the report says); then the node stops and
+# kea-dhcp6 starts from the export on the node's addresses: client-dhclient6 gets its
+# reservation through dhcrelay with options 23, 24 and 56, and the DUID-EN client keeps
+# the address of its exported lease. KEA=0 leaves the rows out.
+
+# The lease row's client: a DUID-EN (the documentation enterprise number of RFC 5612).
+v6_duid_kea=000200007ed9cafe0001
+
+# v6_kea_files: the export's answer in $work/export6.json split into the files the command
+# line writes (tenko dhcp export --out), with interfaces-config naming the node's
+# interface and address for relayed traffic, as the report asks.
+v6_kea_files() {
+  local iface
+  iface="$(c6 exec -T netns ip -o -6 addr show | tr -d '\r' |
+    awk -v a="$v6_node6" '{ split($4, p, "/") } p[1] == a { print $2; exit }')"
+  [[ -n "$iface" ]] || return 1
+  python3 - "$work/export6.json" "$work/kea" "$iface/$v6_node6" <<'PY'
+import json, os, sys
+answer = json.load(open(sys.argv[1]))
+out = sys.argv[2]
+os.makedirs(out, exist_ok=True)
+dhcp6 = answer["dhcp6"]
+dhcp6["Dhcp6"]["interfaces-config"]["interfaces"] = [sys.argv[3]]
+json.dump(dhcp6, open(os.path.join(out, "kea-dhcp6.json"), "w"), indent=2)
+open(os.path.join(out, "kea-leases6.csv"), "w").write(answer.get("leases6_csv") or "")
+json.dump({"entries": answer.get("losses", [])}, open(os.path.join(out, "kea-export-report.json"), "w"), indent=2)
+PY
+  chmod -R a+rX "$work/kea"
+}
+
+# v6_kea_check <file>: kea-dhcp6 -t in the node's network namespace (a subnet's or a shared
+# network's interface must exist).
+v6_kea_check() {
+  docker run --rm --network "container:$(c6 ps -q netns)" -v "$(dirname "$1"):/check:ro" "$KEA_IMAGE" \
+    kea-dhcp6 -t "/check/$(basename "$1")" >"$work/kea6-check.out" 2>&1
+  local status=$?
+  tail -n 20 "$work/kea6-check.out" >&2
+  return "$status"
+}
+
+# v6_report_has <code>...: the loss report has an entry of every code.
+v6_report_has() {
+  python3 - "$work/kea/kea-export-report.json" "$@" <<'PY'
+import json, sys
+codes = {e["code"] for e in json.load(open(sys.argv[1]))["entries"]}
+print(sorted(codes), file=sys.stderr)
+sys.exit(0 if all(c in codes for c in sys.argv[2:]) else 1)
+PY
+}
+
+v6_kea_up() { c6 logs --no-color kea6 2>&1 | grep -q DHCP6_STARTED; }
+
+v6_kea_reserved_ok() {
+  v6_fresh client-dhclient6
+  v6_dhclient client-dhclient6 -1 >/dev/null 2>&1 || return 1
+  local line
+  line="$(v6_last client-dhclient6)"
+  printf 'client-dhclient6 from Kea: %s\n' "$line" >&2
+  [[ "$(event_field ip6 <<<"$line")" == "$v6_reserved_ip" ]] && v6_options_ok client-dhclient6
+}
+
+v6_kea_lease_ok() {
+  local out ip6
+  [[ -n "$v6_kea_ip" ]] || return 1
+  out="$(t6 --link 2001:db8:102::1 --duid "$v6_duid_kea" --expect "${v6_prefix6[iot6]}")" || {
+    printf '%s\n' "$out" >&2
+    return 1
+  }
+  printf '%s\n' "$out" >&2
+  ip6="$(sed -n 's/^address //p' <<<"$out")"
+  printf 'from Kea %s, exported %s\n' "$ip6" "$v6_kea_ip" >&2
+  [[ "$ip6" == "$v6_kea_ip" ]]
+}
+
+v6_kea_rows() {
+  local version out
+  step "E30: the Kea export, DHCPv6"
+  if [[ -z "${KEA_IMAGE_PREBUILT:-}" ]]; then
+    docker build -f "$here/kea.Dockerfile" -t "$KEA_IMAGE" "$here"
+  fi
+  version="$(docker run --rm --network none "$KEA_IMAGE" kea-dhcp6 -V 2>/dev/null | head -n 1 | tr -d '\r')"
+  # A lease the export carries: the DUID-EN client on iot6, not the pool's first address,
+  # so that only the lease file can give it back.
+  out="$(t6 --link 2001:db8:102::1 --duid "$v6_duid_kea" --expect "${v6_prefix6[iot6]}")" ||
+    fail "dhcp6: the lease of the Kea rows: $out"
+  v6_kea_ip="$(sed -n 's/^address //p' <<<"$out")"
+  [[ -n "$v6_kea_ip" && "$v6_kea_ip" != "${v6_pool6_first[iot6]}" ]] ||
+    fail "dhcp6: the lease of the Kea rows is ${v6_kea_ip:-none}, the pool's first address or none"
+  must "the export" api GET "/dhcp/export?format=kea&leases=true"
+  cp "$work/api.out" "$work/export6.json"
+  v6_kea_files || fail "dhcp6: the export's files"
+  ok "export6" "GET /dhcp/export: Dhcp6 with $(($(wc -l <"$work/kea/kea-leases6.csv") - 1)) DHCPv6 lease(s), Kea image $version"
+  row "export.kea6" "kea-dhcp6 -t ($version) accepts the exported Dhcp6 configuration" \
+    v6_kea_check "$work/kea/kea-dhcp6.json"
+  row "export.kea6.golden" "kea-dhcp6 -t accepts the golden file of the unit tests (crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json)" \
+    v6_kea_check "$repo/crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json"
+  row "export.kea6.report" "the loss report names the relay listener's address for interfaces-config and the server DUID the export does not know" \
+    v6_report_has export.kea.v6.interfaces.address export.kea.v6.server_id.unknown
+
+  step "dhcp6: stop the node and start kea-dhcp6 from the export on $v6_node6"
+  c6 stop tenko >/dev/null 2>&1
+  c6 up -d kea6 >/dev/null 2>&1
+  retry 60 "kea-dhcp6 to start" v6_kea_up
+  row "export.kea6.reservation" "kea-dhcp6 from the export gives client-dhclient6 its reservation $v6_reserved_ip through dhcrelay, with options 23, 24 and 56" \
+    within 60 v6_kea_reserved_ok
+  row "export.kea6.lease" "the DUID-EN client keeps ${v6_kea_ip:-its address} from the exported lease file (iot6 through relay-test6)" \
+    within 30 v6_kea_lease_ok
+  c6 logs --no-color --tail 40 kea6 >&2 2>&1 || true
+  c6 stop kea6 >/dev/null 2>&1 || true
+}
+# End WP9.3.
+
 v6_rows() {
   local host iface
   step "dhcp6: leases through the relay"
@@ -439,6 +558,13 @@ v6_rows() {
   step "dhcp6: release"
   row "v6.release" "dhclient -6 -r on lan6: the node counts a RELEASE answered; relay-test6 --release removes the AAAA and the PTR of host6" \
     v6_release_all
+
+  # WP9.3: the Kea rows stop the node, so they come last.
+  if [[ "${KEA:-1}" == 1 ]]; then
+    v6_kea_rows
+  else
+    skip "export.kea6" "KEA=0: the Kea export rows are left out"
+  fi
 }
 v6_release_all() { v6_release_counted && v6_fqdn_released_ok; }
 
@@ -448,7 +574,7 @@ v6_release_all() { v6_release_counted && v6_fqdn_released_ok; }
 v6_logs() {
   local service
   printf '\n==> FAILED: logs of the round dhcp6\n' >&2
-  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6; do
+  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6 kea6; do
     printf '\n--- %s ---\n' "$service" >&2
     c6 logs --no-color --tail 200 "$service" >&2 2>&1
   done

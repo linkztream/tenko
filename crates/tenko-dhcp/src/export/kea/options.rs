@@ -11,12 +11,19 @@
 //! 209 to 211 for PXELINUX, 249 `ms-classless-static-route` and 252 `wpad`); the export adds
 //! an `option-def` for each one it uses. Tenko's custom definitions become `option-def`
 //! entries of their space.
+//!
+//! In the `Dhcp6` document every code of Tenko's DHCPv6 catalog is one Kea 2.6 defines
+//! under the same name, so only the custom definitions of `dhcp6` need an `option-def`.
+//! Option 56 holds addresses in Tenko's option set and is sent as one
+//! `NTP_SUBOPTION_SRV_ADDR` sub-option per address (RFC 5908); Kea defines it as an
+//! empty option that encapsulates `v6-ntp-server-suboptions`, so the export writes the
+//! sub-options as wire data, the octets the engine sends.
 
 use std::{collections::BTreeSet, fmt::Write as _};
 
 use serde_json::{Map, Value, json};
 use tenko_core::dhcp::{
-    OptionData, OptionDef, OptionKind, OptionValue, catalog_v4, option::CatalogEntry,
+    OptionData, OptionDef, OptionKind, OptionValue, catalog_v4, catalog_v6, option::CatalogEntry,
 };
 
 /// The codes of Tenko's catalog that Kea 2.6 does not define.
@@ -117,6 +124,15 @@ impl Options {
                 array: entry.array,
             });
         }
+        if value.space.is_dhcp6()
+            && let Some(entry) = catalog_v6(value.code)
+        {
+            return Some(Typing {
+                name: entry.name.to_owned(),
+                kind: entry.kind,
+                array: entry.array,
+            });
+        }
         self.defs
             .iter()
             .find(|def| def.space == value.space && def.code == value.code)
@@ -135,6 +151,14 @@ impl Options {
         let typing = self.typing(value);
         if let Some(typing) = &typing {
             out.insert("name".into(), json!(typing.name));
+        }
+        if value.space.is_dhcp6() && value.code == NTP_SERVER {
+            out.insert("csv-format".into(), json!(false));
+            out.insert("data".into(), json!(hex(&ntp_suboptions(&value.data.0))));
+            if always_send {
+                out.insert("always-send".into(), json!(true));
+            }
+            return Value::Object(out);
         }
         // Kea types option 15 as a domain name, so its text must stay text.
         let text = typing.and_then(|typing| csv(typing.kind, typing.array, &value.data.0));
@@ -186,6 +210,25 @@ fn catalog_def(entry: &CatalogEntry) -> Value {
         "record-types": "",
         "encapsulate": "",
     })
+}
+
+/// DHCPv6 option 56 (NTP server, RFC 5908).
+const NTP_SERVER: u16 = 56;
+
+/// Option 56 as the engine writes it: one `NTP_SUBOPTION_SRV_ADDR` per address of the
+/// option set's value (at most 16, as the engine sends).
+fn ntp_suboptions(addresses: &[u8]) -> Vec<u8> {
+    let servers: Vec<std::net::Ipv6Addr> = addresses
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .take(16)
+        .map(|chunk| std::net::Ipv6Addr::from(*chunk))
+        .collect();
+    let mut out = vec![0u8; 20 * servers.len()];
+    let len = crate::v6::encode_ntp_servers(&servers, &mut out).unwrap_or(0);
+    out.truncate(len);
+    out
 }
 
 /// The first IPv4 address of an option's data.
@@ -244,6 +287,37 @@ mod tests {
         assert_eq!(options.extra.iter().copied().collect::<Vec<_>>(), [252]);
         assert_eq!(options.defs()[0]["name"], json!("wpad"));
         assert_eq!(options.defs()[0]["type"], json!("string"));
+    }
+
+    fn v6(code: u16, data: Vec<u8>) -> OptionValue {
+        OptionValue {
+            space: OptionSpace::dhcp6(),
+            code,
+            data: tenko_core::serde_util::HexBytes(data),
+        }
+    }
+
+    #[test]
+    fn dhcp6_values_take_kea_names_and_option_56_goes_as_sub_options() {
+        let mut options = Options::new(Vec::new());
+        let dns: std::net::Ipv6Addr = "2001:db8::53".parse().expect("address");
+        assert_eq!(
+            options.entry(&v6(23, dns.octets().to_vec()), true),
+            json!({"code": 23, "space": "dhcp6", "name": "dns-servers", "csv-format": true, "data": "2001:db8::53", "always-send": true})
+        );
+        let ntp: std::net::Ipv6Addr = "2001:db8::123".parse().expect("address");
+        let entry = options.entry(&v6(56, ntp.octets().to_vec()), false);
+        assert_eq!(entry["name"], json!("ntp-server"));
+        assert_eq!(entry["csv-format"], json!(false));
+        assert_eq!(
+            entry["data"],
+            json!(format!("00010010{}", hex(&ntp.octets())))
+        );
+        assert_eq!(
+            options.entry(&v6(82, vec![0, 0, 0x0e, 0x10]), false)["name"],
+            json!("sol-max-rt")
+        );
+        assert!(options.extra.is_empty());
     }
 
     #[test]

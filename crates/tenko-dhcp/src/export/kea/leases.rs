@@ -25,11 +25,11 @@ use super::{Cx, at, codes, subnets::colon_hex};
 /// The header line.
 pub const HEADER: &str = "address,hwaddr,client_id,valid_lifetime,expire,subnet_id,fqdn_fwd,fqdn_rev,hostname,state,user_context,pool_id";
 
-fn seconds(time: tenko_core::Timestamp) -> i64 {
+pub(crate) fn seconds(time: tenko_core::Timestamp) -> i64 {
     i64::try_from(time.unix_nanos().div_euclid(1_000_000_000)).unwrap_or(0)
 }
 
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace(',', "&#x2c")
 }
 

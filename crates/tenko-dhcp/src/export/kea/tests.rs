@@ -498,6 +498,8 @@ fn run(lab: &Lab) -> super::KeaExport {
         data: &lab.data,
         zones: &zones,
         listeners: Some(&listeners),
+        listeners6: None,
+        server_duid: None,
         now: time("2026-10-22T12:30:00Z"),
         leases: true,
         conflict_detection: true,
@@ -836,6 +838,8 @@ fn the_lease_file() {
         data: &lab.data,
         zones: &zones,
         listeners: None,
+        listeners6: None,
+        server_duid: None,
         now: time("2026-10-22T12:30:00Z"),
         leases: false,
         conflict_detection: false,
@@ -857,12 +861,16 @@ fn an_empty_configuration_is_still_a_configuration() {
         data: &data,
         zones: &zones,
         listeners: Some(&[]),
+        listeners6: None,
+        server_duid: None,
         now: time("2026-10-22T12:30:00Z"),
         leases: true,
         conflict_detection: false,
     });
     let dhcp4 = &out.dhcp4["Dhcp4"];
     assert_eq!(dhcp4["subnet4"], json!([]));
+    // Kea refuses an empty client-classes list.
+    assert!(dhcp4.get("client-classes").is_none());
     assert_eq!(dhcp4["valid-lifetime"], json!(86_400));
     assert_eq!(
         out.leases4_csv.as_deref(),

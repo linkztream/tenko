@@ -6133,7 +6133,7 @@
           "dhcp"
         ],
         "summary": "Export the DHCP configuration and leases (Kea JSON)",
-        "description": "Scope: `dhcp.read` on the server-wide DHCP configuration (global roles). The Kea 2.6 export (MIG-16): `dhcp4` is the `kea-dhcp4` configuration file, `leases4_csv` the memfile lease file (unless `leases=false`), `dhcp_ddns` a `kea-dhcp-ddns` skeleton when a scope writes names, `losses` what Kea does not express as Tenko does. The export is audited (`dhcp.export`).",
+        "description": "Scope: `dhcp.read` on the server-wide DHCP configuration (global roles). The Kea 2.6 export (MIG-16): `dhcp4` is the `kea-dhcp4` configuration file, `dhcp6` the `kea-dhcp6` one when there is a DHCPv6 scope or listener, `leases4_csv` and `leases6_csv` the memfile lease files (unless `leases=false`), `dhcp_ddns` a `kea-dhcp-ddns` skeleton when a scope writes names, `losses` what Kea does not express as Tenko does. The export is audited (`dhcp.export`).",
         "operationId": "export_dhcp",
         "parameters": [
           {
@@ -40486,7 +40486,7 @@
       },
       "DhcpExport": {
         "type": "object",
-        "description": "The Kea export (P3-Q17): the configurations, the leases and what did not map.",
+        "description": "The Kea export (P3-Q17): the configurations of both families, their leases and what\ndid not map.",
         "required": [
           "dhcp4"
         ],
@@ -40500,14 +40500,14 @@
               "object",
               "null"
             ],
-            "description": "The `Dhcp6` configuration (Slice 9)."
+            "description": "The `kea-dhcp6` configuration file: `{\"Dhcp6\": {..}}` for Kea 2.6. Absent when no\nscope is on an IPv6 prefix and the role has no DHCPv6 listener."
           },
           "dhcp_ddns": {
             "type": [
               "object",
               "null"
             ],
-            "description": "A `kea-dhcp-ddns` configuration skeleton (`{\"DhcpDdns\": {..}}`) with the forward and\nreverse domains of the scopes that write names; its DNS servers and TSIG keys are\nthe operator's. Absent when no scope writes names."
+            "description": "A `kea-dhcp-ddns` configuration skeleton (`{\"DhcpDdns\": {..}}`) with the forward and\nreverse domains of the scopes of both families that write names; its DNS servers\nand TSIG keys are the operator's. Absent when no scope writes names."
           },
           "leases4_csv": {
             "type": [
@@ -40516,12 +40516,19 @@
             ],
             "description": "The DHCPv4 leases as Kea's memfile lease file (`kea-leases4.csv`), when asked for."
           },
+          "leases6_csv": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The DHCPv6 leases as Kea's memfile lease file (`kea-leases6.csv`), when asked for\nand `dhcp6` is present."
+          },
           "losses": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LossEntry"
             },
-            "description": "What Kea does not express as Tenko does: one entry per item, with a stable code\n(`export.kea.*`)."
+            "description": "What Kea does not express as Tenko does, for both families: one entry per item,\nwith a stable code (`export.kea.*`)."
           }
         }
       },

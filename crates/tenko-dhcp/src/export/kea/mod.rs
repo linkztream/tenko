@@ -1,18 +1,22 @@
-//! The Kea export (WP9.3, MIG-16, decision P3-Q17): the configuration of Kea 2.6's
-//! `kea-dhcp4` with the leases as its memfile lease file, so that Kea starts from it and
-//! keeps the clients' addresses, plus a report of what Kea cannot express.
+//! The Kea export (WP9.3, MIG-16, decision P3-Q17): the configurations of Kea 2.6's
+//! `kea-dhcp4` and `kea-dhcp6` with the leases as their memfile lease files, so that Kea
+//! starts from them and keeps the clients' addresses, plus a report of what Kea cannot
+//! express.
 //!
 //! [`export`] takes the rows the role serves from ([`DhcpData`], with the leases when they
-//! are wanted), the names of the DNS zones, the role's listeners and the time, and gives a
-//! [`KeaExport`]:
+//! are wanted), the names of the DNS zones, the role's listeners, its server DUID and the
+//! time, and gives a [`KeaExport`]:
 //!
 //! - `dhcp4`: the document `{"Dhcp4": {..}}` that `kea-dhcp4 -c` reads;
-//! - `dhcp_ddns`: a `{"DhcpDdns": {..}}` skeleton for `kea-dhcp-ddns` when a scope writes
-//!   names (its DNS servers and TSIG keys are the operator's);
-//! - `leases4_csv`: `kea-leases4.csv` in the columns Kea 2.6 reads;
-//! - `report`: the [`LossReport`], one entry per item Kea does not express as Tenko does,
-//!   in the shape of the migration imports (`location`, a stable `code`, an English
-//!   `detail`).
+//! - `dhcp6`: the document `{"Dhcp6": {..}}` that `kea-dhcp6 -c` reads, when the
+//!   configuration has a scope on an IPv6 prefix or the role a DHCPv6 listener ([`v6`]);
+//! - `dhcp_ddns`: a `{"DhcpDdns": {..}}` skeleton for `kea-dhcp-ddns` when a scope of
+//!   either family writes names (its DNS servers and TSIG keys are the operator's);
+//! - `leases4_csv` and `leases6_csv`: `kea-leases4.csv` and `kea-leases6.csv` in the
+//!   columns Kea 2.6 reads;
+//! - `report`: the [`LossReport`] of both families, one entry per item Kea does not
+//!   express as Tenko does, in the shape of the migration imports (`location`, a stable
+//!   `code`, an English `detail`).
 //!
 //! The translation, level by level (`docs/dhcp.md` section 18 has the tables):
 //!
@@ -43,6 +47,11 @@
 //!   echoed and option 43 as Tenko sends them.
 //! - **DDNS.** `ddns-*` parameters per subnet and `dhcp-ddns` (ADR 0020 mapped onto Kea's
 //!   parameters), and the `DhcpDdns` skeleton.
+//!
+//! The `Dhcp6` document ([`v6`]) follows the same levels for the DHCPv6 scopes of WP9.1:
+//! `subnet6` and `shared-networks` with pools, DUID and MAC reservations, options, the
+//! lifetimes as the engine derives them, rapid commit, the relay Interface-Id, the MAC
+//! filters, the server DUID and DDNS.
 
 mod classes;
 pub mod expr;
@@ -51,6 +60,8 @@ pub mod options;
 mod subnets;
 // The DDNS hints and the DhcpDdns skeleton.
 mod ddns;
+// The DHCPv6 half of WP9.3: the Dhcp6 document and the DHCPv6 lease file.
+pub mod v6;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +82,7 @@ use crate::{
     feed::DhcpData,
     server::ListenerInfo,
     v4::engine::ListenMode,
+    v6::server::Listener6Info,
 };
 
 pub use self::options::Options;
@@ -85,11 +97,18 @@ pub mod files {
     pub const REPORT: &str = "kea-export-report.json";
     /// The `DhcpDdns` skeleton.
     pub const DDNS: &str = "kea-dhcp-ddns.json";
+    /// The `Dhcp6` configuration.
+    pub const CONFIG6: &str = "kea-dhcp6.json";
+    /// The DHCPv6 memfile lease file.
+    pub const LEASES6: &str = "kea-leases6.csv";
 }
 
 /// Where Kea's memfile keeps the leases: its default data directory, the only one Kea 2.6
 /// accepts for the lease file.
 pub const LEASE_FILE: &str = "/var/lib/kea/kea-leases4.csv";
+
+/// Where Kea's memfile keeps the DHCPv6 leases.
+pub const LEASE_FILE6: &str = "/var/lib/kea/kea-leases6.csv";
 
 /// The stable codes of the loss report's entries.
 pub mod codes {
@@ -155,6 +174,23 @@ pub mod codes {
     pub const DDNS_D2: &str = "export.kea.ddns.d2";
     /// A lease of a scope the export left out.
     pub const LEASE_SCOPE: &str = "export.kea.lease.scope";
+    // The DHCPv6 half: what only the Dhcp6 document reports.
+    /// Tenko's classes and policies apply to DHCPv4 only: the Dhcp6 document has none.
+    pub const V6_CLASSES: &str = "export.kea.v6.classes";
+    /// The MAC filters in Dhcp6: Kea reads option 79 of the relay nearest the server.
+    pub const V6_FILTERS: &str = "export.kea.v6.filters";
+    /// The server DUID is not known (the role does not run in this process).
+    pub const V6_SERVER_ID_UNKNOWN: &str = "export.kea.v6.server_id.unknown";
+    /// A server DUID of a type Kea's `server-id` cannot hold (DUID-UUID).
+    pub const V6_SERVER_ID_TYPE: &str = "export.kea.v6.server_id.type";
+    /// A relay Interface-Id Kea cannot take: beside an interface, or one of several in a
+    /// shared network.
+    pub const V6_INTERFACE_ID: &str = "export.kea.v6.interface_id";
+    /// Delegated prefixes (`IA_PD`): the export writes no `pd-pools`.
+    pub const V6_PD: &str = "export.kea.v6.pd";
+    /// A DHCPv6 relay listener binds an address; Kea receives unicast only on
+    /// `<interface>/<address>`.
+    pub const V6_INTERFACES_ADDRESS: &str = "export.kea.v6.interfaces.address";
 }
 
 /// What the export reads besides the rows.
@@ -166,6 +202,10 @@ pub struct KeaInput<'a> {
     pub zones: &'a BTreeMap<ZoneId, DnsName>,
     /// The role's listeners; none when the role does not run in this process.
     pub listeners: Option<&'a [ListenerInfo]>,
+    /// The role's DHCPv6 listeners; none when the role does not run in this process.
+    pub listeners6: Option<&'a [Listener6Info]>,
+    /// The role's server DUID (option 2); none when it is not known.
+    pub server_duid: Option<&'a [u8]>,
     /// The time of the export.
     pub now: Timestamp,
     /// Whether the lease file is written.
@@ -180,10 +220,16 @@ pub struct KeaInput<'a> {
 pub struct KeaExport {
     /// `{"Dhcp4": {..}}`.
     pub dhcp4: Value,
+    /// `{"Dhcp6": {..}}` when the configuration has a scope on an IPv6 prefix or the role
+    /// a DHCPv6 listener.
+    pub dhcp6: Option<Value>,
     /// `{"DhcpDdns": {..}}` when a scope writes names.
     pub dhcp_ddns: Option<Value>,
     /// The memfile lease file, when the leases were asked for.
     pub leases4_csv: Option<String>,
+    /// The DHCPv6 memfile lease file, when the leases were asked for and there is a
+    /// `Dhcp6` document.
+    pub leases6_csv: Option<String>,
     /// What Kea does not express as Tenko does.
     pub report: LossReport,
 }
@@ -217,8 +263,12 @@ pub(crate) struct Cx<'a> {
     pub(crate) built: Built,
     pub(crate) report: LossReport,
     pub(crate) options: Options,
+    /// The option writer of the `Dhcp6` document.
+    pub(crate) options6: Options,
     /// Kea's subnet identifier of each exported scope.
     pub(crate) subnet_ids: BTreeMap<PrefixId, u32>,
+    /// Kea's subnet identifier of each exported DHCPv6 scope.
+    pub(crate) subnet_ids6: BTreeMap<PrefixId, u32>,
     /// Kea's name of each class.
     pub(crate) class_names: BTreeMap<ClassId, String>,
     /// Kea's name of each exported policy's class.
@@ -232,6 +282,8 @@ pub(crate) struct Cx<'a> {
     pub(crate) late_classes: Vec<Value>,
     /// Pool admission classes by their test.
     pub(crate) admission: BTreeMap<String, String>,
+    /// Whether a restricted DHCPv6 scope's pools name the allow class.
+    pub(crate) need_allow6: bool,
 }
 
 impl<'a> Cx<'a> {
@@ -417,24 +469,28 @@ fn sorted_policies<'a>(data: &'a DhcpData, exported: &BTreeMap<PrefixId, u32>) -
 /// The export of `input`.
 pub fn export(input: &KeaInput<'_>) -> KeaExport {
     let data = input.data;
+    // The custom definitions of the DHCPv6 space go to Dhcp6, the others to Dhcp4.
+    let (defs6, defs4): (Vec<OptionDef>, Vec<OptionDef>) = data
+        .option_defs
+        .values()
+        .cloned()
+        .partition(|def| def.space.is_dhcp6());
     let mut cx = Cx {
         input: *input,
         data,
         built: build(data),
         report: LossReport::default(),
-        options: Options::new(
-            data.option_defs
-                .values()
-                .cloned()
-                .collect::<Vec<OptionDef>>(),
-        ),
+        options: Options::new(defs4),
+        options6: Options::new(defs6),
         subnet_ids: BTreeMap::new(),
+        subnet_ids6: BTreeMap::new(),
         class_names: BTreeMap::new(),
         policy_names: BTreeMap::new(),
         policies: Vec::new(),
         need_allow: false,
         late_classes: Vec::new(),
         admission: BTreeMap::new(),
+        need_allow6: false,
     };
     subnets::number(&mut cx);
     cx.policies = sorted_policies(data, &cx.subnet_ids);
@@ -468,20 +524,38 @@ pub fn export(input: &KeaInput<'_>) -> KeaExport {
     let mut client_classes = classes::early(&mut cx);
     client_classes.extend(classes::policies(&mut cx));
     client_classes.append(&mut cx.late_classes);
-    dhcp4.insert("client-classes".into(), Value::Array(client_classes));
+    // Kea 2.6 refuses an empty client-classes list, so none is written then.
+    if !client_classes.is_empty() {
+        dhcp4.insert("client-classes".into(), Value::Array(client_classes));
+    }
     dhcp4.insert("shared-networks".into(), Value::Array(shared));
     dhcp4.insert("subnet4".into(), Value::Array(subnet4));
-    let dhcp_ddns = ddns::global(&mut cx, &domains, &mut dhcp4);
+    let mut dhcp6 = v6::wanted(&cx).then(|| v6::build(&mut cx));
+    let dhcp_ddns = ddns::global(
+        &mut cx,
+        &domains,
+        &mut dhcp4,
+        dhcp6
+            .as_mut()
+            .map(|(dhcp6, domains6)| (dhcp6, domains6.as_slice())),
+    );
     dhcp4.insert("option-def".into(), Value::Array(cx.options.defs()));
     dhcp4.insert(
         "user-context".into(),
         json!({"tenko-export": {"revision": data.revision.0, "generated": input.now.to_string(), "format": "kea 2.6"}}),
     );
     let leases4_csv = input.leases.then(|| leases::csv(&mut cx));
+    let dhcp6 = dhcp6.map(|(mut dhcp6, _)| {
+        v6::finish(&mut cx, &mut dhcp6);
+        dhcp6
+    });
+    let leases6_csv = (input.leases && dhcp6.is_some()).then(|| v6::leases_csv(&mut cx));
     KeaExport {
         dhcp4: json!({ "Dhcp4": Value::Object(dhcp4) }),
+        dhcp6: dhcp6.map(|dhcp6| json!({ "Dhcp6": Value::Object(dhcp6) })),
         dhcp_ddns,
         leases4_csv,
+        leases6_csv,
         report: cx.report,
     }
 }

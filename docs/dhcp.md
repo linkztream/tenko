@@ -973,7 +973,7 @@ Record the date, the lease times used and the findings in the Phase 3 status (`d
 
 ## 18. The Kea export
 
-WP9.3 writes Tenko's DHCPv4 configuration and leases in the form ISC Kea 2.6 reads (MIG-16, decisions P3-Q10 and P3-Q17 (a)), so that leaving Tenko is never blocked by a format only Tenko reads: `kea-dhcp4` starts from the export and keeps the clients' addresses. This section is for operators who leave Tenko or keep a Kea server as a fallback, and for reviewers of `tenko_dhcp::export::kea`. The DHCPv6 half (`Dhcp6`, `kea-dhcp6 -t`) is WP9.3's, over the DHCPv6 server of section 19.
+WP9.3 writes Tenko's DHCPv4 and DHCPv6 configuration and leases in the form ISC Kea 2.6 reads (MIG-16, decisions P3-Q10 and P3-Q17 (a)), so that leaving Tenko is never blocked by a format only Tenko reads: `kea-dhcp4` and `kea-dhcp6` start from the export and keep the clients' addresses. This section is for operators who leave Tenko or keep a Kea server as a fallback, and for reviewers of `tenko_dhcp::export::kea`. Sections 18.2 to 18.4 cover the `Dhcp4` document, section 18.5 the `Dhcp6` document of the DHCPv6 server of section 19, section 18.6 the tests of both.
 
 ### 18.1 Running it
 
@@ -987,9 +987,11 @@ tenko dhcp export                                    # the whole answer as JSON,
 | `kea-dhcp4.json` | `{"Dhcp4": {..}}`, the configuration `kea-dhcp4 -c` reads; check it with `kea-dhcp4 -t kea-dhcp4.json` |
 | `kea-leases4.csv` | with `--leases`: the memfile lease file; copy it to `/var/lib/kea/kea-leases4.csv` before Kea starts (Kea 2.6 accepts a lease file only in its data directory) |
 | `kea-export-report.json` | the loss report, `{"entries": [..]}` with `location`, a stable `code` and an English `detail` per item, the shape the migration imports report in (`tenko_core::ir::LossReport`) |
-| `kea-dhcp-ddns.json` | when a scope writes names: a `{"DhcpDdns": {..}}` skeleton for `kea-dhcp-ddns` |
+| `kea-dhcp6.json` | when a scope is on an IPv6 prefix or the role has a DHCPv6 listener: `{"Dhcp6": {..}}`, the configuration `kea-dhcp6 -c` reads; check it with `kea-dhcp6 -t kea-dhcp6.json` (section 18.5) |
+| `kea-leases6.csv` | with `--leases`, beside `kea-dhcp6.json`: the DHCPv6 memfile lease file, for `/var/lib/kea/kea-leases6.csv` |
+| `kea-dhcp-ddns.json` | when a scope of either family writes names: a `{"DhcpDdns": {..}}` skeleton for `kea-dhcp-ddns`, which both servers send their name changes to |
 
-The route is `GET /api/v1/dhcp/export?format=kea` (`leases=false` leaves the lease file out; `leases` is true when absent): `dhcp4`, `leases4_csv`, `dhcp_ddns` and `losses`. An unknown format answers 400 `dhcp.export.format`, a server without the DHCP configuration service 409 `dhcp.module.disabled`. The export is server-wide configuration and the leases are personal data: the caller needs `dhcp.read` on the `dhcp_scope` singleton (global roles only), and every export writes the audit record `dhcp.export` with the format, whether the leases were included, the number of scopes, lease rows and report entries. It reads every row at one revision; the listeners come from the `dhcp` role when it runs in the process.
+Kea runs one daemon per family, each with its own file, so the export writes one document per family rather than one file with both; the loss report and the DDNS skeleton cover both. The route is `GET /api/v1/dhcp/export?format=kea` (`leases=false` leaves the lease files out; `leases` is true when absent): `dhcp4`, `dhcp6` (absent without DHCPv6), `leases4_csv`, `leases6_csv`, `dhcp_ddns` and `losses`. An unknown format answers 400 `dhcp.export.format`, a server without the DHCP configuration service 409 `dhcp.module.disabled`. The export is server-wide configuration and the leases are personal data: the caller needs `dhcp.read` on the `dhcp_scope` singleton (global roles only), and every export writes the audit record `dhcp.export` with the format, whether the leases were included, the number of scopes, lease rows and report entries. It reads every row at one revision; the listeners of both families come from the `dhcp` role when it runs in the process. The role's status does not carry its server DUID, so the route exports without one (`export.kea.v6.server_id.unknown`, section 18.5).
 
 ### 18.2 What translates
 
@@ -1056,7 +1058,9 @@ Every item Kea does not express as Tenko does is one entry; `location.sheet` nam
 | `export.kea.conflict_detection` | Conflict detection before an offer (Kea's core has none; its ping_check hook does) |
 | `export.kea.history` | The lease history is not exported |
 | `export.kea.ddns.ttl`, `.legacy_clients`, `.refuse_foreign`, `.reverse`, `.zone`, `.d2` | A TTL in seconds (Kea takes a share of the lease time), legacy clients off, foreign names refused, PTR records off in a shared reverse domain, no zone to name, and the `kea-dhcp-ddns` skeleton to complete (DNS servers, TSIG keys) |
-| `export.kea.lease.scope` | Leases of scopes the export left out |
+| `export.kea.lease.scope` | Leases of scopes the export left out (either family) |
+
+The codes of the `Dhcp6` document are in section 18.5; the scope, pool, reservation, listener, DDNS and lease codes above apply to DHCPv6 scopes too.
 
 ### 18.4 Verification
 
@@ -1068,6 +1072,60 @@ The unit tests in `crates/tenko-dhcp/src/export/kea/` cover the expressions, the
 | `export.kea.report` | the report names the DDNS policy (`export.kea.policy.ddns`) |
 | `export.kea.reservation` | with the node stopped, Kea on the node's address from the export gives client-lan its reservation `192.0.2.80` with options 3 and 6 |
 | `export.kea.lease` | client-iot asks again (INIT-REBOOT) and keeps the address of its exported lease |
+
+The DHCPv6 rows and tests are in section 18.6.
+
+### 18.5 The DHCPv6 half
+
+`tenko_dhcp::export::kea::v6` writes the DHCPv6 scopes of section 19 as the `Dhcp6` document, from the same image the engine serves from, so every address, lifetime and option is the one the engine would give. Classes and policies stay DHCPv4-only in Tenko (section 19), so the document has no client classes from them; the MAC filters, which the engine applies to DHCPv6 clients by their link-layer address, are the only classes it holds.
+
+| Tenko | Kea 2.6 `Dhcp6` |
+|---|---|
+| Server lease times | Global `valid-lifetime`, `preferred-lifetime` (five eighths of valid), `renew-timer` and `rebind-timer` (half and four fifths of the preferred lifetime unless T1 or T2 is set, then the DHCPv4 rule scaled, both kept below the preferred lifetime), each with `min-` and `max-` set to the same value: the engine grants the configured lifetimes and none a client asks for |
+| A scope's lease times and `v6.preferred_secs` | The same eight parameters per subnet, derived as the engine derives them (`v6::engine::alloc::lifetimes`; a property test holds the export's derivation to the engine's) |
+| `v6.rapid_commit` | `rapid-commit` per subnet, true unless the scope turns it off (Kea's default is false) |
+| `v6.interface_id` | `interface-id` of the subnet (Kea selects by it before the relay's link address, as the engine does); in a shared network on the shared network, the first one when the scopes differ (reported) |
+| Relay link addresses | Nothing to write: the engine selects the scope whose network holds the link address of the relay on the client's link, and Kea selects the subnet whose prefix holds it, so no subnet needs Kea's `relay` list |
+| A direct DHCPv6 listener | `interface` of the subnet whose network holds the listener's address (on its shared network when it has one; a shared network's own `interface` wins); Kea takes either `interface` or `interface-id`, so an Interface-Id beside an interface is reported |
+| Server, shared network, scope, pool and reservation options | `option-data` at the global, shared-network, subnet, pool and reservation levels with Kea's DHCPv6 names (`dns-servers` 23, `domain-search` 24, `sntp-servers` 31, `ntp-server` 56, `bootfile-url` 59, `sol-max-rt` 82 and the rest of the catalog, every one defined by Kea 2.6); 23 and 24 `always-send`, as the engine sends them unasked; option 56 as hexadecimal wire data with one `NTP_SUBOPTION_SRV_ADDR` sub-option per address, the octets the engine sends (Kea defines it as an empty option over `v6-ntp-server-suboptions`); the `dhcp4` and vendor values of an option set are left out |
+| Custom definitions of `dhcp6` | `option-def` of `Dhcp6`; the definitions of other spaces go to `Dhcp4` only |
+| DHCPv6 scopes | `subnet6` entries numbered from 1 in network order, with `user-context` naming the Tenko prefix; a scope of a shared network inside its `shared-networks` entry |
+| Pools | The `dhcp_pool` ranges without the exclusions (the image's merged list) and without the network's first address, the Subnet-Router anycast address the engine never leases; a restricted scope's pools require `tenko.allow` |
+| Reservations | Per subnet, by `duid` when the interface has one, else `hw-address`, with `ip-addresses`, the host name as `hostname`, the interface's options; `host-reservation-identifiers` `duid` then `hw-address` and `mac-sources` `client-link-addr-option` then `duid`, so a reservation by MAC matches the address of the relay's option 79 (RFC 6939), else of a DUID-LLT or DUID-LL, as the engine reads it |
+| Deny and allow filters | `DROP` and `tenko.allow`, each the OR of its patterns against the client's link-layer address: `relay6[0].option[79].hex` of hardware type 1 when the relay sent option 79, else the address of a DUID-LLT (`substring(option[1].hex,8,6)`) or DUID-LL (`substring(option[1].hex,4,6)`) |
+| Server DUID | `server-id`: a DUID-LLT as type `LLT` with `htype`, `time` and `identifier`, a DUID-EN as `EN` with `enterprise-id`, a DUID-LL as `LL`; Kea holds no DUID-UUID, which is the derived default of `[dhcp.v6] server_duid` |
+| Listeners | `interfaces-config`: a direct listener's interface; a relay listener bound to an address as `*` (reported: name it `<interface>/<address>`, the only form on which `kea-dhcp6` receives unicast) |
+| DDNS | The parameters of section 18.2 per subnet; `ddns-qualifying-suffix` is the forward zone, else the first name of the scope's option 24, as the DDNS worker takes it; the skeleton gains the `ip6.arpa` reverse domain on the nibble boundary at or above the prefix length and the scope's first option 23 server; `Dhcp6` has its own `dhcp-ddns` to the same `kea-dhcp-ddns` |
+| Leases | `kea-leases6.csv` (below) |
+| Delegation pools (`IA_PD`) | Not written: the delegation pools of WP9.2 are not on `main`; the leases of delegated prefixes are left out and reported, and Kea delegates no prefixes |
+
+**The lease file.** Kea 2.6's DHCPv6 memfile columns `address,duid,valid_lifetime,expire,subnet_id,pref_lifetime,lease_type,iaid,prefix_len,fqdn_fwd,fqdn_rev,hostname,hwaddr,state,user_context,hwtype,hwaddr_source,pool_id`. An `active` address lease is state 0, lease type 0 (`IA_NA`), prefix length 128, with the client's DUID and IAID, the times from `cltt` to `ends` (valid) and to `preferred_ends` (preferred) and the end; the link-layer address the engine learned is `hwaddr` with its hardware type and Kea's source bit (2 from the DUID, 8 from the relay's option); an `abandoned` lease is state 1 (declined) with Kea's empty DUID `00:00:00` until its end; the other states and delegated prefixes are left out. `fqdn_fwd` and `fqdn_rev` say whether the DDNS worker wrote the AAAA and PTR records, `hostname` is the name written, else the client's option 39 name, a comma written `&#x2c`.
+
+**After the move.** Kea answers a client's RENEW only when it names Kea's server DUID. With `server-id` set from a DUID-LLT, DUID-EN or DUID-LL the clients renew with Kea as they did with Tenko; without it (a DUID-UUID, or the route's export, which does not know the DUID) Kea makes a DUID-LLT of its own, the clients' RENEWs go unanswered, and at T2 they REBIND without a server identifier and Kea answers from the lease file, so they keep their addresses. Set `server-id` by hand from `[dhcp.v6] server_duid` to keep the renewals.
+
+The codes of the `Dhcp6` document:
+
+| Code | What |
+|---|---|
+| `export.kea.v6.classes` | Tenko's classes and policies (and the classes a DHCPv6 scope names) apply to DHCPv4 clients only; `Dhcp6` has no classes from them |
+| `export.kea.v6.filters` | The MAC filters as `DROP` and `tenko.allow`: Kea reads option 79 of the relay nearest the server (`relay6[0]`), the engine that of the relay on the client's link, which differs only behind more than one relay |
+| `export.kea.v6.server_id.unknown` | The server DUID is not known to the export: no `server-id` |
+| `export.kea.v6.server_id.type` | A server DUID Kea's `server-id` cannot hold (DUID-UUID): no `server-id` |
+| `export.kea.v6.interface_id` | An Interface-Id beside a direct interface, or several in one shared network |
+| `export.kea.v6.interfaces.address` | A relay listener bound to an address: write `<interface>/<address>` in `interfaces-config` |
+| `export.kea.v6.pd` | Leases of delegated prefixes are not exported (no `pd-pools`) |
+
+### 18.6 Verification of the DHCPv6 half
+
+The unit tests in `crates/tenko-dhcp/src/export/kea/v6/tests.rs` export a configuration with every DHCPv6 level and setting (two single scopes, one restricted and selected by Interface-Id; a shared network on a direct link with two Interface-Ids; a disabled scope; reservations by DUID and by MAC with options; options 23, 24, 31, 56 and a custom definition; deny and allow filters; a class; leases active, declined, delegated, released and of a left-out scope) and compare it with the golden files `crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json` and `kea-leases6.csv` (`KEA_GOLDEN=update` writes them anew for review in the diff); they check each mapping, the report and the server DUID types, and two property tests hold the lifetimes to the engine's and the pools to exactly the addresses the engine may lease. `crates/tenko-api/tests/dhcp_export.rs` checks the `Dhcp6` document and its lease file through the route, `crates/tenko/tests/acceptance_kea_export.rs` the two files through the binary. E30's DHCPv6 rows end the lab's round `dhcp6` (section 19, `ROUNDS=dhcp6`; the kea image holds `kea-dhcp6` too, `kea.sh 6` starts it, the compose service `kea6` of the profile `kea` runs it in the node's network namespace): after the other rows a DUID-EN client takes a lease on iot6 through `relay-test6`, the node exports with the leases, and the rows check:
+
+| Row | Checks |
+|---|---|
+| `export.kea6` | `kea-dhcp6 -t` accepts `kea-dhcp6.json`, with `interfaces-config` naming the node's interface and address as the report asks |
+| `export.kea6.golden` | `kea-dhcp6 -t` accepts the golden file of the unit tests |
+| `export.kea6.report` | the report names the relay listener's address (`export.kea.v6.interfaces.address`) and the unknown server DUID (`export.kea.v6.server_id.unknown`) |
+| `export.kea6.reservation` | with the node stopped, `kea-dhcp6` on the node's addresses gives client-dhclient6 (dhclient -6 through dhcrelay) its reservation by DUID, `2001:db8:101::80`, with options 23, 24 and 56 |
+| `export.kea6.lease` | the DUID-EN client asks again and keeps the address of its exported lease, which was not the pool's first address |
 
 ## 19. DHCPv6
 

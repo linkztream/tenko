@@ -212,6 +212,13 @@ fn mac(pattern: &MacPattern) -> Expr {
         let octets: Vec<u8> = positions.iter().filter_map(|b| *b).collect();
         return Expr::Test(format!("pkt4.mac == {}", hex_literal(&octets)));
     }
+    mac_at("pkt4.mac", 0, pattern)
+}
+
+/// The tests of a MAC pattern against the six octets of `field` from `offset` on: one
+/// `substring` per run of fixed octets.
+fn mac_at(field: &str, offset: usize, pattern: &MacPattern) -> Expr {
+    let positions = positions(pattern);
     let mut tests = Vec::new();
     let mut at = 0;
     while at < 6 {
@@ -229,12 +236,44 @@ fn mac(pattern: &MacPattern) -> Expr {
             at += 1;
         }
         tests.push(Expr::Test(format!(
-            "substring(pkt4.mac,{start},{}) == {}",
+            "substring({field},{},{}) == {}",
+            offset + start,
             run.len(),
             hex_literal(&run)
         )));
     }
     Expr::and(tests)
+}
+
+// WP9.3, the DHCPv6 half: the MAC filters of a DHCPv6 client.
+/// Option 79 (RFC 6939) of the relay nearest the server, as Kea reads it.
+const RELAY_LINK_LAYER: &str = "relay6[0].option[79].hex";
+/// The client's DUID (option 1).
+const CLIENT_DUID: &str = "option[1].hex";
+
+/// A MAC pattern against a DHCPv6 client's link-layer address as the engine takes it: the
+/// Client Link-Layer Address option a relay added (RFC 6939, hardware type 1), else the
+/// address of a DUID-LLT or DUID-LL of hardware type 1. Kea reads option 79 of the relay
+/// nearest the server (`relay6[0]`), which is the relay on the client's link when one
+/// relay forwards; the engine reads it from the relay on the client's link.
+pub fn mac6(pattern: &MacPattern) -> Expr {
+    let has_option = Expr::Test(String::from("relay6[0].option[79].exists"));
+    let from_option = Expr::and([
+        Expr::Test(format!("substring({RELAY_LINK_LAYER},0,2) == 0x0001")),
+        mac_at(RELAY_LINK_LAYER, 2, pattern),
+    ]);
+    let llt = Expr::and([
+        Expr::Test(format!("substring({CLIENT_DUID},0,4) == 0x00010001")),
+        mac_at(CLIENT_DUID, 8, pattern),
+    ]);
+    let ll = Expr::and([
+        Expr::Test(format!("substring({CLIENT_DUID},0,4) == 0x00030001")),
+        mac_at(CLIENT_DUID, 4, pattern),
+    ]);
+    Expr::or([
+        Expr::and([has_option.clone(), from_option]),
+        Expr::and([has_option.negate(), Expr::or([llt, ll])]),
+    ])
 }
 
 /// The expression of one match, and whether it is exact (false for the user class, of

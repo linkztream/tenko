@@ -1,0 +1,277 @@
+{
+  "Dhcp6": {
+    "client-classes": [
+      {
+        "name": "DROP",
+        "test": "((relay6[0].option[79].exists) and (substring(relay6[0].option[79].hex,0,2) == 0x0001) and (substring(relay6[0].option[79].hex,2,6) == 0x00005e0053ee)) or ((not (relay6[0].option[79].exists)) and (((substring(option[1].hex,0,4) == 0x00010001) and (substring(option[1].hex,8,6) == 0x00005e0053ee)) or ((substring(option[1].hex,0,4) == 0x00030001) and (substring(option[1].hex,4,6) == 0x00005e0053ee))))"
+      },
+      {
+        "name": "tenko.allow",
+        "test": "((relay6[0].option[79].exists) and (substring(relay6[0].option[79].hex,0,2) == 0x0001) and (substring(relay6[0].option[79].hex,2,5) == 0x00005e0053)) or ((not (relay6[0].option[79].exists)) and (((substring(option[1].hex,0,4) == 0x00010001) and (substring(option[1].hex,8,5) == 0x00005e0053)) or ((substring(option[1].hex,0,4) == 0x00030001) and (substring(option[1].hex,4,5) == 0x00005e0053))))"
+      }
+    ],
+    "ddns-send-updates": false,
+    "dhcp-ddns": {
+      "enable-updates": true,
+      "ncr-format": "JSON",
+      "ncr-protocol": "UDP",
+      "server-ip": "127.0.0.1",
+      "server-port": 53001
+    },
+    "host-reservation-identifiers": [
+      "duid",
+      "hw-address"
+    ],
+    "interfaces-config": {
+      "interfaces": [
+        "*",
+        "eth0"
+      ]
+    },
+    "lease-database": {
+      "lfc-interval": 3600,
+      "name": "/var/lib/kea/kea-leases6.csv",
+      "persist": true,
+      "type": "memfile"
+    },
+    "mac-sources": [
+      "client-link-addr-option",
+      "duid"
+    ],
+    "max-preferred-lifetime": 54000,
+    "max-valid-lifetime": 86400,
+    "min-preferred-lifetime": 54000,
+    "min-valid-lifetime": 86400,
+    "option-data": [
+      {
+        "always-send": true,
+        "code": 23,
+        "csv-format": true,
+        "data": "2001:db8:100::53",
+        "name": "dns-servers",
+        "space": "dhcp6"
+      },
+      {
+        "always-send": true,
+        "code": 24,
+        "csv-format": true,
+        "data": "lab6.example.test",
+        "name": "domain-search",
+        "space": "dhcp6"
+      },
+      {
+        "code": 56,
+        "csv-format": false,
+        "data": "0001001020010DB8010000000000000000000123",
+        "name": "ntp-server",
+        "space": "dhcp6"
+      }
+    ],
+    "option-def": [
+      {
+        "array": false,
+        "code": 65001,
+        "encapsulate": "",
+        "name": "tenko-site",
+        "record-types": "",
+        "space": "dhcp6",
+        "type": "string"
+      }
+    ],
+    "preferred-lifetime": 54000,
+    "rebind-timer": 43200,
+    "renew-timer": 27000,
+    "server-id": {
+      "htype": 1,
+      "identifier": "00005E005310",
+      "time": 780883968,
+      "type": "LLT"
+    },
+    "shared-networks": [
+      {
+        "interface": "eth0",
+        "name": "campus6",
+        "option-data": [
+          {
+            "always-send": true,
+            "code": 23,
+            "csv-format": true,
+            "data": "2001:db8:200::53",
+            "name": "dns-servers",
+            "space": "dhcp6"
+          }
+        ],
+        "subnet6": [
+          {
+            "id": 3,
+            "max-preferred-lifetime": 54000,
+            "max-valid-lifetime": 86400,
+            "min-preferred-lifetime": 54000,
+            "min-valid-lifetime": 86400,
+            "option-data": [],
+            "pools": [
+              {
+                "pool": "2001:db8:201::1 - 2001:db8:201::ff"
+              }
+            ],
+            "preferred-lifetime": 54000,
+            "rapid-commit": true,
+            "rebind-timer": 43200,
+            "renew-timer": 27000,
+            "reservations": [],
+            "subnet": "2001:db8:201::/64",
+            "user-context": {
+              "tenko-prefix": "00000000-0000-7000-8000-00000000001f"
+            },
+            "valid-lifetime": 86400
+          },
+          {
+            "id": 4,
+            "max-preferred-lifetime": 54000,
+            "max-valid-lifetime": 86400,
+            "min-preferred-lifetime": 54000,
+            "min-valid-lifetime": 86400,
+            "option-data": [],
+            "pools": [
+              {
+                "pool": "2001:db8:202::100 - 2001:db8:202::1ff"
+              }
+            ],
+            "preferred-lifetime": 54000,
+            "rapid-commit": true,
+            "rebind-timer": 43200,
+            "renew-timer": 27000,
+            "reservations": [],
+            "subnet": "2001:db8:202::/64",
+            "user-context": {
+              "tenko-prefix": "00000000-0000-7000-8000-000000000021"
+            },
+            "valid-lifetime": 86400
+          }
+        ],
+        "user-context": {
+          "description": "two links in one"
+        }
+      }
+    ],
+    "subnet6": [
+      {
+        "ddns-conflict-resolution-mode": "check-with-dhcid",
+        "ddns-override-client-update": true,
+        "ddns-override-no-update": true,
+        "ddns-qualifying-suffix": "example.test.",
+        "ddns-replace-client-name": "never",
+        "ddns-send-updates": true,
+        "id": 1,
+        "max-preferred-lifetime": 60,
+        "max-valid-lifetime": 120,
+        "min-preferred-lifetime": 60,
+        "min-valid-lifetime": 120,
+        "option-data": [
+          {
+            "code": 65001,
+            "csv-format": true,
+            "data": "lan6",
+            "name": "tenko-site",
+            "space": "dhcp6"
+          }
+        ],
+        "pools": [
+          {
+            "option-data": [
+              {
+                "code": 31,
+                "csv-format": true,
+                "data": "2001:db8:100::123",
+                "name": "sntp-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "pool": "2001:db8:101::1000 - 2001:db8:101::17ff"
+          },
+          {
+            "option-data": [
+              {
+                "code": 31,
+                "csv-format": true,
+                "data": "2001:db8:100::123",
+                "name": "sntp-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "pool": "2001:db8:101::1900 - 2001:db8:101::1fff"
+          }
+        ],
+        "preferred-lifetime": 60,
+        "rapid-commit": true,
+        "rebind-timer": 48,
+        "renew-timer": 30,
+        "reservations": [
+          {
+            "duid": "00:03:00:01:00:00:5e:00:53:61",
+            "hostname": "lab6-reserved",
+            "ip-addresses": [
+              "2001:db8:101::80"
+            ]
+          },
+          {
+            "hostname": "lab6-printer",
+            "hw-address": "00:00:5e:00:53:62",
+            "ip-addresses": [
+              "2001:db8:101::81"
+            ],
+            "option-data": [
+              {
+                "always-send": true,
+                "code": 23,
+                "csv-format": true,
+                "data": "2001:db8:100::54",
+                "name": "dns-servers",
+                "space": "dhcp6"
+              }
+            ]
+          }
+        ],
+        "subnet": "2001:db8:101::/64",
+        "user-context": {
+          "description": "lab link lan6",
+          "tenko-prefix": "00000000-0000-7000-8000-000000000013"
+        },
+        "valid-lifetime": 120
+      },
+      {
+        "id": 2,
+        "interface-id": "lab-iot6",
+        "max-preferred-lifetime": 2250,
+        "max-valid-lifetime": 3600,
+        "min-preferred-lifetime": 2250,
+        "min-valid-lifetime": 3600,
+        "option-data": [],
+        "pools": [
+          {
+            "client-class": "tenko.allow",
+            "pool": "2001:db8:102::1000 - 2001:db8:102::1fff"
+          }
+        ],
+        "preferred-lifetime": 2250,
+        "rapid-commit": false,
+        "rebind-timer": 1800,
+        "renew-timer": 1125,
+        "reservations": [],
+        "subnet": "2001:db8:102::/64",
+        "user-context": {
+          "tenko-prefix": "00000000-0000-7000-8000-00000000001c"
+        },
+        "valid-lifetime": 3600
+      }
+    ],
+    "user-context": {
+      "tenko-export": {
+        "format": "kea 2.6",
+        "generated": "2026-10-25T12:30:00Z",
+        "revision": 0
+      }
+    },
+    "valid-lifetime": 86400
+  }
+}

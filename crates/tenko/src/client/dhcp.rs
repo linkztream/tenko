@@ -880,7 +880,7 @@ pub struct HistoryArgs {
 /// The formats `tenko dhcp export` writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ExportFormat {
-    /// Kea JSON (`Dhcp4`), with the leases as a memfile CSV.
+    /// Kea JSON (`Dhcp4` and `Dhcp6`), with the leases as memfile CSV.
     Kea,
 }
 
@@ -902,12 +902,14 @@ pub struct ExportArgs {
     #[arg(long, value_enum, default_value = "kea")]
     pub format: ExportFormat,
     // WP9.3: the leases on request, and the files of the export in a directory.
-    /// Include the leases (Kea's memfile lease file).
+    /// Include the leases (Kea's memfile lease files).
     #[arg(long)]
     pub leases: bool,
     /// Write the files into this directory (created when missing): `kea-dhcp4.json`,
-    /// `kea-leases4.csv` with `--leases`, `kea-export-report.json` and, when a scope writes
-    /// names, `kea-dhcp-ddns.json`; without it the whole answer goes to standard output.
+    /// `kea-leases4.csv` with `--leases`, `kea-dhcp6.json` and with `--leases`
+    /// `kea-leases6.csv` when there is a DHCPv6 scope or listener,
+    /// `kea-export-report.json` and, when a scope writes names, `kea-dhcp-ddns.json`;
+    /// without it the whole answer goes to standard output.
     #[arg(long, short = 'o', value_name = "DIR")]
     pub out: Option<PathBuf>,
 }
@@ -2009,9 +2011,10 @@ async fn execute(target: &Target, client: &Client, request: &Request) -> Result<
 }
 
 // WP9.3: the files of `tenko dhcp export --out <dir>`.
-/// Writes the export's files into `dir`: the `kea-dhcp4` configuration, the lease file
-/// when the answer has one, the loss report (`{"entries": [..]}`, the shape of the
-/// migration imports' report) and the `kea-dhcp-ddns` skeleton when there is one.
+/// Writes the export's files into `dir`: the `kea-dhcp4` configuration, its lease file
+/// when the answer has one, the `kea-dhcp6` configuration and its lease file when the
+/// answer has them, the loss report (`{"entries": [..]}`, the shape of the migration
+/// imports' report) and the `kea-dhcp-ddns` skeleton when there is one.
 fn write_export(dir: &std::path::Path, answer: &Value) -> Result<Output, Failure> {
     use tenko_dhcp::export::kea::files;
     std::fs::create_dir_all(dir)
@@ -2024,6 +2027,13 @@ fn write_export(dir: &std::path::Path, answer: &Value) -> Result<Output, Failure
     let mut written: Vec<(&str, String)> = vec![(files::CONFIG, pretty(&answer["dhcp4"]))];
     if let Some(csv) = answer.get("leases4_csv").and_then(Value::as_str) {
         written.push((files::LEASES, csv.to_owned()));
+    }
+    // WP9.3, the DHCPv6 half: the Dhcp6 document and its lease file.
+    if let Some(dhcp6) = answer.get("dhcp6").filter(|value| !value.is_null()) {
+        written.push((files::CONFIG6, pretty(dhcp6)));
+    }
+    if let Some(csv) = answer.get("leases6_csv").and_then(Value::as_str) {
+        written.push((files::LEASES6, csv.to_owned()));
     }
     let losses = answer.get("losses").cloned().unwrap_or_else(|| json!([]));
     let count = losses.as_array().map_or(0, Vec::len);

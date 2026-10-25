@@ -1,0 +1,4 @@
+address,duid,valid_lifetime,expire,subnet_id,pref_lifetime,lease_type,iaid,prefix_len,fqdn_fwd,fqdn_rev,hostname,hwaddr,state,user_context,hwtype,hwaddr_source,pool_id
+2001:db8:101::1234,00:03:00:01:00:00:5e:00:53:61,120,1792929720,1,60,0,7,128,1,1,host6.example.test.,00:00:5e:00:53:61,0,,1,2,0
+2001:db8:101::1235,00:00:00,120,1792929720,1,60,0,0,128,0,0,,,1,,0,0,0
+2001:db8:102::1abc,00:02:00:00:7e:d9:01:02:03,120,1792929720,2,60,0,7,128,0,0,host6&#x2ca.example.test.,00:00:5e:00:53:6f,0,,1,8,0

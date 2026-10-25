@@ -21,9 +21,11 @@
 #   (lan6, ...:62, profile networkd): systemd-networkd, DHCPv6 with Rapid Commit.
 #   client-iot6 (iot6, ...:63): dhclient -6.
 # - tester: relay-test6.py and relay-test.py, relay agents on servers6.
+# - kea6 (profile kea, WP9.3): Kea's kea-dhcp6 (kea.Dockerfile) from Tenko's export in
+#   LAB_DIR/kea, on the node's addresses once the node has stopped (E30's DHCPv6 rows).
 #
 # Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
-# file, required), TENKO_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE.
+# file, required), TENKO_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE, KEA_IMAGE.
 
 # smoke.sh passes -p tenkodhcp6lab: COMPOSE_PROJECT_NAME of the other rounds would win over
 # this name.
@@ -115,6 +117,19 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  # WP9.3: Kea's DHCPv6 server from the export, in the node's network namespace.
+  kea6:
+    profiles: ["kea"]
+    image: ${KEA_IMAGE:-tenko-dhcp-lab-kea:latest}
+    entrypoint: ["/lab/kea.sh", "6"]
+    network_mode: "service:netns"
+    depends_on:
+      - netns
+    restart: "no"
+    stop_grace_period: 5s
+    volumes:
+      - "${LAB_DIR:?set LAB_DIR}/kea:/lab/kea:ro"
 
   client-dhclient6:
     <<: *client

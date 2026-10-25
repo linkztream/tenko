@@ -125,6 +125,7 @@ same documentation addresses `192.0.2.0/24` as the lab above.
 | `client-dhclient6` | ISC's `dhclient -6 -D LL` (a DUID-LL from the MAC, so that the reservation and the correlation rows can name it) with `scripts/dhclient6.conf` and `scripts/client6-script.sh`, which puts the address on the interface and writes one line per event to `/run/lab/events6`; also `dhclient -4` on the same interface (with the files of the DHCPv4 clients) for the correlation row. `dhclient6.conf` defines option 56, which dhclient does not know (the script decodes it) | `lan6`, MAC `00:00:5e:00:53:61` |
 | `client-networkd` (profile `networkd`) | Debian 12's `systemd-networkd` (systemd 252) as a DHCPv6 client, started directly (`networkd.Dockerfile`, `scripts/networkd.sh`; there is no systemd as process 1) with `scripts/networkd-lab.network`: `DHCP=ipv6`, `WithoutRA=solicit`, Rapid Commit, a DUID-LL, DNS and NTP servers. Its debug log goes to the container log; what it learns is in `/run/systemd/netif/links`. It starts with its row | `lan6`, MAC `00:00:5e:00:53:62` |
 | `client-iot6` | `dhclient -6` on the second link | `iot6`, MAC `00:00:5e:00:53:63` |
+| `kea6` (profile `kea`) | E30's DHCPv6 rows (WP9.3): Kea 2.6's `kea-dhcp6` from the kea image (`kea.Dockerfile`, `scripts/kea.sh 6`), in the node's namespace once the node has stopped, from the export the rows wrote into the work directory's `kea/` | `2001:db8:100::10` |
 | `tester` | `scripts/relay-test6.py`: a relay agent written against RFC 8415 with the standard library only. It sends a RELAY-FORW around a SOLICIT and then around a REQUEST for the advertised address, from the tester's address on port 547 to the node's, optionally two deep (`--two-deep`: an inner lightweight relay of RFC 6221 with the link address `::`), with an Interface-Id (`--interface-id`), the Client Link-Layer Address of RFC 6939 (`--mac`), the Client FQDN of option 39 (`--fqdn`), Rapid Commit (`--rapid-commit`), a RELEASE at the end (`--release`) and a check of the address (`--expect`). It checks that the RELAY-REPL chain is as deep as the RELAY-FORW chain, that the Interface-Id is echoed in the layer that sent it, and an ADVERTISE and then a REPLY with an address. `relay-test.py` (DHCPv4) for the correlation row | `192.0.2.20`, `2001:db8:100::20` |
 
 The node is set up as in the lab above (the Lab profile, through the API): the server's option
@@ -148,6 +149,14 @@ names the Interface-Id `lab-iot6`. Servers6 has no scope.
 | `v6.correlation.rfc6939` | `relay-test6.py --mac 00:00:5e:00:53:6f` with a DUID-EN (no MAC in it; option 79 of the innermost RELAY-FORW carries it) and `relay-test.py` with the same MAC: both addresses are listed for the MAC |
 | `v6.fqdn` | with a primary zone `example.test`, the reverse zone of `2001:db8:101::/64` and DDNS on for the lan6 scope: `relay-test6.py --fqdn host6` gets an address, and `host6.example.test` holds an AAAA record with it, a DHCID record (the API shows its type as `TYPE49`, identifier type 2 and digest type 1) and the PTR in `ip6.arpa`, all of origin `dhcp` |
 | `v6.release` | `dhclient -6 -r` on lan6: the node counts a RELEASE answered; `relay-test6.py --release` for `host6` removes its AAAA record and the PTR |
+| `export.kea6` | E30 (WP9.3, [docs/dhcp.md](../../../docs/dhcp.md) section 18.5): a DUID-EN client takes a lease on iot6 through `relay-test6.py`, then the node's configuration and leases come from `GET /dhcp/export?format=kea`; with `interfaces-config` naming the node's interface and address, as the report asks, `kea-dhcp6 -t` accepts the `Dhcp6` document |
+| `export.kea6.golden` | `kea-dhcp6 -t` accepts the golden file of the unit tests (`crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json`) |
+| `export.kea6.report` | the loss report names the relay listener's address (`export.kea.v6.interfaces.address`) and the server DUID the route does not know (`export.kea.v6.server_id.unknown`) |
+| `export.kea6.reservation` | the node stops and `kea6` starts from the export: `dhclient -6` on lan6 gets its reservation `2001:db8:101::80` through `dhcrelay`, with options 23, 24 and 56 |
+| `export.kea6.lease` | the DUID-EN client asks again and Kea gives it the address of its exported lease, which was not the pool's first |
+
+The Kea rows come last, since they stop the node; `KEA=0` leaves them out, and `KEA_IMAGE`
+(with `KEA_IMAGE_PREBUILT=1`) names an existing kea image.
 
 ```sh
 IMAGE=tenko:lab bash deploy/compose/lab-dhcp/smoke.sh   # the default rows

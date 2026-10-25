@@ -16,7 +16,6 @@ use tenko_core::{
         Relay6Info, RelayInfo, ReservationWarning, Scope, SharedNetwork, SharedNetworkId,
     },
     ipam::Stamp,
-    ir::LossEntry,
     net::{Duid, HostName, MacAddr},
     serde_util::HexBytes,
 };
@@ -965,32 +964,6 @@ pub struct DhcpExportParams {
     pub format: Option<String>,
     /// Whether the leases are included as memfile CSV; true when absent.
     pub leases: Option<bool>,
-}
-
-/// The Kea export (P3-Q17): the configurations, the leases and what did not map.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct DhcpExport {
-    /// The `kea-dhcp4` configuration file: `{"Dhcp4": {..}}` for Kea 2.6.
-    #[schema(value_type = Object)]
-    pub dhcp4: serde_json::Value,
-    /// The `Dhcp6` configuration (Slice 9).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Object>)]
-    pub dhcp6: Option<serde_json::Value>,
-    // WP9.3: the kea-dhcp-ddns skeleton.
-    /// A `kea-dhcp-ddns` configuration skeleton (`{"DhcpDdns": {..}}`) with the forward and
-    /// reverse domains of the scopes that write names; its DNS servers and TSIG keys are
-    /// the operator's. Absent when no scope writes names.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<Object>)]
-    pub dhcp_ddns: Option<serde_json::Value>,
-    /// The DHCPv4 leases as Kea's memfile lease file (`kea-leases4.csv`), when asked for.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leases4_csv: Option<String>,
-    /// What Kea does not express as Tenko does: one entry per item, with a stable code
-    /// (`export.kea.*`).
-    #[serde(default)]
-    pub losses: Vec<LossEntry>,
 }
 
 // ---------------------------------------------------------------------------------------
