@@ -154,22 +154,36 @@ describe("refusals", () => {
       renderNow(UNCOVERED);
       const dialog = await openDialog();
       fireEvent.click(within(dialog).getByTestId("scan-now-start"));
-      return await within(dialog).findByTestId("scan-now-no-probe-link");
+      return await within(dialog).findAllByTestId("scan-now-no-probe-link");
+    }
+    /** The one link of a hint that has exactly one. */
+    function only(links: HTMLElement[]): HTMLElement {
+      const [link, ...more] = links;
+      expect(more).toEqual([]);
+      if (!link) throw new Error("no link");
+      return link;
     }
 
     it("links to the scan configuration of the one probe", async () => {
-      const link = await refused([probe(1, "controller-1")]);
+      const link = only(await refused([probe(1, "controller-1")]));
       expect(link.getAttribute("href")).toBe("/nodes/1/scan");
       expect(link.textContent).toContain("controller-1");
     });
 
-    it("links to the Nodes page when several probes exist", async () => {
-      const link = await refused([probe(1, "controller-1"), probe(3, "probe-annex")]);
-      expect(link.getAttribute("href")).toBe("/nodes");
+    it("links to the scan configuration of each probe, this controller's own included, when several exist", async () => {
+      const links = await refused([probe(1, "controller-1"), probe(3, "probe-annex")]);
+      expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+        ["controller-1", "/nodes/1/scan"],
+        ["probe-annex", "/nodes/3/scan"],
+      ]);
+      const hint = screen.getByTestId("scan-now-no-probe-hint");
+      expect(hint.textContent).toContain("Open the scan configuration of one");
+      expect(hint.querySelectorAll("li")).toHaveLength(2);
+      expect(await axeViolations(hint, { disable: ["region"] })).toEqual([]);
     });
 
     it("asks for the probe role first, linking to the Nodes page, when no probe exists", async () => {
-      const link = await refused([]);
+      const link = only(await refused([]));
       expect(link.getAttribute("href")).toBe("/nodes");
       expect(link.textContent).toContain("Turn on the probe role");
     });

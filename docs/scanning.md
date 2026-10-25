@@ -469,7 +469,9 @@ The controllers hold one scan configuration per probe. It has the keys of the `[
 | `PUT /nodes/{id}/scan-config` | Update on the node (administrators) | 200 with the stored configuration and its new `ETag`. `If-Match` with the revision read makes the write fail with 412 `node.config.revision_mismatch` when the configuration changed since |
 | `GET /scans/probes` | Read on nodes | 200 `{"items": [...]}`: every probe, this controller's own probe role first (named `controller-<id>`), then the enrolled probes by id |
 
-`{id}` is the node id of a probe, or the node id of the controller when it runs the probe role. The answer of `GET` and `PUT` holds: In the UI the page is `/nodes/{id}/scan`, reached from the panel of an enrolled probe on the Nodes page, from the section "This controller" there while the controller runs the probe role, and from the link in the "no probe covers this target" error of Scan now.
+In the web UI the scan configuration of a probe is the page `/nodes/{id}/scan`. It is reached from the panel of an enrolled probe on the Nodes page; from the section "This controller" there, whose link **Scan configuration** shows while the controller's stored role set or the set it runs has the probe role (and a line in its place says to switch the role on otherwise); from the **Scan configuration** link of every row, this controller's own included, in the Probes table of the Scans page, and from a probe's name there and in a scan's parts; and from the links in the "no probe covers this target" error of Scan now, one per probe. The page of the controller's own probe leads back to the Nodes page, because the node list does not show the controller itself.
+
+`{id}` is the node id of a probe, or the node id of the controller when it runs the probe role. The answer of `GET` and `PUT` holds:
 
 | Field | Meaning |
 |---|---|

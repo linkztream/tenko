@@ -4,7 +4,7 @@
 // and, after a change, the node followed through its restart until it is back. A change asks
 // first, because the node restarts to apply it. A node that is gone shows nothing here: the
 // view around the editor says so.
-import { createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { getNodeRoles, putNodeRoles, type NodeRoles } from "../api/nodes";
 import { ApiError, errorMessage } from "../api/problem";
 import { isAdmin } from "../auth/session";
@@ -30,6 +30,8 @@ export function RolesEditor(props: {
   bare?: boolean;
   pollMs?: number;
   deadlineMs?: number;
+  /** The roles of the node each time they are read or saved, for the view around the editor. */
+  onRoles?: (roles: NodeRoles) => void;
 }) {
   const [roles, { refetch, mutate }] = createResource(
     () => String(props.id),
@@ -37,6 +39,10 @@ export function RolesEditor(props: {
   );
   const current = () => (roles.error ? undefined : roles.latest);
   const gone = () => roles.error instanceof ApiError && roles.error.code === "cluster.node.not_found";
+  createEffect(() => {
+    const known = current();
+    if (known) props.onRoles?.(known);
+  });
   const [draft, setDraft] = createSignal<RoleName[] | null>(null);
   const selected = (): RoleName[] => draft() ?? canonical(current()?.configured ?? []);
   const dirty = () => {

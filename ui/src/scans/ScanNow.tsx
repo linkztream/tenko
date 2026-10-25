@@ -22,7 +22,7 @@ import "./scans.css";
 const DEADLINES: readonly number[] = [60, 300, 600, 1800, 3600];
 const DEFAULT_DEADLINE = 600;
 
-/** Where to go after "no probe covers this target": the probe's scan configuration, or the Nodes page. */
+/** Where to go after "no probe covers this target": the scan configuration of each probe, this controller's own included, or the Nodes page while there is none. */
 function NoProbeHint() {
   const [probes] = createResource(async () => {
     try {
@@ -34,7 +34,7 @@ function NoProbeHint() {
   return (
     <Show when={probes()}>
       {(list) => (
-        <p class="muted" data-testid="scan-now-no-probe-hint">
+        <div class="muted scan-now-no-probe" data-testid="scan-now-no-probe-hint">
           <Show
             when={list().length > 0}
             fallback={
@@ -46,9 +46,20 @@ function NoProbeHint() {
             <Show
               when={list().length === 1 ? list()[0] : undefined}
               fallback={
-                <A href={paths.nodes()} data-testid="scan-now-no-probe-link">
+                <>
                   {t("scans.now.no_probe.many")}
-                </A>
+                  <ul class="scan-now-probes">
+                    <For each={list()}>
+                      {(probe) => (
+                        <li>
+                          <A href={nodeScanPath(probe.node)} data-testid="scan-now-no-probe-link" data-node={probe.node}>
+                            {probe.name}
+                          </A>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </>
               }
             >
               {(probe) => (
@@ -58,7 +69,7 @@ function NoProbeHint() {
               )}
             </Show>
           </Show>
-        </p>
+        </div>
       )}
     </Show>
   );

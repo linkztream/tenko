@@ -653,7 +653,7 @@ Only the node itself can tell its privileges and its installer's state, so these
 
 ### 13.5 The web UI, the API and the command line
 
-The node's panel on the nodes page, and the section "This controller" for the controller that serves the page, show the four roles as switches: the `controller` switch is read-only, a node without the controller role offers `probe` only, and a pin shows as a note with the editor read-only. Saving asks first, because the node restarts, then shows the node's state until it is back.
+The node's panel on the nodes page, and the section "This controller" for the controller that serves the page, show the four roles as switches: the `controller` switch is read-only, a node without the controller role offers `probe` only, and a pin shows as a note with the editor read-only. Saving asks first, because the node restarts, then shows the node's state until it is back. While the controller has the probe role, in its stored set or in the set it runs, the section "This controller" also links to its scan configuration (`/nodes/{id}/scan`, [scanning.md](scanning.md) section 7.5). `GET /api/v1/system/status` lists the roles the node runs, the `probe` role of a controller included.
 
 | Endpoint | Operation id | Authorization |
 |---|---|---|

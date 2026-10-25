@@ -5234,6 +5234,7 @@ export type MessageKey =
   | "nodes.scan.raw.listen_help"
   | "nodes.scan.resume.done"
   | "nodes.scan.resume.failed"
+  | "nodes.scan.self_off"
   | "nodes.scan.snmp.lldp_ports"
   | "nodes.scan.snmp.lldp_ports_help"
   | "nodes.scan.snmp.retries"
@@ -5434,10 +5435,13 @@ export type MessageKey =
   | "scans.part.state.pending"
   | "scans.part.state.rejected"
   | "scans.part.state.running"
+  | "scans.probe.col.config"
   | "scans.probe.col.name"
   | "scans.probe.col.scope"
   | "scans.probe.col.switch"
   | "scans.probe.col.sync"
+  | "scans.probe.config"
+  | "scans.probe.config_named"
   | "scans.probe.in_process"
   | "scans.probe.in_sync"
   | "scans.probe.methods_none"
@@ -7804,6 +7808,7 @@ export interface MessageArgs {
   "scans.now.started": { probes: number };
   "scans.now.title": { target: string | number };
   "scans.part.ingested": { batches: string | number; ingested: string | number };
+  "scans.probe.config_named": { name: string | number };
   "scans.probe.node_unnamed": { id: string | number };
   "scans.probe.scope": { count: number; methods: string | number };
   "scans.progress.label": { target: string | number };
@@ -13259,6 +13264,7 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.scan.raw.listen_help",
   "nodes.scan.resume.done",
   "nodes.scan.resume.failed",
+  "nodes.scan.self_off",
   "nodes.scan.snmp.lldp_ports",
   "nodes.scan.snmp.lldp_ports_help",
   "nodes.scan.snmp.retries",
@@ -13459,10 +13465,13 @@ export const messageKeys: readonly MessageKey[] = [
   "scans.part.state.pending",
   "scans.part.state.rejected",
   "scans.part.state.running",
+  "scans.probe.col.config",
   "scans.probe.col.name",
   "scans.probe.col.scope",
   "scans.probe.col.switch",
   "scans.probe.col.sync",
+  "scans.probe.config",
+  "scans.probe.config_named",
   "scans.probe.in_process",
   "scans.probe.in_sync",
   "scans.probe.methods_none",

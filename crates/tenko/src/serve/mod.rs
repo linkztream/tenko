@@ -447,6 +447,23 @@ pub fn check_roles(roles: RoleSet, err: &mut impl Write) -> Option<u8> {
     (!roles.contains(Role::Probe)).then_some(exit::USAGE)
 }
 
+/// The roles `GET /system/status` lists for this controller: the controller role, the `dns`
+/// and `dhcp` roles when they start in process (`dns_on`, `dhcp_on`: listed and with their
+/// module on), and the `probe` role when `roles`, the effective set of this start, lists it,
+/// because the scan control then runs the probe in process (`crate::node::scan::control`).
+fn status_roles(roles: RoleSet, dns_on: bool, dhcp_on: bool) -> Vec<String> {
+    [
+        (Role::Controller, true),
+        (Role::Dns, dns_on),
+        (Role::Dhcp, dhcp_on),
+        (Role::Probe, roles.contains(Role::Probe)),
+    ]
+    .into_iter()
+    .filter(|(_, on)| *on)
+    .map(|(role, _)| role.as_str().to_owned())
+    .collect()
+}
+
 /// The runtime the server runs on, with `[runtime] workers` worker threads.
 ///
 /// # Errors
@@ -1664,15 +1681,7 @@ async fn start(
                     event_routes: event_routes(),
                     node: NodeStatus {
                         id: Some(resolved.node_id),
-                        roles: [
-                            (Role::Controller, true),
-                            (Role::Dns, dns_on),
-                            (Role::Dhcp, dhcp_on),
-                        ]
-                        .into_iter()
-                        .filter(|(_, on)| *on)
-                        .map(|(role, _)| role.as_str().to_owned())
-                        .collect(),
+                        roles: status_roles(resolved.roles, dns_on, dhcp_on),
                     },
                     modules,
                 },
@@ -2444,6 +2453,26 @@ mod tests {
             assert_eq!(check_roles(roles.parse().expect("roles"), &mut err), None);
             assert_eq!(err, b"", "{roles}");
         }
+    }
+
+    #[test]
+    fn the_status_lists_the_probe_role_the_controller_runs_in_process() {
+        let probe: RoleSet = "controller,dns,probe".parse().expect("roles");
+        assert_eq!(
+            status_roles(probe, true, false),
+            ["controller", "dns", "probe"]
+        );
+        assert_eq!(
+            status_roles(RoleSet::ALL, true, true),
+            ["controller", "dns", "dhcp", "probe"]
+        );
+        let without: RoleSet = "controller,dns".parse().expect("roles");
+        assert_eq!(status_roles(without, true, false), ["controller", "dns"]);
+        // A role whose module is off does not start, so the status does not list it.
+        assert_eq!(
+            status_roles(RoleSet::ALL, false, false),
+            ["controller", "probe"]
+        );
     }
 
     #[test]

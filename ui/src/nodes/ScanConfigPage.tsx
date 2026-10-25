@@ -261,21 +261,25 @@ function ProbeScanConfig(props: { id: string }) {
     fetch: async (signal) => ({ value: valid ? await getScanConfig(node, signal) : null }),
   });
   // The name comes from the probe list, which names the controller's own probe too, else from the node.
-  const [found] = createResource(async () => {
+  // The node list does not show the controller itself, so the page of its own probe leads back to
+  // the Nodes page, whose "This controller" section holds its roles.
+  const [found] = createResource(async (): Promise<{ name: string; own: boolean } | undefined> => {
     if (!valid) return undefined;
     try {
       const probe = (await listProbes()).items.find((p) => p.node === node);
-      if (probe) return probe.name;
+      if (probe) return { name: probe.name, own: probe.in_process };
     } catch {
       // Falls through to the node itself.
     }
     try {
-      return (await getNode(node)).name;
+      return { name: (await getNode(node)).name, own: false };
     } catch {
       return undefined;
     }
   });
-  const name = () => (found.error ? undefined : found()) ?? t("nodes.scan.node_fallback", { id: props.id });
+  const known = () => (found.error ? undefined : found());
+  const name = () => known()?.name ?? t("nodes.scan.node_fallback", { id: props.id });
+  const backTo = () => (known()?.own ? paths.nodes() : paths.node(props.id));
   const admin = () => isAdmin();
   // Reading `latest` of a failed load throws the error at the reader, so the guarded accessor is used.
   const view = () => live.latest();
@@ -294,7 +298,7 @@ function ProbeScanConfig(props: { id: string }) {
           <>
             <A href={paths.nodes()}>{t("shell.nav.nodes")}</A>
             <Icon name="chev-r" size="xs" />
-            <A href={paths.node(props.id)} data-testid="scan-config-back">
+            <A href={backTo()} data-testid="scan-config-back">
               {t("nodes.scan.back", { name: name() })}
             </A>
           </>

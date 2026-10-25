@@ -230,6 +230,18 @@
         <notes><note category="description">Column heading: the kill switch of a probe.</note></notes>
         <segment><source>Kill switch</source></segment>
       </unit>
+      <unit id="scans.probe.col.config">
+        <notes><note category="description">Accessible name of the column of the probes table that holds the link to each probe's scan configuration.</note></notes>
+        <segment><source>Scan configuration</source></segment>
+      </unit>
+      <unit id="scans.probe.config">
+        <notes><note category="description">Link in a row of the probes table to that probe's scan configuration page.</note></notes>
+        <segment><source>Scan configuration</source></segment>
+      </unit>
+      <unit id="scans.probe.config_named">
+        <notes><note category="description">Accessible name of the link to a probe's scan configuration; the argument is the probe name.</note></notes>
+        <segment><source>Scan configuration of {name}</source></segment>
+      </unit>
       <unit id="scans.probe.in_process">
         <notes><note category="description">Marker on the probe that runs inside the controller itself.</note></notes>
         <segment><source>This controller</source></segment>
@@ -527,8 +539,8 @@
         <segment><source>Open the scan configuration of {name} to add the network to its prefixes.</source></segment>
       </unit>
       <unit id="scans.now.no_probe.many">
-        <notes><note category="description">Link in the Scan now error "no probe covers this target" when several probes exist; it opens the Nodes page.</note></notes>
-        <segment><source>Several probes exist. Choose one on the Nodes page and add the network to its prefixes.</source></segment>
+        <notes><note category="description">Text in the Scan now error "no probe covers this target" when several probes exist, above the list of the probes, each a link to its scan configuration.</note></notes>
+        <segment><source>Several probes exist. Open the scan configuration of one and add the network to its prefixes:</source></segment>
       </unit>
       <unit id="scans.now.no_probe.none">
         <notes><note category="description">Link in the Scan now error "no probe covers this target" when no probe exists; it opens the Nodes page.</note></notes>

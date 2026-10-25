@@ -87,7 +87,7 @@ describe("the probes", () => {
     await waitFor(() => expect(within(table).getAllByTestId(/^probe-row-/)).toHaveLength(3));
     const ctl = screen.getByTestId("probe-row-1");
     expect(within(ctl).getByTestId("probe-in-process")).toBeTruthy();
-    expect(within(ctl).getByRole("link").getAttribute("href")).toBe(nodeScanPath(1));
+    expect(within(ctl).getByText("ctl-1.example.test").getAttribute("href")).toBe(nodeScanPath(1));
     expect(within(ctl).getByTestId("probe-sync").textContent).toBe("In sync");
     expect(within(ctl).getByTestId("probe-scope").textContent).toMatch(/^2 prefixes · /);
     expect(within(ctl).getByTestId("probe-switch").textContent).toBe("Scanning");
@@ -95,6 +95,19 @@ describe("the probes", () => {
     expect(within(dmz).queryByTestId("probe-in-process")).toBeNull();
     expect(within(dmz).getByText("probe-dmz").getAttribute("href")).toBe(nodeScanPath(NODE_IDS.dmz));
     expect(within(dmz).getByTestId("probe-scope").textContent).toMatch(/^2 prefixes · /);
+  });
+});
+
+describe("the way to a probe's scan configuration", () => {
+  it("gives every probe, this controller's own included, a link named Scan configuration", async () => {
+    renderScans();
+    const table = await screen.findByTestId("scans-probes");
+    await waitFor(() => expect(within(table).getAllByTestId(/^probe-row-/)).toHaveLength(3));
+    const links = within(table).getAllByTestId("probe-config");
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([nodeScanPath(1), nodeScanPath(NODE_IDS.dmz), nodeScanPath(NODE_IDS.lab)]);
+    for (const link of links) expect(link.textContent).toBe("Scan configuration");
+    const own = within(screen.getByTestId("probe-row-1")).getByRole("link", { name: "Scan configuration of ctl-1.example.test" });
+    expect(own.getAttribute("href")).toBe("/nodes/1/scan");
   });
 });
 

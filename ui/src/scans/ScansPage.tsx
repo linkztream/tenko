@@ -220,6 +220,9 @@ export default function ScansPage() {
                       <th scope="col">{t("scans.probe.col.sync")}</th>
                       <th scope="col">{t("scans.probe.col.scope")}</th>
                       <th scope="col">{t("scans.probe.col.switch")}</th>
+                      <th scope="col" class="r">
+                        <span class="sr-only">{t("scans.probe.col.config")}</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -246,6 +249,12 @@ export default function ScansPage() {
                           </td>
                           <td>
                             <SwitchCell probe={probe} />
+                          </td>
+                          <td class="r">
+                            <A href={nodeScanPath(probe.node)} class="btn sm" data-testid="probe-config" aria-label={t("scans.probe.config_named", { name: probe.name })}>
+                              <Icon name="scan" size="sm" />
+                              {t("scans.probe.config")}
+                            </A>
                           </td>
                         </tr>
                       )}

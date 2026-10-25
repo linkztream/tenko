@@ -26,6 +26,10 @@
         <notes><note category="description">Link in the node panel of a probe to its scan configuration page.</note></notes>
         <segment><source>Scan configuration</source><target>Skanningskonfiguration</target></segment>
       </unit>
+      <unit id="nodes.scan.self_off">
+        <notes><note category="description">Line in the This controller section of the Nodes page while the controller does not have the probe role; the scan configuration link appears there once it has.</note></notes>
+        <segment><source>This controller does not have the probe role. Switch on Probe above to scan from it; the link to its scan configuration then appears here.</source><target>Den här kontrollern har inte rollen sond. Slå på Sond ovan för att skanna från den; länken till dess skanningskonfiguration visas sedan här.</target></segment>
+      </unit>
       <unit id="nodes.scan.not_probe.title">
         <notes><note category="description">Heading of the notice shown when the node has no scan configuration.</note></notes>
         <segment><source>No scan configuration here</source><target>Ingen skanningskonfiguration här</target></segment>

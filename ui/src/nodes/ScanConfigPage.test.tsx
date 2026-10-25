@@ -485,6 +485,30 @@ describe("who may change it", () => {
   });
 });
 
+describe("this controller's own probe role", () => {
+  const OWN = 1;
+
+  it("renders for the controller's id, which the node list does not contain, and leads back to the Nodes page", async () => {
+    expect(nodesState().nodes.has(OWN)).toBe(false);
+    await openLoaded(OWN);
+    expect(screen.getByTestId("page-scan-config").dataset.node).toBe(String(OWN));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("ctl-1.example.test");
+    expect(screen.getByTestId("scan-config-back").getAttribute("href")).toBe("/nodes");
+    expect(field("prefixes").value).toBe("192.0.2.0/24\n2001:db8:0:10::/64");
+    expect(screen.queryByTestId("scan-config-not-probe")).toBeNull();
+    expect(screen.queryByTestId("error-notice")).toBeNull();
+  });
+
+  it("still shows the form when neither the probe list nor the node can be read", async () => {
+    server.use(
+      http.get("/api/v1/scans/probes", () => HttpResponse.json({ status: 503, code: "store.unavailable", title: "x", detail: "x" }, { status: 503, headers: { "Content-Type": "application/problem+json" } })),
+    );
+    await openLoaded(OWN);
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Node 1"));
+    expect(screen.queryByTestId("scan-config-not-probe")).toBeNull();
+  });
+});
+
 describe("a node that has no scan configuration", () => {
   it("shows a calm notice for a node without the probe role", async () => {
     const node = nodesState().nodes.get(LAB);

@@ -9,7 +9,7 @@ import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
-import { deleteEnrolment, listEnrolments, type EnrolmentView, type NodeView } from "../api/nodes";
+import { deleteEnrolment, listEnrolments, type EnrolmentView, type NodeRoles, type NodeView } from "../api/nodes";
 import { errorMessage } from "../api/problem";
 import type { SystemStatus } from "../api/types";
 import { paths } from "../app/paths";
@@ -102,6 +102,8 @@ export default function NodesView() {
   const columnState = createColumnState("nodes", () => columns);
   const [enrolling, setEnrolling] = createSignal(false);
   const [withdrawing, setWithdrawing] = createSignal<EnrolmentView | null>(null);
+  // node-roles: the roles of this controller as the roles editor reads and saves them.
+  const [ownRoles, setOwnRoles] = createSignal<NodeRoles | undefined>();
 
   // Reading `latest` of a failed load throws the error at the reader, so a failed load reads as no
   // value (the token list shows its error).
@@ -114,6 +116,13 @@ export default function NodesView() {
     return ids.map((id) => source.rows().find((n) => String(n.id) === id)?.name ?? id);
   };
   const open = (n: NodeView) => navigate(paths.node(n.id));
+  // The probe role of this controller: in the stored set (what the roles editor writes, which a
+  // restart applies), in the set it runs now, or in the roles of the status. Any of them leads to
+  // the scan configuration, which the controllers keep whether the probe runs yet or not.
+  const ownProbe = () => {
+    const roles = ownRoles();
+    return !!(roles?.configured.includes("probe") || roles?.running?.includes("probe") || system()?.node.roles.includes("probe"));
+  };
 
   useCommands(() => [
     {
@@ -230,9 +239,18 @@ export default function NodesView() {
                   {t("nodes.roles.self_title")}
                   <span class="aside">{t("nodes.roles.self_hint", { id: id() })}</span>
                 </h2>
-                <RolesEditor id={id()} bare />
-                {/* The probe role the controller runs now: the way to its scan configuration. */}
-                <Show when={system()?.node.roles.includes("probe")}>
+                <RolesEditor id={id()} bare onRoles={setOwnRoles} />
+                {/* The way to the scan configuration of the controller's own probe role; the node list does not show this node. */}
+                <Show
+                  when={ownProbe()}
+                  fallback={
+                    <Show when={ownRoles()}>
+                      <p class="muted" data-testid="nodes-self-scan-off">
+                        {t("nodes.scan.self_off")}
+                      </p>
+                    </Show>
+                  }
+                >
                   <NodeScanPanel id={id()} bare />
                 </Show>
               </section>

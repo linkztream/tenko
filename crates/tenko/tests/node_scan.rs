@@ -406,6 +406,16 @@ fn a_controller_with_the_probe_role_runs_the_scanner_in_process() {
     let status: Value =
         serde_json::from_slice(&std::fs::read(&status_file).expect("read")).expect("status");
     assert_eq!(status["prefixes"], serde_json::json!(["127.0.0.1/32"]));
+    // The system status lists the probe role the controller runs in process; the Nodes page
+    // links to the controller's own scan configuration by it.
+    node.setup_and_login(&server);
+    let mut api = Api::new(&node);
+    api.login_password();
+    let system = api.get("/system/status").ok();
+    let roles = system["node"]["roles"].as_array().expect("roles");
+    assert!(roles.contains(&serde_json::json!("probe")), "{system}");
+    let probes = api.get("/scans/probes").ok();
+    assert_eq!(probes["items"][0]["in_process"], true, "{probes}");
     let outcome = server.stop();
     outcome.assert_graceful_shutdown();
     outcome.assert_stderr_contains("scanner stopped");

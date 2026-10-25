@@ -410,12 +410,56 @@ describe("the scan configuration of this controller", () => {
     expect(link.getAttribute("href")).toBe("/nodes/1/scan");
   });
 
-  it("shows nothing about scanning there while the probe role does not run", async () => {
+  /** Answers the roles of this controller as if it stored `configured` and ran `running`. */
+  async function ownRoles(configured: string[], running: string[]) {
+    const roles = await api.get("/api/v1/nodes/{id}/roles", { path: { id: 1 } });
+    server.use(http.get("/api/v1/nodes/1/roles", () => HttpResponse.json({ ...roles, configured, running, stored: true, revision: 7 })));
+  }
+
+  it("links to the scan configuration when the stored set has the probe role and the status does not list it", async () => {
+    // A server of version 0.0.5 or older never listed the probe role in the status.
+    await running(["controller", "dns"]);
+    await ownRoles(["controller", "dns", "probe"], ["controller", "dns", "probe"]);
+    openNodes();
+    const section = await screen.findByTestId("nodes-self");
+    const link = await within(section).findByRole("link", { name: "Scan configuration" });
+    expect(link.getAttribute("href")).toBe("/nodes/1/scan");
+    expect(within(section).queryByTestId("nodes-self-scan-off")).toBeNull();
+  });
+
+  it("links to it as soon as the probe role is stored, before the restart applies it", async () => {
+    await running(["controller", "dns"]);
+    await ownRoles(["controller", "dns", "probe"], ["controller", "dns"]);
+    openNodes();
+    const section = await screen.findByTestId("nodes-self");
+    expect((await within(section).findByTestId("node-scan-config")).getAttribute("href")).toBe("/nodes/1/scan");
+  });
+
+  it("says how to get there while the controller has no probe role, and links once it is switched on", async () => {
     await running(["controller", "dns"]);
     openNodes();
     const section = await screen.findByTestId("nodes-self");
-    await within(section).findByTestId("node-roles-running");
+    // The mock controller starts with the probe role: switch it off first.
+    await within(section).findByTestId("node-scan-config");
+    const probe = () => within(section).getByTestId("node-role-probe") as HTMLInputElement;
+    const change = async () => {
+      fireEvent.click(probe());
+      fireEvent.click(within(section).getByTestId("node-roles-save"));
+      const dialog = await screen.findByTestId("node-roles-confirm");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Change and restart" }));
+    };
+    await change();
+    // The probe still runs until the restart, which the roles editor follows.
+    const hint = await within(section).findByTestId("nodes-self-scan-off", undefined, { timeout: 5000 });
+    expect(hint.tagName).toBe("P");
+    expect(hint.querySelector("a")).toBeNull();
+    expect(hint.textContent).toContain("does not have the probe role");
     expect(within(section).queryByTestId("node-scan-panel")).toBeNull();
+
+    await waitFor(() => expect(probe().checked).toBe(false));
+    await change();
+    expect((await within(section).findByTestId("node-scan-config")).getAttribute("href")).toBe("/nodes/1/scan");
+    expect(within(section).queryByTestId("nodes-self-scan-off")).toBeNull();
   });
 });
 
