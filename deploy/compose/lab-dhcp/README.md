@@ -111,9 +111,9 @@ same documentation addresses `192.0.2.0/24` as the lab above.
 
 ```text
           servers6 192.0.2.0/26, 2001:db8:100::/64
-   node .10, ::10 ─┐   tester .20, ::20
+   node .10, ::10 ─┐   tester .20, ::20   router6 .30, ::30
                    └─── .2, ::2 ┌─────────┐ .66, ::1 ──── lan6 192.0.2.64/26, 2001:db8:101::/64
-                                 │  relay  │                client-dhclient6 (…:53:61), client-networkd (…:53:62)
+                                 │  relay  │                client-dhclient6 (…:53:61), client-networkd (…:53:62), client-pd6 (…:53:64)
                                  └─────────┘ .130, ::1 ─── iot6 192.0.2.128/26, 2001:db8:102::/64
                                                             client-iot6 (…:53:63)
 ```
@@ -121,10 +121,12 @@ same documentation addresses `192.0.2.0/24` as the lab above.
 | Service | What | Address |
 |---|---|---|
 | `relay` | The gateway: ISC's `dhcrelay -6` (Debian's `isc-dhcp-relay` 4.4) relays `lan6` and `iot6` up to the node's IPv6 address with the Interface-Id of each link (`-I`), and `dhcrelay -4` does the same for DHCPv4, so that one client can hold a lease of each family; it routes IPv4 between the networks. The interfaces keep Docker's names, so that their IPv6 addresses survive | `.2`, `.66`, `.130`; `::2`, `::1`, `::1` |
-| `netns`, `tenko` | As above: the node's namespace (with `net.ipv4.ip_unprivileged_port_start=0`, which opens ports 67 and 547) and the node from `deploy/Dockerfile`, with `--roles controller,dhcp`, the modules `ipam`, `dns` and `dhcp` (DDNS needs the DNS module; the node serves no DNS) and `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }, { address = "2001:db8:100::10", mode = "relay" }]` | `192.0.2.10`, `2001:db8:100::10` |
+| `netns`, `tenko` | As above: the node's namespace (with `net.ipv4.ip_unprivileged_port_start=0`, which opens ports 67 and 547) and the node from `deploy/Dockerfile`, as `TENKO_PROBE_IMAGE` (`probe.Dockerfile`: the same binary with the file capability `cap_net_raw+ep`, `NET_RAW` in the bounding set, `no-new-privileges` off for this container; Docker gives a non-root user no effective capability, so this is the `setcap` way of `deploy/systemd/probe.conf`), with `--roles controller,dhcp,probe` (WP9.2: the probe role runs the router advertisement check), the modules `ipam`, `dns` and `dhcp` (DDNS needs the DNS module; the node serves no DNS) and `[dhcp] listen = [{ address = "192.0.2.10", mode = "relay" }, { address = "2001:db8:100::10", mode = "relay" }]` | `192.0.2.10`, `2001:db8:100::10` |
 | `client-dhclient6` | ISC's `dhclient -6 -D LL` (a DUID-LL from the MAC, so that the reservation and the correlation rows can name it) with `scripts/dhclient6.conf` and `scripts/client6-script.sh`, which puts the address on the interface and writes one line per event to `/run/lab/events6`; also `dhclient -4` on the same interface (with the files of the DHCPv4 clients) for the correlation row. `dhclient6.conf` defines option 56, which dhclient does not know (the script decodes it) | `lan6`, MAC `00:00:5e:00:53:61` |
 | `client-networkd` (profile `networkd`) | Debian 12's `systemd-networkd` (systemd 252) as a DHCPv6 client, started directly (`networkd.Dockerfile`, `scripts/networkd.sh`; there is no systemd as process 1) with `scripts/networkd-lab.network`: `DHCP=ipv6`, `WithoutRA=solicit`, Rapid Commit, a DUID-LL, DNS and NTP servers. Its debug log goes to the container log; what it learns is in `/run/systemd/netif/links`. It starts with its row | `lan6`, MAC `00:00:5e:00:53:62` |
 | `client-iot6` | `dhclient -6` on the second link | `iot6`, MAC `00:00:5e:00:53:63` |
+| `client-pd6` (WP9.2) | `dhclient -6 -P -D LL`, a requesting router asking for a delegated prefix only; `client6-script.sh` writes the prefix (`prefix=`) to `/run/lab/events6` and leaves the interface alone | `lan6`, MAC `00:00:5e:00:53:64` |
+| `router6` (WP9.2) | Debian's `radvd` (`scripts/radvd.sh`) advertising `2001:db8:100::/64` on servers6 every three to four seconds with the router lifetime 0 (no default router) and A off (no SLAAC), so the other rows keep their routes and addresses; `radvd.sh flags <M> <O>` writes new flags and sends radvd SIGHUP. It starts with the RA rows | `192.0.2.30`, `2001:db8:100::30` |
 | `kea6` (profile `kea`) | E30's DHCPv6 rows (WP9.3): Kea 2.6's `kea-dhcp6` from the kea image (`kea.Dockerfile`, `scripts/kea.sh 6`), in the node's namespace once the node has stopped, from the export the rows wrote into the work directory's `kea/` | `2001:db8:100::10` |
 | `tester` | `scripts/relay-test6.py`: a relay agent written against RFC 8415 with the standard library only. It sends a RELAY-FORW around a SOLICIT and then around a REQUEST for the advertised address, from the tester's address on port 547 to the node's, optionally two deep (`--two-deep`: an inner lightweight relay of RFC 6221 with the link address `::`), with an Interface-Id (`--interface-id`), the Client Link-Layer Address of RFC 6939 (`--mac`), the Client FQDN of option 39 (`--fqdn`), Rapid Commit (`--rapid-commit`), a RELEASE at the end (`--release`) and a check of the address (`--expect`). It checks that the RELAY-REPL chain is as deep as the RELAY-FORW chain, that the Interface-Id is echoed in the layer that sent it, and an ADVERTISE and then a REPLY with an address. `relay-test.py` (DHCPv4) for the correlation row | `192.0.2.20`, `2001:db8:100::20` |
 
@@ -134,7 +136,11 @@ set holds the DHCPv4 options 6, 15 and 42 and the DHCPv6 options 23 (`2001:db8:1
 to `.123` on lan6, `.158` to `.187` on iot6, option 3 the relay) and an IPv6 prefix with a
 `dhcp_pool` range `::1000` to `::1fff`, and a scope on each. The IPv6 scope of lan6 has a
 valid lifetime of 120 seconds and a preferred lifetime of 60 (T1 after 30); that of iot6
-names the Interface-Id `lab-iot6`. Servers6 has no scope.
+names the Interface-Id `lab-iot6`. Servers6 has no scope until the RA rows. WP9.2: the IA_PD
+rows add the delegation network `2001:db8:180::/48` with a `dhcp_pd_pool` range
+`2001:db8:180:100::` to `2001:db8:180:1ff:ffff:ffff:ffff:ffff` (`delegated_len` 60) and a
+scope, and a shared network `lab-lan6` that holds lan6's IPv6 scope and that scope; the RA
+rows add an IPv6 prefix `2001:db8:100::/64` with a scope and no pool.
 
 | Row | Checks |
 |---|---|
@@ -149,6 +155,11 @@ names the Interface-Id `lab-iot6`. Servers6 has no scope.
 | `v6.correlation.rfc6939` | `relay-test6.py --mac 00:00:5e:00:53:6f` with a DUID-EN (no MAC in it; option 79 of the innermost RELAY-FORW carries it) and `relay-test.py` with the same MAC: both addresses are listed for the MAC |
 | `v6.fqdn` | with a primary zone `example.test`, the reverse zone of `2001:db8:101::/64` and DDNS on for the lan6 scope: `relay-test6.py --fqdn host6` gets an address, and `host6.example.test` holds an AAAA record with it, a DHCID record (the API shows its type as `TYPE49`, identifier type 2 and digest type 1) and the PTR in `ip6.arpa`, all of origin `dhcp` |
 | `v6.release` | `dhclient -6 -r` on lan6: the node counts a RELEASE answered; `relay-test6.py --release` for `host6` removes its AAAA record and the PTR |
+| `v6.pd` | `dhclient -6 -P` on client-pd6 gets a /60 of the delegation pool through `dhcrelay` (the pool of a sibling scope in lan6's shared network), on its boundary inside the pool, and `GET /observations?type=network&current=true` lists it as a network fact of a source `dhcp:<node>` |
+| `v6.pd.release` | `dhclient -6 -P -r`: the node counts a RELEASE answered and the network fact of the prefix is no longer current |
+| `v6.ra.flags_off` | radvd on servers6 with M and O off, and a scope on `2001:db8:100::/64`: `GET /system/status` carries `dhcp.ra.flags_off` naming the scope (within 60 seconds) |
+| `v6.ra.managed` | `radvd.sh flags on off`: the finding is gone and no `dhcp.ra.managed_without_scope` or `dhcp.ra.other_only` names the link |
+| `v6.ra.without_scope` | the servers6 scope disabled while M stays on: `GET /system/status` carries `dhcp.ra.managed_without_scope` naming `2001:db8:100::/64` |
 | `export.kea6` | E30 (WP9.3, [docs/dhcp.md](../../../docs/dhcp.md) section 18.5): a DUID-EN client takes a lease on iot6 through `relay-test6.py`, then the node's configuration and leases come from `GET /dhcp/export?format=kea`; with `interfaces-config` naming the node's interface and address, as the report asks, `kea-dhcp6 -t` accepts the `Dhcp6` document |
 | `export.kea6.golden` | `kea-dhcp6 -t` accepts the golden file of the unit tests (`crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json`) |
 | `export.kea6.report` | the loss report names the relay listener's address (`export.kea.v6.interfaces.address`) and the server DUID the route does not know (`export.kea.v6.server_id.unknown`) |
@@ -164,7 +175,8 @@ IMAGE=tenko:lab ROUNDS=dhcp6 bash deploy/compose/lab-dhcp/smoke.sh
 ```
 
 `NETWORKD_IMAGE` (with `NETWORKD_IMAGE_PREBUILT=1`) names a built networkd image, as `TOOLS_IMAGE`
-does the tools image; `KEEP=1` leaves the round running and prints the commands. By hand, with
+does the tools image; `TENKO_PROBE_IMAGE` names the node image the round builds from the Tenko
+image with `probe.Dockerfile` (default `tenko-dhcp-lab-probe:latest`); `KEEP=1` leaves the round running and prints the commands. By hand, with
 `KEEP=1`:
 
 ```sh

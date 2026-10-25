@@ -61,7 +61,15 @@ pub const LOG_LINES: usize = 20;
 pub const LOG_TAIL_CAPACITY: usize = 200;
 
 /// The informational findings: states worth knowing when reading a report, nothing to act on.
-const INFORMATIONAL: &[&str] = &["sys.ui.stub", "dns.trust_anchor.pending", "dns.nta.active"];
+const INFORMATIONAL: &[&str] = &[
+    "sys.ui.stub",
+    "dns.trust_anchor.pending",
+    "dns.nta.active",
+    // WP9.2: advertisements with O and without M (stateless DHCPv6 may be meant), and a
+    // check that cannot run.
+    tenko_dhcp::ra::OTHER_ONLY,
+    tenko_dhcp::ra::UNCHECKED,
+];
 
 /// The findings of a role or a service that does not do its work.
 const ERRORS: &[&str] = &[

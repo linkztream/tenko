@@ -158,6 +158,7 @@ async fn network(store: &Arc<dyn Store>, vrf: VrfId, cidr: &str, pool: (&str, &s
         last: pool.1.parse().expect("last"),
         role: RangeRole::DhcpPool,
         lease_secs: None,
+        delegated_len: None,
         status: Status::Active,
         meta: meta(),
     };

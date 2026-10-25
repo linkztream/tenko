@@ -211,6 +211,7 @@ pub(crate) fn translate(request: &QueuedRequest) -> Result<Translated, ApiError>
                 role: range.role,
                 status: range.status,
                 lease_secs: range.lease_secs,
+                delegated_len: range.delegated_len,
                 tags: range.tags,
                 custom: range.custom,
                 description: range.description,

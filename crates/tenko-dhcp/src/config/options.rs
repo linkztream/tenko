@@ -280,10 +280,10 @@ fn owner_row(view: &dyn ReadView, owner: OptionOwner) -> ConfigResult<OwnerRow> 
             }
         }
         OptionOwner::Pool(range) => {
-            let Some((row, revision)) = view
-                .get_typed(&RANGES, &range)?
-                .filter(|(row, _)| !row.meta.is_deleted() && row.role == RangeRole::DhcpPool)
-            else {
+            let Some((row, revision)) = view.get_typed(&RANGES, &range)?.filter(|(row, _)| {
+                !row.meta.is_deleted()
+                    && matches!(row.role, RangeRole::DhcpPool | RangeRole::DhcpPdPool)
+            }) else {
                 return Err(ConfigError::new(
                     codes::POOL_NOT_FOUND,
                     404,

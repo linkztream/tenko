@@ -7,7 +7,10 @@
 //! down, and finds duplicate reservations with sets of its own. The generator builds
 //! configurations with the corners the rules name: supernets, deleted rows, disabled scopes,
 //! IPv6 prefixes, ranges of every role, hosts of every mode, interfaces without identity,
-//! two hosts on one address, two interfaces with one MAC, option sets on every level.
+//! two hosts on one address, two interfaces with one MAC, option sets on every level, and
+//! (WP9.2) delegation pools on IPv6 networks, valid and not, with lease times and pool
+//! settings, and delegation ranges on IPv4 networks that the DHCPv4 part must ignore.
+//! The delegation pools of the image are compared with a reference of their own.
 
 use std::{
     collections::BTreeSet,
@@ -21,9 +24,9 @@ use tenko_core::{
     dhcp::{
         AddressRange, Class, ClassId, Condition, DdnsPolicy, DhcpSettings, ExclusionId,
         ExclusionRange, Filter, FilterId, FilterKind, Join, LeaseTimes, MacPattern, Match,
-        OptionOwner, OptionSet, OptionValue, Policy, PolicyAction, PolicyId, PoolSettings,
-        ReservationCandidate, ReservationWarning, Scope, SharedNetwork, SharedNetworkId, Term,
-        check_reservations,
+        OptionOwner, OptionSet, OptionSpace, OptionValue, Policy, PolicyAction, PolicyId,
+        PoolSettings, ReservationCandidate, ReservationWarning, Scope, SharedNetwork,
+        SharedNetworkId, Term, check_reservations,
     },
     ipam::{Address, AssignmentMode, PrefixRole, RangeRole, Status},
 };
@@ -35,6 +38,7 @@ use super::{
 use crate::{
     feed::DhcpData,
     image::{ImageBuilder, PoolImage, ReservationImage, ScopeImage},
+    v6::image::PdPool6Image,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -148,6 +152,10 @@ fn reference_scope(data: &DhcpData, id: PrefixId, scope: &Scope) -> Option<Scope
         let (Some(first), Some(last)) = (v4(range.first), v4(range.last)) else {
             continue;
         };
+        if range.role == RangeRole::DhcpPdPool {
+            // Delegation pools are IPv6 only: the DHCPv4 part neither serves nor excludes them.
+            continue;
+        }
         if range.role == RangeRole::DhcpPool {
             let settings = data.pools.get(&range.id);
             let pool_lease = match (settings.and_then(|s| s.lease), range.lease_secs) {
@@ -204,6 +212,58 @@ fn reference_scope(data: &DhcpData, id: PrefixId, scope: &Scope) -> Option<Scope
         classes: scope.classes.clone(),
         ddns: scope.ddns.clone(),
     })
+}
+
+/// The delegation pools of the scope on prefix `id`, worked out from the rows alone: none
+/// for a scope the image does not serve; a range counts when it is live, of role
+/// `dhcp_pd_pool`, on IPv6 addresses, with a delegated length of 1 to 64; its lease times
+/// are the pool settings', else the range's `lease_secs`, else the scope's, else the
+/// server's; the pools are ordered by first address.
+fn reference_pd_pools(data: &DhcpData, id: PrefixId, scope: &Scope) -> Option<Vec<PdPool6Image>> {
+    let row = data.prefixes.get(&id)?;
+    if !scope.enabled || row.meta.is_deleted() || row.role != PrefixRole::Network {
+        return None;
+    }
+    if !matches!(row.cidr, IpNet::V6(_)) {
+        return None;
+    }
+    let scope_lease = scope.lease.unwrap_or_else(|| {
+        data.settings
+            .as_ref()
+            .map_or_else(LeaseTimes::default, |settings| settings.lease)
+    });
+    let mut pools = Vec::new();
+    for range in data.ranges.values() {
+        if range.prefix != id || range.meta.is_deleted() || range.role != RangeRole::DhcpPdPool {
+            continue;
+        }
+        let (IpAddr::V6(first), IpAddr::V6(last)) = (range.first, range.last) else {
+            continue;
+        };
+        let Some(delegated_len) = range.delegated_len else {
+            continue;
+        };
+        if delegated_len == 0 || delegated_len > 64 {
+            continue;
+        }
+        let lease = if let Some(own) = data.pools.get(&range.id).and_then(|pool| pool.lease) {
+            own
+        } else if let Some(secs) = range.lease_secs {
+            LeaseTimes::fixed(secs)
+        } else {
+            scope_lease
+        };
+        pools.push(PdPool6Image {
+            range: range.id,
+            first,
+            last,
+            delegated_len,
+            lease,
+            options: set(data, OptionOwner::Pool(range.id)),
+        });
+    }
+    pools.sort_by_key(|pool| pool.first);
+    Some(pools)
 }
 
 fn reference_identity(interface: &tenko_core::ipam::Interface) -> Option<Vec<u8>> {
@@ -324,6 +384,19 @@ fn assert_same(data: &DhcpData) {
     );
     assert_eq!(built.warnings, expected.warnings);
     assert_eq!(built.dropped, expected.dropped);
+    // WP9.2: the delegation pools of every scope against the reference's; a scope the
+    // reference does not serve has none in the image.
+    for (id, scope) in &data.scopes {
+        assert_eq!(
+            built
+                .image
+                .v6()
+                .scope(*id)
+                .map(|held| held.pd_pools.clone()),
+            reference_pd_pools(data, *id, scope),
+            "the delegation pools of scope {id:?} differ from the reference"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -712,7 +785,141 @@ fn generate(seed: u64) -> DhcpData {
             );
         }
     }
+    add_delegation_pools(&mut data, seed, vrfs[0], &v4_prefixes, &v6);
     data
+}
+
+/// WP9.2: delegation pools on top of the configuration above, drawn from a generator of
+/// their own (so the stream above stays as the other rules were tuned against it): a /48
+/// and a /56 network with scopes, a few ranges of role `dhcp_pd_pool` on each IPv6 network
+/// (whole blocks of a length between the network's and 64, and the corners the image has
+/// to skip or take as they are: no length, 0, above 64, not longer than the network, a
+/// first address off the boundary), some deleted, some with `lease_secs`, some with pool
+/// settings and option sets; and delegation ranges on the IPv4 networks, which the image
+/// ignores.
+#[allow(clippy::too_many_lines, reason = "one generator, read top to bottom")]
+fn add_delegation_pools(
+    data: &mut DhcpData,
+    seed: u64,
+    vrf: VrfId,
+    v4_prefixes: &[tenko_core::ipam::Prefix],
+    v6: &tenko_core::ipam::Prefix,
+) {
+    let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) | 1);
+    let mut v6_prefixes = vec![v6.clone()];
+    for cidr in ["2001:db8:1::/48", "2001:db8:2::/56"] {
+        let mut row = prefix(vrf, cidr, PrefixRole::Network);
+        row.meta = meta(rng.chance(10));
+        data.prefixes.insert(row.id, row.clone());
+        data.scopes.insert(
+            row.id,
+            Scope {
+                v6: None,
+                prefix: row.id,
+                enabled: rng.chance(85),
+                lease: rng.chance(40).then(|| {
+                    LeaseTimes::fixed(u32::try_from(rng.below(5_000) + 60).expect("secs"))
+                }),
+                authoritative: None,
+                server_id: None,
+                ddns: DdnsPolicy::default(),
+                shared_network: None,
+                restricted: false,
+                classes: Vec::new(),
+                description: None,
+                created: stamp(),
+                updated: stamp(),
+            },
+        );
+        v6_prefixes.push(row);
+    }
+    let mut ranges = Vec::new();
+    for row in &v6_prefixes {
+        let IpNet::V6(network) = row.cidr else {
+            continue;
+        };
+        for _ in 0..rng.below(4) {
+            let delegated_len = match rng.below(10) {
+                0 => None,
+                1 => Some(0),
+                2 => Some(u8::try_from(65 + rng.below(64)).expect("length")),
+                3 => Some(network.prefix_len()),
+                _ => Some(
+                    u8::try_from((u64::from(network.prefix_len()) + 1 + rng.below(16)).min(64))
+                        .expect("length"),
+                ),
+            };
+            let basis = delegated_len
+                .filter(|len| (1..=64).contains(len))
+                .unwrap_or(56);
+            let bits = basis.saturating_sub(network.prefix_len()).min(16);
+            let (a, b) = (rng.below(1 << bits), rng.below(1 << bits));
+            let step = 1u128 << (128 - u32::from(basis));
+            let base = u128::from(network.network());
+            let mut first = base.saturating_add(u128::from(a.min(b)).saturating_mul(step));
+            let last = base
+                .saturating_add(u128::from(a.max(b) + 1).saturating_mul(step))
+                .saturating_sub(1);
+            if rng.chance(10) {
+                first += 1;
+            }
+            let mut item = range(
+                row.id,
+                &Ipv6Addr::from(first).to_string(),
+                &Ipv6Addr::from(last).to_string(),
+                RangeRole::DhcpPdPool,
+            );
+            item.delegated_len = delegated_len;
+            ranges.push(item);
+        }
+    }
+    for row in v4_prefixes {
+        let IpNet::V4(network) = row.cidr else {
+            continue;
+        };
+        for _ in 0..rng.below(2) {
+            let (first, last) = span(&mut rng, network);
+            let mut item = range(
+                row.id,
+                &first.to_string(),
+                &last.to_string(),
+                RangeRole::DhcpPdPool,
+            );
+            item.delegated_len = rng.chance(70).then_some(56);
+            ranges.push(item);
+        }
+    }
+    for mut item in ranges {
+        item.lease_secs = rng
+            .chance(40)
+            .then(|| u32::try_from(rng.below(9_000) + 60).expect("secs"));
+        item.meta = meta(rng.chance(15));
+        if rng.chance(50) {
+            data.pools.insert(
+                item.id,
+                PoolSettings {
+                    range: item.id,
+                    classes: Vec::new(),
+                    lease: rng.chance(60).then(|| {
+                        LeaseTimes::fixed(u32::try_from(rng.below(5_000) + 60).expect("secs"))
+                    }),
+                    updated: stamp(),
+                },
+            );
+        }
+        if rng.chance(50) {
+            let owner = OptionOwner::Pool(item.id);
+            data.option_sets.insert(
+                owner,
+                OptionSet {
+                    owner,
+                    values: values(&mut rng),
+                    updated: stamp(),
+                },
+            );
+        }
+        data.ranges.insert(item.id, item);
+    }
 }
 
 proptest! {
@@ -787,6 +994,210 @@ fn a_pool_takes_its_lease_from_its_settings_then_the_range_then_the_scope() {
     assert_eq!(lease_of(a.id), LeaseTimes::fixed(900));
     assert_eq!(lease_of(b.id), LeaseTimes::fixed(300));
     assert_eq!(lease_of(c.id), LeaseTimes::default());
+    assert_same(&data);
+}
+
+/// A served scope on the IPv6 network `cidr`.
+fn one_scope6(cidr: &str) -> (DhcpData, PrefixId) {
+    let (mut data, v4_id) = one_scope();
+    let mut scope = data.scopes.remove(&v4_id).expect("scope");
+    data.prefixes.remove(&v4_id);
+    let row = prefix(VrfId::generate(), cidr, PrefixRole::Network);
+    scope.prefix = row.id;
+    let id = row.id;
+    data.scopes.insert(id, scope);
+    data.prefixes.insert(id, row);
+    (data, id)
+}
+
+fn pd_range(
+    prefix: PrefixId,
+    first: &str,
+    last: &str,
+    delegated_len: Option<u8>,
+) -> tenko_core::ipam::Range {
+    let mut item = range(prefix, first, last, RangeRole::DhcpPdPool);
+    item.delegated_len = delegated_len;
+    item
+}
+
+#[test]
+fn a_delegation_pool_takes_its_lease_from_its_settings_then_the_range_then_the_scope() {
+    let (mut data, id) = one_scope6("2001:db8:1::/48");
+    data.scopes.get_mut(&id).expect("scope").lease = Some(LeaseTimes::fixed(7_200));
+    let mut a = pd_range(
+        id,
+        "2001:db8:1:100::",
+        "2001:db8:1:1ff:ffff:ffff:ffff:ffff",
+        Some(56),
+    );
+    a.lease_secs = Some(900);
+    let mut b = pd_range(
+        id,
+        "2001:db8:1:200::",
+        "2001:db8:1:2ff:ffff:ffff:ffff:ffff",
+        Some(56),
+    );
+    b.lease_secs = Some(900);
+    let c = pd_range(
+        id,
+        "2001:db8:1:300::",
+        "2001:db8:1:5ff:ffff:ffff:ffff:ffff",
+        Some(56),
+    );
+    data.pools.insert(
+        b.id,
+        PoolSettings {
+            range: b.id,
+            classes: Vec::new(),
+            lease: Some(LeaseTimes::fixed(300)),
+            updated: stamp(),
+        },
+    );
+    // The pool's own option set: the DNS servers option of DHCPv6 (23).
+    let dns = OptionValue {
+        space: OptionSpace::dhcp6(),
+        code: 23,
+        data: tenko_core::serde_util::HexBytes(
+            "2001:db8::53"
+                .parse::<Ipv6Addr>()
+                .expect("addr")
+                .octets()
+                .to_vec(),
+        ),
+    };
+    data.option_sets.insert(
+        OptionOwner::Pool(c.id),
+        OptionSet {
+            owner: OptionOwner::Pool(c.id),
+            values: vec![dns.clone()],
+            updated: stamp(),
+        },
+    );
+    for item in [&a, &b, &c] {
+        data.ranges.insert(item.id, item.clone());
+    }
+    let built = build(&data);
+    let scope = built.image.v6().scope(id).expect("the scope");
+    assert!(
+        scope.pools.is_empty(),
+        "a delegation pool is no address pool"
+    );
+    assert_eq!(scope.excluded.len(), 0);
+    assert_eq!(scope.pd_pools.len(), 3);
+    let pool_of = |range: tenko_core::RangeId| {
+        scope
+            .pd_pools
+            .iter()
+            .find(|pool| pool.range == range)
+            .expect("the pool")
+    };
+    assert_eq!(pool_of(a.id).lease, LeaseTimes::fixed(900));
+    assert_eq!(pool_of(b.id).lease, LeaseTimes::fixed(300));
+    assert_eq!(pool_of(c.id).lease, LeaseTimes::fixed(7_200));
+    assert_eq!(pool_of(a.id).options.len(), 0);
+    assert_eq!(pool_of(c.id).options, vec![dns]);
+    assert_eq!(pool_of(c.id).delegated_len, 56);
+    assert_eq!(pool_of(c.id).blocks(), 3);
+    // By first address.
+    let firsts: Vec<_> = scope.pd_pools.iter().map(|pool| pool.first).collect();
+    assert!(firsts.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_same(&data);
+}
+
+#[test]
+fn a_delegation_pool_without_a_lease_anywhere_takes_the_server_default() {
+    let (mut data, id) = one_scope6("2001:db8:1::/48");
+    let pool = pd_range(
+        id,
+        "2001:db8:1:100::",
+        "2001:db8:1:1ff:ffff:ffff:ffff:ffff",
+        Some(56),
+    );
+    data.ranges.insert(pool.id, pool);
+    let built = build(&data);
+    let scope = built.image.v6().scope(id).expect("the scope");
+    assert_eq!(scope.pd_pools[0].lease, LeaseTimes::default());
+    data.settings = Some(DhcpSettings {
+        lease: LeaseTimes::fixed(1_234),
+        ..DhcpSettings::default()
+    });
+    let built = build(&data);
+    let scope = built.image.v6().scope(id).expect("the scope");
+    assert_eq!(scope.pd_pools[0].lease, LeaseTimes::fixed(1_234));
+    assert_same(&data);
+}
+
+#[test]
+fn delegation_ranges_without_a_usable_length_or_deleted_are_left_out() {
+    let (mut data, id) = one_scope6("2001:db8:1::/48");
+    let last = "2001:db8:1:1ff:ffff:ffff:ffff:ffff";
+    let mut deleted = pd_range(id, "2001:db8:1:100::", last, Some(56));
+    deleted.meta = meta(true);
+    let items = [
+        pd_range(id, "2001:db8:1:100::", last, None),
+        pd_range(id, "2001:db8:1:100::", last, Some(0)),
+        pd_range(id, "2001:db8:1:100::", last, Some(65)),
+        deleted,
+        pd_range(id, "2001:db8:1:200::", last, Some(64)),
+    ];
+    let kept = items[4].id;
+    for item in items {
+        data.ranges.insert(item.id, item);
+    }
+    let built = build(&data);
+    let scope = built.image.v6().scope(id).expect("the scope");
+    assert_eq!(scope.pd_pools.len(), 1);
+    assert_eq!(scope.pd_pools[0].range, kept);
+    assert_same(&data);
+}
+
+#[test]
+fn a_delegation_pool_on_an_ipv4_scope_is_not_in_the_image() {
+    let (mut data, id) = one_scope();
+    let pool = pd_range(id, "192.0.2.64", "192.0.2.127", Some(56));
+    let mut with_lease = pd_range(id, "192.0.2.128", "192.0.2.191", Some(56));
+    with_lease.lease_secs = Some(600);
+    for item in [pool, with_lease] {
+        data.ranges.insert(item.id, item);
+    }
+    let built = build(&data);
+    let scope = built.image.scope(id).expect("the scope");
+    assert_eq!(scope.pools.len(), 0);
+    assert!(
+        scope.excluded.is_empty(),
+        "the role does not exclude addresses"
+    );
+    assert_eq!(built.image.v6().scopes().len(), 0);
+    assert_same(&data);
+}
+
+#[test]
+fn a_delegation_pool_of_a_disabled_scope_or_a_deleted_prefix_is_not_in_the_image() {
+    let (mut data, id) = one_scope6("2001:db8:1::/48");
+    let pool = pd_range(
+        id,
+        "2001:db8:1:100::",
+        "2001:db8:1:1ff:ffff:ffff:ffff:ffff",
+        Some(56),
+    );
+    data.ranges.insert(pool.id, pool);
+    assert_eq!(
+        build(&data)
+            .image
+            .v6()
+            .scope(id)
+            .expect("scope")
+            .pd_pools
+            .len(),
+        1
+    );
+    data.scopes.get_mut(&id).expect("scope").enabled = false;
+    assert!(build(&data).image.v6().scope(id).is_none());
+    assert_same(&data);
+    data.scopes.get_mut(&id).expect("scope").enabled = true;
+    data.prefixes.get_mut(&id).expect("prefix").meta = meta(true);
+    assert!(build(&data).image.v6().scope(id).is_none());
     assert_same(&data);
 }
 
@@ -927,8 +1338,33 @@ fn the_reference_agrees_on_a_few_fixed_seeds() {
 fn the_generator_reaches_every_rule() {
     let (mut scopes, mut pools, mut excluded, mut reservations, mut dropped) = (0, 0, 0, 0, 0);
     let (mut no_identity, mut address_collisions, mut client_collisions) = (0, 0, 0);
+    let (mut pd_pools, mut pd_with_lease, mut pd_ignored, mut pd_on_v4) = (0, 0, 0, 0);
     for seed in 0..400u64 {
-        let built = build(&generate(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)));
+        let data = generate(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let built = build(&data);
+        for scope in built.image.v6().scopes() {
+            pd_pools += scope.pd_pools.len();
+            pd_with_lease += scope
+                .pd_pools
+                .iter()
+                .filter(|pool| pool.lease != scope.lease)
+                .count();
+        }
+        for item in data.ranges.values() {
+            if item.role != RangeRole::DhcpPdPool || item.meta.is_deleted() {
+                continue;
+            }
+            match data.prefixes.get(&item.prefix).map(|row| row.cidr) {
+                Some(IpNet::V4(_)) => pd_on_v4 += 1,
+                // Whether the scope is served or not, a bad length is never in the image.
+                Some(IpNet::V6(_))
+                    if !item.delegated_len.is_some_and(|l| (1..=64).contains(&l)) =>
+                {
+                    pd_ignored += 1;
+                }
+                _ => {}
+            }
+        }
         scopes += built.image.scopes().len();
         pools += built
             .image
@@ -961,6 +1397,10 @@ fn the_generator_reaches_every_rule() {
         ("no-identity warnings", no_identity),
         ("address collisions", address_collisions),
         ("client collisions", client_collisions),
+        ("delegation pools", pd_pools),
+        ("delegation pools with a lease of their own", pd_with_lease),
+        ("delegation ranges with a bad length", pd_ignored),
+        ("delegation ranges on IPv4 networks", pd_on_v4),
     ] {
         assert!(count >= 5, "the generator made only {count} {what}");
     }

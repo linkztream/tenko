@@ -17,6 +17,9 @@ before it merges.
 | `scan_arp` | The active-scan frame parsers: Ethernet, ARP (RFC 826), and the IPv4 and TCP parsers the SYN scan and the fingerprint read (`tenko_scan::frame::{ethernet, arp, ipv4, tcp}`) |
 | `scan_dhcp_snoop` | The DHCP-snoop field parser (RFC 2131), through the Ethernet/IPv4/UDP framing; replaced by `tenko-dhcp`'s codec once it merges (`tenko_scan::frame::{dhcp, ethernet, ipv4}`) |
 <!-- End WP3.14 raw-socket frame parsers. -->
+<!-- WP9.2 router advertisement parser (marked block). -->
+| `scan_ra` | The Router Advertisement parser of the DHCPv6 check (RFC 4861 section 4.2): the ICMPv6 message, its options (prefix information, MTU, source link-layer address, RDNSS) and the Router Solicitation builder (`tenko_scan::ra`) |
+<!-- End WP9.2 router advertisement parser. -->
 
 | `connect_hass_ws_frame` | WebSocket frames and messages of the Home Assistant connector (`tenko_connect_hass::ws`) |
 | `connect_hass_inventory` | Home Assistant registry and state answers mapped to hosts and vendor facts (`tenko_connect_hass::inventory`) |

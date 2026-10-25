@@ -274,6 +274,7 @@ async fn a_network_with_ranges_stays_a_network() {
         role: RangeRole::Reserved,
         status: None,
         lease_secs: None,
+        delegated_len: None,
         tags: BTreeSet::default(),
         custom: BTreeMap::default(),
         description: None,

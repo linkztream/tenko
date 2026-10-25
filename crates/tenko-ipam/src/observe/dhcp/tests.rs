@@ -422,3 +422,222 @@ async fn a_fingerprint_gives_an_os_fact_and_option_60_a_vendor_fact() {
         Some("udhcp 1.35.0")
     );
 }
+
+// WP9.2: the network fact of a delegated prefix.
+
+fn delegation(vrf: VrfId, cltt: Timestamp, state: BindingState) -> tenko_core::dhcp::Lease6 {
+    use tenko_core::{
+        dhcp::{Lease6, Lease6Kind},
+        net::Duid,
+    };
+    Lease6 {
+        addr: "2001:db8:1:100::"
+            .parse::<std::net::Ipv6Addr>()
+            .expect("addr")
+            .into(),
+        prefix_len: 56,
+        kind: Lease6Kind::Pd,
+        vrf,
+        scope: PrefixId::generate(),
+        iaid: 1,
+        duid: Duid::new(vec![0, 3, 0, 1, 0x00, 0x00, 0x5e, 0x00, 0x53, 0x20]).expect("a DUID"),
+        link_layer: Some(HexBytes(vec![0x00, 0x00, 0x5e, 0x00, 0x53, 0x20])),
+        link_layer_type: Some(1),
+        state,
+        cltt,
+        ends: cltt.checked_add(Duration::from_secs(3_600)).expect("end"),
+        preferred_ends: cltt.checked_add(Duration::from_secs(1_800)).expect("end"),
+        node: NODE,
+        fqdn: None,
+        fqdn_flags: None,
+        relay: None,
+        observed_at: None,
+        ddns: DdnsState::default(),
+    }
+}
+
+impl World {
+    /// Observes the DHCPv6 `lease` at `now` and commits the batch.
+    async fn observe6(
+        &self,
+        lease: &tenko_core::dhcp::Lease6,
+        now: Timestamp,
+    ) -> super::LeaseObservation {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+        let outcome = self
+            .facts
+            .observe6(lease, now, &mut batch)
+            .expect("observe6");
+        assert_eq!(outcome.wrote(), !batch.mutations.is_empty(), "{outcome:?}");
+        if !batch.mutations.is_empty() {
+            self.store.propose(batch).await.expect("commit");
+        }
+        outcome
+    }
+
+    fn delegated(&self, vrf: VrfId) -> super::ObservedFact {
+        self.facts
+            .fact(&FactSubject::Network {
+                controller: format!("dhcp-pd/{vrf}/2001:db8:1:100::/56"),
+            })
+            .expect("the network fact")
+    }
+}
+
+#[tokio::test]
+async fn a_delegated_prefix_is_one_network_fact_and_nothing_else() {
+    let world = World::new();
+    let vrf = VrfId::generate();
+    // Even with a name the client sent, no address, name or other fact is written.
+    let mut granted = delegation(vrf, at(0), BindingState::Active);
+    granted.fqdn = Some("router.example.net.".to_owned());
+    let first = world.observe6(&granted, at(0)).await;
+    assert_eq!(first.address, FactOutcome::New);
+    assert_eq!(
+        (first.name, first.os, first.vendor),
+        (FactOutcome::None, FactOutcome::None, FactOutcome::None)
+    );
+    assert_eq!(first.observed_at, Some(at(0)));
+    assert_eq!(world.facts.len(), 1);
+    let fact = world.delegated(vrf);
+    assert_eq!(
+        fact.subject_key,
+        format!("network:dhcp-pd/{vrf}/2001:db8:1:100::/56")
+    );
+    assert_eq!(fact.source_key, "dhcp:7");
+    assert_eq!(fact.expires_at, Some(granted.ends));
+    assert_eq!(fact.sightings, 1);
+    assert_eq!(
+        fact.observed,
+        Observed::Network {
+            controller: format!("dhcp-pd/{vrf}/2001:db8:1:100::/56"),
+            name: "delegated to 00:00:5e:00:53:20".to_owned(),
+            subnet: Some("2001:db8:1:100::/56".parse().expect("prefix")),
+            vlan: None,
+            dhcp: tenko_core::observe::NetworkDhcp::Server,
+            management: false,
+        }
+    );
+    // The rows of the store: no address fact for the prefix's first address, no name fact.
+    let ip = "2001:db8:1:100::"
+        .parse::<std::net::Ipv6Addr>()
+        .expect("addr");
+    assert!(
+        world
+            .facts
+            .fact(&FactSubject::Address { vrf, ip: ip.into() })
+            .is_none()
+    );
+    assert!(
+        world
+            .facts
+            .fact(&FactSubject::Name { ip: ip.into() })
+            .is_none()
+    );
+    let view = world
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    assert_eq!(
+        view.scan_typed(&FACTS, tenko_store::KeyRange::all(), 10, false)
+            .expect("scan")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_client_without_a_mac_address_is_named_by_its_duid() {
+    let world = World::new();
+    let vrf = VrfId::generate();
+    let mut granted = delegation(vrf, at(0), BindingState::Active);
+    granted.link_layer = None;
+    granted.link_layer_type = None;
+    world.observe6(&granted, at(0)).await;
+    let Observed::Network { name, .. } = world.delegated(vrf).observed else {
+        panic!("a network fact");
+    };
+    assert_eq!(name, "delegated to DUID 0003000100005e005320");
+}
+
+#[tokio::test]
+async fn a_renewal_of_a_delegation_writes_nothing_until_the_refresh_is_due() {
+    let world = World::new();
+    let vrf = VrfId::generate();
+    world
+        .observe6(&delegation(vrf, at(0), BindingState::Active), at(0))
+        .await;
+    // A renewal ten minutes later: nothing written.
+    let quiet = world
+        .observe6(&delegation(vrf, at(10), BindingState::Active), at(10))
+        .await;
+    assert_eq!(quiet.address, FactOutcome::Unchanged);
+    assert_eq!(quiet.observed_at, None);
+    assert_eq!(world.delegated(vrf).last_seen, at(0));
+    // At the renewal point (half the hour) the refresh is due.
+    let renewed = delegation(vrf, at(30), BindingState::Active);
+    let due = world.observe6(&renewed, at(30)).await;
+    assert_eq!(due.address, FactOutcome::Refreshed);
+    let fact = world.delegated(vrf);
+    assert_eq!((fact.first_seen, fact.last_seen), (at(0), at(30)));
+    assert_eq!(fact.sightings, 2);
+    assert_eq!(fact.expires_at, Some(renewed.ends));
+}
+
+#[tokio::test]
+async fn a_release_of_a_delegation_expires_its_fact() {
+    let world = World::new();
+    let vrf = VrfId::generate();
+    world
+        .observe6(&delegation(vrf, at(0), BindingState::Active), at(0))
+        .await;
+    let mut released = delegation(vrf, at(5), BindingState::Released);
+    released.ends = at(5);
+    let gone = world.observe6(&released, at(5)).await;
+    assert_eq!(gone.address, FactOutcome::Expired);
+    assert_eq!(gone.name, FactOutcome::None);
+    assert!(!world.delegated(vrf).is_current(at(5)));
+    // A second release finds nothing current and writes nothing.
+    let again = world.observe6(&released, at(6)).await;
+    assert_eq!(again.address, FactOutcome::None);
+    // A new delegation of the same prefix starts the fact again.
+    let renewed = world
+        .observe6(&delegation(vrf, at(7), BindingState::Active), at(7))
+        .await;
+    assert_eq!(renewed.address, FactOutcome::Changed);
+    assert!(world.delegated(vrf).is_current(at(8)));
+}
+
+#[tokio::test]
+async fn an_address_lease_of_dhcpv6_still_writes_the_address_fact() {
+    // The delegation branch must not touch the address leases of DHCPv6.
+    let world = World::new();
+    let vrf = VrfId::generate();
+    let mut address = delegation(vrf, at(0), BindingState::Active);
+    address.kind = tenko_core::dhcp::Lease6Kind::Na;
+    address.prefix_len = 128;
+    address.addr = "2001:db8::50"
+        .parse::<std::net::Ipv6Addr>()
+        .expect("addr")
+        .into();
+    let first = world.observe6(&address, at(0)).await;
+    assert_eq!(first.address, FactOutcome::New);
+    assert!(
+        world
+            .facts
+            .fact(&FactSubject::Address {
+                vrf,
+                ip: address.addr
+            })
+            .is_some()
+    );
+    assert!(
+        world
+            .facts
+            .fact(&FactSubject::Network {
+                controller: format!("dhcp-pd/{vrf}/2001:db8::50/128")
+            })
+            .is_none()
+    );
+}

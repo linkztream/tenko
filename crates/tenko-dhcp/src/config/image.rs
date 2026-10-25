@@ -28,7 +28,8 @@
 //! - **DHCPv6** (WP9.1, [`crate::v6::image`]). An enabled scope whose prefix is a live IPv6
 //!   network, with the same rules for lease times, pools, exclusions and options (its
 //!   `dhcp6` values are the DHCPv6 options), its DHCPv6 settings and the Interface-Id that
-//!   selects it; reservations for the live IPv6 addresses of status `active` or `planned` of
+//!   selects it, and (WP9.2) its delegation pools: the live ranges of role `dhcp_pd_pool`
+//!   with their delegated length, lease times and options as a pool's; reservations for the live IPv6 addresses of status `active` or `planned` of
 //!   `reserved` hosts, keyed by the interface's DUID, else by its MAC address (matched
 //!   against the client's link-layer address); an interface with neither gives
 //!   `no_identity`. Their findings are [`Built::warnings6`]. Classes and policies are
@@ -184,6 +185,8 @@ fn scope_image(data: &DhcpData, index: &Index<'_>, prefix: PrefixId) -> Option<S
                     options: values(data, OptionOwner::Pool(range.id)).to_vec(),
                 });
             }
+            // WP9.2: delegation pools are IPv6 only (IPAM refuses one on an IPv4 network).
+            RangeRole::DhcpPdPool => {}
             RangeRole::Reserved | RangeRole::Infrastructure => excluded.push((first, last)),
         }
     }
@@ -239,7 +242,7 @@ fn scope6_image(
     index: &Index<'_>,
     prefix: PrefixId,
 ) -> Option<crate::v6::image::Scope6Image> {
-    use crate::v6::image::{Pool6Image, Scope6Image};
+    use crate::v6::image::{PdPool6Image, Pool6Image, Scope6Image};
     let scope = data.scopes.get(&prefix)?;
     let row = data.prefixes.get(&prefix)?;
     if !scope.enabled || row.meta.is_deleted() || row.role != PrefixRole::Network {
@@ -251,6 +254,7 @@ fn scope6_image(
     let settings = data.settings.clone().unwrap_or_default();
     let lease = scope.lease.unwrap_or(settings.lease);
     let mut pools = Vec::new();
+    let mut pd_pools = Vec::new();
     let mut excluded = Vec::new();
     for range in index.ranges.get(&prefix).map_or(&[][..], Vec::as_slice) {
         let (Some(first), Some(last)) = (v6(range.first), v6(range.last)) else {
@@ -263,6 +267,25 @@ fn scope6_image(
                     range: range.id,
                     first,
                     last,
+                    lease: pool
+                        .and_then(|pool| pool.lease)
+                        .or_else(|| range.lease_secs.map(LeaseTimes::fixed))
+                        .unwrap_or(lease),
+                    options: values(data, OptionOwner::Pool(range.id)).to_vec(),
+                });
+            }
+            // WP9.2: a delegation pool with its length (IPAM refuses one without).
+            RangeRole::DhcpPdPool => {
+                let Some(delegated_len) = range.delegated_len.filter(|len| (1..=64).contains(len))
+                else {
+                    continue;
+                };
+                let pool = data.pools.get(&range.id);
+                pd_pools.push(PdPool6Image {
+                    range: range.id,
+                    first,
+                    last,
+                    delegated_len,
                     lease: pool
                         .and_then(|pool| pool.lease)
                         .or_else(|| range.lease_secs.map(LeaseTimes::fixed))
@@ -310,6 +333,7 @@ fn scope6_image(
         v6: v6_settings,
         shared_network: scope.shared_network,
         pools,
+        pd_pools,
         excluded,
         options: merge(levels),
         ddns: scope.ddns.clone(),

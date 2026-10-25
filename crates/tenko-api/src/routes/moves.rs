@@ -259,6 +259,7 @@ mod tests {
                     role: RangeRole::DhcpPool,
                     status: None,
                     lease_secs: Some(7_200),
+                    delegated_len: None,
                     tags: BTreeSet::new(),
                     custom: BTreeMap::new(),
                     description: None,

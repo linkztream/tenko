@@ -1,0 +1,21 @@
+# Router Advertisement with the O flag only, as radvd sends it with AdvOtherConfigFlag on and
+# AdvManagedFlag off: addresses come from SLAAC, the other configuration (DNS servers, domain
+# search list) from stateless DHCPv6. Router fe80::200:5eff:fe00:5303.
+#
+# type 134, code 0, checksum 0x3e4f
+86 00 3e 4f
+# cur hop limit 64, flags 0x40 (M off, O on), router lifetime 1800 s
+40 40 07 08
+# reachable time 0, retransmit timer 0
+00 00 00 00
+00 00 00 00
+# option 1, source link-layer address 00:00:5e:00:53:03
+01 01 00 00 5e 00 53 03
+# option 3, prefix information, 4 units: prefix length 64, flags 0xc0 (L, A)
+03 04 40 c0
+# valid lifetime 86400 s, preferred lifetime 14400 s, reserved
+00 01 51 80
+00 00 38 40
+00 00 00 00
+# prefix 2001:db8:100::
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 00

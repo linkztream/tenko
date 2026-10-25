@@ -278,6 +278,7 @@ fn pool_settings_need_a_pool_range() {
         last: ip("192.0.2.199"),
         role: RangeRole::DhcpPool,
         lease_secs: Some(3_600),
+        delegated_len: None,
         status: Status::Active,
         meta: Meta::new(stamp()),
     };
@@ -299,6 +300,66 @@ fn pool_settings_need_a_pool_range() {
         pool.validate(&range, &other).expect_err("outside").code(),
         codes::POOL_OUTSIDE
     );
+}
+
+#[test]
+fn pool_settings_accept_a_delegation_pool_range_and_refuse_a_reserved_one() {
+    let network = prefix("2001:db8:1::/48", PrefixRole::Network);
+    let mut range = Range {
+        id: RangeId::generate(),
+        prefix: network.id,
+        first: ip("2001:db8:1:100::"),
+        last: ip("2001:db8:1:1ff:ffff:ffff:ffff:ffff"),
+        role: RangeRole::DhcpPdPool,
+        lease_secs: Some(3_600),
+        delegated_len: Some(56),
+        status: Status::Active,
+        meta: Meta::new(stamp()),
+    };
+    let pool = PoolSettings {
+        range: range.id,
+        classes: Vec::new(),
+        lease: Some(LeaseTimes::fixed(7_200)),
+        updated: stamp(),
+    };
+    assert!(pool.validate(&range, &network).is_ok());
+    // The lease times are checked as for any pool.
+    let bad = PoolSettings {
+        lease: Some(LeaseTimes {
+            default_secs: 100,
+            min_secs: 200,
+            max_secs: 300,
+            t1_secs: None,
+            t2_secs: None,
+        }),
+        ..pool.clone()
+    };
+    assert!(bad.validate(&range, &network).is_err());
+    // The range must lie inside the prefix and be the one named.
+    let other = prefix("2001:db8:2::/48", PrefixRole::Network);
+    assert_eq!(
+        pool.validate(&range, &other).expect_err("outside").code(),
+        codes::POOL_OUTSIDE
+    );
+    let stranger = PoolSettings {
+        range: RangeId::generate(),
+        ..pool.clone()
+    };
+    assert_eq!(
+        stranger
+            .validate(&range, &network)
+            .expect_err("another range")
+            .code(),
+        codes::POOL_NOT_POOL
+    );
+    for role in [RangeRole::Reserved, RangeRole::Infrastructure] {
+        range.role = role;
+        assert_eq!(
+            pool.validate(&range, &network).expect_err("role").code(),
+            codes::POOL_NOT_POOL,
+            "{role:?}"
+        );
+    }
 }
 
 #[test]

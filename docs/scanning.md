@@ -552,7 +552,7 @@ Batches that `tenko node scan run` queues go to `<data_dir>/node/buffer/incoming
 
 ## 9. Raw-socket methods
 
-`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` send and listen at the link layer, so they need a raw socket. On Linux this is `CAP_NET_RAW` and an `AF_PACKET` socket, taken through a safe dependency (`pnet_datalink`); the workspace uses no `unsafe` of its own. Each method's batch is filed under `probe:<node>:<method>` like any other. With the capability the methods run; without it they answer `unsupported` with the reason, and `tenko node scan status` says so. The frame parsers (Ethernet, ARP, IPv4, TCP, LLDP, CDP, DHCPv4) are in `crates/tenko-scan/src/frame/` and have fuzz targets (`scan_lldp_cdp`, `scan_arp`, `scan_dhcp_snoop`).
+`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` send and listen at the link layer, so they need a raw socket. On Linux this is `CAP_NET_RAW` and an `AF_PACKET` socket, taken through a safe dependency (`pnet_datalink`); the workspace uses no `unsafe` of its own. Each method's batch is filed under `probe:<node>:<method>` like any other. With the capability the methods run; without it they answer `unsupported` with the reason, and `tenko node scan status` says so. The frame parsers (Ethernet, ARP, IPv4, TCP, LLDP, CDP, DHCPv4) are in `crates/tenko-scan/src/frame/` and have fuzz targets (`scan_lldp_cdp`, `scan_arp`, `scan_dhcp_snoop`). The Router Advertisement parser of the DHCPv6 check (`crates/tenko-scan/src/ra.rs`, WP9.2) has one too (`scan_ra`).
 
 | Platform | What the methods need | Setup |
 |---|---|---|

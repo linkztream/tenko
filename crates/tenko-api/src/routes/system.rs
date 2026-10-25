@@ -387,6 +387,16 @@ pub fn dhcp_role_warnings(role: &tenko_dhcp::role::DhcpStatus) -> Vec<StatusWarn
             params: node(),
         });
     }
+    // WP9.2: the router advertisement check of DHCP-10 (`dhcp.ra.*`).
+    for finding in &role.ra.findings {
+        let mut params = node();
+        params.extend(finding.params.clone());
+        warnings.push(StatusWarning {
+            code: finding.code.to_owned(),
+            detail: finding.detail.clone(),
+            params,
+        });
+    }
     warnings
 }
 

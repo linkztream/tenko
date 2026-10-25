@@ -1,0 +1,7 @@
+# A message of type 134 with code 1 (RFC 4861 section 6.1.2: the code must be 0).
+#
+86 01 1a 2b
+40 00 07 08
+00 00 00 00
+00 00 00 00
+01 01 00 00 5e 00 53 01

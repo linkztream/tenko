@@ -312,6 +312,10 @@ meta_input_fields! {
         /// is the default timeout of moves into the prefix (IPAM-19).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub lease_secs: Option<u32>,
+        /// The length of the delegated prefixes, `dhcp_pd_pool` ranges only (required
+        /// there): between the network's length and 64, with the range on its boundaries.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub delegated_len: Option<u8>,
     }
 }
 
@@ -336,6 +340,11 @@ meta_patch_fields! {
         #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
         #[schema(value_type = Option<u32>, nullable)]
         pub lease_secs: Option<Option<u32>>,
+        /// New length of the delegated prefixes (`dhcp_pd_pool` ranges only); `null`
+        /// clears it.
+        #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+        #[schema(value_type = Option<u8>, nullable)]
+        pub delegated_len: Option<Option<u8>>,
     }
 }
 

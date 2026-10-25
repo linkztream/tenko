@@ -40,6 +40,8 @@ pub mod image;
 pub mod lease;
 pub mod metrics;
 pub mod probe;
+// WP9.2: the router advertisement check of DHCP-10.
+pub mod ra;
 // WP7.3: the listeners, the workers and the committer around the engine.
 pub mod server;
 pub mod store;

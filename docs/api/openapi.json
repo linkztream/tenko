@@ -52626,6 +52626,15 @@
               "description": "Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`."
             }
           },
+          "delegated_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The length of the prefixes a delegation pool (`dhcp_pd_pool`) hands out, required\nthere and refused elsewhere: longer than the network's length, at most 64, with the\nrange on its boundaries.",
+            "minimum": 0
+          },
           "description": {
             "type": [
               "string",
@@ -58944,6 +58953,15 @@
                 "meta"
               ],
               "properties": {
+                "delegated_len": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),\nbetween the length of its network and 64; the range starts and ends on a boundary of\nthat length. Only delegation pools have one.",
+                  "minimum": 0
+                },
                 "first": {
                   "type": "string",
                   "description": "First address, inclusive.",
@@ -63259,6 +63277,15 @@
           "meta"
         ],
         "properties": {
+          "delegated_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),\nbetween the length of its network and 64; the range starts and ends on a boundary of\nthat length. Only delegation pools have one.",
+            "minimum": 0
+          },
           "first": {
             "type": "string",
             "description": "First address, inclusive.",
@@ -63324,6 +63351,15 @@
               "type": "string",
               "description": "Key of a custom field (IPAM-08): `[a-z][a-z0-9_]{0,63}`."
             }
+          },
+          "delegated_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The length of the delegated prefixes, `dhcp_pd_pool` ranges only (required\nthere): between the network's length and 64, with the range on its boundaries.",
+            "minimum": 0
           },
           "description": {
             "type": [
@@ -63409,6 +63445,15 @@
               "type": "string"
             }
           },
+          "delegated_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "New length of the delegated prefixes (`dhcp_pd_pool` ranges only); `null`\nclears it.",
+            "minimum": 0
+          },
           "description": {
             "type": [
               "string",
@@ -63480,6 +63525,7 @@
         "description": "Role of a range.",
         "enum": [
           "dhcp_pool",
+          "dhcp_pd_pool",
           "reserved",
           "infrastructure"
         ]
@@ -75306,6 +75352,15 @@
               "meta"
             ],
             "properties": {
+              "delegated_len": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),\nbetween the length of its network and 64; the range starts and ends on a boundary of\nthat length. Only delegation pools have one.",
+                "minimum": 0
+              },
               "first": {
                 "type": "string",
                 "description": "First address, inclusive.",

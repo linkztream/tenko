@@ -3475,6 +3475,10 @@
         <notes><note category="description">Role of an address range.</note></notes>
         <segment><source>DHCP pool</source></segment>
       </unit>
+      <unit id="ipam.range_role.dhcp_pd_pool">
+        <notes><note category="description">Role of an address range: a pool of IPv6 prefixes handed out by DHCPv6 prefix delegation.</note></notes>
+        <segment><source>Delegation pool</source></segment>
+      </unit>
       <unit id="ipam.range_role.reserved">
         <notes><note category="description">Role of an address range: held back, not handed out.</note></notes>
         <segment><source>Reserved</source></segment>

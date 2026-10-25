@@ -1737,6 +1737,7 @@ mod tests {
                     role: RangeRole::Reserved,
                     status: None,
                     lease_secs: None,
+                    delegated_len: None,
                     tags: BTreeSet::new(),
                     custom: BTreeMap::new(),
                     description: None,

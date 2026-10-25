@@ -29,6 +29,12 @@
 //!   server's flags, and the options the client asks for (23, 24 and 56 among them) from
 //!   the reservation, the pool and the scope.
 //!
+//! WP9.2 adds `IA_PD` (RFC 8415 sections 6.3 and 18.3): the `IA_PD`s of a message follow
+//! its `IA_NA`s within [`MAX_BINDINGS`], each gets a prefix of a delegation pool of the
+//! scope or a sibling of its shared network ([`alloc::pick_pd`]) or `NoPrefixAvail`, and a
+//! delegated prefix is a binding of kind `pd` in the same change. RELEASE gives prefixes
+//! back; DECLINE and CONFIRM concern addresses only (RFC 8415 sections 18.3.3 and 18.3.8).
+//!
 //! Classes and policies are DHCPv4 only. From the parse to the change in
 //! [`Scratch6::change`] nothing allocates (`tests/alloc.rs`).
 
@@ -56,7 +62,7 @@ pub use self::{
     offers::Offers6,
 };
 use super::{
-    IaNa, Message, MessageType, RelayChain, code,
+    IaNa, IaPd, Message, MessageType, RelayChain, code,
     image::Scope6Image,
     lease::{Binding6, Lease6Table, MAX_BINDINGS, PendingChange6, PendingRelay6},
     option::flags_from_v4,
@@ -435,6 +441,39 @@ fn hints(ia: &IaNa<'_>) -> ([Ipv6Addr; 4], usize) {
     (out, count)
 }
 
+// WP9.2: the IA_PDs of a message.
+/// The `IA_PD`s of the message, at most `room` (what its `IA_NA`s leave of
+/// [`MAX_BINDINGS`]); none when one is malformed.
+fn ia_pds<'m>(
+    message: &Message<'m>,
+    room: usize,
+) -> Option<([Option<IaPd<'m>>; MAX_BINDINGS], usize)> {
+    let mut out = [None; MAX_BINDINGS];
+    let mut count = 0;
+    for ia in message.ia_pds() {
+        let ia = ia.ok()?;
+        if count < room.min(MAX_BINDINGS) {
+            out[count] = Some(ia);
+            count += 1;
+        }
+    }
+    Some((out, count))
+}
+
+/// The prefixes (and lengths) a client put in an `IA_PD`, at most four; a prefix of `::`
+/// with a length is a hint of the length only.
+fn prefix_hints(ia: &IaPd<'_>) -> ([(Ipv6Addr, u8); 4], usize) {
+    let mut out = [(Ipv6Addr::UNSPECIFIED, 0); 4];
+    let mut count = 0;
+    for prefix in ia.prefixes().flatten() {
+        if count < out.len() {
+            out[count] = (prefix.prefix, prefix.prefix_len);
+            count += 1;
+        }
+    }
+    (out, count)
+}
+
 /// Where the reply goes.
 fn destination(
     inbound: &Inbound<'_>,
@@ -537,6 +576,24 @@ fn levels<'a>(
     }
 }
 
+/// The levels of a reply whose first binding may be a delegated prefix: the home scope of
+/// the first prefix and its pool's options when no address was granted.
+fn levels_with_pd<'a>(
+    scope: &'a Scope6Image,
+    first: Option<(&'a Scope6Image, Ipv6Addr)>,
+    first_pd: Option<(&'a Scope6Image, &'a [tenko_core::dhcp::OptionValue])>,
+    host: Option<&'a [tenko_core::dhcp::OptionValue]>,
+) -> Levels6<'a> {
+    match (first, first_pd) {
+        (None, Some((home, pool))) => Levels6 {
+            scope: Some(home),
+            pool: Some(pool),
+            host,
+        },
+        _ => levels(scope, first, host),
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the parts of one reply, each a field of `Reply6`"
@@ -633,6 +690,81 @@ fn claim<'a>(
     None
 }
 
+/// One `IA_PD`'s prefix, held in the offers as [`claim`] holds an address.
+fn claim_pd<'a>(
+    ctx: &Context6<'a>,
+    inbound: &Inbound<'_>,
+    scope: &'a Scope6Image,
+    ia: &IaPd<'_>,
+    taken: &[Ipv6Addr],
+    hold: bool,
+) -> Option<alloc::PickPd<'a>> {
+    let (hinted, count) = prefix_hints(ia);
+    let mut identity = [0u8; MAX_IDENTITY6];
+    let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
+    let mut skip = [Ipv6Addr::UNSPECIFIED; MAX_BINDINGS + 4];
+    let mut skipped = taken.len().min(MAX_BINDINGS);
+    skip[..skipped].copy_from_slice(&taken[..skipped]);
+    for _ in 0..4 {
+        let pick = alloc::pick_pd(
+            ctx,
+            inbound.client(),
+            scope,
+            ia.iaid,
+            &hinted[..count],
+            &skip[..skipped],
+        )?;
+        if !hold {
+            return Some(pick);
+        }
+        let until = later(ctx.now, ctx.settings.offer_secs);
+        if ctx.offers.hold(
+            pick.home.prefix,
+            pick.prefix,
+            &identity[..len],
+            until,
+            ctx.now,
+        ) {
+            return Some(pick);
+        }
+        if skipped < skip.len() {
+            skip[skipped] = pick.prefix;
+            skipped += 1;
+        }
+    }
+    None
+}
+
+/// The bound prefix of an `IA_PD` while the store refuses writes (P3-Q14): answered for
+/// the time it has left, nothing written.
+fn bound_pd<'a>(
+    ctx: &Context6<'a>,
+    inbound: &Inbound<'_>,
+    scope: &'a Scope6Image,
+    iaid: u32,
+) -> Option<alloc::PickPd<'a>> {
+    let mut identity = [0u8; MAX_IDENTITY6];
+    let len = alloc::identity(iaid, inbound.duid, &mut identity);
+    ctx.image.v6().siblings(scope).find_map(|sibling| {
+        let lease = ctx
+            .leases
+            .by_client(sibling.prefix, Lease6Kind::Pd, &identity[..len])
+            .filter(|lease| lease.is_bound(ctx.now))?;
+        let pool = sibling.pd_pool_of(lease.addr6(), lease.prefix_len)?;
+        Some(alloc::PickPd {
+            home: sibling,
+            pool,
+            prefix: lease.addr6(),
+            len: lease.prefix_len,
+            source: Source::Lease,
+        })
+    })
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the IA_NAs, then the IA_PDs, then the three answers of RFC 8415 section 18.3.9"
+)]
 fn solicit(
     ctx: &Context6<'_>,
     inbound: &Inbound<'_>,
@@ -643,7 +775,11 @@ fn solicit(
     let Some((list, count)) = ias(&inbound.message) else {
         return Action6::Drop(DropReason::Malformed);
     };
-    let fqdn = fqdn_of(inbound, scope);
+    let Some((pds, pd_count)) = ia_pds(&inbound.message, MAX_BINDINGS - count) else {
+        return Action6::Drop(DropReason::Malformed);
+    };
+    // The name of RFC 4704 goes with an address; a message for prefixes only writes none.
+    let fqdn = (count > 0).then(|| fqdn_of(inbound, scope)).flatten();
     let rapid = inbound.message.rapid_commit() && scope.v6.rapid_commit() && ctx.accepting;
     let mut replies = [IaReply::new(0); MAX_BINDINGS];
     let mut taken = [Ipv6Addr::UNSPECIFIED; MAX_BINDINGS];
@@ -691,11 +827,69 @@ fn solicit(
         }
         replies[index] = out;
     }
-    let levels = levels(scope, first, host);
+    let mut taken_pd = [Ipv6Addr::UNSPECIFIED; MAX_BINDINGS];
+    let mut delegated = 0;
+    let mut first_pd = None;
+    for (index, ia) in pds[..pd_count].iter().flatten().enumerate() {
+        let mut out = IaReply::new_pd(ia.iaid);
+        match claim_pd(ctx, inbound, scope, ia, &taken_pd[..delegated], true) {
+            Some(pick) if ctx.accepting || pick.source == Source::Lease => {
+                let times = alloc::pd_lifetimes(pick.home, pick.pool);
+                out.t1 = times.t1;
+                out.t2 = times.t2;
+                out.addr = Some((pick.prefix, times.preferred, times.valid));
+                out.prefix_len = pick.len;
+                taken_pd[delegated] = pick.prefix;
+                delegated += 1;
+                if pick.source == Source::Lease {
+                    bound += 1;
+                }
+                first_pd = first_pd.or(Some((pick.home, pick.pool.options.as_slice())));
+                if rapid {
+                    scratch.change.push(Binding6 {
+                        event: if pick.source == Source::Lease {
+                            LeaseEventKind::Renewed
+                        } else {
+                            LeaseEventKind::Granted
+                        },
+                        kind: Lease6Kind::Pd,
+                        vrf: pick.home.vrf,
+                        scope: pick.home.prefix,
+                        iaid: ia.iaid,
+                        addr: pick.prefix,
+                        prefix_len: pick.len,
+                        state: BindingState::Active,
+                        preferred_ends: later(ctx.now, times.preferred),
+                        ends: later(ctx.now, times.valid),
+                    });
+                }
+            }
+            _ => out.status = Some(status::NO_PREFIX_AVAIL),
+        }
+        replies[count + index] = out;
+    }
+    let total = count + pd_count;
+    let levels = levels_with_pd(scope, first, first_pd, host);
     if !ctx.accepting && bound == 0 {
         return Action6::Drop(DropReason::StoreRefused);
     }
-    if granted == 0 {
+    if granted + delegated == 0 && pd_count > 0 {
+        // RFC 8415 section 18.3.9: each IA with no address or prefix carries its status
+        // (NoAddrsAvail, NoPrefixAvail) inside it.
+        return reply(
+            ctx,
+            inbound,
+            received,
+            scratch,
+            MessageType::Advertise,
+            &replies[..total],
+            None,
+            false,
+            None,
+            levels,
+        );
+    }
+    if granted + delegated == 0 {
         // RFC 8415 section 18.3.9: nothing to assign: an ADVERTISE with the identifiers and
         // a Status Code of NoAddrsAvail only.
         return reply(
@@ -721,7 +915,7 @@ fn solicit(
             received,
             scratch,
             MessageType::Reply,
-            &replies[..count],
+            &replies[..total],
             None,
             true,
             fqdn.as_ref(),
@@ -735,7 +929,7 @@ fn solicit(
         received,
         scratch,
         MessageType::Advertise,
-        &replies[..count],
+        &replies[..total],
         None,
         false,
         fqdn.as_ref(),
@@ -760,10 +954,13 @@ fn stateful(
     let Some((list, count)) = ias(&inbound.message) else {
         return Action6::Drop(DropReason::Malformed);
     };
-    if count == 0 {
+    let Some((pds, pd_count)) = ia_pds(&inbound.message, MAX_BINDINGS - count) else {
+        return Action6::Drop(DropReason::Malformed);
+    };
+    if count == 0 && pd_count == 0 {
         return Action6::Ignore(Ignore6::Incomplete);
     }
-    let fqdn = fqdn_of(inbound, scope);
+    let fqdn = (count > 0).then(|| fqdn_of(inbound, scope)).flatten();
     let image = ctx.image.v6();
     let mut replies = [IaReply::new(0); MAX_BINDINGS];
     let mut taken = [Ipv6Addr::UNSPECIFIED; MAX_BINDINGS];
@@ -784,7 +981,7 @@ fn stateful(
             let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
             image.siblings(scope).find_map(|sibling| {
                 ctx.leases
-                    .by_client(sibling.prefix, &identity[..len])
+                    .by_client(sibling.prefix, Lease6Kind::Na, &identity[..len])
                     .filter(|lease| lease.is_bound(ctx.now))
                     .map(|lease| alloc::Pick {
                         home: sibling,
@@ -868,17 +1065,26 @@ fn stateful(
         }
         replies[index] = out;
     }
-    if !ctx.accepting && granted == 0 {
+    let (delegated, first_pd) = stateful_pd(
+        ctx,
+        inbound,
+        scope,
+        scratch,
+        kind,
+        &pds[..pd_count],
+        &mut replies[count..],
+    );
+    if !ctx.accepting && granted + delegated == 0 {
         return Action6::Drop(DropReason::StoreRefused);
     }
-    let levels = levels(scope, first, host);
+    let levels = levels_with_pd(scope, first, first_pd, host);
     let action = reply(
         ctx,
         inbound,
         received,
         scratch,
         MessageType::Reply,
-        &replies[..count],
+        &replies[..count + pd_count],
         None,
         false,
         fqdn.as_ref(),
@@ -889,6 +1095,117 @@ fn stateful(
     } else {
         action
     }
+}
+
+/// The `IA_PD`s of a REQUEST, RENEW or REBIND (RFC 8415 sections 18.3.2, 18.3.4 and
+/// 18.3.5), by the rules of the `IA_NA`s: the client's bound prefix, a hinted one, a new
+/// one, with the prefixes it may no longer use at lifetimes of zero, else `NoPrefixAvail`
+/// or `NoBinding`. Their answers go to `out`; the number of prefixes given and the first
+/// one's levels.
+#[allow(
+    clippy::too_many_lines,
+    clippy::single_match_else,
+    reason = "the three states of a binding, per IA, read top to bottom"
+)]
+fn stateful_pd<'a>(
+    ctx: &Context6<'a>,
+    inbound: &Inbound<'_>,
+    scope: &'a Scope6Image,
+    scratch: &mut Scratch6,
+    kind: MessageType,
+    pds: &[Option<IaPd<'_>>],
+    out: &mut [IaReply],
+) -> (
+    usize,
+    Option<(&'a Scope6Image, &'a [tenko_core::dhcp::OptionValue])>,
+) {
+    let mut taken = [Ipv6Addr::UNSPECIFIED; MAX_BINDINGS];
+    let mut delegated = 0;
+    let mut first = None;
+    for (index, ia) in pds.iter().flatten().enumerate() {
+        let mut answer = IaReply::new_pd(ia.iaid);
+        let (hinted, hint_count) = prefix_hints(ia);
+        let hinted = &hinted[..hint_count];
+        let given = || hinted.iter().filter(|(prefix, _)| !prefix.is_unspecified());
+        let pick = if ctx.accepting {
+            claim_pd(ctx, inbound, scope, ia, &taken[..delegated], true)
+        } else {
+            bound_pd(ctx, inbound, scope, ia.iaid)
+        };
+        match pick {
+            Some(pick) => {
+                let times = alloc::pd_lifetimes(pick.home, pick.pool);
+                let held = ctx.leases.get(pick.home.vrf, pick.prefix);
+                let (preferred, valid) = if ctx.accepting {
+                    (times.preferred, times.valid)
+                } else {
+                    let left =
+                        held.map_or(0, |lease| lease.ends.saturating_since(ctx.now).as_secs());
+                    let valid = u32::try_from(left).unwrap_or(u32::MAX).max(1);
+                    (times.preferred.min(valid), valid)
+                };
+                answer.t1 = times.t1.min(preferred);
+                answer.t2 = times.t2.min(preferred);
+                answer.addr = Some((pick.prefix, preferred, valid));
+                answer.prefix_len = pick.len;
+                if delegated < taken.len() {
+                    taken[delegated] = pick.prefix;
+                }
+                delegated += 1;
+                first = first.or(Some((pick.home, pick.pool.options.as_slice())));
+                if ctx.accepting {
+                    let renewed = pick.source == Source::Lease
+                        || held.is_some_and(|lease| {
+                            lease.is_bound(ctx.now)
+                                && lease.kind == Lease6Kind::Pd
+                                && lease.iaid == ia.iaid
+                                && lease.duid.as_bytes() == inbound.duid
+                        });
+                    let event = match (renewed, kind) {
+                        (true, MessageType::Rebind) => LeaseEventKind::Rebound,
+                        (true, _) => LeaseEventKind::Renewed,
+                        (false, _) => LeaseEventKind::Granted,
+                    };
+                    scratch.change.push(Binding6 {
+                        event,
+                        kind: Lease6Kind::Pd,
+                        vrf: pick.home.vrf,
+                        scope: pick.home.prefix,
+                        iaid: ia.iaid,
+                        addr: pick.prefix,
+                        prefix_len: pick.len,
+                        state: BindingState::Active,
+                        preferred_ends: later(ctx.now, times.preferred),
+                        ends: later(ctx.now, times.valid),
+                    });
+                }
+                // The prefixes of the IA the client may no longer use (RFC 8415 section
+                // 18.3.4: lifetimes of zero).
+                for (prefix, len) in given() {
+                    if (*prefix, *len) != (pick.prefix, pick.len) {
+                        answer.zero_prefix(*prefix, *len);
+                    }
+                }
+            }
+            None => {
+                let mut any = false;
+                for (prefix, len) in given() {
+                    any = true;
+                    answer.zero_prefix(*prefix, *len);
+                }
+                answer.status = match kind {
+                    MessageType::Request => Some(status::NO_PREFIX_AVAIL),
+                    _ if !any => Some(status::NO_BINDING),
+                    // Lifetimes of zero tell the client to stop using the prefixes.
+                    _ => None,
+                };
+            }
+        }
+        if let Some(slot) = out.get_mut(index) {
+            *slot = answer;
+        }
+    }
+    (delegated, first)
 }
 
 /// CONFIRM (RFC 8415 section 18.3.3): whether every address of the IAs is on the link.
@@ -1001,6 +1318,14 @@ fn give_back(
             shown += 1;
         }
     }
+    // WP9.2: RELEASE gives delegated prefixes back; DECLINE concerns addresses only (RFC
+    // 8415 section 18.3.8), so its IA_PDs are left alone.
+    if kind == MessageType::Release {
+        let Some(after) = release_pd(ctx, inbound, scope, scratch, &mut replies, shown) else {
+            return Action6::Drop(DropReason::Malformed);
+        };
+        shown = after;
+    }
     if !scratch.change.is_empty() && !ctx.accepting {
         return Action6::Drop(DropReason::StoreRefused);
     }
@@ -1021,6 +1346,65 @@ fn give_back(
     } else {
         commit_then(action)
     }
+}
+
+// WP9.2: the IA_PDs of a RELEASE.
+/// The client's delegated prefixes among those of its `IA_PD`s are released; an `IA_PD`
+/// it holds nothing of is answered `NoBinding` in `replies` after the `shown` ones. The new
+/// count of answers; none for a malformed `IA_PD`.
+fn release_pd(
+    ctx: &Context6<'_>,
+    inbound: &Inbound<'_>,
+    scope: &Scope6Image,
+    scratch: &mut Scratch6,
+    replies: &mut [IaReply; MAX_BINDINGS],
+    mut shown: usize,
+) -> Option<usize> {
+    let image = ctx.image.v6();
+    let (pds, pd_count) = ia_pds(&inbound.message, MAX_BINDINGS)?;
+    for ia in pds[..pd_count].iter().flatten() {
+        let mut held_any = false;
+        for given in ia.prefixes().flatten() {
+            let Some((home, lease)) = image.siblings(scope).find_map(|sibling| {
+                ctx.leases
+                    .get(sibling.vrf, given.prefix)
+                    .filter(|lease| {
+                        lease.scope == sibling.prefix
+                            && lease.kind == Lease6Kind::Pd
+                            && lease.prefix_len == given.prefix_len
+                    })
+                    .map(|lease| (sibling, lease))
+            }) else {
+                continue;
+            };
+            if lease.state != BindingState::Active
+                || lease.iaid != ia.iaid
+                || lease.duid.as_bytes() != inbound.duid
+            {
+                continue;
+            }
+            held_any = true;
+            scratch.change.push(Binding6 {
+                event: LeaseEventKind::Released,
+                kind: Lease6Kind::Pd,
+                vrf: home.vrf,
+                scope: home.prefix,
+                iaid: ia.iaid,
+                addr: given.prefix,
+                prefix_len: given.prefix_len,
+                state: BindingState::Released,
+                preferred_ends: ctx.now,
+                ends: ctx.now,
+            });
+        }
+        if !held_any && shown < MAX_BINDINGS {
+            let mut out = IaReply::new_pd(ia.iaid);
+            out.status = Some(status::NO_BINDING);
+            replies[shown] = out;
+            shown += 1;
+        }
+    }
+    Some(shown)
 }
 
 /// INFORMATION-REQUEST (RFC 8415 section 18.3.6): the options, no address.

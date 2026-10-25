@@ -133,6 +133,7 @@ impl Rows {
             last: last.parse().expect("last"),
             role,
             lease_secs,
+            delegated_len: None,
             status: Status::Active,
             meta: meta(),
         };

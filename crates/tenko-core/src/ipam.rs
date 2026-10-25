@@ -231,6 +231,11 @@ pub struct Range {
     /// exists, and the source of the default move timeout (IPAM-19).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_secs: Option<u32>,
+    /// The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),
+    /// between the length of its network and 64; the range starts and ends on a boundary of
+    /// that length. Only delegation pools have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_len: Option<u8>,
     /// Lifecycle status.
     pub status: Status,
     /// Metadata.
@@ -368,6 +373,9 @@ pub enum PrefixRole {
 pub enum RangeRole {
     /// A DHCP pool.
     DhcpPool,
+    /// A DHCPv6 delegation pool (`IA_PD`, RFC 8415 section 6.3): prefixes of the range's
+    /// `delegated_len` handed to requesting routers.
+    DhcpPdPool,
     /// Held back from allocation.
     Reserved,
     /// Gateways, switches and other infrastructure.
@@ -736,6 +744,71 @@ mod tests {
                 .expect("object")
                 .contains_key("dns_reverse")
         );
+    }
+
+    fn delegation_range() -> Range {
+        Range {
+            id: RangeId::generate(),
+            prefix: PrefixId::generate(),
+            first: "2001:db8:1:100::".parse().expect("first"),
+            last: "2001:db8:1:1ff:ffff:ffff:ffff:ffff".parse().expect("last"),
+            role: RangeRole::DhcpPdPool,
+            lease_secs: Some(3_600),
+            delegated_len: Some(56),
+            status: Status::Active,
+            meta: Meta::new(stamp()),
+        }
+    }
+
+    #[test]
+    fn a_delegation_range_round_trips_in_json_and_cbor() {
+        let range = delegation_range();
+        let json = serde_json::to_value(&range).expect("json");
+        assert_eq!(json["role"], "dhcp_pd_pool");
+        assert_eq!(json["delegated_len"], 56);
+        let back: Range = serde_json::from_value(json).expect("json");
+        assert_eq!(back, range);
+        let back: Range = from_cbor(&to_cbor(&range).expect("cbor")).expect("cbor");
+        assert_eq!(back, range);
+        assert_eq!(back.role, RangeRole::DhcpPdPool);
+        assert_eq!(back.delegated_len, Some(56));
+    }
+
+    #[test]
+    fn a_range_stored_without_a_delegated_length_reads_as_none() {
+        // A row of a range without the field (every range written before WP9.2): the
+        // field is absent in the encodings and reads as none.
+        let mut range = delegation_range();
+        range.role = RangeRole::DhcpPool;
+        range.delegated_len = None;
+        let json = serde_json::to_value(&range).expect("json");
+        assert!(
+            !json
+                .as_object()
+                .expect("object")
+                .contains_key("delegated_len")
+        );
+        let bytes = to_cbor(&range).expect("cbor");
+        let value: ciborium::Value = from_cbor(&bytes).expect("value");
+        let ciborium::Value::Map(entries) = value else {
+            panic!("a map");
+        };
+        assert!(
+            entries
+                .iter()
+                .all(|(key, _)| key.as_text() != Some("delegated_len")),
+            "the field is not written when it is none"
+        );
+        let back: Range = from_cbor(&bytes).expect("cbor");
+        assert_eq!(back.delegated_len, None);
+        assert_eq!(back, range);
+        // The same from a row of a delegation pool with the field removed by hand.
+        let mut json = serde_json::to_value(delegation_range()).expect("json");
+        json.as_object_mut()
+            .expect("object")
+            .remove("delegated_len");
+        let back: Range = serde_json::from_value(json).expect("json");
+        assert_eq!(back.delegated_len, None);
     }
 
     #[test]

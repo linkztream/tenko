@@ -44,7 +44,10 @@ use std::{
 use futures::StreamExt as _;
 use tenko_core::{
     RequestCtx, SystemComponent, Timestamp, VrfId,
-    dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, tables},
+    dhcp::{
+        BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, Lease6Kind,
+        tables,
+    },
     dns::{DnsName, tables::ZONES},
     serde_util::HexBytes,
 };
@@ -376,6 +379,9 @@ impl<'a> Worker<'a> {
             };
             let last = tables::LEASES6.key(last);
             for ((vrf, addr), lease, _) in page {
+                if lease.kind == Lease6Kind::Pd {
+                    continue;
+                }
                 let key = (vrf, IpAddr::V6(addr));
                 let memo = self.memory.entry(key).or_insert_with(|| Memo {
                     client: lease.client_key(),
@@ -562,7 +568,11 @@ impl<'a> Worker<'a> {
                     .map(|row| row.map(|(lease, _)| request_of(&lease, image, now))),
                 IpAddr::V6(addr) => view
                     .get_typed(&tables::LEASES6, &(key.0, addr))
-                    .map(|row| row.map(|(lease, _)| request_of6(&lease, image, now))),
+                    // WP9.2: a delegated prefix has no name.
+                    .map(|row| {
+                        row.filter(|(lease, _)| lease.kind == Lease6Kind::Na)
+                            .map(|(lease, _)| request_of6(&lease, image, now))
+                    }),
             };
             let request = match row {
                 Ok(Some(request)) => request,

@@ -1,5 +1,6 @@
-//! Pools: IPAM ranges of role `dhcp_pool` (created, moved and deleted through the IPAM
-//! routes) with what DHCP adds to them (`dhcp.pools`): classes and lease times. A pool
+//! Pools: IPAM ranges of role `dhcp_pool`, and (WP9.2) the delegation pools of role
+//! `dhcp_pd_pool` (created, moved and deleted through the IPAM routes) with what DHCP adds
+//! to them (`dhcp.pools`): classes and lease times. A pool
 //! without settings serves with the range's `lease_secs`, else the scope's lease times.
 //! Settings are kept for pools of a prefix with a scope; they are audited on the scope.
 
@@ -31,7 +32,8 @@ pub struct PoolRow {
     pub range: Range,
     /// The DHCP settings, when set.
     pub settings: Option<PoolSettings>,
-    /// Addresses a client can lease (exclusions taken out); 0 without an IPv4 scope.
+    /// Addresses a client can lease (exclusions taken out); 0 without an IPv4 scope. For a
+    /// delegation pool (WP9.2): the prefixes it delegates.
     pub size: u64,
     /// Addresses with an active lease.
     pub leased: u64,
@@ -71,10 +73,30 @@ fn pools_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<Vec<PoolRow>>
     };
     let mut rows = Vec::new();
     for (range, _) in ranges_of(view, prefix)? {
-        if range.role != RangeRole::DhcpPool {
+        if !matches!(range.role, RangeRole::DhcpPool | RangeRole::DhcpPdPool) {
             continue;
         }
         let settings = view.get_typed(&POOLS, &range.id)?;
+        // WP9.2: a delegation pool's size is the number of prefixes it delegates; the
+        // DHCPv6 bindings are not read here yet (as for an IPv6 address pool).
+        if range.role == RangeRole::DhcpPdPool {
+            let size = built
+                .image
+                .v6()
+                .scope(prefix)
+                .and_then(|scope| scope.pd_pools.iter().find(|pool| pool.range == range.id))
+                .map_or(0, |pool| u64::try_from(pool.blocks()).unwrap_or(u64::MAX));
+            rows.push(PoolRow {
+                revision: settings
+                    .as_ref()
+                    .map_or(Revision::ZERO, |(_, revision)| *revision),
+                settings: settings.map(|(settings, _)| settings),
+                range,
+                size,
+                leased: 0,
+            });
+            continue;
+        }
         let (size, leased) = image
             .and_then(|scope| {
                 scope

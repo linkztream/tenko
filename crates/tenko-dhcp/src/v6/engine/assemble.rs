@@ -7,7 +7,8 @@
 //! - **The message.** The type and the client's transaction id; the Server Identifier (the
 //!   server's DUID) and the Client Identifier echoed; the `IA_NA`s in the client's order,
 //!   each with its address and lifetimes, the addresses the client may no longer use with
-//!   lifetimes of zero, or its status; a top-level Status Code when the message has one;
+//!   lifetimes of zero, or its status, then the `IA_PD`s (WP9.2) the same way with IA
+//!   Prefix options; a top-level Status Code when the message has one;
 //!   Rapid Commit in a REPLY to a SOLICIT that asked for it; the Client FQDN option of RFC
 //!   4704 with the server's flags; then the options the client asks for in its Option
 //!   Request, in its order, and the DNS servers (23) and domain list (24) when they are set
@@ -22,7 +23,7 @@
 
 use std::net::Ipv6Addr;
 
-use tenko_core::dhcp::{OptionValue, SERVER_MANAGED_V6};
+use tenko_core::dhcp::{Lease6Kind, OptionValue, SERVER_MANAGED_V6};
 
 use crate::{
     v4::WireName,
@@ -35,44 +36,63 @@ use crate::{
 /// Addresses returned with lifetimes of zero per IA, at most.
 pub const MAX_ZEROED: usize = 4;
 
-/// The answer for one `IA_NA`.
+/// The answer for one `IA_NA` or (WP9.2) `IA_PD`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IaReply {
+    /// An `IA_NA` or an `IA_PD`.
+    pub kind: Lease6Kind,
     /// The IAID.
     pub iaid: u32,
     /// T1.
     pub t1: u32,
     /// T2.
     pub t2: u32,
-    /// The address with its preferred and valid lifetimes.
+    /// The address, or the delegated prefix, with its preferred and valid lifetimes.
     pub addr: Option<(Ipv6Addr, u32, u32)>,
-    /// Addresses the client may no longer use (lifetimes of zero).
-    pub zeroed: [Option<Ipv6Addr>; MAX_ZEROED],
+    /// The length of the delegated prefix in `addr` (128 for an address).
+    pub prefix_len: u8,
+    /// Addresses or prefixes (with their lengths) the client may no longer use (lifetimes
+    /// of zero).
+    pub zeroed: [Option<(Ipv6Addr, u8)>; MAX_ZEROED],
     /// The IA's status, when it has one.
     pub status: Option<u16>,
 }
 
 impl IaReply {
-    /// An IA without an address yet.
+    /// An `IA_NA` without an address yet.
     pub const fn new(iaid: u32) -> Self {
         Self {
+            kind: Lease6Kind::Na,
             iaid,
             t1: 0,
             t2: 0,
             addr: None,
+            prefix_len: 128,
             zeroed: [None; MAX_ZEROED],
             status: None,
         }
     }
 
+    /// An `IA_PD` without a prefix yet.
+    pub const fn new_pd(iaid: u32) -> Self {
+        let mut reply = Self::new(iaid);
+        reply.kind = Lease6Kind::Pd;
+        reply
+    }
+
     /// Adds an address to return with lifetimes of zero; false when full.
     pub fn zero(&mut self, addr: Ipv6Addr) -> bool {
-        if self.zeroed.contains(&Some(addr)) {
+        self.zero_prefix(addr, 128)
+    }
+
+    /// Adds a prefix to return with lifetimes of zero; false when full.
+    pub fn zero_prefix(&mut self, addr: Ipv6Addr, len: u8) -> bool {
+        if self.zeroed.contains(&Some((addr, len))) {
             return true;
         }
         match self.zeroed.iter_mut().find(|slot| slot.is_none()) {
             Some(slot) => {
-                *slot = Some(addr);
+                *slot = Some((addr, len));
                 true
             }
             None => false,
@@ -160,12 +180,26 @@ pub fn write(buf: &mut [u8], limit: usize, reply: &Reply6<'_>) -> Result<usize, 
         builder.option(code::CLIENTID, client)?;
     }
     for ia in reply.ias {
-        let mark = builder.begin_ia_na(ia.iaid, ia.t1, ia.t2)?;
+        let pd = ia.kind == Lease6Kind::Pd;
+        let mark = if pd {
+            builder.begin_ia_pd(ia.iaid, ia.t1, ia.t2)?
+        } else {
+            builder.begin_ia_na(ia.iaid, ia.t1, ia.t2)?
+        };
         if let Some((addr, preferred, valid)) = ia.addr {
-            builder.ia_address(addr, preferred, valid)?;
+            if pd {
+                builder.ia_prefix(addr, ia.prefix_len, preferred, valid)?;
+            } else {
+                builder.ia_address(addr, preferred, valid)?;
+            }
         }
-        for addr in ia.zeroed.iter().flatten() {
-            if Some(*addr) != ia.addr.map(|(held, _, _)| held) {
+        for (addr, len) in ia.zeroed.iter().flatten() {
+            if Some((*addr, *len)) == ia.addr.map(|(held, _, _)| (held, ia.prefix_len)) {
+                continue;
+            }
+            if pd {
+                builder.ia_prefix(*addr, *len, 0, 0)?;
+            } else {
                 builder.ia_address(*addr, 0, 0)?;
             }
         }

@@ -670,6 +670,7 @@ impl Planner<'_> {
             .param("cidr", prefix.cidr)
             .field("first", codes::RANGE_OUTSIDE_PREFIX));
         }
+        check_delegation(prefix, range)?;
         let (first, last) = (ip_to_u128(range.first), ip_to_u128(range.last));
         for other in self.ranges_of(prefix.id, false)? {
             if other.id != range.id
@@ -690,7 +691,7 @@ impl Planner<'_> {
                 .field("first", codes::RANGE_OVERLAP));
             }
         }
-        if range.role == RangeRole::DhcpPool {
+        if matches!(range.role, RangeRole::DhcpPool | RangeRole::DhcpPdPool) {
             let family = Family::of(range.first);
             for (ip, address) in self.addresses_between(prefix.vrf, family, first, last)? {
                 let (address, _) = self.load::<Address>(address)?;
@@ -733,6 +734,7 @@ impl Planner<'_> {
             last: input.last,
             role: input.role,
             lease_secs: input.lease_secs,
+            delegated_len: input.delegated_len,
             status,
             meta,
         };
@@ -769,12 +771,17 @@ impl Planner<'_> {
         if let Some(lease_secs) = patch.lease_secs {
             after.lease_secs = lease_secs;
         }
+        if let Some(delegated_len) = patch.delegated_len {
+            after.delegated_len = delegated_len;
+        }
         check_lease(&after)?;
         if let Some(status) = patch.status {
             Self::check_transition(before.id.into(), before.status, status)?;
             after.status = status;
         }
-        if (after.first, after.last, after.role) != (before.first, before.last, before.role) {
+        if (after.first, after.last, after.role, after.delegated_len)
+            != (before.first, before.last, before.role, before.delegated_len)
+        {
             self.ws.expect_and_bump(&alloc_counter(prefix.id))?;
             self.check_range(&prefix, &after)?;
         }
@@ -937,6 +944,15 @@ impl Planner<'_> {
                 RangeRole::Reserved => self.warn(
                     codes::WARN_ADDRESS_IN_RANGE,
                     format!("{ip} lies inside the reserved range {label}"),
+                    Some(object),
+                    &[("ip", ip.to_string()), ("range", label)],
+                    false,
+                ),
+                // WP9.2: an address inside a delegation pool takes its delegated prefix out
+                // of the pool; a reservation there is refused by the range rule above.
+                RangeRole::DhcpPdPool => self.warn(
+                    codes::WARN_ADDRESS_IN_RANGE,
+                    format!("{ip} lies inside the delegation pool {label}"),
                     Some(object),
                     &[("ip", ip.to_string()), ("range", label)],
                     false,
@@ -1310,13 +1326,65 @@ const MIN_LEASE_SECS: u32 = 60;
 /// Longest DHCP lease time of a range (a year).
 const MAX_LEASE_SECS: u32 = 31_536_000;
 
+// WP9.2: the shape of a delegation pool (RFC 8415 section 6.3).
+/// The longest delegated prefix: a delegated prefix is at most a /64, the length of one
+/// link (RFC 4291 section 2.5.1).
+const MAX_DELEGATED_LEN: u8 = 64;
+
+/// A delegation pool is IPv6, has a delegated length between its network's length and 64,
+/// and starts and ends on a boundary of that length; no other range has one.
+fn check_delegation(prefix: &Prefix, range: &Range) -> IpamResult<()> {
+    let field = "delegated_len";
+    if range.role != RangeRole::DhcpPdPool {
+        return match range.delegated_len {
+            Some(_) => Err(IpamError::invalid(
+                field,
+                "only delegation pools (dhcp_pd_pool) have a delegated length",
+            )),
+            None => Ok(()),
+        };
+    }
+    let IpNet::V6(network) = prefix.cidr else {
+        return Err(IpamError::invalid(
+            "role",
+            "a delegation pool belongs to an IPv6 network",
+        ));
+    };
+    let Some(len) = range.delegated_len else {
+        return Err(IpamError::invalid(
+            field,
+            "a delegation pool needs the length of the prefixes it delegates",
+        ));
+    };
+    if len <= network.prefix_len() || len > MAX_DELEGATED_LEN {
+        return Err(IpamError::invalid(
+            field,
+            format!(
+                "the delegated length {len} must be longer than the network's {} and at most                  {MAX_DELEGATED_LEN}",
+                network.prefix_len()
+            ),
+        ));
+    }
+    let block = 1u128 << (128 - u32::from(len));
+    let (first, last) = (ip_to_u128(range.first), ip_to_u128(range.last));
+    if first % block != 0 || last.wrapping_add(1) % block != 0 {
+        return Err(IpamError::invalid(
+            field,
+            format!(
+                "{} to {} does not start and end on a /{len} boundary",
+                range.first, range.last
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// A lease time belongs to DHCP pools and lies between a minute and a year.
 fn check_lease(range: &Range) -> IpamResult<()> {
     match range.lease_secs {
-        Some(_) if range.role != RangeRole::DhcpPool => Err(IpamError::invalid(
-            "lease_secs",
-            "only DHCP pools have a lease time",
-        )),
+        Some(_) if !matches!(range.role, RangeRole::DhcpPool | RangeRole::DhcpPdPool) => Err(
+            IpamError::invalid("lease_secs", "only DHCP pools have a lease time"),
+        ),
         Some(secs) if !(MIN_LEASE_SECS..=MAX_LEASE_SECS).contains(&secs) => {
             Err(IpamError::invalid(
                 "lease_secs",

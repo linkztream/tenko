@@ -15,8 +15,15 @@
 # - netns: owns the node's network namespace: its two addresses, the IPv4 route to the
 #   other networks through the gateway, and net.ipv4.ip_unprivileged_port_start=0, which
 #   opens ports 67 and 547 to the node's user (the node needs no capability).
-# - tenko: the node from the musl image with the roles controller and dhcp and the modules
-#   ipam, dns and dhcp (DDNS needs the DNS module), listening for relays on both addresses.
+# - tenko: the node from the musl image with the roles controller, dhcp and probe and the
+#   modules ipam, dns and dhcp (DDNS needs the DNS module), listening for relays on both
+#   addresses. WP9.2: the image is TENKO_PROBE_IMAGE (probe.Dockerfile: the same binary
+#   with the file capability cap_net_raw+ep), so that the probe's router advertisement
+#   check opens its raw ICMPv6 socket as the unprivileged user of the image.
+# - router6 (servers6, WP9.2): radvd with the M and O flags of the RA rows
+#   (scripts/radvd.sh), started by its row.
+# - client-pd6 (lan6, 00:00:5e:00:53:64, WP9.2): dhclient -6 -P, a requesting router that
+#   asks for a delegated prefix.
 # - client-dhclient6 (lan6, 00:00:5e:00:53:61): ISC dhclient -6 and -4. client-networkd
 #   (lan6, ...:62, profile networkd): systemd-networkd, DHCPv6 with Rapid Commit.
 #   client-iot6 (iot6, ...:63): dhclient -6.
@@ -25,7 +32,7 @@
 #   LAB_DIR/kea, on the node's addresses once the node has stopped (E30's DHCPv6 rows).
 #
 # Variables (smoke.sh sets them): LAB_DIR (the work directory with tenko.toml and the key
-# file, required), TENKO_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE, KEA_IMAGE.
+# file, required), TENKO_IMAGE, TENKO_PROBE_IMAGE, TOOLS_IMAGE, NETWORKD_IMAGE, KEA_IMAGE.
 
 # smoke.sh passes -p tenkodhcp6lab: COMPOSE_PROJECT_NAME of the other rounds would win over
 # this name.
@@ -86,8 +93,8 @@ services:
         ipv6_address: "2001:db8:100::10"
 
   tenko:
-    image: ${TENKO_IMAGE:-tenko:lab}
-    command: ["--roles", "controller,dhcp", "--config", "/lab/tenko.toml"]
+    image: ${TENKO_PROBE_IMAGE:-tenko-dhcp-lab-probe:latest}
+    command: ["--roles", "controller,dhcp,probe", "--config", "/lab/tenko.toml"]
     network_mode: "service:netns"
     depends_on:
       - netns
@@ -113,10 +120,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # WP9.2: CAP_NET_RAW in the bounding set for the binary's file capability (the raw
+    # ICMPv6 socket of the RA check); no-new-privileges would ignore that capability.
     cap_drop:
       - ALL
-    security_opt:
-      - no-new-privileges:true
+    cap_add:
+      - NET_RAW
 
   # WP9.3: Kea's DHCPv6 server from the export, in the node's network namespace.
   kea6:
@@ -169,6 +178,35 @@ services:
         ipv4_address: 192.0.2.133
         ipv6_address: "2001:db8:102::133"
         mac_address: "00:00:5e:00:53:63"
+
+  # WP9.2: a requesting router on lan6 (dhclient -6 -P through dhcrelay).
+  client-pd6:
+    <<: *client
+    environment:
+      GATEWAY: 192.0.2.66
+    networks:
+      lan6:
+        ipv4_address: 192.0.2.71
+        ipv6_address: "2001:db8:101::71"
+        mac_address: "00:00:5e:00:53:64"
+
+  # WP9.2: the router advertisements of the node's link servers6 (the RA rows).
+  router6:
+    <<: *tools
+    entrypoint: ["/lab/radvd.sh", "run"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv6.conf.all.forwarding: "1"
+    environment:
+      PREFIX: "2001:db8:100::/64"
+      MANAGED: "off"
+      OTHER: "off"
+    networks:
+      servers6:
+        ipv4_address: 192.0.2.30
+        ipv6_address: "2001:db8:100::30"
 
   tester:
     <<: *tools

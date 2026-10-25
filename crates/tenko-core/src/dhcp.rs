@@ -909,13 +909,17 @@ pub struct PoolSettings {
 
 impl PoolSettings {
     /// Checks pool settings against the range and the scope's prefix: the range is the one
-    /// named, of role `dhcp_pool`, inside the prefix; valid lease times.
+    /// named, of role `dhcp_pool` or (WP9.2) `dhcp_pd_pool`, inside the prefix; valid lease
+    /// times. The classes of a delegation pool are stored and, like every class, matched
+    /// for DHCPv4 only.
     ///
     /// # Errors
     ///
     /// `dhcp.pool.not_pool`, `dhcp.pool.outside` or the code of the lease check.
     pub fn validate(&self, range: &Range, prefix: &Prefix) -> Result<(), DhcpError> {
-        if range.id != self.range || range.role != RangeRole::DhcpPool {
+        if range.id != self.range
+            || !matches!(range.role, RangeRole::DhcpPool | RangeRole::DhcpPdPool)
+        {
             return Err(
                 DhcpError::new(codes::POOL_NOT_POOL, 409, "the range is not a DHCP pool")
                     .with_param("range", range.id.to_string()),

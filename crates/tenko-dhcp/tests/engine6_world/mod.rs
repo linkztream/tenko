@@ -20,7 +20,7 @@ use tenko_dhcp::{
         engine::{
             Action6, Answer6, Context6, Engine6Settings, Offers6, Received6, Scratch6, handle,
         },
-        image::{Pool6Image, Reservation6Image, Reservation6Key, Scope6Image},
+        image::{PdPool6Image, Pool6Image, Reservation6Image, Reservation6Key, Scope6Image},
         lease::{
             Lease6Index, Lease6Table,
             store::{Lease6Store, MemLease6Store},
@@ -93,6 +93,7 @@ pub fn scope(prefix: PrefixId, network: &str, first: &str, last: &str) -> Scope6
             },
             options: Vec::new(),
         }],
+        pd_pools: Vec::new(),
         excluded: Vec::new(),
         options: vec![
             OptionValue {
@@ -390,4 +391,92 @@ pub fn bound(world: &World6, address: Ipv6Addr, duid: &[u8]) -> bool {
         .table
         .get(VrfId::from_uuid(uuid::Uuid::nil()), address)
         .is_some_and(|lease| lease.is_bound(world.now) && lease.duid.as_bytes() == duid)
+}
+
+// WP9.2: delegation pools and IA_PD.
+
+/// The first address of the default delegation pool (inside a /48 of the documentation
+/// range).
+pub const PD_FIRST: &str = "2001:db8:180:100::";
+/// The last address of the default delegation pool: sixteen /60 prefixes.
+pub const PD_LAST: &str = "2001:db8:180:1ff:ffff:ffff:ffff:ffff";
+
+/// A delegation pool of `first` to `last` cut into prefixes of `len`; its lease times (a
+/// valid lifetime of 6,000 seconds) differ from the scope's so that a test sees which one
+/// a reply used.
+pub fn pd_pool(first: &str, last: &str, len: u8) -> PdPool6Image {
+    PdPool6Image {
+        range: RangeId::generate(),
+        first: addr(first),
+        last: addr(last),
+        delegated_len: len,
+        lease: LeaseTimes {
+            default_secs: 6_000,
+            min_secs: 600,
+            max_secs: 8_000,
+            t1_secs: None,
+            t2_secs: None,
+        },
+        options: Vec::new(),
+    }
+}
+
+/// The default delegation pool: `PD_FIRST` to `PD_LAST` in /60 prefixes.
+pub fn pd_pool_60() -> PdPool6Image {
+    pd_pool(PD_FIRST, PD_LAST, 60)
+}
+
+/// An `IA_PD` with `iaid` and the hints `prefixes` (a prefix of `::` is a hint of the
+/// length only).
+pub fn ia_pd(builder: &mut MessageBuilder<'_>, iaid: u32, prefixes: &[(Ipv6Addr, u8)]) {
+    let mark = builder.begin_ia_pd(iaid, 0, 0).expect("ia_pd");
+    for (prefix, len) in prefixes {
+        builder.ia_prefix(*prefix, *len, 0, 0).expect("ia prefix");
+    }
+    builder.end(mark).expect("end");
+}
+
+/// The prefixes of the `IA_PD`s of a reply, in order: (IAID, prefix, length, preferred,
+/// valid).
+pub fn prefixes(reply: &[u8]) -> Vec<(u32, Ipv6Addr, u8, u32, u32)> {
+    let inner = unwrap(reply);
+    let message = Message::parse(&inner).expect("parses");
+    let mut out = Vec::new();
+    for ia in message.ia_pds() {
+        let ia = ia.expect("ia_pd");
+        for prefix in ia.prefixes() {
+            let prefix = prefix.expect("prefix");
+            out.push((
+                ia.iaid,
+                prefix.prefix,
+                prefix.prefix_len,
+                prefix.preferred,
+                prefix.valid,
+            ));
+        }
+    }
+    out
+}
+
+/// The status codes inside the reply's `IA_PD`s, in order.
+pub fn pd_statuses(reply: &[u8]) -> Vec<Option<u16>> {
+    let inner = unwrap(reply);
+    let message = Message::parse(&inner).expect("parses");
+    message
+        .ia_pds()
+        .map(|ia| ia.expect("ia_pd").status().map(|status| status.code))
+        .collect()
+}
+
+/// Whether the table holds an active delegation of `prefix`/`len` for `duid`.
+pub fn delegated(world: &World6, prefix: Ipv6Addr, len: u8, duid: &[u8]) -> bool {
+    world
+        .table
+        .get(VrfId::from_uuid(uuid::Uuid::nil()), prefix)
+        .is_some_and(|lease| {
+            lease.is_bound(world.now)
+                && lease.kind == tenko_core::dhcp::Lease6Kind::Pd
+                && lease.prefix_len == len
+                && lease.duid.as_bytes() == duid
+        })
 }

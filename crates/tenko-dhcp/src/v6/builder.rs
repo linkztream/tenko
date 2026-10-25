@@ -286,6 +286,50 @@ impl<'b> MessageBuilder<'b> {
         )
     }
 
+    // WP9.2: the delegated prefixes.
+    /// Opens an `IA_PD` with its IAID, T1 and T2 (RFC 8415 section 21.21); its IA Prefix
+    /// options and status follow.
+    ///
+    /// # Errors
+    ///
+    /// As [`MessageBuilder::begin`].
+    pub fn begin_ia_pd(&mut self, iaid: u32, t1: u32, t2: u32) -> Result<Mark, EncodeError> {
+        let mark = self.begin(code::IA_PD)?;
+        let mut head = [0u8; 12];
+        head[..4].copy_from_slice(&iaid.to_be_bytes());
+        head[4..8].copy_from_slice(&t1.to_be_bytes());
+        head[8..].copy_from_slice(&t2.to_be_bytes());
+        if let Err(error) = self.put(code::IA_PD, &head) {
+            self.rewind(mark)?;
+            return Err(error);
+        }
+        Ok(mark)
+    }
+
+    /// Appends an IA Prefix without options (RFC 8415 section 21.22): the lifetimes, the
+    /// length and the prefix.
+    ///
+    /// # Errors
+    ///
+    /// As [`MessageBuilder::option`].
+    pub fn ia_prefix(
+        &mut self,
+        prefix: Ipv6Addr,
+        prefix_len: u8,
+        preferred: u32,
+        valid: u32,
+    ) -> Result<&mut Self, EncodeError> {
+        self.option_parts(
+            code::IAPREFIX,
+            &[
+                &preferred.to_be_bytes(),
+                &valid.to_be_bytes(),
+                &[prefix_len],
+                &prefix.octets(),
+            ],
+        )
+    }
+
     /// Appends a list of addresses (options 23, 31, 22).
     ///
     /// # Errors

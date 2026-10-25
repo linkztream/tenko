@@ -244,6 +244,7 @@ async fn network(
         last: pool.1.parse().expect("last"),
         role: RangeRole::DhcpPool,
         lease_secs: None,
+        delegated_len: None,
         status: Status::Active,
         meta: meta(),
     };
@@ -699,6 +700,7 @@ async fn the_status_reports_both_families_and_each_serves_its_own() {
     assert_eq!(status.listeners6[0].workers, 2);
     assert_eq!(status.scopes, 1, "the IPv4 scope");
     assert_eq!(status.scopes6, 1, "the IPv6 scope");
+    assert_eq!(status.server_duid.as_deref(), Some(&SERVER_DUID[..]));
     assert_eq!(fx.active6(), 0);
 
     // Both families answer at once.

@@ -92,6 +92,7 @@ impl Lab {
                 last: ip(last),
                 role,
                 lease_secs: None,
+                delegated_len: None,
                 status: Status::Active,
                 meta: Meta::new(stamp()),
             },

@@ -1,0 +1,10 @@
+# Router Solicitation (ICMPv6 type 133, RFC 4861 section 4.1) as the probe sends it to
+# ff02::2: checksum 0 (the kernel fills it on a raw ICMPv6 socket), four reserved octets, and
+# the source link-layer address 00:00:5e:00:53:01. It is not an advertisement.
+#
+# type 133, code 0, checksum 0
+85 00 00 00
+# reserved
+00 00 00 00
+# option 1, source link-layer address, 1 unit
+01 01 00 00 5e 00 53 01

@@ -1,0 +1,38 @@
+# Router Advertisement with the options of a full radvd configuration: source link-layer
+# address, MTU 1480 (a PPPoE uplink), a prefix, the recursive DNS servers of RFC 8106 section
+# 5.1 and the DNS search list of section 5.2 (an option the parser keeps as "other"). The
+# flags are 0x48: O on, M off, router preference high (bits 3 and 4 = 01). Router
+# fe80::200:5eff:fe00:5304.
+#
+# type 134, code 0, checksum 0x5061
+86 00 50 61
+# cur hop limit 64, flags 0x48, router lifetime 1800 s
+40 48 07 08
+# reachable time 30000 ms, retransmit timer 1000 ms
+00 00 75 30
+00 00 03 e8
+# option 1, source link-layer address 00:00:5e:00:53:04
+01 01 00 00 5e 00 53 04
+# option 5, MTU, 1 unit: reserved 0, MTU 1480
+05 01 00 00 00 00 05 c8
+# option 3, prefix information, 4 units: prefix length 64, flags 0xc0 (L, A)
+03 04 40 c0
+# valid lifetime 86400 s, preferred lifetime 14400 s, reserved
+00 01 51 80
+00 00 38 40
+00 00 00 00
+# prefix 2001:db8:100::
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 00
+# option 25, RDNSS, 5 units: reserved 0, lifetime 1200 s
+19 05 00 00
+00 00 04 b0
+# server 2001:db8:100::53
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 53
+# server 2001:db8:100::54
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 54
+# option 31, DNSSL, 3 units: reserved 0, lifetime 1200 s
+1f 03 00 00
+00 00 04 b0
+# search domain example.net in DNS wire format, then 3 octets of padding
+07 65 78 61 6d 70 6c 65 03 6e 65 74 00
+00 00 00

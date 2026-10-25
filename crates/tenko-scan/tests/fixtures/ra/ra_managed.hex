@@ -1,0 +1,21 @@
+# Router Advertisement with the M flag: the router sends hosts to DHCPv6 for addresses, as a
+# router does that runs a stateful DHCPv6 service. The prefix has L but not A, so SLAAC forms
+# no address in it. Router fe80::200:5eff:fe00:5302 (documentation MAC 00:00:5e:00:53:02).
+#
+# type 134, code 0, checksum 0x2c3d
+86 00 2c 3d
+# cur hop limit 64, flags 0x80 (M on, O off), router lifetime 1800 s
+40 80 07 08
+# reachable time 0, retransmit timer 0
+00 00 00 00
+00 00 00 00
+# option 1, source link-layer address 00:00:5e:00:53:02
+01 01 00 00 5e 00 53 02
+# option 3, prefix information, 4 units: prefix length 64, flags 0x80 (L)
+03 04 40 80
+# valid lifetime 2592000 s (30 days), preferred lifetime 604800 s (7 days), reserved
+00 27 8d 00
+00 09 3a 80
+00 00 00 00
+# prefix 2001:db8:200::
+20 01 0d b8 02 00 00 00 00 00 00 00 00 00 00 00

@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-24 Phase 3 requirements; 8 named by at least one test, 16 not; 0 named by no test, measurement or document.
+24 Phase 3 requirements; 9 named by at least one test, 15 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DHCP-07 | Must | - | - | `crates/tenko-dhcp/src/lease/history.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0002-storage-and-replication.md`<br>`docs/adr/0019-dhcp-data-model-and-lease-path.md`<br>and 5 more |
 | DHCP-08 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`crates/tenko-dhcp/src/image.rs`<br>and 7 more |
 | DHCP-09 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>`docs/plans/ha-plan.md`<br>`docs/plans/phase-3-plan.md` |
-| DHCP-10 | Should | - | - | `docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>`docs/plans/phase-3-plan.md` |
+| DHCP-10 | Should | `crates/tenko-api/tests/system_dhcp_ra.rs`<br>`crates/tenko-dhcp/tests/ra.rs` | - | `crates/tenko-dhcp/src/ra.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/ra.rs`<br>`docs/CONFORMANCE.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-11 | Should | - | - | `crates/tenko-api/src/routes/dhcp/leases.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp/lease.rs`<br>`crates/tenko-dhcp/src/role/commands.rs`<br>`crates/tenko-dhcp/src/role/leases6.rs`<br>and 7 more |
 | DHCP-12 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 4 more |
 | DHCP-13 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/ddns/names.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>and 10 more |
@@ -35,7 +35,7 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 | DNS-13 | Must | - | - | `crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/validate.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 7 more |
 | DNS-34 | Should | - | - | `crates/tenko-dns/src/cache/denial.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0021-recursive-resolution-and-validation.md`<br>and 4 more |
 | IPAM-21 | Must | `crates/tenko-ipam/tests/reconcile_view.rs`<br>`crates/tenko/tests/acceptance_reconcile.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/reconcile.rs`<br>`crates/tenko-ipam/src/reconcile/view.rs`<br>`crates/tenko/src/client/ipam.rs`<br>`docs/ARCHITECTURE.md`<br>and 6 more |
-| MIG-16 | Must | `crates/tenko-api/tests/dhcp_export.rs`<br>`crates/tenko/tests/acceptance_kea_export.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/export.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/export.rs`<br>and 7 more |
+| MIG-16 | Must | `crates/tenko-api/tests/dhcp_export.rs`<br>`crates/tenko/tests/acceptance_kea_export.rs` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dhcp/export.rs`<br>`crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/export.rs`<br>and 8 more |
 | OPS-17 | Should | - | - | `docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>`docs/plans/ha-plan.md`<br>`docs/plans/phase-2-exit.md`<br>`docs/plans/phase-2-plan.md` |
 
 ## Exit criteria
@@ -85,7 +85,6 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - DHCP-07 (Must)
 - DHCP-08 (Must)
 - DHCP-09 (Must)
-- DHCP-10 (Should)
 - DHCP-11 (Should)
 - DHCP-12 (Must)
 - DHCP-13 (Must)

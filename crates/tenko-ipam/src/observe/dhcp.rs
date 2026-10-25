@@ -19,6 +19,14 @@
 //! DHCPv6 address of one device under one MAC (DHCP-11); the name fact is the name of
 //! RFC 4704. A DHCPv6 request has no fingerprint and no vendor class here.
 //!
+//! A delegated prefix (WP9.2, an `IA_PD` binding) is no address in use: its fact is
+//! `Observed::Network` with the prefix as the subnet, under the subject
+//! `network:dhcp-pd/<vrf>/<prefix>` (the controller field holds that reference), named by
+//! the router's link-layer address or DUID, while the binding holds. The reconciler reads
+//! network facts of network controllers only, so a delegation never becomes a proposal for
+//! a host, an address or a VLAN, and the observation view shows it under the delegation
+//! network. It has no name fact: a name of RFC 4704 belongs to an address.
+//!
 //! The guess comes from the classifier the role hands the index ([`LeaseFacts::set_classifier`],
 //! the rule table of `tenko_dhcp::fingerprint`); without one no OS fact is written. A
 //! fact's `last_seen` is the lease's client transaction time, its `expires_at` the end of
@@ -60,8 +68,8 @@ use std::{
 use tenko_core::{
     MacAddr, NodeId, ObservationId, Revision, Timestamp,
     codec::encode_key,
-    dhcp::{BindingState, Fingerprint, Lease, Lease6},
-    observe::{ObservationSource, Observed},
+    dhcp::{BindingState, Fingerprint, Lease, Lease6, Lease6Kind},
+    observe::{NetworkDhcp, ObservationSource, Observed},
 };
 use tenko_store::{
     ChangeSet, DerivedIndex, IndexImage, KeyRange, ReadView, ReadViewExt, Store, StoreError,
@@ -351,6 +359,9 @@ impl LeaseFacts {
         now: Timestamp,
         batch: &mut WriteBatch,
     ) -> Result<LeaseObservation, StoreError> {
+        if lease.kind == Lease6Kind::Pd {
+            return self.observe_delegation(lease, now, batch);
+        }
         let conflict = lease.state == BindingState::Abandoned && lease.ends > now;
         self.observe_parts(
             &Parts {
@@ -373,6 +384,64 @@ impl LeaseFacts {
             now,
             batch,
         )
+    }
+
+    // WP9.2: the fact of a delegated prefix.
+    /// The network fact of a delegated prefix while its binding holds; it expires with the
+    /// binding, on a release at once.
+    fn observe_delegation(
+        &self,
+        lease: &Lease6,
+        now: Timestamp,
+        batch: &mut WriteBatch,
+    ) -> Result<LeaseObservation, StoreError> {
+        let prefix = ipnet::Ipv6Net::new(lease.addr6(), lease.prefix_len.min(128))
+            .map(|net| ipnet::IpNet::V6(net.trunc()))
+            .ok();
+        let reference = format!(
+            "dhcp-pd/{}/{}/{}",
+            lease.vrf,
+            lease.addr6(),
+            lease.prefix_len
+        );
+        let holder = match lease.mac() {
+            Some(mac) => MacAddr::new(mac).to_string(),
+            None => format!("DUID {}", hex(lease.duid.as_bytes())),
+        };
+        let observed = Observed::Network {
+            controller: reference,
+            name: format!("delegated to {holder}"),
+            subnet: prefix,
+            vlan: None,
+            dhcp: NetworkDhcp::Server,
+            management: false,
+        };
+        let subject = FactSubject::of(&observed);
+        let stored = self
+            .image
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .facts
+            .get(&subject.key())
+            .cloned();
+        let wanted = lease.is_bound(now).then(|| Wanted {
+            observed,
+            seen: lease.cltt.min(now),
+            expires: lease.ends,
+        });
+        let address = self.apply(&subject, stored.as_ref(), wanted, now, batch)?;
+        let observed_at = address.wrote().then_some(if lease.is_bound(now) {
+            lease.cltt.min(now)
+        } else {
+            now
+        });
+        Ok(LeaseObservation {
+            address,
+            name: FactOutcome::None,
+            os: FactOutcome::None,
+            vendor: FactOutcome::None,
+            observed_at,
+        })
     }
 
     fn observe_parts(
@@ -655,6 +724,16 @@ impl DerivedIndex for LeaseFacts {
             }
         }
     }
+}
+
+/// Lower-case hexadecimal octets.
+fn hex(octets: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(octets.len() * 2);
+    for octet in octets {
+        let _ = write!(out, "{octet:02x}");
+    }
+    out
 }
 
 #[cfg(test)]

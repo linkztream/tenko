@@ -156,6 +156,7 @@ async fn fill(store: &MemStore) -> Space {
                     last: ip(&address_text(n, POOL.1)),
                     role: RangeRole::DhcpPool,
                     lease_secs: None,
+                    delegated_len: None,
                     status: Status::Active,
                     meta: meta(),
                 },

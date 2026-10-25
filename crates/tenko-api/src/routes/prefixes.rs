@@ -286,6 +286,11 @@ pub(crate) struct NewRange {
     /// the default timeout of moves into the prefix.
     #[serde(default)]
     pub(crate) lease_secs: Option<u32>,
+    /// The length of the prefixes a delegation pool (`dhcp_pd_pool`) hands out, required
+    /// there and refused elsewhere: longer than the network's length, at most 64, with the
+    /// range on its boundaries.
+    #[serde(default)]
+    pub(crate) delegated_len: Option<u8>,
     /// Tags.
     #[serde(default)]
     pub(crate) tags: BTreeSet<Tag>,
@@ -946,6 +951,7 @@ async fn create_range(
         role: body.role,
         status: body.status,
         lease_secs: body.lease_secs,
+        delegated_len: body.delegated_len,
         tags: body.tags,
         custom: body.custom,
         description: body.description,

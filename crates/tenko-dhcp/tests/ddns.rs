@@ -154,6 +154,7 @@ async fn lab(profile: DdnsProfile, update: UpdatePolicy) -> Lab {
         last: ip(99).into(),
         role: RangeRole::DhcpPool,
         lease_secs: None,
+        delegated_len: None,
         status: Status::Active,
         meta: meta(),
     };

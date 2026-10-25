@@ -152,6 +152,7 @@ impl Lab {
                 first: ip(first),
                 last: ip(last),
                 role,
+                delegated_len: None,
                 lease_secs: None,
                 status: Status::Active,
                 meta: Meta::new(stamp()),
@@ -961,6 +962,7 @@ fn without_dhcpv6_there_is_no_dhcp6_document() {
 
 fn scope_image(lease: LeaseTimes, settings: Scope6Settings) -> Scope6Image {
     Scope6Image {
+        pd_pools: Vec::new(),
         prefix: PrefixId::from_uuid(uuid(5)),
         vrf: VrfId::from_uuid(uuid(1)),
         network: "2001:db8::/64".parse().expect("network"),

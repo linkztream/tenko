@@ -43,8 +43,8 @@ use crate::{
     lease::{InlineBytes, TextBytes},
 };
 
-/// The most bindings one message changes: its `IA_NA`s (and, with WP9.2, `IA_PD`s) up to
-/// this many; the engine answers the others with a status.
+/// The most bindings one message changes: its `IA_NA`s and `IA_PD`s (WP9.2) together up
+/// to this many; the engine answers the others with a status.
 pub const MAX_BINDINGS: usize = 8;
 
 /// The longest link-layer address kept (RFC 6939 allows any; Ethernet has six octets).
@@ -56,8 +56,10 @@ pub trait Lease6Table {
     fn get(&self, vrf: VrfId, addr: Ipv6Addr) -> Option<&Lease6>;
 
     /// The latest lease of a client identity ([`Lease6::identity`]: IAID and DUID) in a
-    /// scope.
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease6>;
+    /// scope, of one kind: an `IA_NA` and an `IA_PD` of one client may share an IAID (RFC
+    /// 8415 section 12: the IAID is unique among the IAs of one type), so the kind is part
+    /// of the key (WP9.2).
+    fn by_client(&self, scope: PrefixId, kind: Lease6Kind, identity: &[u8]) -> Option<&Lease6>;
 
     /// The number of rows.
     fn len(&self) -> usize;
@@ -84,7 +86,7 @@ type ClientIndex = HashMap<Vec<u8>, Vec<(VrfId, Ipv6Addr)>>;
 #[derive(Debug, Clone, Default)]
 pub struct Lease6Index {
     rows: HashMap<(VrfId, Ipv6Addr), Held>,
-    clients: HashMap<PrefixId, ClientIndex>,
+    clients: HashMap<(PrefixId, Lease6Kind), ClientIndex>,
     revision: Revision,
 }
 
@@ -200,7 +202,7 @@ impl Lease6Index {
                 return false;
             }
         }
-        let scope = lease.scope;
+        let scope = (lease.scope, lease.kind);
         let identity = lease.identity();
         let previous = self.rows.insert(key, Held { lease, revision });
         if revision > self.revision {
@@ -208,8 +210,9 @@ impl Lease6Index {
         }
         if let Some(previous) = previous {
             let held_identity = previous.lease.identity();
-            if previous.lease.scope != scope || held_identity != identity {
-                self.detach(previous.lease.scope, &held_identity, key);
+            let held_scope = (previous.lease.scope, previous.lease.kind);
+            if held_scope != scope || held_identity != identity {
+                self.detach(held_scope, &held_identity, key);
             }
         }
         let rows = self
@@ -227,11 +230,15 @@ impl Lease6Index {
     /// Removes the row of an address; returns it.
     pub fn take(&mut self, vrf: VrfId, addr: Ipv6Addr) -> Option<Lease6> {
         let held = self.rows.remove(&(vrf, addr))?;
-        self.detach(held.lease.scope, &held.lease.identity(), (vrf, addr));
+        self.detach(
+            (held.lease.scope, held.lease.kind),
+            &held.lease.identity(),
+            (vrf, addr),
+        );
         Some(held.lease)
     }
 
-    fn detach(&mut self, scope: PrefixId, identity: &[u8], key: (VrfId, Ipv6Addr)) {
+    fn detach(&mut self, scope: (PrefixId, Lease6Kind), identity: &[u8], key: (VrfId, Ipv6Addr)) {
         let Some(clients) = self.clients.get_mut(&scope) else {
             return;
         };
@@ -253,8 +260,8 @@ impl Lease6Table for Lease6Index {
         self.rows.get(&(vrf, addr)).map(|held| &held.lease)
     }
 
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease6> {
-        let rows = self.clients.get(&scope)?.get(identity)?;
+    fn by_client(&self, scope: PrefixId, kind: Lease6Kind, identity: &[u8]) -> Option<&Lease6> {
+        let rows = self.clients.get(&(scope, kind))?.get(identity)?;
         rows.iter()
             .filter_map(|key| self.rows.get(key).map(|held| (key, &held.lease)))
             .max_by_key(|(key, lease)| (lease.cltt, key.1))
@@ -344,7 +351,7 @@ pub struct Binding6 {
     pub iaid: u32,
     /// The address, or the prefix's first address.
     pub addr: Ipv6Addr,
-    /// 128 for an address.
+    /// 128 for an address, the delegated length for a prefix.
     pub prefix_len: u8,
     /// The state after the change.
     pub state: BindingState,

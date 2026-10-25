@@ -10,14 +10,15 @@
 # - iproute2 for the routes and the interface names, python3 for relay-test.py and
 #   relay-test6.py;
 # - tcpdump (the round dhcp6): the packets of a failed DHCPv6 row, from the relay's or the
-#   tester's container.
+#   tester's container;
+# - radvd (the round dhcp6, WP9.2): the router advertisements of the RA check of DHCP-10.
 #
 # Built by smoke.sh as tenko-dhcp-lab-tools:latest, from this directory:
 #   docker build -f deploy/compose/lab-dhcp/tools.Dockerfile -t tenko-dhcp-lab-tools deploy/compose/lab-dhcp
 FROM debian:12-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        busybox iproute2 isc-dhcp-client isc-dhcp-relay kea-admin python3 tcpdump \
+        busybox iproute2 isc-dhcp-client isc-dhcp-relay kea-admin python3 radvd tcpdump \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/ /lab/
 RUN chmod 0755 /lab/*.sh /lab/*.py

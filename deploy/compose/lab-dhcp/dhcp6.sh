@@ -13,6 +13,12 @@
 # the IPAM observations of the leases (GET /observations) and the records DDNS wrote
 # (GET /dns/zones/{id}/records). The round ends with E30's DHCPv6 rows (WP9.3): Kea's
 # kea-dhcp6 from the node's export.
+#
+# WP9.2 adds E29's IA_PD rows (client-pd6, dhclient -6 -P, gets a /60 of a delegation pool
+# through dhcrelay; the delegation is an IPAM network fact; a release ends it) and the RA
+# rows of DHCP-10 (router6, radvd on the node's link servers6: the health view of
+# GET /system/status says dhcp.ra.flags_off while M and O are off and a scope covers the
+# link, nothing once M is on, dhcp.ra.managed_without_scope once the scope is off).
 
 v6_project=tenkodhcp6lab
 v6_compose_file="$here/compose.dhcp6.yml"
@@ -47,6 +53,17 @@ v6_reserved_ip=2001:db8:101::80
 # The lease times of lan6: valid 120 s, preferred 60 s, so that T1 comes after 30 s.
 v6_valid_secs=120
 v6_preferred_secs=60
+# WP9.2: the delegation network (a /48 of its own, joined to lan6's scope by a shared
+# network), its pool of /60s in 2001:db8:180:100::/56, and the node's own link of the RA
+# rows.
+v6_pd_net=2001:db8:180::/48
+v6_pd_first=2001:db8:180:100::
+v6_pd_last=2001:db8:180:1ff:ffff:ffff:ffff:ffff
+v6_pd_len=60
+v6_pd_scope=""
+v6_pd_prefix=""
+v6_servers6=2001:db8:100::/64
+v6_servers6_scope=""
 v6_started=0
 v6_work=""
 declare -A v6_ip=()
@@ -559,12 +576,144 @@ v6_rows() {
   row "v6.release" "dhclient -6 -r on lan6: the node counts a RELEASE answered; relay-test6 --release removes the AAAA and the PTR of host6" \
     v6_release_all
 
+  v6_pd_rows
+  v6_ra_rows
   # WP9.3: the Kea rows stop the node, so they come last.
   if [[ "${KEA:-1}" == 1 ]]; then
     v6_kea_rows
   else
     skip "export.kea6" "KEA=0: the Kea export rows are left out"
   fi
+}
+
+# ---------------------------------------------------------------------------------------
+# WP9.2: prefix delegation (IA_PD)
+
+# v6_pd_configure: the delegation network with its pool of /60s and a scope, and a shared
+# network that joins it to lan6's scope, whose link the requesting router is on.
+v6_pd_configure() {
+  local id shared
+  must "the delegation network" api POST /prefixes "{\"cidr\": \"$v6_pd_net\", \"description\": \"lab delegation network\"}"
+  id="$(field "d['item']['id']" <"$work/api.out")"
+  v6_pd_scope="$id"
+  must "the delegation pool" api POST "/prefixes/$id/ranges" \
+    "{\"first\": \"$v6_pd_first\", \"last\": \"$v6_pd_last\", \"role\": \"dhcp_pd_pool\", \"delegated_len\": $v6_pd_len}"
+  must "the delegation scope" api POST /dhcp/scopes \
+    "{\"prefix\": \"$id\", \"lease\": {\"default_secs\": 600, \"min_secs\": 600, \"max_secs\": 600}}"
+  must "the shared network of lan6" api POST /dhcp/shared-networks "{\"name\": \"lab-lan6\"}"
+  shared="$(field "d['id']" <"$work/api.out")"
+  must "lan6's scope in the shared network" api PATCH "/dhcp/scopes/${v6_scope6[lan6]}" "{\"shared_network\": \"$shared\"}"
+  must "the delegation scope in the shared network" api PATCH "/dhcp/scopes/$id" "{\"shared_network\": \"$shared\"}"
+}
+
+# v6_pd_dhclient [<dhclient options>]: dhclient -6 -P (prefix delegation only) in
+# client-pd6, with its own lease and pid files.
+v6_pd_dhclient() {
+  c6 exec -T client-pd6 dhclient -6 -P -D LL -v -cf /lab/dhclient6.conf -sf /lab/client6-script.sh \
+    -lf /run/lab/dhclient6pd.leases -pf /run/lab/dhclient6pd.pid "$@" eth0
+}
+
+# v6_pd_in_pool <prefix/len>: a prefix of the pool's length on its boundary inside it.
+v6_pd_in_pool() {
+  python3 - "$1" "$v6_pd_first" "$v6_pd_last" "$v6_pd_len" <<'PY'
+import ipaddress, sys
+net = ipaddress.IPv6Network(sys.argv[1], strict=True)
+first, last = ipaddress.IPv6Address(sys.argv[2]), ipaddress.IPv6Address(sys.argv[3])
+sys.exit(0 if net.prefixlen == int(sys.argv[4]) and first <= net.network_address and net.broadcast_address <= last else 1)
+PY
+}
+
+# v6_network_fact <prefix> <current: true or false>: whether the observations hold a
+# current network fact of the prefix from a source dhcp:<node>.
+v6_network_fact() {
+  api GET "/observations?type=network&current=true&limit=200" >/dev/null || return 1
+  python3 - "$work/api.out" "$1" "$2" <<'PY'
+import ipaddress, json, sys
+d = json.load(open(sys.argv[1]))
+want = ipaddress.IPv6Network(sys.argv[2])
+current = sys.argv[3] == "true"
+found = False
+for fact in d["items"]:
+    observed = fact["observed"]
+    if observed.get("type") != "network" or not fact["source_key"].startswith("dhcp:"):
+        continue
+    subnet = observed["data"].get("subnet")
+    if subnet and ipaddress.ip_network(subnet) == want:
+        print(json.dumps(fact), file=sys.stderr)
+        found = True
+sys.exit(0 if found == current else 1)
+PY
+}
+
+v6_pd_ok() {
+  local line
+  v6_pd_dhclient -1 >/dev/null 2>&1 || return 1
+  line="$(v6_last client-pd6)"
+  printf 'client-pd6: %s\n' "$line" >&2
+  [[ "$line" == BOUND6* || "$line" == REBOOT6* ]] || return 1
+  v6_pd_prefix="$(event_field prefix <<<"$line")"
+  [[ -n "$v6_pd_prefix" ]] && v6_pd_in_pool "$v6_pd_prefix" &&
+    within 15 v6_network_fact "$v6_pd_prefix" true
+}
+
+v6_pd_release_ok() {
+  local before
+  before="$(v6_packets release answered)"
+  v6_pd_dhclient -r >/dev/null 2>&1 || true
+  within 10 v6_release_after "$before" && within 15 v6_network_fact "$v6_pd_prefix" false
+}
+
+v6_pd_rows() {
+  step "dhcp6: prefix delegation (IA_PD)"
+  v6_pd_configure
+  row "v6.pd" "dhclient -6 -P on lan6 gets a /$v6_pd_len of $v6_pd_first-$v6_pd_last through dhcrelay (a delegation pool of a scope in lan6's shared network), and IPAM holds it as a network fact of source dhcp" \
+    v6_pd_ok
+  row "v6.pd.release" "dhclient -6 -P -r: the node counts a RELEASE answered and the network fact of the prefix ends" \
+    v6_pd_release_ok
+}
+
+# ---------------------------------------------------------------------------------------
+# WP9.2: the router advertisement check of DHCP-10
+
+# v6_ra_warning <code> <present: true or false>: whether GET /system/status carries a
+# warning of the code that names the interface's scope or prefix of servers6.
+v6_ra_warning() {
+  api GET /system/status >/dev/null || return 1
+  python3 - "$work/api.out" "$1" "$2" "$v6_servers6" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+code, present, net = sys.argv[2], sys.argv[3] == "true", sys.argv[4]
+rows = [w for w in d.get("warnings", []) if w.get("code", "").startswith("dhcp.ra.")]
+print(json.dumps(rows), file=sys.stderr)
+hit = any(w["code"] == code and net in (w.get("params", {}).get("scopes", "") + w.get("params", {}).get("prefixes", "")) for w in rows)
+sys.exit(0 if hit == present else 1)
+PY
+}
+
+v6_ra_flags_off_ok() { within 60 v6_ra_warning dhcp.ra.flags_off true; }
+v6_ra_managed_ok() {
+  c6 exec -T router6 /lab/radvd.sh flags on off || return 1
+  within 60 v6_ra_warning dhcp.ra.flags_off false &&
+    v6_ra_warning dhcp.ra.managed_without_scope false &&
+    v6_ra_warning dhcp.ra.other_only false
+}
+v6_ra_without_scope_ok() {
+  api PATCH "/dhcp/scopes/$v6_servers6_scope" '{"enabled": false}' >/dev/null || return 1
+  within 60 v6_ra_warning dhcp.ra.managed_without_scope true
+}
+
+v6_ra_rows() {
+  step "dhcp6: the router advertisement check (DHCP-10)"
+  must "the IPv6 prefix of servers6" api POST /prefixes "{\"cidr\": \"$v6_servers6\", \"description\": \"lab link servers6, IPv6\"}"
+  v6_servers6_scope="$(field "d['item']['id']" <"$work/api.out")"
+  must "the IPv6 scope of servers6" api POST /dhcp/scopes "{\"prefix\": \"$v6_servers6_scope\"}"
+  c6 up -d router6 >/dev/null 2>&1
+  row "v6.ra.flags_off" "radvd on servers6 with M and O off: the health view says dhcp.ra.flags_off for the scope $v6_servers6" \
+    v6_ra_flags_off_ok
+  row "v6.ra.managed" "radvd with M on: the finding is gone and no other dhcp.ra finding names the link" \
+    v6_ra_managed_ok
+  row "v6.ra.without_scope" "the scope of servers6 disabled while M stays on: the health view says dhcp.ra.managed_without_scope" \
+    v6_ra_without_scope_ok
 }
 v6_release_all() { v6_release_counted && v6_fqdn_released_ok; }
 
@@ -574,11 +723,11 @@ v6_release_all() { v6_release_counted && v6_fqdn_released_ok; }
 v6_logs() {
   local service
   printf '\n==> FAILED: logs of the round dhcp6\n' >&2
-  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6 kea6; do
+  for service in relay netns tenko tester client-dhclient6 client-networkd client-iot6 client-pd6 router6 kea6; do
     printf '\n--- %s ---\n' "$service" >&2
     c6 logs --no-color --tail 200 "$service" >&2 2>&1
   done
-  for service in client-dhclient6 client-iot6 client-networkd; do
+  for service in client-dhclient6 client-iot6 client-networkd client-pd6; do
     printf '\n--- %s: /run/lab ---\n' "$service" >&2
     c6 exec -T "$service" sh -c 'tail -n 20 /run/lab/events6 /run/lab/events 2>&1; ls /run/lab /run/systemd/netif/links 2>&1' >&2 2>&1
   done
@@ -618,6 +767,10 @@ dhcp6_round() {
     docker image inspect "$TENKO_IMAGE" >/dev/null 2>&1 || fail "image $TENKO_IMAGE not found"
   fi
   ok "image" "$TENKO_IMAGE"
+  # WP9.2: the same binary with the probe's file capability (probe.Dockerfile).
+  step "build $TENKO_PROBE_IMAGE from $TENKO_IMAGE (cap_net_raw on the binary)"
+  docker build -f "$here/probe.Dockerfile" --build-arg TENKO_IMAGE="$TENKO_IMAGE" -t "$TENKO_PROBE_IMAGE" "$here"
+  ok "probe image" "$TENKO_PROBE_IMAGE"
 
   v6_work="$(mktemp -d)"
   work="$v6_work"
@@ -627,7 +780,8 @@ dhcp6_round() {
   chmod 0444 "$work/secrets/kek"
   cat >"$work/tenko.toml" <<TOML
 # The node of the round dhcp6 (written by smoke.sh).
-roles = "controller,dhcp"
+# WP9.2: the probe role in the process runs the router advertisement check.
+roles = "controller,dhcp,probe"
 # DDNS needs the DNS module next to the DHCP module (the node serves no DNS here).
 modules = ["ipam", "dns", "dhcp"]
 
@@ -657,7 +811,7 @@ TOML
 
   step "start the gateway, the node and the clients"
   v6_started=1
-  c6 up -d relay netns tenko client-dhclient6 client-iot6 tester
+  c6 up -d relay netns tenko client-dhclient6 client-iot6 client-pd6 tester
   retry "$wait_secs" "tenko to become healthy" v6_healthy
   v6_lab_setup
   v6_configure

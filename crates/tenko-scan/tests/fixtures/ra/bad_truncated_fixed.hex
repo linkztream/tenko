@@ -1,0 +1,7 @@
+# A Router Advertisement cut inside the fixed part: 15 octets, one short of the retransmit
+# timer's last octet.
+#
+86 00 1a 2b
+40 00 07 08
+00 00 00 00
+00 00 00

@@ -323,3 +323,12 @@ test = false
 doc = false
 bench = false
 # WP10.2: end.
+
+# WP9.2: the router advertisement parser's target (marked block).
+[[bin]]
+name = "scan_ra"
+path = "fuzz_targets/scan_ra.rs"
+test = false
+doc = false
+bench = false
+# WP9.2: end.

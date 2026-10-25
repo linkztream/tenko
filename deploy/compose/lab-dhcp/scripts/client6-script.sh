@@ -3,7 +3,9 @@
 # address on the interface and writes one line per event to /run/lab/events6, which
 # smoke.sh reads:
 #   <reason> ip6=<address> len=<prefix length> dns=<option 23> search=<option 24>
-#            ntp=<option 56> valid=<seconds> preferred=<seconds>
+#            ntp=<option 56> valid=<seconds> preferred=<seconds> prefix=<delegated prefix>
+# A delegated prefix (dhclient -6 -P, IA_PD) comes without an address: the interface keeps
+# what it has and only the event is written.
 # The variables dhclient passes go to /run/lab/env6.<reason> for a look at what it hands
 # over. dhclient sets reason, interface and the new_ and old_ variables.
 # shellcheck disable=SC2154
@@ -40,12 +42,13 @@ ntp_servers() {
 }
 
 log() {
-  printf '%s ip6=%s len=%s dns=%s search=%s ntp=%s valid=%s preferred=%s\n' \
+  printf '%s ip6=%s len=%s dns=%s search=%s ntp=%s valid=%s preferred=%s prefix=%s\n' \
     "$reason" "${new_ip6_address:-${old_ip6_address:-}}" \
     "${new_ip6_prefixlen:-${old_ip6_prefixlen:-}}" \
     "${new_dhcp6_name_servers:-}" "${new_dhcp6_domain_search:-}" \
     "$(ntp_servers "${new_dhcp6_ntp_server:-}")" \
-    "${new_max_life:-}" "${new_preferred_life:-}" >>/run/lab/events6
+    "${new_max_life:-}" "${new_preferred_life:-}" \
+    "${new_ip6_prefix:-${old_ip6_prefix:-}}" >>/run/lab/events6
 }
 
 case "$reason" in
@@ -54,6 +57,10 @@ case "$reason" in
     ;;
   BOUND6 | RENEW6 | REBIND6 | REBOOT6)
     env | grep -E '^(new|old)_' | sort >"/run/lab/env6.$reason"
+    if [ -z "${new_ip6_address:-}" ]; then
+      log
+      exit 0
+    fi
     if [ -n "${old_ip6_address:-}" ] && [ "${old_ip6_address}" != "${new_ip6_address:-}" ]; then
       ip -6 addr del "$old_ip6_address/${old_ip6_prefixlen:-128}" dev "$interface" 2>/dev/null || true
     fi

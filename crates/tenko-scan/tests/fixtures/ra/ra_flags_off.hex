@@ -1,0 +1,24 @@
+# Router Advertisement of a typical home router (ICMPv6 type 134, RFC 4861 section 4.2): M and
+# O both off, SLAAC only. The router is fe80::200:5eff:fe00:5301 (documentation MAC
+# 00:00:5e:00:53:01); the message is the ICMPv6 payload, without the IPv6 header. The checksum
+# is as a capture shows it; the parser does not verify it (the kernel does on a raw socket).
+#
+# type 134, code 0, checksum 0x1a2b
+86 00 1a 2b
+# cur hop limit 64, flags 0x00 (M off, O off, preference medium), router lifetime 1800 s
+40 00 07 08
+# reachable time 0, retransmit timer 0 (unspecified)
+00 00 00 00
+00 00 00 00
+# option 1, source link-layer address, 1 unit of 8 octets: 00:00:5e:00:53:01
+01 01 00 00 5e 00 53 01
+# option 5, MTU, 1 unit: reserved 0, MTU 1500
+05 01 00 00 00 00 05 dc
+# option 3, prefix information, 4 units: prefix length 64, flags 0xc0 (L, A)
+03 04 40 c0
+# valid lifetime 86400 s, preferred lifetime 14400 s, reserved
+00 01 51 80
+00 00 38 40
+00 00 00 00
+# prefix 2001:db8:100::
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 00

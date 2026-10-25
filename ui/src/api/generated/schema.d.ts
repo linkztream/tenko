@@ -12030,6 +12030,13 @@ export interface components {
             custom?: {
                 [key: string]: components["schemas"]["CustomValue"];
             };
+            /**
+             * Format: int32
+             * @description The length of the prefixes a delegation pool (`dhcp_pd_pool`) hands out, required
+             *     there and refused elsewhere: longer than the network's length, at most 64, with the
+             *     range on its boundaries.
+             */
+            delegated_len?: number | null;
             /** @description Free text. */
             description?: string | null;
             /**
@@ -14406,6 +14413,13 @@ export interface components {
             /** @description The items of this page, at most `limit` of them. */
             items: {
                 /**
+                 * Format: int32
+                 * @description The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),
+                 *     between the length of its network and 64; the range starts and ends on a boundary of
+                 *     that length. Only delegation pools have one.
+                 */
+                delegated_len?: number | null;
+                /**
                  * @description First address, inclusive.
                  * @example 192.0.2.100
                  */
@@ -16016,6 +16030,13 @@ export interface components {
         /** @description A range of addresses inside a prefix. */
         Range: {
             /**
+             * Format: int32
+             * @description The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),
+             *     between the length of its network and 64; the range starts and ends on a boundary of
+             *     that length. Only delegation pools have one.
+             */
+            delegated_len?: number | null;
+            /**
              * @description First address, inclusive.
              * @example 192.0.2.100
              */
@@ -16050,6 +16071,12 @@ export interface components {
             custom?: {
                 [key: string]: components["schemas"]["CustomValue"];
             };
+            /**
+             * Format: int32
+             * @description The length of the delegated prefixes, `dhcp_pd_pool` ranges only (required
+             *     there): between the network's length and 64, with the range on its boundaries.
+             */
+            delegated_len?: number | null;
             /** @description Free text. */
             description?: string | null;
             /**
@@ -16083,6 +16110,12 @@ export interface components {
             custom?: {
                 [key: string]: components["schemas"]["CustomValue"];
             } | null;
+            /**
+             * Format: int32
+             * @description New length of the delegated prefixes (`dhcp_pd_pool` ranges only); `null`
+             *     clears it.
+             */
+            delegated_len?: number | null;
             /** @description Replaces the description; `null` clears it. */
             description?: string | null;
             /** @description New first address. */
@@ -16103,7 +16136,7 @@ export interface components {
          * @description Role of a range.
          * @enum {string}
          */
-        RangeRole: "dhcp_pool" | "reserved" | "infrastructure";
+        RangeRole: "dhcp_pool" | "dhcp_pd_pool" | "reserved" | "infrastructure";
         /** @description Body of `GET /health/ready` when the node serves requests. */
         Readiness: {
             /** @description Store revision the node has applied. */
@@ -21012,6 +21045,13 @@ export interface components {
             dry_run: boolean;
             /** @description A range of addresses inside a prefix. */
             item?: {
+                /**
+                 * Format: int32
+                 * @description The length of the prefixes a `dhcp_pd_pool` range delegates (RFC 8415 section 6.3),
+                 *     between the length of its network and 64; the range starts and ends on a boundary of
+                 *     that length. Only delegation pools have one.
+                 */
+                delegated_len?: number | null;
                 /**
                  * @description First address, inclusive.
                  * @example 192.0.2.100

@@ -1,0 +1,8 @@
+# A Router Advertisement whose option claims 2 units (16 octets) and has 8 left.
+#
+86 00 1a 2b
+40 00 07 08
+00 00 00 00
+00 00 00 00
+# option 1, length 2 units, but only 8 octets follow
+01 02 00 00 5e 00 53 01

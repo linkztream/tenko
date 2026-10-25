@@ -1,0 +1,21 @@
+# Router Advertisement of a router that is not a default router (router lifetime 0, RFC 4861
+# section 6.2.5), M and O on, with a prefix whose lifetimes are 0: what a router sends when
+# it withdraws a prefix. The hop limit is 0 (unspecified). Router fe80::200:5eff:fe00:5305.
+#
+# type 134, code 0, checksum 0x6172
+86 00 61 72
+# cur hop limit 0, flags 0xc0 (M on, O on), router lifetime 0
+00 c0 00 00
+# reachable time 0, retransmit timer 0
+00 00 00 00
+00 00 00 00
+# option 3, prefix information, 4 units: prefix length 64, flags 0xc0 (L, A)
+03 04 40 c0
+# valid lifetime 0, preferred lifetime 0, reserved
+00 00 00 00
+00 00 00 00
+00 00 00 00
+# prefix 2001:db8:100::
+20 01 0d b8 01 00 00 00 00 00 00 00 00 00 00 00
+# option 1, source link-layer address 00:00:5e:00:53:05
+01 01 00 00 5e 00 53 05

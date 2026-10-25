@@ -835,6 +835,115 @@ fn a_status_code_written_by_the_builder_reads_back_in_the_ia_and_its_address() {
     assert_eq!(nested.message, b"");
 }
 
+#[test]
+fn an_ia_pd_written_by_the_builder_reads_back_field_for_field() {
+    let written = build(|b| {
+        b.message(MessageType::Reply, 2).expect("header");
+        let ia = b.begin_ia_pd(0x5e00_5303, 1500, 2400).expect("25");
+        b.ia_prefix(ip("2001:db8:180:110::"), 60, 3000, 4000)
+            .expect("26");
+        b.ia_prefix(ip("2001:db8:999::"), 56, 0, 0).expect("26");
+        b.status(status::NO_PREFIX_AVAIL, b"none left").expect("13");
+        b.end(ia).expect("end of 25");
+    });
+    let message = Message::parse(&written).expect("parse");
+    message.validate().expect("well formed");
+    // The wire form of the IA_PD: its head, two IA Prefix options, the status.
+    let data = message.option(code::IA_PD).expect("ok").expect("option 25");
+    assert_eq!(data.len(), 12 + 2 * (4 + 25) + (4 + 2 + 9));
+    assert_eq!(
+        &data[..12],
+        [0x5e, 0x00, 0x53, 0x03, 0, 0, 5, 220, 0, 0, 9, 96]
+    );
+    let mut first = vec![0, 26, 0, 25, 0, 0, 0x0b, 0xb8, 0, 0, 0x0f, 0xa0, 60];
+    first.extend_from_slice(&ip("2001:db8:180:110::").octets());
+    assert_eq!(&data[12..12 + 29], first.as_slice());
+    // The codec reads it back, field for field.
+    let ia = IaPd::parse(data).expect("an IA_PD");
+    assert_eq!((ia.iaid, ia.t1, ia.t2), (0x5e00_5303, 1500, 2400));
+    let prefixes: Vec<IaPrefix<'_>> = ia
+        .prefixes()
+        .collect::<Result<_, _>>()
+        .expect("well-formed IA Prefix options");
+    assert_eq!(prefixes.len(), 2);
+    assert_eq!(prefixes[0].prefix, ip("2001:db8:180:110::"));
+    assert_eq!(prefixes[0].prefix_len, 60);
+    assert_eq!((prefixes[0].preferred, prefixes[0].valid), (3000, 4000));
+    assert_eq!(prefixes[0].options().count(), 0);
+    assert_eq!(prefixes[1].prefix, ip("2001:db8:999::"));
+    assert_eq!(prefixes[1].prefix_len, 56);
+    assert_eq!((prefixes[1].preferred, prefixes[1].valid), (0, 0));
+    let ia_status = ia.status().expect("a status in the IA_PD");
+    assert_eq!(ia_status.code, status::NO_PREFIX_AVAIL);
+    assert_eq!(ia_status.message, b"none left");
+    // The message's own walk gives the same IA_PD.
+    let walked: Vec<IaPd<'_>> = message
+        .ia_pds()
+        .collect::<Result<_, _>>()
+        .expect("well-formed IA_PD options");
+    assert_eq!(walked, [ia]);
+}
+
+#[test]
+fn an_ia_prefix_that_does_not_fit_leaves_the_message_as_it_was() {
+    // 4 (header) + 16 (IA_PD head) + 29 (one IA Prefix) = 49 octets: the limit.
+    let mut buf = [0u8; 120];
+    let mut b = MessageBuilder::new(&mut buf, 49).expect("builder");
+    b.message(MessageType::Reply, 9).expect("header");
+    let ia = b.begin_ia_pd(1, 2, 3).expect("16 octets");
+    b.ia_prefix(ip("2001:db8:180:110::"), 60, 3000, 4000)
+        .expect("29 octets");
+    assert_eq!(b.len(), 49);
+    assert_eq!(b.room(), 0);
+    assert_eq!(
+        b.ia_prefix(ip("2001:db8:180:120::"), 60, 3000, 4000)
+            .map(|_| ()),
+        Err(EncodeError::NoRoom {
+            code: code::IAPREFIX
+        })
+    );
+    assert_eq!(b.len(), 49, "the refused prefix left no trace");
+    assert_eq!(
+        b.status(status::NO_PREFIX_AVAIL, b"").map(|_| ()),
+        Err(EncodeError::NoRoom {
+            code: code::STATUS_CODE
+        })
+    );
+    assert_eq!(b.len(), 49);
+    // The builder is still balanced and usable: the IA_PD closes with its one prefix.
+    b.end(ia).expect("end of 25");
+    let len = b.finish().expect("balanced");
+    assert_eq!(len, 49);
+    let expected = build(|b| {
+        b.message(MessageType::Reply, 9).expect("header");
+        let ia = b.begin_ia_pd(1, 2, 3).expect("16 octets");
+        b.ia_prefix(ip("2001:db8:180:110::"), 60, 3000, 4000)
+            .expect("29 octets");
+        b.end(ia).expect("end of 25");
+    });
+    assert_eq!(&buf[..len], expected.as_slice());
+    let message = Message::parse(&buf[..len]).expect("parse");
+    message.validate().expect("well formed");
+    let pds: Vec<IaPd<'_>> = message
+        .ia_pds()
+        .collect::<Result<_, _>>()
+        .expect("well-formed IA_PD options");
+    assert_eq!(pds.len(), 1);
+    assert_eq!(pds[0].prefixes().count(), 1);
+
+    // An IA_PD head that does not fit is taken back whole.
+    let mut buf = [0u8; 64];
+    let mut b = MessageBuilder::new(&mut buf, 40).expect("builder");
+    b.relay(MessageType::RelayForw, 0, ip("::1"), ip("::2"))
+        .expect("34 octets");
+    assert_eq!(
+        b.begin_ia_pd(1, 2, 3).map(|_| ()),
+        Err(EncodeError::NoRoom { code: code::IA_PD })
+    );
+    assert_eq!(b.len(), 34);
+    assert_eq!(b.finish(), Ok(34));
+}
+
 // ---------------------------------------------------------------------------------------
 // Relay chains
 // ---------------------------------------------------------------------------------------
@@ -2846,4 +2955,171 @@ fn what_the_builder_writes_is_always_walked_without_an_error() {
         let message = Message::parse(&buf[..len]).expect("a header was written");
         message.validate().expect("every option is well formed");
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// The fuzz seeds with IA_PD (WP9.2)
+// ---------------------------------------------------------------------------------------
+
+/// The directory of the `dhcp6_wire` fuzz seeds.
+fn seed_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fuzz")
+        .join("seeds")
+        .join("dhcp6_wire")
+}
+
+/// The octets of the fuzz seed `name`.
+fn seed(name: &str) -> Vec<u8> {
+    let path = seed_dir().join(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+#[test]
+fn every_ia_pd_fuzz_seed_parses_and_validates() {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(seed_dir()).expect("the seed directory") {
+        let name = entry
+            .expect("an entry")
+            .file_name()
+            .into_string()
+            .expect("a UTF-8 name");
+        if name.contains("ia-pd") || name.contains("pd") {
+            names.push(name);
+        }
+    }
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "release-ia-pd",
+            "renew-ia-na-ia-pd-same-iaid",
+            "reply-ia-pd-no-prefix-avail",
+            "request-ia-pd-hint",
+            "solicit-ia-pd",
+        ]
+    );
+    for name in &names {
+        let bytes = seed(name);
+        let message = Message::parse(&bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        message
+            .validate()
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert!(message.ia_pds().count() >= 1, "{name}: an IA_PD");
+        for ia in message.ia_pds() {
+            let ia = ia.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            ia.options()
+                .validate()
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            for prefix in ia.prefixes() {
+                let prefix = prefix.unwrap_or_else(|error| panic!("{name}: {error:?}"));
+                assert!(prefix.prefix_len <= 128, "{name}");
+                prefix
+                    .options()
+                    .validate()
+                    .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_request_seed_asks_for_a_prefix_of_a_length() {
+    let bytes = seed("request-ia-pd-hint");
+    let message = Message::parse(&bytes).expect("parses");
+    assert_eq!(message.kind(), MessageType::Request);
+    assert_eq!(message.transaction_id(), 0x0000_bb01);
+    assert!(message.client_id().expect("ok").is_some());
+    assert!(message.server_id().expect("ok").is_some());
+    assert_eq!(message.ia_nas().count(), 0);
+    let ias: Vec<_> = message.ia_pds().map(|ia| ia.expect("an IA_PD")).collect();
+    assert_eq!(ias.len(), 1);
+    assert_eq!((ias[0].iaid, ias[0].t1, ias[0].t2), (1, 0, 0));
+    let prefixes: Vec<_> = ias[0]
+        .prefixes()
+        .map(|prefix| prefix.expect("an IA Prefix"))
+        .collect();
+    assert_eq!(prefixes.len(), 1);
+    assert_eq!(prefixes[0].prefix, ip("2001:db8:180:100::"));
+    assert_eq!(prefixes[0].prefix_len, 60);
+    assert_eq!((prefixes[0].preferred, prefixes[0].valid), (0, 0));
+}
+
+#[test]
+fn the_reply_seed_has_a_prefix_and_a_no_prefix_avail_status() {
+    let bytes = seed("reply-ia-pd-no-prefix-avail");
+    let message = Message::parse(&bytes).expect("parses");
+    assert_eq!(message.kind(), MessageType::Reply);
+    assert_eq!(message.transaction_id(), 0x0000_bb02);
+    let ias: Vec<_> = message.ia_pds().map(|ia| ia.expect("an IA_PD")).collect();
+    assert_eq!(ias.len(), 2);
+    assert_eq!((ias[0].iaid, ias[0].t1, ias[0].t2), (1, 3000, 4800));
+    let prefix = ias[0]
+        .prefixes()
+        .next()
+        .expect("a prefix")
+        .expect("an IA Prefix");
+    assert_eq!(prefix.prefix, ip("2001:db8:180:100::"));
+    assert_eq!(prefix.prefix_len, 60);
+    assert_eq!((prefix.preferred, prefix.valid), (6000, 7200));
+    assert_eq!(ias[0].status(), None);
+    assert_eq!(ias[1].iaid, 2);
+    assert_eq!(ias[1].prefixes().count(), 0);
+    let status = ias[1].status().expect("a status");
+    assert_eq!(status.code, status::NO_PREFIX_AVAIL);
+    assert_eq!(status.message, b"no prefixes available");
+}
+
+#[test]
+fn the_renew_seed_shares_an_iaid_between_an_ia_na_and_an_ia_pd() {
+    let bytes = seed("renew-ia-na-ia-pd-same-iaid");
+    let message = Message::parse(&bytes).expect("parses");
+    assert_eq!(message.kind(), MessageType::Renew);
+    assert_eq!(message.transaction_id(), 0x0000_bb03);
+    let nas: Vec<_> = message.ia_nas().map(|ia| ia.expect("an IA_NA")).collect();
+    let pds: Vec<_> = message.ia_pds().map(|ia| ia.expect("an IA_PD")).collect();
+    assert_eq!((nas.len(), pds.len()), (1, 1));
+    assert_eq!(nas[0].iaid, 1);
+    assert_eq!(pds[0].iaid, 1);
+    let address = nas[0]
+        .addresses()
+        .next()
+        .expect("an address")
+        .expect("an IA Address");
+    assert_eq!(address.addr, ip("2001:db8:1::100"));
+    assert_eq!((address.preferred, address.valid), (3000, 4000));
+    let prefix = pds[0]
+        .prefixes()
+        .next()
+        .expect("a prefix")
+        .expect("an IA Prefix");
+    assert_eq!(prefix.prefix, ip("2001:db8:180:100::"));
+    assert_eq!(prefix.prefix_len, 60);
+    assert_eq!((prefix.preferred, prefix.valid), (3000, 4000));
+}
+
+#[test]
+fn the_release_seed_gives_back_a_prefix() {
+    let bytes = seed("release-ia-pd");
+    let message = Message::parse(&bytes).expect("parses");
+    assert_eq!(message.kind(), MessageType::Release);
+    assert_eq!(message.transaction_id(), 0x0000_bb04);
+    assert_eq!(message.ia_nas().count(), 0);
+    let ia = message
+        .ia_pds()
+        .next()
+        .expect("an IA_PD")
+        .expect("well formed");
+    assert_eq!(ia.iaid, 1);
+    let prefix = ia
+        .prefixes()
+        .next()
+        .expect("a prefix")
+        .expect("an IA Prefix");
+    assert_eq!(
+        (prefix.prefix, prefix.prefix_len),
+        (ip("2001:db8:180:100::"), 60)
+    );
 }

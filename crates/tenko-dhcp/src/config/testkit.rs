@@ -68,6 +68,7 @@ pub(crate) fn range(prefix: PrefixId, first: &str, last: &str, role: RangeRole) 
         last: last.parse().expect("last"),
         role,
         lease_secs: None,
+        delegated_len: None,
         status: Status::Active,
         meta: meta(false),
     }

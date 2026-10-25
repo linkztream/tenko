@@ -4383,6 +4383,7 @@ export type MessageKey =
   | "ipam.prefix_role.supernet"
   | "ipam.range.add"
   | "ipam.range.empty"
+  | "ipam.range_role.dhcp_pd_pool"
   | "ipam.range_role.dhcp_pool"
   | "ipam.range_role.infrastructure"
   | "ipam.range_role.reserved"
@@ -12581,6 +12582,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix_role.supernet",
   "ipam.range.add",
   "ipam.range.empty",
+  "ipam.range_role.dhcp_pd_pool",
   "ipam.range_role.dhcp_pool",
   "ipam.range_role.infrastructure",
   "ipam.range_role.reserved",

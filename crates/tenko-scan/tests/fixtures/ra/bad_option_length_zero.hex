@@ -1,0 +1,9 @@
+# A Router Advertisement with an option of length zero (RFC 4861 section 4.6: a node silently
+# discards the message, and a walk that trusted the length would never advance).
+#
+86 00 1a 2b
+40 00 07 08
+00 00 00 00
+00 00 00 00
+# option 1 with length 0, then the octets the address would have been
+01 00 00 00 5e 00 53 01

@@ -152,6 +152,12 @@ pub struct DhcpStatus {
     pub scopes6: usize,
     /// The DHCPv6 leases by binding state.
     pub leases6: [(BindingState, usize); 7],
+    // WP9.2: the router advertisement check of DHCP-10.
+    /// The router advertisements of the node's links against its DHCPv6 scopes.
+    pub ra: crate::ra::RaReport,
+    /// The DHCPv6 server's DUID (option 2), while a DHCPv6 server runs; the Kea export
+    /// writes it as `server-id`.
+    pub server_duid: Option<Vec<u8>>,
 }
 
 /// A node's DHCP role as the API reaches it: locally in Phase 3.
@@ -188,6 +194,8 @@ pub struct LocalNode {
     lease_store6: StoreLeases6,
     // WP9.4: the DHCPv6 observation hook, for the operator's release of a DHCPv6 lease.
     observations6: Arc<dyn Observation6Hook>,
+    // WP9.2: what the router advertisement check heard.
+    ra: Arc<crate::ra::RaWatch>,
 }
 
 impl std::fmt::Debug for LocalNode {
@@ -227,6 +235,11 @@ impl LocalNode {
     /// The DHCPv6 lease store.
     pub fn lease_store6(&self) -> &StoreLeases6 {
         &self.lease_store6
+    }
+
+    /// What the router advertisement check heard (WP9.2); the tests record into it.
+    pub fn ra(&self) -> &Arc<crate::ra::RaWatch> {
+        &self.ra
     }
 
     /// The DHCPv6 offers held, for the expiry service to prune; none without a DHCPv6
@@ -566,6 +579,10 @@ impl DhcpNode for LocalNode {
             scopes6: image.as_ref().map_or(0, |image| image.v6().scopes().len()),
             leases6: self.leases6.read().counts_by_state(),
             listeners6,
+            ra: self
+                .ra
+                .report(image.as_ref().map(|image| image.v6()), Timestamp::now()),
+            server_duid: server6.as_ref().map(|server| server.server_duid().to_vec()),
         }
     }
 
@@ -944,6 +961,12 @@ impl Role {
             installs: Arc::clone(&installs),
         };
         let follow = tokio::spawn(follower.run(feed, stop.child_token()));
+        // WP9.2: the router advertisement check runs with the probe role, whose drop-in
+        // grants the raw socket it needs.
+        let ra = crate::ra::RaWatch::new();
+        let ra_task = settings
+            .probe
+            .then(|| tokio::spawn(crate::ra::run(Arc::clone(&ra), stop.child_token())));
         let node = Arc::new(LocalNode {
             node,
             server: RwLock::new(Some(server)),
@@ -960,9 +983,11 @@ impl Role {
             leases6,
             lease_store6,
             observations6,
+            ra,
         });
         let mut tasks = vec![follow, wake, reporter, committer, committer6];
         tasks.extend(wake6);
+        tasks.extend(ra_task);
         Ok(Self { node, stop, tasks })
     }
 

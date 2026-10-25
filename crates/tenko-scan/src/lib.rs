@@ -12,6 +12,7 @@
 //! | [`limit`] | probes per second, spacing per address, probes in flight (TGL-19) |
 //! | [`blackout`] | blackout windows (SCAN-06) |
 //! | [`oui`] | vendor names from the OUI of a MAC address |
+//! | [`ra`] | router advertisements and their M and O flags, for the check of DHCP-10 (WP9.2) |
 //! | [`dns`] | DNS messages for mDNS, LLMNR and reverse DNS |
 //! | [`snmp`] | SNMPv3 polling of switches (SCAN-05) |
 //! | [`methods`] | the methods themselves |
@@ -34,6 +35,7 @@ pub mod limit;
 pub mod method;
 pub mod methods;
 pub mod oui;
+pub mod ra;
 pub mod scanner;
 pub mod scope;
 pub mod secrets;

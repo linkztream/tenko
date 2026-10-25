@@ -69,6 +69,9 @@
 #                   what it started; ROUNDS=dhcp6 runs nothing else.
 #   NETWORKD_IMAGE  an existing image of the networkd client of the round dhcp6 (with
 #                   NETWORKD_IMAGE_PREBUILT=1); default: build tenko-dhcp-lab-networkd:latest
+#   TENKO_PROBE_IMAGE  the node image of the round dhcp6, built from the Tenko image by
+#                   probe.Dockerfile (its binary with the file capability cap_net_raw+ep,
+#                   WP9.2); default: tenko-dhcp-lab-probe:latest
 
 set -euo pipefail
 
@@ -122,6 +125,8 @@ build_tools=1
 [[ -n "${TOOLS_IMAGE_PREBUILT:-}" ]] && build_tools=0
 # WP9.1: the networkd client of the round dhcp6.
 export NETWORKD_IMAGE="${NETWORKD_IMAGE:-tenko-dhcp-lab-networkd:latest}"
+# WP9.2: the node of the round dhcp6 with the probe's capability.
+export TENKO_PROBE_IMAGE="${TENKO_PROBE_IMAGE:-tenko-dhcp-lab-probe:latest}"
 build_networkd=1
 [[ -n "${NETWORKD_IMAGE_PREBUILT:-}" ]] && build_networkd=0
 if ((run_dhcp6)) && [[ "$node" != tenko ]]; then

@@ -55,7 +55,9 @@ pub fn held_by_other6(
         // A declined address is held for nobody until its hold ends.
         return true;
     }
-    previous.identity() != identity[..len]
+    // WP9.2: an address is never taken over by a prefix of the same client, nor the
+    // reverse.
+    previous.kind != binding.kind || previous.identity() != identity[..len]
 }
 
 #[derive(Debug)]
