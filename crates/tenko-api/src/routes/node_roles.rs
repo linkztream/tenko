@@ -28,10 +28,13 @@
 //!   Phase 5 (`node.roles.unsupported`), the same rule as `tenko serve` at start.
 //!
 //! The answer carries findings, which do not refuse the change: `node.roles.privileges`
-//! when a role is switched on whose raw methods need a systemd drop-in the node does not
-//! have, and `node.roles.dns_resolver` when the `dns` role leaves a node whose host resolver
-//! the installer pointed at it (`--use-self`). Only the node itself can tell, so the
-//! findings are those of the controller that answers, for its own node.
+//! when a role is switched on whose raw methods need `CAP_NET_RAW`, which the process does
+//! not hold, `node.roles.unprepared` when a role is switched on that the installer did not
+//! prepare the machine for (its drop-in, its firewall ports), and `node.roles.dns_resolver`
+//! when the `dns` role leaves a node whose host resolver the installer pointed at it
+//! (`--use-self`). Only the node itself can tell, so the findings are those of the
+//! controller that answers, for its own node; so is `prepared`, what the installer
+//! prepared the machine for per role, which an administrator may still switch on.
 //!
 //! # The service
 //!
@@ -83,7 +86,7 @@ use super::{
     not_implemented,
 };
 use crate::{
-    dto::system::StatusWarning,
+    dto::system::{PreparedRoles, StatusWarning},
     extract::Ctx,
     problem::{ApiError, ProblemDetails},
     state::AppState,
@@ -92,8 +95,11 @@ use crate::{
 /// The audit action of a change.
 pub const AUDIT_ACTION: &str = "nodes.roles";
 
-/// The finding of a role whose raw methods need a drop-in the node does not have.
+/// The finding of a role whose raw methods need a capability the process does not hold.
 pub const PRIVILEGES: &str = "node.roles.privileges";
+
+/// The finding of a role the installer did not prepare the machine for.
+pub const UNPREPARED: &str = "node.roles.unprepared";
 
 /// The finding of the `dns` role leaving a node that is its host's resolver.
 pub const DNS_RESOLVER: &str = "node.roles.dns_resolver";
@@ -151,8 +157,12 @@ pub struct NodeRoles {
     /// How the node applies the stored set.
     pub restart: RoleRestart,
     /// What the node should know about the set, which does not refuse it:
-    /// `node.roles.privileges`, `node.roles.dns_resolver`.
+    /// `node.roles.privileges`, `node.roles.unprepared`, `node.roles.dns_resolver`.
     pub findings: Vec<StatusWarning>,
+    /// What the installer prepared the machine for, per role; known for the node of the
+    /// controller that answers when an installer recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared: Option<PreparedRoles>,
 }
 
 /// The body of `PUT /nodes/{id}/roles`.
@@ -171,6 +181,11 @@ pub trait RoleHost: Send + Sync + 'static {
 
     /// The findings of this node running `configured` instead of `running`.
     fn findings(&self, configured: RoleSet, running: RoleSet) -> BoxFuture<'_, Vec<StatusWarning>>;
+
+    /// What the installer prepared this machine for; `None` when nothing recorded it.
+    fn prepared(&self) -> Option<PreparedRoles> {
+        None
+    }
 }
 
 /// The facts of the node of the controller that serves the requests.
@@ -324,6 +339,7 @@ impl NodeRoleService {
             controller: kind.is_controller(),
             restart,
             findings,
+            prepared: if own { self.host.prepared() } else { None },
         }
     }
 
@@ -487,20 +503,46 @@ fn mismatch() -> CodedError {
     )
 }
 
-/// The finding `node.roles.privileges`: `roles` need the systemd drop-ins `dropins`.
-pub fn privileges_finding(roles: &[&str], dropins: &[&str]) -> StatusWarning {
+/// The capability of the raw methods.
+pub const NET_RAW: &str = "CAP_NET_RAW";
+
+/// The finding `node.roles.privileges`: `roles` need `CAP_NET_RAW`, which the systemd
+/// drop-ins `dropins` grant and the installer command `command` puts in place.
+pub fn privileges_finding(roles: &[&str], dropins: &[&str], command: &str) -> StatusWarning {
     StatusWarning {
         code: PRIVILEGES.to_owned(),
         detail: format!(
-            "the role(s) {} need raw sockets (CAP_NET_RAW, AF_PACKET) that this node does not \
-             have; install the systemd drop-in(s) {} in /etc/systemd/system/tenko.service.d/ \
-             (deploy/install.sh --reconfigure --roles does) and restart the service",
+            "the role(s) {} need raw sockets ({NET_RAW} and AF_PACKET), and this process does \
+             not hold {NET_RAW} (its bounding and effective sets); the systemd drop-in(s) {} in \
+             /etc/systemd/system/tenko.service.d/ grant it: run `{command}` on the host, \
+             which puts them in place and restarts the service",
             roles.join(", "),
             dropins.join(", ")
         ),
         params: BTreeMap::from([
             ("roles".to_owned(), roles.join(", ")),
             ("dropins".to_owned(), dropins.join(", ")),
+            ("capability".to_owned(), NET_RAW.to_owned()),
+            ("command".to_owned(), command.to_owned()),
+        ]),
+    }
+}
+
+/// The finding `node.roles.unprepared`: the installer did not prepare the machine for
+/// `roles`, which miss `missing` (drop-ins, ports); `command` prepares them.
+pub fn unprepared_finding(roles: &[&str], missing: &[&str], command: &str) -> StatusWarning {
+    StatusWarning {
+        code: UNPREPARED.to_owned(),
+        detail: format!(
+            "the installer did not prepare this machine for the role(s) {}, which miss {}: \
+             run `{command}` on the host",
+            roles.join(", "),
+            missing.join(", ")
+        ),
+        params: BTreeMap::from([
+            ("roles".to_owned(), roles.join(", ")),
+            ("missing".to_owned(), missing.join(", ")),
+            ("command".to_owned(), command.to_owned()),
         ]),
     }
 }

@@ -463,6 +463,55 @@ describe("the scan configuration of this controller", () => {
   });
 });
 
+describe("the health rows of the node page", () => {
+  const COMMAND = "sudo bash install.sh --prepare --roles controller,dns,probe";
+
+  /** Answers the status with the warnings of a machine the installer did not prepare. */
+  async function warned(warnings: { code: string; detail: string; params: Record<string, string> }[]) {
+    const status = await api.get("/api/v1/system/status");
+    server.use(http.get("/api/v1/system/status", () => HttpResponse.json({ ...status, warnings: [...status.warnings, ...warnings] })));
+  }
+
+  it("shows no health row while the machine is prepared", async () => {
+    openNodes();
+    await listed(2);
+    expect(screen.queryByTestId("nodes-health-row")).toBeNull();
+  });
+
+  it("shows the privileges warning with the capability, the drop-in and the installer command", async () => {
+    await warned([
+      {
+        code: "node.roles.privileges",
+        detail: "the role(s) probe need raw sockets",
+        params: { roles: "probe", dropins: "probe.conf", capability: "CAP_NET_RAW", command: "sudo bash install.sh --prepare" },
+      },
+    ]);
+    openNodes();
+    const row = await screen.findByTestId("nodes-health-row");
+    expect(row.dataset.code).toBe("node.roles.privileges");
+    expect(row.textContent).toContain("probe");
+    expect(row.textContent).toContain("CAP_NET_RAW");
+    expect(row.textContent).toContain("probe.conf");
+    expect(row.textContent).toContain("sudo bash install.sh --prepare");
+  });
+
+  it("shows the warning about a machine the installer did not prepare", async () => {
+    await warned([
+      {
+        code: "node.roles.unprepared",
+        detail: "the machine is not prepared for dhcp",
+        params: { roles: "dhcp", missing: "dhcp-direct.conf, 67/udp", command: COMMAND },
+      },
+    ]);
+    openNodes();
+    const row = await screen.findByTestId("nodes-health-row");
+    expect(row.dataset.code).toBe("node.roles.unprepared");
+    expect(row.textContent).toContain("did not prepare");
+    expect(row.textContent).toContain("dhcp-direct.conf, 67/udp");
+    expect(row.textContent).toContain(COMMAND);
+  });
+});
+
 describe("when the server cannot answer", () => {
   const failing = (path: string) =>
     server.use(

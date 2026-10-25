@@ -220,6 +220,53 @@ pub struct NodeStatus {
     pub id: Option<NodeId>,
     /// Roles this node runs: `controller`, `dns`, `dhcp`, `probe`.
     pub roles: Vec<String>,
+    /// What the installer prepared this machine for, per role, with what the server found
+    /// missing at start; absent when no installer recorded it (a container, a node set up
+    /// by hand, an installer older than the record).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared: Option<PreparedRoles>,
+}
+
+/// What the installer prepared this machine for (OPS-01): the file `prepared-roles` beside
+/// `tenko.toml`, which `deploy/install.sh` and the MSI write and the server reads at start,
+/// joined with what the server checks itself (`CAP_NET_RAW` in its bounding and effective
+/// sets on Linux). The Hardened profile prepares only the roles chosen at installation;
+/// every other profile prepares every role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PreparedRoles {
+    /// The file the record was read from.
+    pub file: String,
+    /// The security profile of the installer run that wrote it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// The systemd drop-ins it put in place (Linux): `probe.conf`, `dhcp-direct.conf`.
+    #[serde(default)]
+    pub dropins: Vec<String>,
+    /// The ports it prepared, as `53/udp`: opened on the host firewall where one runs.
+    #[serde(default)]
+    pub ports: Vec<String>,
+    /// The host firewall it configured: `firewalld`, `ufw`, `windows`, or `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firewall: Option<String>,
+    /// Every role in canonical order, prepared or not.
+    pub roles: Vec<RolePreparation>,
+}
+
+/// Whether the machine is prepared for one role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RolePreparation {
+    /// `controller`, `dns`, `dhcp` or `probe`.
+    pub role: String,
+    /// Whether the role finds what it needs: the installer prepared it and nothing the
+    /// server checks is missing.
+    pub prepared: bool,
+    /// What is missing, in technical names: a drop-in (`probe.conf`), a capability
+    /// (`CAP_NET_RAW`), a port (`67/udp`).
+    #[serde(default)]
+    pub missing: Vec<String>,
+    /// The installer command that prepares the role, when it is not prepared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 /// Summary of the store status.

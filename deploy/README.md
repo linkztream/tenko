@@ -58,11 +58,11 @@ read -rs GITHUB_TOKEN && export GITHUB_TOKEN && bash install.sh   # private: pas
 
 Run the file; piped into bash it still asks its questions on the terminal, but read it
 first. Without `--yes` it asks, with `whiptail` when installed and plain prompts otherwise:
-the roles, the modules, the security profile, the host name, the addresses and upstream
-resolvers of the dns role, the data directory, and an administrator for first-run setup
-(empty: setup in the browser with the setup token). On a rerun with an existing
-`/etc/tenko/tenko.toml` it asks nothing and keeps the file. Unattended, every answer is a
-flag:
+the security profile first, the roles only under the Hardened profile, the modules, the
+host name, the addresses and upstream resolvers of the dns role, the data directory, and an
+administrator for first-run setup (empty: setup in the browser with the setup token). On a
+rerun with an existing `/etc/tenko/tenko.toml` it asks nothing and keeps the file.
+Unattended, every answer is a flag:
 
 ```
 printf '%s\n' "$ADMIN_PIN" | bash install.sh --yes --binary ./tenko-0.2.0-linux-x86_64 \
@@ -73,11 +73,38 @@ printf '%s\n' "$ADMIN_PIN" | bash install.sh --yes --binary ./tenko-0.2.0-linux-
 Under the Home profile the first administrator signs in with a PIN (four or more digits,
 no simple pattern such as `1234`); the other profiles take a password.
 
+**Roles and the security profile.** Which roles a node runs is a runtime decision, made on
+the Nodes page of the web UI ([../docs/cluster.md](../docs/cluster.md), section 13). What a
+role needs from root is the installer's: the drop-ins `systemd/probe.conf` and
+`systemd/dhcp-direct.conf` (`CAP_NET_RAW` for the probe role's raw methods and the dhcp
+role's direct mode), the role's ports on the host firewall (firewalld or ufw, when one is
+active; with neither, the closing lines name the ports for the network's firewall), and
+systemd-resolved's stub listener off for the dns role on every address. So:
+
+| Profile | The roles question | Prepared for | The node starts with |
+|---|---|---|---|
+| Home, Standard, Lab | Not asked | Every role | Every role; trim the set on the Nodes page (`--roles` names another starting set, and the machine is still prepared for every role) |
+| Hardened | Asked (`--roles` unattended, default `controller,dns`) | The chosen roles only | The chosen roles |
+
+The installer records what it prepared in `/etc/tenko/prepared-roles` (root's, readable by
+the service; it changes nothing and nothing in it is run). The node reads it at start, and
+the Nodes page says per role whether the machine is prepared for it: an administrator may
+switch on a role that is not, and the page names what is missing and the command that
+prepares it. Before it sets anything up, the installer's dependency check lists what the
+prepared roles miss and asks once whether to set it up now (yes by default, `--yes` answers
+yes); `--check` only reports, `--prepare` sets up and changes nothing else:
+
+```
+sudo bash install.sh --check                                    # exit 11 when something is missing
+sudo bash install.sh --prepare                                  # outside Hardened: every role
+sudo bash install.sh --prepare --roles controller,dns,probe    # Hardened: these roles
+```
+
 | Flag | Default | Meaning |
 |---|---|---|
-| `--roles controller[,dns][,dhcp][,probe]` | `controller,dns` | The roles of the node (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below; with the probe role the installer puts the drop-in `systemd/probe.conf` in place, "The probe role" below). On a node that has started before the roles are in the store: `--reconfigure --roles` writes the file and the drop-ins but cannot change the running set; change it on the nodes page of the web UI, with `tenko node roles set <id> --roles ...`, or with `PUT /api/v1/nodes/{id}/roles` ([../docs/cluster.md](../docs/cluster.md), section 13) |
+| `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)); it decides what the machine is prepared for (above) |
+| `--roles controller[,dns][,dhcp][,probe]` | every role; `controller,dns` under Hardened | The roles the node starts with (the dhcp role also needs `[dhcp] listen` in `tenko.toml`, section "DHCP" below). Outside Hardened it narrows the starting set only; under Hardened it also names the roles the machine is prepared for, and `--reconfigure --roles` without the probe role removes `probe.conf`. On a node that has started before the roles are in the store: `--reconfigure --roles` writes the file and the drop-ins but cannot change the running set; change it on the nodes page of the web UI, with `tenko node roles set <id> --roles ...`, or with `PUT /api/v1/nodes/{id}/roles` ([../docs/cluster.md](../docs/cluster.md), section 13) |
 | `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
-| `--profile home\|standard\|hardened\|lab` | `home` | The security profile ([../docs/SECURITY-PROFILES.md](../docs/SECURITY-PROFILES.md)) |
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
 | `--dns-address all\|<addr>,...` | `all` | Where the dns role answers; port 53 unless given (`192.0.2.53`, `[2001:db8::53]:5353`) |
 | `--forwarders <addr>,...\|none` | the host's resolvers, loopback excluded | Upstream resolvers for names outside the zones |
@@ -91,22 +118,27 @@ no simple pattern such as `1234`); the other profiles take a password.
 | `--repo <owner/name>` | `linkztream/tenko` | The GitHub repository |
 | `--release-url <url>` | | A directory with `SHA256SUMS` and the binary instead of GitHub (a mirror) |
 | `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
-| `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved |
+| `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved; remembered in `/etc/tenko/installer.state` for later runs |
+| `--check` | | The dependency check only: the drop-ins, `CAP_NET_RAW` of the running service, the firewall ports, the resolved stub and the record of the prepared roles; changes nothing, exit 11 when something is missing |
+| `--prepare` | | Set up what the prepared roles miss (asked once, yes by default) and nothing else: no download, no change to `tenko.toml`; restarts the service when its unit changed. Under Hardened, `--roles` names the roles to prepare |
 | `--use-self` | no (asked in interactive mode, default no) | With the dns role, point this host's own resolver at Tenko (`127.0.0.1`) once the node listens there; `--uninstall` restores the previous resolver |
 | `--reconfigure` | | Change `tenko.toml` by the answers you give; every other value of the file (`[dns] listen`, `[dhcp]`, `[server]`, `[tls]`, `[kek]`, `[dns.recursion]`, the profile, comments) is carried over, one output line per section; the old file stays as `tenko.toml.<time>.bak` |
 | `--yes` | | No questions; the defaults for what no flag gives |
 | `--no-start` | | Everything except enabling and starting the service (containers without systemd) |
 | `--dry-run` | | Print every step, change nothing |
-| `--uninstall [--purge]` | | Remove the service and the binary; `--purge` also the data, `/etc/tenko` and the account |
+| `--uninstall [--purge]` | | Remove the service and the binary, the role drop-ins, the firewall ports the installer opened and `/etc/tenko/prepared-roles`; `--purge` also the data, `/etc/tenko` and the account |
 
 What it does, in this order:
 
 1. Checks the host: root, x86_64 (other architectures stop: there is no release binary for
    them), the distribution (others get a warning), systemd as PID 1 and its version (250 or
    later for encrypted credentials), `curl` when it downloads, `useradd`, and the ports:
-   8443/tcp, 53 when the dns role is chosen, and UDP 67 when the dhcp role is chosen (another
-   DHCP server on every address, such as dnsmasq, isc-dhcp-server or Kea, stops it with the
-   program's name; one bound to a single address only warns). When systemd-resolved's stub listener
+   8443/tcp, 53 when the node starts with the dns role, and UDP 67 when it starts with the
+   dhcp role (another DHCP server on every address, such as dnsmasq, isc-dhcp-server or Kea,
+   stops it with the program's name; one bound to a single address only warns). When the
+   starting set was not chosen (no `--roles` outside Hardened), a taken port leaves that
+   role out of the starting set instead, with a warning; the machine stays prepared for it.
+   When systemd-resolved's stub listener
    holds 127.0.0.53:53 and the dns role is to answer on every address, it asks (`--yes`
    answers yes) to set `DNSStubListener=no` in `/etc/systemd/resolved.conf.d/tenko.conf`
    and points `/etc/resolv.conf` at `/run/systemd/resolve/resolv.conf`, so the host keeps
@@ -127,15 +159,17 @@ What it does, in this order:
    `[profile]`, `[server] listen` on IPv4 and IPv6 (`0.0.0.0:8443` and `[::]:8443`; IPv4
    only on a kernel without IPv6), `[tls]` with the host name and `localhost` on the
    certificate, plus the host's IPv4 and global IPv6 addresses when it has them, `[dns]
-   listen` and `forwarders`, a commented `[dhcp] listen` example with the dhcp role, and
-   `[kek]` for a key file) and checks it with `tenko config check`. With the dhcp role it
-   closes with a reminder: set `[dhcp] listen`; the installer puts `systemd/dhcp-direct.conf` in
-   place when it runs again and the listener is in direct mode (section "DHCP" below).
+   listen` and `forwarders` when the machine is prepared for the dns role, a commented
+   `[dhcp] listen` example when it is prepared for the dhcp role, and `[kek]` for a key file)
+   and checks it with `tenko config check`. With the dhcp role it closes with a reminder:
+   set `[dhcp] listen` (section "DHCP" below).
    On a rerun with `--reconfigure` it changes the file that is there by your answers and
    carries the rest over (see the option); the old file stays as `tenko.toml.<time>.bak`.
 5. Installs `systemd/tenko.service` unchanged (the script carries a copy; a test keeps the
-   two equal) with its drop-ins, enables and starts it, and waits until `tenko health`
-   reports the node ready.
+   two equal) with its drop-ins, runs the dependency check of the prepared roles (above:
+   the role drop-ins, the firewall ports, the resolved stub, `/etc/tenko/prepared-roles`)
+   and sets up what is missing after one question, enables and starts the service, and
+   waits until `tenko health` reports the node ready.
 6. With `--admin`, completes first-run setup with `tenko setup`; otherwise it reads the
    setup token. The closing lines name the URL, the CA root and its SHA-256, the setup
    token or the administrator, the data directory, the key and how to back it up.
@@ -502,8 +536,9 @@ procedure for upgrades and rollbacks, and the layout are described in
 
 **The probe role.** The base unit has no capability. To run the probe role next to the
 controller (`--roles controller,probe`, or `roles = "controller,probe"` in `tenko.toml`),
-install the drop-in `systemd/probe.conf` (`install.sh` does this itself when its roles
-include `probe`, and removes it when `--reconfigure --roles` drops the role):
+install the drop-in `systemd/probe.conf` (`install.sh` does this itself: outside the
+Hardened profile always, under Hardened when the probe role is chosen, and `--reconfigure
+--roles` without the role removes it there):
 
 ```
 install -d /etc/systemd/system/tenko.service.d
@@ -522,9 +557,10 @@ the unit 1.2 without the drop-in and 1.6 with it.
 **The dhcp role.** UDP 67 is below 1024 and covered by the base unit's
 `CAP_NET_BIND_SERVICE`, so relay mode needs no change. Direct mode (the broadcasts of clients
 on a link) needs the drop-in `systemd/dhcp-direct.conf`, which grants the same
-capability and address families as the probe drop-in (`install.sh` puts it in place when
-the dhcp role is listed and `[dhcp] listen` has a listener in direct mode, and removes it
-with the role); section "DHCP: the dhcp role and UDP 67" has the steps and the reasons.
+capability and address families as the probe drop-in (`install.sh` puts it in place
+outside the Hardened profile always, and under Hardened when the dhcp role is chosen and
+`[dhcp] listen` has a listener in direct mode, run `install.sh --prepare` after setting
+it); section "DHCP: the dhcp role and UDP 67" has the steps and the reasons.
 
 **The smoke test.** `systemd/smoke.sh` checks the unit end to end on a host where systemd
 is PID 1; the CI job `systemd-smoke` runs it on a Linux runner on the weekly schedule
@@ -880,10 +916,12 @@ need it) and the address families `AF_NETLINK` (the interface list) and `AF_PACK
 grants the same set as the probe drop-in `systemd/probe.conf`, so one of the two is enough
 when both roles run. Every other hardening setting stays. Without systemd,
 `setcap cap_net_bind_service,cap_net_raw+ep` on the binary does the same (repeat it after
-every update). Open the firewall for UDP 67 to the relay agents, or to the clients' link in
-direct mode, for example `nft add rule inet filter input udp dport 67 accept`, narrowed to
-their networks. The installer does not install the drop-in; it prints a reminder when the
-dhcp role is chosen.
+every update). The installer opens UDP 67 and 547 on firewalld or ufw when one is active
+(for every address: narrow the rules to the relay agents, or to the clients' link in direct
+mode, if the host is reachable from networks that should not reach it); with another
+firewall open them yourself, for example `nft add rule inet filter input udp dport { 67, 547 }
+accept`, narrowed to those networks. `install.sh` puts the drop-in in place as described
+under "The dhcp role" in the Linux section; `install.sh --check` tells whether it is there.
 
 **Another DHCP server on UDP 67.** Only one process can hold UDP 67 on an address.
 dnsmasq, isc-dhcp-server, Kea, and the DHCP service of a hypervisor or home router software

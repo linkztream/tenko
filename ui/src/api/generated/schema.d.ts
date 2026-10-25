@@ -12030,7 +12030,7 @@ export interface components {
             controller: boolean;
             /**
              * @description What the node should know about the set, which does not refuse it:
-             *     `node.roles.privileges`, `node.roles.dns_resolver`.
+             *     `node.roles.privileges`, `node.roles.unprepared`, `node.roles.dns_resolver`.
              */
             findings: components["schemas"]["StatusWarning"][];
             /**
@@ -12048,6 +12048,7 @@ export interface components {
              *     not used and cannot be changed.
              */
             pinned: boolean;
+            prepared?: components["schemas"]["PreparedRoles"] | null;
             /** @description How the node applies the stored set. */
             restart: components["schemas"]["RoleRestart"];
             /**
@@ -12068,6 +12069,7 @@ export interface components {
         /** @description Identity and roles of the node. */
         NodeStatus: {
             id?: components["schemas"]["NodeId"] | null;
+            prepared?: components["schemas"]["PreparedRoles"] | null;
             /** @description Roles this node runs: `controller`, `dns`, `dhcp`, `probe`. */
             roles: string[];
         };
@@ -15060,6 +15062,27 @@ export interface components {
             id: components["schemas"]["PrefixId"];
             vrf?: components["schemas"]["VrfId"] | null;
         };
+        /**
+         * @description What the installer prepared this machine for (OPS-01): the file `prepared-roles` beside
+         *     `tenko.toml`, which `deploy/install.sh` and the MSI write and the server reads at start,
+         *     joined with what the server checks itself (`CAP_NET_RAW` in its bounding and effective
+         *     sets on Linux). The Hardened profile prepares only the roles chosen at installation;
+         *     every other profile prepares every role.
+         */
+        PreparedRoles: {
+            /** @description The systemd drop-ins it put in place (Linux): `probe.conf`, `dhcp-direct.conf`. */
+            dropins?: string[];
+            /** @description The file the record was read from. */
+            file: string;
+            /** @description The host firewall it configured: `firewalld`, `ufw`, `windows`, or `none`. */
+            firewall?: string | null;
+            /** @description The ports it prepared, as `53/udp`: opened on the host firewall where one runs. */
+            ports?: string[];
+            /** @description The security profile of the installer run that wrote it. */
+            profile?: string | null;
+            /** @description Every role in canonical order, prepared or not. */
+            roles: components["schemas"]["RolePreparation"][];
+        };
         /** @description One source row of the preview. */
         PreviewRow: {
             /** @description What it creates, updates or leaves unchanged. */
@@ -16953,6 +16976,23 @@ export interface components {
             /** @description The role. */
             role: components["schemas"]["RoleName"];
             stored?: components["schemas"]["RoleMfa"] | null;
+        };
+        /** @description Whether the machine is prepared for one role. */
+        RolePreparation: {
+            /** @description The installer command that prepares the role, when it is not prepared. */
+            command?: string | null;
+            /**
+             * @description What is missing, in technical names: a drop-in (`probe.conf`), a capability
+             *     (`CAP_NET_RAW`), a port (`67/udp`).
+             */
+            missing?: string[];
+            /**
+             * @description Whether the role finds what it needs: the installer prepared it and nothing the
+             *     server checks is missing.
+             */
+            prepared: boolean;
+            /** @description `controller`, `dns`, `dhcp` or `probe`. */
+            role: string;
         };
         /**
          * @description How a node applies its stored set.

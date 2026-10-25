@@ -186,16 +186,20 @@
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="StartMenu" Value="1" Type="integer" KeyPath="yes" />
       </Component>
 
-      <!-- Firewall rules (TENKO_FIREWALL=1): the web UI and API on TCP 8443 always, DNS on
-           TCP and UDP with the dns role, UDP 67 with the dhcp role (below). Removed with the
-           product. -->
+      <!-- Firewall rules (TENKO_FIREWALL=1): the web UI and API on TCP 8443 always. The rules
+           of the roles follow the security profile: outside Hardened the machine is prepared
+           for every role, so DNS on TCP and UDP and DHCP on UDP 67 and 547 are opened whatever
+           TENKO_ROLES says, and a role switched on later from the Nodes page finds its ports;
+           under Hardened only the rules of the roles in TENKO_ROLES. Removed with the product.
+           Transitive: a reinstall (REINSTALL=ALL) with another profile or role list adds or
+           removes them. -->
       <Component Id="FirewallApi" Directory="INSTALLFOLDER" Condition="TENKO_FIREWALL = &quot;1&quot;" Transitive="yes">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallApi" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallApiTcp" Name="Tenko DDI web UI and API (TCP 8443)" Description="Tenko DDI: the web UI and the API"
                               Port="8443" Protocol="tcp" Scope="any" Profile="all" />
       </Component>
       <Component Id="FirewallDns" Directory="INSTALLFOLDER" Transitive="yes"
-                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_ROLES &gt;&lt; &quot;dns&quot; OR TENKO_ROLES = &quot;all&quot;)">
+                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_PROFILE &lt;&gt; &quot;hardened&quot; OR TENKO_ROLES &gt;&lt; &quot;dns&quot; OR TENKO_ROLES = &quot;all&quot;)">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDns" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallDnsUdp" Name="Tenko DDI DNS (UDP)" Description="Tenko DDI: the dns role"
                               Port="[TENKO_DNS_PORT]" Protocol="udp" Scope="any" Profile="all" />
@@ -203,15 +207,40 @@
                               Port="[TENKO_DNS_PORT]" Protocol="tcp" Scope="any" Profile="all" />
       </Component>
       <!-- WP7.5: DHCP with the dhcp role, UDP 67 (the server port of the node's [dhcp]
-           section; relay agents and direct clients both send to it). Conditioned on the role
-           string like the DNS rule above. UDP 547 joins it with DHCPv6 in Slice 9. -->
+           section; relay agents and direct clients both send to it), and UDP 547 for DHCPv6
+           ([dhcp.v6] port). Conditioned like the DNS rule above. -->
       <Component Id="FirewallDhcp" Directory="INSTALLFOLDER" Transitive="yes"
-                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_ROLES &gt;&lt; &quot;dhcp&quot; OR TENKO_ROLES = &quot;all&quot;)">
+                 Condition="TENKO_FIREWALL = &quot;1&quot; AND (TENKO_PROFILE &lt;&gt; &quot;hardened&quot; OR TENKO_ROLES &gt;&lt; &quot;dhcp&quot; OR TENKO_ROLES = &quot;all&quot;)">
         <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="FirewallDhcp" Value="1" Type="integer" KeyPath="yes" />
         <fw:FirewallException Id="FirewallDhcpUdp" Name="Tenko DDI DHCP (UDP)" Description="Tenko DDI: the dhcp role"
                               Port="67" Protocol="udp" Scope="any" Profile="all" />
+        <fw:FirewallException Id="FirewallDhcp6Udp" Name="Tenko DDI DHCPv6 (UDP)" Description="Tenko DDI: the dhcp role, DHCPv6"
+                              Port="547" Protocol="udp" Scope="any" Profile="all" />
+      </Component>
+
+      <!-- The record of what this machine is prepared for, beside tenko.toml
+           (%ProgramData%\Tenko\prepared-roles), which the service reads at start and reports
+           per role on the Nodes page (crates/tenko/src/prepared.rs). An INI file: the
+           service skips the section line. Administrators own it like the folder; the service
+           only reads it. Removed with the product. -->
+      <Component Id="PreparedRecord" Directory="CONFIGFOLDER" Transitive="yes">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Tenko\Installer" Name="PreparedRecord" Value="1" Type="integer" KeyPath="yes" />
+        <IniFile Id="PreparedProfile" Action="addLine" Directory="CONFIGFOLDER" Name="prepared-roles" Section="prepared" Key="profile" Value="[TENKO_PROFILE]" />
+        <IniFile Id="PreparedRoles" Action="addLine" Directory="CONFIGFOLDER" Name="prepared-roles" Section="prepared" Key="roles" Value="[TENKO_PREPARED_ROLES]" />
+        <IniFile Id="PreparedFirewall" Action="addLine" Directory="CONFIGFOLDER" Name="prepared-roles" Section="prepared" Key="firewall" Value="[TENKO_FIREWALL_KIND]" />
       </Component>
     </Feature>
+
+    <!-- What the record names: every role outside Hardened, the chosen ones under it; the
+         firewall the rules above went into. -->
+    <SetProperty Action="PreparedAll" Id="TENKO_PREPARED_ROLES" Value="controller,dns,dhcp,probe" Before="CostInitialize" Sequence="execute"
+                 Condition="TENKO_PROFILE &lt;&gt; &quot;hardened&quot; OR TENKO_ROLES = &quot;all&quot;" />
+    <SetProperty Action="PreparedChosen" Id="TENKO_PREPARED_ROLES" Value="[TENKO_ROLES]" Before="CostInitialize" Sequence="execute"
+                 Condition="TENKO_PROFILE = &quot;hardened&quot; AND TENKO_ROLES &lt;&gt; &quot;all&quot;" />
+    <SetProperty Action="FirewallKindWindows" Id="TENKO_FIREWALL_KIND" Value="windows" Before="CostInitialize" Sequence="execute"
+                 Condition="TENKO_FIREWALL = &quot;1&quot;" />
+    <SetProperty Action="FirewallKindNone" Id="TENKO_FIREWALL_KIND" Value="none" Before="CostInitialize" Sequence="execute"
+                 Condition="TENKO_FIREWALL &lt;&gt; &quot;1&quot;" />
 
     <!-- ===================================================================================
          Custom actions. Each runs a command line through WixQuietExec (no console window,

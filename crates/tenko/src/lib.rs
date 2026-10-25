@@ -13,6 +13,7 @@
 //! | [`cluster`] | `tenko cluster` and the cluster start step of `tenko serve` (controller cluster, Slice 3) |
 //! | [`backup`] | `tenko backup`: create, verify and restore backups (Slice 3) |
 //! | [`modules`] | the module switch of OPS-25 |
+//! | [`prepared`] | what the installer prepared the machine for, per role (`prepared-roles` beside `tenko.toml`) |
 //! | [`node`] | `tenko node`: enrol, status, renew, enrolment tokens; the cluster step of `tenko serve` and the data-plane node process |
 //! | [`upgrade`] | `tenko upgrade`, the data-directory format and its migrations, in-app updates (OPS-23, OPS-24) |
 //! | [`plugin`] | `tenko plugin`: list, run a bundled plugin, conformance test; the connector service of `tenko serve` |
@@ -42,6 +43,8 @@ pub mod node;
 pub mod node_roles;
 pub mod platform;
 pub mod plugin;
+// What the installer prepared the machine for.
+pub mod prepared;
 pub mod serve;
 pub mod telemetry;
 pub mod upgrade;

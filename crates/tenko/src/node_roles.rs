@@ -21,9 +21,14 @@
 //!
 //! Privileges stay the operator's: the probe's raw methods and the dhcp role's direct mode
 //! need `CAP_NET_RAW` and `AF_PACKET`, which the systemd drop-ins `probe.conf` and
-//! `dhcp-direct.conf` grant. A node that runs such a role without `CAP_NET_RAW` carries the
-//! status warning `node.roles.privileges` naming the drop-in, and the answers of the role
-//! routes carry the same finding.
+//! `dhcp-direct.conf` grant, and the roles need their ports on the host firewall. The
+//! installer prepares them ([`crate::prepared`]): for every role outside the Hardened
+//! profile, for the chosen ones in Hardened. A node that runs such a role without
+//! `CAP_NET_RAW` in its bounding and effective sets carries the status warning
+//! `node.roles.privileges` naming the role, the capability and the installer command that
+//! prepares it; a role the installer did not prepare carries `node.roles.unprepared`; the
+//! answers of the role routes carry the same findings for the configured set, and
+//! `prepared` per role.
 
 use std::{
     path::{Path, PathBuf},
@@ -33,10 +38,9 @@ use std::{
 
 use futures::{StreamExt as _, future::BoxFuture};
 use tenko_api::{
-    dto::system::StatusWarning,
+    dto::system::{PreparedRoles, StatusWarning},
     routes::node_roles::{
         NodeRoleService, OwnNode, RESTART_NOTICE, RoleHost, dns_resolver_finding,
-        privileges_finding,
     },
     state::AppState,
 };
@@ -49,7 +53,8 @@ use tenko_store::{ReadConsistency, ReadViewExt as _, Store, StoreError, WatchFil
 use tokio::sync::watch;
 
 use crate::{
-    config::{DhcpListenMode, Resolved},
+    config::Resolved,
+    prepared::Machine,
     upgrade::restart::{self, Restart},
 };
 
@@ -64,12 +69,6 @@ const SEED_RETRY: Duration = Duration::from_secs(5);
 
 /// The file in which `deploy/install.sh` records what it did to the host.
 pub const INSTALLER_STATE: &str = "/etc/tenko/installer.state";
-
-/// The drop-in of the probe role.
-pub const PROBE_DROPIN: &str = "probe.conf";
-
-/// The drop-in of the dhcp role's direct mode.
-pub const DHCP_DIRECT_DROPIN: &str = "dhcp-direct.conf";
 
 /// The roles of a start: `file` (the file's or `--roles`), unless `pinned`, the stored set
 /// with the controller role as the file says.
@@ -167,35 +166,6 @@ pub fn at_node_start(resolved: &Resolved, config_dir: &Path) -> RoleSet {
     roles
 }
 
-/// Whether the dhcp role of `resolved` has a listener in direct mode.
-pub fn dhcp_direct(resolved: &Resolved) -> bool {
-    resolved
-        .config
-        .dhcp
-        .listen
-        .iter()
-        .any(|listen| listen.mode == DhcpListenMode::Direct)
-}
-
-/// The finding `node.roles.privileges` for `roles` on a host where `raw` says whether the
-/// process holds `CAP_NET_RAW`; `None` when nothing is missing.
-pub fn privilege_gaps(roles: RoleSet, dhcp_direct: bool, raw: bool) -> Option<StatusWarning> {
-    if raw {
-        return None;
-    }
-    let mut needing = Vec::new();
-    let mut dropins = Vec::new();
-    if roles.contains(Role::Probe) {
-        needing.push(Role::Probe.as_str());
-        dropins.push(PROBE_DROPIN);
-    }
-    if roles.contains(Role::Dhcp) && dhcp_direct {
-        needing.push(Role::Dhcp.as_str());
-        dropins.push(DHCP_DIRECT_DROPIN);
-    }
-    (!needing.is_empty()).then(|| privileges_finding(&needing, &dropins))
-}
-
 /// Whether the installer pointed the host's resolver at this node: a non-empty `use_self`
 /// in the text of its state file.
 pub fn uses_self(state: &str) -> bool {
@@ -205,24 +175,13 @@ pub fn uses_self(state: &str) -> bool {
     })
 }
 
-/// Whether this process may open raw sockets: `CAP_NET_RAW` on Linux. Elsewhere the systemd
-/// drop-ins do not apply, and the answer is yes.
-pub fn raw_sockets() -> bool {
-    if !cfg!(target_os = "linux") {
-        return true;
-    }
-    tenko_scan::capability::Capabilities::detect(&tenko_scan::sys::HostSystem).raw_sockets
-}
-
 /// What the role service needs from this process.
 #[derive(Debug, Clone)]
 pub struct ServeHost {
     /// Whether a service manager starts the process again after exit status 12.
     pub supervised: bool,
-    /// Whether the dhcp role has a listener in direct mode.
-    pub dhcp_direct: bool,
-    /// Whether the process holds `CAP_NET_RAW`.
-    pub raw: bool,
+    /// What the installer prepared the machine for, and the capabilities of the process.
+    pub machine: Machine,
     /// The installer's state file, when the platform has one.
     pub installer_state: Option<PathBuf>,
 }
@@ -232,8 +191,7 @@ impl ServeHost {
     pub fn of(resolved: &Resolved) -> Self {
         Self {
             supervised: restart::supervised(),
-            dhcp_direct: dhcp_direct(resolved),
-            raw: raw_sockets(),
+            machine: Machine::of(resolved),
             installer_state: cfg!(target_os = "linux").then(|| PathBuf::from(INSTALLER_STATE)),
         }
     }
@@ -251,7 +209,8 @@ impl RoleHost for ServeHost {
     ) -> BoxFuture<'_, Vec<StatusWarning>> {
         Box::pin(async move {
             let mut findings = Vec::new();
-            findings.extend(privilege_gaps(configured, self.dhcp_direct, self.raw));
+            findings.extend(self.machine.privilege_gaps(configured));
+            findings.extend(self.machine.unprepared(configured));
             if !configured.contains(Role::Dns)
                 && let Some(path) = &self.installer_state
             {
@@ -262,6 +221,10 @@ impl RoleHost for ServeHost {
             }
             findings
         })
+    }
+
+    fn prepared(&self) -> Option<PreparedRoles> {
+        self.machine.prepared()
     }
 }
 
@@ -295,7 +258,18 @@ pub fn start(parts: Parts) -> (Arc<NodeRoleService>, tokio::task::JoinHandle<()>
         restart,
         stop,
     } = parts;
-    if let Some(warning) = privilege_gaps(own.running, host.dhcp_direct, host.raw) {
+    // The start check of the roles this node runs: CAP_NET_RAW where a role needs it, and
+    // what the installer did not prepare. Both are health rows until the next start.
+    if let Some(warning) = host.machine.privilege_gaps(own.running) {
+        tracing::warn!(
+            code = %warning.code,
+            capability = host.machine.raw_detail().unwrap_or_default(),
+            "{}",
+            warning.detail
+        );
+        state.set_notice(warning);
+    }
+    if let Some(warning) = host.machine.unprepared(own.running) {
         tracing::warn!(code = %warning.code, "{}", warning.detail);
         state.set_notice(warning);
     }
@@ -583,19 +557,75 @@ mod tests {
     }
 
     #[test]
-    fn privileges_and_the_resolver() {
-        assert!(privilege_gaps(roles("controller,probe,dhcp"), true, true).is_none());
-        let probe = privilege_gaps(roles("controller,probe"), true, false).expect("finding");
-        assert_eq!(probe.code, "node.roles.privileges");
-        assert_eq!(probe.params["dropins"], "probe.conf");
-        let both = privilege_gaps(roles("controller,dhcp,probe"), true, false).expect("finding");
-        assert_eq!(both.params["roles"], "probe, dhcp");
-        assert_eq!(both.params["dropins"], "probe.conf, dhcp-direct.conf");
-        // Relay mode needs nothing.
-        assert!(privilege_gaps(roles("controller,dhcp"), false, false).is_none());
+    fn the_resolver_of_the_host() {
         assert!(uses_self("version=1\nuse_self=resolved\n"));
         assert!(!uses_self("use_self=\n"));
         assert!(!uses_self(""));
+    }
+
+    /// A host whose process lacks `CAP_NET_RAW`, on a machine the installer prepared for
+    /// the controller and dns roles under Hardened.
+    fn hardened_host() -> ServeHost {
+        ServeHost {
+            supervised: false,
+            machine: Machine {
+                record: Some((
+                    PathBuf::from("/etc/tenko/prepared-roles"),
+                    crate::prepared::Record::parse("profile=hardened\nroles=controller,dns\n"),
+                )),
+                ..Machine::bare(false)
+            },
+            installer_state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_start_raises_the_privileges_and_the_preparation() {
+        let store: Arc<dyn Store> = Arc::new(MemStore::default());
+        let state = AppState::new(Arc::clone(&store));
+        let (stop_tx, stop) = watch::channel(false);
+        let (service, task) = start(Parts {
+            store: Arc::clone(&store),
+            state: state.clone(),
+            own: OwnNode {
+                id: NodeId(1),
+                running: roles("controller,dns,probe"),
+                pinned: true,
+            },
+            file: roles("controller,dns,probe"),
+            host: hardened_host(),
+            restart: Restart::new(),
+            stop,
+        });
+        let notices = state.notices_list();
+        let privileges = notices
+            .iter()
+            .find(|warning| warning.code == "node.roles.privileges")
+            .expect("the health row of the capability");
+        assert_eq!(privileges.params["roles"], "probe");
+        assert_eq!(privileges.params["capability"], "CAP_NET_RAW");
+        assert_eq!(
+            privileges.params["command"],
+            "sudo bash install.sh --prepare --roles controller,dns,probe"
+        );
+        let unprepared = notices
+            .iter()
+            .find(|warning| warning.code == "node.roles.unprepared")
+            .expect("the health row of the preparation");
+        assert_eq!(unprepared.params["missing"], "probe.conf");
+        // The answer of the role routes says the same per role.
+        let answer = service.get(NodeId(1)).await.expect("roles");
+        let prepared = answer.prepared.expect("the record");
+        assert!(prepared.roles[1].prepared, "dns");
+        assert!(!prepared.roles[3].prepared, "probe");
+        assert!(
+            answer
+                .findings
+                .iter()
+                .any(|finding| finding.code == "node.roles.unprepared")
+        );
+        let _ = stop_tx.send(true);
+        let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
     }
 
     #[tokio::test]
@@ -650,8 +680,7 @@ mod tests {
             file: roles("controller,dns"),
             host: ServeHost {
                 supervised: true,
-                dhcp_direct: false,
-                raw: true,
+                machine: Machine::bare(true),
                 installer_state: None,
             },
             restart: restart.clone(),

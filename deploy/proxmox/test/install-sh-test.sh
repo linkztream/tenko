@@ -2,7 +2,9 @@
 # Checks of deploy/install.sh, the Linux installer that install/tenko-install.sh runs in a
 # Proxmox container:
 #   (1) its parsers and validators, sourced, against test/fixtures/tenko-release.json, and its
-#       refusal of a file that is not the binary (a script, an empty file, a text file);
+#       refusal of a file that is not the binary (a script, an empty file, a text file), the
+#       profile and the roles question (Hardened asks, every other profile prepares every
+#       role) and the dependency check with --check, yes and no, on a directory of its own;
 #   (2) a dry run in ubuntu:24.04 that changes nothing;
 #   (3) an unattended --no-start install of a local binary in ubuntu:24.04, debian:12-slim and
 #       rockylinux/rockylinux:9-minimal (the release workflow's smoke images): the files and
@@ -277,6 +279,169 @@ CFG_END
     expect "dhcp_direct_wanted without a direct listener" 1 "$(dhcp_direct_wanted "$cfg"; echo $?)"
     printf '[dhcp]\n# listen = [{ address = "192.0.2.10", mode = "direct", interface = "eth0" }]\n' >"${work}/commented.toml"
     expect "dhcp_direct_wanted ignores a comment" 1 "$(dhcp_direct_wanted "${work}/commented.toml"; echo $?)"
+
+    echo "== (1c) the profile decides the roles question; the dependency check"
+    # The questions answered from REPLIES (empty: the default); QUESTIONS records what was asked.
+    QUESTIONS=() REPLIES=() NEXT=""
+    next_reply() { NEXT="${REPLIES[0]-}"; REPLIES=("${REPLIES[@]:1}"); }
+    ask() { QUESTIONS+=("$2"); next_reply; printf -v "$1" '%s' "${NEXT:-$3}"; }
+    ask_menu() { QUESTIONS+=("$2"); next_reply; printf -v "$1" '%s' "${NEXT:-$3}"; }
+    ask_yes_no() { QUESTIONS+=("${1%%$'\n'*}"); next_reply; [[ "${NEXT:-$2}" == yes ]]; }
+    asked() { printf '%s\n' "${QUESTIONS[@]}"; }
+    PREP_RECORD="${work}/prepared-roles" PREP_DROPINS="${work}/dropins"
+    fresh_defaults() { # a fresh interactive install, no flags
+      OPT_YES=0 HAVE_CONFIG=0 OPT_RECONFIGURE=0 OPT_USE_SELF=0 OPT_LANGUAGE="" OPT_ADMIN=""
+      OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DATA_DIR="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
+      SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0 ROLES_DEFAULTED=0 ROLES_CHOSEN=0 PREPARE_ROLES=""
+      DATA_DIR=/var/lib/tenko QUESTIONS=()
+      rm -f "$PREP_RECORD"
+    }
+    # Hardened: the profile is asked first, then the roles, and only those are prepared.
+    fresh_defaults
+    REPLIES=(hardened controller,dns yes)
+    answers >"${work}/answers.out" 2>&1
+    expect "hardened: the profile is the first question" "Security profile (docs/SECURITY-PROFILES.md)" "${QUESTIONS[0]}"
+    has "$(asked)" "Roles of this node (the Hardened profile prepares the machine for these only)" "hardened: the roles are asked"
+    has "$(asked)" "Also run the probe role on this node?" "hardened: the probe role is asked"
+    expect "hardened: the starting set" "controller,dns,probe" "$ROLES"
+    expect "hardened: prepared for the chosen roles only" "controller,dns,probe" "$PREPARE_ROLES"
+    # Every other profile: no roles question, every role prepared and started.
+    for profile in home standard lab; do
+      fresh_defaults
+      REPLIES=("$profile")
+      answers >"${work}/answers.out" 2>&1
+      lacks "$(asked)" "Roles of this node" "${profile}: the roles are not asked"
+      lacks "$(asked)" "Also run the probe role" "${profile}: the probe role is not asked"
+      expect "${profile}: the node starts with every role" "controller,dns,dhcp,probe" "$ROLES"
+      expect "${profile}: prepared for every role" "controller,dns,dhcp,probe" "$PREPARE_ROLES"
+    done
+    has "$(cat "${work}/answers.out")" "the machine is prepared for every role and the node starts with all of them" "says that every role is prepared"
+    has "$(asked)" "Addresses the dns role answers on" "the dns settings are asked for the prepared dns role"
+    # --roles outside Hardened names the starting set only, with a note.
+    fresh_defaults
+    OPT_YES=1 OPT_PROFILE=standard OPT_ROLES=controller SET_ROLES=1
+    answers >"${work}/answers.out" 2>&1
+    expect "--roles outside hardened: the starting set" "controller" "$ROLES"
+    expect "--roles outside hardened: still prepared for every role" "controller,dns,dhcp,probe" "$PREPARE_ROLES"
+    has "$(cat "${work}/answers.out")" "--roles controller is the set the node starts with" "--roles outside hardened: says so"
+    # --yes under Hardened without --roles: the default pair, prepared alone.
+    fresh_defaults
+    OPT_YES=1 OPT_PROFILE=hardened
+    answers >"${work}/answers.out" 2>&1
+    expect "--yes hardened: the default roles" "controller,dns" "$ROLES"
+    expect "--yes hardened: prepared for them only" "controller,dns" "$PREPARE_ROLES"
+    # A rerun under Hardened keeps what the record names; --roles names it anew.
+    PROFILE=hardened ROLES=controller,dns SET_ROLES=0
+    printf '[prepared]\nprofile=hardened\nroles=controller,dns,probe\n' >"$PREP_RECORD"
+    read_record
+    expect "read_record: the profile" "hardened" "$REC_PROFILE"
+    prepare_roles
+    expect "hardened rerun: the recorded roles stay prepared" "controller,dns,probe" "$PREPARE_ROLES"
+    SET_ROLES=1 ROLES=controller,dhcp
+    prepare_roles
+    expect "hardened --roles: exactly the roles given" "controller,dhcp" "$PREPARE_ROLES"
+    expect "canonical_roles" "controller,dns,probe" "$(canonical_roles probe,dns "" controller)"
+
+    # The dependency check, on a directory of its own: a missing drop-in found, set up on yes.
+    put() { cat >"$1"; CHANGED=$((CHANGED + 1)); return 0; }
+    state_set() { :; }
+    state_get() { :; }
+    firewall_kind() { echo none; }
+    resolved_stub_holds_53() { return 1; }
+    prep_defaults() {
+      fresh_defaults
+      ACTIVE=0 SYSTEMD=0 STUB_OFF=0 OPT_KEEP_STUB=0 OPT_CHECK=0 OPT_DRY=0 UNIT_CHANGED=0 NEED_RESTART=0
+      PROFILE=home ROLES=controller,dns PREPARE_ROLES=controller,dns,dhcp,probe DNS_ADDRESS=all
+      API_PORT=8443 CLUSTER_PORT=8444 RECORD_ROLES=""
+      rm -rf "$PREP_DROPINS"
+      mkdir -p "$PREP_DROPINS"
+      dhcp_direct_dropin_text >"${PREP_DROPINS}/dhcp-direct.conf"
+    }
+    prep_defaults
+    deps_check
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "the drop-in ${PREP_DROPINS}/probe.conf (CAP_NET_RAW for the probe role)" "check: finds the missing probe.conf"
+    lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "dhcp-direct.conf" "check: the dhcp drop-in in place is not missing"
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "the record ${PREP_RECORD}" "check: finds the missing record"
+    has "$(printf '%s\n' "${DEP_OK[@]}")" "no host firewall is active" "check: no firewall, says which ports the network must let in"
+    # --check only reports.
+    OPT_CHECK=1
+    out="$(step_prepare 2>&1)"
+    has "$out" "missing (probe): the drop-in" "--check: reports the missing drop-in"
+    expect "--check: changes nothing" "no" "$([[ -f "${PREP_DROPINS}/probe.conf" || -f "$PREP_RECORD" ]] && echo yes || echo no)"
+    OPT_CHECK=0
+    # Yes: the drop-in and the record are set up, and the unit is reloaded.
+    REPLIES=(yes)
+    step_prepare >"${work}/prepare.out" 2>&1
+    has "$(asked)" "Set up what the roles need now?" "prepare: asks once"
+    expect "prepare: probe.conf is the shipped one" "same" "$(cmp -s <(probe_dropin_text) "${PREP_DROPINS}/probe.conf" && echo same || echo differs)"
+    expect "prepare: the unit is reloaded" "1" "$UNIT_CHANGED"
+    record="$(cat "$PREP_RECORD" 2>/dev/null)"
+    has "$record" "roles=controller,dns,dhcp,probe" "record: every role"
+    has "$record" "profile=home" "record: the profile"
+    has "$record" "dropins=probe.conf,dhcp-direct.conf" "record: the drop-ins"
+    has "$record" "ports=8443/tcp,8444/tcp,53/tcp,53/udp,67/udp,547/udp" "record: the ports of every role"
+    lacks "$record" "20" "record: no date, so a rerun that changes nothing leaves it"
+    deps_check
+    expect "after prepare: nothing is missing" "0" "${#TODO_TEXT[@]}"
+    out="$(step_prepare 2>&1)"
+    has "$out" "Prepared for the roles controller, dns, dhcp, probe" "a second run: says the machine is prepared"
+    # No: nothing is set up, and the record leaves out the role that misses something.
+    prep_defaults
+    REPLIES=(no)
+    step_prepare >"${work}/prepare.out" 2>&1
+    expect "declined: no drop-in" "no" "$([[ -f "${PREP_DROPINS}/probe.conf" ]] && echo yes || echo no)"
+    has "$(cat "$PREP_RECORD")" "roles=controller,dns,dhcp" "declined: the record leaves the probe role out"
+    lacks "$(cat "$PREP_RECORD")" "probe" "declined: no probe in the record"
+    has "$(cat "${work}/prepare.out")" "Left as it is: the role(s) probe run without what they miss" "declined: says so"
+    # Under Hardened a drop-in no prepared role needs goes.
+    prep_defaults
+    probe_dropin_text >"${PREP_DROPINS}/probe.conf"
+    PROFILE=hardened PREPARE_ROLES=controller,dns
+    deps_check
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "removing ${PREP_DROPINS}/probe.conf" "hardened: an unneeded probe.conf goes"
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "removing ${PREP_DROPINS}/dhcp-direct.conf" "hardened: an unneeded dhcp-direct.conf goes"
+    lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "67/udp" "hardened: no dhcp port without the dhcp role"
+    # A drop-in the operator changed stays, outside Hardened as inside.
+    prep_defaults
+    echo '# mine' >"${PREP_DROPINS}/probe.conf"
+    deps_check
+    has "$(printf '%s\n' "${DEP_NOTES[@]}")" "probe.conf differs from the one the installer ships; it is left as it is" "an operator's drop-in stays"
+    # ufw: the ports that are not open are opened.
+    prep_defaults
+    probe_dropin_text >"${PREP_DROPINS}/probe.conf"
+    : >"${work}/ufw.log"
+    ufw() {
+      case "$1" in
+      status) printf 'Status: active\n\nTo                         Action      From\n8443/tcp                   ALLOW       Anywhere\n' ;;
+      *) echo "ufw $*" >>"${work}/ufw.log" ;;
+      esac
+    }
+    firewall_kind() { echo ufw; }
+    deps_check
+    lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "8443/tcp" "ufw: an open port is not missing"
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "547/udp on ufw" "ufw: DHCPv6 is missing"
+    REPLIES=(yes)
+    step_prepare >"${work}/prepare.out" 2>&1
+    has "$(cat "${work}/ufw.log")" "ufw allow 53/udp comment Tenko DDI" "ufw: opens the dns port"
+    has "$(cat "${work}/ufw.log")" "ufw allow 8444/tcp comment Tenko DDI" "ufw: opens the cluster port"
+    lacks "$(cat "${work}/ufw.log")" "allow 8443/tcp" "ufw: leaves the open port"
+    has "$(cat "$PREP_RECORD")" "firewall=ufw" "record: the firewall"
+    unset -f ufw
+    # The resolved stub: in the way of the dns role on every address, unless it is kept.
+    prep_defaults
+    probe_dropin_text >"${PREP_DROPINS}/probe.conf"
+    firewall_kind() { echo none; }
+    resolved_stub_holds_53() { return 0; }
+    deps_check
+    has "$(printf '%s\n' "${TODO_TEXT[@]}")" "systemd-resolved's stub listener off" "stub: in the way of the prepared dns role"
+    OPT_KEEP_STUB=1
+    deps_check
+    lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "stub listener off" "stub: --keep-resolved-stub keeps it"
+    has "$(printf '%s\n' "${DEP_NOTES[@]}")" "--keep-resolved-stub keeps it" "stub: and says what the dns role then needs"
+    DNS_ADDRESS=192.0.2.53 OPT_KEEP_STUB=0
+    deps_check
+    lacks "$(printf '%s\n' "${TODO_TEXT[@]}")" "stub listener off" "stub: a dns role on the host's own address does not need it off"
+    expect "--help names --check and --prepare" "yes" "$(bash "$installer" --help | grep -q -- '--prepare' && bash "$installer" --help | grep -q -- '--check' && echo yes)"
     rm -rf "$work"
     exit "$failures"
   )
@@ -344,7 +509,9 @@ printf '%s\n' "$out" | sed 's/^/      /'
 [ "$(mode /var/lib/tenko)" = "700 tenko:tenko" ] && pass "data directory 0700 tenko" || fail "data directory: $(mode /var/lib/tenko)"
 check "the unit is deploy/systemd/tenko.service" sh -c '[ "$(sha256sum </etc/systemd/system/tenko.service)" = "$(sha256sum </i/tenko.service)" ]'
 check "the KEK drop-in resets the credential" grep -qx 'LoadCredentialEncrypted=' /etc/systemd/system/tenko.service.d/kek-file.conf
-check "tenko.toml: roles controller,dns" grep -qx 'roles = "controller,dns"' /etc/tenko/tenko.toml
+check "tenko.toml: every role outside Hardened" grep -qx 'roles = "controller,dns,dhcp,probe"' /etc/tenko/tenko.toml
+check "prepared-roles: every role" grep -qx 'roles=controller,dns,dhcp,probe' /etc/tenko/prepared-roles
+check "the probe drop-in is in place" test -f /etc/systemd/system/tenko.service.d/probe.conf
 check "tenko.toml: the file provider" grep -qx 'provider = "file"' /etc/tenko/tenko.toml
 check "tenko.toml: forwarders" grep -qx 'forwarders = \["192.0.2.1"\]' /etc/tenko/tenko.toml
 check "tenko.toml: the API listens on IPv4 and IPv6" grep -qx 'listen = \["0.0.0.0:8443", "\[::\]:8443"\]' /etc/tenko/tenko.toml
@@ -388,7 +555,7 @@ echo "-- --reconfigure --roles controller"
 out="$(bash /i/install.sh "${install_args[@]}" --reconfigure --roles controller 2>&1)"; rc=$?
 [ "$rc" = 0 ] && pass "reconfigure exit 0" || { fail "reconfigure exit ${rc}"; printf '%s\n' "$out" | sed 's/^/      /'; }
 check "roles = controller" grep -qx 'roles = "controller"' /etc/tenko/tenko.toml
-check "no [dns] section" sh -c '! grep -q "^\[dns\]" /etc/tenko/tenko.toml'
+check "[dns] stays for the prepared dns role" grep -q "^\[dns\]" /etc/tenko/tenko.toml
 check "the old file is kept as .bak" sh -c 'ls /etc/tenko/tenko.toml.*.bak'
 check "the key is unchanged" sh -c '[ "$(sha256sum </etc/tenko/kek.key)" = "'"$key_before"'" ]'
 

@@ -863,8 +863,24 @@
         <segment><source>The node applies the change when it receives it.</source></segment>
       </unit>
       <unit id="nodes.roles.finding.privileges">
-        <notes><note category="description">Warning: roles need a systemd drop-in the node lacks; the arguments are role names and drop-in file names.</note></notes>
-        <segment><source>The role(s) {roles} need raw sockets this node does not have. Install the systemd drop-in(s) {dropins} (deploy/install.sh --reconfigure --roles does) and restart the service.</source></segment>
+        <notes><note category="description">Warning: roles need raw sockets and the service lacks CAP_NET_RAW; the arguments are role names, the capability, drop-in file names and the installer command.</note></notes>
+        <segment><source>The role(s) {roles} need raw sockets, and the service does not hold {capability}. Run {command} on the host: it installs the drop-in(s) {dropins} and restarts the service.</source></segment>
+      </unit>
+      <unit id="nodes.roles.finding.unprepared">
+        <notes><note category="description">Warning: the installer did not prepare the machine for roles; the arguments are role names, the missing items and the installer command.</note></notes>
+        <segment><source>The installer did not prepare this machine for the role(s) {roles} ({missing} missing). Run {command} on the host.</source></segment>
+      </unit>
+      <unit id="nodes.roles.prepared.yes">
+        <notes><note category="description">Tag after a role name: the installer prepared the machine for the role.</note></notes>
+        <segment><source>Prepared</source></segment>
+      </unit>
+      <unit id="nodes.roles.prepared.no">
+        <notes><note category="description">Tag after a role name: the installer did not prepare the machine for the role.</note></notes>
+        <segment><source>Not prepared</source></segment>
+      </unit>
+      <unit id="nodes.roles.unprepared">
+        <notes><note category="description">Warning under the role switches when a role is switched on that the machine is not prepared for; the arguments are the role and the missing items, and the installer command follows.</note></notes>
+        <segment><source>The installer did not prepare this machine for the {role} role ({missing} missing). Run this on the host:</source></segment>
       </unit>
       <unit id="nodes.roles.finding.dns_resolver">
         <notes><note category="description">Warning: the dns role leaves a node that is its host's resolver; the argument is the installer's state file.</note></notes>

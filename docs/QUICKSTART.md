@@ -11,8 +11,10 @@ one link away (section 5). The node below is 192.0.2.10 in 192.0.2.0/24, the rou
    curl -fsSLO https://github.com/linkztream/tenko/releases/latest/download/install.sh
    ```
 
-2. Run it and answer its questions: the roles (all four, section 2), the security profile
-   (Home) and the data directory (on SSD or NVMe); everything else keeps its default.
+2. Run it and answer its questions: the security profile (Home) and the data directory (on
+   SSD or NVMe); everything else keeps its default. Outside the Hardened profile the
+   installer does not ask for the roles: it prepares the box for all four (section 2) and
+   the node starts with all four; under Hardened it asks and prepares only the chosen ones.
 
    ```bash
    bash install.sh
@@ -21,7 +23,7 @@ one link away (section 5). The node below is 192.0.2.10 in 192.0.2.0/24, the rou
    Unattended, everything on one box in one line (setup then happens in the browser):
 
    ```bash
-   bash install.sh --yes --roles controller,dns,dhcp,probe --host-name tenko.home.arpa
+   bash install.sh --yes --host-name tenko.home.arpa
    ```
 
 3. Open `https://<the node's address>:8443/`, accept the internal CA's certificate once,
@@ -42,11 +44,16 @@ creates a container and runs the installer in it ([deploy/proxmox/README.md](../
 
 - `controller`: the API, the web UI and the replicated store; every node has one to talk to.
 - `dns`: the authoritative and recursive name server on port 53.
-- `dhcp`: the DHCPv4 server on UDP 67.
+- `dhcp`: the DHCP server on UDP 67, and DHCPv6 on UDP 547.
 - `probe`: the discovery scans that fill IPAM, and the DHCP conflict probe before an offer.
 
-One box runs all four. ARP does not cross routers, so each further segment gets its own
-probe later, enrolled from the Cluster page with a token ([cluster.md](cluster.md)).
+One box runs all four. Switch a role off or on later on the Nodes page (the section "This
+controller"); each role there says whether the box is prepared for it, and for one that is
+not (under Hardened) it names what is missing and the installer command that prepares it,
+such as `sudo bash install.sh --prepare --roles controller,dns,probe`. `sudo bash install.sh
+--check` reports the same on the box. ARP does not cross routers, so each further segment
+gets its own probe later, enrolled from the Cluster page with a token
+([cluster.md](cluster.md)).
 
 ## 3. Your first network
 
@@ -101,7 +108,9 @@ tenko login -u admin
    enabled, forward zone `home.arpa`.
 8. If the wizard's DHCP step did not do it, add the section below to `/etc/tenko/tenko.toml`
    (direct mode on the LAN interface; relay mode without `interface` when the router relays
-   to the node), install the drop-in that direct mode needs, and restart.
+   to the node) and restart. Outside Hardened the installer has put the drop-in that direct
+   mode needs in place already; under Hardened `install.sh --prepare` does it once the
+   listener is set.
 
    ```toml
    [dhcp]
@@ -109,7 +118,7 @@ tenko login -u admin
    ```
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/linkztream/tenko/main/deploy/systemd/dhcp-direct.conf --create-dirs -o /etc/systemd/system/tenko.service.d/dhcp-direct.conf && systemctl daemon-reload && systemctl restart tenko
+   systemctl restart tenko
    ```
 
 9. Switch scanning on for the prefix (no command): Nodes, the node, Scan configuration,
@@ -132,6 +141,7 @@ tenko ipam reconcile --prefix 192.0.2.0/24
 | 53 | UDP and TCP | in | clients | dns role | DNS queries |
 | 853, 443 | TCP | in | clients | dns role | only with DNS over TLS or DNS over HTTPS on |
 | 67 | UDP | in | clients (broadcast), the router's relay (unicast) | dhcp role | DHCP requests |
+| 547 | UDP | in | clients on the link, the router's relay | dhcp role | DHCPv6 requests |
 | 68 | UDP | out | dhcp role | clients | DHCP replies to clients on the link |
 | 8444 | TCP | in | probes and other controllers | controller | the cluster port (mutual TLS) |
 | ICMP echo | ICMP | out and back | probe | the scanned prefixes | the `icmp` method, and the conflict probe of relayed scopes |
@@ -139,7 +149,10 @@ tenko ipam reconcile --prefix 192.0.2.0/24
 | 53 | UDP and TCP | out | dns role | the internet | the recursive resolver's queries to authority servers |
 | 443 | TCP | out | controller | github.com | `releases.json` for the update check, and the installer's download |
 
-The ports are those of `deploy/tenko.example.toml`; the Windows MSI adds rules for 8443, 53 and 67.
+The ports are those of `deploy/tenko.example.toml`. On Linux the installer opens the inbound
+ones of the roles the box is prepared for (8443, 8444, 53, 67 and 547; every role outside
+Hardened) on firewalld or ufw when one is active, and names them in its closing lines when
+neither is; the Windows MSI adds rules for 8443, 53, 67 and 547 the same way.
 
 ## 5. Where to go next
 

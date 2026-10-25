@@ -4,6 +4,9 @@
 import { tDynamic } from "../i18n";
 import type { NodeRoles } from "../api/nodes";
 
+type PreparedRoles = NonNullable<NodeRoles["prepared"]>;
+export type RolePreparation = PreparedRoles["roles"][number];
+
 /** The roles in canonical order, the order the server lists them in. */
 export const ROLES = ["controller", "dns", "dhcp", "probe"] as const;
 export type RoleName = (typeof ROLES)[number];
@@ -46,6 +49,18 @@ export function changeOf(from: readonly string[], to: readonly string[]): { on: 
 export function findingText(finding: { code: string; detail: string; params?: Record<string, string> | null }): string {
   const name = finding.code.split(".").pop() ?? finding.code;
   return tDynamic(`nodes.roles.finding.${name}`, finding.params ?? {}) ?? finding.detail;
+}
+
+/** What the installer recorded for `role`, or undefined when the node reports no preparation. */
+export function preparationOf(role: string, prepared: NodeRoles["prepared"]): RolePreparation | undefined {
+  return prepared?.roles.find((r) => r.role === role);
+}
+
+/** The roles the draft switches on that the machine is not prepared for, in canonical order. */
+export function unpreparedOn(draft: readonly string[], configured: readonly string[], prepared: NodeRoles["prepared"]): RolePreparation[] {
+  return changeOf(configured, draft)
+    .on.map((role) => preparationOf(role, prepared))
+    .filter((p): p is RolePreparation => p !== undefined && !p.prepared);
 }
 
 /**

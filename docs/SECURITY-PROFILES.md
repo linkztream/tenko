@@ -112,6 +112,26 @@ Lab means permissive configuration for testing and training: open recursion, uns
 
 Lab is loud in the UI. The persistent warning banner described under Principles is shown for as long as the profile is active, and the never-off list still applies.
 
+## Installation: what the machine is prepared for
+
+The profile chosen at installation also decides what the installer prepares on the host,
+the root-only part of the roles: the systemd drop-ins that grant `CAP_NET_RAW` (the probe
+role's raw methods, the dhcp role's direct mode), the roles' ports on the host firewall, and
+systemd-resolved's stub listener off for the dns role on every address. This is an
+installer decision, not a toggle: the service never gains privileges at runtime (ADR 0023),
+so switching a role on later cannot grant them.
+
+| Profile | Prepared for | Roles question |
+|---|---|---|
+| Home, Standard, Lab | Every role, so that a role switched on from the Nodes page finds its privileges and ports | Not asked; the node starts with every role and the operator trims the set |
+| Hardened | The roles chosen at installation only (least privilege) | Asked; another role is prepared by an explicit rerun as root (`install.sh --prepare --roles ...`) |
+
+The node reports per role whether the machine is prepared for it, and the Nodes page names
+what is missing and the installer command ([cluster.md](cluster.md), section 13.4). The
+installer remembers the profile it prepared for (`/etc/tenko/prepared-roles`); a profile
+changed later in the web UI changes nothing on the host until the operator runs
+`install.sh --prepare --profile <name>`.
+
 ## Structural controls outside the profile system
 
 These controls are always on because they are architecture, not toggles. No profile, including Lab, has a setting for them.

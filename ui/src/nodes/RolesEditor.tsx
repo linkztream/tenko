@@ -13,7 +13,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { formatList, t } from "../i18n";
 import { roleWord } from "./model";
-import { canonical, changeOf, findingText, lockOf, nextPhase, ROLES, sameRoles, type RestartPhase, type RoleName } from "./roles";
+import { canonical, changeOf, findingText, lockOf, nextPhase, preparationOf, ROLES, sameRoles, unpreparedOn, type RestartPhase, type RolePreparation, type RoleName } from "./roles";
 
 /** How often a restarting node is asked for its roles. */
 const POLL_MS = 1_500;
@@ -22,6 +22,25 @@ const DEADLINE_MS = 180_000;
 
 function words(roles: readonly string[]): string {
   return roles.length === 0 ? "–" : formatList(roles.map(roleWord));
+}
+
+/** The warning for a role the draft switches on and the machine is not prepared for. */
+function UnpreparedNotice(props: { item: RolePreparation }) {
+  return (
+    <Notice kind="warn" testid="node-roles-unprepared">
+      <span data-role={props.item.role}>
+        {t("nodes.roles.unprepared", { role: roleWord(props.item.role), missing: formatList(props.item.missing ?? []) })}
+        <Show when={props.item.command}>
+          {(command) => (
+            <>
+              {" "}
+              <code data-testid="node-roles-unprepared-command">{command()}</code>
+            </>
+          )}
+        </Show>
+      </span>
+    </Notice>
+  );
 }
 
 export function RolesEditor(props: {
@@ -56,6 +75,10 @@ export function RolesEditor(props: {
   const [saved, setSaved] = createSignal<NodeRoles | null>(null);
   const [phase, setPhase] = createSignal<RestartPhase | null>(null);
   const editable = () => isAdmin() && current() !== undefined && !current()?.pinned;
+  const unprepared = () => {
+    const c = current();
+    return c ? unpreparedOn(selected(), c.configured, c.prepared) : [];
+  };
   const findings = () => saved()?.findings ?? current()?.findings ?? [];
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -177,7 +200,20 @@ export function RolesEditor(props: {
                             onChange={(e) => toggle(role, e.currentTarget.checked)}
                           />
                           <span>
-                            {roleWord(role)}
+                            <span class="node-role-name">
+                              {roleWord(role)}
+                              <Show when={preparationOf(role, c().prepared)}>
+                                {(p) => (
+                                  <span
+                                    class={`tag ${p().prepared ? "ok" : "discrepancy"}`}
+                                    data-testid={`node-role-prepared-${role}`}
+                                    data-state={p().prepared ? "prepared" : "unprepared"}
+                                  >
+                                    {p().prepared ? t("nodes.roles.prepared.yes") : t("nodes.roles.prepared.no")}
+                                  </span>
+                                )}
+                              </Show>
+                            </span>
                             <small class="help">{lock() ? t(`nodes.roles.lock.${lock()!}`) : t(`nodes.roles.hint.${role}`)}</small>
                           </span>
                         </label>
@@ -185,6 +221,7 @@ export function RolesEditor(props: {
                     }}
                   </For>
                 </fieldset>
+                <For each={unprepared()}>{(item) => <UnpreparedNotice item={item} />}</For>
                 <Show when={c().running}>
                   {(running) => (
                     <p class="muted" data-testid="node-roles-running">
@@ -249,6 +286,7 @@ export function RolesEditor(props: {
                             })}
                           </p>
                         </Show>
+                        <For each={unprepared()}>{(item) => <UnpreparedNotice item={item} />}</For>
                         <p>{c().running ? t("nodes.roles.confirm_restart") : t("nodes.roles.confirm_on_node")}</p>
                       </>
                     }

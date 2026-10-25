@@ -28,7 +28,7 @@ including the output of every `tenko` command the installer ran.
 
 | Property | Default | Meaning |
 |---|---|---|
-| `TENKO_ROLES` | `controller` | `controller`, `controller,dns`, `controller,dhcp` or `controller,dns,dhcp` (any `roles` value of `tenko.toml` works; the dhcp role also needs `[dhcp] listen`) |
+| `TENKO_ROLES` | `controller` | `controller`, `controller,dns`, `controller,dhcp` or `controller,dns,dhcp` (any `roles` value of `tenko.toml` works; the dhcp role also needs `[dhcp] listen`): the roles the service starts with. Under `TENKO_PROFILE=hardened` also the roles the machine is prepared for (the firewall rules below); outside Hardened it is prepared for every role |
 | `TENKO_MODULES` | not set | The modules, for example `ipam,dns`; not set lets the browser setup ask |
 | `TENKO_PROFILE` | `home` | The security profile until setup: `home`, `standard`, `hardened` or `lab` |
 | `TENKO_HOSTNAME` | not set | The certificate's name until setup stores the host name (`[tls] host_name`); `localhost` is added as an extra name. Not set: `localhost` |
@@ -96,24 +96,43 @@ The command also works by hand (`tenko config init --help`).
 
 ### Firewall
 
-With `TENKO_FIREWALL=1` the installer adds inbound rules for all profiles, and removes them
-with the product:
+With `TENKO_FIREWALL=1` the installer adds inbound rules for all firewall profiles, and
+removes them with the product. Which rules follows the security profile, as on Linux
+([../README.md](../README.md), "Roles and the security profile"): outside Hardened the
+machine is prepared for every role, so the DNS and DHCP rules are added whatever
+`TENKO_ROLES` says and a role switched on later from the Nodes page finds its ports; under
+`TENKO_PROFILE=hardened` only the rules of the roles in `TENKO_ROLES`:
 
 | Rule | Port |
 |---|---|
 | Tenko DDI web UI and API (TCP 8443) | TCP 8443 |
-| Tenko DDI DNS (UDP) | UDP `TENKO_DNS_PORT`, with the dns role |
-| Tenko DDI DNS (TCP) | TCP `TENKO_DNS_PORT`, with the dns role |
-| Tenko DDI DHCP (UDP) | UDP 67, with the dhcp role |
+| Tenko DDI DNS (UDP) | UDP `TENKO_DNS_PORT`; under Hardened with the dns role |
+| Tenko DDI DNS (TCP) | TCP `TENKO_DNS_PORT`; under Hardened with the dns role |
+| Tenko DDI DHCP (UDP) | UDP 67; under Hardened with the dhcp role |
+| Tenko DDI DHCPv6 (UDP) | UDP 547; under Hardened with the dhcp role |
 
 Narrow them to your networks in Windows Defender Firewall if the server is reachable from
-networks that should not manage it.
+networks that should not manage it. Under Hardened a role added later gets its rules from a
+reinstall with the new role list, `msiexec /i tenko-<version>-windows-x86_64.msi
+REINSTALL=ALL TENKO_ROLES=controller,dns,dhcp`; the Nodes page shows that command for a role
+the machine is not prepared for.
+
+The installer records what it prepared in `%ProgramData%\Tenko\prepared-roles` (the profile,
+the roles, the firewall; an INI file the service only reads), which the node reports per
+role on the Nodes page.
 
 <!-- WP7.5 -->
-The DHCP rule is for the dhcp role (`TENKO_ROLES=controller,dhcp`); it opens UDP 67 only, so a
-`[dhcp] port` other than 67 needs a rule of your own. On Windows the role answers clients by
-broadcast, and the service needs no privilege for port 67. UDP 547 joins the rule with
-DHCPv6 in Slice 9; it is not served yet.
+The DHCP rules are for the dhcp role; they open UDP 67 and 547 only, so a `[dhcp] port` or a
+`[dhcp.v6] port` of your own needs a rule of your own. On Windows the role answers clients by
+broadcast, and the service needs no privilege for these ports.
+
+**The raw methods on Windows.** The probe role's raw scan methods
+([../../docs/scanning.md](../../docs/scanning.md), section 9) need Npcap, which the MSI does
+not install: install it yourself; `tenko node scan status` then reports raw sockets as
+available (the service looks for `System32\Npcap\wpcap.dll`). Without it those methods
+answer `unsupported`, and ICMP works through the `ping` command, as does the dhcp role's
+conflict probe on Windows. The systemd drop-ins and `CAP_NET_RAW` of Linux have no
+counterpart here, so the Nodes page reports the probe role as prepared on Windows.
 
 ### First-run setup
 

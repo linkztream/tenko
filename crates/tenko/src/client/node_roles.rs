@@ -125,6 +125,21 @@ pub fn render(roles: &NodeRoles) -> String {
         RoleRestart::OnNode => "on the node, when it receives the change",
     };
     let _ = writeln!(text, "restart     {restart}");
+    // What the installer prepared the machine for, per role.
+    if let Some(prepared) = &roles.prepared {
+        for role in &prepared.roles {
+            let state = if role.prepared {
+                "prepared".to_owned()
+            } else {
+                let mut state = format!("not prepared, missing {}", role.missing.join(", "));
+                if let Some(command) = &role.command {
+                    let _ = write!(state, ": {command}");
+                }
+                state
+            };
+            let _ = writeln!(text, "machine     {:<10}  {state}", role.role);
+        }
+    }
     for finding in &roles.findings {
         let _ = writeln!(text, "finding     [{}] {}", finding.code, finding.detail);
     }
@@ -168,6 +183,7 @@ async fn set(args: &SetArgs) -> Result<Output, Failure> {
 
 #[cfg(test)]
 mod tests {
+    use tenko_api::dto::system::{PreparedRoles, RolePreparation};
     use tenko_core::NodeId;
 
     use super::*;
@@ -188,7 +204,25 @@ mod tests {
             findings: vec![tenko_api::routes::node_roles::privileges_finding(
                 &["probe"],
                 &["probe.conf"],
+                "sudo bash install.sh",
             )],
+            prepared: Some(PreparedRoles {
+                file: "/etc/tenko/prepared-roles".to_owned(),
+                roles: vec![
+                    RolePreparation {
+                        role: "dns".to_owned(),
+                        prepared: true,
+                        ..RolePreparation::default()
+                    },
+                    RolePreparation {
+                        role: "probe".to_owned(),
+                        prepared: false,
+                        missing: vec!["probe.conf".to_owned()],
+                        command: Some("sudo bash install.sh".to_owned()),
+                    },
+                ],
+                ..PreparedRoles::default()
+            }),
         };
         let text = render(&roles);
         assert!(text.contains("configured  controller,dns,dhcp\n"), "{text}");
@@ -199,5 +233,15 @@ mod tests {
         );
         assert!(text.contains("restart     scheduled"), "{text}");
         assert!(text.contains("[node.roles.privileges]"), "{text}");
+        assert!(
+            text.contains("machine     dns         prepared\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "machine     probe       not prepared, missing probe.conf: sudo bash install.sh\n"
+            ),
+            "{text}"
+        );
     }
 }

@@ -52611,7 +52611,7 @@
             "items": {
               "$ref": "#/components/schemas/StatusWarning"
             },
-            "description": "What the node should know about the set, which does not refuse it:\n`node.roles.privileges`, `node.roles.dns_resolver`."
+            "description": "What the node should know about the set, which does not refuse it:\n`node.roles.privileges`, `node.roles.unprepared`, `node.roles.dns_resolver`."
           },
           "node": {
             "type": "integer",
@@ -52629,6 +52629,17 @@
           "pinned": {
             "type": "boolean",
             "description": "Whether `--roles` on the command line pins the node's roles; the stored set is then\nnot used and cannot be changed."
+          },
+          "prepared": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PreparedRoles",
+                "description": "What the installer prepared the machine for, per role; known for the node of the\ncontroller that answers when an installer recorded it."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "restart": {
             "$ref": "#/components/schemas/RoleRestart",
@@ -52688,6 +52699,17 @@
               {
                 "$ref": "#/components/schemas/NodeId",
                 "description": "Raft node id, once enrolled."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prepared": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PreparedRoles",
+                "description": "What the installer prepared this machine for, per role, with what the server found\nmissing at start; absent when no installer recorded it (a container, a node set up\nby hand, an installer older than the record)."
               },
               {
                 "type": "null"
@@ -60587,6 +60609,55 @@
           }
         }
       },
+      "PreparedRoles": {
+        "type": "object",
+        "description": "What the installer prepared this machine for (OPS-01): the file `prepared-roles` beside\n`tenko.toml`, which `deploy/install.sh` and the MSI write and the server reads at start,\njoined with what the server checks itself (`CAP_NET_RAW` in its bounding and effective\nsets on Linux). The Hardened profile prepares only the roles chosen at installation;\nevery other profile prepares every role.",
+        "required": [
+          "file",
+          "roles"
+        ],
+        "properties": {
+          "dropins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The systemd drop-ins it put in place (Linux): `probe.conf`, `dhcp-direct.conf`."
+          },
+          "file": {
+            "type": "string",
+            "description": "The file the record was read from."
+          },
+          "firewall": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The host firewall it configured: `firewalld`, `ufw`, `windows`, or `none`."
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The ports it prepared, as `53/udp`: opened on the host firewall where one runs."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The security profile of the installer run that wrote it."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RolePreparation"
+            },
+            "description": "Every role in canonical order, prepared or not."
+          }
+        }
+      },
       "PreviewRow": {
         "type": "object",
         "description": "One source row of the preview.",
@@ -65095,6 +65166,38 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "RolePreparation": {
+        "type": "object",
+        "description": "Whether the machine is prepared for one role.",
+        "required": [
+          "role",
+          "prepared"
+        ],
+        "properties": {
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The installer command that prepares the role, when it is not prepared."
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What is missing, in technical names: a drop-in (`probe.conf`), a capability\n(`CAP_NET_RAW`), a port (`67/udp`)."
+          },
+          "prepared": {
+            "type": "boolean",
+            "description": "Whether the role finds what it needs: the installer prepared it and nothing the\nserver checks is missing."
+          },
+          "role": {
+            "type": "string",
+            "description": "`controller`, `dns`, `dhcp` or `probe`."
           }
         }
       },

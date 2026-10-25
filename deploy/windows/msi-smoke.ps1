@@ -203,10 +203,13 @@ try {
     Assert-That ((Get-FirewallPorts 'Tenko DDI web UI and API (TCP 8443)') -eq '8443') 'the firewall rule for TCP 8443 is missing'
     Assert-That ((Get-FirewallPorts 'Tenko DDI DNS (UDP)') -eq "$DnsPort") "the firewall rule for UDP $DnsPort is missing"
     Assert-That ((Get-FirewallPorts 'Tenko DDI DNS (TCP)') -eq "$DnsPort") "the firewall rule for TCP $DnsPort is missing"
-    # WP7.5: the dhcp rule (UDP 67) belongs to the dhcp role, which this install does not
-    # name, so the rule must not exist. (A role list with dhcp would start a DHCP server on
-    # the runner's port 67, which a smoke test must not do.)
-    Assert-That ($null -eq (Get-FirewallPorts 'Tenko DDI DHCP (UDP)')) 'the firewall rule for UDP 67 exists without the dhcp role'
+    # The Home profile prepares the machine for every role: the dhcp rules (UDP 67 and 547)
+    # exist although this install does not name the dhcp role. (A role list with dhcp would
+    # start a DHCP server on the runner's port 67, which a smoke test must not do.)
+    Assert-That ((Get-FirewallPorts 'Tenko DDI DHCP (UDP)') -eq '67') 'the firewall rule for UDP 67 is missing outside Hardened'
+    Assert-That ((Get-FirewallPorts 'Tenko DDI DHCPv6 (UDP)') -eq '547') 'the firewall rule for UDP 547 is missing outside Hardened'
+    $record = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $ConfigFile) 'prepared-roles') -Raw
+    Assert-That ($record -match 'roles=controller,dns,dhcp,probe') "prepared-roles does not name every role: $record"
 
     # -----------------------------------------------------------------------------------
     Write-Step '2/7 service running, health, setup token'

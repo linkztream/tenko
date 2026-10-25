@@ -338,6 +338,21 @@ function canonicalRoles(roles: readonly string[]): string[] {
   return ROLE_ORDER.filter((role) => roles.includes(role));
 }
 
+/** What the installer recorded for the mock controller: every role but probe is prepared. */
+const MOCK_PREPARED: S["PreparedRoles"] = {
+  file: "/var/lib/tenko/prepared-roles",
+  profile: "standard",
+  dropins: [],
+  ports: ["53/udp", "67/udp"],
+  firewall: "none",
+  roles: [
+    { role: "controller", prepared: true, missing: [] },
+    { role: "dns", prepared: true, missing: [] },
+    { role: "dhcp", prepared: true, missing: [] },
+    { role: "probe", prepared: false, missing: ["probe.conf", "CAP_NET_RAW"], command: "sudo bash install.sh --prepare" },
+  ],
+};
+
 function rolesView(id: number): S["NodeRoles"] {
   const own = id === OWN_NODE;
   const running = own ? canonicalRoles(db.installation.roles) : canonicalRoles(findNode(id).roles);
@@ -356,6 +371,7 @@ function rolesView(id: number): S["NodeRoles"] {
     controller: own,
     restart: own ? (same ? "none" : "scheduled") : "on_node",
     findings: [],
+    ...(own ? { prepared: MOCK_PREPARED } : {}),
   };
 }
 

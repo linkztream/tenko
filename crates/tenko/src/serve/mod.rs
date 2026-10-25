@@ -369,6 +369,7 @@ pub fn command(args: &ServeArgs, err: &mut impl Write) -> u8 {
         telemetry
     };
     crate::backup::service::remember_config_file(args.config.clone());
+    crate::prepared::remember_config_file(args.config.clone());
     let stop_on_eof = args.stop_on_eof;
     let shutdown = move || -> Shutdown {
         Box::pin(async move {
@@ -1682,6 +1683,8 @@ async fn start(
                     node: NodeStatus {
                         id: Some(resolved.node_id),
                         roles: status_roles(resolved.roles, dns_on, dhcp_on),
+                        // What the installer prepared the machine for (prepared-roles).
+                        prepared: crate::prepared::Machine::of(resolved).prepared(),
                     },
                     modules,
                 },

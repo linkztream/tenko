@@ -602,7 +602,7 @@ What the lab shows is the behaviour of the software: elections, forwarding, catc
 
 ## 13. Changing a node's roles
 
-A node's roles (`controller`, `dns`, `dhcp`, `probe`) are chosen at install time with `roles` in `tenko.toml`, and can be changed afterwards from the web UI, the API and the command line, the way the installation's modules are ([upgrades.md](upgrades.md), the module switch). The change applies at the node's next start, which the node runs itself under a service manager.
+A node's roles (`controller`, `dns`, `dhcp`, `probe`) start from `roles` in `tenko.toml`, which the installer writes, and are changed afterwards from the web UI, the API and the command line, the way the installation's modules are ([upgrades.md](upgrades.md), the module switch). The change applies at the node's next start, which the node runs itself under a service manager. Outside the Hardened profile the installer does not ask for the roles: it writes every role, and the operator trims the set here; under Hardened it asks (section 13.4 has why).
 
 ### 13.1 Which roles a start runs
 
@@ -638,14 +638,20 @@ A node without the controller role does the same when the row reaches it: under 
 
 ### 13.4 Privileges stay the operator's
 
-A role switched on does not grant itself privileges: port 53 is in the base unit, and the raw methods need `CAP_NET_RAW` and `AF_PACKET`, which the systemd drop-ins grant and `deploy/install.sh --roles` (or `--reconfigure --roles`) puts in place with the role:
+A role switched on does not grant itself privileges, and the service never gains any at runtime (ADR 0023): what a role needs from root is the installer's, run as root by the operator. Port 53 and UDP 67 and 547 are in the base unit (`CAP_NET_BIND_SERVICE`); the rest:
 
-| Role | Needs | Drop-in |
+| Role | Needs | From the installer |
 |---|---|---|
-| `probe` | ARP and the raw scan methods ([dhcp.md](dhcp.md) section 14.5, [scanning.md](scanning.md)) | `deploy/systemd/probe.conf` |
-| `dhcp` with a listener in direct mode (`[dhcp] listen` with `mode = "direct"`) | Broadcast replies on the link | `deploy/systemd/dhcp-direct.conf` |
+| `controller` | TCP 8443 (the API) and 8444 (the cluster port) | The firewall ports, at every installation |
+| `dns` | TCP and UDP 53; on every address, systemd-resolved's stub listener off | The firewall ports, the stub listener off (unless `--keep-resolved-stub`) |
+| `dhcp` | UDP 67 and 547; with a listener in direct mode (`[dhcp] listen` with `mode = "direct"`), broadcast replies on the link | The firewall ports; `deploy/systemd/dhcp-direct.conf` (`CAP_NET_RAW`, `AF_PACKET`) |
+| `probe` | ARP and the raw scan methods ([dhcp.md](dhcp.md) section 14.5, [scanning.md](scanning.md)) | `deploy/systemd/probe.conf` (`CAP_NET_RAW`, `AF_PACKET`) |
 
-A controller that runs such a role on Linux without `CAP_NET_RAW` in its effective set carries the status warning `node.roles.privileges` (parameters `roles` and `dropins`), and the answers of `/nodes/{id}/roles` carry the same finding when the stored set has such a role, so the web UI shows it under the editor before the restart. The finding refuses nothing: install the drop-in and restart the service.
+Which roles the installer prepares follows the security profile ([SECURITY-PROFILES.md](SECURITY-PROFILES.md), "Installation"): outside Hardened every role, so that a role switched on here finds its privileges and its ports; under Hardened only the roles chosen at installation, and another one is prepared by an explicit rerun, `sudo bash install.sh --prepare --roles <roles>`. The firewall ports are opened on firewalld or ufw when one is active (the MSI on Windows adds its rules the same way); on Windows the raw methods need Npcap, which the MSI does not install ([deploy/windows/README.md](../deploy/windows/README.md)). `install.sh --check` reports what the prepared roles miss and changes nothing; `install.sh --prepare` sets it up after one question.
+
+The installer records what it prepared in `prepared-roles` beside `tenko.toml` (`/etc/tenko/prepared-roles`, `%ProgramData%\Tenko\prepared-roles`): `key=value` lines `profile`, `roles`, `dropins`, `ports` and `firewall`. The file is root's (Administrators' on Windows) and the service only reads it, once at start; nothing in it is run. The node joins it with what it checks itself (on Linux, `CAP_NET_RAW` in the bounding and the effective set of its process) and reports every role as `prepared` (`prepared`, `missing`, `command`) in `GET /api/v1/system/status` (`node.prepared`) and in the answers of `/nodes/{id}/roles`. Without the file (a container, a node set up by hand, an older installer) nothing is reported.
+
+A controller that runs a role needing `CAP_NET_RAW` on Linux without it carries the status warning `node.roles.privileges` (parameters `roles`, `dropins`, `capability` and `command`, the installer command that prepares it), and a running role the installer did not prepare carries `node.roles.unprepared` (parameters `roles`, `missing` and `command`). The answers of `/nodes/{id}/roles` carry the same findings when the stored set has such a role, so the web UI shows them under the editor before the restart. The findings refuse nothing: an administrator may switch on a role the machine is not prepared for, and the editor names what is missing and the command before the change is confirmed.
 
 The `dns` role leaving a node whose host resolver the installer pointed at it (`--use-self`, recorded as `use_self` in `/etc/tenko/installer.state`) is the finding `node.roles.dns_resolver`: without the role the host resolves no names. Run the installer with `--reconfigure` and without `--use-self` first, or keep the role.
 
@@ -653,14 +659,14 @@ Only the node itself can tell its privileges and its installer's state, so these
 
 ### 13.5 The web UI, the API and the command line
 
-The node's panel on the nodes page, and the section "This controller" for the controller that serves the page, show the four roles as switches: the `controller` switch is read-only, a node without the controller role offers `probe` only, and a pin shows as a note with the editor read-only. Saving asks first, because the node restarts, then shows the node's state until it is back. While the controller has the probe role, in its stored set or in the set it runs, the section "This controller" also links to its scan configuration (`/nodes/{id}/scan`, [scanning.md](scanning.md) section 7.5). `GET /api/v1/system/status` lists the roles the node runs, the `probe` role of a controller included.
+The node's panel on the nodes page, and the section "This controller" for the controller that serves the page, show the four roles as switches: the `controller` switch is read-only, a node without the controller role offers `probe` only, and a pin shows as a note with the editor read-only. For the controller that serves the page each role carries a label, Prepared or Not prepared, when the installer recorded what it prepared; switching on a role that is not prepared shows what it misses and the installer command, in the editor and in the confirmation. The editor is read-only for everyone but administrators, who see the labels too. The page's notes show the health rows `node.roles.privileges` and `node.roles.unprepared` of the status. Saving asks first, because the node restarts, then shows the node's state until it is back. While the controller has the probe role, in its stored set or in the set it runs, the section "This controller" also links to its scan configuration (`/nodes/{id}/scan`, [scanning.md](scanning.md) section 7.5). `GET /api/v1/system/status` lists the roles the node runs, the `probe` role of a controller included.
 
 | Endpoint | Operation id | Authorization |
 |---|---|---|
 | `GET /api/v1/nodes/{id}/roles` | `get_node_roles` | `read` on the node. Returns an `ETag` once a set is stored |
 | `PUT /api/v1/nodes/{id}/roles` | `put_node_roles` | `update` on the node: administrators. Body `{"roles": ["controller", "dns"]}`, `If-Match` optional |
 
-The answer has `configured` (the stored set, else what the node runs), `running` (for the controller that answers), `stored`, `origin`, `revision`, `pinned`, `controller`, `restart` (`none`, `scheduled`, `required` or `on_node`) and `findings`.
+The answer has `configured` (the stored set, else what the node runs), `running` (for the controller that answers), `stored`, `origin`, `revision`, `pinned`, `controller`, `restart` (`none`, `scheduled`, `required` or `on_node`), `findings` and `prepared` (for the controller that answers, when the installer recorded it; section 13.4). `tenko node roles show` prints `prepared` as one `machine` line per role.
 
 ```sh
 tenko node roles show 1

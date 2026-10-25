@@ -834,6 +834,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         node: NodeStatus {
             id: platform.node.id,
             roles: platform.node.roles.clone(),
+            prepared: platform.node.prepared.clone(),
         },
         store: StoreSummary {
             role: serde_json::to_value(store.role)

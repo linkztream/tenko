@@ -6,8 +6,10 @@
 #
 # Usage, as root:
 #   bash install.sh                                   # asks a few questions
-#   bash install.sh --yes --roles controller,dns      # unattended, flags for the answers
+#   bash install.sh --yes --profile hardened --roles controller,dns   # unattended
 #   bash install.sh --binary ./tenko-0.2.0-linux-x86_64   # a local binary instead of a download
+#   bash install.sh --check                           # what the roles need: report only
+#   bash install.sh --prepare                         # set up what the roles miss, nothing else
 #   bash install.sh --uninstall [--purge]
 # Download it first and run the file (`curl -fsSLO <url>/install.sh && bash install.sh`);
 # piped into bash it cannot ask questions. `bash install.sh --help` lists every option.
@@ -23,6 +25,21 @@
 # drop-ins, starts it, waits for `tenko health`, optionally completes first-run setup, and
 # prints the URL, the setup token, and where the data and the key are.
 #
+# Roles and the security profile: the profile is asked first. Roles are a runtime decision
+# (the Nodes page of the web UI, docs/cluster.md section 13), but what a role needs from root
+# is the installer's: the drop-ins probe.conf and dhcp-direct.conf (CAP_NET_RAW), the ports on
+# the host firewall (firewalld or ufw, when one is active), systemd-resolved's stub listener
+# off for the dns role on every address. Outside the Hardened profile the roles question is
+# not asked: the machine is prepared for every role and the node starts with every role (the
+# operator trims the set on the Nodes page; --roles still names the starting set). Under
+# Hardened the question is asked and only the chosen roles are prepared. The dependency check
+# then tests what the prepared roles need and asks whether to set up what is missing (yes by
+# default; --yes answers yes). --check only reports (exit 11 when something is missing);
+# --prepare sets up what is missing and changes nothing else (no download, no configuration),
+# with --roles under Hardened to prepare more roles. What was prepared is recorded in
+# /etc/tenko/prepared-roles (root's, readable by the service), which the node reads at start
+# and reports per role on the Nodes page.
+#
 # Run again: a newer version is an upgrade (`tenko upgrade check` with the new binary on the
 # stopped node, then the new binary as /usr/local/bin/tenko and a start, which switches the
 # updates layout; docs/upgrades.md section 7.3). The data directory and the key are never
@@ -30,7 +47,9 @@
 # --reconfigure changes /etc/tenko/tenko.toml by the answers given as flags or at the
 # questions and carries every other value over (a hand-set [dns] listen, [tls], [kek], ...),
 # saying so per section. A node that has started before keeps its roles in the store, so
-# --roles then writes the file and the drop-ins but does not change the running set.
+# --roles then writes the file (and, under Hardened, the drop-ins) but does not change the
+# running set. A rerun reads the profile from /etc/tenko/prepared-roles (else tenko.toml):
+# outside Hardened it prepares every role, under Hardened the recorded roles and the file's.
 #
 # Exit statuses:
 #   0  done, or nothing to change
@@ -44,6 +63,7 @@
 #   8  the upgrade was refused (tenko upgrade check), nothing was changed
 #   9  first-run setup failed (the node runs; complete setup in the browser)
 #  10  cancelled at a question
+#  11  --check: something the prepared roles need is missing
 #
 # License: Business Source License 1.1; see LICENSE.md at the repository root.
 
@@ -53,7 +73,7 @@ set -Eeuo pipefail
 umask 077
 
 readonly E_FAIL=1 E_USAGE=2 E_HOST=3 E_PORT=4 E_DOWNLOAD=5 E_CONFIG=6 E_START=7 E_UPGRADE=8
-readonly E_SETUP=9 E_CANCEL=10
+readonly E_SETUP=9 E_CANCEL=10 E_MISSING=11
 
 # ── Fixed paths (the unit names them) ───────────────────────────────────────────────────────
 readonly BIN=/usr/local/bin/tenko
@@ -62,24 +82,34 @@ readonly CONFIG=/etc/tenko/tenko.toml
 readonly KEK_CRED=/etc/tenko/kek.cred
 readonly KEK_FILE=/etc/tenko/kek.key
 readonly STATE_FILE=/etc/tenko/installer.state
+# What this machine is prepared for, which the node reads at start (crates/tenko/src/prepared.rs).
+readonly PREPARED_FILE=/etc/tenko/prepared-roles
 readonly UNIT=/etc/systemd/system/tenko.service
 readonly DROPIN_DIR=/etc/systemd/system/tenko.service.d
 readonly DROPIN_KEK=/etc/systemd/system/tenko.service.d/kek-file.conf
 readonly DROPIN_DATA=/etc/systemd/system/tenko.service.d/data-dir.conf
 readonly DROPIN_PROBE=/etc/systemd/system/tenko.service.d/probe.conf
 readonly DROPIN_DHCP=/etc/systemd/system/tenko.service.d/dhcp-direct.conf
+# The dependency check works on these two (the tests point them at a directory of their own;
+# they are set here, never from the environment).
+PREP_DROPINS="$DROPIN_DIR" PREP_RECORD="$PREPARED_FILE"
 readonly RESOLVED_DROPIN=/etc/systemd/resolved.conf.d/tenko.conf
 readonly RESOLV_CONF=/etc/resolv.conf
 readonly RESOLV_MARK='# Written by the Tenko installer (--use-self)'
 readonly LOG_DIR=/var/log/tenko
 readonly DEFAULT_DATA_DIR=/var/lib/tenko
 readonly API_PORT_DEFAULT=8443
+readonly CLUSTER_PORT_DEFAULT=8444
+# Every role, in the order tenko lists them; outside the Hardened profile the machine is
+# prepared for all of them and the node starts with all of them.
+readonly ALL_ROLES=controller,dns,dhcp,probe
 
 # ── Options ─────────────────────────────────────────────────────────────────────────────────
 OPT_YES=0 OPT_DRY=0 OPT_NO_START=0 OPT_RECONFIGURE=0 OPT_UNINSTALL=0 OPT_PURGE=0
 OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
 OPT_DATA_DIR="" OPT_VERSION="" OPT_LANGUAGE="" OPT_ADMIN="" OPT_PASSWORD_STDIN=0
 OPT_BINARY="" OPT_TOKEN="" OPT_REPO="" OPT_RELEASE_URL="" OPT_KEK="" OPT_KEEP_STUB=0 OPT_USE_SELF=0
+OPT_CHECK=0 OPT_PREPARE=0
 SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0 SET_ADMIN=0
 
 usage() {
@@ -87,14 +117,21 @@ usage() {
 Usage: bash install.sh [options]          as root
 
 Answers (asked when --yes is not given; the default is in brackets):
-  --roles controller[,dns][,dhcp][,probe]   roles of the node [controller,dns]; the dhcp role
-                                      needs [dhcp] listen in tenko.toml, see deploy/README.md,
+  --profile home|standard|hardened|lab   security profile, asked first [home]. Outside
+                                      hardened the machine is prepared for every role (the
+                                      drop-ins, the firewall ports, the resolved stub) and the
+                                      node starts with every role; under hardened only the
+                                      roles of --roles (or the question) are prepared
+  --roles controller[,dns][,dhcp][,probe]   the roles the node starts with [every role;
+                                      controller,dns under hardened, where it is asked]. Outside
+                                      hardened it narrows only the starting set: the machine is
+                                      still prepared for every role. The dhcp role needs
+                                      [dhcp] listen in tenko.toml, see deploy/README.md,
                                       section "DHCP". The probe role probes an address before
                                       the dhcp role offers it (conflict detection) and runs the
-                                      discovery scans; with it the installer puts the drop-in
-                                      probe.conf (CAP_NET_RAW, for ARP and the raw scan
-                                      methods; ICMP needs nothing) next to the unit, and
-                                      --reconfigure --roles without it removes the drop-in.
+                                      discovery scans; its raw methods need the drop-in
+                                      probe.conf (CAP_NET_RAW; ICMP needs nothing). Under
+                                      hardened, --reconfigure --roles without it removes it.
                                       A node that has started before keeps its roles in the
                                       store: --reconfigure --roles writes the file and the
                                       drop-ins but cannot change the running set; change it on
@@ -103,7 +140,6 @@ Answers (asked when --yes is not given; the default is in brackets):
                                       (docs/cluster.md, section 13)
   --modules all|<list>|wizard         product modules: ipam,dns,dhcp,discovery; wizard leaves
                                       the choice to first-run setup [wizard]
-  --profile home|standard|hardened|lab   security profile [home]
   --host-name <name>                  the name clients use, not an address [hostname -f]
   --dns-address all|<addr>[,<addr>]   where the dns role answers, port 53 unless given [all]
   --forwarders <addr>[,<addr>]        upstream resolvers for names outside the zones, or
@@ -128,6 +164,15 @@ Behaviour:
   --kek auto|sealed|file              the key-encryption key: sealed with systemd-creds, a plain
                                       file, or sealed where that works [auto]
   --keep-resolved-stub                never turn off systemd-resolved's stub listener on port 53
+                                      (remembered for later runs)
+  --check                             the dependency check only: what the prepared roles need
+                                      (drop-ins, CAP_NET_RAW of the running service, firewall
+                                      ports, the resolved stub, the record prepared-roles);
+                                      changes nothing, exit 11 when something is missing
+  --prepare                           set up what the prepared roles miss (asked, yes by
+                                      default) and nothing else: no download, no configuration
+                                      change; restarts the service when its unit changed. With
+                                      --roles under hardened: prepare these roles
   --use-self                          with the dns role: point this host's own resolver at Tenko
                                       (127.0.0.1) once the node listens; --uninstall restores
                                       the previous resolver [asked in interactive mode, default no]
@@ -143,7 +188,8 @@ Behaviour:
   -h, --help                          this text
 
 Exit statuses: 0 done, 1 failure, 2 usage, 3 unsupported host, 4 port taken, 5 download or
-checksum, 6 configuration, 7 start, 8 upgrade refused, 9 setup failed, 10 cancelled.
+checksum, 6 configuration, 7 start, 8 upgrade refused, 9 setup failed, 10 cancelled,
+11 something missing (--check).
 EOF
 }
 
@@ -810,6 +856,51 @@ detect_installed() {
 # ── Answers ─────────────────────────────────────────────────────────────────────────────────
 DATA_DIR="" ROLES="" MODULES="" PROFILE="" HOST_NAME="" DNS_ADDRESS="" FORWARDERS=""
 LANGUAGE="" ADMIN="" PASSWORD="" API_PORT="$API_PORT_DEFAULT" USE_SELF=0 USE_SELF_DONE=0 STUB_OFF=0
+CLUSTER_PORT="$CLUSTER_PORT_DEFAULT"
+# PREPARE_ROLES: the roles the machine is prepared for (every role outside Hardened).
+# ROLES_DEFAULTED: the starting set was not chosen (no --roles, no question), so a port
+# conflict leaves a role out of it instead of stopping the install.
+PREPARE_ROLES="" ROLES_DEFAULTED=0 ROLES_CHOSEN=0 REC_PROFILE="" REC_ROLES=""
+
+# in_set <role> <comma list>: the role is in the list.
+in_set() { [[ ",$2," == *",$1,"* ]]; }
+
+# canonical_roles <comma list>...: the roles of the lists, once each, in the order tenko lists
+# them, with controller first (the installer installs controllers only).
+canonical_roles() {
+  local role all out=controller
+  all="$(IFS=,; echo "$*")"
+  for role in dns dhcp probe; do
+    in_set "$role" "$all" && out+=",${role}"
+  done
+  printf '%s' "$out"
+}
+
+# read_record: the profile and the roles of the record of the last run (REC_PROFILE,
+# REC_ROLES), nothing when there is none. Only text is read; nothing in it is run.
+read_record() {
+  REC_PROFILE="" REC_ROLES=""
+  [[ -f "$PREP_RECORD" ]] || return 0
+  local v
+  v="$(sed -n 's/^[[:space:]]*profile[[:space:]]*=[[:space:]]*//p' "$PREP_RECORD" | tail -n 1 | tr -d '[:space:]')"
+  if valid_profile "$v"; then REC_PROFILE="$v"; fi
+  v="$(sed -n 's/^[[:space:]]*roles[[:space:]]*=[[:space:]]*//p' "$PREP_RECORD" | tail -n 1 | tr -d '[:space:]')"
+  if [[ -n "$v" ]]; then REC_ROLES="$(canonical_roles "$v")"; fi
+  return 0
+}
+
+# prepare_roles: what the machine is prepared for. Outside Hardened every role. Under
+# Hardened the roles named by --roles (or the question), else the recorded ones and the
+# file's, so that a rerun takes nothing away.
+prepare_roles() {
+  if [[ "$PROFILE" != hardened ]]; then
+    PREPARE_ROLES="$ALL_ROLES"
+  elif ((SET_ROLES || ROLES_CHOSEN)); then
+    PREPARE_ROLES="$(canonical_roles "$ROLES")"
+  else
+    PREPARE_ROLES="$(canonical_roles "$REC_ROLES" "$ROLES")"
+  fi
+}
 
 check_or_die() {
   local fn="$1" value="$2" what="$3"
@@ -845,6 +936,9 @@ read_config_values() {
   v="$(toml_get "$cfg" server listen | toml_strings | head -n 1)"
   v="${v##*:}"
   if valid_port "$v"; then API_PORT="$v"; fi
+  v="$(toml_get "$cfg" cluster listen | toml_strings | head -n 1)"
+  v="${v##*:}"
+  if valid_port "$v"; then CLUSTER_PORT="$v"; fi
   return 0
 }
 
@@ -858,6 +952,10 @@ seed_from_config() {
   [[ -z "$OPT_HOST" && -n "${FILE_VAL[host]:-}" ]] && HOST_NAME="${FILE_VAL[host]}"
   if ((!OPT_RECONFIGURE)); then
     [[ -n "${FILE_VAL[roles]:-}" ]] && ROLES="${FILE_VAL[roles]}"
+    # The profile decides what the machine is prepared for: the one of the last run's
+    # record, else the file's.
+    [[ -z "$OPT_PROFILE" ]] && PROFILE="${REC_PROFILE:-${FILE_VAL[profile]:-$PROFILE}}"
+    [[ -n "${FILE_VAL[dns]:-}" ]] && DNS_ADDRESS="${FILE_VAL[dns]}"
     return 0
   fi
   [[ -z "$OPT_ROLES" && -n "${FILE_VAL[roles]:-}" ]] && ROLES="${FILE_VAL[roles]}"
@@ -874,12 +972,13 @@ answers() {
   default_host="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo tenko)"
   valid_hostname "$default_host" || default_host="$(hostname 2>/dev/null || echo tenko)"
   forwarders_default="$(host_resolvers || true)"
-  ROLES="${OPT_ROLES:-controller,dns}"
+  ROLES="$OPT_ROLES"
   MODULES="${OPT_MODULES:-wizard}"
   PROFILE="${OPT_PROFILE:-home}"
   HOST_NAME="${OPT_HOST:-$default_host}"
   DNS_ADDRESS="${OPT_DNS_ADDRESS:-all}"
   FORWARDERS="${OPT_FORWARDERS:-${forwarders_default:-none}}"
+  read_record
   seed_from_config
   LANGUAGE="${OPT_LANGUAGE:-en}"
   ADMIN="$OPT_ADMIN"
@@ -887,11 +986,30 @@ answers() {
   local write_config=1
   ((HAVE_CONFIG && !OPT_RECONFIGURE)) && write_config=0
 
+  # The profile first: it decides whether the roles are asked at all.
   if ((!OPT_YES && write_config)); then
+    while true; do
+      [[ -n "$OPT_PROFILE" ]] || ask_menu PROFILE "Security profile (docs/SECURITY-PROFILES.md)" "$PROFILE" \
+        home "One box runs all roles, sane defaults" \
+        standard "A business network, the default for organisations" \
+        hardened "Regulated environments; prepares only the roles you choose" \
+        lab "Permissive, for testing and training"
+      valid_profile "$PROFILE" && break
+      OPT_PROFILE=""
+    done
+  fi
+  check_or_die valid_profile "$PROFILE" --profile
+  # The roles the node starts with: under Hardened the question (the machine is prepared for
+  # these only); otherwise every role, trimmed later on the Nodes page.
+  if [[ -z "$ROLES" ]]; then
+    ROLES_DEFAULTED=1
+    if [[ "$PROFILE" == hardened ]]; then ROLES=controller,dns; else ROLES="$ALL_ROLES"; fi
+  fi
+  if ((!OPT_YES && write_config)) && [[ "$PROFILE" == hardened ]]; then
     while true; do
       if ((!SET_ROLES)); then
         # WP7.5: the two choices with the dhcp role.
-        ask_menu ROLES "Roles of this node" "$ROLES" \
+        ask_menu ROLES "Roles of this node (the Hardened profile prepares the machine for these only)" "$ROLES" \
           controller "API, web UI, store and IPAM" \
           controller,dns "The same, and DNS on port 53" \
           controller,dhcp "The same, and DHCP on UDP port 67 (no DNS)" \
@@ -912,6 +1030,20 @@ The probe role probes an address before the dhcp role offers it (conflict detect
         ROLES+=",probe"
       fi
     fi
+    # The roles are an answer now: under Hardened they name what is prepared.
+    ROLES_CHOSEN=1 ROLES_DEFAULTED=0
+  fi
+  check_or_die valid_roles "$ROLES" --roles
+  prepare_roles
+  if [[ "$PROFILE" != hardened ]] && ((write_config)); then
+    if ((SET_ROLES)); then
+      info "Profile ${PROFILE}: the machine is prepared for every role; --roles ${ROLES} is the set the node starts with, and the Nodes page switches on the others"
+    elif ((!HAVE_CONFIG)); then
+      info "Profile ${PROFILE}: the machine is prepared for every role and the node starts with all of them; trim the set on the Nodes page of the web UI"
+    fi
+  fi
+
+  if ((!OPT_YES && write_config)); then
     while true; do
       [[ -n "$OPT_MODULES" ]] || ask MODULES "Product modules: wizard (first-run setup asks), all, or a list of ipam,dns,dhcp,discovery" "$MODULES"
       valid_modules "$MODULES" && break
@@ -919,21 +1051,14 @@ The probe role probes an address before the dhcp role offers it (conflict detect
       OPT_MODULES=""
     done
     while true; do
-      [[ -n "$OPT_PROFILE" ]] || ask_menu PROFILE "Security profile (docs/SECURITY-PROFILES.md)" "$PROFILE" \
-        home "One box runs all roles, sane defaults" \
-        standard "A business network, the default for organisations" \
-        hardened "Regulated environments, strict authentication" \
-        lab "Permissive, for testing and training"
-      valid_profile "$PROFILE" && break
-      OPT_PROFILE=""
-    done
-    while true; do
       [[ -n "$OPT_HOST" ]] || ask HOST_NAME "Host name clients use for this node (the TLS name and the passkey ID; not an address)" "$HOST_NAME"
       valid_hostname "$HOST_NAME" && break
       printf 'Not a host name: %s\n' "$HOST_NAME" >"$TTY"
       OPT_HOST=""
     done
-    if [[ "$ROLES" == *dns* ]]; then
+    # The dns role's settings when the machine is prepared for it, so that the role finds them
+    # when it is switched on later.
+    if in_set dns "$PREPARE_ROLES"; then
       while true; do
         ((SET_DNS_ADDRESS)) || ask DNS_ADDRESS "Addresses the dns role answers on: all, or a list such as 192.0.2.53,2001:db8::53" "$DNS_ADDRESS"
         dns_listen "$DNS_ADDRESS" >/dev/null && break
@@ -946,7 +1071,7 @@ The probe role probes an address before the dhcp role offers it (conflict detect
         printf 'Not a resolver list: %s\n' "$FORWARDERS" >"$TTY"
         SET_FORWARDERS=0
       done
-      if ((!OPT_USE_SELF)) && dns_listen "$DNS_ADDRESS" | grep -qE '"(0\.0\.0\.0|127\.0\.0\.1):53"'; then
+      if ((!OPT_USE_SELF)) && [[ "$ROLES" == *dns* ]] && dns_listen "$DNS_ADDRESS" | grep -qE '"(0\.0\.0\.0|127\.0\.0\.1):53"'; then
         ask_yes_no "Use Tenko as this host's own resolver (127.0.0.1)?
 
 Names the host looks up then go through Tenko: your zones first, forwarders for the rest. --uninstall puts the previous resolver back. Choose no to leave the host's resolver as it is." no &&
@@ -961,9 +1086,7 @@ Names the host looks up then go through Tenko: your zones first, forwarders for 
     done
   fi
 
-  check_or_die valid_roles "$ROLES" --roles
   check_or_die valid_modules "$MODULES" --modules
-  check_or_die valid_profile "$PROFILE" --profile
   check_or_die valid_hostname "$HOST_NAME" --host-name
   check_or_die valid_language "$LANGUAGE" --language
   dns_listen "$DNS_ADDRESS" >/dev/null || die "$E_USAGE" "--dns-address: invalid value '${DNS_ADDRESS}'"
@@ -1069,7 +1192,9 @@ step_ports() {
         warn "${holder:-A program} holds UDP ${local67}; the dhcp role must not listen on that address"
       fi
     done <<<"$listen67"
-    if [[ -n "$dhcp_other" ]]; then
+    if [[ -n "$dhcp_other" ]] && ((ROLES_DEFAULTED)); then
+      leave_out dhcp "port 67/udp is taken by ${dhcp_other} on every address (another DHCP server)"
+    elif [[ -n "$dhcp_other" ]]; then
       die "$E_PORT" "Port 67/udp is taken by ${dhcp_other} on every address, another DHCP server (dnsmasq, isc-dhcp-server, kea-dhcp4 or a hypervisor's DHCP service); stop and disable it first"
     fi
   fi
@@ -1085,11 +1210,26 @@ step_ports() {
       other="${holder:-unknown}"
     fi
   done <<<"$listen53"
-  if [[ -n "$other" ]]; then
+  if [[ -n "$other" ]] && ((ROLES_DEFAULTED)); then
+    leave_out dns "port 53 is taken by ${other}"
+    return 0
+  elif [[ -n "$other" ]]; then
     die "$E_PORT" "Port 53 is taken by ${other}; stop it or narrow it to other addresses, or give the dns role other addresses with --dns-address"
   fi
   ((stub)) || return 0
   step_resolved_stub
+}
+
+# leave_out <role> <why>: a role of the default starting set whose port is taken does not
+# start; the machine stays prepared for it, and the Nodes page switches it on once the port
+# is free.
+leave_out() {
+  local role="$1" r out=""
+  for r in ${ROLES//,/ }; do
+    [[ "$r" == "$role" ]] || out+="${out:+,}${r}"
+  done
+  ROLES="$out"
+  warn "The ${role} role is left out of the roles this node starts with: $2. The machine is still prepared for it; switch it on from the Nodes page once the port is free"
 }
 
 # resolved_stub_holds_53: systemd-resolved listens on port 53 (its stub, 127.0.0.53).
@@ -1107,7 +1247,7 @@ step_resolved_stub() {
     ok "systemd-resolved holds 127.0.0.53:53 only; the dns role answers on ${DNS_ADDRESS}"
     return 0
   fi
-  if ((OPT_KEEP_STUB)); then
+  if keep_stub; then
     die "$E_PORT" "systemd-resolved's stub listener holds 127.0.0.53:53 and --keep-resolved-stub was given, but the dns role would listen on every address (${DNS_ADDRESS}); give it this host's addresses: --dns-address <addr>[,<addr>], or [dns] listen in ${CONFIG}"
   fi
   if ! ask_yes_no "systemd-resolved listens on 127.0.0.53:53, which the dns role on every address (0.0.0.0:53) needs.
@@ -1115,6 +1255,15 @@ step_resolved_stub() {
 Turn its stub listener off (DNSStubListener=no in ${RESOLVED_DROPIN}) and point /etc/resolv.conf at the upstream list, so that name resolution on this host keeps working?" yes; then
     die "$E_PORT" "Port 53 is held by systemd-resolved; run again with --dns-address <this host's addresses>, or allow the change"
   fi
+  resolved_stub_off
+}
+
+# keep_stub: --keep-resolved-stub, given now or at an earlier run (the state file remembers it).
+keep_stub() { ((OPT_KEEP_STUB)) || [[ "$(state_get keep_resolved_stub)" == 1 ]]; }
+
+# resolved_stub_off: turns systemd-resolved's stub listener off and points /etc/resolv.conf at
+# the upstream list; --uninstall puts both back.
+resolved_stub_off() {
   info "Turning off systemd-resolved's stub listener"
   run install -d -m 0755 /etc/systemd/resolved.conf.d
   printf '# Written by the Tenko installer: the dns role of Tenko answers on port 53.\n[Resolve]\nDNSStubListener=no\n' |
@@ -1566,13 +1715,15 @@ host_name = \"${HOST_NAME}\"
 alt_names = [\"localhost\"]
 addresses = [${tls_addresses}]
 ${kek_section}"
-  if [[ "$ROLES" == *dns* ]]; then
+  # The sections of every role the machine is prepared for, so that a role switched on from
+  # the Nodes page finds its settings.
+  if in_set dns "$PREPARE_ROLES" || [[ "$ROLES" == *dns* ]]; then
     listen="$(dns_listen "$DNS_ADDRESS")"
     forwarders="$(forwarder_list "$FORWARDERS")"
     body+="$(config_dns_section "$listen" "$forwarders")
 "
   fi
-  if [[ "$ROLES" == *dhcp* ]]; then
+  if in_set dhcp "$PREPARE_ROLES" || [[ "$ROLES" == *dhcp* ]]; then
     body+="$(config_dhcp_section)
 "
   fi
@@ -2043,11 +2194,11 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 TENKO_DHCP_END
 }
 
-# dhcp_direct_wanted: the dhcp role is listed and [dhcp] in the configuration has a listener
-# in direct mode, which binds an interface and answers through a raw socket.
+# dhcp_direct_wanted: the dhcp role is listed or prepared and [dhcp] in the configuration has a
+# listener in direct mode, which binds an interface and answers through a raw socket.
 dhcp_direct_wanted() {
   local cfg="${1:-$CONFIG}"
-  [[ "$ROLES" == *dhcp* && -f "$cfg" ]] || return 1
+  { [[ "$ROLES" == *dhcp* ]] || in_set dhcp "$PREPARE_ROLES"; } && [[ -f "$cfg" ]] || return 1
   toml_section_text "$cfg" dhcp | grep -qE 'mode[[:space:]]*=[[:space:]]*"direct"'
 }
 
@@ -2085,26 +2236,7 @@ step_unit() {
     run rm -f "$DROPIN_DATA"
     changed=1
   fi
-  # The probe role: its drop-in comes with the role and goes with it (--reconfigure --roles
-  # without probe). The one of the dhcp role's direct mode comes with a direct listener in
-  # [dhcp] listen (the interface is the operator's to name) and goes with the role; a file
-  # that differs from the shipped one is the operator's and stays.
-  if [[ "$ROLES" == *probe* ]]; then
-    [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
-    probe_dropin_text | put "$DROPIN_PROBE" 0644 root:root && changed=1
-  elif [[ -f "$DROPIN_PROBE" ]]; then
-    run rm -f "$DROPIN_PROBE"
-    changed=1
-  fi
-  if [[ -f "$DROPIN_DHCP" && "$(dhcp_direct_dropin_text | sha256sum)" != "$(sha256sum <"$DROPIN_DHCP")" ]]; then
-    ! dhcp_direct_wanted || warn "${DROPIN_DHCP} differs from the one the installer ships; it is left as it is"
-  elif dhcp_direct_wanted; then
-    [[ -d "$DROPIN_DIR" ]] || run install -d -m 0755 "$DROPIN_DIR"
-    dhcp_direct_dropin_text | put "$DROPIN_DHCP" 0644 root:root && changed=1
-  elif [[ -f "$DROPIN_DHCP" && "$ROLES" != *dhcp* ]]; then
-    run rm -f "$DROPIN_DHCP"
-    changed=1
-  fi
+  # The drop-ins of the roles (probe.conf, dhcp-direct.conf) are step_prepare's.
   if ((changed)); then
     if [[ -f "$DROPIN_KEK" || -f "$DROPIN_DATA" || -f "$DROPIN_PROBE" || -f "$DROPIN_DHCP" ]]; then
       ok "Installed the unit ${UNIT} with drop-ins in ${DROPIN_DIR}"
@@ -2117,6 +2249,283 @@ step_unit() {
   fi
 }
 
+# ── What the roles need: the dependency check ───────────────────────────────────────────────
+# The prepared roles (PREPARE_ROLES: every role outside Hardened, the chosen ones under
+# Hardened) need, from root: the drop-ins that grant CAP_NET_RAW (and a running service that
+# has it), their ports on the host firewall when firewalld or ufw is active, systemd-resolved's
+# stub listener off for the dns role on every address, and the record prepared-roles that
+# the node reads. deps_check lists what is missing (TODO_*) with the step that sets it up;
+# step_prepare asks once and runs them. Nothing here is run as root on behalf of the service:
+# the service only reads the record.
+
+# wanted_dropins: the drop-ins of the prepared roles, one per line. Outside Hardened both
+# (the probe's raw methods, the dhcp role's direct mode whenever it is configured); under
+# Hardened probe.conf with the probe role, dhcp-direct.conf with a direct listener.
+wanted_dropins() {
+  in_set probe "$PREPARE_ROLES" && echo probe.conf
+  if in_set dhcp "$PREPARE_ROLES" && { [[ "$PROFILE" != hardened ]] || dhcp_direct_wanted; }; then
+    echo dhcp-direct.conf
+  fi
+  return 0
+}
+
+# dropin_text <name>: the shipped text of a role's drop-in.
+dropin_text() {
+  case "$1" in
+  probe.conf) probe_dropin_text ;;
+  dhcp-direct.conf) dhcp_direct_dropin_text ;;
+  esac
+}
+
+# present_dropins: the role drop-ins in place, one per line.
+present_dropins() {
+  local d
+  for d in probe.conf dhcp-direct.conf; do
+    if [[ -f "${PREP_DROPINS}/${d}" ]]; then echo "$d"; fi
+  done
+  return 0
+}
+
+# dns_ports: the ports of the dns role's listen addresses, once each.
+dns_ports() { { dns_listen "$DNS_ADDRESS" | grep -oE ':[0-9]+"' | tr -d ':"' | sort -un; } || true; }
+
+# wanted_ports: the ports of the prepared roles as <port>/<proto>, one per line: the API and the
+# cluster port of the controller, TCP and UDP of the dns role, UDP 67 and 547 (DHCPv6) of the
+# dhcp role.
+wanted_ports() {
+  local p
+  echo "${API_PORT}/tcp"
+  echo "${CLUSTER_PORT}/tcp"
+  if in_set dns "$PREPARE_ROLES"; then
+    for p in $(dns_ports); do printf '%s/tcp\n%s/udp\n' "$p" "$p"; done
+  fi
+  if in_set dhcp "$PREPARE_ROLES"; then printf '67/udp\n547/udp\n'; fi
+  return 0
+}
+
+# port_role <port/proto>: the role a port is for.
+port_role() {
+  case "$1" in
+  "${API_PORT}/tcp" | "${CLUSTER_PORT}/tcp") echo controller ;;
+  67/udp | 547/udp) echo dhcp ;;
+  *) echo dns ;;
+  esac
+}
+
+# firewall_kind: the active host firewall: firewalld, ufw or none.
+FIREWALL=""
+firewall_kind() {
+  if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    echo firewalld
+  elif have ufw && ufw status 2>/dev/null | grep '^Status: active' >/dev/null; then
+    echo ufw
+  else
+    echo none
+  fi
+}
+
+# firewall_has <port/proto>: the active firewall lets the port in.
+firewall_has() {
+  case "$FIREWALL" in
+  firewalld) firewall-cmd --query-port="$1" >/dev/null 2>&1 ;;
+  ufw) ufw status 2>/dev/null | grep -E "^${1}[[:space:]]+ALLOW" >/dev/null ;;
+  *) return 0 ;;
+  esac
+}
+
+# state_add <key> <item>: the item added to a comma list of the state file, once.
+state_add() {
+  local list
+  list="$(state_get "$1")"
+  in_set "$2" "$list" || state_set "$1" "${list:+${list},}$2"
+}
+
+# service_lacks_net_raw: the running service's bounding set lacks CAP_NET_RAW (it started
+# before its drop-in was put in place). Root reads the process's status; nothing is run.
+service_lacks_net_raw() {
+  ((SYSTEMD)) || return 1
+  local pid bnd
+  pid="$(systemctl show -p MainPID --value tenko 2>/dev/null || true)"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  bnd="$(sed -n 's/^CapBnd:[[:space:]]*//p' "/proc/${pid}/status" 2>/dev/null || true)"
+  [[ "$bnd" =~ ^[0-9a-fA-F]+$ ]] || return 1
+  (((16#$bnd >> 13) & 1)) && return 1
+  return 0
+}
+
+# record_text <roles>: the record of what this machine is prepared for, read by the node at
+# start (crates/tenko/src/prepared.rs). No date in it: a rerun that changes nothing leaves it.
+record_text() {
+  local roles="$1" dropins ports stub=absent
+  dropins="$(present_dropins | paste -sd, -)"
+  ports="$(PREPARE_ROLES="$roles" wanted_ports | paste -sd, -)"
+  if ((STUB_OFF)) || [[ "$(state_get resolved_stub_off)" == 1 ]]; then
+    stub=off
+  elif keep_stub; then
+    stub=kept
+  fi
+  cat <<RECORD_END
+# Written by the Tenko installer (deploy/install.sh): what this machine is prepared for.
+# tenko serve reads it at start and reports it per role (GET /api/v1/system/status, the
+# Nodes page); it changes nothing and nothing in it is run. A rerun of the installer rewrites
+# it; bash install.sh --check compares the machine with it.
+[prepared]
+profile=${PROFILE}
+roles=${roles}
+dropins=${dropins}
+ports=${ports}
+firewall=${FIREWALL:-none}
+resolved_stub=${stub}
+RECORD_END
+}
+
+TODO_TEXT=() TODO_FIX=() TODO_ROLE=() DEP_OK=() DEP_NOTES=()
+todo() {
+  TODO_ROLE+=("$1")
+  TODO_TEXT+=("$2")
+  TODO_FIX+=("$3")
+}
+
+# deps_check: what the prepared roles need and this machine lacks (TODO_*), what is in place
+# (DEP_OK) and what the operator decided otherwise (DEP_NOTES).
+deps_check() {
+  TODO_TEXT=() TODO_FIX=() TODO_ROLE=() DEP_OK=() DEP_NOTES=()
+  FIREWALL="$(firewall_kind)"
+  local d f p role wanted
+  wanted="$(wanted_dropins)"
+  for d in $wanted; do
+    f="${PREP_DROPINS}/${d}"
+    role=probe
+    [[ "$d" == dhcp-direct.conf ]] && role=dhcp
+    if [[ ! -f "$f" ]]; then
+      todo "$role" "the drop-in ${f} (CAP_NET_RAW for the ${role} role)" "fix_dropin ${d}"
+    elif [[ "$(dropin_text "$d" | sha256sum)" != "$(sha256sum <"$f")" ]]; then
+      DEP_NOTES+=("${f} differs from the one the installer ships; it is left as it is")
+    else
+      DEP_OK+=("the drop-in ${f}")
+    fi
+  done
+  # Under Hardened a drop-in that no prepared role needs any more goes (a file that differs
+  # from the shipped one is the operator's and stays).
+  if [[ "$PROFILE" == hardened ]]; then
+    for d in probe.conf dhcp-direct.conf; do
+      f="${PREP_DROPINS}/${d}"
+      [[ -f "$f" ]] || continue
+      grep -qx "$d" <<<"$wanted" && continue
+      [[ "$(dropin_text "$d" | sha256sum)" == "$(sha256sum <"$f")" ]] || continue
+      todo - "removing ${f}: no role prepared under Hardened needs it" "fix_remove_dropin ${d}"
+    done
+  fi
+  if [[ -n "$wanted" ]] && ((ACTIVE)) && ! grep -q '^fix_dropin' < <(printf '%s\n' "${TODO_FIX[@]}") &&
+    service_lacks_net_raw; then
+    todo probe "a restart of the running service, which lacks CAP_NET_RAW (it started before its drop-in)" fix_restart
+  fi
+  if [[ "$FIREWALL" == none ]]; then
+    DEP_OK+=("no host firewall is active (firewalld, ufw); the network's firewall must let in $(wanted_ports | paste -sd, - | sed 's/,/, /g')")
+  else
+    for p in $(wanted_ports); do
+      if firewall_has "$p"; then
+        DEP_OK+=("${p} is open on ${FIREWALL}")
+      else
+        todo "$(port_role "$p")" "${p} on ${FIREWALL}" "fix_port ${p}"
+      fi
+    done
+  fi
+  if in_set dns "$PREPARE_ROLES" && ((!STUB_OFF)) && dns_binds_wildcard "$DNS_ADDRESS" && resolved_stub_holds_53; then
+    if keep_stub; then
+      DEP_NOTES+=("systemd-resolved's stub listener holds 127.0.0.53:53 and --keep-resolved-stub keeps it: the dns role needs [dns] listen on this host's addresses in ${CONFIG}")
+    else
+      todo dns "systemd-resolved's stub listener off: it holds 127.0.0.53:53, which the dns role on every address needs" fix_stub
+    fi
+  fi
+  if [[ ! -f "$PREP_RECORD" ]] || [[ "$(record_text "$PREPARE_ROLES" | sha256sum)" != "$(sha256sum <"$PREP_RECORD")" ]]; then
+    todo - "the record ${PREP_RECORD} of what this machine is prepared for" fix_record
+  fi
+  return 0
+}
+
+fix_dropin() {
+  [[ -d "$PREP_DROPINS" ]] || run install -d -m 0755 "$PREP_DROPINS"
+  dropin_text "$1" | put "${PREP_DROPINS}/$1" 0644 root:root || true
+  UNIT_CHANGED=1
+  ok "Installed the drop-in ${PREP_DROPINS}/$1 (CAP_NET_RAW)"
+}
+fix_remove_dropin() {
+  run rm -f "${PREP_DROPINS}/$1"
+  UNIT_CHANGED=1
+  ok "Removed ${PREP_DROPINS}/$1"
+}
+fix_restart() { NEED_RESTART=1; }
+fix_port() {
+  case "$FIREWALL" in
+  firewalld)
+    run firewall-cmd --quiet --permanent --add-port="$1"
+    run firewall-cmd --quiet --add-port="$1"
+    ;;
+  ufw) run ufw allow "$1" comment 'Tenko DDI' ;;
+  esac
+  state_set firewall "$FIREWALL"
+  state_add firewall_ports "$1"
+  ok "Opened ${1} on ${FIREWALL}"
+}
+fix_stub() { resolved_stub_off; }
+# fix_record: the record, with the roles whose needs are all in place (RECORD_ROLES).
+fix_record() {
+  local dir
+  dir="$(dirname "$PREP_RECORD")"
+  [[ -d "$dir" ]] || run install -d -m 0750 -o root -g tenko "$dir"
+  if record_text "${RECORD_ROLES:-$PREPARE_ROLES}" | put "$PREP_RECORD" 0640 root:tenko; then
+    ok "Recorded in ${PREP_RECORD}: prepared for ${RECORD_ROLES:-$PREPARE_ROLES}"
+  fi
+}
+
+# step_prepare: the dependency check; what is missing is listed and, after one question (yes
+# by default, --yes answers yes), set up. With --check only the report.
+NEED_RESTART=0 RECORD_ROLES=""
+step_prepare() {
+  local i parts=() gaps="" role
+  if ((OPT_KEEP_STUB && !OPT_CHECK)); then state_set keep_resolved_stub 1; fi
+  deps_check
+  for i in "${DEP_NOTES[@]}"; do warn "$i"; done
+  if ((OPT_CHECK)); then
+    for i in "${DEP_OK[@]}"; do ok "$i"; done
+    for i in "${!TODO_TEXT[@]}"; do warn "missing (${TODO_ROLE[i]/#-/the machine}): ${TODO_TEXT[i]}"; done
+    return 0
+  fi
+  if ((${#TODO_TEXT[@]} == 0)); then
+    ok "Prepared for the roles ${PREPARE_ROLES//,/, }$([[ "$PROFILE" == hardened ]] && echo " (Hardened: the chosen roles only)")"
+    return 0
+  fi
+  info "The roles ${PREPARE_ROLES//,/, } need what this machine lacks:"
+  for i in "${TODO_TEXT[@]}"; do printf '      - %s\n' "$i"; done
+  if ask_yes_no "Set up what the roles need now?
+
+$(printf -- '- %s\n' "${TODO_TEXT[@]}")
+
+Choose no to leave the machine as it is: those roles then run without it, and bash install.sh --prepare sets it up later." yes; then
+    for i in "${!TODO_FIX[@]}"; do
+      [[ "${TODO_FIX[i]}" == fix_record ]] && continue
+      read -ra parts <<<"${TODO_FIX[i]}"
+      "${parts[@]}"
+    done
+    RECORD_ROLES="$PREPARE_ROLES"
+  else
+    # The record names only the roles whose needs are all in place.
+    for i in "${!TODO_ROLE[@]}"; do
+      role="${TODO_ROLE[i]}"
+      [[ "$role" == - || "$role" == controller ]] || in_set "$role" "$gaps" || gaps+="${gaps:+,}${role}"
+    done
+    RECORD_ROLES="controller"
+    for role in dns dhcp probe; do
+      in_set "$role" "$PREPARE_ROLES" && ! in_set "$role" "$gaps" && RECORD_ROLES+=",${role}"
+    done
+    warn "Left as it is${gaps:+: the role(s) ${gaps//,/, } run without what they miss}; bash install.sh --prepare sets it up later"
+  fi
+  if [[ ! -f "$PREP_RECORD" ]] || [[ "$(record_text "$RECORD_ROLES" | sha256sum)" != "$(sha256sum <"$PREP_RECORD")" ]]; then
+    fix_record
+  fi
+}
+
 step_start() {
   if ((OPT_NO_START)); then
     ok "Not started (--no-start). Start it with: systemctl enable --now tenko"
@@ -2126,7 +2535,7 @@ step_start() {
   if ! systemctl is-enabled --quiet tenko 2>/dev/null; then
     run systemctl enable tenko
   fi
-  if ((ACTIVE)) && ((!UPGRADED)) && ((UNIT_CHANGED || WROTE_CONFIG)); then
+  if ((ACTIVE)) && ((!UPGRADED)) && ((UNIT_CHANGED || WROTE_CONFIG || NEED_RESTART)); then
     info "Restarting tenko for the changed unit or configuration"
     run systemctl restart tenko
   elif ! systemctl is-active --quiet tenko 2>/dev/null || ((UPGRADED)); then
@@ -2254,19 +2663,30 @@ summary() {
   printf '    %-14s %s\n' "Data:" "$DATA_DIR" "Configuration:" "$CONFIG"
   ((USE_SELF_DONE)) && printf '    %-14s %s\n' "Host resolver:" "127.0.0.1 (Tenko; --uninstall restores the previous one)"
   # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.
-  if [[ "$ROLES" == *dhcp* ]]; then
+  # The roles: what the machine is prepared for, and what the node starts with.
+  printf '    %-14s %s\n' "Roles:" "the node starts with ${ROLES//,/, }; the Nodes page of the web UI changes the set" \
+    "Prepared for:" "${RECORD_ROLES:-$PREPARE_ROLES}" "" "(${PREPARED_FILE}; bash install.sh --check compares)"
+  if [[ "$PROFILE" == hardened ]]; then
+    printf '    %-14s %s\n' "" "Hardened: only these roles are prepared; bash install.sh --prepare --roles <roles> adds one."
+  fi
+  if [[ "${FIREWALL:-none}" == none ]]; then
+    printf '    %-14s %s\n' "Firewall:" "no host firewall is active; the network's must let in $(wanted_ports | paste -sd, - | sed 's/,/, /g')"
+  else
+    printf '    %-14s %s\n' "Firewall:" "the ports of the prepared roles are open on ${FIREWALL}"
+  fi
+  # WP7.5: the dhcp role needs an address to listen on, and direct mode a drop-in.
+  if [[ "$ROLES" == *dhcp* ]] || in_set dhcp "$PREPARE_ROLES"; then
     printf '    %-14s %s\n' "DHCP:" "set [dhcp] listen in ${CONFIG} (relay mode: the node's address, the gateway relays to it;" \
-      "" "direct mode: an interface; run this script again and it puts the drop-in" \
-      "" "${DROPIN_DHCP} in place); then restart the service." \
-      "" "UDP 67 must be open on the host's firewall; 547 (DHCPv6) is not served yet."
+      "" "direct mode: an interface, which needs the drop-in ${DROPIN_DHCP}" \
+      "" "that bash install.sh --prepare puts in place); then restart the service."
     if [[ "$ROLES" != *probe* ]]; then
       printf '    %-14s %s\n' "" "Conflict detection (docs/dhcp.md, section 14.5) is off without the probe role:" \
-        "" "add probe to roles in ${CONFIG} and run this script again, which installs its drop-in."
+        "" "switch on the probe role on the Nodes page."
     fi
   fi
-  if [[ "$ROLES" == *probe* ]]; then
+  if [[ -f "$DROPIN_PROBE" ]]; then
     printf '    %-14s %s\n' "Probe:" "${DROPIN_PROBE} grants CAP_NET_RAW (ARP for the dhcp role's conflict" \
-      "" "detection, the raw scan methods); --reconfigure --roles without probe removes it."
+      "" "detection, the raw scan methods)."
   fi
   case "$KEK_MODE" in
   sealed)
@@ -2287,6 +2707,26 @@ summary() {
 }
 
 # ── Uninstall ───────────────────────────────────────────────────────────────────────────────
+# close_firewall_ports: the ports the installer opened (the state file lists them), closed
+# again; ports that were open before the installer stay.
+close_firewall_ports() {
+  local fw ports p
+  fw="$(state_get firewall)"
+  ports="$(state_get firewall_ports)"
+  [[ -n "$fw" && -n "$ports" ]] || return 0
+  for p in ${ports//,/ }; do
+    case "$fw" in
+    firewalld)
+      if have firewall-cmd; then
+        { run firewall-cmd --quiet --permanent --remove-port="$p" && run firewall-cmd --quiet --remove-port="$p"; } || true
+      fi
+      ;;
+    ufw) if have ufw; then run ufw delete allow "$p" || true; fi ;;
+    esac
+  done
+  ok "Closed the ports the installer opened on ${fw}: ${ports//,/, }"
+}
+
 uninstall() {
   local link
   [[ -f "$UNIT" || -x "$BIN" ]] || ((OPT_PURGE)) || {
@@ -2315,6 +2755,9 @@ uninstall() {
   ((SYSTEMD)) && run systemctl daemon-reload
   [[ -e "$BIN" ]] && run rm -f "$BIN"
   ok "Removed the service and ${BIN}"
+  close_firewall_ports
+  # The record describes the drop-ins and the ports, which are gone now.
+  [[ -f "$PREPARED_FILE" ]] && run rm -f "$PREPARED_FILE"
   # round2: updates/ holds binaries (one per version, plus the links current and previous), not
   # data; the next install's `tenko upgrade layout` recreates it from the installed binary.
   if [[ -d "${DATA_DIR}/updates" ]] && ((!OPT_PURGE)); then
@@ -2353,6 +2796,8 @@ parse_args() {
     --purge) OPT_PURGE=1 ;;
     --password-stdin) OPT_PASSWORD_STDIN=1 ;;
     --keep-resolved-stub) OPT_KEEP_STUB=1 ;;
+    --check) OPT_CHECK=1 ;;
+    --prepare) OPT_PREPARE=1 ;;
     --print-unit)
       unit_text
       exit 0
@@ -2383,6 +2828,9 @@ parse_args() {
     shift
   done
   ((OPT_PURGE && !OPT_UNINSTALL)) && die "$E_USAGE" "--purge goes with --uninstall"
+  ((OPT_CHECK && OPT_PREPARE)) && die "$E_USAGE" "--check reports and --prepare sets up; give one of them"
+  ((OPT_UNINSTALL && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare do not go with --uninstall"
+  ((OPT_RECONFIGURE && (OPT_CHECK || OPT_PREPARE))) && die "$E_USAGE" "--check and --prepare change no configuration; --reconfigure goes without them"
   OPT_VERSION="${OPT_VERSION:-latest}"
   OPT_REPO="${OPT_REPO:-${TENKO_REPO:-linkztream/tenko}}"
   OPT_TOKEN="${OPT_TOKEN:-${GITHUB_TOKEN:-}}"
@@ -2404,7 +2852,8 @@ parse_args() {
 
 main() {
   parse_args "$@"
-  if ((!OPT_YES)); then
+  # --check asks nothing.
+  if ((!OPT_YES && !OPT_CHECK)); then
     if { : >/dev/tty; } 2>/dev/null; then
       TTY=/dev/tty
     else
@@ -2415,8 +2864,8 @@ main() {
   bold "  Tenko DDI installer"
   echo
   if [[ "$(id -u)" != 0 ]]; then
-    ((OPT_DRY)) || die "$E_HOST" "Run as root (sudo bash install.sh ...)"
-    warn "Not root: a dry run only, some checks are skipped"
+    ((OPT_DRY || OPT_CHECK)) || die "$E_HOST" "Run as root (sudo bash install.sh ...)"
+    warn "Not root: $( ((OPT_CHECK)) && echo "a check only" || echo "a dry run only"), some checks are skipped"
   fi
   TMP="$(mktemp -d)"
   detect_host
@@ -2437,6 +2886,9 @@ main() {
       info "Installed: Tenko ${OLD_VERSION}, not running"
     fi
   fi
+  if ((OPT_CHECK || OPT_PREPARE)); then
+    prepare_only
+  fi
   answers
   warn_roles_in_store
   setup_answers
@@ -2448,16 +2900,71 @@ main() {
   step_account
   step_dirs
   step_binary
-  WROTE_CONFIG=0 UNIT_CHANGED=0
+  WROTE_CONFIG=0 UNIT_CHANGED=0 NEED_RESTART=0
   step_kek
   step_config
   step_config_check
   step_unit
+  step_prepare
   step_start
   step_setup
   step_use_self
   summary
   [[ -n "${SETUP_FAILED:-}" ]] && exit "$E_SETUP"
+  exit 0
+}
+
+# prepare_only: --check and --prepare on an installed node: the dependency check of the roles
+# the machine is prepared for, read from the record and tenko.toml (the profile, the roles of
+# the file, the dns role's addresses, the ports), and nothing else: no download, no change to
+# the configuration. --prepare sets up what is missing and restarts the service when its unit
+# changed; --check only reports and exits 11 when something is missing.
+prepare_only() {
+  [[ -x "$BIN" && -f "$CONFIG" ]] ||
+    die "$E_USAGE" "Tenko is not installed here (${BIN}, ${CONFIG}); run bash install.sh without --check and --prepare first"
+  HAVE_CONFIG=1
+  read_record
+  read_config_values
+  ROLES="${FILE_VAL[roles]:-controller}"
+  PROFILE="${OPT_PROFILE:-${REC_PROFILE:-${FILE_VAL[profile]:-home}}}"
+  check_or_die valid_profile "$PROFILE" --profile
+  DNS_ADDRESS="${FILE_VAL[dns]:-all}"
+  if ((SET_ROLES)); then
+    check_or_die valid_roles "$OPT_ROLES" --roles
+    if [[ "$PROFILE" == hardened ]]; then
+      PREPARE_ROLES="$(canonical_roles "$OPT_ROLES")"
+    else
+      info "Profile ${PROFILE}: the machine is prepared for every role; --roles changes nothing here"
+      PREPARE_ROLES="$ALL_ROLES"
+    fi
+  else
+    prepare_roles
+  fi
+  info "Profile ${PROFILE}: the roles this machine is prepared for are ${PREPARE_ROLES//,/, }"
+  UNIT_CHANGED=0 NEED_RESTART=0
+  step_prepare
+  if ((OPT_CHECK)); then
+    if ((${#TODO_TEXT[@]} > 0)); then
+      warn "${#TODO_TEXT[@]} thing(s) missing; bash install.sh --prepare sets them up"
+      exit "$E_MISSING"
+    fi
+    ok "Everything the prepared roles need is in place"
+    exit 0
+  fi
+  if ((SYSTEMD)); then
+    ((UNIT_CHANGED)) && run systemctl daemon-reload
+    if ((ACTIVE)) && ((UNIT_CHANGED || NEED_RESTART)); then
+      info "Restarting tenko, so that it runs with what was set up"
+      run systemctl restart tenko
+    fi
+  fi
+  if ((CHANGED == 0)); then
+    bold "  This machine is prepared for the roles ${PREPARE_ROLES//,/, }; nothing was changed"
+  elif ((OPT_DRY)); then
+    bold "  Dry run: the steps above were printed, nothing was changed"
+  else
+    bold "  This machine is prepared for the roles ${PREPARE_ROLES//,/, }"
+  fi
   exit 0
 }
 

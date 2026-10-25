@@ -489,19 +489,23 @@ jobs:
         timeout-minutes: 45
       # WP6.6: deploy/install.sh on a host where systemd is PID 1: a fresh node (the key
       # sealed where the service manager hands it to the service, a plain key file
-      # otherwise), the rerun that changes nothing, then --uninstall --purge. The controller
-      # role only, so that systemd-resolved of the runner keeps port 53.
+      # otherwise), the rerun that changes nothing, the dependency check, then --uninstall
+      # --purge. The controller role only, and --keep-resolved-stub (remembered for the rerun),
+      # so that systemd-resolved of the runner keeps port 53; the machine is still prepared
+      # for every role (the Home profile).
       - name: Installer on this host
         run: |
           set -euo pipefail
           sudo bash deploy/install.sh --yes --uninstall --purge > /dev/null
-          sudo bash deploy/install.sh --yes --binary target/debug/tenko --roles controller \
+          sudo bash deploy/install.sh --yes --binary target/debug/tenko --roles controller --keep-resolved-stub \
             --modules all --host-name tenko.example.test 2>&1 | tee "$RUNNER_TEMP/install.log" > /dev/null ||
             { cat "$RUNNER_TEMP/install.log"; exit 1; }
           cat "$RUNNER_TEMP/install.log"
           grep -q 'The node is ready' "$RUNNER_TEMP/install.log"
           sudo bash deploy/install.sh --yes --binary target/debug/tenko 2>&1 | tee "$RUNNER_TEMP/rerun.log" > /dev/null
           grep -q 'nothing was changed' "$RUNNER_TEMP/rerun.log" || { cat "$RUNNER_TEMP/rerun.log"; exit 1; }
+          sudo bash deploy/install.sh --check
+          sudo grep -qx 'roles=controller,dns,dhcp,probe' /etc/tenko/prepared-roles
           sudo bash deploy/install.sh --yes --uninstall --purge
           {
             echo "### install.sh"

@@ -32,10 +32,13 @@ import { CertificateText, LinkBadge, NodePanel } from "./NodePanel";
 import { NodeScanPanel } from "./NodeScanPanel";
 // node-roles: the roles of this controller.
 import { RolesEditor } from "./RolesEditor";
+import { findingText } from "./roles";
 import "./nodes.css";
 
 /** The status warning of nodes with a refused handshake (docs/cluster.md, section 5). */
 const MISMATCH_WARNING = "cluster.protocol.mismatch";
+/** Status warnings about the preparation of this machine for its roles (the health rows of the page). */
+const HEALTH_WARNINGS = ["node.roles.privileges", "node.roles.unprepared"];
 
 function nodeColumns(): Column<NodeView>[] {
   return [
@@ -115,6 +118,8 @@ export default function NodesView() {
     const ids = (mismatch()?.params?.nodes ?? "").split(",").filter(Boolean);
     return ids.map((id) => source.rows().find((n) => String(n.id) === id)?.name ?? id);
   };
+  // The status warnings about the machine's preparation for its roles (the health rows).
+  const healthRows = () => (system()?.warnings ?? []).filter((w) => HEALTH_WARNINGS.includes(w.code));
   const open = (n: NodeView) => navigate(paths.node(n.id));
   // The probe role of this controller: in the stored set (what the roles editor writes, which a
   // restart applies), in the set it runs now, or in the roles of the status. Any of them leads to
@@ -180,6 +185,13 @@ export default function NodesView() {
             </Notice>
           )}
         </Show>
+        <For each={healthRows()}>
+          {(w) => (
+            <Notice kind="warn" testid="nodes-health-row" code={w.code}>
+              {findingText(w)}
+            </Notice>
+          )}
+        </For>
         <Show when={cluster()}>
           {(c) => (
             <p class="muted nodes-cluster" data-testid="nodes-cluster">

@@ -5124,6 +5124,7 @@ export type MessageKey =
   | "nodes.roles.confirm_title"
   | "nodes.roles.finding.dns_resolver"
   | "nodes.roles.finding.privileges"
+  | "nodes.roles.finding.unprepared"
   | "nodes.roles.hint.controller"
   | "nodes.roles.hint.dhcp"
   | "nodes.roles.hint.dns"
@@ -5133,6 +5134,8 @@ export type MessageKey =
   | "nodes.roles.lock.membership"
   | "nodes.roles.lock.pinned"
   | "nodes.roles.pinned"
+  | "nodes.roles.prepared.no"
+  | "nodes.roles.prepared.yes"
   | "nodes.roles.reset"
   | "nodes.roles.restart.back"
   | "nodes.roles.restart.down"
@@ -5147,6 +5150,7 @@ export type MessageKey =
   | "nodes.roles.self_hint"
   | "nodes.roles.self_title"
   | "nodes.roles.title"
+  | "nodes.roles.unprepared"
   | "nodes.scan.applied.active"
   | "nodes.scan.applied.applied_at"
   | "nodes.scan.applied.error"
@@ -7862,11 +7866,13 @@ export interface MessageArgs {
   "nodes.roles.confirm_off": { roles: string | number };
   "nodes.roles.confirm_on": { roles: string | number };
   "nodes.roles.finding.dns_resolver": { file: string | number };
-  "nodes.roles.finding.privileges": { dropins: string | number; roles: string | number };
+  "nodes.roles.finding.privileges": { capability: string | number; command: string | number; dropins: string | number; roles: string | number };
+  "nodes.roles.finding.unprepared": { command: string | number; missing: string | number; roles: string | number };
   "nodes.roles.pinned": { roles: string | number };
   "nodes.roles.restart.back": { roles: string | number };
   "nodes.roles.running": { roles: string | number };
   "nodes.roles.self_hint": { id: string | number };
+  "nodes.roles.unprepared": { missing: string | number; role: string | number };
   "nodes.scan.applied.error": { error: string | number };
   "nodes.scan.back": { name: string | number };
   "nodes.scan.devices.error": { column: string | number; error: string | number; n: string | number };
@@ -13255,6 +13261,7 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.roles.confirm_title",
   "nodes.roles.finding.dns_resolver",
   "nodes.roles.finding.privileges",
+  "nodes.roles.finding.unprepared",
   "nodes.roles.hint.controller",
   "nodes.roles.hint.dhcp",
   "nodes.roles.hint.dns",
@@ -13264,6 +13271,8 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.roles.lock.membership",
   "nodes.roles.lock.pinned",
   "nodes.roles.pinned",
+  "nodes.roles.prepared.no",
+  "nodes.roles.prepared.yes",
   "nodes.roles.reset",
   "nodes.roles.restart.back",
   "nodes.roles.restart.down",
@@ -13278,6 +13287,7 @@ export const messageKeys: readonly MessageKey[] = [
   "nodes.roles.self_hint",
   "nodes.roles.self_title",
   "nodes.roles.title",
+  "nodes.roles.unprepared",
   "nodes.scan.applied.active",
   "nodes.scan.applied.applied_at",
   "nodes.scan.applied.error",
