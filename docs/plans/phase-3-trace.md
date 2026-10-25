@@ -7,13 +7,13 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 3`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 3 --check`
 
-23 Phase 3 requirements; 7 named by at least one test, 16 not; 0 named by no test, measurement or document.
+23 Phase 3 requirements; 8 named by at least one test, 15 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
 | ID | Priority | Tests | Measurements | Documents |
 |---|---|---|---|---|
-| DHCP-01 | Must | - | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
+| DHCP-01 | Must | `ui/src/dhcp/reservations/ReserveDialog.test.tsx` | - | `crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/reserve.rs`<br>`crates/tenko-api/src/routes/reserve/tests.rs`<br>`crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>and 4 more |
 | DHCP-02 | Must | - | - | `crates/tenko-core/src/dhcp/option.rs`<br>`crates/tenko-dhcp/src/config/options.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
 | DHCP-03 | Must | `crates/tenko-dhcp/tests/classes.rs` | - | `crates/tenko-core/src/dhcp/class.rs`<br>`crates/tenko-dhcp/src/class.rs`<br>`crates/tenko-dhcp/src/config/classes.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 2 more |
 | DHCP-04 | Must | - | - | `crates/tenko-core/src/dhcp.rs`<br>`crates/tenko-dhcp/src/config/networks.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/dhcp.md`<br>and 1 more |
@@ -67,7 +67,6 @@ This file is generated. It lists every Phase 3 requirement of `docs/REQUIREMENTS
 
 ### No test
 
-- DHCP-01 (Must)
 - DHCP-02 (Must)
 - DHCP-04 (Must)
 - DHCP-07 (Must)

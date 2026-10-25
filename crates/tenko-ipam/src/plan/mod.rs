@@ -47,6 +47,16 @@ pub struct PlanOptions {
     /// acknowledgement. Not part of the API.
     #[serde(skip)]
     pub supernet_step: bool,
+    /// A DHCP reservation to check over the state after the commands (the reserve route,
+    /// [`crate::reserve`]). Not part of the API.
+    #[serde(skip)]
+    pub reservation: Option<crate::reserve::ReservationCheck>,
+    /// Records the whole plan as one audit record with this action, naming every changed
+    /// object and carrying every changed field with its object, instead of one record per
+    /// change (the reserve route's `ipam.address.reserve`). The history keeps one entry per
+    /// change. Not part of the API.
+    #[serde(skip)]
+    pub audit_as: Option<tenko_core::audit::AuditAction>,
 }
 
 impl PlanOptions {
@@ -58,7 +68,7 @@ impl PlanOptions {
     {
         Self {
             acknowledge: codes.into_iter().map(Into::into).collect(),
-            supernet_step: false,
+            ..Self::default()
         }
     }
 }

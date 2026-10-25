@@ -15,6 +15,7 @@ import { commit, db, isAdmin, onMockReset, type MockUser } from "./db";
 import { ipamState } from "./ipam/state";
 import { ok, Problem } from "./reply";
 import { paginate, route } from "./route";
+import { leaseReservation } from "./routes-reserve";
 import { mockUpdates } from "./routes-updates";
 
 /** The seeded scope: the IPAM prefix 192.0.2.0/24 (DHCP_IDS.lan of dhcp-model.ts). */
@@ -224,6 +225,13 @@ function findLease(addr: string, vrf?: string | null): Lease {
   return found;
 }
 
+/** A lease as the list shows it: whether it is its client's reservation and the host IPAM knows for the client, from the IPAM rows. */
+function shown(lease: Lease): Lease {
+  const found = leaseReservation(lease);
+  const host = found.host ?? lease.host;
+  return { ...lease, reserved: lease.reserved || found.reserved, ...(host ? { host } : {}) };
+}
+
 const NODE_ID = "1";
 
 function nodeStatus(): NodeStatus {
@@ -243,8 +251,8 @@ function nodeStatus(): NodeStatus {
 }
 
 export const dhcpLeaseRoutes: HttpHandler[] = [
-  route("get", "/api/v1/dhcp/leases", (ctx) => guard("dhcp.read", () => ok(paginate(filteredLeases(ctx.url), ctx.url, db.revision)) as never)),
-  route("get", "/api/v1/dhcp/leases/{addr}", (ctx) => guard("dhcp.read", () => ok(findLease(ctx.params.addr)) as never)),
+  route("get", "/api/v1/dhcp/leases", (ctx) => guard("dhcp.read", () => ok(paginate(filteredLeases(ctx.url).map(shown), ctx.url, db.revision)) as never)),
+  route("get", "/api/v1/dhcp/leases/{addr}", (ctx) => guard("dhcp.read", () => ok(shown(findLease(ctx.params.addr))) as never)),
   route("post", "/api/v1/dhcp/leases/{addr}/release", async (ctx) => {
     const body = await ctx.optionalBody();
     return guard("dhcp.write", () => {

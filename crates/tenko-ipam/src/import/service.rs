@@ -786,6 +786,7 @@ impl ImportService {
                 .cloned()
                 .collect(),
             supernet_step: true,
+            ..PlanOptions::default()
         };
         let plan = crate::plan::plan(
             view.as_ref(),

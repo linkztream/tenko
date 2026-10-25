@@ -779,13 +779,13 @@ describe("acting on selected addresses of the prefix", () => {
     expect(within(dialog).getByRole("heading", { name: "Move 1 object to a network" })).toBeTruthy();
   });
 
-  it("offers open, move and delete for an address, and none of them for a free gap", async () => {
+  it("offers open, move, reserve in DHCP and delete for an address, and none of them for a free gap", async () => {
     await openNetwork("192.0.2.0/24");
     expect(within(rowOf("192.0.2.30")).getByRole("button", { name: "Actions for 192.0.2.30" })).toBeTruthy();
     expect(within(rowOf("192.0.2.6")).queryByRole("button", { name: /^Actions for/ })).toBeNull();
     fireEvent.click(within(rowOf("192.0.2.30")).getByRole("button", { name: "Actions for 192.0.2.30" }));
     const menu = await screen.findByTestId("row-menu");
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "delete"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.dataset.item)).toEqual(["open", "move", "reserve", "delete"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
     const dialog = await screen.findByTestId("dialog-delete");
     expect(within(dialog).getByRole("heading", { name: "Delete address 192.0.2.30" })).toBeTruthy();

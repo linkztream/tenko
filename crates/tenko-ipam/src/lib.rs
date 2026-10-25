@@ -58,6 +58,7 @@
 //! | [`topology`] | the computed topology graph (IPAM-20) |
 //! | [`history`] | history entries (IPAM-09) |
 //! | [`query`] | reads for the API: lists, filters, pagination, search |
+//! | [`reserve`] | reserving an address in DHCP: the commands and the check of the reserve route (IPAM-18, IPAM-23) |
 //! | [`scope`] | anchors of IPAM objects for scoped authorization (IAM-01) and the plan check of scoped writes |
 //! | [`custom`] | custom field validation (IPAM-08) |
 //! | [`tables`] | the `ipam.*` tables and counters |
@@ -85,6 +86,7 @@ pub mod proposals;
 pub mod query;
 pub mod queue;
 pub mod reconcile;
+pub mod reserve;
 pub mod scope;
 pub mod service;
 pub mod tables;

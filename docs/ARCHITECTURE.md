@@ -291,6 +291,8 @@ The assignment mode of a host decides what IPAM may do in DHCP and DNS (IPAM-14)
 | `dynamic` | IPAM only observes |
 | `unmanaged` | Nothing touches the host |
 
+A DHCP reservation is therefore not an object of its own but these IPAM rows: a `reserved` host, an interface with a MAC address or client identifier, and an `active` or `planned` address on it in a network with a DHCP scope. Reserving an address from where the operator stands (the IPAM address page, the address lists, the DHCP lease list) writes exactly those rows in one plan with one audit record `ipam.address.reserve`, and the plan checks the identity and the collisions the DHCP role would find (`POST /api/v1/addresses/{id}/reserve`, [dhcp.md](dhcp.md) section 12.1).
+
 ### Proposals
 
 Observations without intent create proposals, never intent (IPAM-15). An unknown MAC in a lease becomes a "discovered host", and a DNS record without a host becomes an "orphaned record". A proposal is approved with one click, or the operator sets the rule "auto-adopt in network Z".

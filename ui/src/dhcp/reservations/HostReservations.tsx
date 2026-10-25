@@ -38,7 +38,7 @@ interface Loaded {
 const keyOf = (address: Pick<Address, "ip" | "vrf">) => `${address.vrf}/${address.ip}`;
 
 /** Whether the dhcp role of this server serves: a server without the role (409 `dhcp.node.not_dhcp`) or without a node (404 `cluster.node.not_found`) does not. */
-async function roleServes(signal: AbortSignal): Promise<boolean> {
+export async function roleServes(signal: AbortSignal): Promise<boolean> {
   try {
     const node = await thisNodeDhcp(signal);
     return node?.serving ?? false;

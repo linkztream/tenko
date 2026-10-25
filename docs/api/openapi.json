@@ -1376,6 +1376,138 @@
         }
       }
     },
+    "/api/v1/addresses/reserve": {
+      "post": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "Reserve an address in DHCP by value",
+        "description": "As `POST /addresses/{id}/reserve`, with the address named by `ip` and `vrf` (the default VRF when absent), for example from a DHCP lease. An address IPAM does not hold yet is created on the interface with `status` (`active` when absent).",
+        "operationId": "reserve_address_by_value",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The reservation's rows after the change, or the plan of a dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReserveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or parameter, or no `ip` (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.out_of_scope`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The address's prefix has no DHCP scope (`dhcp.scope.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "As for `POST /addresses/{id}/reserve`, plus `ipam.address.no_prefix` and `ipam.address.network_or_broadcast` for a new address",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "An object changed between the read and the write (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "The host is locked against automation (`ipam.host.locked`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/addresses/{id}": {
       "get": {
         "tags": [
@@ -1811,6 +1943,147 @@
           },
           "404": {
             "description": "No such object (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/addresses/{id}/reserve": {
+      "post": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "Reserve an address in DHCP",
+        "description": "Writes the IPAM rows a DHCP reservation is derived from (docs/dhcp.md section 2) in one batch: the host (`host`, or `new_host` for a new one, else the host of the address's interface) becomes `reserved`; the interface (`interface`, or `new_interface`, else the address's interface on that host, else the host's only interface, else a new `eth0`) gets `mac` and `client_id`; the address is bound to it with `status` `active` or `planned`. The address must lie in a prefix with a DHCP scope; the scope need not be enabled. Checked like the IPAM writes it makes; one audit record `ipam.address.reserve`.",
+        "operationId": "reserve_address",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Address identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Plan the change and return the plan without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "acknowledge",
+            "in": "query",
+            "description": "Warning codes to acknowledge, comma-separated (for example\n`ipam.prefix.nibble_boundary`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The reservation's rows after the change, or the plan of a dry run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReserveResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed (`auth.forbidden`, `auth.out_of_scope`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such address (`ipam.not_found`), or its prefix has no DHCP scope (`dhcp.scope.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another reserved host holds the address or presents the client identity in the scope (`dhcp.reservation.conflict`, IPAM-23), the interface has no MAC address or client identifier (`dhcp.reservation.no_identity`, IPAM-18), the address lies in a DHCP pool (`ipam.address.in_dhcp_pool`), or another IPAM conflict (`ipam.name_taken`, `ipam.reference_missing`, `ipam.object_deleted`, `ipam.status.transition`, `ipam.plan.unacknowledged`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "An object changed between the read and the write (`ipam.revision_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "The host is locked against automation (`ipam.host.locked`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -64313,6 +64586,180 @@
           }
         ],
         "description": "What the reservation check finds (IPAM-18, IPAM-23). A reservation inside a pool is\nallowed: it wins over the pool."
+      },
+      "ReserveInput": {
+        "type": "object",
+        "description": "What a reservation request asks for.",
+        "properties": {
+          "client_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The DHCPv4 client identifier (option 61) in hexadecimal; absent keeps the\ninterface's, `null` clears it. When set, the reservation is keyed by it instead of\nthe MAC address."
+          },
+          "host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An existing host. When neither `host` nor `new_host` is given, the host of the\naddress's interface."
+          },
+          "interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An existing interface of the host. When neither `interface` nor `new_interface` is\ngiven, the address's interface when it belongs to the host, else the host's only\ninterface, else a new interface `eth0`."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address by value (`POST /addresses/reserve` only): an address IPAM does not hold\nyet in the VRF is created.",
+            "example": "192.0.2.20"
+          },
+          "mac": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The MAC address the interface gets; absent keeps the interface's.",
+            "example": "02:00:5e:10:00:01"
+          },
+          "new_host": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of a new host of mode `reserved` in the default tenant.",
+            "example": "printer01"
+          },
+          "new_interface": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of a new interface of the host."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Status",
+                "description": "The status of the address afterwards, `active` or `planned`; absent keeps an active\nor planned address as it is and makes any other one active."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The VRF of `ip`; the default VRF when absent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReserveResponse": {
+        "type": "object",
+        "description": "The answer of a reservation.",
+        "required": [
+          "dry_run",
+          "unchanged",
+          "warnings"
+        ],
+        "properties": {
+          "address": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Address",
+                "description": "The address after the change; on a dry run, as it would be."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Whether this is a dry run."
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Host",
+                "description": "The host after the change; on a dry run, as it would be."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interface": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Interface",
+                "description": "The interface after the change; on a dry run, as it would be."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The inline job that carried the change; `null` on a dry run and when nothing\nchanged."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanView",
+                "description": "The plan (dry runs only)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision that committed the change; `null` on a dry run.",
+            "minimum": 0
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The prefix whose DHCP scope serves the reservation."
+          },
+          "unchanged": {
+            "type": "boolean",
+            "description": "Whether the request changed nothing: the reservation was in place."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanWarning"
+            },
+            "description": "Warnings of the plan."
+          }
+        }
       },
       "ResetData": {
         "type": "object",

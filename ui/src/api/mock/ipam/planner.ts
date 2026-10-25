@@ -244,6 +244,10 @@ export interface PlanOptions {
   principal?: Principal | undefined;
   /** The import sets it: turning a network into a supernet then warns (`ipam.prefix.becomes_supernet`). */
   supernetStep?: boolean | undefined;
+  /** A check over the state after the commands (the reserve route); it throws a `Problem` to refuse. */
+  check?: ((ws: Workspace) => void) | undefined;
+  /** One audit record with this action for the whole plan instead of one per change (the reserve route). */
+  auditAs?: string | undefined;
 }
 
 export interface Plan {
@@ -253,6 +257,8 @@ export interface Plan {
   request: string;
   principal: Principal;
   ws: Workspace;
+  /** One audit record with this action for the whole plan, when set. */
+  auditAs?: string | undefined;
   changes: PlannedChange[];
   warnings: PlanWarning[];
   results: ObjectRef[];
@@ -275,6 +281,7 @@ export function planCommands(commands: readonly RawCommand[], options: PlanOptio
   ws.supernetStep = options.supernetStep === true;
   const results = commands.map((command) => runCommand(ws, command));
   checkReservations(ws);
+  options.check?.(ws);
   const acknowledge = new Set(options.acknowledge ?? []);
   for (const warning of ws.warnings) warning.acknowledged = warning.requires_ack === true && acknowledge.has(warning.code);
   return {
@@ -283,6 +290,7 @@ export function planCommands(commands: readonly RawCommand[], options: PlanOptio
     request: randomId(),
     principal,
     ws,
+    auditAs: options.auditAs,
     changes: ws.changes,
     warnings: ws.warnings,
     results,
@@ -428,11 +436,23 @@ export function commitPlan(plan: Plan): Applied {
     const entry = entries[index] as HistoryEntry;
     if (list) list.push(entry);
     else store.history.set(change.object.id, [entry]);
+    if (plan.auditAs) continue;
     appendAudit({
       action: `ipam.${change.object.kind}.${change.action}`,
       objects: [change.object],
       changes: change.fields ?? [],
       context: change.derived ? { derived: "true" } : {},
+      principal: plan.principal,
+    });
+  }
+  if (plan.auditAs) {
+    const objects: ObjectRef[] = [];
+    for (const change of plan.changes) if (!objects.some((o) => o.kind === change.object.kind && o.id === change.object.id)) objects.push(change.object);
+    appendAudit({
+      action: plan.auditAs,
+      objects,
+      changes: plan.changes.flatMap((change) => (change.fields ?? []).map((field) => ({ ...field, object: change.object }))),
+      context: {},
       principal: plan.principal,
     });
   }

@@ -177,6 +177,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/addresses/reserve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve an address in DHCP by value
+         * @description As `POST /addresses/{id}/reserve`, with the address named by `ip` and `vrf` (the default VRF when absent), for example from a DHCP lease. An address IPAM does not hold yet is created on the interface with `status` (`active` when absent).
+         */
+        post: operations["reserve_address_by_value"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/addresses/{id}": {
         parameters: {
             query?: never;
@@ -207,6 +227,26 @@ export interface paths {
         get: operations["get_address_history"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addresses/{id}/reserve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve an address in DHCP
+         * @description Writes the IPAM rows a DHCP reservation is derived from (docs/dhcp.md section 2) in one batch: the host (`host`, or `new_host` for a new one, else the host of the address's interface) becomes `reserved`; the interface (`interface`, or `new_interface`, else the address's interface on that host, else the host's only interface, else a new `eth0`) gets `mac` and `client_id`; the address is bound to it with `status` `active` or `planned`. The address must lie in a prefix with a DHCP scope; the scope need not be enabled. Checked like the IPAM writes it makes; one audit record `ipam.address.reserve`.
+         */
+        post: operations["reserve_address"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16683,6 +16723,68 @@ export interface components {
                 scope: components["schemas"]["PrefixId"];
             };
         };
+        /** @description What a reservation request asks for. */
+        ReserveInput: {
+            /**
+             * @description The DHCPv4 client identifier (option 61) in hexadecimal; absent keeps the
+             *     interface's, `null` clears it. When set, the reservation is keyed by it instead of
+             *     the MAC address.
+             */
+            client_id?: string | null;
+            /**
+             * @description An existing host. When neither `host` nor `new_host` is given, the host of the
+             *     address's interface.
+             */
+            host?: string | null;
+            /**
+             * @description An existing interface of the host. When neither `interface` nor `new_interface` is
+             *     given, the address's interface when it belongs to the host, else the host's only
+             *     interface, else a new interface `eth0`.
+             */
+            interface?: string | null;
+            /**
+             * @description The address by value (`POST /addresses/reserve` only): an address IPAM does not hold
+             *     yet in the VRF is created.
+             * @example 192.0.2.20
+             */
+            ip?: string | null;
+            /**
+             * @description The MAC address the interface gets; absent keeps the interface's.
+             * @example 02:00:5e:10:00:01
+             */
+            mac?: string | null;
+            /**
+             * @description The name of a new host of mode `reserved` in the default tenant.
+             * @example printer01
+             */
+            new_host?: string | null;
+            /** @description The name of a new interface of the host. */
+            new_interface?: string | null;
+            status?: components["schemas"]["Status"] | null;
+            /** @description The VRF of `ip`; the default VRF when absent. */
+            vrf?: string | null;
+        };
+        /** @description The answer of a reservation. */
+        ReserveResponse: {
+            address?: components["schemas"]["Address"] | null;
+            /** @description Whether this is a dry run. */
+            dry_run: boolean;
+            host?: components["schemas"]["Host"] | null;
+            interface?: components["schemas"]["Interface"] | null;
+            job_id?: components["schemas"]["JobId"] | null;
+            plan?: components["schemas"]["PlanView"] | null;
+            /**
+             * Format: int64
+             * @description The revision that committed the change; `null` on a dry run.
+             */
+            revision?: number | null;
+            /** @description The prefix whose DHCP scope serves the reservation. */
+            scope?: string | null;
+            /** @description Whether the request changed nothing: the reservation was in place. */
+            unchanged: boolean;
+            /** @description Warnings of the plan. */
+            warnings: components["schemas"]["PlanWarning"][];
+        };
         /** @description The `data` of a `reset` event. Its SSE id is `revision`. */
         ResetData: {
             /** @description Why the client must reload. */
@@ -21916,6 +22018,110 @@ export interface operations {
             };
         };
     };
+    reserve_address_by_value: {
+        parameters: {
+            query?: {
+                /** @description Plan the change and return the plan without writing (API-09). */
+                dry_run?: boolean;
+                /**
+                 * @description Warning codes to acknowledge, comma-separated (for example
+                 *     `ipam.prefix.nibble_boundary`).
+                 */
+                acknowledge?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReserveInput"];
+            };
+        };
+        responses: {
+            /** @description The reservation's rows after the change, or the plan of a dry run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReserveResponse"];
+                };
+            };
+            /** @description Invalid body or parameter, or no `ip` (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`, `auth.out_of_scope`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The address's prefix has no DHCP scope (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description As for `POST /addresses/{id}/reserve`, plus `ipam.address.no_prefix` and `ipam.address.network_or_broadcast` for a new address */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An object changed between the read and the write (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not JSON (`sys.invalid_request`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The host is locked against automation (`ipam.host.locked`) */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     get_address: {
         parameters: {
             query?: {
@@ -22230,6 +22436,113 @@ export interface operations {
             };
             /** @description No such object (`ipam.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    reserve_address: {
+        parameters: {
+            query?: {
+                /** @description Plan the change and return the plan without writing (API-09). */
+                dry_run?: boolean;
+                /**
+                 * @description Warning codes to acknowledge, comma-separated (for example
+                 *     `ipam.prefix.nibble_boundary`).
+                 */
+                acknowledge?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Address identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReserveInput"];
+            };
+        };
+        responses: {
+            /** @description The reservation's rows after the change, or the plan of a dry run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReserveResponse"];
+                };
+            };
+            /** @description Invalid body or parameter (`ipam.validation`, `sys.invalid_request`, `sys.invalid_query`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed (`auth.forbidden`, `auth.out_of_scope`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such address (`ipam.not_found`), or its prefix has no DHCP scope (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another reserved host holds the address or presents the client identity in the scope (`dhcp.reservation.conflict`, IPAM-23), the interface has no MAC address or client identifier (`dhcp.reservation.no_identity`, IPAM-18), the address lies in a DHCP pool (`ipam.address.in_dhcp_pool`), or another IPAM conflict (`ipam.name_taken`, `ipam.reference_missing`, `ipam.object_deleted`, `ipam.status.transition`, `ipam.plan.unacknowledged`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An object changed between the read and the write (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not JSON (`sys.invalid_request`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The host is locked against automation (`ipam.host.locked`) */
+            423: {
                 headers: {
                     [name: string]: unknown;
                 };

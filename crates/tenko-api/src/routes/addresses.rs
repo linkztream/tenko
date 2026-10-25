@@ -66,6 +66,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_addresses, create_address))
         .routes(routes!(get_address, update_address, delete_address))
+        // Reserving an address in DHCP: the IPAM rows of a reservation in one batch.
+        .merge(super::reserve::routes())
 }
 
 /// Lists addresses, by VRF and address unless `sort` says otherwise.

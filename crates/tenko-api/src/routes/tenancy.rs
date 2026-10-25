@@ -1174,6 +1174,11 @@ pub(super) mod testkit {
             }
         }
 
+        /// The store under the service, for rows of other domains and the audit log.
+        pub fn store(&self) -> Arc<dyn Store> {
+            Arc::clone(self.service.store())
+        }
+
         /// Runs commands directly on the service (for the prefixes, which have no route
         /// of these areas) and returns the primary object of each.
         pub async fn run(&self, commands: Vec<IpamCommand>) -> Vec<ObjectRef> {

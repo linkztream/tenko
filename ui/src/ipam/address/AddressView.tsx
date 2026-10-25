@@ -1,18 +1,21 @@
 // One address (/ipam/addresses/<ip>, `?vrf=` when the address exists in several VRFs): its
 // prefix, its interface and host, DNS name, status, tags and custom fields, with edit,
-// move, delete or restore, and its history.
+// move, delete or restore, and its history. In a prefix with a DHCP scope, a principal who may
+// write IPAM there and DHCP reserves the address in DHCP from here; the address of a reserved host
+// shows its reservation as the host page does.
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import { createResource, createSignal, For, onCleanup, Show } from "solid-js";
+import { createResource, createSignal, For, lazy, onCleanup, Show } from "solid-js";
 import { api } from "../../api/client";
 import { events } from "../../api/events";
-import type { AddressRow as Address } from "../../api/types";
+import type { AddressRow as Address, Host, Interface } from "../../api/types";
 import { decodeSegment, paths } from "../../app/paths";
 import { may } from "../../auth/gate";
 import { Addr, Mac } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice } from "../../components/Notice";
 import { DeletedTag, DnsName, LockFlag, ModeBadge, StatusBadge, Tags, TimeAgo } from "../../grid/cells";
-import { t } from "../../i18n";
+import { createScopeIndex, mayReserve } from "../../dhcp/reservations/gate";
+import { t, withPacks } from "../../i18n";
 import { DeleteDialog, RestoreDialog } from "../DeleteDialog";
 import { CustomValues } from "../fields/CustomFieldsEditor";
 import { HistoryPanel } from "../history/HistoryPanel";
@@ -24,6 +27,28 @@ import { DnsRecords } from "../../hosts/DnsRecords";
 import { AddressForm } from "./AddressForm";
 import "../ipam.css";
 
+const ReserveDialog = lazy(withPacks(["dhcp"], () => import("../../dhcp/reservations/ReserveDialog")));
+const HostReservations = lazy(withPacks(["dhcp"], () => import("../../dhcp/reservations/HostReservations")));
+
+/** The reservation of an address of a reserved host, as the host page shows it. */
+function AddressReservation(props: { address: Address }) {
+  const [rows] = createResource(
+    () => {
+      const a = props.address;
+      return a.host?.mode === "reserved" && a.interface && !a.meta.deleted ? { host: a.host.id, iface: a.interface, revision: a.meta.revision } : undefined;
+    },
+    async ({ host, iface }) => {
+      const [h, i] = await Promise.all([api.get("/api/v1/hosts/{id}", { path: { id: host } }), api.get("/api/v1/interfaces/{id}", { path: { id: iface } })]);
+      return { host: h as Host, iface: i as Interface };
+    },
+  );
+  return (
+    <Show when={!rows.error && rows.latest}>
+      {(r) => <HostReservations host={r().host} interfaces={[r().iface]} addresses={[props.address]} />}
+    </Show>
+  );
+}
+
 export default function AddressView() {
   const params = useParams();
   const [search] = useSearchParams();
@@ -31,7 +56,8 @@ export default function AddressView() {
   const scope = useScope();
   const ip = () => decodeSegment(params.ip);
   const vrfParam = () => (typeof search.vrf === "string" ? search.vrf : undefined);
-  const [dialog, setDialog] = createSignal<"edit" | "move" | "delete" | "restore" | null>(null);
+  const [dialog, setDialog] = createSignal<"edit" | "move" | "delete" | "restore" | "reserve" | null>(null);
+  const scopes = createScopeIndex();
 
   const [found, { refetch }] = createResource(
     () => [ip(), vrfParam()] as const,
@@ -124,6 +150,12 @@ export default function AddressView() {
                       <Icon name="move" />
                       {t("ipam.do.move")}
                     </button>
+                    <Show when={mayReserve(a(), scopes())}>
+                      <button type="button" class="btn" data-testid="address-reserve" onClick={() => setDialog("reserve")}>
+                        <Icon name="pin" />
+                        {t("ipam.do.reserve")}
+                      </button>
+                    </Show>
                     <button type="button" class="btn danger" data-testid="address-delete" onClick={() => setDialog("delete")}>
                       <Icon name="trash" />
                       {t("ipam.do.delete")}
@@ -185,6 +217,7 @@ export default function AddressView() {
                 </dl>
                 <CustomValues values={a().meta.custom} />
               </section>
+              <AddressReservation address={a()} />
               <DnsRecords addresses={[a()]} />
               <section class="page-section" aria-labelledby="address-history">
                 <h2 id="address-history">{t("ipam.prefix.tab.history")}</h2>
@@ -209,6 +242,9 @@ export default function AddressView() {
                   else void refetch();
                 }}
               />
+            </Show>
+            <Show when={dialog() === "reserve" && mayReserve(a(), scopes())}>
+              <ReserveDialog source={{ address: a() }} onClose={() => setDialog(null)} onDone={() => void refetch()} />
             </Show>
             <Show when={dialog() === "move" && may.inPrefix(a().prefix)}>
               <MoveDialog

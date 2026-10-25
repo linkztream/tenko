@@ -17,6 +17,7 @@
 //! | [`prefixes`] | prefixes, the prefix tree, next free, ranges | WP1.4 |
 //! | [`addresses`] | addresses | WP1.4 |
 //! | [`hosts`] | hosts and interfaces | WP1.4 |
+//! | [`reserve`] | reserving an address in DHCP (the IPAM rows of a reservation) | reserve |
 //! | [`common`] | history, restore, bulk, tags, custom fields, search | WP1.4 |
 //! | [`import`] | import upload, mapping, preview, apply | WP1.5 |
 //! | [`export`] | CSV export | WP1.5 |
@@ -104,6 +105,7 @@ pub mod proposals;
 pub mod queue;
 pub mod reconciler;
 pub mod remote;
+pub mod reserve;
 pub mod scans;
 pub mod secrets;
 pub mod settings;

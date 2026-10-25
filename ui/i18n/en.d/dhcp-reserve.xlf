@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dhcp-reserve">
+      <unit id="ipam.do.reserve">
+        <notes><note category="description">Row and page action on an IPAM address: open the dialog that reserves it in DHCP.</note></notes>
+        <segment><source>Reserve in DHCP</source></segment>
+      </unit>
+      <unit id="dhcp.lease.reserve">
+        <notes><note category="description">Row action on a lease that is not a reservation: open the dialog that reserves the address for the client.</note></notes>
+        <segment><source>Reserve this address</source></segment>
+      </unit>
+      <unit id="dhcp.lease.open_host">
+        <notes><note category="description">Row action on a lease that is the client's reservation: open the reserved host's page.</note></notes>
+        <segment><source>Open the reserved host</source></segment>
+      </unit>
+      <unit id="dhcp.lease.host_missing">
+        <notes><note category="description">Toast when the reserved host of a lease could not be read.</note></notes>
+        <segment><source>The reserved host could not be read.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.title">
+        <notes><note category="description">Title of the dialog that reserves an address in DHCP.</note></notes>
+        <segment><source>Reserve {ip} in DHCP</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.loading">
+        <notes><note category="description">While the dialog reads the address, the scope and the lease.</note></notes>
+        <segment><source>Reading the address, its scope and its lease…</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.saved">
+        <notes><note category="description">Confirmation after the save.</note></notes>
+        <segment><source>{ip} is reserved for {host}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.saved_unchanged">
+        <notes><note category="description">Confirmation when the reservation was in place already and nothing changed.</note></notes>
+        <segment><source>{ip} was reserved for {host} already; nothing changed.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.open_host">
+        <notes><note category="description">Link to the reserved host's page after the save.</note></notes>
+        <segment><source>Open {host}</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.no_scope">
+        <notes><note category="description">The address lies in a network without a DHCP scope.</note></notes>
+        <segment><source>No DHCP scope serves the network of {ip}: create the scope first, then reserve the address.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.scope_served">
+        <notes><note category="description">The scope of the address serves clients.</note></notes>
+        <segment><source>The address lies in the scope {cidr}, which this server serves.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.scope_disabled">
+        <notes><note category="description">The scope of the address is disabled.</note></notes>
+        <segment><source>The address lies in the scope {cidr}, which is disabled: the reservation is written now and served once the scope is enabled.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.scope_not_serving">
+        <notes><note category="description">The scope is enabled, but the dhcp role of this server does not answer.</note></notes>
+        <segment><source>The address lies in the scope {cidr}; the dhcp role of this server does not serve it at the moment.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.scope_link">
+        <notes><note category="description">Link to the scope page.</note></notes>
+        <segment><source>Open the scope</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.address">
+        <notes><note category="description">Label: the address to reserve.</note></notes>
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.address_help">
+        <notes><note category="description">Help of the address field when the dialog was opened from a lease.</note></notes>
+        <segment><source>The lease's address, or another address of the same network.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.outside">
+        <notes><note category="description">The typed address is outside the scope's network.</note></notes>
+        <segment><source>{ip} lies outside the network {cidr} of the lease's scope.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.in_pool">
+        <notes><note category="description">The address lies inside a DHCP pool; IPAM refuses a reservation there.</note></notes>
+        <segment><source>{ip} lies in the DHCP pool {first}–{last}. IPAM keeps reservations out of the pools: move the address out of the pool, or shrink the pool, before you reserve it.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.in_pool_lease">
+        <notes><note category="description">The lease's address lies inside a DHCP pool; the dialog offers another address.</note></notes>
+        <segment><source>{ip} lies in the DHCP pool {first}–{last}. IPAM keeps reservations out of the pools: reserve an address outside the pool for this client. It keeps its lease until it ends and then gets the reserved address.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.use_free">
+        <notes><note category="description">Button: use the next free address outside the pools.</note></notes>
+        <segment><source>Use {ip}, the next free address</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.host">
+        <notes><note category="description">Label: the host the reservation belongs to.</note></notes>
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.host_option">
+        <notes><note category="description">An existing host in the host menu, with its assignment mode.</note></notes>
+        <segment><source>{name} ({mode})</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.host_new">
+        <notes><note category="description">Menu entry: create a new host.</note></notes>
+        <segment><source>A new host</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.new_host">
+        <notes><note category="description">Label: the name of the new host.</note></notes>
+        <segment><source>Name of the new host</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.interface">
+        <notes><note category="description">Label: the interface of the host that gets the identity.</note></notes>
+        <segment><source>Interface</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.interface_new">
+        <notes><note category="description">Menu entry: create a new interface on the host.</note></notes>
+        <segment><source>A new interface</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.new_interface">
+        <notes><note category="description">Label: the name of the new interface.</note></notes>
+        <segment><source>Name of the new interface</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.mac">
+        <notes><note category="description">Label: the MAC address of the client.</note></notes>
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.mac_help">
+        <notes><note category="description">Help of the MAC address field.</note></notes>
+        <segment><source>Prefilled from the interface, the lease on the address or what discovery saw.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.client_id">
+        <notes><note category="description">Label: the DHCP client identifier (option 61), optional.</note></notes>
+        <segment><source>Client identifier (optional)</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.client_id_help">
+        <notes><note category="description">Help of the client identifier field.</note></notes>
+        <segment><source>Option 61 in hexadecimal. When set, the reservation is keyed by it instead of the MAC address; leave it empty to key by the MAC address.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.field.status">
+        <notes><note category="description">Legend of the status choice of the address.</note></notes>
+        <segment><source>Status of the address</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.status.active">
+        <notes><note category="description">Address status: active.</note></notes>
+        <segment><source>active</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.status.planned">
+        <notes><note category="description">Address status: planned.</note></notes>
+        <segment><source>planned</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.mode.static">
+        <notes><note category="description">Assignment mode of a host: static.</note></notes>
+        <segment><source>static</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.mode.reserved">
+        <notes><note category="description">Assignment mode of a host: reserved.</note></notes>
+        <segment><source>reserved</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.mode.dynamic">
+        <notes><note category="description">Assignment mode of a host: dynamic.</note></notes>
+        <segment><source>dynamic</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.mode.unmanaged">
+        <notes><note category="description">Assignment mode of a host: unmanaged.</note></notes>
+        <segment><source>unmanaged</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.preview">
+        <notes><note category="description">Heading of the sentences that say what the save changes.</note></notes>
+        <segment><source>What the save changes</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.stale">
+        <notes><note category="description">After a 412: an object changed while the dialog was open.</note></notes>
+        <segment><source>Close the dialog and open it again to start from what IPAM holds now.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.save">
+        <notes><note category="description">Button: write the reservation.</note></notes>
+        <segment><source>Reserve</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.ip">
+        <notes><note category="description">The typed address is not an IP address.</note></notes>
+        <segment><source>Enter an IP address such as 192.0.2.20.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.host_name">
+        <notes><note category="description">The name of the new host is not a valid host name.</note></notes>
+        <segment><source>Enter a host name of letters, digits and hyphens, such as printer01.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.interface_name">
+        <notes><note category="description">The name of the new interface is empty.</note></notes>
+        <segment><source>Enter a name for the interface, such as eth0.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.mac">
+        <notes><note category="description">The MAC address does not parse.</note></notes>
+        <segment><source>Enter six octets such as 02:00:5e:10:00:01.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.client_id">
+        <notes><note category="description">The client identifier is not hexadecimal.</note></notes>
+        <segment><source>Enter hexadecimal octets such as 01:02:00:5e:10:00:01.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.check.identity">
+        <notes><note category="description">Neither a MAC address nor a client identifier is known (IPAM-18).</note></notes>
+        <segment><source>A reservation needs a MAC address or a client identifier.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.nothing">
+        <notes><note category="description">Preview: the reservation is in place already.</note></notes>
+        <segment><source>Everything is in place already: the save changes nothing.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.host_new">
+        <notes><note category="description">Preview: a new host is created.</note></notes>
+        <segment><source>A new host {name} is created, of mode reserved.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.host_mode">
+        <notes><note category="description">Preview: an existing host becomes reserved.</note></notes>
+        <segment><source>Host {name} becomes reserved (it is {mode} now).</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.host_kept">
+        <notes><note category="description">Preview: the host is reserved already.</note></notes>
+        <segment><source>Host {name} is reserved already.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_new">
+        <notes><note category="description">Preview: a new interface is created without a MAC address.</note></notes>
+        <segment><source>A new interface {name} is created on the host.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_new_mac">
+        <notes><note category="description">Preview: a new interface is created with a MAC address.</note></notes>
+        <segment><source>A new interface {name} is created with the MAC address {mac}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_mac">
+        <notes><note category="description">Preview: an interface without a MAC address gets one.</note></notes>
+        <segment><source>Interface {name} gets the MAC address {mac}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_mac_replaced">
+        <notes><note category="description">Preview: an interface's MAC address is replaced.</note></notes>
+        <segment><source>Interface {name} gets the MAC address {mac} instead of {old}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_mac_kept">
+        <notes><note category="description">Preview: the interface keeps its MAC address.</note></notes>
+        <segment><source>Interface {name} keeps the MAC address {mac}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_client_id">
+        <notes><note category="description">Preview: the interface gets a client identifier.</note></notes>
+        <segment><source>Interface {name} gets the client identifier {client_id}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.interface_client_id_cleared">
+        <notes><note category="description">Preview: the interface's client identifier is removed.</note></notes>
+        <segment><source>Interface {name} loses its client identifier.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.address_new">
+        <notes><note category="description">Preview: IPAM does not hold the address yet; it is created.</note></notes>
+        <segment><source>The address {ip} is created in IPAM on interface {name}, status {status}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.address_bound">
+        <notes><note category="description">Preview: the address moves to the interface.</note></notes>
+        <segment><source>The address {ip} is bound to interface {name}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.address_kept">
+        <notes><note category="description">Preview: the address keeps its status.</note></notes>
+        <segment><source>The address {ip} stays {status}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.address_status">
+        <notes><note category="description">Preview: the address changes its status.</note></notes>
+        <segment><source>The address {ip} becomes {status}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.keyed_mac">
+        <notes><note category="description">Preview: what the reservation is keyed by.</note></notes>
+        <segment><source>The reservation is keyed by the MAC address {value}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.keyed_client_id">
+        <notes><note category="description">Preview: what the reservation is keyed by.</note></notes>
+        <segment><source>The reservation is keyed by the client identifier {value}.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.scope_served">
+        <notes><note category="description">Preview: the scope serves the reservation.</note></notes>
+        <segment><source>The scope {cidr} serves the reservation once the dhcp role has read the change.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.scope_disabled">
+        <notes><note category="description">Preview: the scope is disabled.</note></notes>
+        <segment><source>The scope {cidr} is disabled: the reservation is served once the scope is enabled.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.not_serving">
+        <notes><note category="description">Preview: the dhcp role of this server does not serve.</note></notes>
+        <segment><source>The dhcp role of this server does not serve {cidr} at the moment; the reservation waits for it.</source></segment>
+      </unit>
+      <unit id="dhcp.reserve.will.lease_other">
+        <notes><note category="description">Preview: the lease on the address is held by another client than the one reserved.</note></notes>
+        <segment><source>The lease on {ip} is held by {mac}, another client; it keeps the address until its lease ends.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

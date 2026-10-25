@@ -1,9 +1,10 @@
 // One prefix (the right side of the IPAM view): its head with the actions, the utilization
 // summary, and tabs for its addresses (with the free gaps), its ranges or child prefixes,
 // its adoption policy (WP2.9) and its history. The address grid is where hosts are selected, edited in place, and
-// dragged onto the tree to move them (or moved with M).
+// dragged onto the tree to move them (or moved with M). In a network with a DHCP scope the row
+// menu reserves an address in DHCP.
 import { useNavigate } from "@solidjs/router";
-import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, For, lazy, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import type { Address, AddressRow, Prefix, Range, TreeNode, TreeResponse, Vrf } from "../../api/types";
@@ -22,7 +23,8 @@ import { createColumnState } from "../../grid/prefs";
 import { createListSource } from "../../grid/source";
 import { TextEditor } from "../../grid/TextEditor";
 import type { RowAction } from "../../grid/types";
-import { formatDuration, t, tx } from "../../i18n";
+import { createScopeIndex, mayReserve } from "../../dhcp/reservations/gate";
+import { formatDuration, t, tx, withPacks } from "../../i18n";
 import { isTyping } from "../../shell/keyboard";
 import { addressColumns, addressRowId, addressRowKey, rowAddress, type PrefixRow } from "../address/columns";
 import { addressesCsv } from "../address/csv";
@@ -40,6 +42,8 @@ import { saveTextFile } from "../../hosts/handoff";
 import { useWriteToast } from "../plan/PlanDialog";
 import { AdoptionPanel } from "./AdoptionPanel";
 import { ScanNowLazy } from "../../scans/ScanNowLazy";
+
+const ReserveDialog = lazy(withPacks(["dhcp"], () => import("../../dhcp/reservations/ReserveDialog")));
 
 type Tab = "addresses" | "children" | "ranges" | "adoption" | "history";
 
@@ -65,6 +69,7 @@ export function PrefixPane(props: PrefixPaneProps) {
     | { kind: "range"; range?: Range }
     | { kind: "delete_range"; range: Range }
     | { kind: "delete_address"; address: Address }
+    | { kind: "reserve"; address: AddressRow }
     | { kind: "move"; items: DragItem[] }
     | null
   >(null);
@@ -154,6 +159,7 @@ export function PrefixPane(props: PrefixPaneProps) {
     }
   };
 
+  const scopes = createScopeIndex();
   const rowActions: RowAction<PrefixRow>[] = [
     { id: "open", label: () => t("ipam.do.open"), run: (r) => r.type === "address" && navigate(paths.address(r.data.ip)) },
     {
@@ -162,6 +168,12 @@ export function PrefixPane(props: PrefixPaneProps) {
       disabled: (r) => !selectable(r),
       hidden: (r) => !rowWritable(r),
       run: (r) => setDialog({ kind: "move", items: dragItems([r]) }),
+    },
+    {
+      id: "reserve",
+      label: () => t("ipam.do.reserve"),
+      hidden: (r) => r.type !== "address" || !mayReserve(r.data, scopes()),
+      run: (r) => r.type === "address" && setDialog({ kind: "reserve", address: r.data }),
     },
     {
       id: "delete",
@@ -671,6 +683,9 @@ export function PrefixPane(props: PrefixPaneProps) {
               />
             );
           })()}
+        </Match>
+        <Match when={dialog()?.kind === "reserve"}>
+          <ReserveDialog source={{ address: (dialog() as { address: AddressRow }).address }} onClose={() => setDialog(null)} onDone={() => source.reload()} />
         </Match>
         <Match when={dialog()?.kind === "move"}>
           <MoveDialog tree={props.tree} items={(dialog() as { items: DragItem[] }).items} onClose={() => setDialog(null)} />

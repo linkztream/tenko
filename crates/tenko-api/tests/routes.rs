@@ -164,6 +164,9 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/addresses/{id}", "get_address"),
     ("PATCH", "/addresses/{id}", "update_address"),
     ("DELETE", "/addresses/{id}", "delete_address"),
+    // reserving an address in DHCP
+    ("POST", "/addresses/{id}/reserve", "reserve_address"),
+    ("POST", "/addresses/reserve", "reserve_address_by_value"),
     // hosts
     ("GET", "/hosts", "list_hosts"),
     ("POST", "/hosts", "create_host"),

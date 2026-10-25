@@ -1,8 +1,10 @@
 //! `tenko ipam reconcile`: the reconciliation view of the public API (`GET /ipam/reconcile`,
 //! IPAM-21, WP8.2): ghosts, rogues, orphans, PTR mismatches and conflicts, with the truth
-//! that wins per row.
+//! that wins per row. `tenko ipam address reserve`: reserving an address in DHCP
+//! (`POST /addresses/{id}/reserve`, or `POST /addresses/reserve` for an address given by
+//! value), the IPAM rows of the reservation in one batch.
 
-use std::fmt::Write as _;
+use std::{fmt::Write as _, net::IpAddr, str::FromStr};
 
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
@@ -16,6 +18,20 @@ use super::{ClientOpts, Failure, Output, Target, table};
 pub enum IpamCommand {
     /// Show where intent, the DHCP leases, the DNS records and the scans disagree.
     Reconcile(ReconcileArgs),
+    /// Act on one address.
+    Address {
+        /// The `ipam address` subcommand to run.
+        #[command(subcommand)]
+        action: AddressCommand,
+    },
+}
+
+/// Subcommands of `tenko ipam address`.
+#[derive(Debug, Clone, Subcommand)]
+pub enum AddressCommand {
+    /// Reserve an address in DHCP: the host becomes reserved, its interface gets the MAC
+    /// address and client identifier, the address is bound to it.
+    Reserve(ReserveArgs),
 }
 
 impl IpamCommand {
@@ -23,6 +39,9 @@ impl IpamCommand {
     pub fn client(&self) -> &ClientOpts {
         match self {
             Self::Reconcile(args) => &args.client,
+            Self::Address {
+                action: AddressCommand::Reserve(args),
+            } => &args.client,
         }
     }
 
@@ -30,8 +49,65 @@ impl IpamCommand {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Reconcile(_) => "ipam reconcile",
+            Self::Address {
+                action: AddressCommand::Reserve(_),
+            } => "ipam address reserve",
         }
     }
+}
+
+/// The status of a reserved address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ReserveStatus {
+    /// Served now.
+    Active,
+    /// Planned; served as well (a move or a device not yet installed).
+    Planned,
+}
+
+/// Arguments of `tenko ipam address reserve`.
+#[derive(Debug, Clone, Args)]
+pub struct ReserveArgs {
+    /// Connection options.
+    #[command(flatten)]
+    pub client: ClientOpts,
+    /// The address: its identifier, or the address itself (`192.0.2.20`), which is created
+    /// when IPAM does not hold it.
+    #[arg(value_name = "ID_OR_ADDRESS")]
+    pub address: String,
+    /// The VRF of an address given by value; the default VRF when absent.
+    #[arg(long, value_name = "ID")]
+    pub vrf: Option<String>,
+    /// The host: its identifier or name. Without it and without --new-host, the host of the
+    /// address's interface.
+    #[arg(long, value_name = "ID_OR_NAME", conflicts_with = "new_host")]
+    pub host: Option<String>,
+    /// Create a new host of mode reserved with this name.
+    #[arg(long, value_name = "NAME")]
+    pub new_host: Option<String>,
+    /// The interface of the host (identifier). Without it and without --new-interface, the
+    /// address's interface, else the host's only one, else a new eth0.
+    #[arg(long, value_name = "ID", conflicts_with = "new_interface")]
+    pub interface: Option<String>,
+    /// Create a new interface of the host with this name.
+    #[arg(long, value_name = "NAME")]
+    pub new_interface: Option<String>,
+    /// The MAC address the interface gets.
+    #[arg(long, value_name = "MAC")]
+    pub mac: Option<String>,
+    /// The DHCPv4 client identifier (option 61) in hexadecimal; the reservation is then
+    /// keyed by it.
+    #[arg(long, value_name = "HEX", conflicts_with = "clear_client_id")]
+    pub client_id: Option<String>,
+    /// Remove the interface's client identifier, so the reservation is keyed by the MAC.
+    #[arg(long)]
+    pub clear_client_id: bool,
+    /// The status of the address afterwards; an active or planned address keeps its own.
+    #[arg(long, value_enum, value_name = "STATUS")]
+    pub status: Option<ReserveStatus>,
+    /// Show the plan without writing.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// The kinds of rows of the view.
@@ -95,7 +171,136 @@ pub async fn run(command: &IpamCommand) -> Result<Output, Failure> {
     let target = Target::resolve(command.client(), true)?;
     match command {
         IpamCommand::Reconcile(args) => reconcile(&target, args).await,
+        IpamCommand::Address {
+            action: AddressCommand::Reserve(args),
+        } => reserve(&target, args).await,
     }
+}
+
+fn usage(message: impl std::fmt::Display) -> Failure {
+    Failure::new(crate::exit::USAGE, message.to_string())
+}
+
+/// The path and the body of a reservation request, checked without the server.
+fn reserve_request(args: &ReserveArgs, host: Option<String>) -> Result<(String, Value), Failure> {
+    let mut body = serde_json::Map::new();
+    let path = if is_id(&args.address) {
+        if args.vrf.is_some() {
+            return Err(usage(
+                "--vrf names the VRF of an address given by value, not by identifier",
+            ));
+        }
+        format!("/addresses/{}/reserve", args.address.trim())
+    } else {
+        let ip = IpAddr::from_str(args.address.trim()).map_err(|_| {
+            usage(format!(
+                "`{}` is neither an address identifier nor an IP address",
+                args.address
+            ))
+        })?;
+        body.insert("ip".into(), json!(ip.to_string()));
+        if let Some(vrf) = &args.vrf {
+            body.insert("vrf".into(), json!(vrf.trim()));
+        }
+        "/addresses/reserve".to_owned()
+    };
+    if let Some(host) = host {
+        body.insert("host".into(), json!(host));
+    }
+    if let Some(name) = &args.new_host {
+        tenko_core::net::HostName::new(name.trim())
+            .map_err(|error| usage(format!("--new-host {name}: {error}")))?;
+        body.insert("new_host".into(), json!(name.trim()));
+    }
+    if let Some(interface) = &args.interface {
+        if !is_id(interface) {
+            return Err(usage(format!(
+                "--interface {interface}: give the interface's identifier"
+            )));
+        }
+        body.insert("interface".into(), json!(interface.trim()));
+    }
+    if let Some(name) = &args.new_interface {
+        body.insert("new_interface".into(), json!(name.trim()));
+    }
+    if let Some(mac) = &args.mac {
+        let mac = tenko_core::MacAddr::from_str(mac.trim())
+            .map_err(|error| usage(format!("--mac {mac}: {error}")))?;
+        body.insert("mac".into(), json!(mac.to_string()));
+    }
+    if let Some(client_id) = &args.client_id {
+        let octets = tenko_core::serde_util::from_hex(client_id.trim()).ok_or_else(|| {
+            usage(format!(
+                "--client-id {client_id}: not hexadecimal octets such as 01:02:00:5e:10:00:01"
+            ))
+        })?;
+        body.insert(
+            "client_id".into(),
+            json!(tenko_core::serde_util::to_hex(&octets)),
+        );
+    } else if args.clear_client_id {
+        body.insert("client_id".into(), Value::Null);
+    }
+    if let Some(status) = args.status {
+        let status = match status {
+            ReserveStatus::Active => "active",
+            ReserveStatus::Planned => "planned",
+        };
+        body.insert("status".into(), json!(status));
+    }
+    let path = if args.dry_run {
+        format!("{path}?dry_run=true")
+    } else {
+        path
+    };
+    Ok((path, Value::Object(body)))
+}
+
+async fn reserve(target: &Target, args: &ReserveArgs) -> Result<Output, Failure> {
+    // Check what can be checked before connecting.
+    reserve_request(args, None)?;
+    let client = target.connect().await?;
+    let host = match &args.host {
+        Some(text) => Some(host_id(&client, text).await?),
+        None => None,
+    };
+    let (path, body) = reserve_request(args, host)?;
+    let answer: Value = client.post(&path, &body, None).await?;
+    if target.json {
+        return Ok(Output::json(&answer));
+    }
+    Ok(Output::text(reserve_text(&answer)))
+}
+
+/// The answer of a reservation in words.
+fn reserve_text(answer: &Value) -> String {
+    let text = |value: &Value| value.as_str().unwrap_or("-").to_owned();
+    let address = &answer["address"];
+    let interface = &answer["interface"];
+    let identity = match interface["client_id"].as_str() {
+        Some(client_id) => format!("client identifier {client_id}"),
+        None => format!("MAC address {}", text(&interface["mac"])),
+    };
+    let mut out = String::new();
+    let verb = if answer["dry_run"] == true {
+        "would be reserved"
+    } else if answer["unchanged"] == true {
+        "is reserved already"
+    } else {
+        "is reserved"
+    };
+    let _ = writeln!(
+        out,
+        "{} {verb} for host {} on interface {}, keyed by its {identity}; status {}",
+        text(&address["ip"]),
+        text(&answer["host"]["name"]),
+        text(&interface["name"]),
+        text(&address["status"]),
+    );
+    for warning in answer["warnings"].as_array().into_iter().flatten() {
+        let _ = writeln!(out, "warning: {}", text(&warning["message"]));
+    }
+    out
 }
 
 #[derive(Serialize)]
@@ -329,7 +534,94 @@ fn host_text(truths: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::*;
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(subcommand)]
+        command: IpamCommand,
+    }
+
+    fn parse(words: &[&str]) -> ReserveArgs {
+        let cli = Cli::try_parse_from(["ipam", "address", "reserve"].iter().chain(words).copied())
+            .expect("arguments");
+        match cli.command {
+            IpamCommand::Address {
+                action: AddressCommand::Reserve(args),
+            } => args,
+            IpamCommand::Reconcile(_) => unreachable!("parsed as reserve"),
+        }
+    }
+
+    #[test]
+    fn an_address_by_value_goes_to_the_value_route_with_its_identity() {
+        let args = parse(&[
+            "192.0.2.20",
+            "--new-host",
+            "printer01",
+            "--mac",
+            "02-00-5E-10-00-01",
+            "--client-id",
+            "01:02:00:5e:10:00:01",
+            "--status",
+            "planned",
+            "--dry-run",
+        ]);
+        let (path, body) = reserve_request(&args, None).expect("request");
+        assert_eq!(path, "/addresses/reserve?dry_run=true");
+        assert_eq!(
+            body,
+            json!({
+                "ip": "192.0.2.20",
+                "new_host": "printer01",
+                "mac": "02:00:5e:10:00:01",
+                "client_id": "0102005e100001",
+                "status": "planned"
+            })
+        );
+    }
+
+    #[test]
+    fn an_address_by_identifier_goes_to_its_route_and_may_clear_the_client_id() {
+        let id = "01890a5d-ac96-774b-bcce-b302099a8057";
+        let args = parse(&[id, "--clear-client-id"]);
+        let (path, body) = reserve_request(&args, Some("host-id".into())).expect("request");
+        assert_eq!(path, format!("/addresses/{id}/reserve"));
+        assert_eq!(body, json!({ "host": "host-id", "client_id": null }));
+    }
+
+    #[test]
+    fn mistakes_are_usage_errors_before_the_server_is_asked() {
+        for words in [
+            &["not-an-address"][..],
+            &["192.0.2.20", "--mac", "02:00"][..],
+            &["192.0.2.20", "--client-id", "xyz"][..],
+            &["192.0.2.20", "--interface", "eth0"][..],
+            &["192.0.2.20", "--new-host", "living room tv"][..],
+            &["01890a5d-ac96-774b-bcce-b302099a8057", "--vrf", "x"][..],
+        ] {
+            let error = reserve_request(&parse(words), None).expect_err("refused");
+            assert_eq!(error.status, crate::exit::USAGE, "{words:?}");
+        }
+    }
+
+    #[test]
+    fn the_answer_says_what_was_reserved() {
+        let answer = json!({
+            "address": { "ip": "192.0.2.20", "status": "active" },
+            "host": { "name": "printer01" },
+            "interface": { "name": "eth0", "mac": "02:00:5e:10:00:01" },
+            "dry_run": false,
+            "unchanged": false,
+            "warnings": []
+        });
+        assert_eq!(
+            reserve_text(&answer),
+            "192.0.2.20 is reserved for host printer01 on interface eth0, keyed by its MAC address 02:00:5e:10:00:01; status active\n"
+        );
+    }
 
     #[test]
     fn a_row_shows_the_four_truths_and_the_rule() {

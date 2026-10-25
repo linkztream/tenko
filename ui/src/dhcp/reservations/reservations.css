@@ -4,3 +4,10 @@
 .tag.reservation-state.served { background: var(--ok-wash); color: var(--ok-ink); }
 .tag.reservation-state.scope_disabled, .tag.reservation-state.not_serving { background: var(--discrepancy-wash); color: var(--discrepancy); }
 .host-reservations .note { margin-block-start: var(--sp-2); }
+
+/* The reserve dialog: the sentences of what the save changes, and the status choice. */
+.reserve-preview { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-2) var(--sp-3); margin-block: var(--sp-2); }
+.reserve-preview h3 { margin: 0 0 var(--sp-1); font-size: inherit; }
+.reserve-preview ul { margin: 0; padding-inline-start: var(--sp-4); }
+.dhcp-form fieldset.field { border: 0; padding: 0; margin: 0; }
+.dhcp-form fieldset.field .choice { margin-inline-end: var(--sp-3); }

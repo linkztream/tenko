@@ -1,9 +1,11 @@
 // Every address of the VRF in view (/ipam/addresses): the server filters, sorts and pages
 // (GET /addresses with `status`, `tag`, `within`, `q`, `sort`, `deleted`), the grid shows
 // the pages as they scroll in. The filter field takes `status:active tag:camera
-// within:192.0.2.0/24` terms; the soft-deleted filter shows deleted addresses for restore.
+// within:192.0.2.0/24` terms; the soft-deleted filter shows deleted addresses for restore. The row
+// menu reserves an address in DHCP when its prefix has a scope and the principal may write IPAM
+// there and DHCP.
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, lazy, onCleanup, onMount, Show } from "solid-js";
 import type { AddressRow as Address } from "../../api/types";
 import { STATUSES } from "../../api/types";
 import { paths } from "../../app/paths";
@@ -17,7 +19,8 @@ import { parseQuery, type QueryField } from "../../grid/query";
 import { createListSource } from "../../grid/source";
 import { sortParam, type RowAction, type SortState } from "../../grid/types";
 import { saveTextFile } from "../../hosts/handoff";
-import { t } from "../../i18n";
+import { createScopeIndex, mayReserve } from "../../dhcp/reservations/gate";
+import { t, withPacks } from "../../i18n";
 import { isTyping } from "../../shell/keyboard";
 import { DeleteDialog, RestoreDialog } from "../DeleteDialog";
 import { HistoryDialog } from "../history/HistoryPanel";
@@ -29,6 +32,8 @@ import { useTree } from "../tree/PrefixTree";
 import { addressColumns } from "./columns";
 import { addressesCsv } from "./csv";
 import "../ipam.css";
+
+const ReserveDialog = lazy(withPacks(["dhcp"], () => import("../../dhcp/reservations/ReserveDialog")));
 
 const FIELDS: readonly QueryField[] = [
   { name: "status", values: STATUSES, multi: true },
@@ -53,6 +58,7 @@ export default function AddressesView() {
     | { kind: "delete"; address: Address }
     | { kind: "restore"; address: Address }
     | { kind: "history"; address: Address }
+    | { kind: "reserve"; address: Address }
     | null
   >(null);
 
@@ -83,6 +89,7 @@ export default function AddressesView() {
     relevant: (e) => [...e.objects, ...e.deleted].some((o) => ["address", "interface", "host"].includes(o.kind)),
   });
 
+  const scopes = createScopeIndex();
   /** Whether the principal may change this address: it is judged by the address's own prefix. */
   const mayRow = (a: Address) => may.inPrefix(a.prefix);
   const prefixes = createMemo(() => new Map((tree.tree()?.nodes ?? []).map((n) => [n.id, n.cidr])));
@@ -100,6 +107,7 @@ export default function AddressesView() {
     { id: "open", label: () => t("ipam.do.open"), run: (a) => navigate(paths.address(a.ip, a.vrf)) },
     { id: "move", label: () => t("ipam.do.move"), disabled: (a) => !!a.meta.deleted, hidden: (a) => !mayRow(a), run: (a) => setDialog({ kind: "move", items: items([a]) }) },
     { id: "history", label: () => t("ipam.do.history"), run: (a) => setDialog({ kind: "history", address: a }) },
+    { id: "reserve", label: () => t("ipam.do.reserve"), hidden: (a) => !mayReserve(a, scopes()), run: (a) => setDialog({ kind: "reserve", address: a }) },
     { id: "restore", label: () => t("ipam.do.restore"), disabled: (a) => !a.meta.deleted, hidden: (a) => !mayRow(a), run: (a) => setDialog({ kind: "restore", address: a }) },
     { id: "delete", label: () => t("ipam.do.delete"), danger: true, disabled: (a) => !!a.meta.deleted, hidden: (a) => !mayRow(a), run: (a) => setDialog({ kind: "delete", address: a }) },
   ];
@@ -227,6 +235,8 @@ export default function AddressesView() {
                   }}
                 />
               );
+            case "reserve":
+              return <ReserveDialog source={{ address: current.address }} onClose={() => setDialog(null)} onDone={() => source.reload()} />;
             case "history":
               return (
                 <HistoryDialog

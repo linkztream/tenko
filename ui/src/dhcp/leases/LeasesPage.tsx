@@ -6,20 +6,27 @@
 // busier than the page can follow; the Live toggle pauses it. The live strip (WP8.6) names the
 // scope filter, shows how full the scope (or each of the first scopes) is and counts the leases
 // granted since the page was opened; the bars and the count are read again with each refresh. Principals with `dhcp.write` release
-// an active lease, with an optional reason. A 409 `dhcp.module.disabled` or a 404 of the route
+// an active lease, with an optional reason. A lease that is not its client's reservation is
+// reserved from the row menu (the reserve dialog, prefilled from the lease) by a principal who may
+// write DHCP and IPAM in the scope's network; a lease that is one says Reserved and links to the
+// host. A 409 `dhcp.module.disabled` or a 404 of the route
 // shows the module-off state, a 501 the not-available notice.
 import { A, useNavigate, useSearchParams } from "@solidjs/router";
-import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, lazy, Show } from "solid-js";
+import { api } from "../../api/client";
+import { paths } from "../../app/paths";
 import { Icon } from "../../components/Icon";
 import { PageHead } from "../../components/PageHead";
 import { DataGrid } from "../../grid/DataGrid";
 import { createListSource } from "../../grid/source";
 import type { Column, RowAction } from "../../grid/types";
+import { toast } from "../../components/toast";
 import { formatDateTime, formatRelative, t } from "../../i18n";
 import { mayWriteDhcp } from "../access";
 import { listScopes, type Scope } from "../api";
 import { DhcpNav } from "../DhcpNav";
 import { DhcpProblem, unavailable } from "../Parts";
+import { mayReserveIn } from "../reservations/gate";
 import { SelectFilter, TextFilter } from "./Filters";
 import { createLiveRefresh, LEASE_TABLE, LiveControls } from "./live";
 import { LiveStrip } from "./LiveStrip";
@@ -44,12 +51,47 @@ import "./leases.css";
 
 const ENDS: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "medium" };
 
+const ReserveDialog = lazy(() => import("../reservations/ReserveDialog"));
+
+/** The names of reserved hosts by id, read once per page. */
+const hostNames = new Map<string, Promise<string | undefined>>();
+
+function hostName(id: string): Promise<string | undefined> {
+  let found = hostNames.get(id);
+  if (!found) {
+    found = api
+      .get("/api/v1/hosts/{id}", { path: { id } })
+      .then((h) => h.name)
+      .catch(() => undefined);
+    hostNames.set(id, found);
+  }
+  return found;
+}
+
+/** The link to the reserved host of a lease, once its name is read. */
+function HostLink(props: { id: string }) {
+  const [name] = createResource(() => props.id, hostName);
+  return (
+    <Show when={name()}>
+      {(n) => (
+        <>
+          {" "}
+          <A href={paths.host(n())} data-testid="lease-reserved-host">
+            {n()}
+          </A>
+        </>
+      )}
+    </Show>
+  );
+}
+
 export default function LeasesPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
   const filters = createMemo(() => readLeaseFilters(search));
   const query = createMemo(() => leaseQuery(filters()), undefined, { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) });
   const [dialog, setDialog] = createSignal<Lease | null>(null);
+  const [reserving, setReserving] = createSignal<Lease | null>(null);
   const [stripVersion, setStripVersion] = createSignal(0);
   // When the page was opened (or the counter reset): the leases granted since are the new ones.
   const [opened, setOpened] = createSignal(new Date().toISOString());
@@ -64,6 +106,14 @@ export default function LeasesPage() {
   });
   const scopeList = () => (scopes.error ? [] : (scopes.latest ?? []));
   const networkOf = (id: string) => scopeList().find((s) => s.prefix === id)?.cidr ?? id;
+  const scopeIndex = createMemo(() => new Map(scopeList().map((s) => [s.prefix, s] as const)));
+  /** Whether the row menu offers to reserve the lease's address. */
+  const mayReserveLease = (l: Lease) => !l.reserved && mayReserveIn(l.scope, scopeIndex());
+  const openHost = async (l: Lease) => {
+    const name = l.host ? await hostName(l.host) : undefined;
+    if (name) navigate(paths.host(name));
+    else toast({ kind: "bad", title: t("dhcp.lease.host_missing") });
+  };
 
   const list = createListSource<Lease>({
     path: "/api/v1/dhcp/leases",
@@ -154,13 +204,14 @@ export default function LeasesPage() {
     {
       id: "reserved",
       header: () => t("dhcp.col.reserved"),
-      width: 100,
+      width: 180,
       text: (l) => (l.reserved ? t("dhcp.lease.reserved") : ""),
       render: (l) => (
         <Show when={l.reserved}>
           <span class="tag" data-testid="lease-reserved">
             {t("dhcp.lease.reserved")}
           </span>
+          <Show when={l.host}>{(id) => <HostLink id={id()} />}</Show>
         </Show>
       ),
     },
@@ -175,6 +226,8 @@ export default function LeasesPage() {
 
   const actions: RowAction<Lease>[] = [
     { id: "history", label: () => t("dhcp.do.history"), run: (l) => navigate(historyHref(l.addr)) },
+    { id: "reserve", label: () => t("dhcp.lease.reserve"), hidden: (l) => !mayReserveLease(l), run: (l) => setReserving(l) },
+    { id: "open_host", label: () => t("dhcp.lease.open_host"), hidden: (l) => !(l.reserved && l.host), run: (l) => void openHost(l) },
     {
       id: "release",
       label: () => t("dhcp.lease.release"),
@@ -303,6 +356,9 @@ export default function LeasesPage() {
             </button>
           </div>
         </Show>
+      </Show>
+      <Show when={reserving()} keyed>
+        {(lease) => <ReserveDialog source={{ lease }} onClose={() => setReserving(null)} onDone={reload} />}
       </Show>
       <Show when={dialog()} keyed>
         {(lease) => (

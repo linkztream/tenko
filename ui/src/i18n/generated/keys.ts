@@ -1455,10 +1455,12 @@ export type MessageKey =
   | "dhcp.join.or"
   | "dhcp.lease.default"
   | "dhcp.lease.history_link"
+  | "dhcp.lease.host_missing"
   | "dhcp.lease.inherit"
   | "dhcp.lease.legend"
   | "dhcp.lease.max"
   | "dhcp.lease.min"
+  | "dhcp.lease.open_host"
   | "dhcp.lease.reason"
   | "dhcp.lease.reason_help"
   | "dhcp.lease.release"
@@ -1466,6 +1468,7 @@ export type MessageKey =
   | "dhcp.lease.release_confirm"
   | "dhcp.lease.release_title"
   | "dhcp.lease.released"
+  | "dhcp.lease.reserve"
   | "dhcp.lease.reserved"
   | "dhcp.lease.server_now"
   | "dhcp.lease.unit"
@@ -1705,6 +1708,70 @@ export type MessageKey =
   | "dhcp.reservations.state_scope_disabled"
   | "dhcp.reservations.state_served"
   | "dhcp.reservations.title"
+  | "dhcp.reserve.check.client_id"
+  | "dhcp.reserve.check.host_name"
+  | "dhcp.reserve.check.identity"
+  | "dhcp.reserve.check.interface_name"
+  | "dhcp.reserve.check.ip"
+  | "dhcp.reserve.check.mac"
+  | "dhcp.reserve.field.address"
+  | "dhcp.reserve.field.address_help"
+  | "dhcp.reserve.field.client_id"
+  | "dhcp.reserve.field.client_id_help"
+  | "dhcp.reserve.field.host"
+  | "dhcp.reserve.field.interface"
+  | "dhcp.reserve.field.mac"
+  | "dhcp.reserve.field.mac_help"
+  | "dhcp.reserve.field.new_host"
+  | "dhcp.reserve.field.new_interface"
+  | "dhcp.reserve.field.status"
+  | "dhcp.reserve.host_new"
+  | "dhcp.reserve.host_option"
+  | "dhcp.reserve.in_pool"
+  | "dhcp.reserve.in_pool_lease"
+  | "dhcp.reserve.interface_new"
+  | "dhcp.reserve.loading"
+  | "dhcp.reserve.mode.dynamic"
+  | "dhcp.reserve.mode.reserved"
+  | "dhcp.reserve.mode.static"
+  | "dhcp.reserve.mode.unmanaged"
+  | "dhcp.reserve.no_scope"
+  | "dhcp.reserve.open_host"
+  | "dhcp.reserve.outside"
+  | "dhcp.reserve.preview"
+  | "dhcp.reserve.save"
+  | "dhcp.reserve.saved"
+  | "dhcp.reserve.saved_unchanged"
+  | "dhcp.reserve.scope_disabled"
+  | "dhcp.reserve.scope_link"
+  | "dhcp.reserve.scope_not_serving"
+  | "dhcp.reserve.scope_served"
+  | "dhcp.reserve.stale"
+  | "dhcp.reserve.status.active"
+  | "dhcp.reserve.status.planned"
+  | "dhcp.reserve.title"
+  | "dhcp.reserve.use_free"
+  | "dhcp.reserve.will.address_bound"
+  | "dhcp.reserve.will.address_kept"
+  | "dhcp.reserve.will.address_new"
+  | "dhcp.reserve.will.address_status"
+  | "dhcp.reserve.will.host_kept"
+  | "dhcp.reserve.will.host_mode"
+  | "dhcp.reserve.will.host_new"
+  | "dhcp.reserve.will.interface_client_id"
+  | "dhcp.reserve.will.interface_client_id_cleared"
+  | "dhcp.reserve.will.interface_mac"
+  | "dhcp.reserve.will.interface_mac_kept"
+  | "dhcp.reserve.will.interface_mac_replaced"
+  | "dhcp.reserve.will.interface_new"
+  | "dhcp.reserve.will.interface_new_mac"
+  | "dhcp.reserve.will.keyed_client_id"
+  | "dhcp.reserve.will.keyed_mac"
+  | "dhcp.reserve.will.lease_other"
+  | "dhcp.reserve.will.not_serving"
+  | "dhcp.reserve.will.nothing"
+  | "dhcp.reserve.will.scope_disabled"
+  | "dhcp.reserve.will.scope_served"
   | "dhcp.scope.create"
   | "dhcp.scope.create_title"
   | "dhcp.scope.created"
@@ -4083,6 +4150,7 @@ export type MessageKey =
   | "ipam.do.next_free_address"
   | "ipam.do.next_free_prefix"
   | "ipam.do.open"
+  | "ipam.do.reserve"
   | "ipam.do.restore"
   | "ipam.field.alarm_both"
   | "ipam.field.alarm_crit"
@@ -7057,6 +7125,39 @@ export interface MessageArgs {
   "dhcp.pools.ipam_link": { network: string | number };
   "dhcp.reservations.lease_ends": { when: string | number };
   "dhcp.reservations.lease_other": { client: string | number };
+  "dhcp.reserve.host_option": { mode: string | number; name: string | number };
+  "dhcp.reserve.in_pool": { first: string | number; ip: string | number; last: string | number };
+  "dhcp.reserve.in_pool_lease": { first: string | number; ip: string | number; last: string | number };
+  "dhcp.reserve.no_scope": { ip: string | number };
+  "dhcp.reserve.open_host": { host: string | number };
+  "dhcp.reserve.outside": { cidr: string | number; ip: string | number };
+  "dhcp.reserve.saved": { host: string | number; ip: string | number };
+  "dhcp.reserve.saved_unchanged": { host: string | number; ip: string | number };
+  "dhcp.reserve.scope_disabled": { cidr: string | number };
+  "dhcp.reserve.scope_not_serving": { cidr: string | number };
+  "dhcp.reserve.scope_served": { cidr: string | number };
+  "dhcp.reserve.title": { ip: string | number };
+  "dhcp.reserve.use_free": { ip: string | number };
+  "dhcp.reserve.will.address_bound": { ip: string | number; name: string | number };
+  "dhcp.reserve.will.address_kept": { ip: string | number; status: string | number };
+  "dhcp.reserve.will.address_new": { ip: string | number; name: string | number; status: string | number };
+  "dhcp.reserve.will.address_status": { ip: string | number; status: string | number };
+  "dhcp.reserve.will.host_kept": { name: string | number };
+  "dhcp.reserve.will.host_mode": { mode: string | number; name: string | number };
+  "dhcp.reserve.will.host_new": { name: string | number };
+  "dhcp.reserve.will.interface_client_id": { client_id: string | number; name: string | number };
+  "dhcp.reserve.will.interface_client_id_cleared": { name: string | number };
+  "dhcp.reserve.will.interface_mac": { mac: string | number; name: string | number };
+  "dhcp.reserve.will.interface_mac_kept": { mac: string | number; name: string | number };
+  "dhcp.reserve.will.interface_mac_replaced": { mac: string | number; name: string | number; old: string | number };
+  "dhcp.reserve.will.interface_new": { name: string | number };
+  "dhcp.reserve.will.interface_new_mac": { mac: string | number; name: string | number };
+  "dhcp.reserve.will.keyed_client_id": { value: string | number };
+  "dhcp.reserve.will.keyed_mac": { value: string | number };
+  "dhcp.reserve.will.lease_other": { ip: string | number; mac: string | number };
+  "dhcp.reserve.will.not_serving": { cidr: string | number };
+  "dhcp.reserve.will.scope_disabled": { cidr: string | number };
+  "dhcp.reserve.will.scope_served": { cidr: string | number };
   "dhcp.scope.created": { network: string | number };
   "dhcp.scope.delete_body": { network: string | number };
   "dhcp.scope.delete_title": { network: string | number };
@@ -9485,10 +9586,12 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.join.or",
   "dhcp.lease.default",
   "dhcp.lease.history_link",
+  "dhcp.lease.host_missing",
   "dhcp.lease.inherit",
   "dhcp.lease.legend",
   "dhcp.lease.max",
   "dhcp.lease.min",
+  "dhcp.lease.open_host",
   "dhcp.lease.reason",
   "dhcp.lease.reason_help",
   "dhcp.lease.release",
@@ -9496,6 +9599,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.lease.release_confirm",
   "dhcp.lease.release_title",
   "dhcp.lease.released",
+  "dhcp.lease.reserve",
   "dhcp.lease.reserved",
   "dhcp.lease.server_now",
   "dhcp.lease.unit",
@@ -9735,6 +9839,70 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.reservations.state_scope_disabled",
   "dhcp.reservations.state_served",
   "dhcp.reservations.title",
+  "dhcp.reserve.check.client_id",
+  "dhcp.reserve.check.host_name",
+  "dhcp.reserve.check.identity",
+  "dhcp.reserve.check.interface_name",
+  "dhcp.reserve.check.ip",
+  "dhcp.reserve.check.mac",
+  "dhcp.reserve.field.address",
+  "dhcp.reserve.field.address_help",
+  "dhcp.reserve.field.client_id",
+  "dhcp.reserve.field.client_id_help",
+  "dhcp.reserve.field.host",
+  "dhcp.reserve.field.interface",
+  "dhcp.reserve.field.mac",
+  "dhcp.reserve.field.mac_help",
+  "dhcp.reserve.field.new_host",
+  "dhcp.reserve.field.new_interface",
+  "dhcp.reserve.field.status",
+  "dhcp.reserve.host_new",
+  "dhcp.reserve.host_option",
+  "dhcp.reserve.in_pool",
+  "dhcp.reserve.in_pool_lease",
+  "dhcp.reserve.interface_new",
+  "dhcp.reserve.loading",
+  "dhcp.reserve.mode.dynamic",
+  "dhcp.reserve.mode.reserved",
+  "dhcp.reserve.mode.static",
+  "dhcp.reserve.mode.unmanaged",
+  "dhcp.reserve.no_scope",
+  "dhcp.reserve.open_host",
+  "dhcp.reserve.outside",
+  "dhcp.reserve.preview",
+  "dhcp.reserve.save",
+  "dhcp.reserve.saved",
+  "dhcp.reserve.saved_unchanged",
+  "dhcp.reserve.scope_disabled",
+  "dhcp.reserve.scope_link",
+  "dhcp.reserve.scope_not_serving",
+  "dhcp.reserve.scope_served",
+  "dhcp.reserve.stale",
+  "dhcp.reserve.status.active",
+  "dhcp.reserve.status.planned",
+  "dhcp.reserve.title",
+  "dhcp.reserve.use_free",
+  "dhcp.reserve.will.address_bound",
+  "dhcp.reserve.will.address_kept",
+  "dhcp.reserve.will.address_new",
+  "dhcp.reserve.will.address_status",
+  "dhcp.reserve.will.host_kept",
+  "dhcp.reserve.will.host_mode",
+  "dhcp.reserve.will.host_new",
+  "dhcp.reserve.will.interface_client_id",
+  "dhcp.reserve.will.interface_client_id_cleared",
+  "dhcp.reserve.will.interface_mac",
+  "dhcp.reserve.will.interface_mac_kept",
+  "dhcp.reserve.will.interface_mac_replaced",
+  "dhcp.reserve.will.interface_new",
+  "dhcp.reserve.will.interface_new_mac",
+  "dhcp.reserve.will.keyed_client_id",
+  "dhcp.reserve.will.keyed_mac",
+  "dhcp.reserve.will.lease_other",
+  "dhcp.reserve.will.not_serving",
+  "dhcp.reserve.will.nothing",
+  "dhcp.reserve.will.scope_disabled",
+  "dhcp.reserve.will.scope_served",
   "dhcp.scope.create",
   "dhcp.scope.create_title",
   "dhcp.scope.created",
@@ -12113,6 +12281,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.do.next_free_address",
   "ipam.do.next_free_prefix",
   "ipam.do.open",
+  "ipam.do.reserve",
   "ipam.do.restore",
   "ipam.field.alarm_both",
   "ipam.field.alarm_crit",

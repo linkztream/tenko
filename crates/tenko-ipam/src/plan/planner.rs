@@ -29,6 +29,7 @@ use crate::{
 
 mod fields;
 mod hosts;
+mod reserve;
 mod space;
 mod tenancy;
 
@@ -166,6 +167,9 @@ impl<'v> Planner<'v> {
             results.push(result);
         }
         self.check_reservations()?;
+        if let Some(check) = self.options.reservation {
+            self.check_reservation(&check)?;
+        }
 
         if let Some(key) = receipt_key
             && self.ws.has_writes()
@@ -197,6 +201,9 @@ impl<'v> Planner<'v> {
         for warning in &mut self.warnings {
             warning.acknowledged =
                 warning.requires_ack && self.options.acknowledge.contains(&warning.code);
+        }
+        if let Some(action) = &self.options.audit_as {
+            self.audit = merge_audit(action, std::mem::take(&mut self.audit));
         }
         let principal = self.cx.principal.clone();
         let (preconditions, mutations) = self.ws.into_parts();
@@ -757,6 +764,37 @@ pub(super) fn status_name(status: Status) -> &'static str {
 
 /// The fingerprint of a command list for idempotency receipts: allocation hints are
 /// removed because the service fills them per attempt.
+/// One audit draft for the drafts of a plan ([`PlanOptions::audit_as`]): the action given,
+/// every object in the order the drafts name them, every field change with the object it
+/// belongs to, and the context of the drafts (the first value of a key wins). No drafts,
+/// no draft.
+fn merge_audit(action: &AuditAction, drafts: Vec<AuditDraft>) -> Vec<AuditDraft> {
+    let Some(first) = drafts.first() else {
+        return drafts;
+    };
+    let mut merged =
+        AuditDraft::success(action.clone(), Vec::new()).with_source_ip(first.source_ip);
+    for draft in drafts {
+        let own = draft.objects.first().copied();
+        for object in draft.objects {
+            if !merged.objects.contains(&object) {
+                merged.objects.push(object);
+            }
+        }
+        merged
+            .details
+            .changes
+            .extend(draft.details.changes.into_iter().map(|mut change| {
+                change.object = change.object.or(own);
+                change
+            }));
+        for (key, value) in draft.details.context {
+            merged.details.context.entry(key).or_insert(value);
+        }
+    }
+    vec![merged]
+}
+
 fn fingerprint(commands: &[IpamCommand]) -> IpamResult<Digest> {
     let stripped: Vec<IpamCommand> = commands
         .iter()

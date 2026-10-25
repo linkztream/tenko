@@ -93,7 +93,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 378, "every operation of the document");
+    assert_eq!(all.len(), 380, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -186,7 +186,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
             }
         }
     }
-    assert_eq!(refused, 378 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
+    assert_eq!(refused, 380 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
 }
 
 /// Every operation without a request body called with a personal token of the

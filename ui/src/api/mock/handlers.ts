@@ -36,6 +36,8 @@ import { dnsRoutes } from "./routes-dns";
 import { dhcpRoutes } from "./routes-dhcp";
 // WP7.5: the leases, the history and the state of the dhcp role of a node.
 import { dhcpLeaseRoutes } from "./routes-dhcp-leases";
+// Reserving an address in DHCP: the IPAM rows of a reservation in one plan.
+import { reserveRoutes } from "./routes-reserve";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -87,6 +89,7 @@ export const happyPaths: HttpHandler[] = [
   ...dhcpRoutes,
   // WP7.5: the leases and the history, ahead of the 501 stubs.
   ...dhcpLeaseRoutes,
+  ...reserveRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

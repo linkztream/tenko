@@ -130,15 +130,17 @@ describe("the address page", () => {
   });
 
   it("reads the address with its host in one request and none for the host", async () => {
+    // A static host: the address of a reserved host also reads its host and interface for the
+    // reservation block (see "the reservation in DHCP").
     const spy = vi.spyOn(globalThis, "fetch");
-    renderAddress("192.0.2.41");
-    await shown("192.0.2.41");
+    renderAddress("192.0.2.30");
+    await shown("192.0.2.30");
     await waitFor(() => expect(screen.getAllByTestId("history-entry").length).toBeGreaterThan(0));
     const urls = spy.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost"));
     const lists = urls.filter((u) => u.pathname === "/api/v1/addresses");
     expect(lists).toHaveLength(1);
     expect(lists[0]?.searchParams.get("expand")).toBe("host");
-    expect(lists[0]?.searchParams.get("q")).toBe("192.0.2.41");
+    expect(lists[0]?.searchParams.get("q")).toBe("192.0.2.30");
     expect(urls.filter((u) => u.pathname.startsWith("/api/v1/hosts") || u.pathname.startsWith("/api/v1/interfaces"))).toEqual([]);
   });
 

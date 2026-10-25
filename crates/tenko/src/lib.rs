@@ -142,7 +142,8 @@ pub enum Command {
     },
 
     // WP8.2
-    /// IPAM views: the reconciliation of intent, leases, DNS records and scans.
+    /// IPAM views and actions: the reconciliation of intent, leases, DNS records and scans,
+    /// and reserving an address in DHCP.
     Ipam {
         /// The `ipam` subcommand to run.
         #[command(subcommand)]
@@ -685,7 +686,7 @@ mod tests {
 
     #[test]
     fn command_names_match_the_command_line() {
-        let cases: [(&[&str], &str); 40] = [
+        let cases: [(&[&str], &str); 41] = [
             (&["audit", "export"], "audit export"),
             (&["audit", "export", "--from", "7"], "audit export"),
             (
@@ -732,6 +733,17 @@ mod tests {
                 &["ipam", "reconcile", "--kind", "ptr_mismatch"],
                 "ipam reconcile",
             ), // WP8.2
+            (
+                &[
+                    "ipam",
+                    "address",
+                    "reserve",
+                    "192.0.2.20",
+                    "--mac",
+                    "02:00:5e:10:00:01",
+                ],
+                "ipam address reserve",
+            ),
             (&["import", "file.csv"], "import"),
             (&["export", "prefixes"], "export"),
             (&["dns", "zone", "list"], "dns zone list"),
