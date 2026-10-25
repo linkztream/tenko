@@ -16,6 +16,11 @@ Read before changing anything substantial:
 
 ## Non-negotiable rules
 
+When two choices stand against each other, this order decides: **security, then
+performance, then usability, then features**. A change that improves a later item at the
+cost of an earlier one is refused; a review or a design question that weighs options says
+where each option stands in this order. The rules below are that order applied.
+
 1. **No tooling banners or attribution trailers.** Commit messages and pull requests carry
    no co-author or generator trailers of any kind. The author recorded by git and the
    `Signed-off-by` trailer required by the Contributor License Agreement (see "Licensing

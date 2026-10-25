@@ -1,5 +1,7 @@
 # Tenko DDI Roadmap
 
+Every choice in this roadmap is ranked by one order: security, then performance, then usability, then features ([CONTRIBUTING.md](../CONTRIBUTING.md), "Non-negotiable rules"). Work that moves an earlier item forward goes before work that only adds to a later one; that is why high availability of the data plane and directory identity come before the remaining features.
+
 Tenko DDI is delivered in six phases (Phase 0 to 5), in the order recorded in [ADR 0007](adr/0007-delivery-order.md): platform and IPAM first, then DNS, DHCP, AD integration and migration, and finally enterprise features. The order follows dependencies. IPAM replaces the existing IPAM spreadsheet immediately and builds the intent model that the engines act on later. The DNS and DHCP engines then become the actuators of that model. AD integration and migration need both engines in place.
 
 The reference home-lab environment (three LANs plus a DMZ, Active Directory, a self-hosted UniFi Network Application, Proxmox VE, Home Assistant) is the first acceptance environment. The Phase 1 to 3 criteria below are stated in terms of it. Phase 4 acceptance uses a separate Windows Server test domain.
