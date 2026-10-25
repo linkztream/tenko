@@ -1,6 +1,6 @@
 [package]
 name = "tenko-connect-proxmox"
-version = "0.0.5"
+version = "0.0.6"
 description = "Proxmox VE reference plugin (inventory source)"
 edition.workspace = true
 rust-version.workspace = true

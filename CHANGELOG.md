@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-10-25
+
 ### Added
 
 - A node says per role whether the machine is prepared for it (OPS-01): the installer records what it prepared in `prepared-roles` beside `tenko.toml` (the roles, the systemd drop-ins, the ports, the host firewall), the server reads it at start and reports it in `GET /api/v1/system/status` (`node.prepared`) and `GET /api/v1/nodes/{id}/roles` (`prepared`, with what is missing and the installer command that prepares it), and `tenko node roles show` prints it. At start the server checks that `CAP_NET_RAW` is in its bounding and effective sets when the probe role or the dhcp role's direct mode runs; the health row `node.roles.privileges` names the role, the capability and the installer command, and `node.roles.unprepared` names a running role the installer did not prepare. The roles editor on the Nodes page tags each role of this controller Prepared or Not prepared; an administrator may still switch on an unprepared role, and the editor and its confirmation name what is missing and the exact installer command that prepares it. The page shows both health rows.
@@ -19,6 +21,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 ### Fixed
 
 - The scan configuration of the controller's own probe role is reachable without typing its address: `GET /api/v1/system/status` lists the `probe` role when the controller runs it (it listed only `controller`, `dns` and `dhcp`, so the link in the section "This controller" of the Nodes page never showed), and that section links to **Scan configuration** whenever the stored role set or the running set has the probe role, with a line saying to switch the role on otherwise. Every row of the Probes table on the Scans page, the controller's own included, has a **Scan configuration** link, the "no probe covers this target" error of Scan now links to each probe instead of the Nodes page when there are several, and the page of the controller's own probe leads back to the Nodes page. See `docs/scanning.md` section 7.5.
+
+### Action required
+
+- A rerun of `install.sh` on a node installed before 0.0.6 now prepares the machine for every role unless its profile is Hardened: it adds the drop-ins `probe.conf` and `dhcp-direct.conf`, opens ports 53, 67 and 547 on firewalld or ufw when one is active, and turns systemd-resolved's stub listener off for the dns role. The dependency check asks once before it changes anything; answer no, or run `install.sh --check` first, to see what it would do. The running role set is not changed by a rerun; a fresh install outside Hardened starts every role, which the Nodes page trims.
 
 ## [0.0.5] - 2026-10-24
 

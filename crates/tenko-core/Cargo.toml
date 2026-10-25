@@ -1,6 +1,6 @@
 [package]
 name = "tenko-core"
-version = "0.0.5"
+version = "0.0.6"
 description = "Shared contracts: identifiers, principals, the IPAM model, observations, audit records, errors and encodings"
 edition.workspace = true
 rust-version.workspace = true
