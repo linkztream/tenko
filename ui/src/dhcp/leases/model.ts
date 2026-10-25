@@ -18,6 +18,11 @@ export type ClientKey = S["ClientKey"];
 export type LeaseRelease = S["DhcpLeaseRelease"];
 export type Family = S["DhcpFamily"];
 export type LeasePeer = S["DhcpLeasePeer"];
+/** What a DHCPv6 lease holds as the API names it: an address (`na`) or a delegated prefix (`pd`). */
+export type LeaseKind = "na" | "pd";
+
+/** The kinds of DHCPv6 leases, in the order the kind menu lists them (the empty choice, both, comes first). */
+export const LEASE_KINDS: readonly LeaseKind[] = ["na", "pd"];
 
 /** The binding states, in the order the state menu lists them. */
 export const BINDING_STATES: readonly BindingState[] = ["active", "expired", "released", "abandoned", "reset", "free", "backup"];
@@ -99,7 +104,12 @@ export function displayAddr(lease: Pick<Lease, "addr" | "kind" | "prefix_len">):
   return lease.kind === "pd" && lease.prefix_len ? `${lease.addr}/${lease.prefix_len}` : lease.addr;
 }
 
-/** The link to the lease list narrowed to the address of the client's lease of the other family. */
+/** WP9.2: the address of a history row as it is shown: a DHCPv6 row of a delegated prefix (a length below 128) with its length, everything else as it is. */
+export function eventAddr(event: Pick<LeaseEvent, "addr" | "family" | "prefix_len">): string {
+  return event.family === "v6" && event.prefix_len != null && event.prefix_len < 128 ? `${event.addr}/${event.prefix_len}` : event.addr;
+}
+
+/** The link to the lease list narrowed to the address of the client's lease of the other family (WP9.2: or, for a delegated prefix, the address lease of the same client). */
 export function peerHref(peer: Pick<LeasePeer, "addr">): string {
   return `/dhcp/leases?addr=${encodeURIComponent(peer.addr)}`;
 }
@@ -121,7 +131,13 @@ function pickFamily(search: Search): string {
   return family === "v4" || family === "v6" ? family : "";
 }
 
-export const LEASE_FILTER_NAMES = ["scope", "addr", "mac", "duid", "name", "state", "family"] as const;
+/** WP9.2: the kind of a lease in the URL: `na`, `pd`, or the empty string (both) for anything else. */
+function pickKind(search: Search): string {
+  const kind = pick(search, "kind");
+  return kind === "na" || kind === "pd" ? kind : "";
+}
+
+export const LEASE_FILTER_NAMES = ["scope", "addr", "mac", "duid", "name", "state", "family", "kind"] as const;
 export type LeaseFilters = Record<(typeof LEASE_FILTER_NAMES)[number], string>;
 
 export const HISTORY_FILTER_NAMES = ["addr", "mac", "duid", "scope", "kind", "family", "from", "to"] as const;
@@ -137,6 +153,7 @@ export function readLeaseFilters(search: Search): LeaseFilters {
     name: pick(search, "name"),
     state: pick(search, "state"),
     family: pickFamily(search),
+    kind: pickKind(search),
   };
 }
 
@@ -189,6 +206,7 @@ export function leaseQuery(filters: LeaseFilters): Query {
     name: text(filters.name),
     state: text(filters.state),
     family: text(filters.family),
+    kind: text(filters.kind),
   };
 }
 

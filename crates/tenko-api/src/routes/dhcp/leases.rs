@@ -57,7 +57,8 @@ use tenko_store::WriteBatch;
 use super::{
     Configs, DhcpCommandAccepted, DhcpFamily, DhcpHistoryFilters, DhcpHistoryItem, DhcpLeaseCount,
     DhcpLeaseFilters, DhcpLeaseItem, DhcpLeaseParams, DhcpLeasePeer, DhcpLeaseRelease,
-    DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, may_read_scope, parse_addr, parse_node,
+    DhcpListenMode, DhcpListenerItem, DhcpNodeStatus, DhcpRaCheck, DhcpRaFinding, DhcpRaLink,
+    DhcpRaReport, may_read_scope, parse_addr, parse_node,
 };
 use crate::{
     dto::Page,
@@ -334,6 +335,7 @@ fn list_args(filters: &DhcpLeaseFilters) -> Result<role::LeaseListArgs, ApiError
             Some(LeaseCursor::V6(after)) => Some(after),
             _ => None,
         },
+        kind: filters.kind,
         ..role::LeaseListArgs::default()
     })
 }
@@ -423,7 +425,16 @@ fn lease_filters(args: &role::LeaseListArgs) -> Vec<(&'static str, Option<String
         ),
         ("exact6", args.exact6.map(|addr| addr.to_string())),
         ("duid", args.duid.as_ref().map(ToString::to_string)),
+        // WP9.4: the kind of a DHCPv6 lease.
+        ("kind", args.kind.map(|kind| kind_name(kind).to_owned())),
     ]
+}
+
+fn kind_name(kind: tenko_core::dhcp::Lease6Kind) -> &'static str {
+    match kind {
+        tenko_core::dhcp::Lease6Kind::Na => "na",
+        tenko_core::dhcp::Lease6Kind::Pd => "pd",
+    }
 }
 
 fn family_name(family: role::Family) -> &'static str {
@@ -505,12 +516,14 @@ fn item(row: role::LeaseRow) -> DhcpLeaseItem {
         reserved: row.reserved,
         revision: row.revision,
         peer: peer(row.peer),
+        address_lease: None,
     }
 }
 
 // WP9.4: a DHCPv6 lease in the same shape.
 fn item6(row: role::Lease6Row) -> DhcpLeaseItem {
     let mac = row.lease.mac().map(MacAddr::new);
+    let address_lease = peer(row.address_lease);
     let Lease6 {
         addr,
         prefix_len,
@@ -567,6 +580,7 @@ fn item6(row: role::Lease6Row) -> DhcpLeaseItem {
         reserved: row.reserved,
         revision: row.revision,
         peer: peer(row.peer),
+        address_lease,
     }
 }
 
@@ -600,7 +614,10 @@ fn event6_item(event: Lease6Event) -> DhcpHistoryItem {
         vrf: event.vrf,
         scope: event.scope,
         client: None,
-        mac: role::duid_mac(event.duid.as_bytes()).map(MacAddr::new),
+        mac: event
+            .mac()
+            .or_else(|| role::duid_mac(event.duid.as_bytes()))
+            .map(MacAddr::new),
         iaid: Some(event.iaid),
         duid: Some(event.duid),
         state: event.state,
@@ -833,7 +850,7 @@ fn listener_item(
     }
 }
 
-fn status_dto(status: DhcpStatus) -> DhcpNodeStatus {
+pub(super) fn status_dto(status: DhcpStatus) -> DhcpNodeStatus {
     let count = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
     DhcpNodeStatus {
         node: status.node,
@@ -895,6 +912,48 @@ fn status_dto(status: DhcpStatus) -> DhcpNodeStatus {
             .map(|(state, leases)| DhcpLeaseCount {
                 state,
                 count: count(leases),
+            })
+            .collect(),
+        // WP9.4: the router advertisement check and the server DUID.
+        ra: ra_dto(status.ra),
+        server_duid: status
+            .server_duid
+            .map(|duid| tenko_core::serde_util::to_hex(&duid)),
+    }
+}
+
+/// The router advertisement check of the role's report as the API answers it.
+fn ra_dto(report: tenko_dhcp::ra::RaReport) -> DhcpRaReport {
+    use tenko_dhcp::ra::RaCheck;
+    let (check, reason) = match report.check {
+        RaCheck::Off => (DhcpRaCheck::Off, None),
+        RaCheck::Unavailable(why) => (DhcpRaCheck::Unavailable, Some(why)),
+        RaCheck::Watching => (DhcpRaCheck::Watching, None),
+    };
+    DhcpRaReport {
+        check,
+        reason,
+        links: report
+            .links
+            .into_iter()
+            .map(|link| DhcpRaLink {
+                interface: link.interface,
+                routers: link.routers,
+                managed: link.managed,
+                other: link.other,
+                prefixes: link.prefixes.iter().map(ToString::to_string).collect(),
+                scopes: link.scopes.iter().map(ToString::to_string).collect(),
+                seen: link.seen,
+            })
+            .collect(),
+        findings: report
+            .findings
+            .into_iter()
+            .map(|finding| DhcpRaFinding {
+                code: finding.code.to_owned(),
+                interface: finding.interface,
+                detail: finding.detail,
+                params: finding.params,
             })
             .collect(),
     }

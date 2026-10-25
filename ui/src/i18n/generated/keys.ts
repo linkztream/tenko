@@ -1491,6 +1491,8 @@ export type MessageKey =
   | "dhcp.leases.state.reset"
   | "dhcp.leases.sub"
   | "dhcp.leases.title"
+  | "dhcp.leases6.address_lease_title"
+  | "dhcp.leases6.col_address_lease"
   | "dhcp.leases6.col_duid"
   | "dhcp.leases6.col_family"
   | "dhcp.leases6.col_kind"
@@ -1498,11 +1500,16 @@ export type MessageKey =
   | "dhcp.leases6.iaid"
   | "dhcp.leases6.kind_address"
   | "dhcp.leases6.kind_prefix"
+  | "dhcp.leases6.lfilter_addr_help"
   | "dhcp.leases6.lfilter_duid"
   | "dhcp.leases6.lfilter_duid_invalid"
   | "dhcp.leases6.lfilter_duid_placeholder"
   | "dhcp.leases6.lfilter_family"
   | "dhcp.leases6.lfilter_family_any"
+  | "dhcp.leases6.lfilter_kind"
+  | "dhcp.leases6.lfilter_kind_any"
+  | "dhcp.leases6.lfilter_kind_na"
+  | "dhcp.leases6.lfilter_kind_pd"
   | "dhcp.leases6.peer_also"
   | "dhcp.leases6.peer_title"
   | "dhcp.leases6.release_body_duid"
@@ -1659,6 +1666,29 @@ export type MessageKey =
   | "dhcp.optset.saved"
   | "dhcp.optset.unknown"
   | "dhcp.optset.value_of"
+  | "dhcp.pd.add"
+  | "dhcp.pd.col.leased"
+  | "dhcp.pd.col.len"
+  | "dhcp.pd.col.size"
+  | "dhcp.pd.create"
+  | "dhcp.pd.created"
+  | "dhcp.pd.empty"
+  | "dhcp.pd.empty_body"
+  | "dhcp.pd.field.delegated"
+  | "dhcp.pd.field.delegated_first"
+  | "dhcp.pd.field.delegated_help"
+  | "dhcp.pd.field.delegated_last"
+  | "dhcp.pd.field.delegated_number"
+  | "dhcp.pd.field.delegated_range"
+  | "dhcp.pd.field.delegated_required"
+  | "dhcp.pd.field.first"
+  | "dhcp.pd.field.ip_invalid"
+  | "dhcp.pd.field.ip_required"
+  | "dhcp.pd.field.last"
+  | "dhcp.pd.field.last_before_first"
+  | "dhcp.pd.help"
+  | "dhcp.pd.note"
+  | "dhcp.pd.title"
   | "dhcp.policies.empty"
   | "dhcp.policies.empty_body"
   | "dhcp.policies.note_live"
@@ -1707,11 +1737,33 @@ export type MessageKey =
   | "dhcp.pool.save"
   | "dhcp.pool.saved"
   | "dhcp.pool.settings"
+  | "dhcp.pools.address_title"
   | "dhcp.pools.empty"
   | "dhcp.pools.empty_body"
   | "dhcp.pools.ipam_link"
   | "dhcp.pools.note"
   | "dhcp.pools.title"
+  | "dhcp.ra.col.interface"
+  | "dhcp.ra.col.m"
+  | "dhcp.ra.col.m_title"
+  | "dhcp.ra.col.o"
+  | "dhcp.ra.col.o_title"
+  | "dhcp.ra.col.prefixes"
+  | "dhcp.ra.col.routers"
+  | "dhcp.ra.col.scopes"
+  | "dhcp.ra.col.seen"
+  | "dhcp.ra.default_route"
+  | "dhcp.ra.finding.flags_off"
+  | "dhcp.ra.finding.managed_without_scope"
+  | "dhcp.ra.finding.other_only"
+  | "dhcp.ra.finding.unchecked"
+  | "dhcp.ra.findings_count"
+  | "dhcp.ra.label"
+  | "dhcp.ra.none"
+  | "dhcp.ra.state.off"
+  | "dhcp.ra.state.unavailable"
+  | "dhcp.ra.state.watching"
+  | "dhcp.ra.title"
   | "dhcp.reservations.col_identity"
   | "dhcp.reservations.col_lease"
   | "dhcp.reservations.col_served"
@@ -1882,6 +1934,8 @@ export type MessageKey =
   | "dhcp.strip.refusing"
   | "dhcp.strip.revision"
   | "dhcp.strip.scopes"
+  | "dhcp.strip.server_duid"
+  | "dhcp.strip.server_duid_title"
   | "dhcp.strip.serving"
   | "dhcp.term.add"
   | "dhcp.term.class"
@@ -1907,6 +1961,8 @@ export type MessageKey =
   | "dhcp.util.free"
   | "dhcp.util.label"
   | "dhcp.util.leased"
+  | "dhcp.util.pd"
+  | "dhcp.util.pd_words"
   | "dhcp.util.percent"
   | "dhcp.util.pool_size"
   | "dhcp.util.reserved"
@@ -4172,6 +4228,7 @@ export type MessageKey =
   | "ipam.cfdef.yes"
   | "ipam.col.address"
   | "ipam.col.created"
+  | "ipam.col.delegation"
   | "ipam.col.description"
   | "ipam.col.dns_name"
   | "ipam.col.host"
@@ -4227,6 +4284,13 @@ export type MessageKey =
   | "ipam.field.cidr_invalid"
   | "ipam.field.cidr_required"
   | "ipam.field.custom"
+  | "ipam.field.delegated"
+  | "ipam.field.delegated_first"
+  | "ipam.field.delegated_help"
+  | "ipam.field.delegated_last"
+  | "ipam.field.delegated_number"
+  | "ipam.field.delegated_range"
+  | "ipam.field.delegated_required"
   | "ipam.field.dns_help"
   | "ipam.field.dns_invalid"
   | "ipam.field.first"
@@ -4398,6 +4462,7 @@ export type MessageKey =
   | "ipam.prefix_role.network"
   | "ipam.prefix_role.supernet"
   | "ipam.range.add"
+  | "ipam.range.delegation"
   | "ipam.range.empty"
   | "ipam.range_role.dhcp_pd_pool"
   | "ipam.range_role.dhcp_pool"
@@ -7151,6 +7216,7 @@ export interface MessageArgs {
   "dhcp.lease.server_now": { lease: string | number };
   "dhcp.lease.unit": { name: string | number };
   "dhcp.lease.words": { default: string | number; max: string | number; min: string | number };
+  "dhcp.leases6.address_lease_title": { state: string | number };
   "dhcp.leases6.iaid": { iaid: string | number };
   "dhcp.leases6.peer_also": { family: string | number };
   "dhcp.leases6.peer_title": { family: string | number; state: string | number };
@@ -7187,6 +7253,12 @@ export interface MessageArgs {
   "dhcp.optset.remove": { name: string | number };
   "dhcp.optset.unknown": { code: string | number };
   "dhcp.optset.value_of": { name: string | number };
+  "dhcp.pd.created": { first: string | number; last: string | number };
+  "dhcp.pd.field.delegated_first": { len: string | number };
+  "dhcp.pd.field.delegated_help": { length: string | number };
+  "dhcp.pd.field.delegated_last": { len: string | number };
+  "dhcp.pd.field.delegated_range": { length: string | number };
+  "dhcp.pd.help": { network: string | number };
   "dhcp.policy.created": { name: string | number };
   "dhcp.policy.delete_title": { name: string | number };
   "dhcp.policy.deleted": { name: string | number };
@@ -7199,6 +7271,12 @@ export interface MessageArgs {
   "dhcp.pool.lease_range": { lease: string | number };
   "dhcp.pool.saved": { first: string | number; last: string | number };
   "dhcp.pools.ipam_link": { network: string | number };
+  "dhcp.ra.finding.flags_off": { interface: string | number; node: string | number; routers: string | number; scopes: string | number };
+  "dhcp.ra.finding.managed_without_scope": { interface: string | number; node: string | number; prefixes: string | number; routers: string | number };
+  "dhcp.ra.finding.other_only": { interface: string | number; node: string | number; routers: string | number; scopes: string | number };
+  "dhcp.ra.finding.unchecked": { node: string | number; reason: string | number };
+  "dhcp.ra.findings_count": { count: number };
+  "dhcp.ra.state.unavailable": { reason: string | number };
   "dhcp.reservations.lease_ends": { when: string | number };
   "dhcp.reservations.lease_other": { client: string | number };
   "dhcp.reserve.host_option": { mode: string | number; name: string | number };
@@ -7246,6 +7324,8 @@ export interface MessageArgs {
   "dhcp.strip.listeners": { count: number };
   "dhcp.strip.revision": { revision: string | number };
   "dhcp.strip.scopes": { count: number };
+  "dhcp.strip.server_duid": { duid: string | number };
+  "dhcp.strip.server_duid_title": { duid: string | number };
   "dhcp.term.class": { name: string | number };
   "dhcp.term.not_class": { name: string | number };
   "dhcp.term.not_match": { match: string | number };
@@ -7254,6 +7334,7 @@ export interface MessageArgs {
   "dhcp.util.at": { time: string | number };
   "dhcp.util.bits": { bits: string | number };
   "dhcp.util.label": { percent: string | number };
+  "dhcp.util.pd_words": { leased: string | number; size: string | number };
   "dhcp.v6.check.interface_id": { max: string | number };
   "dhcp.v6.check.preferred_above": { valid: string | number };
   "dhcp.v6.preferred_default": { seconds: string | number; valid: string | number };
@@ -7679,6 +7760,10 @@ export interface MessageArgs {
   "ipam.delete.done": { kind: string | number; label: string | number };
   "ipam.delete.title": { kind: string | number; label: string | number };
   "ipam.delete.undo_failed": { kind: string | number; label: string | number };
+  "ipam.field.delegated_first": { len: string | number };
+  "ipam.field.delegated_help": { length: string | number };
+  "ipam.field.delegated_last": { len: string | number };
+  "ipam.field.delegated_range": { length: string | number };
   "ipam.field.inside_prefix": { cidr: string | number };
   "ipam.field.tag_invalid": { max: string | number };
   "ipam.field.tag_remove": { tag: string | number };
@@ -7741,6 +7826,7 @@ export interface MessageArgs {
   "ipam.prefix.not_found": { cidr: string | number };
   "ipam.prefix.ranges_grid": { cidr: string | number };
   "ipam.prefix.usage": { capacity: string | number; used: string | number };
+  "ipam.range.delegation": { count: number; len: string | number };
   "ipam.reconcile.count": { count: number; more: string };
   "ipam.reconcile.filter.host_chip": { host: string | number };
   "ipam.reconcile.filter.host_unknown": { name: string | number };
@@ -9711,6 +9797,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.leases.state.reset",
   "dhcp.leases.sub",
   "dhcp.leases.title",
+  "dhcp.leases6.address_lease_title",
+  "dhcp.leases6.col_address_lease",
   "dhcp.leases6.col_duid",
   "dhcp.leases6.col_family",
   "dhcp.leases6.col_kind",
@@ -9718,11 +9806,16 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.leases6.iaid",
   "dhcp.leases6.kind_address",
   "dhcp.leases6.kind_prefix",
+  "dhcp.leases6.lfilter_addr_help",
   "dhcp.leases6.lfilter_duid",
   "dhcp.leases6.lfilter_duid_invalid",
   "dhcp.leases6.lfilter_duid_placeholder",
   "dhcp.leases6.lfilter_family",
   "dhcp.leases6.lfilter_family_any",
+  "dhcp.leases6.lfilter_kind",
+  "dhcp.leases6.lfilter_kind_any",
+  "dhcp.leases6.lfilter_kind_na",
+  "dhcp.leases6.lfilter_kind_pd",
   "dhcp.leases6.peer_also",
   "dhcp.leases6.peer_title",
   "dhcp.leases6.release_body_duid",
@@ -9879,6 +9972,29 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.optset.saved",
   "dhcp.optset.unknown",
   "dhcp.optset.value_of",
+  "dhcp.pd.add",
+  "dhcp.pd.col.leased",
+  "dhcp.pd.col.len",
+  "dhcp.pd.col.size",
+  "dhcp.pd.create",
+  "dhcp.pd.created",
+  "dhcp.pd.empty",
+  "dhcp.pd.empty_body",
+  "dhcp.pd.field.delegated",
+  "dhcp.pd.field.delegated_first",
+  "dhcp.pd.field.delegated_help",
+  "dhcp.pd.field.delegated_last",
+  "dhcp.pd.field.delegated_number",
+  "dhcp.pd.field.delegated_range",
+  "dhcp.pd.field.delegated_required",
+  "dhcp.pd.field.first",
+  "dhcp.pd.field.ip_invalid",
+  "dhcp.pd.field.ip_required",
+  "dhcp.pd.field.last",
+  "dhcp.pd.field.last_before_first",
+  "dhcp.pd.help",
+  "dhcp.pd.note",
+  "dhcp.pd.title",
   "dhcp.policies.empty",
   "dhcp.policies.empty_body",
   "dhcp.policies.note_live",
@@ -9927,11 +10043,33 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.pool.save",
   "dhcp.pool.saved",
   "dhcp.pool.settings",
+  "dhcp.pools.address_title",
   "dhcp.pools.empty",
   "dhcp.pools.empty_body",
   "dhcp.pools.ipam_link",
   "dhcp.pools.note",
   "dhcp.pools.title",
+  "dhcp.ra.col.interface",
+  "dhcp.ra.col.m",
+  "dhcp.ra.col.m_title",
+  "dhcp.ra.col.o",
+  "dhcp.ra.col.o_title",
+  "dhcp.ra.col.prefixes",
+  "dhcp.ra.col.routers",
+  "dhcp.ra.col.scopes",
+  "dhcp.ra.col.seen",
+  "dhcp.ra.default_route",
+  "dhcp.ra.finding.flags_off",
+  "dhcp.ra.finding.managed_without_scope",
+  "dhcp.ra.finding.other_only",
+  "dhcp.ra.finding.unchecked",
+  "dhcp.ra.findings_count",
+  "dhcp.ra.label",
+  "dhcp.ra.none",
+  "dhcp.ra.state.off",
+  "dhcp.ra.state.unavailable",
+  "dhcp.ra.state.watching",
+  "dhcp.ra.title",
   "dhcp.reservations.col_identity",
   "dhcp.reservations.col_lease",
   "dhcp.reservations.col_served",
@@ -10102,6 +10240,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.strip.refusing",
   "dhcp.strip.revision",
   "dhcp.strip.scopes",
+  "dhcp.strip.server_duid",
+  "dhcp.strip.server_duid_title",
   "dhcp.strip.serving",
   "dhcp.term.add",
   "dhcp.term.class",
@@ -10127,6 +10267,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.util.free",
   "dhcp.util.label",
   "dhcp.util.leased",
+  "dhcp.util.pd",
+  "dhcp.util.pd_words",
   "dhcp.util.percent",
   "dhcp.util.pool_size",
   "dhcp.util.reserved",
@@ -12392,6 +12534,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.cfdef.yes",
   "ipam.col.address",
   "ipam.col.created",
+  "ipam.col.delegation",
   "ipam.col.description",
   "ipam.col.dns_name",
   "ipam.col.host",
@@ -12447,6 +12590,13 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.field.cidr_invalid",
   "ipam.field.cidr_required",
   "ipam.field.custom",
+  "ipam.field.delegated",
+  "ipam.field.delegated_first",
+  "ipam.field.delegated_help",
+  "ipam.field.delegated_last",
+  "ipam.field.delegated_number",
+  "ipam.field.delegated_range",
+  "ipam.field.delegated_required",
   "ipam.field.dns_help",
   "ipam.field.dns_invalid",
   "ipam.field.first",
@@ -12618,6 +12768,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix_role.network",
   "ipam.prefix_role.supernet",
   "ipam.range.add",
+  "ipam.range.delegation",
   "ipam.range.empty",
   "ipam.range_role.dhcp_pd_pool",
   "ipam.range_role.dhcp_pool",

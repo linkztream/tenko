@@ -139,7 +139,9 @@ impl MemLease6Store {
             for binding in change.bindings() {
                 let key = (binding.vrf, binding.addr);
                 let lease = change.to_lease(binding, self.node, inner.rows.get(&key));
-                let event = change.to_event(binding, self.node);
+                let mut event = change.to_event(binding, self.node);
+                event.link_layer.clone_from(&lease.link_layer);
+                event.link_layer_type = lease.link_layer_type;
                 inner.rows.insert(key, lease.clone());
                 inner.history.push(event);
                 written.push(lease);

@@ -27,6 +27,7 @@ const DEFAULT_TREE = [
   "2001:db8::/32",
   "2001:db8:0:10::/64",
   "2001:db8:0:30::/64",
+  "2001:db8:1::/48",
 ];
 
 beforeEach(async () => {
@@ -186,7 +187,7 @@ describe("the networks page", () => {
   it("shows the overview of the VRF until a prefix is chosen", async () => {
     renderIpam();
     const overview = await screen.findByTestId("vrf-overview");
-    await waitFor(() => expect(within(overview).getByRole("heading", { level: 1 }).textContent).toBe("defaultdefault, 9 prefixes, 1 alarm"));
+    await waitFor(() => expect(within(overview).getByRole("heading", { level: 1 }).textContent).toBe("defaultdefault, 10 prefixes, 1 alarm"));
     const grid = within(overview).getByTestId("grid-vrf-prefixes");
     await waitFor(() => expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(DEFAULT_TREE));
     const lan = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "192.0.2.0/24") as HTMLElement;
@@ -481,8 +482,22 @@ describe("the prefix pane", () => {
     expect(infrastructure?.querySelector('td[data-col="lease"]')?.textContent).toBe("");
     expect(pool?.querySelector('td[data-col="role"]')?.textContent).toBe("DHCP pool");
     expect(pool?.querySelector('td[data-col="lease"]')?.textContent).toBe("1 day");
+    // An address pool has nothing in the column of the delegation pools.
+    expect(pool?.querySelector('td[data-col="delegation"]')?.textContent).toBe("");
     expect(tab("Ranges").getAttribute("aria-selected")).toBe("true");
     expect(screen.queryByTestId("grid-prefix-addresses")).toBeNull();
+  });
+
+  // WP9.2: the ranges tab says what a delegation pool hands out.
+  it("shows the delegated length and the number of prefixes of a delegation pool", async () => {
+    renderIpam(paths.prefix("2001:db8:1::/48"));
+    await paneOf("2001:db8:1::/48");
+    fireEvent.click(tab("Ranges"));
+    const grid = await screen.findByTestId("grid-prefix-ranges");
+    await waitFor(() => expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(["2001:db8:1:100::-2001:db8:1:1ff:ffff:ffff:ffff:ffff"]));
+    const [pool] = within(grid).getAllByTestId("row");
+    expect(pool?.querySelector('td[data-col="role"]')?.textContent).toBe("Delegation pool");
+    expect(pool?.querySelector('td[data-col="delegation"]')?.textContent).toBe("/60, 16 prefixes");
   });
 
   it("opens the form for a new range", async () => {
@@ -532,8 +547,8 @@ describe("the prefix pane", () => {
     renderIpam(paths.prefix("2001:db8::/32"));
     await paneOf("2001:db8::/32");
     const grid = await screen.findByTestId("grid-prefix-children");
-    await waitFor(() => expect(within(grid).getAllByTestId("row")).toHaveLength(2));
-    expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(["2001:db8:0:10::/64", "2001:db8:0:30::/64"]);
+    await waitFor(() => expect(within(grid).getAllByTestId("row")).toHaveLength(3));
+    expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(["2001:db8:0:10::/64", "2001:db8:0:30::/64", "2001:db8:1::/48"]);
   });
 
   it("shows the history of a prefix, the newest change first", async () => {
@@ -744,6 +759,7 @@ describe("acting on selected addresses of the prefix", () => {
       "203.0.113.192/28",
       "2001:db8:0:10::/64",
       "2001:db8:0:30::/64",
+      "2001:db8:1::/48",
     ]));
   });
 

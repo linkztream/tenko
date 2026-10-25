@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp6-pd">
+      <unit id="ipam.field.delegated">
+        <notes><note category="description">Label of the field for the length of the prefixes a delegation pool hands to routers (IPv6).</note></notes>
+        <segment><source>Delegated length</source><target>Delegerad längd</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_help">
+        <notes><note category="description">Help under the delegated length field of a delegation pool; {length} is the prefix length of the network.</note></notes>
+        <segment><source>The length of the prefixes handed to routers, for example 56 or 60. Longer than /{length} and at most /64.</source><target>Längden på de prefix som delas ut till routrar, till exempel 56 eller 60. Längre än /{length} och högst /64.</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_required">
+        <notes><note category="description">Error under the delegated length field when it is empty.</note></notes>
+        <segment><source>Enter the length of the delegated prefixes, for example 60.</source><target>Ange längden på de delegerade prefixen, till exempel 60.</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_number">
+        <notes><note category="description">Error under the delegated length field when it is not a whole number.</note></notes>
+        <segment><source>Enter a whole number, for example 60.</source><target>Ange ett heltal, till exempel 60.</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_range">
+        <notes><note category="description">Error under the delegated length field when it is out of range; {length} is the prefix length of the network.</note></notes>
+        <segment><source>The length must be longer than /{length} and at most /64.</source><target>Längden måste vara längre än /{length} och högst /64.</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_first">
+        <notes><note category="description">Error under the first address of a delegation pool when it does not start a prefix of the delegated length; {len} is that length.</note></notes>
+        <segment><source>The first address must be the first address of a /{len} prefix.</source><target>Den första adressen måste vara första adressen i ett /{len}-prefix.</target></segment>
+      </unit>
+      <unit id="ipam.field.delegated_last">
+        <notes><note category="description">Error under the last address of a delegation pool when it does not end a prefix of the delegated length; {len} is that length.</note></notes>
+        <segment><source>The last address must be the last address of a /{len} prefix.</source><target>Den sista adressen måste vara sista adressen i ett /{len}-prefix.</target></segment>
+      </unit>
+      <unit id="ipam.col.delegation">
+        <notes><note category="description">Column header of the ranges table of a network: what a delegation pool hands out (the length and how many prefixes).</note></notes>
+        <segment><source>Delegation</source><target>Delegering</target></segment>
+      </unit>
+      <unit id="ipam.range.delegation">
+        <notes><note category="description">What a delegation pool hands out, in the ranges table; {len} is the delegated length, {count} the number of prefixes.</note></notes>
+        <segment><source>/{len}, {count, plural, one {# prefix} other {# prefixes}}</source><target>/{len}, {count, plural, one {# prefix} other {# prefix}}</target></segment>
+      </unit>
+      <unit id="dhcp.pools.address_title">
+        <notes><note category="description">Heading of the address pools on the pools tab of a DHCPv6 scope, above the delegation pools.</note></notes>
+        <segment><source>Address pools</source><target>Adresspooler</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated">
+        <notes><note category="description">Label of the field for the length of the prefixes a delegation pool hands to routers (IPv6).</note></notes>
+        <segment><source>Delegated length</source><target>Delegerad längd</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_help">
+        <notes><note category="description">Help under the delegated length field of a delegation pool; {length} is the prefix length of the network.</note></notes>
+        <segment><source>The length of the prefixes handed to routers, for example 56 or 60. Longer than /{length} and at most /64.</source><target>Längden på de prefix som delas ut till routrar, till exempel 56 eller 60. Längre än /{length} och högst /64.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_required">
+        <notes><note category="description">Error under the delegated length field when it is empty.</note></notes>
+        <segment><source>Enter the length of the delegated prefixes, for example 60.</source><target>Ange längden på de delegerade prefixen, till exempel 60.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_number">
+        <notes><note category="description">Error under the delegated length field when it is not a whole number.</note></notes>
+        <segment><source>Enter a whole number, for example 60.</source><target>Ange ett heltal, till exempel 60.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_range">
+        <notes><note category="description">Error under the delegated length field when it is out of range; {length} is the prefix length of the network.</note></notes>
+        <segment><source>The length must be longer than /{length} and at most /64.</source><target>Längden måste vara längre än /{length} och högst /64.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_first">
+        <notes><note category="description">Error under the first address of a delegation pool when it does not start a prefix of the delegated length; {len} is that length.</note></notes>
+        <segment><source>The first address must be the first address of a /{len} prefix.</source><target>Den första adressen måste vara första adressen i ett /{len}-prefix.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.delegated_last">
+        <notes><note category="description">Error under the last address of a delegation pool when it does not end a prefix of the delegated length; {len} is that length.</note></notes>
+        <segment><source>The last address must be the last address of a /{len} prefix.</source><target>Den sista adressen måste vara sista adressen i ett /{len}-prefix.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.ip_required">
+        <notes><note category="description">The same words as ipam.field.ip_required, for the delegation pool dialog of the DHCP scope page (which does not load the IPAM message pack).</note></notes>
+        <segment><source>Enter an address.</source><target>Ange en adress.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.ip_invalid">
+        <notes><note category="description">The same words as ipam.field.ip_invalid, for the delegation pool dialog of the DHCP scope page (which does not load the IPAM message pack).</note></notes>
+        <segment><source>This is not a valid IP address.</source><target>Det här är ingen giltig IP-adress.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.last_before_first">
+        <notes><note category="description">The same words as ipam.field.last_before_first, for the delegation pool dialog of the DHCP scope page (which does not load the IPAM message pack).</note></notes>
+        <segment><source>The last address must not come before the first.</source><target>Sista adressen får inte komma före den första.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.title">
+        <notes><note category="description">Heading and table label of the delegation pools on the pools tab of a DHCPv6 scope.</note></notes>
+        <segment><source>Delegation pools</source><target>Delegeringspooler</target></segment>
+      </unit>
+      <unit id="dhcp.pd.note">
+        <notes><note category="description">Introduction under the heading of the delegation pools; a delegation pool hands whole prefixes to routers (RFC 8415 prefix delegation).</note></notes>
+        <segment><source>A delegation pool hands whole prefixes to routers that ask for them (prefix delegation, RFC 8415). It is an IPAM range of the role Delegation pool: it is made here or on the page of the network, and moved and deleted on that page.</source><target>En delegeringspool delar ut hela prefix till routrar som ber om dem (prefixdelegering, RFC 8415). Den är ett IPAM-intervall med rollen Delegeringspool: den läggs till här eller på nätverkets sida och flyttas och tas bort på den sidan.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.add">
+        <notes><note category="description">Button and dialog title: add a delegation pool to the scope.</note></notes>
+        <segment><source>Add a delegation pool</source><target>Lägg till en delegeringspool</target></segment>
+      </unit>
+      <unit id="dhcp.pd.create">
+        <notes><note category="description">Submit button of the dialog that adds a delegation pool.</note></notes>
+        <segment><source>Add pool</source><target>Lägg till pool</target></segment>
+      </unit>
+      <unit id="dhcp.pd.help">
+        <notes><note category="description">Introduction in the dialog that adds a delegation pool; {network} is the IPv6 network of the scope.</note></notes>
+        <segment><source>The pool is made as a range of {network} in IPAM. It must start and end on boundaries of the delegated length.</source><target>Poolen skapas som ett intervall i {network} i IPAM. Den måste börja och sluta på gränser för den delegerade längden.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.empty">
+        <notes><note category="description">Heading of the empty state of the delegation pools.</note></notes>
+        <segment><source>No delegation pools</source><target>Inga delegeringspooler</target></segment>
+      </unit>
+      <unit id="dhcp.pd.empty_body">
+        <notes><note category="description">Text of the empty state of the delegation pools.</note></notes>
+        <segment><source>Add a delegation pool so that routers on this network can be given prefixes.</source><target>Lägg till en delegeringspool så att routrar på det här nätverket kan få prefix.</target></segment>
+      </unit>
+      <unit id="dhcp.pd.col.len">
+        <notes><note category="description">Column header of the delegation pools: the length of the prefixes handed out.</note></notes>
+        <segment><source>Delegated length</source><target>Delegerad längd</target></segment>
+      </unit>
+      <unit id="dhcp.pd.col.size">
+        <notes><note category="description">Column header of the delegation pools: how many prefixes the pool can hand out.</note></notes>
+        <segment><source>Prefixes</source><target>Prefix</target></segment>
+      </unit>
+      <unit id="dhcp.pd.col.leased">
+        <notes><note category="description">Column header of the delegation pools: how many prefixes are bound to routers.</note></notes>
+        <segment><source>Bound</source><target>Bundna</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.first">
+        <notes><note category="description">Label of the first address of a delegation pool in the add dialog.</note></notes>
+        <segment><source>First address</source><target>Första adress</target></segment>
+      </unit>
+      <unit id="dhcp.pd.field.last">
+        <notes><note category="description">Label of the last address of a delegation pool in the add dialog.</note></notes>
+        <segment><source>Last address</source><target>Sista adress</target></segment>
+      </unit>
+      <unit id="dhcp.pd.created">
+        <notes><note category="description">Toast after a delegation pool was added; {first} and {last} are its addresses.</note></notes>
+        <segment><source>Added the delegation pool {first} - {last}</source><target>Lade till delegeringspoolen {first} - {last}</target></segment>
+      </unit>
+      <unit id="dhcp.util.pd">
+        <notes><note category="description">Label of the delegated prefixes in the utilization of a DHCPv6 scope.</note></notes>
+        <segment><source>Delegated prefixes</source><target>Delegerade prefix</target></segment>
+      </unit>
+      <unit id="dhcp.util.pd_words">
+        <notes><note category="description">The delegated prefixes of a scope: {leased} bound of {size} that the delegation pools can hand out.</note></notes>
+        <segment><source>{leased} of {size} bound</source><target>{leased} av {size} bundna</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

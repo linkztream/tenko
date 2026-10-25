@@ -16,6 +16,13 @@
 //! out (the image's merged list: explicit exclusions, reserved and infrastructure ranges,
 //! static addresses) and the network's first address, the Subnet-Router anycast address
 //! the engine never leases. The pools of a restricted scope require the allow class.
+//!
+//! **Delegation pools** (WP9.4). A delegation pool (an IPAM range of role `dhcp_pd_pool`)
+//! is cut into the prefixes of its delegated length; a prefix that holds an excluded
+//! address is never delegated by the engine, so the rest is written as Kea's `pd-pools`:
+//! each run of delegable prefixes as the fewest aligned prefixes that cover it exactly,
+//! each with `prefix`, `prefix-len` and `delegated-len`. Kea, like the engine, offers the
+//! `pd-pools` of a subnet to the clients of every subnet of its shared network.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -31,7 +38,7 @@ use crate::{
     v4::engine::ListenMode,
     v6::{
         engine::alloc::lifetimes,
-        image::{Pool6Image, Reservation6Key, Scope6Image},
+        image::{PdPool6Image, Pool6Image, Reservation6Key, Scope6Image},
     },
 };
 
@@ -120,6 +127,91 @@ fn pools(cx: &mut Cx<'_>, scope: &Scope6Image) -> Vec<Value> {
             }
             out.push(Value::Object(entry));
         }
+    }
+    out
+}
+
+// WP9.4: the delegation pools as Kea's `pd-pools`.
+/// The fewest aligned prefixes that cover `first` to `last` exactly, as (prefix, length).
+pub(crate) fn cover(first: u128, last: u128) -> Vec<(Ipv6Addr, u8)> {
+    let mut out = Vec::new();
+    let mut at = first;
+    loop {
+        // The largest block aligned at `at` that ends at or before `last`.
+        let span = last - at;
+        let fits = |bits: u32| {
+            if bits >= 128 {
+                span == u128::MAX
+            } else {
+                (1u128 << bits) - 1 <= span
+            }
+        };
+        let mut bits = at.trailing_zeros();
+        while !fits(bits) {
+            bits -= 1;
+        }
+        out.push((Ipv6Addr::from(at), u8::try_from(128 - bits).unwrap_or(0)));
+        let end = if bits >= 128 {
+            u128::MAX
+        } else {
+            at + ((1u128 << bits) - 1)
+        };
+        if end >= last {
+            return out;
+        }
+        at = end + 1;
+    }
+}
+
+/// The `pd-pools` of a delegation pool: the delegable prefixes ([`Scope6Image::delegable`])
+/// as aligned prefixes with the pool's delegated length.
+fn pd_pool_entries(
+    scope: &Scope6Image,
+    pool: &PdPool6Image,
+    data: &[Value],
+    restricted: bool,
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (first, last) in scope.delegable(pool) {
+        for (prefix, len) in cover(u128::from(first), u128::from(last)) {
+            let mut entry = Map::new();
+            entry.insert("prefix".into(), json!(prefix.to_string()));
+            entry.insert("prefix-len".into(), json!(len));
+            entry.insert("delegated-len".into(), json!(pool.delegated_len));
+            if restricted {
+                entry.insert("client-class".into(), json!(ALLOW));
+            }
+            if !data.is_empty() {
+                entry.insert("option-data".into(), Value::Array(data.to_vec()));
+            }
+            out.push(Value::Object(entry));
+        }
+    }
+    out
+}
+
+/// The `pd-pools` of a scope: its delegation pools, the pool lifetimes reported as for the
+/// address pools.
+fn pd_pools(cx: &mut Cx<'_>, scope: &Scope6Image) -> Vec<Value> {
+    let mut out = Vec::new();
+    for pool in &scope.pd_pools {
+        let label = format!("{} - {}", pool.first, pool.last);
+        if pool.lease != scope.lease {
+            cx.report.push(
+                at("delegation pool", &label),
+                codes::POOL_LEASE,
+                format!(
+                    "the delegation pool's valid lifetime ({} s) is left out: Kea's pd-pools have no lifetimes, so the subnet's ({} s) applies",
+                    pool.lease.default_secs, scope.lease.default_secs
+                ),
+            );
+        }
+        let data = option_data(cx, &pool.options);
+        let entries = pd_pool_entries(scope, pool, &data, scope.restricted);
+        if scope.restricted && !entries.is_empty() {
+            cx.need_allow6 = true;
+        }
+        out.extend(entries);
     }
     out
 }
@@ -227,6 +319,9 @@ fn subnet(
         selection(cx, &label, interface, interface_id, &mut entry);
     }
     entry.insert("pools".into(), Value::Array(pools(cx, scope)));
+    if !scope.pd_pools.is_empty() {
+        entry.insert("pd-pools".into(), Value::Array(pd_pools(cx, scope)));
+    }
     entry.insert("reservations".into(), Value::Array(reservations(cx, scope)));
     if scope.restricted {
         cx.report.push(
@@ -346,4 +441,76 @@ pub(crate) fn build(cx: &mut Cx<'_>) -> (Vec<Value>, Vec<Value>, Vec<ddns::Domai
         shared.push(Value::Object(entry));
     }
     (shared, subnet6, domains)
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use std::net::Ipv6Addr;
+
+    use super::cover;
+
+    fn ip(text: &str) -> u128 {
+        u128::from(text.parse::<Ipv6Addr>().expect("an address"))
+    }
+
+    fn shown(first: &str, last: &str) -> Vec<String> {
+        cover(ip(first), ip(last))
+            .into_iter()
+            .map(|(prefix, len)| format!("{prefix}/{len}"))
+            .collect()
+    }
+
+    #[test]
+    fn a_run_of_prefixes_is_covered_by_the_fewest_aligned_prefixes() {
+        assert_eq!(
+            shown("2001:db8:180:100::", "2001:db8:180:1ff:ffff:ffff:ffff:ffff"),
+            ["2001:db8:180:100::/56"]
+        );
+        assert_eq!(
+            shown("2001:db8:180:120::", "2001:db8:180:1ff:ffff:ffff:ffff:ffff"),
+            [
+                "2001:db8:180:120::/59",
+                "2001:db8:180:140::/58",
+                "2001:db8:180:180::/57"
+            ]
+        );
+        assert_eq!(
+            shown("2001:db8:180:110::", "2001:db8:180:12f:ffff:ffff:ffff:ffff"),
+            ["2001:db8:180:110::/60", "2001:db8:180:120::/60"]
+        );
+        assert_eq!(shown("2001:db8::5", "2001:db8::5"), ["2001:db8::5/128"]);
+        assert_eq!(cover(0, u128::MAX), [(Ipv6Addr::UNSPECIFIED, 0)]);
+        assert_eq!(
+            cover(0, u128::MAX >> 1),
+            [(Ipv6Addr::UNSPECIFIED, 1)],
+            "half of the space"
+        );
+    }
+
+    proptest::proptest! {
+        /// The prefixes are aligned, in order, adjacent, and cover the run exactly.
+        #[test]
+        fn the_cover_is_exact(first in proptest::num::u128::ANY, span in 0u128..(1u128 << 80)) {
+            let last = first.saturating_add(span);
+            let parts = cover(first, last);
+            let mut at = first;
+            for (index, (prefix, len)) in parts.iter().enumerate() {
+                let start = u128::from(*prefix);
+                proptest::prop_assert_eq!(start, at);
+                let size_bits = 128 - u32::from(*len);
+                let end = if size_bits >= 128 { u128::MAX } else { start + ((1u128 << size_bits) - 1) };
+                if size_bits < 128 {
+                    proptest::prop_assert_eq!(start % (1u128 << size_bits), 0);
+                }
+                proptest::prop_assert!(end <= last);
+                if index + 1 < parts.len() {
+                    at = end + 1;
+                } else {
+                    proptest::prop_assert_eq!(end, last);
+                }
+            }
+            // At most two prefixes of each length.
+            proptest::prop_assert!(parts.len() <= 2 * 128);
+        }
+    }
 }

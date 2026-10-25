@@ -1334,7 +1334,7 @@ export interface paths {
         };
         /**
          * List DHCP pools
-         * @description Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address.
+         * @description Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address: the address pools (`role` `dhcp_pool`) and the delegation pools of DHCPv6 scopes (`dhcp_pd_pool`, with `delegated_len`; `size` and `leased` count prefixes).
          */
         get: operations["list_dhcp_pools"];
         put?: never;
@@ -1538,7 +1538,7 @@ export interface paths {
         };
         /**
          * Get how full a DHCP scope is
-         * @description Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.
+         * @description Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool. A DHCPv6 scope with delegation pools has `pd`, their figures in prefixes; the address figures leave the delegated prefixes out.
          */
         get: operations["get_dhcp_scope_utilization"];
         put?: never;
@@ -7341,7 +7341,8 @@ export interface components {
             kind: components["schemas"]["LeaseEventKind"];
             /**
              * @description The client's MAC address where the row says it: the Ethernet hardware address of a
-             *     DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+             *     DHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its
+             *     DUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).
              * @example 00:00:5e:00:53:01
              */
             mac?: string | null;
@@ -7379,6 +7380,7 @@ export interface components {
              * @example 192.0.2.50
              */
             addr: string;
+            address_lease?: components["schemas"]["DhcpLeasePeer"] | null;
             atsfp?: components["schemas"]["Timestamp"] | null;
             client?: components["schemas"]["ClientKey"] | null;
             /** @description The client's last transaction time. */
@@ -7520,6 +7522,8 @@ export interface components {
             node: components["schemas"]["NodeId"];
             /** @description Whether conflict detection runs (a `probe` role in the process). */
             probe: boolean;
+            /** @description The router advertisement check of DHCP-10 (`docs/dhcp.md` section 19.12). */
+            ra?: components["schemas"]["DhcpRaReport"];
             /** @description The revision of the configuration image served. */
             revision: components["schemas"]["Revision"];
             /**
@@ -7532,8 +7536,42 @@ export interface components {
              * @description The DHCPv6 scopes served.
              */
             scopes6?: number;
+            /**
+             * @description The DHCPv6 server's DUID in hexadecimal, when the role serves DHCPv6.
+             * @example 000400000000000000000000000000000001
+             */
+            server_duid?: string | null;
             /** @description Whether the role serves. */
             serving: boolean;
+        };
+        /** @description How full the delegation pools of a DHCPv6 scope are (`pd` of the utilization). */
+        DhcpPdUtilization: {
+            /**
+             * Format: int64
+             * @description The prefixes free now; stops at 2^64 - 1.
+             */
+            free: number;
+            /**
+             * Format: int64
+             * @description The prefixes bound now.
+             */
+            leased: number;
+            /**
+             * Format: int64
+             * @description The prefixes they may delegate, those an exclusion touches taken out; stops at
+             *     2^64 - 1.
+             */
+            pool_size: number;
+            /**
+             * Format: int32
+             * @description The delegation pools of the scope.
+             */
+            pools: number;
+            /**
+             * Format: double
+             * @description `leased / pool_size`, 0 to 1.
+             */
+            utilization: number;
         };
         /** @description `POST /dhcp/policies`. */
         DhcpPolicyCreate: {
@@ -7575,8 +7613,16 @@ export interface components {
              */
             order?: number | null;
         };
-        /** @description A pool: an IPAM range of role `dhcp_pool` with its DHCP settings. */
+        /**
+         * @description A pool: an IPAM range of role `dhcp_pool` (addresses) or `dhcp_pd_pool` (delegated
+         *     prefixes of a DHCPv6 scope) with its DHCP settings.
+         */
         DhcpPoolItem: {
+            /**
+             * Format: int32
+             * @description A delegation pool's delegated length: the length of the prefixes it hands out.
+             */
+            delegated_len?: number | null;
             /** @description The first address. */
             first: string;
             /** @description The last address. */
@@ -7588,7 +7634,7 @@ export interface components {
             lease_secs?: number | null;
             /**
              * Format: int64
-             * @description Addresses with an active lease.
+             * @description Addresses with an active lease; for a delegation pool the prefixes bound.
              */
             leased: number;
             /** @description The scope. */
@@ -7597,10 +7643,13 @@ export interface components {
             range: components["schemas"]["RangeId"];
             /** @description The store revision of the settings row (the `ETag`); 0 without settings. */
             revision: components["schemas"]["Revision"];
+            /** @description The range's role: `dhcp_pool` or `dhcp_pd_pool`. */
+            role: components["schemas"]["RangeRole"];
             settings?: components["schemas"]["PoolSettings"] | null;
             /**
              * Format: int64
-             * @description Addresses in the pool, exclusions taken out.
+             * @description Addresses in the pool, exclusions taken out; for a delegation pool the prefixes it
+             *     may delegate (a prefix an exclusion touches taken out). Stops at 2^64 - 1.
              */
             size: number;
         };
@@ -7609,6 +7658,77 @@ export interface components {
             /** @description The classes the pool admits. */
             classes?: components["schemas"]["ClassId"][];
             lease?: components["schemas"]["LeaseTimes"] | null;
+        };
+        /**
+         * @description Whether the router advertisement check runs.
+         * @enum {string}
+         */
+        DhcpRaCheck: "off" | "unavailable" | "watching";
+        /** @description One finding of the router advertisement check. */
+        DhcpRaFinding: {
+            /**
+             * @description The health row's code: `dhcp.ra.flags_off`, `dhcp.ra.other_only`,
+             *     `dhcp.ra.managed_without_scope` or `dhcp.ra.unchecked`.
+             * @example dhcp.ra.flags_off
+             */
+            code: string;
+            /** @description What it means and what to do, in English. */
+            detail: string;
+            /** @description The interface (empty for `dhcp.ra.unchecked`). */
+            interface: string;
+            /**
+             * @description The parameters: `interface`, `routers`, and `scopes` or `prefixes`; `reason` for
+             *     `dhcp.ra.unchecked`.
+             */
+            params?: {
+                [key: string]: string;
+            };
+        };
+        /** @description One link as the router advertisement check hears it. */
+        DhcpRaLink: {
+            /**
+             * @description The interface.
+             * @example eth0
+             */
+            interface: string;
+            /** @description Whether a router sets M (managed address configuration). */
+            managed: boolean;
+            /** @description Whether a router sets O (other configuration). */
+            other: boolean;
+            /**
+             * @description The prefixes the routers advertise.
+             * @example [
+             *       "2001:db8:100::/64"
+             *     ]
+             */
+            prefixes: string[];
+            /**
+             * @description The routers heard, by link-local address.
+             * @example [
+             *       "fe80::1"
+             *     ]
+             */
+            routers: string[];
+            /**
+             * @description The networks of the enabled DHCPv6 scopes of the link.
+             * @example [
+             *       "2001:db8:100::/64"
+             *     ]
+             */
+            scopes: string[];
+            /** @description When the last advertisement was heard. */
+            seen: components["schemas"]["Timestamp"];
+        };
+        /** @description The router advertisement check of a node's `dhcp` role. */
+        DhcpRaReport: {
+            /** @description Whether it runs. */
+            check: components["schemas"]["DhcpRaCheck"];
+            /** @description The findings, which are also health rows of `GET /system/status`. */
+            findings?: components["schemas"]["DhcpRaFinding"][];
+            /** @description The links heard in the last hour, by interface. */
+            links?: components["schemas"]["DhcpRaLink"][];
+            /** @description Why it is unavailable. */
+            reason?: string | null;
         };
         /**
          * @description A reservation: an IPAM host of mode `reserved` with an interface and an address in a
@@ -7732,6 +7852,7 @@ export interface components {
              * @description Pool addresses with an active lease.
              */
             leased: number;
+            pd?: components["schemas"]["DhcpPdUtilization"] | null;
             /**
              * Format: int32
              * @description The pool size as a power of two, rounded down, when it is at least 2^32 (a DHCPv6
@@ -13281,7 +13402,8 @@ export interface components {
                 kind: components["schemas"]["LeaseEventKind"];
                 /**
                  * @description The client's MAC address where the row says it: the Ethernet hardware address of a
-                 *     DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+                 *     DHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its
+                 *     DUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).
                  * @example 00:00:5e:00:53:01
                  */
                 mac?: string | null;
@@ -13320,6 +13442,7 @@ export interface components {
                  * @example 192.0.2.50
                  */
                 addr: string;
+                address_lease?: components["schemas"]["DhcpLeasePeer"] | null;
                 atsfp?: components["schemas"]["Timestamp"] | null;
                 client?: components["schemas"]["ClientKey"] | null;
                 /** @description The client's last transaction time. */
@@ -13423,6 +13546,11 @@ export interface components {
         Page_DhcpPoolItem: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
+                /**
+                 * Format: int32
+                 * @description A delegation pool's delegated length: the length of the prefixes it hands out.
+                 */
+                delegated_len?: number | null;
                 /** @description The first address. */
                 first: string;
                 /** @description The last address. */
@@ -13434,7 +13562,7 @@ export interface components {
                 lease_secs?: number | null;
                 /**
                  * Format: int64
-                 * @description Addresses with an active lease.
+                 * @description Addresses with an active lease; for a delegation pool the prefixes bound.
                  */
                 leased: number;
                 /** @description The scope. */
@@ -13443,10 +13571,13 @@ export interface components {
                 range: components["schemas"]["RangeId"];
                 /** @description The store revision of the settings row (the `ETag`); 0 without settings. */
                 revision: components["schemas"]["Revision"];
+                /** @description The range's role: `dhcp_pool` or `dhcp_pd_pool`. */
+                role: components["schemas"]["RangeRole"];
                 settings?: components["schemas"]["PoolSettings"] | null;
                 /**
                  * Format: int64
-                 * @description Addresses in the pool, exclusions taken out.
+                 * @description Addresses in the pool, exclusions taken out; for a delegation pool the prefixes it
+                 *     may delegate (a prefix an exclusion touches taken out). Stops at 2^64 - 1.
                  */
                 size: number;
             }[];
@@ -26552,7 +26683,11 @@ export interface operations {
             query?: {
                 /** @description Only this scope. */
                 scope?: components["schemas"]["PrefixId"];
-                /** @description Addresses starting with this text (`192.0.2.`). */
+                /**
+                 * @description Addresses starting with this text (`192.0.2.`). An IPv6 address or prefix
+                 *     (`2001:db8:180::/48`) also matches the DHCPv6 leases whose address or delegated
+                 *     prefix it holds and the delegated prefixes that hold it.
+                 */
                 addr?: string;
                 /** @description The client's MAC address. */
                 mac?: string;
@@ -26568,6 +26703,8 @@ export interface operations {
                 family?: components["schemas"]["DhcpFamily"];
                 /** @description Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed). */
                 duid?: string;
+                /** @description Only DHCPv6 leases of this kind: `na` (addresses) or `pd` (delegated prefixes). */
+                kind?: components["schemas"]["Lease6Kind"];
             };
             header?: never;
             path?: never;
@@ -36809,7 +36946,11 @@ export interface operations {
             query?: {
                 /** @description Only this scope. */
                 scope?: components["schemas"]["PrefixId"];
-                /** @description Addresses starting with this text (`192.0.2.`). */
+                /**
+                 * @description Addresses starting with this text (`192.0.2.`). An IPv6 address or prefix
+                 *     (`2001:db8:180::/48`) also matches the DHCPv6 leases whose address or delegated
+                 *     prefix it holds and the delegated prefixes that hold it.
+                 */
                 addr?: string;
                 /** @description The client's MAC address. */
                 mac?: string;
@@ -36825,6 +36966,8 @@ export interface operations {
                 family?: components["schemas"]["DhcpFamily"];
                 /** @description Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed). */
                 duid?: string;
+                /** @description Only DHCPv6 leases of this kind: `na` (addresses) or `pd` (delegated prefixes). */
+                kind?: components["schemas"]["Lease6Kind"];
             };
             header?: never;
             path: {

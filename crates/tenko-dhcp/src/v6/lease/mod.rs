@@ -524,6 +524,10 @@ impl PendingChange6 {
             state: binding.state,
             ends: binding.ends,
             node,
+            link_layer: self
+                .link_layer
+                .map(|(_, octets)| HexBytes(octets.as_slice().to_vec())),
+            link_layer_type: self.link_layer.map(|(kind, _)| kind),
         }
     }
 }

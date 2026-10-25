@@ -9,6 +9,7 @@ import {
   colons,
   displayAddr,
   duidProblem,
+  eventAddr,
   familyName,
   historyQuery,
   holderOf,
@@ -125,9 +126,39 @@ describe("the filters of the lease list", () => {
       name: undefined,
       state: undefined,
       family: undefined,
+      kind: undefined,
     });
     const query = leaseQuery(readLeaseFilters({ family: "v6", duid: " 00:03:00:01 ", mac: "00-00-5E-00-53-10", addr: "2001:db8:" }));
     expect(query).toMatchObject({ family: "v6", duid: "00:03:00:01", mac: "00:00:5e:00:53:10", addr: "2001:db8:" });
+  });
+});
+
+describe("the kind filter of the lease list (WP9.2)", () => {
+  it("reads na and pd from the URL and anything else as both kinds", () => {
+    expect(readLeaseFilters({ kind: "pd" }).kind).toBe("pd");
+    expect(readLeaseFilters({ kind: "na" }).kind).toBe("na");
+    expect(readLeaseFilters({ kind: "prefix" }).kind).toBe("");
+    expect(readLeaseFilters({ kind: ["pd", "na"] }).kind).toBe("pd");
+    expect(readLeaseFilters({}).kind).toBe("");
+    expect(anyFilter(readLeaseFilters({ kind: "pd" }))).toBe(true);
+    expect(anyFilter(readLeaseFilters({ kind: "x" }))).toBe(false);
+  });
+
+  it("is sent as the kind parameter, and is no filter of the history (whose kind is the kind of event)", () => {
+    expect(leaseQuery(readLeaseFilters({ kind: "pd" })).kind).toBe("pd");
+    expect(leaseQuery(readLeaseFilters({})).kind).toBeUndefined();
+    expect(readHistoryFilters({ kind: "granted" }).kind).toBe("granted");
+    expect(historyQuery(readHistoryFilters({ kind: "granted" })).kind).toBe("granted");
+  });
+});
+
+describe("the address of a history row (WP9.2)", () => {
+  it("shows a DHCPv6 row of a delegated prefix with its length, and every other row as it is", () => {
+    expect(eventAddr({ addr: "2001:db8:1:110::", family: "v6", prefix_len: 60 })).toBe("2001:db8:1:110::/60");
+    expect(eventAddr({ addr: "2001:db8:0:10::100", family: "v6", prefix_len: 128 })).toBe("2001:db8:0:10::100");
+    expect(eventAddr({ addr: "2001:db8:0:10::100", family: "v6" })).toBe("2001:db8:0:10::100");
+    expect(eventAddr({ addr: "2001:db8:0:10::100", family: "v6", prefix_len: null })).toBe("2001:db8:0:10::100");
+    expect(eventAddr({ addr: "192.0.2.100", family: "v4" })).toBe("192.0.2.100");
   });
 });
 

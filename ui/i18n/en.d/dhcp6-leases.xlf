@@ -78,6 +78,34 @@
         <notes><note category="description">Tooltip of the count of leases in one state when both families have leases; {v4} and {v6} are the formatted numbers.</note></notes>
         <segment><source>{v4} DHCPv4 and {v6} DHCPv6</source></segment>
       </unit>
+      <unit id="dhcp.leases6.col_address_lease">
+        <notes><note category="description">Column header of the leases: for a delegated prefix, the address lease of the same client (the router's own address).</note></notes>
+        <segment><source>Router address</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.address_lease_title">
+        <notes><note category="description">Tooltip of the link from a delegated prefix to the address lease of the same client; {state} is the binding state of that lease.</note></notes>
+        <segment><source>Show the address lease of this client ({state})</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_kind">
+        <notes><note category="description">Label of the filter that chooses what the DHCPv6 leases hold, addresses or delegated prefixes.</note></notes>
+        <segment><source>Holds</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_kind_any">
+        <notes><note category="description">The entry of the kind filter that shows addresses and delegated prefixes.</note></notes>
+        <segment><source>Addresses and prefixes</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_kind_na">
+        <notes><note category="description">The entry of the kind filter that shows the DHCPv6 leases of addresses.</note></notes>
+        <segment><source>Addresses</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_kind_pd">
+        <notes><note category="description">The entry of the kind filter that shows the DHCPv6 leases of delegated prefixes.</note></notes>
+        <segment><source>Prefixes</source></segment>
+      </unit>
+      <unit id="dhcp.leases6.lfilter_addr_help">
+        <notes><note category="description">Hint under the address filter of the leases: what an IPv6 address or prefix finds.</note></notes>
+        <segment><source>An IPv6 prefix such as 2001:db8:1::/48 also finds the delegated prefixes that hold it and the leases inside it.</source></segment>
+      </unit>
       <unit id="dhcp.reservations.identity_duid">
         <notes><note category="description">Before the DUID a DHCPv6 reservation is keyed by, on the host page.</note></notes>
         <segment><source>DUID</source></segment>

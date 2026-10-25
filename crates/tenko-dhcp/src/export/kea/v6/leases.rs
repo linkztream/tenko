@@ -13,9 +13,11 @@
 //! - An `abandoned` lease (declined) is state 1 with the empty DUID `00:00:00` and no client,
 //!   held until its end, as Kea keeps a declined address (Kea's empty DUID is three zero
 //!   octets).
+//! - An `active` delegated prefix (`IA_PD`, WP9.4) is lease type 2 with the prefix's first
+//!   address and its delegated length, the client's DUID, IAID and link-layer address as
+//!   for an address, and no names (the DDNS worker leaves prefixes alone).
 //! - The other states hold no address for a client and are left out, as Kea removes
-//!   reclaimed leases; so are delegated prefixes (`IA_PD`), which have no `pd-pools` in the
-//!   export (reported).
+//!   reclaimed leases.
 //! - `fqdn_fwd` and `fqdn_rev` are 1 when the DDNS worker wrote the AAAA and the PTR
 //!   record, and `hostname` is the name written, else the name of the client's option 39.
 //! - `subnet_id` is the Kea subnet of the lease's scope; a lease of a scope the export
@@ -48,7 +50,16 @@ fn duid_link_layer(duid: &[u8]) -> Option<&[u8]> {
     }
 }
 
+/// Kea's lease type of an address (`IA_NA`).
+const TYPE_NA: u8 = 0;
+/// Kea's lease type of a delegated prefix (`IA_PD`).
+const TYPE_PD: u8 = 2;
+
 fn line(lease: &Lease6, subnet: u32, out: &mut String) {
+    let (lease_type, prefix_len) = match lease.kind {
+        Lease6Kind::Na => (TYPE_NA, 128),
+        Lease6Kind::Pd => (TYPE_PD, lease.prefix_len),
+    };
     let cltt = seconds(lease.cltt);
     let expire = seconds(lease.ends);
     let valid = (expire - cltt).max(1);
@@ -72,7 +83,8 @@ fn line(lease: &Lease6, subnet: u32, out: &mut String) {
         };
         (colon_hex(duid), lease.iaid, hwaddr, hwtype, source)
     };
-    let hostname = if declined {
+    // A delegated prefix has no name: the DDNS worker leaves prefixes alone.
+    let hostname = if declined || lease.kind == Lease6Kind::Pd {
         String::new()
     } else {
         lease
@@ -86,7 +98,7 @@ fn line(lease: &Lease6, subnet: u32, out: &mut String) {
     };
     let _ = writeln!(
         out,
-        "{},{duid_text},{valid},{expire},{subnet},{preferred},0,{iaid},128,{},{},{hostname},{hwaddr},{},,{hwtype},{source},0",
+        "{},{duid_text},{valid},{expire},{subnet},{preferred},{lease_type},{iaid},{prefix_len},{},{},{hostname},{hwaddr},{},,{hwtype},{source},0",
         lease.addr6(),
         u8::from(lease.ddns.forward.is_some() && !declined),
         u8::from(lease.ddns.reverse.is_some() && !declined),
@@ -100,9 +112,13 @@ pub(crate) fn csv(cx: &mut Cx<'_>) -> String {
     out.push('\n');
     let mut left_out = Vec::new();
     for lease in cx.data.leases6.values() {
-        if lease.kind != Lease6Kind::Na
-            || !matches!(lease.state, BindingState::Active | BindingState::Abandoned)
-        {
+        let kept = match lease.kind {
+            Lease6Kind::Na => {
+                matches!(lease.state, BindingState::Active | BindingState::Abandoned)
+            }
+            Lease6Kind::Pd => lease.state == BindingState::Active,
+        };
+        if !kept {
             continue;
         }
         match cx.subnet_ids6.get(&lease.scope) {

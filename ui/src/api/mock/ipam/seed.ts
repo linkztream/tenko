@@ -73,6 +73,8 @@ export const IPAM_IDS = {
     managementV6: uid("a", 10),
     /** 192.0.2.0/24 in the VRF isolated. */
     workshop: uid("a", 11),
+    /** 2001:db8:1::/48, the network of the DHCPv6 scope with a delegation pool (WP9.2). */
+    pdV6: uid("a", 12),
   },
   range: {
     infrastructure: uid("5", 1),
@@ -80,6 +82,8 @@ export const IPAM_IDS = {
     iotPool: uid("5", 3),
     /** 2001:db8:0:10::100 to 2001:db8:0:10::1ff, the pool of the DHCPv6 scope on the v6 LAN (WP9.4). */
     lanV6Pool: uid("5", 4),
+    /** 2001:db8:1:100:: to 2001:db8:1:1ff:ffff:ffff:ffff:ffff, a delegation pool of /60 prefixes, 16 of them (WP9.2). */
+    pdV6Pool: uid("5", 5),
   },
   field: { assetTag: uid("8", 1), rack: uid("8", 2), warrantyUntil: uid("8", 3) },
 } as const;
@@ -362,16 +366,22 @@ export function buildSeed(now: number): IpamStore {
       vrf: IPAM_IDS.vrf.isolated,
       meta: { description: "Workshop LAN" },
     }),
+    // WP9.2: a network for prefix delegation, in the VRF of the other IPv6 networks.
+    prefix(P.pdV6, "2001:db8:1::/48", "network", {
+      vrf: IPAM_IDS.vrf.default,
+      meta: { description: "Delegation v6" },
+    }),
   ].forEach((p) => add("prefix", p));
 
   // Ranges.
-  const range = (id: string, prefixId: string, first: string, last: string, role: Range["role"], lease?: number): Range => ({
+  const range = (id: string, prefixId: string, first: string, last: string, role: Range["role"], lease?: number, delegated?: number): Range => ({
     id,
     prefix: prefixId,
     first,
     last,
     role,
     ...(lease === undefined ? {} : { lease_secs: lease }),
+    ...(delegated === undefined ? {} : { delegated_len: delegated }),
     status: "active",
     meta: makeMeta(now),
   });
@@ -381,6 +391,8 @@ export function buildSeed(now: number): IpamStore {
     range(IPAM_IDS.range.iotPool, P.iot, "198.51.100.100", "198.51.100.199", "dhcp_pool", 3_600),
     // WP9.4: the pool of the seeded DHCPv6 scope.
     range(IPAM_IDS.range.lanV6Pool, P.lanV6, "2001:db8:0:10::100", "2001:db8:0:10::1ff", "dhcp_pool"),
+    // WP9.2: the delegation pool of the DHCPv6 scope on 2001:db8:1::/48, 16 prefixes of /60.
+    range(IPAM_IDS.range.pdV6Pool, P.pdV6, "2001:db8:1:100::", "2001:db8:1:1ff:ffff:ffff:ffff:ffff", "dhcp_pd_pool", undefined, 60),
   ].forEach((r) => add("range", r));
 
   // Hosts, interfaces and addresses.

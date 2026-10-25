@@ -135,7 +135,7 @@ describe("the seed", () => {
     resetMockDb("lab");
     expect(ipamState().data.prefix.size).toBeGreaterThan(0);
     resetMockDb("signed-in");
-    expect(ipamState().data.prefix.size).toBe(11);
+    expect(ipamState().data.prefix.size).toBe(12);
   });
 
   it("brings the seed back after a reset", async () => {
@@ -238,6 +238,7 @@ describe("the prefix tree", () => {
       [0, "2001:db8::/32"],
       [1, "2001:db8:0:10::/64"],
       [1, "2001:db8:0:30::/64"],
+      [1, "2001:db8:1::/48"],
     ]);
     const lan = tree.body.nodes[0]!;
     expect(lan).toMatchObject({
@@ -281,9 +282,10 @@ describe("the prefix tree", () => {
   it("counts the supernet of IPv6 in decimal strings and leaves out the deleted prefix", async () => {
     const tree = await get<TreeResponse>(`${V}/prefixes/tree`);
     const v6 = tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")!;
-    expect(v6.children).toBe(2);
+    expect(v6.children).toBe(3);
     expect(v6.utilization.capacity).toBe((2n ** 96n).toString());
-    expect(v6.utilization.covered).toBe((2n * 2n ** 64n).toString());
+    // Two /64 networks and the /48 of the delegation network (WP9.2).
+    expect(v6.utilization.covered).toBe((2n * 2n ** 64n + 2n ** 80n).toString());
     expect(v6.utilization.percent).toBe(0);
     expect(tree.body.nodes.some((n) => n.cidr === "2001:db8:0:99::/64")).toBe(false);
     const lanV6 = tree.body.nodes.find((n) => n.id === P.lanV6)!;
@@ -294,7 +296,7 @@ describe("the prefix tree", () => {
   it("limits the depth and keeps the child counts", async () => {
     const top = await get<TreeResponse>(`${V}/prefixes/tree?depth=0`);
     expect(top.body.nodes.map((n) => n.cidr)).toEqual(["192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"]);
-    expect(top.body.nodes.map((n) => n.children)).toEqual([0, 0, 3, 2]);
+    expect(top.body.nodes.map((n) => n.children)).toEqual([0, 0, 3, 3]);
   });
 
   it("answers a subtree with depth relative to its top", async () => {
@@ -589,7 +591,7 @@ describe("creating prefixes", () => {
     const child = await post<Write<Prefix>>(`${V}/prefixes`, { cidr: "2001:db8:0:50::/64", description: "Guest v6" });
     expect(child.status).toBe(201);
     let tree = await get<TreeResponse>(`${V}/prefixes/tree`);
-    expect(tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")?.children).toBe(3);
+    expect(tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")?.children).toBe(4);
     const wrap = await post<Write<Prefix>>(`${V}/prefixes`, { cidr: "203.0.112.0/22" });
     expect(wrap.body.item?.role).toBe("supernet");
     tree = await get<TreeResponse>(`${V}/prefixes/tree`);
@@ -847,7 +849,7 @@ describe("deleting and restoring prefixes", () => {
     expect(restored.body.item?.meta.deleted).toBeNull();
     const tree = await get<TreeResponse>(`${V}/prefixes/tree`);
     expect(tree.body.nodes.map((n) => n.cidr)).toContain("2001:db8:0:99::/64");
-    expect(tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")?.children).toBe(3);
+    expect(tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")?.children).toBe(4);
   });
 
   it("checks If-Match on delete and restore and honours dry runs", async () => {
@@ -961,6 +963,7 @@ describe("lists", () => {
       "2001:db8::/32",
       "2001:db8:0:10::/64",
       "2001:db8:0:30::/64",
+      "2001:db8:1::/48",
       "192.0.2.0/24",
     ]);
     expect(await cidrs(`vrf=${IPAM_IDS.vrf.isolated}`)).toEqual(["192.0.2.0/24"]);
@@ -981,9 +984,10 @@ describe("lists", () => {
       "2001:db8:0:10::/64",
       "2001:db8:0:30::/64",
       "2001:db8:0:99::/64",
+      "2001:db8:1::/48",
     ]);
     const byStatus = await get<Page<Prefix>>(`${V}/prefixes?vrf=${IPAM_IDS.vrf.default}&sort=status,-cidr&limit=2`);
-    expect(byStatus.body.items.map((p) => p.cidr)).toEqual(["2001:db8:0:30::/64", "2001:db8:0:10::/64"]);
+    expect(byStatus.body.items.map((p) => p.cidr)).toEqual(["2001:db8:1::/48", "2001:db8:0:30::/64"]);
   });
 
   it("filters addresses", async () => {
@@ -1331,7 +1335,7 @@ describe("tenants, VRFs, sites and VLANs", () => {
     const cleared = await patch<Write<{ rd: string | null }>>(`${V}/vrfs/${other.body.item!.id}`, { rd: null });
     expect(cleared.body.item?.rd).toBeNull();
     const inUse = expectProblem(await del(`${V}/vrfs/${IPAM_IDS.vrf.default}`), 409, "ipam.in_use");
-    expect(inUse.params).toMatchObject({ by: "prefixes", count: "9" });
+    expect(inUse.params).toMatchObject({ by: "prefixes", count: "10" });
     expect((await del(`${V}/vrfs/${other.body.item!.id}`)).status).toBe(200);
     expectProblem(
       await post(`${V}/vrfs`, { name: "orphan", tenant: "0190d1c2-0000-7000-8000-0000e1ffffff" }),
@@ -1468,6 +1472,64 @@ describe("ranges", () => {
     const both = await patch<Write<Range>>(`${V}/ranges/${pool.body.item!.id}`, { role: "reserved", lease_secs: null });
     expect(both.body.item?.role).toBe("reserved");
     expect(longestLeaseSecs(P.lan)).toBe(86_400);
+  });
+
+  // WP9.2: delegation pools.
+  it("seeds a delegation pool of 16 prefixes of /60 on the delegation network", async () => {
+    const prefix = await get<Prefix>(`${V}/prefixes/${P.pdV6}`);
+    expect(prefix.body).toMatchObject({ cidr: "2001:db8:1::/48", role: "network", vrf: IPAM_IDS.vrf.default, meta: { description: "Delegation v6" } });
+    const pool = await get<Range>(`${V}/ranges/${IPAM_IDS.range.pdV6Pool}`);
+    expect(pool.body).toMatchObject({
+      prefix: P.pdV6,
+      first: "2001:db8:1:100::",
+      last: "2001:db8:1:1ff:ffff:ffff:ffff:ffff",
+      role: "dhcp_pd_pool",
+      delegated_len: 60,
+    });
+    const listed = await get<Page<Range>>(`${V}/prefixes/${P.pdV6}/ranges?role=dhcp_pd_pool`);
+    expect(listed.body.items.map((r) => r.id)).toEqual([IPAM_IDS.range.pdV6Pool]);
+  });
+
+  it("creates a delegation pool with its delegated length and a lease time", async () => {
+    const made = await post<Write<Range>>(`${V}/prefixes/${P.pdV6}/ranges`, {
+      first: "2001:db8:1:200::",
+      last: "2001:db8:1:2ff:ffff:ffff:ffff:ffff",
+      role: "dhcp_pd_pool",
+      delegated_len: 56,
+      lease_secs: 7200,
+    });
+    expect(made.status).toBe(201);
+    expect(made.body.item).toMatchObject({ role: "dhcp_pd_pool", delegated_len: 56, lease_secs: 7200 });
+    // The lease time and the length can change, and the length goes with the role.
+    const changed = await patch<Write<Range>>(`${V}/ranges/${made.body.item!.id}`, { delegated_len: 60, lease_secs: null });
+    expect(changed.body.item).toMatchObject({ delegated_len: 60 });
+    expect(changed.body.item).not.toHaveProperty("lease_secs");
+    const away = await patch<Write<Range>>(`${V}/ranges/${made.body.item!.id}`, { role: "reserved", delegated_len: null });
+    expect(away.body.item?.role).toBe("reserved");
+    expect(away.body.item).not.toHaveProperty("delegated_len");
+  });
+
+  it("refuses a delegation pool that breaks the rules, with the field named", async () => {
+    const make = (body: Record<string, unknown>, prefix: string = P.pdV6) =>
+      post(`${V}/prefixes/${prefix}/ranges`, { first: "2001:db8:1:200::", last: "2001:db8:1:2ff:ffff:ffff:ffff:ffff", role: "dhcp_pd_pool", ...body });
+    // An IPv4 network: the role is wrong.
+    expect(expectProblem(await post(`${V}/prefixes/${P.lan}/ranges`, { first: "192.0.2.50", last: "192.0.2.60", role: "dhcp_pd_pool", delegated_len: 60 }), 400, "ipam.validation").errors?.[0]?.field).toBe("role");
+    // The length: missing, not longer than the network's /48, longer than 64.
+    for (const body of [{}, { delegated_len: 48 }, { delegated_len: 40 }, { delegated_len: 65 }]) {
+      expect(expectProblem(await make(body), 400, "ipam.validation").errors?.[0]?.field, JSON.stringify(body)).toBe("delegated_len");
+    }
+    // The boundaries of the length.
+    expect(expectProblem(await make({ delegated_len: 60, first: "2001:db8:1:208::" }), 400, "ipam.validation").errors?.[0]?.field).toBe("first");
+    expect(expectProblem(await make({ delegated_len: 60, last: "2001:db8:1:2ff:ffff:ffff:ffff:fff0" }), 400, "ipam.validation").errors?.[0]?.field).toBe("last");
+    // Any other role has no delegated length.
+    expect(
+      expectProblem(await post(`${V}/prefixes/${P.lan}/ranges`, { first: "192.0.2.50", last: "192.0.2.60", role: "reserved", delegated_len: 60 }), 400, "ipam.validation").errors?.[0]?.field,
+    ).toBe("delegated_len");
+    // Changing the role of a delegation pool without clearing its length is refused the same way.
+    const wrongRole = expectProblem(await patch(`${V}/ranges/${IPAM_IDS.range.pdV6Pool}`, { role: "reserved" }), 400, "ipam.validation");
+    expect(wrongRole.errors?.[0]?.field).toBe("delegated_len");
+    // The pool of the seed keeps its overlap rule.
+    expectProblem(await make({ delegated_len: 60, first: "2001:db8:1:100::", last: "2001:db8:1:10f:ffff:ffff:ffff:ffff" }), 409, "ipam.range.overlap");
   });
 
   it("reads, changes, deletes and restores a range", async () => {

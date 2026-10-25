@@ -1,9 +1,11 @@
 // The lease history with DHCPv6 beside DHCPv4 (WP9.4): both families merged newest first, a family
 // column, the MAC address from `mac` (a DUID-LL or DUID-LLT names one, a DUID-EN none), the DUID of
 // a DHCPv6 row, the family and DUID filters in the URL and in the request, an IPv6 address in the
-// address filter, Swedish.
+// address filter, a delegated prefix with its length (WP9.2), the MAC address of a client found by its
+// link-layer address, Swedish.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dhcpLeaseState } from "../../api/mock/routes-dhcp-leases";
 import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { setSessionForTest } from "../../auth/session";
@@ -24,6 +26,8 @@ afterEach(async () => {
 const GRID = "dhcp-history";
 const V6_100 = "2001:db8:0:10::100";
 const V6_101 = "2001:db8:0:10::101";
+/** The delegated prefix 2001:db8:1:110::/60 of the client of ::100. */
+const PD = "2001:db8:1:110::";
 const open = (url = "/dhcp/history") => renderRoute(HistoryPage, { url, path: "/dhcp/history" });
 const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 const keys = () => rows(GRID).map((r) => r.dataset.key ?? "");
@@ -145,6 +149,62 @@ describe("the address filter with an IPv6 address", () => {
     await waitFor(() => expect(keys().sort()).toEqual([`${V6_100} granted`, `${V6_100} renewed`]));
     expect(historyReads(spy).at(-1)!.searchParams.get("addr")).toBe(V6_100);
     expect((screen.getByTestId("filter-addr") as HTMLInputElement).value).toBe(V6_100);
+  });
+});
+
+describe("a delegated prefix", () => {
+  it("shows the prefix with its length where an address shows only the address", async () => {
+    open();
+    await loaded();
+    const r = rowOf(`${PD} granted`);
+    expect(within(r).getByTestId("event-lease-link").textContent).toBe("2001:db8:1:110::/60");
+    expect(within(r).getByTestId("event-family").dataset.key).toBe("v6");
+    expect(cell(r, "mac").textContent).toBe("00:00:5e:00:53:10");
+    // The address of the same client keeps the plain address.
+    expect(within(rowOf(`${V6_100} granted`)).getByTestId("event-lease-link").textContent).toBe(V6_100);
+  });
+
+  it("links to the leases by the first address, which the lease list reads as the prefix too", async () => {
+    open();
+    await loaded();
+    const href = within(rowOf(`${PD} granted`)).getByTestId("event-lease-link").getAttribute("href")!;
+    expect(new URL(href, "http://localhost").searchParams.get("addr")).toBe(PD);
+  });
+
+  it("shows the history of the prefix by its first address", async () => {
+    open(`/dhcp/history?addr=${encodeURIComponent(PD)}`);
+    await waitFor(() => expect(keys()).toEqual([`${PD} granted`]));
+    expect((screen.getByTestId("filter-addr") as HTMLInputElement).value).toBe(PD);
+  });
+});
+
+describe("the MAC address of a DHCPv6 client behind a relay", () => {
+  it("finds the events of a DUID-EN client by the link-layer address of its lease", async () => {
+    const lease = dhcpLeaseState().leases.find((l) => l.addr === V6_101)!;
+    lease.link_layer = "00005e005377";
+    lease.link_layer_type = 1;
+    dhcpLeaseState().events.push({
+      addr: V6_101,
+      at: new Date().toISOString(),
+      duid: lease.duid,
+      ends: lease.ends,
+      family: "v6",
+      iaid: 1,
+      kind: "renewed",
+      mac: "00:00:5e:00:53:77",
+      node: 1,
+      prefix_len: 128,
+      scope: lease.scope,
+      state: "active",
+      vrf: lease.vrf,
+    });
+    const spy = vi.spyOn(globalThis, "fetch");
+    open();
+    await loaded();
+    fireEvent.change(screen.getByTestId("filter-mac"), { target: { value: "00:00:5e:00:53:77" } });
+    await waitFor(() => expect(historyReads(spy).at(-1)!.searchParams.get("mac")).toBe("00:00:5e:00:53:77"));
+    await waitFor(() => expect(keys()).toEqual([`${V6_101} renewed`]));
+    expect(cell(rowOf(`${V6_101} renewed`), "mac").textContent).toBe("00:00:5e:00:53:77");
   });
 });
 

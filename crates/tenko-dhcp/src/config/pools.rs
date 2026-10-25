@@ -59,6 +59,33 @@ fn not_found(range: RangeId) -> ConfigError {
     .param("range", range.to_string())
 }
 
+// WP9.4: the bound prefixes of a delegation pool.
+/// The active delegated prefixes (`pd` rows of `dhcp.leases6`) of the scope `prefix` that
+/// are prefixes of `pool`.
+fn bound_prefixes(
+    view: &dyn ReadView,
+    prefix: &tenko_core::ipam::Prefix,
+    pool: &crate::v6::image::PdPool6Image,
+) -> ConfigResult<u64> {
+    let count = view
+        .scan_typed(
+            &tenko_core::dhcp::tables::LEASES6,
+            super::load::address_range(prefix.vrf, pool.first, pool.last),
+            usize::MAX,
+            false,
+        )?
+        .into_iter()
+        .filter(|(_, lease, _)| {
+            let lease: &tenko_core::dhcp::Lease6 = lease;
+            lease.kind == tenko_core::dhcp::Lease6Kind::Pd
+                && lease.scope == prefix.id
+                && lease.state == BindingState::Active
+                && pool.holds(lease.addr6(), lease.prefix_len)
+        })
+        .count();
+    Ok(u64::try_from(count).unwrap_or(u64::MAX))
+}
+
 /// The pools of one prefix with their sizes and leases.
 fn pools_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<Vec<PoolRow>> {
     let mut data = scope_data(view, prefix)?;
@@ -77,15 +104,24 @@ fn pools_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<Vec<PoolRow>>
             continue;
         }
         let settings = view.get_typed(&POOLS, &range.id)?;
-        // WP9.2: a delegation pool's size is the number of prefixes it delegates; the
-        // DHCPv6 bindings are not read here yet (as for an IPv6 address pool).
+        // WP9.2, WP9.4: a delegation pool's size is the number of prefixes it may delegate
+        // (those an exclusion touches taken out), and its leases the prefixes bound in it.
         if range.role == RangeRole::DhcpPdPool {
-            let size = built
-                .image
-                .v6()
-                .scope(prefix)
-                .and_then(|scope| scope.pd_pools.iter().find(|pool| pool.range == range.id))
-                .map_or(0, |pool| u64::try_from(pool.blocks()).unwrap_or(u64::MAX));
+            let image6 = built.image.v6();
+            let found = image6.scope(prefix).and_then(|scope| {
+                scope
+                    .pd_pools
+                    .iter()
+                    .find(|pool| pool.range == range.id)
+                    .map(|pool| (scope, pool))
+            });
+            let (size, leased) = match (found, data.prefixes.get(&prefix)) {
+                (Some((scope, pool)), Some(row)) => (
+                    u64::try_from(scope.delegable_count(pool)).unwrap_or(u64::MAX),
+                    bound_prefixes(view, row, pool)?,
+                ),
+                _ => (0, 0),
+            };
             rows.push(PoolRow {
                 revision: settings
                     .as_ref()
@@ -93,7 +129,7 @@ fn pools_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<Vec<PoolRow>>
                 settings: settings.map(|(settings, _)| settings),
                 range,
                 size,
-                leased: 0,
+                leased,
             });
             continue;
         }

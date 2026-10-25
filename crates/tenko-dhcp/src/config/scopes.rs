@@ -774,6 +774,24 @@ pub struct Utilization6 {
     pub free: u128,
     /// `(pool_size - free) / pool_size`, 0 for an empty pool.
     pub utilization: f64,
+    /// The scope's delegation pools, when it has any (WP9.4).
+    pub pd: Option<PdUtilization>,
+}
+
+// WP9.4: the delegation pools of a DHCPv6 scope.
+/// How full the delegation pools of a DHCPv6 scope are, counted in prefixes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PdUtilization {
+    /// The delegation pools.
+    pub pools: u32,
+    /// The prefixes they may delegate (those an exclusion touches taken out).
+    pub pool_size: u128,
+    /// The prefixes bound now.
+    pub leased: u64,
+    /// The prefixes free now.
+    pub free: u128,
+    /// `leased / pool_size`, 0 without a prefix.
+    pub utilization: f64,
 }
 
 /// The dynamic addresses of a DHCPv6 pool: neither excluded nor the Subnet-Router anycast
@@ -838,6 +856,7 @@ impl ConfigService {
                 abandoned: 0,
                 free: 0,
                 utilization: 0.0,
+                pd: None,
             }));
         };
         let mut pool_size: u128 = image
@@ -854,7 +873,7 @@ impl ConfigService {
                 }
             }
         }
-        let (mut leased, mut abandoned) = (0u64, 0u64);
+        let (mut leased, mut abandoned, mut delegated) = (0u64, 0u64, 0u64);
         for (_, lease, _) in view.scan_typed(
             &tenko_core::dhcp::tables::LEASES6,
             address_range(row.vrf, net.network(), net.broadcast()),
@@ -863,6 +882,15 @@ impl ConfigService {
         )? {
             let lease: tenko_core::dhcp::Lease6 = lease;
             let addr = lease.addr6();
+            if lease.kind == tenko_core::dhcp::Lease6Kind::Pd {
+                if lease.scope == prefix
+                    && lease.is_bound(now)
+                    && image.pd_pool_of(addr, lease.prefix_len).is_some()
+                {
+                    delegated += 1;
+                }
+                continue;
+            }
             if lease.scope != prefix
                 || !image.is_dynamic(addr)
                 || image6.reserved_at(prefix, addr).is_some()
@@ -890,6 +918,34 @@ impl ConfigService {
             abandoned,
             free,
             utilization,
+            pd: pd_figures(image, delegated),
         }))
     }
+}
+
+/// The figures of a DHCPv6 scope's delegation pools with `delegated` prefixes bound; none
+/// without a delegation pool.
+fn pd_figures(image: &crate::v6::image::Scope6Image, delegated: u64) -> Option<PdUtilization> {
+    if image.pd_pools.is_empty() {
+        return None;
+    }
+    let pool_size = image
+        .pd_pools
+        .iter()
+        .map(|pool| image.delegable_count(pool))
+        .fold(0, u128::saturating_add);
+    let free = pool_size.saturating_sub(u128::from(delegated));
+    #[allow(clippy::cast_precision_loss, reason = "a ratio for display")]
+    let utilization = if pool_size == 0 {
+        0.0
+    } else {
+        ((pool_size - free) as f64 / pool_size as f64).min(1.0)
+    };
+    Some(PdUtilization {
+        pools: u32::try_from(image.pd_pools.len()).unwrap_or(u32::MAX),
+        pool_size,
+        leased: delegated,
+        free,
+        utilization,
+    })
 }

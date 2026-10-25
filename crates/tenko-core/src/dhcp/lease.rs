@@ -548,9 +548,29 @@ pub struct Lease6Event {
     pub ends: Timestamp,
     /// The node that wrote it.
     pub node: NodeId,
+    // WP9.4: the client's link-layer address, so that the history's MAC filter finds a
+    // client with a DUID-EN or DUID-UUID behind an RFC 6939 relay. A row written before
+    // reads as none.
+    /// The client's link-layer address as the lease had it (RFC 6939, else a DUID-LLT or
+    /// DUID-LL).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_layer: Option<HexBytes>,
+    /// The hardware type of `link_layer` (1 for Ethernet), when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_layer_type: Option<u16>,
 }
 
 impl Lease6Event {
+    /// The client's Ethernet address, when the row's link-layer address is one.
+    pub fn mac(&self) -> Option<[u8; 6]> {
+        if self.link_layer_type.is_some_and(|kind| kind != 1) {
+            return None;
+        }
+        self.link_layer
+            .as_ref()
+            .and_then(|octets| <[u8; 6]>::try_from(octets.0.as_slice()).ok())
+    }
+
     /// The history row of a lease after `kind`.
     pub fn of(lease: &Lease6, kind: LeaseEventKind, at: Timestamp) -> Self {
         Self {
@@ -565,6 +585,8 @@ impl Lease6Event {
             state: lease.state,
             ends: lease.ends,
             node: lease.node,
+            link_layer: lease.link_layer.clone(),
+            link_layer_type: lease.link_layer_type,
         }
     }
 }

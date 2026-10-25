@@ -6843,7 +6843,7 @@
           {
             "name": "addr",
             "in": "query",
-            "description": "Addresses starting with this text (`192.0.2.`).",
+            "description": "Addresses starting with this text (`192.0.2.`). An IPv6 address or prefix\n(`2001:db8:180::/48`) also matches the DHCPv6 leases whose address or delegated\nprefix it holds and the delegated prefixes that hold it.",
             "required": false,
             "schema": {
               "type": "string"
@@ -6912,6 +6912,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only DHCPv6 leases of this kind: `na` (addresses) or `pd` (delegated prefixes).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Lease6Kind"
             }
           }
         ],
@@ -8574,7 +8583,7 @@
           "dhcp"
         ],
         "summary": "List DHCP pools",
-        "description": "Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address.",
+        "description": "Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address: the address pools (`role` `dhcp_pool`) and the delegation pools of DHCPv6 scopes (`dhcp_pd_pool`, with `delegated_len`; `size` and `leased` count prefixes).",
         "operationId": "list_dhcp_pools",
         "parameters": [
           {
@@ -10087,7 +10096,7 @@
           "dhcp"
         ],
         "summary": "Get how full a DHCP scope is",
-        "description": "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.",
+        "description": "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool. A DHCPv6 scope with delegation pools has `pd`, their figures in prefixes; the address figures leave the delegated prefixes out.",
         "operationId": "get_dhcp_scope_utilization",
         "parameters": [
           {
@@ -20711,7 +20720,7 @@
           {
             "name": "addr",
             "in": "query",
-            "description": "Addresses starting with this text (`192.0.2.`).",
+            "description": "Addresses starting with this text (`192.0.2.`). An IPv6 address or prefix\n(`2001:db8:180::/48`) also matches the DHCPv6 leases whose address or delegated\nprefix it holds and the delegated prefixes that hold it.",
             "required": false,
             "schema": {
               "type": "string"
@@ -20780,6 +20789,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only DHCPv6 leases of this kind: `na` (addresses) or `pd` (delegated prefixes).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Lease6Kind"
             }
           }
         ],
@@ -40700,7 +40718,7 @@
               "string",
               "null"
             ],
-            "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.",
+            "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its\nDUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).",
             "example": "00:00:5e:00:53:01"
           },
           "node": {
@@ -40770,6 +40788,17 @@
             "type": "string",
             "description": "The address (a delegated prefix's first address for a DHCPv6 `pd` lease).",
             "example": "192.0.2.50"
+          },
+          "address_lease": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DhcpLeasePeer",
+                "description": "A delegated prefix (`pd`): the lease of an address (`na`) of the same client, by its\nDUID in the same VRF, when the node holds one (an active one first, else the one\nthat ends last)."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "atsfp": {
             "oneOf": [
@@ -41216,6 +41245,10 @@
             "type": "boolean",
             "description": "Whether conflict detection runs (a `probe` role in the process)."
           },
+          "ra": {
+            "$ref": "#/components/schemas/DhcpRaReport",
+            "description": "The router advertisement check of DHCP-10 (`docs/dhcp.md` section 19.12)."
+          },
           "revision": {
             "$ref": "#/components/schemas/Revision",
             "description": "The revision of the configuration image served."
@@ -41232,9 +41265,59 @@
             "description": "The DHCPv6 scopes served.",
             "minimum": 0
           },
+          "server_duid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The DHCPv6 server's DUID in hexadecimal, when the role serves DHCPv6.",
+            "example": "000400000000000000000000000000000001"
+          },
           "serving": {
             "type": "boolean",
             "description": "Whether the role serves."
+          }
+        }
+      },
+      "DhcpPdUtilization": {
+        "type": "object",
+        "description": "How full the delegation pools of a DHCPv6 scope are (`pd` of the utilization).",
+        "required": [
+          "pools",
+          "pool_size",
+          "leased",
+          "free",
+          "utilization"
+        ],
+        "properties": {
+          "free": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The prefixes free now; stops at 2^64 - 1.",
+            "minimum": 0
+          },
+          "leased": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The prefixes bound now.",
+            "minimum": 0
+          },
+          "pool_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The prefixes they may delegate, those an exclusion touches taken out; stops at\n2^64 - 1.",
+            "minimum": 0
+          },
+          "pools": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The delegation pools of the scope.",
+            "minimum": 0
+          },
+          "utilization": {
+            "type": "number",
+            "format": "double",
+            "description": "`leased / pool_size`, 0 to 1."
           }
         }
       },
@@ -41375,9 +41458,10 @@
       },
       "DhcpPoolItem": {
         "type": "object",
-        "description": "A pool: an IPAM range of role `dhcp_pool` with its DHCP settings.",
+        "description": "A pool: an IPAM range of role `dhcp_pool` (addresses) or `dhcp_pd_pool` (delegated\nprefixes of a DHCPv6 scope) with its DHCP settings.",
         "required": [
           "range",
+          "role",
           "prefix",
           "first",
           "last",
@@ -41386,6 +41470,15 @@
           "revision"
         ],
         "properties": {
+          "delegated_len": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "A delegation pool's delegated length: the length of the prefixes it hands out.",
+            "minimum": 0
+          },
           "first": {
             "type": "string",
             "description": "The first address."
@@ -41406,7 +41499,7 @@
           "leased": {
             "type": "integer",
             "format": "int64",
-            "description": "Addresses with an active lease.",
+            "description": "Addresses with an active lease; for a delegation pool the prefixes bound.",
             "minimum": 0
           },
           "prefix": {
@@ -41420,6 +41513,10 @@
           "revision": {
             "$ref": "#/components/schemas/Revision",
             "description": "The store revision of the settings row (the `ETag`); 0 without settings."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RangeRole",
+            "description": "The range's role: `dhcp_pool` or `dhcp_pd_pool`."
           },
           "settings": {
             "oneOf": [
@@ -41435,7 +41532,7 @@
           "size": {
             "type": "integer",
             "format": "int64",
-            "description": "Addresses in the pool, exclusions taken out.",
+            "description": "Addresses in the pool, exclusions taken out; for a delegation pool the prefixes it\nmay delegate (a prefix an exclusion touches taken out). Stops at 2^64 - 1.",
             "minimum": 0
           }
         }
@@ -41461,6 +41558,145 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "DhcpRaCheck": {
+        "type": "string",
+        "description": "Whether the router advertisement check runs.",
+        "enum": [
+          "off",
+          "unavailable",
+          "watching"
+        ]
+      },
+      "DhcpRaFinding": {
+        "type": "object",
+        "description": "One finding of the router advertisement check.",
+        "required": [
+          "code",
+          "interface",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The health row's code: `dhcp.ra.flags_off`, `dhcp.ra.other_only`,\n`dhcp.ra.managed_without_scope` or `dhcp.ra.unchecked`.",
+            "example": "dhcp.ra.flags_off"
+          },
+          "detail": {
+            "type": "string",
+            "description": "What it means and what to do, in English."
+          },
+          "interface": {
+            "type": "string",
+            "description": "The interface (empty for `dhcp.ra.unchecked`)."
+          },
+          "params": {
+            "type": "object",
+            "description": "The parameters: `interface`, `routers`, and `scopes` or `prefixes`; `reason` for\n`dhcp.ra.unchecked`.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DhcpRaLink": {
+        "type": "object",
+        "description": "One link as the router advertisement check hears it.",
+        "required": [
+          "interface",
+          "routers",
+          "managed",
+          "other",
+          "prefixes",
+          "scopes",
+          "seen"
+        ],
+        "properties": {
+          "interface": {
+            "type": "string",
+            "description": "The interface.",
+            "example": "eth0"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "Whether a router sets M (managed address configuration)."
+          },
+          "other": {
+            "type": "boolean",
+            "description": "Whether a router sets O (other configuration)."
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The prefixes the routers advertise.",
+            "example": [
+              "2001:db8:100::/64"
+            ]
+          },
+          "routers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The routers heard, by link-local address.",
+            "example": [
+              "fe80::1"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The networks of the enabled DHCPv6 scopes of the link.",
+            "example": [
+              "2001:db8:100::/64"
+            ]
+          },
+          "seen": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the last advertisement was heard."
+          }
+        }
+      },
+      "DhcpRaReport": {
+        "type": "object",
+        "description": "The router advertisement check of a node's `dhcp` role.",
+        "required": [
+          "check"
+        ],
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/DhcpRaCheck",
+            "description": "Whether it runs."
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DhcpRaFinding"
+            },
+            "description": "The findings, which are also health rows of `GET /system/status`."
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DhcpRaLink"
+            },
+            "description": "The links heard in the last hour, by interface."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is unavailable."
           }
         }
       },
@@ -41844,6 +42080,17 @@
             "format": "int64",
             "description": "Pool addresses with an active lease.",
             "minimum": 0
+          },
+          "pd": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DhcpPdUtilization",
+                "description": "A DHCPv6 scope with delegation pools: how full they are, in prefixes. The address\nfigures above leave the delegated prefixes out."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pool_bits": {
             "type": [
@@ -56128,7 +56375,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.",
+                  "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its\nDUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).",
                   "example": "00:00:5e:00:53:01"
                 },
                 "node": {
@@ -56203,6 +56450,17 @@
                   "type": "string",
                   "description": "The address (a delegated prefix's first address for a DHCPv6 `pd` lease).",
                   "example": "192.0.2.50"
+                },
+                "address_lease": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/DhcpLeasePeer",
+                      "description": "A delegated prefix (`pd`): the lease of an address (`na`) of the same client, by its\nDUID in the same VRF, when the node holds one (an active one first, else the one\nthat ends last)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "atsfp": {
                   "oneOf": [
@@ -56553,9 +56811,10 @@
             "type": "array",
             "items": {
               "type": "object",
-              "description": "A pool: an IPAM range of role `dhcp_pool` with its DHCP settings.",
+              "description": "A pool: an IPAM range of role `dhcp_pool` (addresses) or `dhcp_pd_pool` (delegated\nprefixes of a DHCPv6 scope) with its DHCP settings.",
               "required": [
                 "range",
+                "role",
                 "prefix",
                 "first",
                 "last",
@@ -56564,6 +56823,15 @@
                 "revision"
               ],
               "properties": {
+                "delegated_len": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "A delegation pool's delegated length: the length of the prefixes it hands out.",
+                  "minimum": 0
+                },
                 "first": {
                   "type": "string",
                   "description": "The first address."
@@ -56584,7 +56852,7 @@
                 "leased": {
                   "type": "integer",
                   "format": "int64",
-                  "description": "Addresses with an active lease.",
+                  "description": "Addresses with an active lease; for a delegation pool the prefixes bound.",
                   "minimum": 0
                 },
                 "prefix": {
@@ -56598,6 +56866,10 @@
                 "revision": {
                   "$ref": "#/components/schemas/Revision",
                   "description": "The store revision of the settings row (the `ETag`); 0 without settings."
+                },
+                "role": {
+                  "$ref": "#/components/schemas/RangeRole",
+                  "description": "The range's role: `dhcp_pool` or `dhcp_pd_pool`."
                 },
                 "settings": {
                   "oneOf": [
@@ -56613,7 +56885,7 @@
                 "size": {
                   "type": "integer",
                   "format": "int64",
-                  "description": "Addresses in the pool, exclusions taken out.",
+                  "description": "Addresses in the pool, exclusions taken out; for a delegation pool the prefixes it\nmay delegate (a prefix an exclusion touches taken out). Stops at 2^64 - 1.",
                   "minimum": 0
                 }
               }

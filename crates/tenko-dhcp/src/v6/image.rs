@@ -174,6 +174,46 @@ impl Scope6Image {
         !(at > 0 && self.excluded[at - 1].1 >= prefix)
     }
 
+    // WP9.4: the delegable prefixes as intervals, for the pool sizes and the Kea export.
+    /// The delegable part of `pool` as intervals of whole prefixes, by address: the pool
+    /// without every prefix an excluded address lies in, so that each interval starts on a
+    /// boundary of the delegated length and ends at the last address of a prefix, and
+    /// [`Self::is_delegable`] holds for every prefix inside one and for no other.
+    pub fn delegable(&self, pool: &PdPool6Image) -> Vec<(Ipv6Addr, Ipv6Addr)> {
+        let size = pool.block_size();
+        let (first, last) = (u128::from(pool.first), u128::from(pool.last));
+        let block_of = |addr: u128| first + (addr - first) / size * size;
+        let mut out = Vec::new();
+        let mut cursor = first;
+        for &(from, to) in &self.excluded {
+            let (low, high) = (u128::from(from).max(first), u128::from(to).min(last));
+            if low > high || high < cursor {
+                continue;
+            }
+            let start = block_of(low);
+            if start > cursor {
+                out.push((Ipv6Addr::from(cursor), Ipv6Addr::from(start - 1)));
+            }
+            match block_of(high).checked_add(size) {
+                Some(after) if after <= last => cursor = cursor.max(after),
+                _ => return out,
+            }
+        }
+        if cursor <= last {
+            out.push((Ipv6Addr::from(cursor), Ipv6Addr::from(last)));
+        }
+        out
+    }
+
+    /// The number of prefixes of `pool` that may be delegated ([`Self::delegable`]).
+    pub fn delegable_count(&self, pool: &PdPool6Image) -> u128 {
+        let size = pool.block_size();
+        self.delegable(pool)
+            .iter()
+            .map(|(first, last)| (u128::from(*last) - u128::from(*first)) / size + 1)
+            .fold(0, u128::saturating_add)
+    }
+
     /// The first option of `code` in the `dhcp6` space.
     pub fn option(&self, code: u16) -> Option<&OptionValue> {
         self.options
@@ -458,6 +498,100 @@ mod tests {
         assert_eq!(wide.block(65_535), ip("2001:db8:180:ffff::"));
         // An index past the end saturates and does not panic.
         assert_eq!(pool.block(u128::MAX), Ipv6Addr::from(u128::MAX));
+    }
+
+    // WP9.4: the delegable prefixes as intervals.
+    #[test]
+    fn the_delegable_part_leaves_out_every_prefix_an_exclusion_touches() {
+        let mut held = scope(PrefixId::generate(), "2001:db8:180::/48", None);
+        held.pools.clear();
+        held.excluded.clear();
+        let pool = pd_pool();
+        held.pd_pools = vec![pool.clone()];
+        assert_eq!(held.delegable(&pool), vec![(pool.first, pool.last)]);
+        assert_eq!(held.delegable_count(&pool), 16);
+        // One address in the second prefix, a range over the ends of the eighth and the
+        // ninth, and one before the pool that reaches into its first prefix.
+        held.excluded = vec![
+            (ip("2001:db8:180:ff::"), ip("2001:db8:180:100::1")),
+            (ip("2001:db8:180:115::5"), ip("2001:db8:180:115::5")),
+            (ip("2001:db8:180:17f::"), ip("2001:db8:180:180::")),
+        ];
+        assert_eq!(
+            held.delegable(&pool),
+            vec![
+                (
+                    ip("2001:db8:180:120::"),
+                    ip("2001:db8:180:16f:ffff:ffff:ffff:ffff")
+                ),
+                (
+                    ip("2001:db8:180:190::"),
+                    ip("2001:db8:180:1ff:ffff:ffff:ffff:ffff")
+                ),
+            ]
+        );
+        assert_eq!(held.delegable_count(&pool), 12);
+        // An exclusion in the last prefix ends the delegable part before it; one past the
+        // pool changes nothing.
+        held.excluded = vec![
+            (ip("2001:db8:180:1f8::"), ip("2001:db8:180:1f8::")),
+            (ip("2001:db8:180:300::"), ip("2001:db8:180:300::")),
+        ];
+        assert_eq!(
+            held.delegable(&pool),
+            vec![(pool.first, ip("2001:db8:180:1ef:ffff:ffff:ffff:ffff"))]
+        );
+        // Every prefix excluded: nothing is delegable.
+        held.excluded = vec![(ip("2001:db8:180::"), ip("2001:db8:180:ffff::"))];
+        assert_eq!(held.delegable(&pool), Vec::new());
+        assert_eq!(held.delegable_count(&pool), 0);
+    }
+
+    proptest::proptest! {
+        /// A prefix lies in the delegable part exactly when `is_delegable` says it may be
+        /// delegated.
+        #[test]
+        fn the_delegable_part_is_what_the_engine_delegates(
+            cuts in proptest::collection::vec((0u128..18, 0u128..(1u128 << 68), 0u128..(1u128 << 70)), 0..5)
+        ) {
+            let mut held = scope(PrefixId::generate(), "2001:db8:180::/48", None);
+            held.pools.clear();
+            let pool = pd_pool();
+            let base = u128::from(ip("2001:db8:180:100::")) - (1u128 << 68);
+            let mut excluded: Vec<(u128, u128)> = cuts
+                .iter()
+                .map(|(block, offset, span)| {
+                    let first = base + block * (1u128 << 68) + offset;
+                    (first, first + span)
+                })
+                .collect();
+            excluded.sort_unstable();
+            let mut merged: Vec<(u128, u128)> = Vec::new();
+            for (first, last) in excluded {
+                match merged.last_mut() {
+                    Some((_, end)) if first <= end.saturating_add(1) => *end = (*end).max(last),
+                    _ => merged.push((first, last)),
+                }
+            }
+            held.excluded = merged
+                .into_iter()
+                .map(|(first, last)| (Ipv6Addr::from(first), Ipv6Addr::from(last)))
+                .collect();
+            held.pd_pools = vec![pool.clone()];
+            let parts = held.delegable(&pool);
+            let mut count = 0u128;
+            for index in 0..pool.blocks() {
+                let prefix = pool.block(index);
+                let inside = parts.iter().any(|(first, last)| *first <= prefix && prefix <= *last);
+                proptest::prop_assert_eq!(inside, held.is_delegable(prefix, 60), "prefix {}", prefix);
+                count += u128::from(inside);
+            }
+            proptest::prop_assert_eq!(held.delegable_count(&pool), count);
+            for (first, last) in parts {
+                proptest::prop_assert_eq!((u128::from(first) - u128::from(pool.first)) % pool.block_size(), 0);
+                proptest::prop_assert_eq!((u128::from(last) + 1 - u128::from(pool.first)) % pool.block_size(), 0);
+            }
+        }
     }
 
     #[test]

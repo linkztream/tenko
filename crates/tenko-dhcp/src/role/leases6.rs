@@ -7,7 +7,8 @@ use std::{collections::HashMap, net::Ipv6Addr};
 
 use tenko_core::{
     Revision, Timestamp, VrfId,
-    dhcp::{BindingState, Lease6, Lease6Event, LeaseEventKind, tables},
+    dhcp::{BindingState, Lease6, Lease6Event, Lease6Kind, LeaseEventKind, tables},
+    net::Duid,
 };
 use tenko_store::{ReadConsistency, ReadViewExt as _, StoreError, WriteBatch};
 
@@ -72,9 +73,10 @@ impl LocalNode {
             let after = args.after6.and_then(|resume| resume.key());
             let (rows, more) = {
                 let table = self.leases6.read();
+                let addr = args.addr_filter6();
                 let mut matching: Vec<&Lease6> = table
                     .iter()
-                    .filter(|lease| args.matches6(lease))
+                    .filter(|lease| args.matches6_with(lease, addr.as_ref()))
                     .filter(|lease| after.is_none_or(|after| (lease.vrf, lease.addr6()) > after))
                     .collect();
                 matching.sort_unstable_by_key(|lease| (lease.vrf, lease.addr6()));
@@ -126,6 +128,7 @@ impl LocalNode {
             reserved: reservation.is_some_and(|(addr, _)| addr == lease.addr6()),
             host: reservation.map(|(_, host)| host),
             peer: None,
+            address_lease: None,
             revision,
             lease,
         }
@@ -181,6 +184,44 @@ impl LocalNode {
             }
             for row in &mut page.items6 {
                 row.peer = row.lease.mac().and_then(|mac| peers.get(&mac).copied());
+            }
+        }
+        // WP9.4: a delegated prefix names the router's address lease (the same DUID).
+        let routers: Vec<(VrfId, Duid)> = page
+            .items6
+            .iter()
+            .filter(|row| row.lease.kind == Lease6Kind::Pd)
+            .map(|row| (row.lease.vrf, row.lease.duid.clone()))
+            .collect();
+        if !routers.is_empty() {
+            let mut addresses: HashMap<(VrfId, Duid), LeasePeer> = HashMap::new();
+            for lease in self.leases6.read().iter() {
+                if lease.kind != Lease6Kind::Na {
+                    continue;
+                }
+                let key = (lease.vrf, lease.duid.clone());
+                if !routers.contains(&key) {
+                    continue;
+                }
+                let peer = LeasePeer {
+                    vrf: lease.vrf,
+                    addr: std::net::IpAddr::V6(lease.addr6()),
+                    state: lease.state,
+                    ends: lease.ends,
+                };
+                match addresses.get(&key) {
+                    Some(held) if !peer.better_than(held) => {}
+                    _ => {
+                        addresses.insert(key, peer);
+                    }
+                }
+            }
+            for row in &mut page.items6 {
+                if row.lease.kind == Lease6Kind::Pd {
+                    row.address_lease = addresses
+                        .get(&(row.lease.vrf, row.lease.duid.clone()))
+                        .copied();
+                }
             }
         }
     }

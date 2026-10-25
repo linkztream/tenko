@@ -510,8 +510,8 @@ v6_kea_rows() {
     v6_kea_check "$work/kea/kea-dhcp6.json"
   row "export.kea6.golden" "kea-dhcp6 -t accepts the golden file of the unit tests (crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json)" \
     v6_kea_check "$repo/crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json"
-  row "export.kea6.report" "the loss report names the relay listener's address for interfaces-config and the server DUID the export does not know" \
-    v6_report_has export.kea.v6.interfaces.address export.kea.v6.server_id.unknown
+  row "export.kea6.report" "the loss report names the relay listener's address for interfaces-config and the server DUID Kea cannot hold (the node's default DUID-UUID)" \
+    v6_report_has export.kea.v6.interfaces.address export.kea.v6.server_id.type
 
   step "dhcp6: stop the node and start kea-dhcp6 from the export on $v6_node6"
   c6 stop tenko >/dev/null 2>&1

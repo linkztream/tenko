@@ -48,3 +48,14 @@
 .dhcp-optset-code { display: inline-flex; gap: var(--sp-2); }
 .dhcp-optset-code .input { width: 9em; }
 .dhcp-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* WP9.4: the pools tab of a DHCPv6 scope holds the address pools and the delegation pools. */
+.dhcp-tab-v6-pools {
+  overflow-y: auto;
+}
+.dhcp-list-body-v6 {
+  min-block-size: 200px;
+}
+.dhcp-pd-box {
+  block-size: 240px;
+}

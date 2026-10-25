@@ -428,9 +428,39 @@ export function restorePrefix(ws: Workspace, id: string, expected: number | null
 
 function checkLease(role: RangeRole, lease: number | null | undefined): void {
   if (lease === null || lease === undefined) return;
-  if (role !== "dhcp_pool") throw invalid("lease_secs", "only DHCP pools have a lease time");
+  // WP9.2: a delegation pool has a lease time too.
+  if (role !== "dhcp_pool" && role !== "dhcp_pd_pool") throw invalid("lease_secs", "only DHCP pools have a lease time");
   if (lease < MIN_LEASE_SECS || lease > MAX_LEASE_SECS) {
     throw invalid("lease_secs", `lease_secs ${lease} is outside ${MIN_LEASE_SECS} to ${MAX_LEASE_SECS}`);
+  }
+}
+
+/** The longest prefix a router is given (RFC 8415 section 6.3 leaves the SLAAC /64 to the router). */
+const MAX_DELEGATED_LEN = 64;
+
+/**
+ * The rules of a delegation pool (docs/dhcp.md section 19.10): it belongs to an IPv6 network, has a
+ * delegated length longer than the network's and at most 64, and starts and ends on boundaries of
+ * that length. Any other role has no delegated length.
+ */
+function checkDelegation(prefix: Prefix, range: Range): void {
+  const delegated = range.delegated_len ?? null;
+  if (range.role !== "dhcp_pd_pool") {
+    if (delegated !== null) throw invalid("delegated_len", "only delegation pools have a delegated length");
+    return;
+  }
+  const cidr = cidrOf(prefix.cidr);
+  if (cidr.version !== 6) throw invalid("role", "a delegation pool belongs to an IPv6 network");
+  if (delegated === null) throw invalid("delegated_len", "delegated_len is required for a delegation pool");
+  if (delegated <= cidr.length || delegated > MAX_DELEGATED_LEN) {
+    throw invalid("delegated_len", `delegated_len must be longer than ${cidr.length} and at most ${MAX_DELEGATED_LEN}`);
+  }
+  const host = (1n << BigInt(128 - delegated)) - 1n;
+  if ((ipOf(range.first).value & host) !== 0n) {
+    throw invalid("first", `first must be the first address of a /${delegated} prefix`);
+  }
+  if ((ipOf(range.last).value & host) !== host) {
+    throw invalid("last", `last must be the last address of a /${delegated} prefix`);
   }
 }
 
@@ -487,7 +517,7 @@ function checkRange(ws: Workspace, prefix: Prefix, range: Range): void {
   }
 }
 
-const RANGE_MEMBERS = ["custom", "description", "first", "id", "last", "lease_secs", "role", "status", "tags"] as const;
+const RANGE_MEMBERS = ["custom", "delegated_len", "description", "first", "id", "last", "lease_secs", "role", "status", "tags"] as const;
 
 export function createRange(ws: Workspace, args: Json): ObjectRef {
   const b = new Body(args).only([...RANGE_MEMBERS, "prefix"]);
@@ -498,6 +528,7 @@ export function createRange(ws: Workspace, args: Json): ObjectRef {
   const role = b.reqOneOf<RangeRole>("role", RANGE_ROLES);
   const status = b.oneOf<Status>("status", STATUSES);
   const lease = b.nullableInteger("lease_secs", 0, 2_147_483_647);
+  const delegated = b.nullableInteger("delegated_len", 0, 2_147_483_647);
   const meta = readMeta(b);
   b.done();
   const prefix = ws.liveRef("prefix", prefixId, "prefix");
@@ -509,10 +540,12 @@ export function createRange(ws: Workspace, args: Json): ObjectRef {
     last: formatIp(last),
     role,
     ...(lease !== null && lease !== undefined ? { lease_secs: lease } : {}),
+    ...(delegated !== null && delegated !== undefined ? { delegated_len: delegated } : {}),
     status: status ?? "active",
     meta: ws.makeMeta("range", meta),
   };
   checkLease(role, lease);
+  checkDelegation(prefix, range);
   checkRange(ws, prefix, range);
   ws.checkParentStatus(ref("range", id), range.status, ref("prefix", prefix.id), prefix.status);
   ws.put("range", range);
@@ -527,6 +560,7 @@ export function updateRange(ws: Workspace, args: Json): ObjectRef {
   const role = patch.oneOf<RangeRole>("role", RANGE_ROLES);
   const status = patch.oneOf<Status>("status", STATUSES);
   const lease = patch.nullableInteger("lease_secs", 0, 2_147_483_647);
+  const delegated = patch.nullableInteger("delegated_len", 0, 2_147_483_647);
   const meta = readMeta(patch);
   patch.done();
   const before = ws.loadForChange("range", id, expected);
@@ -537,7 +571,10 @@ export function updateRange(ws: Workspace, args: Json): ObjectRef {
   if (role) after.role = role;
   if (lease === null) delete after.lease_secs;
   else if (lease !== undefined) after.lease_secs = lease;
+  if (delegated === null) delete after.delegated_len;
+  else if (delegated !== undefined) after.delegated_len = delegated;
   checkLease(after.role, after.lease_secs);
+  checkDelegation(prefix, after);
   if (status !== undefined) {
     ws.checkTransition("range", id, before.status, status);
     after.status = status;

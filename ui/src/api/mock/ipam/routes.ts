@@ -319,7 +319,7 @@ const prefixRoutes: HttpHandler[] = [
     const params = writeParams(call, false);
     const id = idParam(call);
     ensure("prefix", id);
-    const body = await readBody(call, ["custom", "description", "first", "id", "last", "lease_secs", "role", "status", "tags"]);
+    const body = await readBody(call, ["custom", "delegated_len", "description", "first", "id", "last", "lease_secs", "role", "status", "tags"]);
     const command = { op: "create_range", args: { ...body, prefix: id } };
     return writeReply(execute([command], { acknowledge: params.acknowledge, dryRun: params.dryRun }), true);
   }),

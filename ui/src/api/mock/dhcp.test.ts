@@ -53,6 +53,7 @@ const POOL = DHCP_IDS.lanPool;
 const SUPERNET = "0190d1c2-0000-7000-8000-0000000a00f1";
 const WIFI = "0190d1c2-0000-7000-8000-0000000a00f2";
 const V6_POOL = DHCP_IDS.lanV6Pool;
+const PD_POOL = DHCP_IDS.pdV6Pool;
 
 let rev = 0;
 let ids = 0;
@@ -66,6 +67,7 @@ const NETWORKS: Record<string, { cidr: string; role: "network" | "supernet" }> =
   [SUPERNET]: { cidr: "203.0.113.0/24", role: "supernet" },
   [WIFI]: { cidr: "203.0.113.0/25", role: "network" },
   [DHCP_IDS.lanV6]: { cidr: "2001:db8:0:10::/64", role: "network" },
+  [DHCP_IDS.pdV6]: { cidr: "2001:db8:1::/48", role: "network" },
   [IOT_V6]: { cidr: "2001:db8:0:30::/64", role: "network" },
 };
 
@@ -87,7 +89,10 @@ beforeEach(() => {
             : prefix === IOT_V6
               ? [{ id: "range-wide", first: "2001:db8:0:30::", last: "2001:db8:0:30:ffff:ffff:ffff:ffff" }]
               : [],
-      range: (id) => (id === POOL ? { id, prefix: DHCP_IDS.lan, role: "dhcp_pool" } : id === "range-reserved" ? { id, prefix: DHCP_IDS.lan, role: "reserved" } : undefined),
+      // WP9.2: 16 prefixes of /60.
+      pdPools: (prefix) =>
+        prefix === DHCP_IDS.pdV6 ? [{ id: PD_POOL, first: "2001:db8:1:100::", last: "2001:db8:1:1ff:ffff:ffff:ffff:ffff", lease_secs: 7200, delegated_len: 60 }] : [],
+      range: (id) => (id === POOL ? { id, prefix: DHCP_IDS.lan, role: "dhcp_pool" } : id === PD_POOL ? { id, prefix: DHCP_IDS.pdV6, role: "dhcp_pd_pool" } : id === "range-reserved" ? { id, prefix: DHCP_IDS.lan, role: "reserved" } : undefined),
       reservation: (mac) => (mac === "00:00:5e:00:53:04" ? "0190d1c2-0000-7000-8000-000000000999" : undefined),
     },
   };
@@ -112,6 +117,8 @@ describe("seedDhcp", () => {
     expect(listScopes(state, ctx).map((s) => [s.cidr, s.family, s.pools, s.leases])).toEqual([
       ["192.0.2.0/24", "v4", 1, 12],
       ["2001:db8:0:10::/64", "v6", 1, 3],
+      // WP9.2: the delegation pool is no address pool, and the scope has no address lease.
+      ["2001:db8:1::/48", "v6", 0, 0],
     ]);
     // WP9.4: the DHCPv6 scope has rapid commit set and the DNS servers and the search list as dhcp6 options.
     expect(listScopes(state, ctx)[1]).toMatchObject({ v6: { rapid_commit: true }, description: "House LAN, IPv6" });
@@ -180,7 +187,7 @@ describe("scopes", () => {
     putOptionSet(state, ctx, `pool:${POOL}`, { values: [{ code: 3, typed: { ipv4: { values: ["192.0.2.1"] } } }] }, 0);
     deleteScope(state, ctx, DHCP_IDS.lan, "*");
     // The DHCPv6 scope of the seed and its options stay.
-    expect([state.scopes, state.exclusions, state.pools, state.policies].map((x) => x.length)).toEqual([1, 0, 0, 0]);
+    expect([state.scopes, state.exclusions, state.pools, state.policies].map((x) => x.length)).toEqual([2, 0, 0, 0]);
     expect([...state.optionSets.keys()].sort()).toEqual([`scope:${DHCP_IDS.lanV6}`, "server"]);
     expect(state.classes).toHaveLength(1);
   });
@@ -224,6 +231,28 @@ describe("pools", () => {
     expect(failure(() => setPool(state, ctx, POOL, { classes: [] }, 0)).status).toBe(412);
     expect(failure(() => setPool(state, ctx, "range-reserved", {}, 0)).code).toBe("dhcp.pool.not_pool");
     expect(listPools(state, ctx, DHCP_IDS.lan)).toHaveLength(1);
+  });
+
+  // WP9.2
+  it("lists a delegation pool with its role, delegated length and the prefixes it may delegate and has bound", () => {
+    const pools = listPools(state, ctx, DHCP_IDS.pdV6);
+    expect(pools).toHaveLength(1);
+    expect(pools[0]).toMatchObject({ range: PD_POOL, role: "dhcp_pd_pool", delegated_len: 60, first: "2001:db8:1:100::", size: 16, leased: 1, lease_secs: 7200 });
+    // An address pool says its role and has no delegated length.
+    const address = listPools(state, ctx, DHCP_IDS.lan)[0]!;
+    expect([address.role, address.delegated_len]).toEqual(["dhcp_pool", undefined]);
+    expect(listPools(state, ctx, null).map((p) => p.role)).toEqual(["dhcp_pool", "dhcp_pool", "dhcp_pd_pool"]);
+  });
+
+  it("takes out the prefixes an exclusion touches from the size of a delegation pool", () => {
+    // 2001:db8:1:110:: to 2001:db8:1:12f:: touches the /60 prefixes 1 and 2 (110::/60 and 120::/60).
+    createExclusion(state, ctx, DHCP_IDS.pdV6, { first: "2001:db8:1:118::", last: "2001:db8:1:12f::" });
+    expect(listPools(state, ctx, DHCP_IDS.pdV6)[0]?.size).toBe(14);
+    expect(utilization(state, ctx, DHCP_IDS.pdV6).pd).toMatchObject({ pool_size: 14, leased: 1, free: 13 });
+  });
+
+  it("keeps the settings of a delegation pool out of reach: it is no address pool", () => {
+    expect(failure(() => setPool(state, ctx, PD_POOL, {}, 0)).code).toBe("dhcp.pool.not_pool");
   });
 });
 
@@ -513,6 +542,16 @@ describe("DHCPv6 (WP9.4)", () => {
     expect([cleared.v6, cleared.description]).toEqual([undefined, "Other"]);
   });
 
+  // WP9.2
+  it("gives the utilization of a scope with delegation pools a pd block in prefixes and zero address figures", () => {
+    const u = utilization(state, ctx, DHCP_IDS.pdV6);
+    expect([u.family, u.pool_size, u.leased, u.free, u.utilization]).toEqual(["v6", 0, 0, 0, 0]);
+    expect(u.pd).toEqual({ pools: 1, pool_size: 16, leased: 1, free: 15, utilization: 0.0625 });
+    // Other scopes have no pd block.
+    expect(utilization(state, ctx, DHCP_IDS.lanV6).pd).toBeUndefined();
+    expect(utilization(state, ctx, DHCP_IDS.lan).pd).toBeUndefined();
+  });
+
   it("counts the pools of a DHCPv6 scope with 128-bit sizes and says the size of a large one as a power of two", () => {
     const small = utilization(state, ctx, DHCP_IDS.lanV6);
     expect([small.family, small.pool_size, small.leased, small.free, small.pool_bits]).toEqual(["v6", 256, 3, 253, undefined]);
@@ -588,10 +627,23 @@ describe("the routes", () => {
 
   it("lists a page and audits a write", async () => {
     const page = await api.get("/api/v1/dhcp/scopes");
-    expect(page.items.map((s) => s.cidr)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64"]);
+    expect(page.items.map((s) => s.cidr)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64", "2001:db8:1::/48"]);
     const before = audit.records.length;
     await api.post("/api/v1/dhcp/filters", { body: { mac: "02:00:00:00:00:*", kind: "deny" } });
     expect(audit.records.slice(before).map((r) => r.draft.action)).toEqual(["dhcp.filter.create"]);
+  });
+
+  // WP9.2: the routes read the delegation pool of the IPAM seed.
+  it("answers the delegation pool of the seeded DHCPv6 scope on the pool and utilization routes", async () => {
+    const pools = await api.get("/api/v1/dhcp/pools", { query: { scope: DHCP_IDS.pdV6 } });
+    expect(pools.items).toHaveLength(1);
+    expect(pools.items[0]).toMatchObject({ range: PD_POOL, role: "dhcp_pd_pool", delegated_len: 60, size: 16, leased: 1 });
+    expect(await api.get("/api/v1/dhcp/pools/{range}", { path: { range: PD_POOL } })).toMatchObject({ role: "dhcp_pd_pool", delegated_len: 60 });
+    const u = await api.get("/api/v1/dhcp/scopes/{prefix}/utilization", { path: { prefix: DHCP_IDS.pdV6 } });
+    expect(u.pd).toEqual({ pools: 1, pool_size: 16, leased: 1, free: 15, utilization: 0.0625 });
+    expect([u.pool_size, u.leased]).toEqual([0, 0]);
+    const lan = await api.get("/api/v1/dhcp/scopes/{prefix}/utilization", { path: { prefix: DHCP_IDS.lanV6 } });
+    expect(lan.pd).toBeUndefined();
   });
 
   it("answers the option catalog by space, both with dhcp4 first, and refuses another space", async () => {

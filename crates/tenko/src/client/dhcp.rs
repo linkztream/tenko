@@ -781,6 +781,10 @@ pub struct LeaseListArgs {
     /// Only DHCPv6 leases of this client DUID (hexadecimal, colons allowed).
     #[arg(long, value_name = "HEX")]
     pub duid: Option<String>,
+    // WP9.4: addresses or delegated prefixes.
+    /// Only DHCPv6 addresses (`na`) or delegated prefixes (`pd`).
+    #[arg(long, value_enum, value_name = "KIND")]
+    pub kind: Option<LeaseKind>,
     /// Show one page of at most this many leases (and the cursor of the next one) instead
     /// of all of them.
     #[arg(long, value_name = "N")]
@@ -805,6 +809,25 @@ impl LeaseFamily {
         match self {
             Self::V4 => "v4",
             Self::V6 => "v6",
+        }
+    }
+}
+
+// WP9.4: the kinds of DHCPv6 lease.
+/// What a DHCPv6 lease of `--kind` holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LeaseKind {
+    /// An address (`IA_NA`).
+    Na,
+    /// A delegated prefix (`IA_PD`).
+    Pd,
+}
+
+impl LeaseKind {
+    const fn api(self) -> &'static str {
+        match self {
+            Self::Na => "na",
+            Self::Pd => "pd",
         }
     }
 }
@@ -1721,6 +1744,7 @@ fn lease(action: &LeaseCommand) -> Result<Request, Failure> {
                 )
                 .with_query("family", args.family.map(|family| family.api().to_owned()))
                 .with_query("duid", args.duid.as_deref().map(duid).transpose()?)
+                .with_query("kind", args.kind.map(|kind| kind.api().to_owned()))
                 .with_query("limit", args.limit.map(|limit| limit.to_string()))
                 .with_query("cursor", args.cursor.clone()))
         }
@@ -3085,6 +3109,21 @@ mod tests {
             query(&v6),
             [("family", "v6"), ("duid", "0003000100005e005301")]
         );
+        let pd = check(
+            &[
+                "lease",
+                "list",
+                "--kind",
+                "pd",
+                "--addr",
+                "2001:db8:180::/48",
+            ],
+            Method::Get,
+            "/dhcp/leases",
+            None,
+        );
+        assert_eq!(query(&pd), [("addr", "2001:db8:180::/48"), ("kind", "pd")]);
+        assert!(parse(&["lease", "list", "--kind", "ta"]).is_err());
         check(
             &["lease", "show", "2001:db8::50"],
             Method::Get,

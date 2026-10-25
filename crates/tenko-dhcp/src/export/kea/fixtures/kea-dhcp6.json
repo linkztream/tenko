@@ -103,7 +103,7 @@
         ],
         "subnet6": [
           {
-            "id": 3,
+            "id": 4,
             "max-preferred-lifetime": 54000,
             "max-valid-lifetime": 86400,
             "min-preferred-lifetime": 54000,
@@ -126,7 +126,7 @@
             "valid-lifetime": 86400
           },
           {
-            "id": 4,
+            "id": 5,
             "max-preferred-lifetime": 54000,
             "max-valid-lifetime": 86400,
             "min-preferred-lifetime": 54000,
@@ -263,6 +263,87 @@
           "tenko-prefix": "00000000-0000-7000-8000-00000000001c"
         },
         "valid-lifetime": 3600
+      },
+      {
+        "id": 3,
+        "max-preferred-lifetime": 4500,
+        "max-valid-lifetime": 7200,
+        "min-preferred-lifetime": 4500,
+        "min-valid-lifetime": 7200,
+        "option-data": [],
+        "pd-pools": [
+          {
+            "delegated-len": 60,
+            "option-data": [
+              {
+                "always-send": true,
+                "code": 23,
+                "csv-format": true,
+                "data": "2001:db8:180::53",
+                "name": "dns-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "prefix": "2001:db8:180:100::",
+            "prefix-len": 60
+          },
+          {
+            "delegated-len": 60,
+            "option-data": [
+              {
+                "always-send": true,
+                "code": 23,
+                "csv-format": true,
+                "data": "2001:db8:180::53",
+                "name": "dns-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "prefix": "2001:db8:180:120::",
+            "prefix-len": 59
+          },
+          {
+            "delegated-len": 60,
+            "option-data": [
+              {
+                "always-send": true,
+                "code": 23,
+                "csv-format": true,
+                "data": "2001:db8:180::53",
+                "name": "dns-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "prefix": "2001:db8:180:140::",
+            "prefix-len": 58
+          },
+          {
+            "delegated-len": 60,
+            "option-data": [
+              {
+                "always-send": true,
+                "code": 23,
+                "csv-format": true,
+                "data": "2001:db8:180::53",
+                "name": "dns-servers",
+                "space": "dhcp6"
+              }
+            ],
+            "prefix": "2001:db8:180:180::",
+            "prefix-len": 57
+          }
+        ],
+        "pools": [],
+        "preferred-lifetime": 4500,
+        "rapid-commit": true,
+        "rebind-timer": 3600,
+        "renew-timer": 2250,
+        "reservations": [],
+        "subnet": "2001:db8:180::/48",
+        "user-context": {
+          "tenko-prefix": "00000000-0000-7000-8000-000000000023"
+        },
+        "valid-lifetime": 7200
       }
     ],
     "user-context": {

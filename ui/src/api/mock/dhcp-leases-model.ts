@@ -1,7 +1,7 @@
 // The lease model of the mock API (WP7.5, WP9.4): the leases of both address families the DHCP
 // service holds, their history, the peer that correlates a client's two leases by MAC address
-// (DHCP-11), the filters of the two lists and the state of a node's role. It is pure (no msw, no
-// session), so the msw routes (routes-dhcp-leases.ts) and the browser fake of the end-to-end tests
+// (DHCP-11), the address lease of a delegated prefix (WP9.2), the filters of the two lists and the
+// state of a node's role. It is pure (no msw, no session), so the msw routes (routes-dhcp-leases.ts) and the browser fake of the end-to-end tests
 // (e2e/support/dhcp6-leases-mock.ts) run the same code. Documentation values only: RFC 5737
 // addresses, RFC 3849 addresses, MACs of the 00:00:5e:00:53:xx block.
 import type { components } from "../generated/schema";
@@ -16,6 +16,8 @@ type NodeStatus = S["DhcpNodeStatus"];
 export const LEASE_SCOPES = {
   lan: "0190d1c2-0000-7000-8000-0000000a0001",
   lanV6: "0190d1c2-0000-7000-8000-0000000a0008",
+  /** WP9.2: the IPAM prefix 2001:db8:1::/48 whose DHCPv6 scope has a delegation pool 2001:db8:1:100::/56 at /60. */
+  pdV6: "0190d1c2-0000-7000-8000-0000000a000c",
 } as const;
 
 /** The VRF of each seeded scope's prefix. */
@@ -95,6 +97,49 @@ export function compareAddr(a: string, b: string): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
+/** WP9.2: the MAC address a DHCPv6 lease's link-layer address (Ethernet only) spells, or undefined when it has none. */
+export function linkLayerMac(lease: Pick<Lease, "link_layer" | "link_layer_type">): string | undefined {
+  const hex = lease.link_layer;
+  if (!hex || (lease.link_layer_type ?? 1) !== 1 || !/^[0-9a-f]{12}$/i.test(hex)) return undefined;
+  return (hex.toLowerCase().match(/../g) ?? []).join(":");
+}
+
+// ---------------------------------------------------------------------------------
+// IPv6 ranges (WP9.2): the address filter reads an address or a prefix
+
+/** An IPv6 address or prefix as its 128-bit value (host bits cleared) and its length (an address is a /128), or undefined when the text is none. */
+export function parseRange6(text: string): { value: bigint; len: number } | undefined {
+  const [addr = "", rest, ...more] = text.trim().split("/");
+  if (more.length > 0) return undefined;
+  const full = expand6(addr);
+  if (full === undefined) return undefined;
+  let len = 128;
+  if (rest !== undefined) {
+    if (!/^\d{1,3}$/.test(rest) || Number(rest) > 128) return undefined;
+    len = Number(rest);
+  }
+  const value = BigInt(`0x${full.replace(/:/g, "")}`);
+  const host = 128n - BigInt(len);
+  return { value: (value >> host) << host, len };
+}
+
+/** Whether the range `outer` holds the range `inner` (a prefix holds every longer prefix and address it covers). */
+export function holdsRange(outer: { value: bigint; len: number }, inner: { value: bigint; len: number }): boolean {
+  if (outer.len > inner.len) return false;
+  const host = 128n - BigInt(outer.len);
+  return inner.value >> host === outer.value >> host;
+}
+
+/** The addr filter: the addresses whose text starts with it, and for an IPv6 address or prefix also the DHCPv6 leases whose address or delegated prefix it holds and the delegated prefixes that hold it. */
+function addrMatches(lease: Lease, text: string): boolean {
+  const wanted = text.trim().toLowerCase();
+  if (lease.addr.startsWith(wanted)) return true;
+  if (lease.family !== "v6") return false;
+  const asked = parseRange6(wanted);
+  const own = parseRange6(`${lease.addr}/${lease.kind === "pd" ? (lease.prefix_len ?? 128) : 128}`);
+  return asked !== undefined && own !== undefined && (holdsRange(asked, own) || holdsRange(own, asked));
+}
+
 // ---------------------------------------------------------------------------------
 // The seed
 
@@ -110,16 +155,18 @@ export const DUIDS = {
   en2: "0002000000090c0c0c0c04",
 } as const;
 
-/** The twelve DHCPv4 leases of 192.0.2.0/24, four DHCPv6 leases of 2001:db8:0:10::/64 and their events. */
+/** The twelve DHCPv4 leases of 192.0.2.0/24, four DHCPv6 leases of 2001:db8:0:10::/64, a delegated prefix 2001:db8:1:110::/60 and their events. */
 export function seedLeases(vrfs: LeaseVrfs, now = Date.now()): LeaseState {
   const leases: Lease[] = [];
   const events: LeaseEvent[] = [];
   const event = (lease: Lease, kind: LeaseEventKind, at: number): void => {
     const base = { addr: lease.addr, at: new Date(at).toISOString(), ends: lease.ends, family: lease.family, kind, node: NODE, scope: lease.scope, state: lease.state, vrf: lease.vrf };
+    // WP9.2: a DHCPv6 row carries the client's link-layer address (RFC 6939) as its MAC address, whatever DUID the client has.
+    const mac = lease.mac ?? linkLayerMac(lease);
     events.push(
       lease.family === "v4"
         ? { ...base, ...(lease.client ? { client: lease.client } : {}), ...(lease.mac ? { mac: lease.mac } : {}), ...(lease.hostname ? { hostname: lease.hostname } : {}) }
-        : { ...base, ...(lease.duid ? { duid: lease.duid } : {}), ...(lease.mac ? { mac: lease.mac } : {}), iaid: lease.iaid ?? 1, prefix_len: lease.prefix_len ?? 128 },
+        : { ...base, ...(lease.duid ? { duid: lease.duid } : {}), ...(mac ? { mac } : {}), iaid: lease.iaid ?? 1, prefix_len: lease.prefix_len ?? 128 },
     );
   };
   for (let i = 0; i < 12; i += 1) {
@@ -187,6 +234,22 @@ export function seedLeases(vrfs: LeaseVrfs, now = Date.now()): LeaseState {
     if (c.n === 0) event({ ...lease, state: "active" }, "renewed", now - 2_400_000);
     if (c.state === "expired") event(lease, "expired", ends);
   }
+
+  // WP9.2: the router of the first DHCPv6 client (same DUID, same link-layer address) holds a delegated prefix.
+  const router = leases.find((l) => l.family === "v6" && l.duid === DUIDS.ll)!;
+  const delegated: Lease = {
+    ...router,
+    addr: "2001:db8:1:110::",
+    ends: new Date(now + 3 * 900_000).toISOString(),
+    kind: "pd",
+    preferred_ends: new Date(now + 3 * 900_000 - 450_000).toISOString(),
+    prefix_len: 60,
+    scope: LEASE_SCOPES.pdV6,
+    state: "active",
+  };
+  delete delegated.fqdn;
+  leases.push(delegated);
+  event(delegated, "granted", now - 3_600_000 - 4 * 60_000);
   return { leases, events };
 }
 
@@ -220,6 +283,13 @@ function familyParam(params: URLSearchParams): "v4" | "v6" | null {
   return family;
 }
 
+/** WP9.2: `kind` of the lease list, the kind of a DHCPv6 lease; any other value is refused. */
+function kindParam(params: URLSearchParams): "na" | "pd" | null {
+  const kind = param(params, "kind");
+  if (kind !== null && kind !== "na" && kind !== "pd") throw new QueryError("kind", kind);
+  return kind;
+}
+
 function time(value: string, name: string): number {
   const at = Date.parse(value);
   if (Number.isNaN(at)) throw new QueryError(name, value);
@@ -234,12 +304,22 @@ export function peerOf(state: LeaseState, lease: Lease): Lease["peer"] {
   if (!lease.mac) return null;
   const mac = lease.mac.toLowerCase();
   const found = state.leases
-    .filter((l) => l.family !== lease.family && l.mac?.toLowerCase() === mac)
+    // A delegated prefix is no address of the client: the peer of a DHCPv4 lease is the address lease.
+    .filter((l) => l.family !== lease.family && l.kind !== "pd" && l.mac?.toLowerCase() === mac)
     .sort((a, b) => Number(b.state === "active") - Number(a.state === "active") || Date.parse(b.ends) - Date.parse(a.ends) || compareAddr(a.addr, b.addr))[0];
   return found ? { addr: found.addr, ends: found.ends, family: found.family, state: found.state, vrf: found.vrf } : null;
 }
 
-/** The leases the filters pass: the DHCPv4 leases by address, then the DHCPv6 ones, each with its peer. */
+/** WP9.2: the address lease (`na`) of the client of a delegated prefix, by DUID in the same VRF: an active one first, else the one that ends last. */
+export function addressLeaseOf(state: LeaseState, lease: Lease): Lease["address_lease"] {
+  if (lease.kind !== "pd" || !lease.duid) return null;
+  const found = state.leases
+    .filter((l) => l.family === "v6" && l.kind !== "pd" && l.duid === lease.duid && l.vrf === lease.vrf)
+    .sort((a, b) => Number(b.state === "active") - Number(a.state === "active") || Date.parse(b.ends) - Date.parse(a.ends) || compareAddr(a.addr, b.addr))[0];
+  return found ? { addr: found.addr, ends: found.ends, family: found.family, state: found.state, vrf: found.vrf } : null;
+}
+
+/** The leases the filters pass: the DHCPv4 leases by address, then the DHCPv6 ones, each with its peer (a delegated prefix also with its address lease). */
 export function listLeases(state: LeaseState, params: URLSearchParams): Lease[] {
   const scope = param(params, "scope");
   const addr = param(params, "addr");
@@ -248,22 +328,22 @@ export function listLeases(state: LeaseState, params: URLSearchParams): Lease[] 
   const wanted = param(params, "state");
   const family = familyParam(params);
   const duid = param(params, "duid");
+  const kind = kindParam(params);
   if (wanted !== null && !STATES.includes(wanted)) throw new QueryError("state", wanted);
   const digits = mac === null ? null : macDigits(mac);
   const duidHex = duid === null ? null : duidDigits(duid);
   return state.leases
     .filter((l) => family === null || l.family === family)
+    // Only DHCPv6 leases have a kind; the DHCPv4 part is not read when one is asked for.
+    .filter((l) => kind === null || (l.family === "v6" && (l.kind ?? "na") === kind))
     .filter((l) => scope === null || l.scope === scope)
-    .filter((l) => addr === null || l.addr.startsWith(addr.trim().toLowerCase()))
+    .filter((l) => addr === null || addrMatches(l, addr))
     .filter((l) => digits === null || (l.mac ? macDigitsOf(l.mac) === digits : false))
     .filter((l) => duidHex === null || l.duid === duidHex)
     .filter((l) => name === null || `${l.hostname ?? ""}\n${l.fqdn ?? ""}`.toLowerCase().includes(name.toLowerCase()))
     .filter((l) => wanted === null || l.state === wanted)
     .sort((a, b) => Number(a.family === "v6") - Number(b.family === "v6") || compareAddr(a.addr, b.addr))
-    .map((l) => {
-      const peer = peerOf(state, l);
-      return peer ? { ...l, peer } : { ...l };
-    });
+    .map((l) => withPeer(state, l));
 }
 
 /** The events the filters pass, both families merged, newest first. */
@@ -301,10 +381,11 @@ export function findLease(state: LeaseState, addr: string, vrf?: string | null):
   return state.leases.find((l) => sameAddr(l.addr, addr) && (vrf === undefined || vrf === null || l.vrf === vrf));
 }
 
-/** The lease as the item of its address shows it: with its peer. */
+/** The lease as the item of its address shows it: with its peer (a delegated prefix also with its address lease). */
 export function withPeer(state: LeaseState, lease: Lease): Lease {
   const peer = peerOf(state, lease);
-  return peer ? { ...lease, peer } : { ...lease };
+  const address = addressLeaseOf(state, lease);
+  return { ...lease, ...(peer ? { peer } : {}), ...(address ? { address_lease: address } : {}) };
 }
 
 /** The number of leases in each state, in the order the states first appear. */
@@ -326,9 +407,31 @@ export function nodeStatusOf(state: LeaseState, revision: number): NodeStatus {
     node: NODE,
     probe: true,
     revision,
+    ra: raReport(),
     scopes: 1,
     scopes6: 1,
     serving: true,
+    server_duid: "00040000000000000000000000000000002a",
+  };
+}
+
+/** WP9.2: the router advertisement check of the node: one link whose router sets M and O, one whose router sets neither. */
+function raReport(): NonNullable<NodeStatus["ra"]> {
+  const seen = new Date().toISOString();
+  return {
+    check: "watching",
+    links: [
+      { interface: "eth0", routers: ["fe80::1"], managed: true, other: true, prefixes: ["2001:db8:0:10::/64"], scopes: ["2001:db8:0:10::/64"], seen },
+      { interface: "eth1", routers: ["fe80::2"], managed: false, other: false, prefixes: ["2001:db8:0:30::/64"], scopes: ["2001:db8:0:30::/64"], seen },
+    ],
+    findings: [
+      {
+        code: "dhcp.ra.flags_off",
+        interface: "eth1",
+        detail: "the routers on eth1 advertise neither M nor O, so the clients on that link configure addresses by themselves and never ask this server; set the M flag on the router to make them use DHCPv6",
+        params: { interface: "eth1", routers: "fe80::2", scopes: "2001:db8:0:30::/64" },
+      },
+    ],
   };
 }
 

@@ -52,6 +52,17 @@ function Utilization(props: { prefix: string }) {
               <dd class="num" data-testid="util-percent" data-value={String(percentOf(u().utilization))}>
                 {formatNumber(u().utilization, { style: "percent" })}
               </dd>
+              {/* WP9.2: the delegation pools of a DHCPv6 scope count prefixes, not addresses. */}
+              <Show when={u().pd}>
+                {(pd) => (
+                  <>
+                    <dt>{t("dhcp.util.pd")}</dt>
+                    <dd class="num" data-testid="util-pd" data-leased={String(pd().leased)} data-size={String(pd().pool_size)} data-value={String(percentOf(pd().utilization))}>
+                      {t("dhcp.util.pd_words", { leased: formatNumber(pd().leased), size: formatNumber(pd().pool_size) })}
+                    </dd>
+                  </>
+                )}
+              </Show>
             </dl>
             <p class="muted">{t("dhcp.util.at", { time: formatDateTime(u().at) })}</p>
           </>

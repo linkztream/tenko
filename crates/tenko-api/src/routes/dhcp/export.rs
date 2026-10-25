@@ -130,15 +130,16 @@ pub(super) async fn export_dhcp(
     drop(view);
     let status = slot.and_then(|Extension(slot)| slot.status());
     let listeners = status.as_ref().map(|status| status.listeners.clone());
-    let listeners6 = status.map(|status| status.listeners6);
-    // The role's status does not carry its server DUID, so the export reports it as not
-    // known and leaves `server-id` to the operator.
+    let listeners6 = status.as_ref().map(|status| status.listeners6.clone());
+    // WP9.4: the role's server DUID (WP9.2) gives `server-id`; without the role in this
+    // process, or without DHCPv6, the export reports it as not known.
+    let server_duid = status.and_then(|status| status.server_duid);
     let export = kea::export(&KeaInput {
         data: &data,
         zones: &zones,
         listeners: listeners.as_deref(),
         listeners6: listeners6.as_deref(),
-        server_duid: None,
+        server_duid: server_duid.as_deref(),
         now: cx.now,
         leases,
         conflict_detection,

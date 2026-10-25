@@ -175,7 +175,7 @@ export interface Utilization {
   byRole: Map<RangeRole, [bigint, bigint]>;
 }
 
-const ROLE_ORDER: readonly RangeRole[] = ["dhcp_pool", "reserved", "infrastructure"];
+const ROLE_ORDER: readonly RangeRole[] = ["dhcp_pool", "dhcp_pd_pool", "reserved", "infrastructure"];
 
 export function permilleOf(util: Utilization): number {
   return permille(util.used, util.reserved, util.capacity);
@@ -353,9 +353,9 @@ export function firstFree(lo: bigint, hi: bigint, blocked: Interval[], policy: A
   return candidate <= hi ? candidate : null;
 }
 
-/** The ranges next free never hands out from: DHCP pools and reserved ranges. */
+/** The ranges next free never hands out from: DHCP pools (also delegation pools) and reserved ranges. */
 function isGuarded(range: Range): boolean {
-  return range.role === "dhcp_pool" || range.role === "reserved";
+  return range.role === "dhcp_pool" || range.role === "dhcp_pd_pool" || range.role === "reserved";
 }
 
 export interface FreeAddressSearch {

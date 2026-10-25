@@ -15,6 +15,8 @@ export function TextFilter(props: {
   mono?: boolean;
   /** The message of a value the server will not take. */
   problem?: string | undefined;
+  /** WP9.2: a hint under the field (what the text may be), tied to it for assistive technology. */
+  help?: string | undefined;
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = createSignal(untrack(() => props.value));
@@ -37,7 +39,7 @@ export function TextFilter(props: {
         spellcheck={false}
         autocomplete="off"
         aria-invalid={props.problem ? "true" : undefined}
-        aria-describedby={props.problem ? `dhcp-filter-${props.id}-error` : undefined}
+        aria-describedby={[props.problem ? `dhcp-filter-${props.id}-error` : "", props.help ? `dhcp-filter-${props.id}-help` : ""].filter(Boolean).join(" ") || undefined}
         data-testid={`filter-${props.id}`}
         onInput={(e) => {
           setDraft(e.currentTarget.value);
@@ -52,6 +54,11 @@ export function TextFilter(props: {
           if (e.key === "Enter") commit();
         }}
       />
+      <Show when={props.help}>
+        <span class="help" id={`dhcp-filter-${props.id}-help`} data-testid="field-help" data-field={props.id}>
+          {props.help}
+        </span>
+      </Show>
       <Show when={props.problem}>
         <span class="help bad" id={`dhcp-filter-${props.id}-error`} data-testid="field-error" data-field={props.id}>
           {props.problem}

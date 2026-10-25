@@ -17,6 +17,7 @@ import { SelectFilter, TextFilter, TimeFilter } from "../leases/Filters";
 import { createLiveRefresh, HISTORY_TABLE, LiveControls } from "../leases/live";
 import {
   anyFilter,
+  eventAddr,
   eventKey,
   clientMac,
   colons,
@@ -93,11 +94,11 @@ export default function HistoryPage() {
     {
       id: "addr",
       header: () => t("dhcp.col.address"),
-      width: 140,
-      text: (e) => e.addr,
+      width: 170,
+      text: eventAddr,
       render: (e) => (
         <A class="mono" href={`/dhcp/leases?addr=${encodeURIComponent(e.addr)}`} title={t("dhcp.history.lease_link")} data-testid="event-lease-link">
-          {e.addr}
+          {eventAddr(e)}
         </A>
       ),
     },

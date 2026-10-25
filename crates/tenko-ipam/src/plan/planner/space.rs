@@ -1360,7 +1360,7 @@ fn check_delegation(prefix: &Prefix, range: &Range) -> IpamResult<()> {
         return Err(IpamError::invalid(
             field,
             format!(
-                "the delegated length {len} must be longer than the network's {} and at most                  {MAX_DELEGATED_LEN}",
+                "the delegated length {len} must be longer than the network's {} and at most {MAX_DELEGATED_LEN}",
                 network.prefix_len()
             ),
         ));

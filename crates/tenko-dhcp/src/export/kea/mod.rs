@@ -186,8 +186,6 @@ pub mod codes {
     /// A relay Interface-Id Kea cannot take: beside an interface, or one of several in a
     /// shared network.
     pub const V6_INTERFACE_ID: &str = "export.kea.v6.interface_id";
-    /// Delegated prefixes (`IA_PD`): the export writes no `pd-pools`.
-    pub const V6_PD: &str = "export.kea.v6.pd";
     /// A DHCPv6 relay listener binds an address; Kea receives unicast only on
     /// `<interface>/<address>`.
     pub const V6_INTERFACES_ADDRESS: &str = "export.kea.v6.interfaces.address";

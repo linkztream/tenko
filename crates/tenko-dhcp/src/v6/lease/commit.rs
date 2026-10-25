@@ -125,6 +125,10 @@ pub fn build<'t>(
             .map_err(encode)?;
         let mut event = change.to_event(binding, node);
         event.at = lease.cltt;
+        // WP9.4: the link-layer address the row keeps (a renewal without RFC 6939 keeps
+        // the one learned before).
+        event.link_layer.clone_from(&lease.link_layer);
+        event.link_layer_type = lease.link_layer_type;
         batch
             .put_typed(
                 &tables::HISTORY6,

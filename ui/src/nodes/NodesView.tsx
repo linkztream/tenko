@@ -32,6 +32,7 @@ import { CertificateText, LinkBadge, NodePanel } from "./NodePanel";
 import { NodeScanPanel } from "./NodeScanPanel";
 // node-roles: the roles of this controller.
 import { RolesEditor } from "./RolesEditor";
+import { isRaCode, raFindingKind, raFindingText } from "../dhcp/v6/raWords";
 import { findingText } from "./roles";
 import "./nodes.css";
 
@@ -39,6 +40,8 @@ import "./nodes.css";
 const MISMATCH_WARNING = "cluster.protocol.mismatch";
 /** Status warnings about the preparation of this machine for its roles (the health rows of the page). */
 const HEALTH_WARNINGS = ["node.roles.privileges", "node.roles.unprepared"];
+// WP9.4: the findings of the router advertisement check of the dhcp role (`dhcp.ra.*`) are health rows too.
+const isHealth = (code: string) => HEALTH_WARNINGS.includes(code) || isRaCode(code);
 
 function nodeColumns(): Column<NodeView>[] {
   return [
@@ -119,7 +122,7 @@ export default function NodesView() {
     return ids.map((id) => source.rows().find((n) => String(n.id) === id)?.name ?? id);
   };
   // The status warnings about the machine's preparation for its roles (the health rows).
-  const healthRows = () => (system()?.warnings ?? []).filter((w) => HEALTH_WARNINGS.includes(w.code));
+  const healthRows = () => (system()?.warnings ?? []).filter((w) => isHealth(w.code));
   const open = (n: NodeView) => navigate(paths.node(n.id));
   // The probe role of this controller: in the stored set (what the roles editor writes, which a
   // restart applies), in the set it runs now, or in the roles of the status. Any of them leads to
@@ -187,8 +190,8 @@ export default function NodesView() {
         </Show>
         <For each={healthRows()}>
           {(w) => (
-            <Notice kind="warn" testid="nodes-health-row" code={w.code}>
-              {findingText(w)}
+            <Notice kind={isRaCode(w.code) ? raFindingKind(w.code) : "warn"} testid="nodes-health-row" code={w.code}>
+              {isRaCode(w.code) ? raFindingText(w) : findingText(w)}
             </Notice>
           )}
         </For>

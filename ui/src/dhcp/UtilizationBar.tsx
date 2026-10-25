@@ -55,6 +55,18 @@ export function UtilizationBar(props: {
                 <span class="dhcp-fact" data-testid="util-fact" data-key="pool_size">
                   {t("dhcp.util.pool_size")} <b>{poolCountWords(u().pool_size, u().pool_bits)}</b>
                 </span>
+                {/* WP9.2: the delegated prefixes of a DHCPv6 scope, with a bar of their own. */}
+                <Show when={u().pd}>
+                  {(pd) => (
+                    <span class="dhcp-fact" data-testid="util-fact" data-key="pd" data-leased={String(pd().leased)} data-size={String(pd().pool_size)}>
+                      {t("dhcp.util.pd")}{" "}
+                      <span class="dhcp-bar" role="img" aria-label={t("dhcp.util.label", { percent: percentOf(pd().utilization) })} data-testid="scope-util-pd" data-key={String(percentOf(pd().utilization))}>
+                        <span style={{ width: `${percentOf(pd().utilization)}%` }} classList={{ warn: percentOf(pd().utilization) >= 70 && percentOf(pd().utilization) < 90, crit: percentOf(pd().utilization) >= 90 }} />
+                      </span>
+                      <b>{t("dhcp.util.pd_words", { leased: formatNumber(pd().leased), size: formatNumber(pd().pool_size) })}</b>
+                    </span>
+                  )}
+                </Show>
                 <span class="dhcp-fact muted" data-testid="util-at">
                   {t("dhcp.util.at", { time: formatDateTime(u().at, READ_AT) })}
                 </span>

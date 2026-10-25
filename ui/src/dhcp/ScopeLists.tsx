@@ -1,6 +1,7 @@
 // The pools and the exclusions of a scope. A pool is an IPAM range of role DHCP pool: it is made on
 // the prefix's page in IPAM, and here it gets what DHCP adds (the classes it admits and its lease
-// times). An exclusion is an explicit range inside the scope's network that is never leased.
+// times). A DHCPv6 scope (WP9.2) lists its delegation pools, IPAM ranges of the role Delegation
+// pool, in a section of their own below the address pools. An exclusion is an explicit range inside the scope's network that is never leased.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
@@ -32,6 +33,7 @@ import {
 import { LeaseChoice, leaseProblem } from "./LeaseFields";
 import { checkExclusion, draftOfLease, isV6, leaseOfDraft, networkOf, rangeBits, type LeaseDraft, type LeaseField } from "./model";
 import { describedBy, DhcpProblem, errorFor, Field, fieldErrors, hasField, unavailable } from "./Parts";
+import { PdPools } from "./v6/PdPools";
 import { V4Only } from "./v6/V4Only";
 import { leaseWords, poolCountWords } from "./words";
 
@@ -151,6 +153,9 @@ export function PoolsTab(props: { scope: Scope }) {
   const classList = () => (classes.error ? [] : (classes.latest?.items ?? []));
   const nameOf = (id: string) => classList().find((c) => c.id === id)?.name ?? id;
   const pools = () => latest(query);
+  // WP9.2: the address pools and the delegation pools come in one list; the grid below lists the first.
+  const addressPools = () => (pools() ?? []).filter((p) => p.role !== "dhcp_pd_pool");
+  const delegationPools = () => (pools() ?? []).filter((p) => p.role === "dhcp_pd_pool");
   const close = (changed: boolean) => {
     setDialog(null);
     if (changed) query.refetch();
@@ -183,20 +188,25 @@ export function PoolsTab(props: { scope: Scope }) {
     { id: "clear", label: () => t("dhcp.pool.clear"), danger: true, hidden: (p) => !mayWriteDhcp() || !p.settings, run: (p) => setDialog({ kind: "clear", pool: p }) },
   ];
   return (
-    <div class="dhcp-tab" data-testid="scope-pools">
+    <div class="dhcp-tab" classList={{ "dhcp-tab-v6-pools": isV6(props.scope) }} data-testid="scope-pools">
       <Notice kind="info" testid="pools-note">
         {t("dhcp.pools.note")}{" "}
         <A href={paths.prefix(props.scope.cidr)} data-testid="pools-ipam-link">
           {t("dhcp.pools.ipam_link", { network: props.scope.cidr })}
         </A>
       </Notice>
-      <div class="dhcp-list-body">
+      <Show when={isV6(props.scope)}>
+        <h2 class="dhcp-subhead" data-testid="pools-address-title">
+          {t("dhcp.pools.address_title")}
+        </h2>
+      </Show>
+      <div class="dhcp-list-body" classList={{ "dhcp-list-body-v6": isV6(props.scope) }}>
         <DataGrid
           id="dhcp-pools"
           label={t("dhcp.pools.title")}
           noSelection
           columns={columns}
-          rows={pools() ?? []}
+          rows={addressPools()}
           rowId={(p) => p.range}
           rowKey={(p) => `${p.first}-${p.last}`}
           rowLabel={(p) => `${p.first} – ${p.last}`}
@@ -214,6 +224,17 @@ export function PoolsTab(props: { scope: Scope }) {
           }
         />
       </div>
+      <Show when={isV6(props.scope)}>
+        <PdPools
+          scope={props.scope}
+          pools={delegationPools()}
+          loading={query.value.loading}
+          initial={pools() === undefined && !query.value.error}
+          error={query.value.error}
+          onRetry={query.refetch}
+          onChanged={query.refetch}
+        />
+      </Show>
       <Show when={dialog()} keyed>
         {(d) =>
           d.kind === "edit" ? (

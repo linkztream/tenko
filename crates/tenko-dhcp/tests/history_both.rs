@@ -49,6 +49,8 @@ fn event6(second: i128, vrf: VrfId, scope: PrefixId) -> Lease6Event {
         state: BindingState::Active,
         ends: at(second + 3_600),
         node: NodeId(1),
+        link_layer: None,
+        link_layer_type: None,
     }
 }
 

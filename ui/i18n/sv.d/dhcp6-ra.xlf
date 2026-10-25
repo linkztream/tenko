@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="dhcp6-ra">
+      <unit id="dhcp.ra.finding.flags_off">
+        <notes><note category="description">Health row and panel finding of the router advertisement check: a link has a DHCPv6 scope but its routers set neither the M nor the O flag; {routers} are the link-local router addresses, {interface} the interface, {node} the node, {scopes} the networks of the scopes.</note></notes>
+        <segment><source>The routers {routers} on {interface} of node {node} set neither the M nor the O flag, so the hosts on that link do not ask DHCPv6 and the scopes {scopes} serve nobody. Turn on M (addresses) or O (options only) in the router advertisements.</source><target>Routrarna {routers} på {interface} i noden {node} sätter varken M- eller O-flaggan, så värdarna på länken frågar inte DHCPv6 och omfången {scopes} betjänar ingen. Slå på M (adresser) eller O (bara alternativ) i routerannonseringarna.</target></segment>
+      </unit>
+      <unit id="dhcp.ra.finding.other_only">
+        <notes><note category="description">Health row and panel finding of the router advertisement check: routers set O without M while a scope of the link has address pools; {routers}, {interface}, {node} and {scopes} as in the flags-off finding.</note></notes>
+        <segment><source>The routers {routers} on {interface} of node {node} set the O flag without M, so the hosts on that link ask DHCPv6 for options only. That is right for stateless DHCPv6; turn on M if the hosts should get addresses from {scopes}.</source><target>Routrarna {routers} på {interface} i noden {node} sätter O-flaggan utan M, så värdarna på länken frågar DHCPv6 bara efter alternativ. Det stämmer för tillståndslös DHCPv6; slå på M om värdarna ska få adresser från {scopes}.</target></segment>
+      </unit>
+      <unit id="dhcp.ra.finding.managed_without_scope">
+        <notes><note category="description">Health row and panel finding of the router advertisement check: routers set M on a link that no enabled DHCPv6 scope covers; {routers}, {interface}, {node} as before, {prefixes} the prefixes the routers advertise.</note></notes>
+        <segment><source>The routers {routers} on {interface} of node {node} set the M flag for {prefixes}, but no enabled DHCPv6 scope covers that link, so the hosts ask a server that does not answer. Add a scope for the link or turn M off.</source><target>Routrarna {routers} på {interface} i noden {node} sätter M-flaggan för {prefixes}, men inget aktiverat DHCPv6-omfång täcker länken, så värdarna frågar en server som inte svarar. Lägg till ett omfång för länken eller slå av M.</target></segment>
+      </unit>
+      <unit id="dhcp.ra.finding.unchecked">
+        <notes><note category="description">Health row and panel finding of the router advertisement check: the check cannot listen for router advertisements; {node} is the node, {reason} why the raw socket cannot be opened.</note></notes>
+        <segment><source>The router advertisement check cannot run on node {node}: {reason}. It needs the CAP_NET_RAW capability of the probe role on Linux.</source><target>Kontrollen av routerannonseringar kan inte köras på noden {node}: {reason}. Den kräver förmågan CAP_NET_RAW för probe-rollen på Linux.</target></segment>
+      </unit>
+      <unit id="dhcp.ra.findings_count">
+        <notes><note category="description">Tag on the one-line router advertisement panel of the leases page: how many findings the check has.</note></notes>
+        <segment><source>{count, plural, one {# finding} other {# findings}}</source><target>{count, plural, one {# anmärkning} other {# anmärkningar}}</target></segment>
+      </unit>
+      <unit id="dhcp.ra.title">
+        <notes><note category="description">Heading of the router advertisement panel on the leases page.</note></notes>
+        <segment><source>Router advertisements</source><target>Routerannonseringar</target></segment>
+      </unit>
+      <unit id="dhcp.ra.state.off">
+        <notes><note category="description">State of the router advertisement check when the node has no probe role, so nothing listens for advertisements.</note></notes>
+        <segment><source>Not checked: no probe role runs on this node</source><target>Inte kontrollerat: ingen probe-roll körs på den här noden</target></segment>
+      </unit>
+      <unit id="dhcp.ra.state.unavailable">
+        <notes><note category="description">State of the router advertisement check when it cannot run; {reason} is the cause.</note></notes>
+        <segment><source>Unavailable: {reason}</source><target>Ej tillgänglig: {reason}</target></segment>
+      </unit>
+      <unit id="dhcp.ra.state.watching">
+        <notes><note category="description">State of the router advertisement check while the node listens for advertisements.</note></notes>
+        <segment><source>Watching</source><target>Bevakar</target></segment>
+      </unit>
+      <unit id="dhcp.ra.label">
+        <notes><note category="description">Accessible name of the table of the links heard by the router advertisement check.</note></notes>
+        <segment><source>Links heard in router advertisements</source><target>Länkar som hörts i routerannonseringar</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.interface">
+        <notes><note category="description">Column header of the router advertisement table: the network interface of the link.</note></notes>
+        <segment><source>Interface</source><target>Gränssnitt</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.routers">
+        <notes><note category="description">Column header of the router advertisement table: the routers heard, by link-local address.</note></notes>
+        <segment><source>Routers</source><target>Routrar</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.m">
+        <notes><note category="description">Column header of the router advertisement table: the M flag (managed address configuration); keep the single letter.</note></notes>
+        <segment><source>M</source><target>M</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.m_title">
+        <notes><note category="description">Tooltip of the M column header.</note></notes>
+        <segment><source>Managed address configuration: hosts ask DHCPv6 for addresses</source><target>Hanterad adresskonfiguration: värdar frågar DHCPv6 efter adresser</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.o">
+        <notes><note category="description">Column header of the router advertisement table: the O flag (other configuration); keep the single letter.</note></notes>
+        <segment><source>O</source><target>O</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.o_title">
+        <notes><note category="description">Tooltip of the O column header.</note></notes>
+        <segment><source>Other configuration: hosts ask DHCPv6 for options such as DNS servers</source><target>Övrig konfiguration: värdar frågar DHCPv6 efter alternativ som DNS-servrar</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.prefixes">
+        <notes><note category="description">Column header of the router advertisement table: the prefixes the routers advertise.</note></notes>
+        <segment><source>Advertised prefixes</source><target>Annonserade prefix</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.scopes">
+        <notes><note category="description">Column header of the router advertisement table: the networks of the enabled DHCPv6 scopes of the link.</note></notes>
+        <segment><source>Scopes</source><target>Omfång</target></segment>
+      </unit>
+      <unit id="dhcp.ra.col.seen">
+        <notes><note category="description">Column header of the router advertisement table: when the last advertisement was heard.</note></notes>
+        <segment><source>Last heard</source><target>Senast hörd</target></segment>
+      </unit>
+      <unit id="dhcp.ra.none">
+        <notes><note category="description">Shown in the router advertisement panel when the check watches but heard no advertisement.</note></notes>
+        <segment><source>No router advertisement heard in the last hour</source><target>Ingen routerannonsering hörd den senaste timmen</target></segment>
+      </unit>
+      <unit id="dhcp.ra.default_route">
+        <notes><note category="description">Note under the router advertisement panel: DHCPv6 has no option for a default route.</note></notes>
+        <segment><source>DHCPv6 never sets a default route: hosts take it from the router advertisements.</source><target>DHCPv6 sätter aldrig någon standardrutt: värdarna tar den från routerannonseringarna.</target></segment>
+      </unit>
+      <unit id="dhcp.strip.server_duid">
+        <notes><note category="description">Fact in the status strip of the leases page: the DUID of the DHCPv6 server; {duid} is the hexadecimal value in pairs with colons.</note></notes>
+        <segment><source>Server DUID {duid}</source><target>Server-DUID {duid}</target></segment>
+      </unit>
+      <unit id="dhcp.strip.server_duid_title">
+        <notes><note category="description">Tooltip of the server DUID fact in the status strip; {duid} is the whole value.</note></notes>
+        <segment><source>The DUID this DHCPv6 server names itself with: {duid}</source><target>DUID som den här DHCPv6-servern identifierar sig med: {duid}</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

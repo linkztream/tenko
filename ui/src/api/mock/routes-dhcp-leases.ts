@@ -1,6 +1,6 @@
 // The lease routes of the mock API (WP7.5, WP9.4): the leases the DHCP service holds in both
 // address families, their history and the state of the `dhcp` role of a node. The model itself
-// (the seed of twelve DHCPv4 leases of 192.0.2.0/24 and four DHCPv6 leases of 2001:db8:0:10::/64,
+// (the seed of twelve DHCPv4 leases of 192.0.2.0/24, four DHCPv6 leases of 2001:db8:0:10::/64 and a delegated prefix,
 // the filters, the peer that correlates a client's two leases, the merged history) is in
 // dhcp-leases-model.ts, which the browser fake of the end-to-end tests shares. Here are the
 // session and the scope checks, the release (audited), and `grantMockLease` for tests and the
@@ -18,6 +18,7 @@ import {
   findLease as findInState,
   LEASE_SCOPES,
   listEvents,
+  linkLayerMac,
   listLeases,
   macDigitsOf,
   NODE,
@@ -169,7 +170,8 @@ export const dhcpLeaseRoutes: HttpHandler[] = [
       lease.state = "released";
       lease.ends = new Date(at.getTime() + GRACE_MS).toISOString();
       lease.cltt = at.toISOString();
-      const common = { addr: lease.addr, at: at.toISOString(), ends: lease.ends, family: lease.family, kind: "reclaimed" as const, node: NODE, scope: lease.scope, state: "released" as const, vrf: lease.vrf, ...(lease.mac ? { mac: lease.mac } : {}) };
+      const mac = lease.mac ?? linkLayerMac(lease);
+      const common = { addr: lease.addr, at: at.toISOString(), ends: lease.ends, family: lease.family, kind: "reclaimed" as const, node: NODE, scope: lease.scope, state: "released" as const, vrf: lease.vrf, ...(mac ? { mac } : {}) };
       state.events.push(
         lease.family === "v4"
           ? { ...common, ...(lease.client ? { client: lease.client } : {}), ...(lease.hostname ? { hostname: lease.hostname } : {}) }

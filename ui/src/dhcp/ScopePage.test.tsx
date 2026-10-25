@@ -158,8 +158,8 @@ describe("the settings tab", () => {
     await loaded();
     fireEvent.click(screen.getByTestId("dhcp-scope-delete"));
     fireEvent.click(within(await screen.findByTestId("dialog-scope-delete")).getByTestId("confirm-ok"));
-    // Only the DHCPv6 scope of the seed is left.
-    await waitFor(() => expect(dhcpState().scopes.map((s) => s.prefix)).toEqual([DHCP_IDS.lanV6]));
+    // Only the DHCPv6 scopes of the seed are left.
+    await waitFor(() => expect(dhcpState().scopes.map((s) => s.prefix)).toEqual([DHCP_IDS.lanV6, DHCP_IDS.pdV6]));
     await waitFor(() => expect(view.location()).toBe("/dhcp"));
   });
 });

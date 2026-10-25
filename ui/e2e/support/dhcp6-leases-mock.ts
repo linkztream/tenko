@@ -6,9 +6,10 @@
 // DHCP client of support/dhcp-client.ts speaks DHCPv4 only), so its lease table holds no DHCPv6
 // lease and its node answers 409 `dhcp.node.not_dhcp`. The fake answers with the lease model of
 // the mock API (`src/api/mock/dhcp-leases-model.ts`, the code the msw handlers and the unit tests
-// run): twelve DHCPv4 leases, four DHCPv6 leases, the peer that joins a client's two leases by
-// MAC address and the history of both families. The Rust tests prove the real routes: the lease
-// list, the family and DUID filters, the peer and the release of a DHCPv6 lease in
+// run): twelve DHCPv4 leases, four DHCPv6 leases and a delegated prefix (WP9.2) with the address
+// lease of its client, the peer that joins a client's two leases by MAC address and the history of
+// both families. The Rust tests prove the real routes: the lease list, the family, kind
+// and DUID filters, the prefix-aware address filter, the peer and the release of a DHCPv6 lease in
 // `crates/tenko-api/tests/dhcp_leases.rs`, and the merged history of both families in
 // `crates/tenko-dhcp/tests/history_both.rs`. Writes (the release) fall through to the real server.
 

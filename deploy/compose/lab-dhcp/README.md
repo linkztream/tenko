@@ -162,7 +162,7 @@ rows add an IPv6 prefix `2001:db8:100::/64` with a scope and no pool.
 | `v6.ra.without_scope` | the servers6 scope disabled while M stays on: `GET /system/status` carries `dhcp.ra.managed_without_scope` naming `2001:db8:100::/64` |
 | `export.kea6` | E30 (WP9.3, [docs/dhcp.md](../../../docs/dhcp.md) section 18.5): a DUID-EN client takes a lease on iot6 through `relay-test6.py`, then the node's configuration and leases come from `GET /dhcp/export?format=kea`; with `interfaces-config` naming the node's interface and address, as the report asks, `kea-dhcp6 -t` accepts the `Dhcp6` document |
 | `export.kea6.golden` | `kea-dhcp6 -t` accepts the golden file of the unit tests (`crates/tenko-dhcp/src/export/kea/fixtures/kea-dhcp6.json`) |
-| `export.kea6.report` | the loss report names the relay listener's address (`export.kea.v6.interfaces.address`) and the server DUID the route does not know (`export.kea.v6.server_id.unknown`) |
+| `export.kea6.report` | the loss report names the relay listener's address (`export.kea.v6.interfaces.address`) and the server DUID Kea cannot hold, the node's default DUID-UUID (`export.kea.v6.server_id.type`) |
 | `export.kea6.reservation` | the node stops and `kea6` starts from the export: `dhclient -6` on lan6 gets its reservation `2001:db8:101::80` through `dhcrelay`, with options 23, 24 and 56 |
 | `export.kea6.lease` | the DUID-EN client asks again and Kea gives it the address of its exported lease, which was not the pool's first |
 

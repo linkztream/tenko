@@ -8,22 +8,24 @@ import { ErrorNotice } from "../../components/Notice";
 import { toast } from "../../components/toast";
 import { t } from "../../i18n";
 import { releaseLease } from "./api";
-import { clientMac, colons, type Lease } from "./model";
+import { clientMac, colons, displayAddr, type Lease } from "./model";
 
 export function ReleaseDialog(props: { lease: Lease; onClose: () => void; onDone: () => void; onRefused: () => void }) {
   const [reason, setReason] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
+  // WP9.2: a delegated prefix is named with its length; the release itself goes by the first address.
+  const shown = () => displayAddr(props.lease);
   // A client with a MAC address is named by it; a DHCPv6 client whose DUID holds none, by the DUID.
   const body = () => {
     const mac = clientMac(props.lease);
     return mac !== "" || !props.lease.duid
-      ? t("dhcp.lease.release_body", { addr: props.lease.addr, mac })
-      : t("dhcp.leases6.release_body_duid", { addr: props.lease.addr, duid: colons(props.lease.duid) });
+      ? t("dhcp.lease.release_body", { addr: shown(), mac })
+      : t("dhcp.leases6.release_body_duid", { addr: shown(), duid: colons(props.lease.duid) });
   };
   return (
     <ConfirmDialog
-      title={t("dhcp.lease.release_title", { addr: props.lease.addr })}
+      title={t("dhcp.lease.release_title", { addr: shown() })}
       testid="dialog-lease-release"
       danger
       busy={busy()}
@@ -36,7 +38,7 @@ export function ReleaseDialog(props: { lease: Lease; onClose: () => void; onDone
         setError(undefined);
         releaseLease(props.lease, reason())
           .then(() => {
-            toast({ kind: "ok", title: t("dhcp.lease.released", { addr: props.lease.addr }) });
+            toast({ kind: "ok", title: t("dhcp.lease.released", { addr: shown() }) });
             props.onDone();
           })
           .catch((err: unknown) => {

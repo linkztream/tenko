@@ -22,7 +22,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
     HostId, MacAddr, PrefixId, Revision, Timestamp, VrfId,
-    dhcp::{BindingState, Lease, Lease6, Lease6Event, LeaseEvent, LeaseEventKind, tables},
+    dhcp::{
+        BindingState, Lease, Lease6, Lease6Event, Lease6Kind, LeaseEvent, LeaseEventKind, tables,
+    },
     net::Duid,
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt as _, StoreError};
@@ -100,6 +102,52 @@ pub struct LeaseListArgs {
     /// Where the DHCPv6 part of the page starts; set once the DHCPv4 leases are read.
     #[serde(default)]
     pub after6: Option<Resume<(VrfId, Ipv6Addr)>>,
+    // WP9.4: the kind of a DHCPv6 lease.
+    /// Only DHCPv6 leases of this kind: addresses (`na`) or delegated prefixes (`pd`).
+    #[serde(default)]
+    pub kind: Option<Lease6Kind>,
+}
+
+/// The address filter of the DHCPv6 leases, read once per page: the text, and the IPv6
+/// address or prefix it names, if it names one (WP9.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddrFilter6 {
+    text: String,
+    net: Option<ipnet::Ipv6Net>,
+}
+
+impl AddrFilter6 {
+    /// The filter of `text`: an IPv6 address is the prefix of length 128, an IPv6 prefix
+    /// (`2001:db8:180::/48`) is taken on its boundary; other text only starts addresses.
+    pub fn new(text: &str) -> Self {
+        let net = text
+            .parse::<Ipv6Addr>()
+            .ok()
+            .and_then(|addr| ipnet::Ipv6Net::new(addr, 128).ok())
+            .or_else(|| text.parse::<ipnet::Ipv6Net>().ok().map(|net| net.trunc()));
+        Self {
+            text: text.to_owned(),
+            net,
+        }
+    }
+
+    /// Whether `lease` matches: its address's text starts with the text, or the address or
+    /// prefix the text names and the lease's address or delegated prefix hold one another
+    /// (a delegated prefix that holds the address, an address or a delegated prefix inside
+    /// the prefix).
+    pub fn matches(&self, lease: &Lease6) -> bool {
+        if lease.addr6().to_string().starts_with(&self.text) {
+            return true;
+        }
+        let Some(net) = self.net else {
+            return false;
+        };
+        let Ok(held) = ipnet::Ipv6Net::new(lease.addr6(), lease.prefix_len.min(128)) else {
+            return false;
+        };
+        let held = held.trunc();
+        held.contains(&net) || net.contains(&held)
+    }
 }
 
 impl LeaseListArgs {
@@ -109,6 +157,7 @@ impl LeaseListArgs {
         self.family != Some(Family::V6)
             && self.exact6.is_none()
             && self.duid.is_none()
+            && self.kind.is_none()
             && self.after6.is_none()
     }
 
@@ -118,15 +167,23 @@ impl LeaseListArgs {
         self.family != Some(Family::V4) && self.exact.is_none()
     }
 
+    /// The address filter of the DHCPv6 part, when `addr` is set.
+    pub fn addr_filter6(&self) -> Option<AddrFilter6> {
+        self.addr.as_deref().map(AddrFilter6::new)
+    }
+
     /// Whether the DHCPv6 `lease` passes the filters (the cursor aside).
     pub fn matches6(&self, lease: &Lease6) -> bool {
+        self.matches6_with(lease, self.addr_filter6().as_ref())
+    }
+
+    /// [`Self::matches6`] with the address filter read once ([`Self::addr_filter6`]).
+    pub fn matches6_with(&self, lease: &Lease6, addr: Option<&AddrFilter6>) -> bool {
         self.scope.is_none_or(|scope| lease.scope == scope)
             && self.vrf.is_none_or(|vrf| lease.vrf == vrf)
             && self.exact6.is_none_or(|addr| lease.addr6() == addr)
-            && self
-                .addr
-                .as_deref()
-                .is_none_or(|text| lease.addr6().to_string().starts_with(text))
+            && self.kind.is_none_or(|kind| lease.kind == kind)
+            && addr.is_none_or(|filter| filter.matches(lease))
             && self.mac.is_none_or(|mac| lease.mac() == Some(mac.octets()))
             && self.duid.as_ref().is_none_or(|duid| &lease.duid == duid)
             && self.state.is_none_or(|state| lease.state == state)
@@ -157,6 +214,74 @@ impl LeaseListArgs {
                     .flatten()
                     .any(|name| name.to_lowercase().contains(&text))
             })
+    }
+}
+
+#[cfg(test)]
+mod addr_filter_tests {
+    use std::net::IpAddr;
+
+    use tenko_core::{
+        NodeId, PrefixId, Timestamp, VrfId,
+        dhcp::{BindingState, DdnsState, Lease6, Lease6Kind},
+        net::Duid,
+    };
+
+    use super::AddrFilter6;
+
+    fn lease(addr: &str, len: u8) -> Lease6 {
+        Lease6 {
+            addr: addr.parse::<IpAddr>().expect("an address"),
+            prefix_len: len,
+            kind: if len == 128 {
+                Lease6Kind::Na
+            } else {
+                Lease6Kind::Pd
+            },
+            vrf: VrfId::generate(),
+            scope: PrefixId::generate(),
+            iaid: 1,
+            duid: "0003000100005e005301".parse::<Duid>().expect("a DUID"),
+            link_layer: None,
+            link_layer_type: None,
+            state: BindingState::Active,
+            cltt: Timestamp::UNIX_EPOCH,
+            ends: Timestamp::UNIX_EPOCH,
+            preferred_ends: Timestamp::UNIX_EPOCH,
+            node: NodeId(1),
+            fqdn: None,
+            fqdn_flags: None,
+            relay: None,
+            observed_at: None,
+            ddns: DdnsState::default(),
+        }
+    }
+
+    #[test]
+    fn an_address_or_a_prefix_finds_the_leases_that_hold_it_or_lie_in_it() {
+        let prefix = lease("2001:db8:180:110::", 60);
+        let address = lease("2001:db8:1::100", 128);
+        let finds = |text: &str| {
+            let filter = AddrFilter6::new(text);
+            (filter.matches(&prefix), filter.matches(&address))
+        };
+        // Text that starts the address, as before.
+        assert_eq!(finds("2001:db8:180:1"), (true, false));
+        assert_eq!(finds("2001:db8:1::1"), (false, true));
+        // An address inside the delegated prefix; the address itself.
+        assert_eq!(finds("2001:db8:180:11f:ffff::1"), (true, false));
+        assert_eq!(finds("2001:db8:1::100"), (false, true));
+        assert_eq!(finds("2001:db8:180:120::"), (false, false));
+        // A prefix that holds a lease, and one inside the delegated prefix; host bits are
+        // taken off.
+        assert_eq!(finds("2001:db8::/32"), (true, true));
+        assert_eq!(finds("2001:db8:180:114::/62"), (true, false));
+        assert_eq!(finds("2001:db8:180:114::1/62"), (true, false));
+        assert_eq!(finds("2001:db8:1::/64"), (false, true));
+        assert_eq!(finds("2001:db8:180:120::/60"), (false, false));
+        // Neither an address nor a prefix: only the start of the text counts.
+        assert_eq!(finds("2001:db8:180::/129"), (false, false));
+        assert_eq!(finds("192.0.2."), (false, false));
     }
 }
 
@@ -198,6 +323,11 @@ pub struct Lease6Row {
     /// The client's DHCPv4 lease of the same MAC address, when the node holds one.
     #[serde(default)]
     pub peer: Option<LeasePeer>,
+    // WP9.4: from a delegated prefix to the router's address.
+    /// For a delegated prefix (`pd`): the lease of an address (`na`) of the same client
+    /// (DUID) in the same VRF, when the node holds one.
+    #[serde(default)]
+    pub address_lease: Option<LeasePeer>,
 }
 
 /// The lease of the other family that names the same MAC address (DHCP-11): an active one
@@ -362,9 +492,11 @@ impl HistoryArgs {
             && self.kind.is_none_or(|kind| event.kind == kind)
             && self.to.is_none_or(|to| event.at <= to)
             && self.duid.as_ref().is_none_or(|duid| &event.duid == duid)
-            && self
-                .mac
-                .is_none_or(|mac| duid_mac(event.duid.as_bytes()) == Some(mac.octets()))
+            && self.mac.is_none_or(|mac| {
+                // WP9.4: the row's link-layer address (RFC 6939 included), else the DUID's.
+                event.mac() == Some(mac.octets())
+                    || duid_mac(event.duid.as_bytes()) == Some(mac.octets())
+            })
     }
 
     fn matches(&self, event: &LeaseEvent) -> bool {

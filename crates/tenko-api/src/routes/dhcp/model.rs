@@ -15,7 +15,7 @@ use tenko_core::{
         OptionSpace, OptionValue, Policy, PolicyAction, PolicyId, PoolSettings, PoolShare,
         Relay6Info, RelayInfo, ReservationWarning, Scope, SharedNetwork, SharedNetworkId,
     },
-    ipam::Stamp,
+    ipam::{RangeRole, Stamp},
     net::{Duid, HostName, MacAddr},
     serde_util::HexBytes,
 };
@@ -196,6 +196,27 @@ pub struct DhcpScopeUtilization {
     /// pool of a /64 has 64); absent for a smaller pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pool_bits: Option<u8>,
+    // WP9.4: the delegation pools of a DHCPv6 scope.
+    /// A DHCPv6 scope with delegation pools: how full they are, in prefixes. The address
+    /// figures above leave the delegated prefixes out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pd: Option<DhcpPdUtilization>,
+}
+
+/// How full the delegation pools of a DHCPv6 scope are (`pd` of the utilization).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpPdUtilization {
+    /// The delegation pools of the scope.
+    pub pools: u32,
+    /// The prefixes they may delegate, those an exclusion touches taken out; stops at
+    /// 2^64 - 1.
+    pub pool_size: u64,
+    /// The prefixes bound now.
+    pub leased: u64,
+    /// The prefixes free now; stops at 2^64 - 1.
+    pub free: u64,
+    /// `leased / pool_size`, 0 to 1.
+    pub utilization: f64,
 }
 
 /// The client of `GET /dhcp/scopes/{prefix}/effective-options`.
@@ -300,11 +321,19 @@ pub struct SharedNetworkPatch {
 // ---------------------------------------------------------------------------------------
 // Pools and exclusions
 
-/// A pool: an IPAM range of role `dhcp_pool` with its DHCP settings.
+/// A pool: an IPAM range of role `dhcp_pool` (addresses) or `dhcp_pd_pool` (delegated
+/// prefixes of a DHCPv6 scope) with its DHCP settings.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DhcpPoolItem {
     /// The range.
     pub range: RangeId,
+    // WP9.4: the delegation pools beside the address pools.
+    /// The range's role: `dhcp_pool` or `dhcp_pd_pool`.
+    #[schema(example = "dhcp_pool")]
+    pub role: RangeRole,
+    /// A delegation pool's delegated length: the length of the prefixes it hands out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_len: Option<u8>,
     /// The scope.
     pub prefix: PrefixId,
     /// The first address.
@@ -319,9 +348,10 @@ pub struct DhcpPoolItem {
     /// The DHCP settings, when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<PoolSettings>,
-    /// Addresses in the pool, exclusions taken out.
+    /// Addresses in the pool, exclusions taken out; for a delegation pool the prefixes it
+    /// may delegate (a prefix an exclusion touches taken out). Stops at 2^64 - 1.
     pub size: u64,
-    /// Addresses with an active lease.
+    /// Addresses with an active lease; for a delegation pool the prefixes bound.
     pub leased: u64,
     /// The store revision of the settings row (the `ETag`); 0 without settings.
     pub revision: Revision,
@@ -833,6 +863,12 @@ pub struct DhcpLeaseItem {
     /// node holds one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer: Option<DhcpLeasePeer>,
+    // WP9.4: a delegated prefix and its router's address.
+    /// A delegated prefix (`pd`): the lease of an address (`na`) of the same client, by its
+    /// DUID in the same VRF, when the node holds one (an active one first, else the one
+    /// that ends last).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_lease: Option<DhcpLeasePeer>,
 }
 
 /// The filters of `GET /dhcp/leases`.
@@ -841,7 +877,9 @@ pub struct DhcpLeaseItem {
 pub struct DhcpLeaseFilters {
     /// Only this scope.
     pub scope: Option<PrefixId>,
-    /// Addresses starting with this text (`192.0.2.`).
+    /// Addresses starting with this text (`192.0.2.`). An IPv6 address or prefix
+    /// (`2001:db8:180::/48`) also matches the DHCPv6 leases whose address or delegated
+    /// prefix it holds and the delegated prefixes that hold it.
     pub addr: Option<String>,
     /// The client's MAC address.
     #[param(value_type = Option<String>)]
@@ -859,6 +897,9 @@ pub struct DhcpLeaseFilters {
     pub family: Option<DhcpFamily>,
     /// Only DHCPv6 leases of this client DUID (hexadecimal, separators allowed).
     pub duid: Option<String>,
+    // WP9.4: addresses or delegated prefixes.
+    /// Only DHCPv6 leases of this kind: `na` (addresses) or `pd` (delegated prefixes).
+    pub kind: Option<Lease6Kind>,
 }
 
 /// The VRF of an address in the path; the default VRF when absent.
@@ -904,7 +945,8 @@ pub struct DhcpHistoryItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<ClientKey>,
     /// The client's MAC address where the row says it: the Ethernet hardware address of a
-    /// DHCPv4 client, the address in a DUID-LLT or DUID-LL of a DHCPv6 client.
+    /// DHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its
+    /// DUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, example = "00:00:5e:00:53:01")]
     pub mac: Option<MacAddr>,
@@ -1043,6 +1085,83 @@ pub struct DhcpNodeStatus {
     /// The DHCPv6 leases by state.
     #[serde(default)]
     pub leases6: Vec<DhcpLeaseCount>,
+    // WP9.4: the router advertisement check and the server DUID (WP9.2).
+    /// The router advertisement check of DHCP-10 (`docs/dhcp.md` section 19.12).
+    #[serde(default)]
+    pub ra: DhcpRaReport,
+    /// The DHCPv6 server's DUID in hexadecimal, when the role serves DHCPv6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "000400000000000000000000000000000001")]
+    pub server_duid: Option<String>,
+}
+
+/// Whether the router advertisement check runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DhcpRaCheck {
+    /// No `probe` role runs in the process.
+    #[default]
+    Off,
+    /// The raw socket for ICMP version 6 could not be opened (`reason` says why).
+    Unavailable,
+    /// The links are heard.
+    Watching,
+}
+
+/// The router advertisement check of a node's `dhcp` role.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRaReport {
+    /// Whether it runs.
+    pub check: DhcpRaCheck,
+    /// Why it is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The links heard in the last hour, by interface.
+    #[serde(default)]
+    pub links: Vec<DhcpRaLink>,
+    /// The findings, which are also health rows of `GET /system/status`.
+    #[serde(default)]
+    pub findings: Vec<DhcpRaFinding>,
+}
+
+/// One link as the router advertisement check hears it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRaLink {
+    /// The interface.
+    #[schema(example = "eth0")]
+    pub interface: String,
+    /// The routers heard, by link-local address.
+    #[schema(value_type = Vec<String>, example = json!(["fe80::1"]))]
+    pub routers: Vec<std::net::Ipv6Addr>,
+    /// Whether a router sets M (managed address configuration).
+    pub managed: bool,
+    /// Whether a router sets O (other configuration).
+    pub other: bool,
+    /// The prefixes the routers advertise.
+    #[schema(example = json!(["2001:db8:100::/64"]))]
+    pub prefixes: Vec<String>,
+    /// The networks of the enabled DHCPv6 scopes of the link.
+    #[schema(example = json!(["2001:db8:100::/64"]))]
+    pub scopes: Vec<String>,
+    /// When the last advertisement was heard.
+    pub seen: Timestamp,
+}
+
+/// One finding of the router advertisement check.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DhcpRaFinding {
+    /// The health row's code: `dhcp.ra.flags_off`, `dhcp.ra.other_only`,
+    /// `dhcp.ra.managed_without_scope` or `dhcp.ra.unchecked`.
+    #[schema(example = "dhcp.ra.flags_off")]
+    pub code: String,
+    /// The interface (empty for `dhcp.ra.unchecked`).
+    pub interface: String,
+    /// What it means and what to do, in English.
+    pub detail: String,
+    /// The parameters: `interface`, `routers`, and `scopes` or `prefixes`; `reason` for
+    /// `dhcp.ra.unchecked`.
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, String>,
 }
 
 /// A node command was accepted; its outcome follows on the node command's record.

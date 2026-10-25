@@ -431,3 +431,103 @@ async fn a_malformed_path_is_refused_before_anything_else() {
     }
     assert_eq!(policy.asked(), []);
 }
+
+// WP9.4: the router advertisement check and the server DUID in the node report.
+#[test]
+fn the_node_report_carries_the_ra_check_and_the_server_duid() {
+    use std::collections::BTreeMap;
+
+    use tenko_core::{Revision, Timestamp, dhcp::BindingState};
+    use tenko_dhcp::{
+        ra::{FLAGS_OFF, RaCheck, RaFinding, RaLinkReport, RaReport},
+        role::DhcpStatus,
+    };
+
+    let none = [
+        (BindingState::Free, 0),
+        (BindingState::Active, 0),
+        (BindingState::Expired, 0),
+        (BindingState::Released, 0),
+        (BindingState::Abandoned, 0),
+        (BindingState::Reset, 0),
+        (BindingState::Backup, 0),
+    ];
+    let status = |ra: RaReport, server_duid: Option<Vec<u8>>| DhcpStatus {
+        node: NodeId(7),
+        serving: true,
+        accepting: true,
+        refusal: None,
+        probe: true,
+        probe_expected: false,
+        listeners: Vec::new(),
+        scopes: 0,
+        leases: none,
+        last_commit: None,
+        revision: Revision::ZERO,
+        lag: 0,
+        started: Timestamp::UNIX_EPOCH,
+        installs: 0,
+        proxies: Vec::new(),
+        listeners6: Vec::new(),
+        scopes6: 1,
+        leases6: none,
+        ra,
+        server_duid,
+    };
+    let seen: Timestamp = "2026-10-25T12:00:00Z".parse().expect("time");
+    let watching = RaReport {
+        check: RaCheck::Watching,
+        links: vec![RaLinkReport {
+            interface: "eth1".to_owned(),
+            routers: vec!["fe80::2".parse().expect("router")],
+            managed: false,
+            other: false,
+            prefixes: vec!["2001:db8:30::/64".parse().expect("prefix")],
+            scopes: vec!["2001:db8:30::/64".parse().expect("scope")],
+            seen,
+        }],
+        findings: vec![RaFinding {
+            code: FLAGS_OFF,
+            interface: "eth1".to_owned(),
+            detail: "neither M nor O".to_owned(),
+            params: BTreeMap::from([
+                ("interface".to_owned(), "eth1".to_owned()),
+                ("routers".to_owned(), "fe80::2".to_owned()),
+                ("scopes".to_owned(), "2001:db8:30::/64".to_owned()),
+            ]),
+        }],
+    };
+    let duid = vec![0, 1, 0, 1, 0x2e, 0x8b, 0x58, 0, 0, 0, 0x5e, 0, 0x53, 0x10];
+    let dto = super::leases::status_dto(status(watching, Some(duid)));
+    let json = serde_json::to_value(&dto).expect("json");
+    assert_eq!(json["server_duid"], "000100012e8b580000005e005310");
+    assert_eq!(json["ra"]["check"], "watching");
+    assert!(json["ra"].get("reason").is_none());
+    assert_eq!(
+        json["ra"]["links"],
+        json!([{
+            "interface": "eth1",
+            "routers": ["fe80::2"],
+            "managed": false,
+            "other": false,
+            "prefixes": ["2001:db8:30::/64"],
+            "scopes": ["2001:db8:30::/64"],
+            "seen": "2026-10-25T12:00:00Z",
+        }])
+    );
+    assert_eq!(json["ra"]["findings"][0]["code"], "dhcp.ra.flags_off");
+    assert_eq!(json["ra"]["findings"][0]["params"]["routers"], "fe80::2");
+
+    let unavailable = RaReport {
+        check: RaCheck::Unavailable("no CAP_NET_RAW".to_owned()),
+        ..RaReport::default()
+    };
+    let json =
+        serde_json::to_value(super::leases::status_dto(status(unavailable, None))).expect("json");
+    assert_eq!(json["ra"]["check"], "unavailable");
+    assert_eq!(json["ra"]["reason"], "no CAP_NET_RAW");
+    assert!(json.get("server_duid").is_none());
+    let json = serde_json::to_value(super::leases::status_dto(status(RaReport::default(), None)))
+        .expect("json");
+    assert_eq!(json["ra"]["check"], "off");
+}

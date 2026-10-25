@@ -1,6 +1,8 @@
 // Creating and editing a range of a network (IPAM-03): the first and last address inside the
-// prefix, what the range is for and, for a DHCP pool, its lease time. Editing sends only the
-// fields that changed, with the revision the person saw.
+// prefix, what the range is for and, for a DHCP pool, its lease time. A delegation pool (WP9.2, an
+// IPv6 network only) also has the length of the prefixes it hands to routers, with the first and
+// last address on boundaries of that length. Editing sends only the fields that changed, with
+// the revision the person saw.
 import { createMemo, createSignal, Show, untrack } from "solid-js";
 import { api } from "../../api/client";
 import { RANGE_ROLES, type CustomValue, type NewRange, type Prefix, type Range, type RangePatch, type RangeRole, type Status, type WriteResponse } from "../../api/types";
@@ -21,9 +23,10 @@ import {
 import { formatIp, parseCidr, parseIp } from "../ip";
 import { writeQuery } from "../plan/describe";
 import { kindWord, rangeRoleWord } from "../words";
+import { checkDelegatedLen, onBoundary } from "./delegation";
 import { addressIn } from "./inputs";
 
-const PLACED = ["first", "last", "role", "status", "description", "lease_secs", "tags", "custom", "prefix"] as const;
+const PLACED = ["first", "last", "role", "status", "description", "lease_secs", "delegated_len", "tags", "custom", "prefix"] as const;
 
 export type LeaseUnit = "minutes" | "hours" | "days";
 const UNIT_SECS: Readonly<Record<LeaseUnit, number>> = { minutes: 60, hours: 3600, days: 86400 };
@@ -63,6 +66,9 @@ export function RangeForm(props: {
 }) {
   const original = untrack(() => props.range);
   const prefixCidr = untrack(() => parseCidr(props.prefix.cidr));
+  const networkLength = prefixCidr?.length ?? null;
+  // WP9.2: a delegation pool is a range of an IPv6 network.
+  const isV6 = prefixCidr?.version === 6;
   const startLease = original?.lease_secs ? leaseParts(original.lease_secs) : { value: "", unit: "hours" as LeaseUnit };
 
   const [first, setFirst] = createSignal(original?.first ?? "");
@@ -75,12 +81,16 @@ export function RangeForm(props: {
   const [lease, setLease] = createSignal(startLease.value);
   const [unit, setUnit] = createSignal<LeaseUnit>(startLease.unit);
   const [leaseTouched, setLeaseTouched] = createSignal(false);
+  const [delegated, setDelegated] = createSignal(original?.delegated_len != null ? String(original.delegated_len) : "");
+  const [delegatedTouched, setDelegatedTouched] = createSignal(false);
   const [tags, setTags] = createSignal<string[]>([...(original?.meta.tags ?? [])]);
   const [custom, setCustom] = createSignal<Record<string, CustomValue>>({ ...(original?.meta.custom ?? {}) });
   const [customProblems, setCustomProblems] = createSignal<Record<string, string>>({});
 
   const kind = () => kindWord("range");
-  const isPool = () => role() === "dhcp_pool";
+  const isPd = () => role() === "dhcp_pd_pool";
+  /** A lease time belongs to both kinds of pool. */
+  const isPool = () => role() === "dhcp_pool" || isPd();
 
   const addressProblem = (text: string): "empty" | "invalid" | "outside" | undefined => {
     if (text.trim() === "") return "empty";
@@ -95,6 +105,14 @@ export function RangeForm(props: {
     const b = parseIp(last());
     return a && b && a.version === b.version && a.value > b.value ? "reversed" : "ok";
   });
+  const delegatedCheck = createMemo(() => (isPd() ? checkDelegatedLen(delegated(), networkLength) : null));
+  /** The first or last address of a delegation pool off a boundary of the delegated length. */
+  const boundaryProblem = (end: "first" | "last"): boolean => {
+    const check = delegatedCheck();
+    if (!check?.ok) return false;
+    const text = end === "first" ? first() : last();
+    return (end === "first" ? !firstProblem() : !lastProblem()) && !onBoundary(text, check.len, end);
+  };
   const leaseCheck = createMemo(() => (isPool() ? checkLease(lease(), unit()) : ({ ok: true, secs: null } as LeaseCheck)));
 
   const addressMessage = (problem: "empty" | "invalid" | "outside" | undefined): string | undefined => {
@@ -109,8 +127,30 @@ export function RangeForm(props: {
         return undefined;
     }
   };
-  const lastMessage = (): string | undefined =>
-    addressMessage(lastProblem()) ?? (order() === "reversed" ? t("ipam.field.last_before_first") : undefined);
+  const firstMessage = (): string | undefined => {
+    const c = delegatedCheck();
+    return addressMessage(firstProblem()) ?? (c?.ok && boundaryProblem("first") ? t("ipam.field.delegated_first", { len: c.len }) : undefined);
+  };
+  const lastMessage = (): string | undefined => {
+    const c = delegatedCheck();
+    return (
+      addressMessage(lastProblem()) ??
+      (order() === "reversed" ? t("ipam.field.last_before_first") : undefined) ??
+      (c?.ok && boundaryProblem("last") ? t("ipam.field.delegated_last", { len: c.len }) : undefined)
+    );
+  };
+  const delegatedMessage = (): string | undefined => {
+    const c = delegatedCheck();
+    if (!c || c.ok) return undefined;
+    switch (c.reason) {
+      case "required":
+        return t("ipam.field.delegated_required");
+      case "number":
+        return t("ipam.field.delegated_number");
+      default:
+        return t("ipam.field.delegated_range", { length: networkLength ?? 0 });
+    }
+  };
   const leaseMessage = (): string | undefined => {
     const c = leaseCheck();
     if (c.ok) return undefined;
@@ -133,23 +173,36 @@ export function RangeForm(props: {
     if (text !== (original.meta.description ?? "")) out.description = text === "" ? null : text;
     const c = leaseCheck();
     if (c.ok && c.secs !== (original.lease_secs ?? null)) out.lease_secs = c.secs;
+    const d = delegatedCheck();
+    if (d?.ok) {
+      if (d.len !== (original.delegated_len ?? null)) out.delegated_len = d.len;
+    } else if (!isPd() && original.role === "dhcp_pd_pool") out.delegated_len = null;
     if (!sameTags(tags(), original.meta.tags ?? [])) out.tags = tags();
     const values = customPatch(original.meta.custom ?? {}, custom());
     if (values) out.custom = values as RangePatch["custom"];
     return out;
   });
-  const valid = () => !firstProblem() && !lastProblem() && order() === "ok" && leaseCheck().ok;
+  const valid = () =>
+    !firstProblem() &&
+    !lastProblem() &&
+    order() === "ok" &&
+    leaseCheck().ok &&
+    (delegatedCheck()?.ok ?? true) &&
+    !boundaryProblem("first") &&
+    !boundaryProblem("last");
   const changed = () => !original || Object.keys(patch()).length > 0 || !valid();
 
   const validate = (): boolean => {
     setFirstTouched(true);
     setLastTouched(true);
     setLeaseTouched(true);
+    setDelegatedTouched(true);
     return valid() && Object.keys(customProblems()).length === 0;
   };
 
   const createBody = (): NewRange & { lease_secs?: number | null } => {
     const c = leaseCheck();
+    const d = delegatedCheck();
     return {
       first: normalized(first()),
       last: normalized(last()),
@@ -157,12 +210,15 @@ export function RangeForm(props: {
       status: status(),
       ...(description().trim() !== "" ? { description: description().trim() } : {}),
       ...(c.ok && c.secs !== null ? { lease_secs: c.secs } : {}),
+      ...(d?.ok ? { delegated_len: d.len } : {}),
       ...(tags().length > 0 ? { tags: tags() } : {}),
       ...(Object.keys(custom()).length > 0 ? { custom: custom() } : {}),
     };
   };
 
-  const roleOptions = (): Option<RangeRole>[] => RANGE_ROLES.map((r) => ({ value: r, label: rangeRoleWord(r) }));
+  // A delegation pool is offered on an IPv6 network; a range that is one already keeps its role in the list.
+  const roleOptions = (): Option<RangeRole>[] =>
+    RANGE_ROLES.filter((r) => r !== "dhcp_pd_pool" || isV6 || original?.role === "dhcp_pd_pool").map((r) => ({ value: r, label: rangeRoleWord(r) }));
   const unitOptions = (): Option<LeaseUnit>[] => UNITS.map((u) => ({ value: u, label: t(`ipam.field.unit_${u}`) }));
 
   return (
@@ -209,7 +265,7 @@ export function RangeForm(props: {
               label={t("ipam.field.first")}
               help={t("ipam.field.inside_prefix", { cidr: props.prefix.cidr })}
               required
-              error={serverFieldMessage(flow.error(), "first", "prefix") ?? (firstTouched() ? addressMessage(firstProblem()) : undefined)}
+              error={serverFieldMessage(flow.error(), "first", "prefix") ?? (firstTouched() ? firstMessage() : undefined)}
             >
               {(c) => (
                 <input
@@ -252,6 +308,29 @@ export function RangeForm(props: {
               {(c) => <SelectInput {...c} value={status()} options={statusOptions()} onChange={tracked(setStatus, flow)} />}
             </Field>
           </FieldRow>
+          <Show when={isPd()}>
+            <Field
+              name="delegated_len"
+              label={t("ipam.field.delegated")}
+              help={t("ipam.field.delegated_help", { length: networkLength ?? 0 })}
+              required
+              error={serverFieldMessage(flow.error(), "delegated_len") ?? (delegatedTouched() ? delegatedMessage() : undefined)}
+            >
+              {(c) => (
+                <input
+                  class="input mono"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  spellcheck={false}
+                  {...c}
+                  value={delegated()}
+                  onInput={(e) => tracked(setDelegated, flow)(e.currentTarget.value)}
+                  onBlur={() => setDelegatedTouched(true)}
+                />
+              )}
+            </Field>
+          </Show>
           <Show when={isPool()}>
             <Field
               name="lease"

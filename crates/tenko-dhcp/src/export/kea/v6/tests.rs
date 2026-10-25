@@ -253,7 +253,7 @@ impl Lab {
             (vrf, addr),
             Lease6 {
                 addr: addr.into(),
-                prefix_len: if kind == Lease6Kind::Pd { 56 } else { 128 },
+                prefix_len: if kind == Lease6Kind::Pd { 60 } else { 128 },
                 kind,
                 vrf,
                 scope,
@@ -469,6 +469,38 @@ impl Lab {
             });
         }
 
+        // WP9.4: a delegation network with a scope and a delegation pool of sixteen /60s,
+        // one of them touched by an exclusion, with a pool option.
+        let delegation = lab.prefix("2001:db8:180::/48");
+        let pd_pool = lab.range(
+            delegation,
+            "2001:db8:180:100::",
+            "2001:db8:180:1ff:ffff:ffff:ffff:ffff",
+            RangeRole::DhcpPdPool,
+        );
+        lab.data
+            .ranges
+            .get_mut(&pd_pool)
+            .expect("the pool")
+            .delegated_len = Some(60);
+        lab.options(
+            OptionOwner::Pool(pd_pool),
+            vec![v6(23, addresses(&["2001:db8:180::53"]))],
+        );
+        let exclusion = ExclusionId(lab.id());
+        lab.data.exclusions.insert(
+            (delegation, exclusion),
+            ExclusionRange {
+                id: exclusion,
+                scope: delegation,
+                first: ip("2001:db8:180:115::5"),
+                last: ip("2001:db8:180:115::5"),
+                description: None,
+                created: stamp(),
+            },
+        );
+        lab.scope(delegation).lease = Some(LeaseTimes::fixed(7_200));
+
         // A disabled DHCPv6 scope, and a DHCPv4 scope that stays out of Dhcp6.
         let off = lab.prefix("2001:db8:300::/64");
         lab.range(
@@ -531,12 +563,22 @@ impl Lab {
             None,
         );
         lab.lease(
-            lan6,
-            "2001:db8:101:100::",
+            delegation,
+            "2001:db8:180:120::",
             duid_ll(0x64),
-            None,
+            Some(mac(0x64).octets().to_vec()),
             Lease6Kind::Pd,
             BindingState::Active,
+            None,
+        );
+        // A released delegated prefix stays out of the lease file.
+        lab.lease(
+            delegation,
+            "2001:db8:180:130::",
+            duid_ll(0x67),
+            None,
+            Lease6Kind::Pd,
+            BindingState::Released,
             None,
         );
         lab.lease(
@@ -720,12 +762,12 @@ fn subnets_pools_and_reservations() {
     let out = run(&Lab::new());
     let dhcp6 = dhcp6(&out);
     let subnets = all_subnets(dhcp6);
-    assert_eq!(subnets.len(), 4, "the disabled scope is left out");
+    assert_eq!(subnets.len(), 5, "the disabled scope is left out");
     let ids: BTreeSet<u64> = subnets
         .iter()
         .map(|subnet| subnet["id"].as_u64().expect("id"))
         .collect();
-    assert_eq!(ids, BTreeSet::from([1, 2, 3, 4]));
+    assert_eq!(ids, BTreeSet::from([1, 2, 3, 4, 5]));
 
     let lan6 = subnet(&subnets, "2001:db8:101::/64");
     for (name, value) in [
@@ -834,7 +876,6 @@ fn the_report_names_what_did_not_translate() {
         codes::V6_CLASSES,
         codes::V6_FILTERS,
         codes::V6_INTERFACE_ID,
-        codes::V6_PD,
         codes::V6_INTERFACES_ADDRESS,
         codes::POOL_LEASE,
         codes::SCOPE_RESTRICTED,
@@ -877,6 +918,7 @@ fn the_lease_file() {
     let subnets = all_subnets(dhcp6(&out));
     let id = |network: &str| subnet(&subnets, network)["id"].as_u64().expect("id");
     let (lan6, iot6) = (id("2001:db8:101::/64"), id("2001:db8:102::/64"));
+    let delegation = id("2001:db8:180::/48");
     let expire = time("2026-10-25T12:02:00Z").unix_nanos() / 1_000_000_000;
     assert_eq!(
         lines[1..],
@@ -888,7 +930,62 @@ fn the_lease_file() {
             format!(
                 "2001:db8:102::1abc,00:02:00:00:7e:d9:01:02:03,120,{expire},{iot6},60,0,7,128,0,0,host6&#x2ca.example.test.,00:00:5e:00:53:6f,0,,1,8,0"
             ),
+            // WP9.4: a delegated prefix is lease type 2 with its delegated length.
+            format!(
+                "2001:db8:180:120::,00:03:00:01:00:00:5e:00:53:64,120,{expire},{delegation},60,2,7,60,0,0,,00:00:5e:00:53:64,0,,1,2,0"
+            ),
         ]
+    );
+}
+
+// WP9.4: the delegation pools as `pd-pools`.
+#[test]
+fn the_delegation_pools_are_pd_pools_without_the_excluded_prefixes() {
+    let out = run(&Lab::new());
+    let subnets = all_subnets(dhcp6(&out));
+    let delegation = subnet(&subnets, "2001:db8:180::/48");
+    let pd = delegation["pd-pools"].as_array().expect("pd-pools");
+    let shown: Vec<(String, u64, u64)> = pd
+        .iter()
+        .map(|entry| {
+            (
+                entry["prefix"].as_str().expect("prefix").to_owned(),
+                entry["prefix-len"].as_u64().expect("prefix-len"),
+                entry["delegated-len"].as_u64().expect("delegated-len"),
+            )
+        })
+        .collect();
+    // The /56 without 2001:db8:180:110::/60, which holds the excluded address.
+    assert_eq!(
+        shown,
+        [
+            ("2001:db8:180:100::".to_owned(), 60, 60),
+            ("2001:db8:180:120::".to_owned(), 59, 60),
+            ("2001:db8:180:140::".to_owned(), 58, 60),
+            ("2001:db8:180:180::".to_owned(), 57, 60),
+        ]
+    );
+    for entry in pd {
+        assert_eq!(
+            entry["option-data"],
+            json!([{"name": "dns-servers", "code": 23, "space": "dhcp6", "csv-format": true, "data": "2001:db8:180::53", "always-send": true}]),
+            "{entry}"
+        );
+    }
+    // The delegation network has no address pool; the other subnets have no pd-pools.
+    assert_eq!(delegation["pools"], json!([]));
+    assert!(
+        subnet(&subnets, "2001:db8:101::/64")
+            .get("pd-pools")
+            .is_none()
+    );
+    // Nothing about delegated prefixes goes to the report any more.
+    assert!(
+        !codes_of(&out)
+            .iter()
+            .any(|code| code.starts_with("export.kea.v6.pd")),
+        "{:?}",
+        codes_of(&out)
     );
 }
 

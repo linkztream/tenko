@@ -29,6 +29,9 @@ afterEach(async () => {
 
 const GRID = "dhcp-leases";
 const V6 = ["2001:db8:0:10::100", "2001:db8:0:10::101", "2001:db8:0:10::102", "2001:db8:0:10::103"];
+/** WP9.2: the delegated prefix 2001:db8:1:110::/60 of the client of ::100, and every DHCPv6 lease. */
+const PD = "2001:db8:1:110::";
+const V6_ALL = [...V6, PD];
 const open = (url = "/dhcp/leases") => renderRoute(LeasesPage, { url, path: "/dhcp/leases" });
 const loaded = () => waitFor(() => expect(rows(GRID).length).toBeGreaterThan(0));
 const keys = () => rows(GRID).map((r) => r.dataset.key ?? "");
@@ -48,7 +51,7 @@ describe("the family filter", () => {
   it("lists both families, DHCPv4 first, each row with its family", async () => {
     const view = open();
     await loaded();
-    expect(keys().slice(12)).toEqual(V6);
+    expect(keys().slice(12)).toEqual(V6_ALL);
     expect(within(row(GRID, "192.0.2.100")).getByTestId("lease-family").textContent).toBe("DHCPv4");
     expect(within(row(GRID, V6[0]!)).getByTestId("lease-family").textContent).toBe("DHCPv6");
     expect(within(row(GRID, V6[0]!)).getByTestId("lease-family").dataset.key).toBe("v6");
@@ -64,7 +67,7 @@ describe("the family filter", () => {
 
     fireEvent.change(screen.getByTestId("filter-family"), { target: { value: "v6" } });
     await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("family")).toBe("v6"));
-    await waitFor(() => expect(keys()).toEqual(V6));
+    await waitFor(() => expect(keys()).toEqual(V6_ALL));
     expect(view.location()).toContain("family=v6");
 
     fireEvent.change(screen.getByTestId("filter-family"), { target: { value: "v4" } });
@@ -80,7 +83,7 @@ describe("the family filter", () => {
   it("takes the family from the link", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     open("/dhcp/leases?family=v6");
-    await waitFor(() => expect(keys()).toEqual(V6));
+    await waitFor(() => expect(keys()).toEqual(V6_ALL));
     expect((screen.getByTestId("filter-family") as HTMLSelectElement).value).toBe("v6");
     expect(leaseReads(spy).at(-1)!.searchParams.get("family")).toBe("v6");
     expect(screen.getByTestId("leases-reset")).toBeTruthy();
@@ -91,15 +94,96 @@ describe("the family filter", () => {
     open("/dhcp/leases?family=v5");
     await loaded();
     expect(leaseReads(spy).at(-1)!.searchParams.get("family")).toBeNull();
-    expect(rows(GRID)).toHaveLength(16);
+    expect(rows(GRID)).toHaveLength(17);
   });
 
   it("resets the family with the other filters", async () => {
     const view = open("/dhcp/leases?family=v6");
-    await waitFor(() => expect(keys()).toEqual(V6));
+    await waitFor(() => expect(keys()).toEqual(V6_ALL));
     fireEvent.click(screen.getByTestId("leases-reset"));
-    await waitFor(() => expect(rows(GRID)).toHaveLength(16));
+    await waitFor(() => expect(rows(GRID)).toHaveLength(17));
     expect(view.location()).not.toContain("family");
+  });
+});
+
+describe("the kind filter", () => {
+  it("lists the kinds and sends the choice as a query parameter and keeps it in the URL", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    const view = open();
+    await loaded();
+    const menu = screen.getByTestId("filter-kind") as HTMLSelectElement;
+    expect(screen.getByLabelText("Holds", { selector: "select" })).toBe(menu);
+    expect([...menu.options].map((o) => [o.value, o.textContent])).toEqual([
+      ["", "Addresses and prefixes"],
+      ["na", "Addresses"],
+      ["pd", "Prefixes"],
+    ]);
+    expect(menu.value).toBe("");
+    expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBeNull();
+
+    fireEvent.change(menu, { target: { value: "pd" } });
+    await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBe("pd"));
+    await waitFor(() => expect(keys()).toEqual([PD]));
+    expect(view.location()).toContain("kind=pd");
+    expect(screen.getByTestId("leases-reset")).toBeTruthy();
+
+    // The DHCPv4 leases are not read when a kind is asked for.
+    fireEvent.change(menu, { target: { value: "na" } });
+    await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBe("na"));
+    await waitFor(() => expect(keys()).toEqual(V6));
+    expect(view.location()).toContain("kind=na");
+
+    fireEvent.change(menu, { target: { value: "" } });
+    await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBeNull());
+    await waitFor(() => expect(rows(GRID)).toHaveLength(17));
+    expect(view.location()).not.toContain("kind");
+  });
+
+  it("takes the kind from the link, and ignores one that is none", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    open("/dhcp/leases?kind=pd");
+    await waitFor(() => expect(keys()).toEqual([PD]));
+    expect((screen.getByTestId("filter-kind") as HTMLSelectElement).value).toBe("pd");
+    expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBe("pd");
+  });
+
+  it("ignores a kind that is none", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    open("/dhcp/leases?kind=prefix");
+    await loaded();
+    expect(leaseReads(spy).at(-1)!.searchParams.get("kind")).toBeNull();
+    expect(rows(GRID)).toHaveLength(17);
+  });
+
+  it("is reset with the other filters", async () => {
+    const view = open("/dhcp/leases?kind=pd&family=v6");
+    await waitFor(() => expect(keys()).toEqual([PD]));
+    fireEvent.click(screen.getByTestId("leases-reset"));
+    await waitFor(() => expect(rows(GRID)).toHaveLength(17));
+    expect(view.location()).not.toContain("kind");
+  });
+});
+
+describe("the address filter with an IPv6 prefix", () => {
+  it("tells that a prefix also finds the delegated prefixes that hold it and sends the text as typed", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    const view = open();
+    await loaded();
+    const input = screen.getByTestId("filter-addr") as HTMLInputElement;
+    const help = screen.getByTestId("field-help");
+    expect(help.dataset.field).toBe("addr");
+    expect(help.textContent).toBe("An IPv6 prefix such as 2001:db8:1::/48 also finds the delegated prefixes that hold it and the leases inside it.");
+    expect(input.getAttribute("aria-describedby")).toBe(help.id);
+
+    fireEvent.change(input, { target: { value: "2001:db8:1::/48" } });
+    await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("addr")).toBe("2001:db8:1::/48"));
+    await waitFor(() => expect(keys()).toEqual([PD]));
+    expect(new URL(view.location(), "http://localhost").searchParams.get("addr")).toBe("2001:db8:1::/48");
+  });
+
+  it("finds the delegated prefix that holds an address", async () => {
+    open(`/dhcp/leases?addr=${encodeURIComponent("2001:db8:1:117::5")}`);
+    await waitFor(() => expect(keys()).toEqual([PD]));
   });
 });
 
@@ -110,7 +194,8 @@ describe("the DUID filter", () => {
     await loaded();
     fireEvent.change(screen.getByTestId("filter-duid"), { target: { value: "00:03:00:01:00:00:5e:00:53:10" } });
     await waitFor(() => expect(leaseReads(spy).at(-1)!.searchParams.get("duid")).toBe("00:03:00:01:00:00:5e:00:53:10"));
-    await waitFor(() => expect(keys()).toEqual([V6[0]]));
+    // The delegated prefix of the client has the same DUID.
+    await waitFor(() => expect(keys()).toEqual([V6[0], PD]));
     expect(view.location()).toContain("duid=");
   });
 
@@ -180,6 +265,24 @@ describe("a DHCPv6 row", () => {
     expect(within(r).getByTestId("lease-history-link").textContent).toBe("2001:db8:1::/56");
     // The history link still names the address of the row.
     expect(within(r).getByTestId("lease-history-link").getAttribute("href")).toContain("2001%3Adb8%3A1%3A%3A");
+  });
+
+  it("shows a delegated prefix from the mock with its length, the word Prefix and the DUID of its client", async () => {
+    open();
+    await loaded();
+    const r = row(GRID, PD);
+    expect(within(r).getByTestId("lease-history-link").textContent).toBe("2001:db8:1:110::/60");
+    expect(within(r).getByTestId("lease-kind").textContent).toBe("Prefix");
+    expect(within(r).getByTestId("lease-kind").dataset.key).toBe("prefix");
+    expect(within(r).getByTestId("lease-family").dataset.key).toBe("v6");
+    expect(within(r).getByTestId("lease-duid").dataset.key).toBe("0003000100005e005310");
+    expect(within(r).getByTestId("lease-iaid").textContent).toBe("IAID 1");
+    expect(cell(r, "mac").textContent).toBe("00:00:5e:00:53:10");
+    expect(cell(r, "name").textContent).toBe("");
+    // The address rows next to it still hold an address.
+    expect(within(row(GRID, V6[0]!)).getByTestId("lease-history-link").textContent).toBe(V6[0]);
+    expect(within(row(GRID, V6[0]!)).getByTestId("lease-kind").dataset.key).toBe("address");
+    expect(within(row(GRID, "192.0.2.100")).getByTestId("lease-kind").dataset.key).toBe("address");
   });
 
   it("links an address to its history", async () => {
@@ -252,6 +355,89 @@ describe("the lease of the same client in the other family", () => {
   });
 });
 
+describe("the address lease of a delegated prefix", () => {
+  const linkOf = (r: HTMLElement) => new URL(within(r).getByTestId("lease-address-lease-link").getAttribute("href")!, "http://localhost");
+
+  it("links a delegated prefix to the address lease of the same client", async () => {
+    open();
+    await loaded();
+    const r = row(GRID, PD);
+    const found = within(r).getByTestId("lease-address-lease");
+    expect(found.dataset.state).toBe("active");
+    expect(found.textContent).toBe(V6[0]);
+    expect(within(r).getByTestId("lease-address-lease-link").getAttribute("title")).toBe("Show the address lease of this client (Active)");
+    expect(linkOf(r).pathname).toBe("/dhcp/leases");
+    expect(linkOf(r).searchParams.get("addr")).toBe(V6[0]);
+    expect(cell(r, "address_lease").textContent).toBe(V6[0]);
+    // The prefix also links to the DHCPv4 lease of the client, like the address does.
+    expect(within(r).getByTestId("lease-peer-link").textContent).toBe("192.0.2.100");
+  });
+
+  it("has the link on a delegated prefix only", async () => {
+    open();
+    await loaded();
+    for (const key of [V6[0]!, V6[1]!, "192.0.2.100"]) expect(within(row(GRID, key)).queryByTestId("lease-address-lease")).toBeNull();
+  });
+
+  it("follows the link to the list narrowed to the address lease", async () => {
+    const view = open();
+    await loaded();
+    fireEvent.click(within(row(GRID, PD)).getByTestId("lease-address-lease-link"));
+    await waitFor(() => expect(keys()).toEqual([V6[0]]));
+    expect(new URL(view.location(), "http://localhost").searchParams.get("addr")).toBe(V6[0]);
+    expect((screen.getByTestId("filter-addr") as HTMLInputElement).value).toBe(V6[0]);
+  });
+
+  it("says when the address lease is not active", async () => {
+    const lease = held(V6[0]!);
+    lease.state = "expired";
+    lease.ends = new Date(Date.now() - 3_600_000).toISOString();
+    open();
+    await loaded();
+    const found = within(row(GRID, PD)).getByTestId("lease-address-lease");
+    expect(found.dataset.state).toBe("expired");
+    expect(found.textContent).toBe(`${V6[0]} (Expired)`);
+  });
+
+  it("shows no link when the client has no address lease", async () => {
+    dhcpLeaseState().leases = dhcpLeaseState().leases.filter((l) => l.kind === "pd" || l.duid !== held(V6[0]!).duid);
+    open();
+    await loaded();
+    expect(within(row(GRID, PD)).queryByTestId("lease-address-lease")).toBeNull();
+  });
+});
+
+describe("the row menu of a delegated prefix", () => {
+  it("offers the history and the release, and no reservation", async () => {
+    open();
+    await loaded();
+    expect(await rowActions(row(GRID, PD))).toEqual(["history", "release"]);
+  });
+
+  it("links to the history of the first address", async () => {
+    open();
+    await loaded();
+    expect(new URL(within(row(GRID, PD)).getByTestId("lease-history-link").getAttribute("href")!, "http://localhost").searchParams.get("addr")).toBe(PD);
+  });
+
+  it("releases the prefix by its first address and names it with its length", async () => {
+    const writes = recordWrites();
+    open();
+    await loaded();
+    await rowAction(row(GRID, PD), "release");
+    const dialog = await screen.findByTestId("dialog-lease-release");
+    expect(dialog.textContent).toContain("2001:db8:1:110::/60");
+    expect(within(dialog).getByTestId("release-body").textContent).toBe("The lease of 2001:db8:1:110::/60 held by 00:00:5e:00:53:10 ends now. The client can ask for an address again.");
+    fireEvent.click(within(dialog).getByTestId("confirm-ok"));
+    await waitFor(() => expect(within(row(GRID, PD)).getByTestId("lease-state").dataset.key).toBe("released"));
+    const sent = writes().find((w) => w.method === "POST");
+    expect(decodeURIComponent(sent?.url ?? "")).toContain(`/api/v1/dhcp/leases/${PD}/release`);
+    expect(sent?.body).toEqual({ vrf: held(PD).vrf });
+    // The address lease of the client is untouched.
+    expect(within(row(GRID, V6[0]!)).getByTestId("lease-state").dataset.key).toBe("active");
+  });
+});
+
 describe("the row menu of a DHCPv6 lease", () => {
   it("offers the history and the release, and no reservation", async () => {
     open();
@@ -299,9 +485,9 @@ describe("the status strip with both families", () => {
     const active = within(strip)
       .getAllByTestId("strip-leases")
       .find((el) => el.dataset.key === "active")!;
-    expect(active.textContent).toBe("9 DHCPv4 and 3 DHCPv6 active leases");
+    expect(active.textContent).toBe("9 DHCPv4 and 4 DHCPv6 active leases");
     expect(active.dataset.v4).toBe("9");
-    expect(active.dataset.v6).toBe("3");
+    expect(active.dataset.v6).toBe("4");
     // A state both families have is one count with the split in its title.
     const expired = within(strip)
       .getAllByTestId("strip-leases")
@@ -339,6 +525,12 @@ describe("the words", () => {
     expect(screen.getByLabelText("DUID", { selector: "input" })).toBeTruthy();
     const r = row(GRID, V6[0]!);
     expect(within(r).getByTestId("lease-kind").textContent).toBe("Adress");
+    expect(within(row(GRID, PD)).getByTestId("lease-kind").textContent).toBe("Prefix");
+    expect(within(row(GRID, PD)).getByTestId("lease-address-lease-link").getAttribute("title")).toBe("Visa klientens adresslån (Aktivt)");
+    expect(screen.getByLabelText("Innehåller", { selector: "select" })).toBeTruthy();
+    expect([...(screen.getByTestId("filter-kind") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Adresser och prefix", "Adresser", "Prefix"]);
+    expect(screen.getByTestId("field-help").textContent).toBe("Ett IPv6-prefix som 2001:db8:1::/48 hittar även de delegerade prefix som innehåller det och lånen inom det.");
+    expect(screen.getByRole("columnheader", { name: "Routerns adress" })).toBeTruthy();
     expect(within(r).getByTestId("lease-peer").textContent).toBe("Även DHCPv4: 192.0.2.100");
     expect(within(r).getByTestId("lease-family").textContent).toBe("DHCPv6");
     const strip = await screen.findByTestId("dhcp-strip");

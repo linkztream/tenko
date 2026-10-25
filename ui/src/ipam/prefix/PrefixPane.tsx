@@ -34,6 +34,7 @@ import { MoveDialog } from "../move/MoveDialog";
 import { alarmWord, prefixRoleWord, rangeRoleWord } from "../words";
 import { NextFreeAddressDialog, NextFreePrefixDialog } from "./NextFreeDialogs";
 import { PrefixForm } from "./PrefixForm";
+import { delegationWords } from "./delegation";
 import { RangeForm } from "./RangeForm";
 import { VlanChip } from "../vlan/VlanChip";
 import { VlanRef } from "../vlan/VlanRef";
@@ -547,7 +548,15 @@ export function PrefixPane(props: PrefixPaneProps) {
                   id: "lease",
                   header: () => t("ipam.col.lease"),
                   width: 110,
-                  render: (r) => (r.role === "dhcp_pool" && r.lease_secs ? formatDuration(r.lease_secs) : ""),
+                  render: (r) => ((r.role === "dhcp_pool" || r.role === "dhcp_pd_pool") && r.lease_secs ? formatDuration(r.lease_secs) : ""),
+                },
+                // WP9.2: the length of the prefixes a delegation pool hands out and how many it holds.
+                {
+                  id: "delegation",
+                  header: () => t("ipam.col.delegation"),
+                  width: 170,
+                  text: (r: Range) => (r.role === "dhcp_pd_pool" ? delegationWords(r) : ""),
+                  render: (r) => (r.role === "dhcp_pd_pool" ? <span data-testid="range-delegation">{delegationWords(r)}</span> : ""),
                 },
                 { id: "description", header: () => t("ipam.col.description"), render: (r) => r.meta.description ?? "" },
               ]}

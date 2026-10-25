@@ -1,8 +1,11 @@
 // The leases (/dhcp/leases, WP7.5): every lease the server holds, DHCPv4 first and then DHCPv6 (WP9.4),
-// by address, in a grid read page by page, with filters for the scope, the address family, the
-// address (a prefix of its text), the MAC address, the DUID of a DHCPv6 client, the name and the
-// state; they live in the URL. A client that has a lease in both families shows the address of the
-// other one as a link to the list narrowed to it (the peer, correlated by MAC address). A status strip shows what this node's role does. The
+// by address, in a grid read page by page, with filters for the scope, the address family, what a
+// DHCPv6 lease holds (an address or a delegated prefix, WP9.2), the address (a prefix of its text;
+// an IPv6 address or prefix also finds the delegated prefixes that hold it and the leases inside
+// it), the MAC address, the DUID of a DHCPv6 client, the name and the state; they live in the URL.
+// A client that has a lease in both families shows the address of the other one as a link to the
+// list narrowed to it (the peer, correlated by MAC address); a delegated prefix also links to the
+// address lease of its client (the router's own address). A status strip shows what this node's role does. The
 // view is live: it follows the `dhcp` event topic and reads the visible page again when the lease
 // table changed, sampled (sampler.ts), and says how many changes it folded when the server is
 // busier than the page can follow; the Live toggle pauses it. The live strip (WP8.6) names the
@@ -44,6 +47,7 @@ import {
   FAMILIES,
   historyHref,
   kindOf,
+  LEASE_KINDS,
   leaseKey,
   leaseQuery,
   LEASE_FILTER_NAMES,
@@ -151,7 +155,7 @@ export default function LeasesPage() {
     {
       id: "addr",
       header: () => t("dhcp.col.address"),
-      width: 150,
+      width: 170,
       fixed: true,
       text: displayAddr,
       render: (l) => (
@@ -265,6 +269,33 @@ export default function LeasesPage() {
               <Show when={peer().state !== "active"}>
                 {" "}
                 <span class="muted">({t(`dhcp.leases.state.${peer().state}`)})</span>
+              </Show>
+            </span>
+          )}
+        </Show>
+      ),
+    },
+    {
+      // WP9.2: a delegated prefix links to the address lease of the same client (by DUID), the address the router holds.
+      id: "address_lease",
+      header: () => t("dhcp.leases6.col_address_lease"),
+      width: 200,
+      text: (l) => l.address_lease?.addr ?? "",
+      render: (l) => (
+        <Show when={l.address_lease}>
+          {(lease) => (
+            <span data-testid="lease-address-lease" data-state={lease().state}>
+              <A
+                class="mono"
+                href={peerHref(lease())}
+                title={t("dhcp.leases6.address_lease_title", { state: t(`dhcp.leases.state.${lease().state}`) })}
+                data-testid="lease-address-lease-link"
+              >
+                {lease().addr}
+              </A>
+              <Show when={lease().state !== "active"}>
+                {" "}
+                <span class="muted">({t(`dhcp.leases.state.${lease().state}`)})</span>
               </Show>
             </span>
           )}
@@ -387,7 +418,27 @@ export default function LeasesPage() {
               )}
             </For>
           </SelectFilter>
-          <TextFilter id="addr" label={t("dhcp.lfilter.addr")} value={filters().addr} placeholder={t("dhcp.lfilter.addr_placeholder")} mono onCommit={(v) => change("addr", v)} />
+          <SelectFilter id="kind" label={t("dhcp.leases6.lfilter_kind")} onCommit={(v) => change("kind", v)}>
+            <option value="" selected={filters().kind === ""}>
+              {t("dhcp.leases6.lfilter_kind_any")}
+            </option>
+            <For each={LEASE_KINDS}>
+              {(kind) => (
+                <option value={kind} selected={filters().kind === kind}>
+                  {t(`dhcp.leases6.lfilter_kind_${kind}`)}
+                </option>
+              )}
+            </For>
+          </SelectFilter>
+          <TextFilter
+            id="addr"
+            label={t("dhcp.lfilter.addr")}
+            value={filters().addr}
+            placeholder={t("dhcp.lfilter.addr_placeholder")}
+            help={t("dhcp.leases6.lfilter_addr_help")}
+            mono
+            onCommit={(v) => change("addr", v)}
+          />
           <TextFilter
             id="mac"
             label={t("dhcp.lfilter.mac")}

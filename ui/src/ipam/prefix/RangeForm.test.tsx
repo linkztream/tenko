@@ -1,8 +1,10 @@
 import { screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { isApiError } from "../../api/problem";
 import { IPAM_IDS, ipamState } from "../../api/mock/ipam/api";
+import { server } from "../../api/mock/node";
 import type { Prefix, Range } from "../../api/types";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -12,6 +14,10 @@ import { checkLease, leaseParts, RangeForm } from "./RangeForm";
 
 const lan = () => ipamState().data.prefix.get(IPAM_IDS.prefix.lan) as Prefix;
 const pool = () => ipamState().data.range.get(IPAM_IDS.range.pool) as Range;
+// WP9.2: the IPv6 network 2001:db8:1::/48 and its delegation pool (16 prefixes of /60).
+const pdNet = () => ipamState().data.prefix.get(IPAM_IDS.prefix.pdV6) as Prefix;
+const pdPool = () => ipamState().data.range.get(IPAM_IDS.range.pdV6Pool) as Range;
+const roleValues = () => [...(screen.getByTestId("field-role") as HTMLSelectElement).options].map((o) => o.value);
 const rangesOf = (prefix: string) => [...ipamState().data.range.values()].filter((r) => r.prefix === prefix && !r.meta.deleted);
 
 beforeEach(async () => {
@@ -149,6 +155,221 @@ describe("range form: create", () => {
     expect(await axeViolations(dialog)).toEqual([]);
     submitForm();
     expect(screen.getByTestId("field-first").getAttribute("aria-invalid")).toBe("true");
+    expect(await axeViolations(dialog)).toEqual([]);
+  });
+});
+
+describe("range form: delegation pool (WP9.2)", () => {
+  const FIRST = "2001:db8:1:200::";
+  const LAST = "2001:db8:1:2ff:ffff:ffff:ffff:ffff";
+
+  it("offers the role Delegation pool on an IPv6 network only", async () => {
+    const { unmount } = renderRoute(() => <RangeForm prefix={lan()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect(roleValues()).toEqual(["dhcp_pool", "reserved", "infrastructure"]);
+    unmount();
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect(roleValues()).toEqual(["dhcp_pool", "dhcp_pd_pool", "reserved", "infrastructure"]);
+    expect(screen.getByRole("option", { name: "Delegation pool" })).toBeTruthy();
+  });
+
+  it("keeps the role in the list for a range that has it, whatever the network", async () => {
+    renderRoute(() => <RangeForm prefix={lan()} range={pdPool()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect(roleValues()).toContain("dhcp_pd_pool");
+    expect((screen.getByTestId("field-role") as HTMLSelectElement).value).toBe("dhcp_pd_pool");
+  });
+
+  it("shows the delegated length and the lease time for a delegation pool, the lease time alone for an address pool", async () => {
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect(screen.queryByTestId("field-delegated_len")).toBeNull();
+    expect(screen.getByTestId("field-lease")).toBeTruthy();
+    choose("field-role", "dhcp_pd_pool");
+    expect(screen.getByTestId("field-delegated_len")).toBeTruthy();
+    expect(screen.getByTestId("field-lease")).toBeTruthy();
+    expect(noteOf("field-delegated_len")).toBe("The length of the prefixes handed to routers, for example 56 or 60. Longer than /48 and at most /64.");
+    choose("field-role", "reserved");
+    expect(screen.queryByTestId("field-delegated_len")).toBeNull();
+    expect(screen.queryByTestId("field-lease")).toBeNull();
+  });
+
+  it("checks the delegated length and the boundaries of the addresses before anything is sent", async () => {
+    const writes = recordWrites();
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    choose("field-role", "dhcp_pd_pool");
+    typeInto("field-first", FIRST);
+    typeInto("field-last", LAST);
+    submitForm();
+    expect(noteOf("field-delegated_len")).toBe("Enter the length of the delegated prefixes, for example 60.");
+    expect(screen.queryByTestId("dialog-plan")).toBeNull();
+    typeInto("field-delegated_len", "sixty");
+    expect(noteOf("field-delegated_len")).toBe("Enter a whole number, for example 60.");
+    typeInto("field-delegated_len", "60.5");
+    expect(noteOf("field-delegated_len")).toBe("Enter a whole number, for example 60.");
+    for (const bad of ["48", "40", "65", "128"]) {
+      typeInto("field-delegated_len", bad);
+      expect(noteOf("field-delegated_len"), bad).toBe("The length must be longer than /48 and at most /64.");
+    }
+    // The addresses must lie on boundaries of the length.
+    typeInto("field-delegated_len", "60");
+    expect(screen.getByTestId("field-delegated_len").getAttribute("aria-invalid")).toBeNull();
+    typeInto("field-first", "2001:db8:1:208::");
+    expect(noteOf("field-first")).toBe("The first address must be the first address of a /60 prefix.");
+    typeInto("field-first", FIRST);
+    typeInto("field-last", "2001:db8:1:2ff:ffff:ffff:ffff:fff0");
+    expect(noteOf("field-last")).toBe("The last address must be the last address of a /60 prefix.");
+    submitForm();
+    expect(screen.queryByTestId("dialog-plan")).toBeNull();
+    // A shorter length moves the boundaries: 2001:db8:1:208:: is not on a /56, 2001:db8:1:200:: is.
+    typeInto("field-last", LAST);
+    typeInto("field-delegated_len", "56");
+    expect(screen.getByTestId("field-first").getAttribute("aria-invalid")).toBeNull();
+    typeInto("field-first", "2001:db8:1:210::");
+    expect(noteOf("field-first")).toBe("The first address must be the first address of a /56 prefix.");
+    expect(writes().filter((w) => w.method === "POST")).toHaveLength(0);
+  });
+
+  it("creates a delegation pool with its delegated length and lease time", async () => {
+    const writes = recordWrites();
+    const done = vi.fn();
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    choose("field-role", "dhcp_pd_pool");
+    typeInto("field-first", FIRST);
+    typeInto("field-last", LAST);
+    typeInto("field-delegated_len", "60");
+    typeInto("field-lease", "2");
+    choose("field-lease-unit", "hours");
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    const sent = applied(writes());
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.url).toBe(`/api/v1/prefixes/${IPAM_IDS.prefix.pdV6}/ranges`);
+    expect(sent[0]?.body).toEqual({ first: FIRST, last: LAST, role: "dhcp_pd_pool", status: "active", lease_secs: 7200, delegated_len: 60 });
+    const created = rangesOf(IPAM_IDS.prefix.pdV6).find((r) => r.first === FIRST);
+    expect(created).toMatchObject({ role: "dhcp_pd_pool", delegated_len: 60, lease_secs: 7200 });
+  });
+
+  it("sends no delegated length for another role even when one was typed", async () => {
+    const writes = recordWrites();
+    const done = vi.fn();
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    choose("field-role", "dhcp_pd_pool");
+    typeInto("field-delegated_len", "60");
+    choose("field-role", "reserved");
+    typeInto("field-first", "2001:db8:1:300::");
+    typeInto("field-last", "2001:db8:1:300::ff");
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(applied(writes())[0]?.body).toEqual({ first: "2001:db8:1:300::", last: "2001:db8:1:300::ff", role: "reserved", status: "active" });
+  });
+
+  it("shows a delegation pool for editing and sends only the delegated length that changed", async () => {
+    const writes = recordWrites();
+    const range = pdPool();
+    const done = vi.fn();
+    renderRoute(() => <RangeForm prefix={pdNet()} range={range} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect((screen.getByTestId("field-role") as HTMLSelectElement).value).toBe("dhcp_pd_pool");
+    expect((screen.getByTestId("field-delegated_len") as HTMLInputElement).value).toBe("60");
+    const submit = screen.getByTestId("form-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    typeInto("field-delegated_len", "56");
+    expect(submit.disabled).toBe(false);
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    const patches = writes().filter((w) => w.method === "PATCH");
+    expect(patches.length).toBeGreaterThan(0);
+    for (const p of patches) expect(p.body).toEqual({ delegated_len: 56 });
+    expect(pdPool().delegated_len).toBe(56);
+  });
+
+  it("clears the delegated length when the role leaves Delegation pool", async () => {
+    const writes = recordWrites();
+    const done = vi.fn();
+    renderRoute(() => <RangeForm prefix={pdNet()} range={pdPool()} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    choose("field-role", "reserved");
+    expect(screen.queryByTestId("field-delegated_len")).toBeNull();
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(applied(writes())[0]?.body).toEqual({ role: "reserved", delegated_len: null });
+    expect(pdPool().role).toBe("reserved");
+    expect(pdPool().delegated_len).toBeUndefined();
+  });
+
+  it("sends the delegated length with a role that becomes Delegation pool", async () => {
+    const made = await api.post("/api/v1/prefixes/{id}/ranges", {
+      path: { id: IPAM_IDS.prefix.pdV6 },
+      body: { first: "2001:db8:1:300::", last: "2001:db8:1:3ff:ffff:ffff:ffff:ffff", role: "dhcp_pool" },
+    });
+    const range = made.item as Range;
+    const writes = recordWrites();
+    const done = vi.fn();
+    renderRoute(() => <RangeForm prefix={pdNet()} range={range} onDone={done} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    expect(screen.queryByTestId("field-delegated_len")).toBeNull();
+    choose("field-role", "dhcp_pd_pool");
+    typeInto("field-delegated_len", "60");
+    submitForm();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    for (const p of writes().filter((w) => w.method === "PATCH")) expect(p.body).toEqual({ role: "dhcp_pd_pool", delegated_len: 60 });
+    expect(rangesOf(IPAM_IDS.prefix.pdV6).find((r) => r.id === range.id)).toMatchObject({ role: "dhcp_pd_pool", delegated_len: 60 });
+  });
+
+  it("shows the server's refusals under the delegated length and under the role", async () => {
+    server.use(
+      http.post("/api/v1/prefixes/:id/ranges", () =>
+        HttpResponse.json(
+          {
+            type: "about:blank",
+            title: "Bad Request",
+            status: 400,
+            code: "ipam.validation",
+            detail: "delegated_len must be longer than 48",
+            params: { field: "delegated_len" },
+            errors: [
+              { field: "delegated_len", code: "ipam.validation" },
+              { field: "role", code: "ipam.validation" },
+            ],
+          },
+          { status: 400, headers: { "content-type": "application/problem+json" } },
+        ),
+      ),
+    );
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-range-form");
+    choose("field-role", "dhcp_pd_pool");
+    typeInto("field-first", FIRST);
+    typeInto("field-last", LAST);
+    typeInto("field-delegated_len", "60");
+    submitForm();
+    await waitFor(() => expect(screen.getByTestId("field-delegated_len").getAttribute("aria-invalid")).toBe("true"));
+    expect(noteOf("field-delegated_len")).toBe("Some fields are not valid.");
+    expect(screen.getByTestId("field-role").getAttribute("aria-invalid")).toBe("true");
+    expect(noteOf("field-role")).toBe("Some fields are not valid.");
+    // The values stay, and the errors are the fields' own, not a general line above the buttons.
+    expect((screen.getByTestId("field-delegated_len") as HTMLInputElement).value).toBe("60");
+    expect(screen.getByTestId("dialog-range-form").querySelectorAll("[role='alert']")).toHaveLength(2);
+  });
+
+  it("has no accessibility violations with the delegation fields", async () => {
+    renderRoute(() => <RangeForm prefix={pdNet()} onDone={() => {}} onClose={() => {}} />);
+    const form = await screen.findByTestId("dialog-range-form");
+    choose("field-role", "dhcp_pd_pool");
+    const dialog = form.closest("[role='dialog']") as HTMLElement;
+    expect(await axeViolations(dialog)).toEqual([]);
+    submitForm();
+    expect(screen.getByTestId("field-delegated_len").getAttribute("aria-invalid")).toBe("true");
     expect(await axeViolations(dialog)).toEqual([]);
   });
 });

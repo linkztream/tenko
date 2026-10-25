@@ -510,6 +510,63 @@ describe("the health rows of the node page", () => {
     expect(row.textContent).toContain("dhcp-direct.conf, 67/udp");
     expect(row.textContent).toContain(COMMAND);
   });
+
+  // WP9.4: the findings of the router advertisement check of the dhcp role.
+  const RA: { code: string; kind: string; params: Record<string, string>; text: string }[] = [
+    {
+      code: "dhcp.ra.flags_off",
+      kind: "warn",
+      params: { node: "1", interface: "eth1", routers: "fe80::2", scopes: "2001:db8:0:30::/64" },
+      text: "The routers fe80::2 on eth1 of node 1 set neither the M nor the O flag, so the hosts on that link do not ask DHCPv6 and the scopes 2001:db8:0:30::/64 serve nobody.",
+    },
+    {
+      code: "dhcp.ra.other_only",
+      kind: "info",
+      params: { node: "1", interface: "eth0", routers: "fe80::1", scopes: "2001:db8:0:10::/64" },
+      text: "The routers fe80::1 on eth0 of node 1 set the O flag without M, so the hosts on that link ask DHCPv6 for options only.",
+    },
+    {
+      code: "dhcp.ra.managed_without_scope",
+      kind: "warn",
+      params: { node: "1", interface: "eth2", routers: "fe80::9", prefixes: "2001:db8:0:50::/64" },
+      text: "The routers fe80::9 on eth2 of node 1 set the M flag for 2001:db8:0:50::/64, but no enabled DHCPv6 scope covers that link",
+    },
+    {
+      code: "dhcp.ra.unchecked",
+      kind: "info",
+      params: { node: "1", reason: "no CAP_NET_RAW" },
+      text: "The router advertisement check cannot run on node 1: no CAP_NET_RAW.",
+    },
+  ];
+
+  for (const { code, kind, params, text } of RA) {
+    it(`shows ${code} as a ${kind} health row in words`, async () => {
+      await warned([{ code, detail: `English detail of ${code}`, params }]);
+      openNodes();
+      const row = await screen.findByTestId("nodes-health-row");
+      expect(row.dataset.code).toBe(code);
+      expect(row.classList.contains(kind)).toBe(true);
+      expect(row.textContent).toContain(text);
+      expect(row.textContent).not.toContain("English detail");
+    });
+  }
+
+  it("shows the router advertisement rows next to the preparation rows", async () => {
+    await warned([
+      { code: "dhcp.ra.flags_off", detail: "x", params: RA[0]!.params },
+      { code: "node.roles.privileges", detail: "x", params: { roles: "probe", dropins: "probe.conf", capability: "CAP_NET_RAW", command: COMMAND } },
+    ]);
+    openNodes();
+    await waitFor(() => expect(screen.getAllByTestId("nodes-health-row").map((r) => r.dataset.code)).toEqual(["dhcp.ra.flags_off", "node.roles.privileges"]));
+  });
+
+  it("falls back to the detail for a router advertisement code it has no words for", async () => {
+    await warned([{ code: "dhcp.ra.future", detail: "a finding of a newer server", params: { node: "1" } }]);
+    openNodes();
+    const row = await screen.findByTestId("nodes-health-row");
+    expect(row.textContent).toContain("a finding of a newer server");
+    expect(row.classList.contains("info")).toBe(true);
+  });
 });
 
 describe("when the server cannot answer", () => {

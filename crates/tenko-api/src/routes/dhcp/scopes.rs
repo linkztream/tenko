@@ -22,9 +22,10 @@ use tenko_dhcp::config::{
 };
 
 use super::{
-    Configs, DhcpScopeCreate, DhcpScopeItem, DhcpScopePatch, DhcpScopeUtilization, EffectiveOption,
-    EffectiveOptions, EffectiveOptionsParams, ExclusionCreate, ExclusionItem, may_read_scope,
-    page_of, parse_id, settings::profile, with_etag,
+    Configs, DhcpPdUtilization, DhcpScopeCreate, DhcpScopeItem, DhcpScopePatch,
+    DhcpScopeUtilization, EffectiveOption, EffectiveOptions, EffectiveOptionsParams,
+    ExclusionCreate, ExclusionItem, may_read_scope, page_of, parse_id, settings::profile,
+    with_etag,
 };
 use crate::{
     dto::Page,
@@ -317,7 +318,7 @@ fn pool_bits(size: u128) -> Option<u8> {
     tag = "dhcp",
     operation_id = "get_dhcp_scope_utilization",
     summary = "Get how full a DHCP scope is",
-    description = "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool.",
+    description = "Scope: `dhcp.read`. `pool_size` counts the pool addresses a client can hold: the dynamic ones (not excluded) and the reserved ones; `leased` and `abandoned` count dynamic addresses. A DHCPv6 scope (`family` `v6`) counts its DHCPv6 leases; its `pool_size` and `free` stop at 2^64 - 1 and `pool_bits` gives the size of a large pool. A DHCPv6 scope with delegation pools has `pd`, their figures in prefixes; the address figures leave the delegated prefixes out.",
     params(("prefix" = String, Path, description = "Prefix identifier (UUID) of the scope")),
     responses(
         (status = 200, description = "The figures of the scope", body = DhcpScopeUtilization),
@@ -353,6 +354,13 @@ pub(super) async fn get_dhcp_scope_utilization(
             at,
             family: "v6".to_owned(),
             pool_bits: pool_bits(figures.pool_size),
+            pd: figures.pd.map(|pd| DhcpPdUtilization {
+                pools: pd.pools,
+                pool_size: clamp(pd.pool_size),
+                leased: pd.leased,
+                free: clamp(pd.free),
+                utilization: pd.utilization,
+            }),
         })
         .into_response());
     }
@@ -368,6 +376,7 @@ pub(super) async fn get_dhcp_scope_utilization(
         at,
         family: "v4".to_owned(),
         pool_bits: pool_bits(u128::from(figures.pool_size)),
+        pd: None,
     })
     .into_response())
 }

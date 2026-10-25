@@ -17,8 +17,10 @@
 //!   turns it off, as in Tenko), the relay Interface-Id as `interface-id` and the
 //!   interface of a direct listener as `interface`. Pools are the `dhcp_pool` ranges with
 //!   the exclusions cut out (and the Subnet-Router anycast address, which the engine never
-//!   leases); reservations go by `duid`, else `hw-address`, with `ip-addresses`, the host
-//!   name and the interface's options.
+//!   leases); `pd-pools` are the delegation pools (`dhcp_pd_pool`, WP9.2) as prefixes with
+//!   their delegated length, every delegated prefix an exclusion touches cut out (WP9.4);
+//!   reservations go by `duid`, else `hw-address`, with `ip-addresses`, the host name and
+//!   the interface's options.
 //! - **Options.** `option-data` at the global, shared-network, subnet, pool and
 //!   reservation levels with Kea's names; options 23 and 24 are `always-send`, as the
 //!   engine sends them unasked; the custom definitions of `dhcp6` as `option-def`.
@@ -31,8 +33,8 @@
 //! What Kea does not express, or what Tenko does not do for DHCPv6, goes to the report:
 //! classes and policies (DHCPv4 only in Tenko), the MAC filters' relay caveat, a server
 //! DUID Kea cannot hold or that is not known, relay listeners that bind an address,
-//! diverging Interface-Ids in a shared network, pool lifetimes, delegated prefixes (no
-//! `pd-pools`) and the reservations Tenko's image drops.
+//! diverging Interface-Ids in a shared network, pool lifetimes and the reservations Tenko's
+//! image drops.
 
 mod leases;
 mod subnets;
@@ -43,8 +45,7 @@ mod tests;
 use ipnet::IpNet;
 use serde_json::{Map, Value, json};
 use tenko_core::dhcp::{
-    FilterKind, Lease6Kind, LeaseTimes, OptionOwner, OptionValue, ReservationWarning,
-    Scope6Settings,
+    FilterKind, LeaseTimes, OptionOwner, OptionValue, ReservationWarning, Scope6Settings,
 };
 
 use super::{Cx, LEASE_FILE6, at, classes::ALLOW, codes, ddns, expr, options::hex};
@@ -291,22 +292,6 @@ fn findings(cx: &mut Cx<'_>) {
             format!(
                 "the DHCPv6 reservation of {} is left out: its address or client is reserved by another host in the scope (IPAM-23), as in Tenko's image",
                 dropped.addr
-            ),
-        );
-    }
-    let delegated = cx
-        .data
-        .leases6
-        .values()
-        .filter(|lease| lease.kind == Lease6Kind::Pd)
-        .count();
-    if delegated > 0 {
-        cx.report.push(
-            at("leases", "delegated prefixes"),
-            codes::V6_PD,
-            format!(
-                "{} of delegated prefixes (IA_PD) are not exported: the Dhcp6 document has no pd-pools, so Kea delegates no prefixes",
-                plural(delegated, "lease", "leases")
             ),
         );
     }

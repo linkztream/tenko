@@ -26,3 +26,10 @@
 .dhcp-scope-bar { gap: var(--sp-3); font-weight: var(--fw-regular); }
 .dhcp-scope-bar .dhcp-bar { margin-inline-end: var(--sp-2); }
 .dhcp-new { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); margin-inline-start: auto; }
+/* The router advertisement panel (DHCP-10): the links heard, the flags of their routers and the findings. */
+.dhcp-ra { margin-inline: var(--sp-6); margin-block-end: var(--sp-3); }
+.dhcp-ra[open] { display: grid; gap: var(--sp-3); }
+.dhcp-ra-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: 0; font-size: var(--fs-13); font-weight: var(--fw-medium); color: var(--ink-2); cursor: pointer; }
+.dhcp-ra-list { overflow-wrap: anywhere; }
+.dhcp-ra-findings { display: grid; gap: var(--sp-2); }
+.dhcp-ra-note { margin: 0; font-size: var(--fs-12); }

@@ -878,3 +878,49 @@ async fn expiry_writes_what_ran_out_as_expired_with_a_history_row_each() {
     stop.cancel();
     task.await.expect("the committer");
 }
+
+// WP9.4: the history keeps the client's link-layer address, so that the MAC filter finds a
+// client whose DUID names none.
+#[tokio::test]
+async fn the_history_rows_keep_the_link_layer_address_the_row_keeps() {
+    let store = mem_store();
+    let (leases_store, _leases, stop, task) = start6(Arc::clone(&store), CommitSettings::default());
+    let vrf = VrfId::generate();
+    let scope = PrefixId::generate();
+    let mac = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x21];
+    // A DUID-EN behind a relay that sends option 79 (RFC 6939).
+    let mut first = grant(9, vrf, scope, addr(9), Timestamp::now(), from_now(3_600));
+    first.link_layer = Some((1, tenko_dhcp::lease::InlineBytes::new(&mac).0));
+    leases_store.submit6(&first, Ticket(1)).expect("queued");
+    completions(&leases_store, 1, Duration::from_secs(10)).await[0]
+        .outcome
+        .clone()
+        .expect("committed");
+    // A renewal through a relay that does not send it keeps the address the row learned.
+    let renewal = change_of(
+        9,
+        from_now(1),
+        &[binding(
+            LeaseEventKind::Renewed,
+            vrf,
+            scope,
+            1,
+            addr(9),
+            BindingState::Active,
+            from_now(7_200),
+        )],
+    );
+    leases_store.submit6(&renewal, Ticket(2)).expect("queued");
+    completions(&leases_store, 1, Duration::from_secs(10)).await[0]
+        .outcome
+        .clone()
+        .expect("committed");
+    let history = history_rows(store.as_ref()).await;
+    assert_eq!(history.len(), 2);
+    for (event, _) in &history {
+        assert_eq!(event.mac(), Some(mac), "{:?}", event.kind);
+        assert_eq!(event.link_layer_type, Some(1));
+    }
+    stop.cancel();
+    task.await.expect("the committer");
+}

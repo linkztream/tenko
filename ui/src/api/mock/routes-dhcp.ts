@@ -83,6 +83,12 @@ const ipam: DhcpIpam = {
       .filter((r) => r.prefix === prefix && r.role === "dhcp_pool" && !r.meta.deleted)
       .sort((a, b) => (a.first < b.first ? -1 : 1))
       .map((r) => ({ id: r.id, first: r.first, last: r.last, lease_secs: r.lease_secs ?? null })),
+  // WP9.2: the delegation pools of a prefix.
+  pdPools: (prefix) =>
+    [...ipamState().data.range.values()]
+      .filter((r) => r.prefix === prefix && r.role === "dhcp_pd_pool" && !r.meta.deleted)
+      .sort((a, b) => (a.first < b.first ? -1 : 1))
+      .map((r) => ({ id: r.id, first: r.first, last: r.last, lease_secs: r.lease_secs ?? null, delegated_len: r.delegated_len ?? 64 })),
   range: (id) => {
     const range = ipamState().data.range.get(id);
     return range && !range.meta.deleted ? { id: range.id, prefix: range.prefix, role: range.role } : undefined;

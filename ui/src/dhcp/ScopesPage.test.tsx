@@ -93,7 +93,7 @@ describe("creating a scope", () => {
     fireEvent.input(within(dialog).getByTestId("field-description"), { target: { value: "Things" } });
     fireEvent.click(within(dialog).getByTestId("form-submit"));
 
-    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "198.51.100.0/24", "2001:db8:0:10::/64"]));
+    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "198.51.100.0/24", "2001:db8:0:10::/64", "2001:db8:1::/48"]));
     const sent = writes().find((w) => w.method === "POST" && w.url.endsWith("/api/v1/dhcp/scopes"));
     expect(sent?.body).toEqual({
       prefix: DHCP_IDS.iot,
@@ -122,7 +122,7 @@ describe("creating a scope", () => {
     await waitFor(() => expect(within(dialog).queryByTestId("field-server_id")).toBeNull());
     fireEvent.input(within(dialog).getByTestId("field-description"), { target: { value: "IoT, IPv6" } });
     fireEvent.click(within(dialog).getByTestId("form-submit"));
-    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64", "2001:db8:0:30::/64"]));
+    await waitFor(() => expect(rows("dhcp-scopes").map((r) => r.dataset.key)).toEqual(["192.0.2.0/24", "2001:db8:0:10::/64", "2001:db8:0:30::/64", "2001:db8:1::/48"]));
     // The server identifier typed for the IPv4 network was not sent.
     expect(writes().find((w) => w.method === "POST" && w.url.endsWith("/api/v1/dhcp/scopes"))?.body).toEqual({ prefix: IOT_V6, description: "IoT, IPv6" });
     expect(dhcpState().scopes.find((s) => s.prefix === IOT_V6)?.family).toBe("v6");
@@ -150,8 +150,8 @@ describe("creating a scope", () => {
 
 describe("deleting a scope", () => {
   it("says the prefix and its ranges stay, and deletes the scope", async () => {
-    // The DHCPv6 scope of the seed would stay in the list; the empty list is what this checks.
-    dhcpState().scopes = dhcpState().scopes.filter((s) => s.prefix !== DHCP_IDS.lanV6);
+    // The DHCPv6 scopes of the seed would stay in the list; the empty list is what this checks.
+    dhcpState().scopes = dhcpState().scopes.filter((s) => s.prefix !== DHCP_IDS.lanV6 && s.prefix !== DHCP_IDS.pdV6);
     open();
     await loaded();
     await rowAction(row("dhcp-scopes", "192.0.2.0/24"), "delete");

@@ -1,5 +1,6 @@
 //! `GET /dhcp/pools`, `GET|PUT|DELETE /dhcp/pools/{range}`: the IPAM ranges of role
-//! `dhcp_pool` of the scopes with their DHCP settings. A pool is checked on the kind first
+//! `dhcp_pool` and `dhcp_pd_pool` (WP9.2, the delegation pools) of the scopes with their DHCP
+//! settings; a delegation pool counts prefixes. A pool is checked on the kind first
 //! and then on the scope of its range's prefix.
 
 use axum::{
@@ -31,6 +32,8 @@ use crate::{
 fn item(row: PoolRow) -> DhcpPoolItem {
     DhcpPoolItem {
         range: row.range.id,
+        role: row.range.role,
+        delegated_len: row.range.delegated_len,
         prefix: row.range.prefix,
         first: row.range.first,
         last: row.range.last,
@@ -48,7 +51,7 @@ fn item(row: PoolRow) -> DhcpPoolItem {
     tag = "dhcp",
     operation_id = "list_dhcp_pools",
     summary = "List DHCP pools",
-    description = "Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address.",
+    description = "Scope: `dhcp.read`. The pools of the scopes the caller may read, by scope and start address: the address pools (`role` `dhcp_pool`) and the delegation pools of DHCPv6 scopes (`dhcp_pd_pool`, with `delegated_len`; `size` and `leased` count prefixes).",
     params(PageParams, DhcpScopeFilter),
     responses(
         (status = 200, description = "A page of pools by start address", body = Page<DhcpPoolItem>),

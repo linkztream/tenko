@@ -84,10 +84,12 @@ export interface DhcpContext {
   ipam: DhcpIpam;
 }
 
-/** The IPAM the service reads: networks, the ranges of role `dhcp_pool` and reservations. */
+/** The IPAM the service reads: networks, the ranges of role `dhcp_pool` and `dhcp_pd_pool`, and reservations. */
 export interface DhcpIpam {
   prefix(id: string): { id: string; cidr: string; vrf: string; role: "network" | "supernet" } | undefined;
   pools(prefix: string): { id: string; first: string; last: string; lease_secs?: number | null }[];
+  /** WP9.2: the delegation pools (role `dhcp_pd_pool`) of a prefix, with the length of the prefixes they hand out. */
+  pdPools(prefix: string): { id: string; first: string; last: string; lease_secs?: number | null; delegated_len: number }[];
   range(id: string): { id: string; prefix: string; role: string } | undefined;
   /** The IPAM interface of a client with a reservation in the scope, by MAC address. */
   reservation(mac: string, prefix: string): string | undefined;
@@ -124,6 +126,8 @@ export interface DhcpState {
   filters: MacFilter[];
   /** Active leases by scope (prefix id), seeded; the lease routes are not built yet. */
   leases: Map<string, number>;
+  /** WP9.2: the delegated prefixes bound by scope (prefix id), seeded. */
+  pdBound: Map<string, number>;
 }
 
 /** The fixed identifiers of the seed, for tests. */
@@ -138,6 +142,10 @@ export const DHCP_IDS = {
   lanPool: "0190d1c2-0000-7000-8000-000000050002",
   /** The IPAM pool of the v6 LAN (IPAM_IDS.range.lanV6Pool). */
   lanV6Pool: "0190d1c2-0000-7000-8000-000000050004",
+  /** The IPAM prefix 2001:db8:1::/48 (IPAM_IDS.prefix.pdV6): the seeded DHCPv6 scope with a delegation pool (WP9.2). */
+  pdV6: "0190d1c2-0000-7000-8000-0000000a000c",
+  /** The delegation pool of that scope (IPAM_IDS.range.pdV6Pool): 16 prefixes of /60. */
+  pdV6Pool: "0190d1c2-0000-7000-8000-000000050005",
   sharedNetwork: "0190d1c2-0000-7000-8000-00000000e301",
   exclusion: "0190d1c2-0000-7000-8000-00000000e401",
   optionDef: "0190d1c2-0000-7000-8000-00000000e501",
@@ -399,6 +407,7 @@ export function utilization(state: DhcpState, ctx: DhcpContext, prefix: string):
   // `pool_bits`: the size as a power of two, rounded down, from 2^32 up.
   const bits = bitsOfSize(size);
   const clamp = (n: bigint) => Number(n < COUNT_MAX ? n : COUNT_MAX);
+  const pd = pdUtilization(state, ctx, prefix, exclusions);
   return {
     prefix,
     family: row.family,
@@ -409,8 +418,56 @@ export function utilization(state: DhcpState, ctx: DhcpContext, prefix: string):
     free: clamp(size - leased),
     utilization: size === 0n ? 0 : Number((leased * 10_000n) / size) / 10_000,
     ...(bits === null ? {} : { pool_bits: bits }),
+    ...(pd ? { pd } : {}),
     at: new Date(ctx.now()).toISOString(),
   };
+}
+
+/** WP9.2: the figures of the delegation pools of a DHCPv6 scope, in prefixes; none for a scope without one. */
+function pdUtilization(state: DhcpState, ctx: DhcpContext, prefix: string, exclusions: readonly Exclusion[]): NonNullable<Utilization["pd"]> | undefined {
+  const pools = ctx.ipam.pdPools(prefix);
+  if (pools.length === 0) return undefined;
+  let size = 0n;
+  for (const pool of pools) size += pdPoolSize(pool.first, pool.last, pool.delegated_len, exclusions);
+  const bound = BigInt(state.pdBound.get(prefix) ?? 0);
+  const leased = bound < size ? bound : size;
+  return {
+    pools: pools.length,
+    pool_size: Number(size < COUNT_MAX ? size : COUNT_MAX),
+    leased: Number(leased),
+    free: Number(size - leased < COUNT_MAX ? size - leased : COUNT_MAX),
+    utilization: size === 0n ? 0 : Number((leased * 10_000n) / size) / 10_000,
+  };
+}
+
+/** The prefixes of the delegated length between two addresses that no exclusion touches. */
+function pdPoolSize(first: string, last: string, len: number, exclusions: readonly Exclusion[]): bigint {
+  const a = parseIp(first);
+  const b = parseIp(last);
+  if (!a || !b || b.value < a.value) return 0n;
+  const shift = BigInt(128 - len);
+  const total = (b.value - a.value + 1n) >> shift;
+  // The runs of prefixes (by index from the pool's start) an exclusion touches, merged.
+  const touched: [bigint, bigint][] = [];
+  for (const e of exclusions) {
+    const lo = parseIp(e.first);
+    const hi = parseIp(e.last);
+    if (!lo || !hi) continue;
+    const from = lo.value > a.value ? lo.value : a.value;
+    const to = hi.value < b.value ? hi.value : b.value;
+    if (from <= to) touched.push([(from - a.value) >> shift, (to - a.value) >> shift]);
+  }
+  touched.sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  let size = total;
+  let end = -1n;
+  for (const [from, to] of touched) {
+    const start = from > end ? from : end + 1n;
+    if (to >= start) {
+      size -= to - start + 1n;
+      end = to;
+    }
+  }
+  return size < 0n ? 0n : size;
 }
 
 /** The addresses of a range that no exclusion covers (a 128-bit count). */
@@ -562,15 +619,40 @@ function poolView(state: DhcpState, ctx: DhcpContext, prefix: string, range: { i
   const pools = ctx.ipam.pools(prefix);
   const share = pools.reduce((n, p) => n + Number(poolSize(p.first, p.last, exclusions)), 0);
   const leased = share === 0 ? 0 : Math.round(((state.leases.get(prefix) ?? 0) * size) / share);
-  const out: Pool = { range: range.id, prefix, first: range.first, last: range.last, size, leased, revision: settings?.revision ?? 0 };
+  const out: Pool = { range: range.id, prefix, role: "dhcp_pool", first: range.first, last: range.last, size, leased, revision: settings?.revision ?? 0 };
   if (range.lease_secs != null) out.lease_secs = range.lease_secs;
   if (settings) out.settings = { range: range.id, classes: settings.classes, ...(settings.lease ? { lease: settings.lease } : {}), updated: settings.updated };
   return out;
 }
 
+/** WP9.2: a delegation pool; `size` and `leased` count prefixes. */
+function pdPoolView(state: DhcpState, ctx: DhcpContext, prefix: string, range: ReturnType<DhcpIpam["pdPools"]>[number]): Pool {
+  const exclusions = state.exclusions.filter((e) => e.scope === prefix);
+  const wide = pdPoolSize(range.first, range.last, range.delegated_len, exclusions);
+  const size = Number(wide < COUNT_MAX ? wide : COUNT_MAX);
+  // The bound prefixes fill the pools in the order of their start addresses.
+  let remaining = state.pdBound.get(prefix) ?? 0;
+  let leased = 0;
+  for (const p of ctx.ipam.pdPools(prefix)) {
+    const room = Number(pdPoolSize(p.first, p.last, p.delegated_len, exclusions));
+    const here = Math.min(room, remaining);
+    remaining -= here;
+    if (p.id === range.id) leased = here;
+  }
+  const out: Pool = { range: range.id, prefix, role: "dhcp_pd_pool", delegated_len: range.delegated_len, first: range.first, last: range.last, size, leased, revision: 0 };
+  if (range.lease_secs != null) out.lease_secs = range.lease_secs;
+  return out;
+}
+
+/** The pools of a scope, address pools and (of a DHCPv6 scope) delegation pools, by start address. */
+function scopePools(state: DhcpState, ctx: DhcpContext, prefix: string): Pool[] {
+  const pools = [...ctx.ipam.pools(prefix).map((r) => poolView(state, ctx, prefix, r)), ...ctx.ipam.pdPools(prefix).map((r) => pdPoolView(state, ctx, prefix, r))];
+  return pools.sort((a, b) => compareIp(parseIp(a.first) ?? ZERO, parseIp(b.first) ?? ZERO));
+}
+
 export function listPools(state: DhcpState, ctx: DhcpContext, prefix: string | null): Pool[] {
   const scopes = prefix ? [findScopeRow(state, prefix)] : state.scopes;
-  return scopes.flatMap((s) => ctx.ipam.pools(s.prefix).map((r) => poolView(state, ctx, s.prefix, r)));
+  return scopes.flatMap((s) => scopePools(state, ctx, s.prefix));
 }
 
 function poolRange(state: DhcpState, ctx: DhcpContext, id: string): { prefix: string; range: ReturnType<DhcpIpam["pools"]>[number] } {
@@ -582,6 +664,10 @@ function poolRange(state: DhcpState, ctx: DhcpContext, id: string): { prefix: st
 }
 
 export function findPool(state: DhcpState, ctx: DhcpContext, id: string): Pool {
+  for (const scope of state.scopes) {
+    const pd = ctx.ipam.pdPools(scope.prefix).find((r) => r.id === id);
+    if (pd) return pdPoolView(state, ctx, scope.prefix, pd);
+  }
   const { prefix, range } = poolRange(state, ctx, id);
   return poolView(state, ctx, prefix, range);
 }
@@ -1590,7 +1676,8 @@ export function deleteFilter(state: DhcpState, ctx: DhcpContext, id: string, ifM
 /**
  * One scope on the LAN of the IPAM seed with a pool, an exclusion, options at two levels, a class, a
  * policy and a filter; and (WP9.4) a DHCPv6 scope on the IPv6 LAN with the pool IPAM_IDS.range.lanV6Pool,
- * three leases and the dhcp6 options 23 and 24.
+ * three leases and the dhcp6 options 23 and 24; and (WP9.2) a DHCPv6 scope on the delegation network
+ * 2001:db8:1::/48 with the delegation pool IPAM_IDS.range.pdV6Pool (16 prefixes of /60, one bound).
  */
 export function seedDhcp(ctx: DhcpContext): DhcpState {
   const at = ctx.now() - 20 * 86_400_000;
@@ -1619,6 +1706,7 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
       [DHCP_IDS.lan, 12],
       [DHCP_IDS.lanV6, 3],
     ]),
+    pdBound: new Map([[DHCP_IDS.pdV6, 1]]),
   };
   state.sharedNetworks.push({ id: DHCP_IDS.sharedNetwork, name: "home-links", description: "The links of the house", created: stampAt(), updated: stampAt(), revision: rev() });
   state.classes.push({
@@ -1652,6 +1740,20 @@ export function seedDhcp(ctx: DhcpContext): DhcpState {
     restricted: false,
     classes: [],
     description: "House LAN, IPv6",
+    v6: { rapid_commit: true },
+    created: stampAt(),
+    updated: stampAt(),
+    revision: rev(),
+  });
+  // WP9.2: a DHCPv6 scope on the delegation network; its delegation pool is the range IPAM_IDS.range.pdV6Pool.
+  state.scopes.push({
+    prefix: DHCP_IDS.pdV6,
+    family: "v6",
+    enabled: true,
+    ddns: {},
+    restricted: false,
+    classes: [],
+    description: "Delegation, IPv6",
     v6: { rapid_commit: true },
     created: stampAt(),
     updated: stampAt(),

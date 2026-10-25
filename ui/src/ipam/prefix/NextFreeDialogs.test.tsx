@@ -160,7 +160,7 @@ describe("next free prefix", () => {
     expect(noteOf("field-length")).toMatch(/from 33 to 128/);
     submitForm();
     const plan = await screen.findByTestId("dialog-plan");
-    expect((await within(plan).findByTestId("next-free-result")).textContent).toBe("Next free prefix: 2001:db8:1::/48");
+    expect((await within(plan).findByTestId("next-free-result")).textContent).toBe("Next free prefix: 2001:db8:2::/48");
   });
 
   it("says so when a network is asked for room", async () => {
