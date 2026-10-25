@@ -1,10 +1,10 @@
 # Identity plan: GSS-TSIG from Windows and directory sign-in for administrators
 
-- Status: Draft for the owner's review on 2026-10-25. Every decision of section 7 (ID-Q1 to ID-Q18) is a recommendation until the owner answers; the plan binds once the owner accepts it and then changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 3.20 says how
+- Status: Accepted on 2026-10-25: the owner decided every question of section 7 (ID-Q1 to ID-Q18) as recommended, ID-Q13 with one addition (LDAPS must be easy to set up, by importing the certificate chain of the domain controllers in the UI; section 3.13). The plan binds and changes only through rule 2.8 of the execution plan. The owner's standing direction, single node first and cluster-aware (section 2.10 of [phase-2-plan.md](phase-2-plan.md)), binds this work; section 3.20 says how
 - Date: 2026-10-25
 - Scope: the two identity gaps the owner decided on 2026-10-25 to do "right and well from the start" after the comparison with Infoblox, BlueCat and EfficientIP: (1) secure dynamic updates from Windows clients and domain controllers with GSS-TSIG (DNS-28, CON-03, OPS-11, with what DNS-29, DNS-30 and API-18 need of it), and (2) directory-based sign-in for administrators (IAM-11, IAM-12, IAM-13). Data-plane high availability, the other gap, is planned separately. Written against `main` at `3bee0354`. Requirement IDs refer to [REQUIREMENTS.md](../REQUIREMENTS.md), toggles (TGL) and never-off items (NEVER) to [SECURITY-PROFILES.md](../SECURITY-PROFILES.md), RFC targets to [CONFORMANCE.md](../CONFORMANCE.md). Exit criteria, measurements and risks continue the project's series (E43 onward, M45 onward, and R117 onward after R100 to R116 of the high-availability plan); that plan ([ha-plan.md](ha-plan.md), Slice 12, ADR 0025) uses E60 to E71 and M60 to M68.
 
-This plan does for identity what [dns-recursion-plan.md](dns-recursion-plan.md) did for the recursive resolver: the goal, the exit criteria as checks, one slice, the designs compared for the hard choice (the Kerberos implementation), the contracts the packages share, the work packages with owners and acceptance, the order, the measurements, the risks and the decisions only the owner can take. "(proposed)" marks a choice the documents leave open. Sizes are in builder-days. [ADR 0026](../adr/0026-kerberos-and-directory-identity.md) (Proposed) records the decision this plan recommends.
+This plan does for identity what [dns-recursion-plan.md](dns-recursion-plan.md) did for the recursive resolver: the goal, the exit criteria as checks, one slice, the designs compared for the hard choice (the Kerberos implementation), the contracts the packages share, the work packages with owners and acceptance, the order, the measurements, the risks and the decisions only the owner can take. "(proposed)" marks a choice the documents leave open. Sizes are in builder-days. [ADR 0026](../adr/0026-kerberos-and-directory-identity.md) (Accepted on 2026-10-25) records the decision this plan recommends.
 
 Contents:
 
@@ -40,7 +40,7 @@ The ROADMAP puts GSS-TSIG in Phase 4 and directory sign-in in Phase 5. ID-Q10 re
 | E45 | The service account: a pre-staged computer account with a one-time password is taken over by Tenko (the password changed by Tenko, the AES keys derived and stored as a system secret, no administrator credential entered into Tenko); a keytab made with `ktpass` imports and works; a rotation (forced in the lab, every 30 days by default) moves the key version, and tickets issued before it are still accepted until they expire; the self-test reports a missing SPN, a duplicate SPN, a key version Tenko does not hold, an RC4-only account and clock skew above 60 s, each as a health finding with its fix | DNS-28, OPS-09, OPS-11, IAM-16 | WP13.3 |
 | E46 | Ownership: the table-driven tests of section 3.6 pass (a new name, an owned name, the owner, a privileged group, a DnsUpdateProxy member, a claimable imported name, the locator names, a record of IPAM, a manual record, a scavenged name within and after its hold); imported records are governed by the owner SIDs of the Windows adapter (MIG-06) or by the claim rule; a secure update refreshes the aging timestamp (DNS-29) without changing the owner | DNS-28, DNS-29, MIG-06 | WP13.2, WP13.4 |
 | E47 | OIDC sign-in against Keycloak in the lab and, owner-run, against Entra ID: groups or app roles map to roles and scopes, a user without a mapping is refused, removal from the group takes effect at the next sign-in; a wrong issuer, audience, nonce or state, an expired or unsigned ID token, a token signed with an algorithm off the allow-list and a replayed callback are refused; the profile's MFA rule holds through the provider's `amr` claim or through a Tenko factor | IAM-11, IAM-06, TGL-02 | WP13.5 |
-| E48 | LDAP sign-in against the Samba AD controller over LDAPS and StartTLS: a nested group maps through `tokenGroups`, a disabled account and a removed group end the session at the next directory check, an empty password is refused without a bind, a filter value with special characters is escaped, plain LDAP is refused outside Lab, a certificate that does not verify is refused | IAM-12, IAM-05 | WP13.6 |
+| E48 | LDAP sign-in against the Samba AD controller over LDAPS and StartTLS: a nested group maps through `tokenGroups`, a disabled account and a removed group end the session at the next directory check, an empty password is refused without a bind, a filter value with special characters is escaped, plain LDAP is refused outside Lab and shows the clear-text warning in Lab, a certificate that does not verify is refused; the certificate setup (ID-Q13): the provider setup fetches the chain from the configured server, shows it with its fingerprints and pins it only after confirmation, a chain that changes later is refused and shown rather than pinned again, a pasted or uploaded PEM file and the system trust store work as the other two sources, and, as the acceptance test, LDAPS is configured against the lab's Samba AD controller with a private CA in under five minutes using only the UI | IAM-12, IAM-05 | WP13.6 |
 | E49 | Kerberos sign-in to the web UI: `curl --negotiate` from a Linux client with a ticket in the lab and, owner-run, a domain-joined Edge with the site in its allow-list obtain a session whose roles come from the PAC's groups through the mappings | IAM-13 | WP13.7 |
 | E50 | Profiles: under Hardened an AD zone takes signed updates only with ownership on, local person accounts cannot sign in once a directory provider is verified (break-glass and service accounts can), and every new action is in the audit log with its principal (NEVER-02, NEVER-03); the toggle rows of section 7 show their values and the banner rules hold | TGL-09, IAM-09, IAM-19 | WP13.8 |
 | E51 | Fuzz targets for every new parser (TKEY records, SPNEGO tokens, AP-REQ, the authenticator checksum, the PAC, the keytab file, MIC tokens) run in the weekly fuzz smoke; the counting-allocator test still binds the query path and the TSIG path, now with a GSS-TSIG verification on an established context | API-14, API-15 | WP13.1, WP13.2 |
@@ -65,9 +65,9 @@ One slice: **Slice 13, Kerberos and directory identity**. Slice 12 is the high-a
 | DNS-30 DC locator | The secure registration of the locator records (E44); the validation of the SRV records stays with its own package | 4, Must |
 | API-18 Windows interop lab | The GSS-TSIG and sign-in rows of the lab (E44, E47, E49) | 4, Must |
 | MIG-06 Windows DNS source | Uses the owner SIDs it reads (section 3.6); the adapter is not built here | 4, Must |
-| IAM-11 SSO | OIDC (WP13.5); SAML not built (ID-Q11) | 5, Should (ID-Q10 proposes 4, Must) |
-| IAM-12 LDAP/AD group mapping | LDAP sign-in and the group mapping for every provider (WP13.5, WP13.6) | 5, Should (ID-Q10 proposes 4, Must) |
-| IAM-13 Kerberos SPNEGO | Kerberos sign-in to the web UI (WP13.7) | 5, Should (ID-Q10 proposes 4, Should) |
+| IAM-11 SSO | OIDC (WP13.5); SAML not built (ID-Q11) | 4, Must (ID-Q10, decided 2026-10-25; was 5, Should) |
+| IAM-12 LDAP/AD group mapping | LDAP sign-in and the group mapping for every provider, with LDAPS set up from the UI by importing the controllers' certificate chain (WP13.5, WP13.6) | 4, Must (ID-Q10, decided 2026-10-25; was 5, Should) |
+| IAM-13 Kerberos SPNEGO | Kerberos sign-in to the web UI (WP13.7) | 4, Should (ID-Q10, decided 2026-10-25; was 5, Should) |
 | IAM-06, IAM-08, IAM-09, IAM-10, IAM-19 | Applied to directory users: MFA, sessions, break-glass, tokens, attribution (section 3.17) | 1, delivered |
 | IAM-16 Vault | New system secret purposes for the Kerberos keys and the providers' secrets | 1, delivered |
 | TGL-09 | Its Phase 4 values become real (section 3.7) | 2 (GSS-TSIG in 4) |
@@ -267,7 +267,8 @@ Metrics: `tenko_dns_tkey_total{outcome}` (`established`, `continue`, `deleted`, 
 ### 3.13 LDAP and Active Directory
 
 - **Library.** `ldap3` 0.12.1 (MIT OR Apache-2.0) with the `tls-rustls-aws-lc-rs` feature (`aws-lc-rs` is already in the graph; the default `tls-native` would need OpenSSL). Paged results and the extensible-match filters it parses cover the AD searches. Its SASL GSSAPI feature binds the system GSSAPI and is not used; Kerberos sign-in goes through section 3.14 instead.
-- **Transport** (ID-Q13). LDAPS on 636 by default; StartTLS on 389 allowed; the certificate is verified against the system roots, the internal CA or a PEM the provider names; plain LDAP only under Lab, with the banner. Several URLs or `_ldap._tcp.<domain>` SRV discovery for failover.
+- **Transport** (ID-Q13). LDAPS on 636 by default; StartTLS on 389 allowed; plain LDAP only under Lab, with the banner and, on the provider's own setup page, a warning in words that the credentials cross the network in clear text. The certificate is always verified, against one of three sources the setup offers side by side: the chain imported from the server (below), a PEM file that is pasted or uploaded, or the system trust store. Several URLs or `_ldap._tcp.<domain>` SRV discovery for failover.
+- **Importing the certificate chain** (the owner's addition to ID-Q13, 2026-10-25: configuring LDAPS must be easy enough that nobody drops to the Lab profile to run plain LDAP with cleartext credentials). The setup page has a button "Fetch the certificate chain" beside the server URL: the controller opens a TLS connection to the configured server (LDAPS, or StartTLS after the LDAP extended request), reads the chain the server presents, sends no credential and no LDAP request beyond StartTLS, and shows each certificate (subject, issuer, validity, key type, subject alternative names, SHA-256 fingerprint) with a plain statement of whether the chain already verifies against the system trust store, so that an administrator sees at once whether a private CA is involved. The administrator confirms by comparing the fingerprints with the ones the domain controller shows (the page gives the `certutil` and `openssl` commands that print them) and ticks which certificates to trust; the default is every certificate above the server's own, else the server's certificate itself with a note that a pin of the server certificate must be redone when it is renewed. Only then is the pin stored with the provider, as trust anchors for this provider alone (never added to the system store or to another provider). Verification at every connection is ordinary path validation against the pinned set, with the server name check and the validity dates; "accept whatever is presented" does not exist as a setting. A chain that changes later (a new CA) is refused with a finding that shows the difference, and is never pinned again without the same confirmation. The fetch is an interactive-session action of an administrator with the right to change providers, connects only to the URL being configured, and keeps nothing before the confirmation. The same screen takes a PEM file by paste or by upload (a bundle of one or more certificates, shown for confirmation in the same way, private keys refused), and offers the system trust store as the third source. In the Samba lab the controller's LDAPS certificate comes from a private CA that is generated per run and trusted by nothing, so that the import is what makes LDAPS work (section 3.19).
 - **Binds.** A read-only service account (a system secret, purpose `auth.ldap`) finds the user (by `sAMAccountName` or `userPrincipalName`, with RFC 4515 escaping), reads `objectGUID`, `objectSid`, `userAccountControl` and `accountExpires`, refuses a disabled or expired account, and then Tenko binds as the user's DN with the user's password over the TLS session to check it. An empty password is refused before any bind (an empty simple bind is an unauthenticated bind that succeeds). The groups come from `tokenGroups` (a base-scope read of the user's entry, AD only), which lists every group SID the user holds transitively, the primary group included; for other directories `memberOf`, or a group search, with nesting only where the server resolves it.
 - **The directory check.** For the lifetime of a session, at most every `recheck_minutes` (proposed 15 under Home and Standard, 5 under Hardened), the session's next request looks the user up again by `objectGUID` with the service account: disabled, deleted or with changed groups, the session's grants are recomputed or the session ends (`auth.directory.revoke`). A directory that cannot be reached keeps the session for a grace period (proposed 15 minutes, 0 under Hardened) and refuses new LDAP sign-ins; break-glass works throughout.
 - **Lockout.** Tenko's own lockout (TGL-07) runs per user name before the directory is asked, so a guessing attack against Tenko does not lock the AD account through AD's own threshold.
@@ -299,14 +300,14 @@ SAML (ID-Q11), RADIUS and TACACS+ (ID-Q12), NTLM, and SCIM: section 1.6 gives th
 ### 3.18 The UI flows
 
 - **Sign-in page:** the local form (user name and password, passkey) and one button per enabled OIDC provider and for Windows sign-in; a user name with an `@suffix` or `DOMAIN\` prefix that names an LDAP provider goes to that provider; a bare name is local, or goes to the default LDAP provider when one is set and no local account has that name.
-- **Settings, Sign-in providers:** create an OIDC provider (issuer, client, secret, claims; the redirect URI shown to copy into the provider; "Test sign-in" in a new window, which verifies it), an LDAP provider (URLs, TLS mode, CA, service account, base DN, filters, group mode; "Test" with a user name and password, which shows the groups found and the roles they would map to), a negotiate provider (realm, SID mappings); each shows its state, last success and last error.
+- **Settings, Sign-in providers:** create an OIDC provider (issuer, client, secret, claims; the redirect URI shown to copy into the provider; "Test sign-in" in a new window, which verifies it), an LDAP provider (URLs, TLS mode, the certificate source with the chain import, the PEM paste or upload and the system trust store, service account, base DN, filters, group mode; the plain-LDAP option, offered under Lab only, carries the clear-text warning; "Test" with a user name and password, which shows the groups found and the roles they would map to), a negotiate provider (realm, SID mappings); each shows its state, last success and last error.
 - **Access, Directory mappings:** a table of group to role and scope per provider, with the users currently mapped (from the last sign-ins) and a dry run for a user name.
 - **DNS, Active Directory, Kerberos:** a wizard with the realm (and its KDCs, found by SRV or listed), the account name and OU shown together with the PowerShell block filled with those values for the administrator to type on a DC, then the one-time password, then the self-test with its findings; or the keytab upload. Then the zones: a list of the zones of the realm with their current mode and the change to secure only, previewed (API-09) with what changes for the controllers. A status page shows the key versions, the SPNs, the last rotation and self-test, the contexts and the refusals of the last hour.
 - **Zone settings, Dynamic updates:** the mode in Windows terms beside the lists, the ownership switch, the privileged groups, and per record the owner and the principal of the last change.
 
 ### 3.19 The labs and the acceptance tests
 
-- **`deploy/compose/lab-ad`** (new, weekly on hosted runners, never a pull request gate): a Samba AD domain controller container (`samba-tool domain provision --dns-backend=NONE`, realm `LAB.EXAMPLE.TEST`) whose DNS is the Tenko node, so that its own `samba_dnsupdate` registers the DC records through `nsupdate -g` (E43, a controller-shaped client); a Linux client container with MIT `kinit` and `nsupdate -g` running the rows of E43; LDAPS and StartTLS against the same controller (E48); `curl --negotiate` against the UI (E49); a Keycloak container with a realm export for OIDC (E47). The images are pinned by digest. Samba is GPL-licensed and Keycloak Apache-2.0; both are only run as containers in the lab, nothing of them is copied into the repository or linked. Every secret of the lab is generated per run; the repository is public and so are the runners' logs.
+- **`deploy/compose/lab-ad`** (new, weekly on hosted runners, never a pull request gate): a Samba AD domain controller container (`samba-tool domain provision --dns-backend=NONE`, realm `LAB.EXAMPLE.TEST`) whose DNS is the Tenko node, so that its own `samba_dnsupdate` registers the DC records through `nsupdate -g` (E43, a controller-shaped client); a Linux client container with MIT `kinit` and `nsupdate -g` running the rows of E43; LDAPS and StartTLS against the same controller, whose certificate is issued by a private CA generated per run, and the UI end-to-end test of the five-minute LDAPS setup (E48); `curl --negotiate` against the UI (E49); a Keycloak container with a realm export for OIDC (E47). The images are pinned by digest. Samba is GPL-licensed and Keycloak Apache-2.0; both are only run as containers in the lab, nothing of them is copied into the repository or linked. Every secret of the lab is generated per run; the repository is public and so are the runners' logs.
 - **The Windows interop lab** (API-18, owner-run, E44 and the Entra ID row of E47): two Windows Server 2022 or 2025 controllers without the DNS Server role and a Windows 11 client, the steps of the rewritten runbook, captures with `pktmon` or Wireshark committed under `deploy/compose/lab-ad/windows/`. A first probe of it runs early, inside WP13.2 (R120): one controller registering through the TKEY code before the rest of the slice is built.
 - **Unit and table tests:** the acceptor against recorded tokens (Samba, MIT and Windows captures); MIC vectors; the RFC 3962 key derivation test vectors; the ownership table; the OIDC verifier against crafted tokens; the LDAP filter escaping; fuzz targets `krb_spnego`, `krb_ap_req`, `krb_pac`, `krb_keytab`, `dns_tkey`, `gss_mic` (E51).
 
@@ -319,7 +320,7 @@ The slice builds and measures one node with the `controller` and `dns` roles. Wh
 ### 4.1 Model (`tenko-core`)
 
 - `dns`: `UpdatePolicy.kerberos: Option<KerberosUpdate { realms: Vec<Realm>, ownership: Ownership { Windows, None }, owner_hold_days: u16, privileged: Vec<Sid>, update_proxy: Option<Sid> }>`; `AclEntry::Kerberos { realm, principal: Option<String>, from: Option<IpNet>, deny }`; `RrSet.principal: Option<PrincipalName>`; `NameOwner { sid: Option<Sid>, principal: PrincipalName, since, hold_until }`; `Realm`, `PrincipalName`, `Sid` with parsing and validation; `KrbAccount { realm, name, spns, kdcs, owned: bool, rotation_days, versions: [KeyVersionMeta], last_rotation, last_check }` (metadata only; the keys are the secret); the aging timestamp is not added here (DNS-29's package).
-- `auth` (in `tenko-auth`): `UserSource { Local, External { provider, subject } }` on `UserRecord`; `DirectoryProvider { Oidc(..), Ldap(..), Negotiate(..) }` with a state (`draft`, `verified`, `disabled`); `DirectoryMapping`; `SessionRecord.source` and `directory_checked_at`; `OidcFlow`.
+- `auth` (in `tenko-auth`): `UserSource { Local, External { provider, subject } }` on `UserRecord`; `DirectoryProvider { Oidc(..), Ldap(..), Negotiate(..) }` with a state (`draft`, `verified`, `disabled`), the LDAP variant holding its `LdapTrust { System, Pem { certs }, Imported { certs, fingerprints, confirmed_by, confirmed_at } }` (certificates only, never a key); `DirectoryMapping`; `SessionRecord.source` and `directory_checked_at`; `OidcFlow`.
 - Tables: `dns.name_owners`, `dns.krb_accounts`, `auth.providers`, `auth.mappings`, `auth.oidc_flows`, `auth.external_ids` (provider and subject to user ID, unique).
 
 ### 4.2 Crates
@@ -330,8 +331,8 @@ The slice builds and measures one node with the `controller` and `dns` roles. Wh
 
 ### 4.3 API, CLI and UI
 
-- Routes (session only where `interactive_only` says, annotated per [api/README.md](../api/README.md)): `GET /dns/kerberos`, `POST /dns/kerberos/adopt`, `POST /dns/kerberos/import`, `POST /dns/kerberos/check`, `POST /dns/kerberos/rotate`, `DELETE /dns/kerberos`; `GET /dns/zones/{id}/owners` (paged); `GET, POST /auth/providers`, `GET, PATCH, DELETE /auth/providers/{id}`, `POST /auth/providers/{id}/test`; `GET, POST /access/directory-mappings`, `DELETE /access/directory-mappings/{id}`; public: `GET /auth/oidc/{id}/start`, `GET /auth/oidc/{id}/callback`, `GET /auth/negotiate`, `GET /auth/providers/public` (the buttons); `POST /auth/login/password` gains an optional `provider`.
-- CLI: `tenko dns kerberos status|adopt|import|check|rotate|delete`, `tenko auth provider ...`, `tenko access mapping ...`.
+- Routes (session only where `interactive_only` says, annotated per [api/README.md](../api/README.md)): `GET /dns/kerberos`, `POST /dns/kerberos/adopt`, `POST /dns/kerberos/import`, `POST /dns/kerberos/check`, `POST /dns/kerberos/rotate`, `DELETE /dns/kerberos`; `GET /dns/zones/{id}/owners` (paged); `GET, POST /auth/providers`, `GET, PATCH, DELETE /auth/providers/{id}`, `POST /auth/providers/{id}/test`, `POST /auth/providers/ldap/chain` (fetches the chain from the URL in the body and returns it with its fingerprints and whether it verifies against the system store; session only; it stores nothing, the pin is made by the provider's create or update call that carries the confirmed certificates); `GET, POST /access/directory-mappings`, `DELETE /access/directory-mappings/{id}`; public: `GET /auth/oidc/{id}/start`, `GET /auth/oidc/{id}/callback`, `GET /auth/negotiate`, `GET /auth/providers/public` (the buttons); `POST /auth/login/password` gains an optional `provider`.
+- CLI: `tenko dns kerberos status|adopt|import|check|rotate|delete`, `tenko auth provider ...` (including `tenko auth provider ldap-chain <url>`, which prints the chain and fingerprints), `tenko access mapping ...`.
 - Codes: `dns.gss.*` and `dns.krb.*` (the findings of 3.10 and the refusals), `auth.provider.*`, `auth.directory.*`, `auth.oidc.*`; i18n units in `sv` and `en`.
 - Configuration: `[dns.gss] context_max_secs, contexts_max, negotiating_max, per_client_max, skew_secs`.
 
@@ -399,14 +400,16 @@ Every package below touches `crates/tenko-krb/**`, `crates/tenko-directory/**`, 
 - **Acceptance:** E47 against Keycloak (the owner runs the Entra ID row); the route tests of [api/README.md](../api/README.md) for the new public routes; the CSRF and cookie tests for the callback.
 - **Risk:** R119, R128, R129.
 
-#### WP13.6 LDAP and AD sign-in (9 builder-days)
+#### WP13.6 LDAP and AD sign-in (10 builder-days)
 
 - **Requirements:** IAM-12, IAM-05.
-- **Owns:** the LDAP half of `crates/tenko-directory`, the directory check in `tenko-auth`, the LDAP provider UI and test dialog, the LDAP rows of `lab-ad`.
+- **Owns:** the LDAP half of `crates/tenko-directory` (with the chain fetch), the directory check in `tenko-auth`, the LDAP provider UI and test dialog (with the certificate setup: the chain confirmation screen, the PEM paste and upload, the trust-store source, the plain-LDAP warning), the LDAP rows of `lab-ad` (with its private CA), the five-minute UI end-to-end test under `ui/e2e`.
 - **Depends on:** WP13.5.
-- **Content:** 1. find, bind and `tokenGroups`; 2. `memberOf` and group search for other directories; 3. the check and the grace; 4. user name routing; 5. UI.
-- **Acceptance:** E48 against the Samba controller; an OpenLDAP row with `memberOf` (a container in the lab).
-- **Risk:** R127.
+- **Content:** 1. find, bind and `tokenGroups`; 2. `memberOf` and group search for other directories; 3. the check and the grace; 4. user name routing; 5. UI; 6. the certificate setup of LDAPS (the owner's addition to ID-Q13, section 3.13): the chain fetch over LDAPS and StartTLS, the confirmation screen with the fingerprints and the pin, the refusal of a changed chain, the PEM paste and upload, the system trust store as the third source, the clear-text warning on the plain-LDAP option, and the private CA of the lab.
+- **Contracts:** `LdapTrust`, `POST /auth/providers/ldap/chain` and `tenko auth provider ldap-chain` (sections 4.1 and 4.3), the finding codes `auth.provider.chain_changed` and `auth.provider.chain_unverified`.
+- **Acceptance:** E48 against the Samba controller, including the five-minute test: with the lab's private CA, LDAPS is configured using only the UI in under five minutes, from an empty provider list to a successful "Test" that shows the groups found (a Playwright test in `ui/e2e` that makes no API call and edits no file, run by the weekly lab job, failing above 300 s, and timed once by hand at the exit); an OpenLDAP row with `memberOf` (a container in the lab).
+- **Size:** 10 builder-days, one more than the 9 of the draft, for the chain fetch, the confirmation screen, the PEM alternative, the trust-store source, the warning and the UI test; the slice's total becomes 82.
+- **Risk:** R127, R136.
 
 #### WP13.7 Kerberos sign-in to the web UI (4 builder-days)
 
@@ -422,7 +425,7 @@ Every package below touches `crates/tenko-krb/**`, `crates/tenko-directory/**`, 
 - **Depends on:** every other package.
 - **Acceptance:** E50 to E52.
 
-Total: 81 builder-days, of which WP13.1 and WP13.2 are the critical path (about 34 days after the spike).
+Total: 82 builder-days, of which WP13.1 and WP13.2 are the critical path (about 34 days after the spike).
 
 ## 6. Order, measurements and exit checks
 
@@ -442,121 +445,139 @@ WP13.0 first (the spike decides the stack). Then two lines: the Kerberos line WP
 
 ## 7. Owner decisions
 
-Each question lists its options, the trade-offs and the recommendation. Document changes the recommendations imply are listed in section 8 (the lead's files).
+Each question lists its options, the trade-offs and the recommendation. Document changes the recommendations imply are listed in section 8 (the lead's files). The owner decided every question on 2026-10-25 as recommended, ID-Q13 with the addition recorded under it; each question ends with the decision.
 
-Proposed toggle rows (SECURITY-PROFILES.md, the lead's file; new rows take the next free TGL numbers):
+Toggle rows (SECURITY-PROFILES.md, the lead's file; applied on 2026-10-25, the new rows as TGL-32 to TGL-36 in the order below):
 
 | Toggle | Home | Standard | Hardened | Lab | Where |
 |---|---|---|---|---|---|
 | TGL-09 Dynamic updates from external clients (the row exists; the values are refined) | None by default; any mode per zone | TSIG; secure only for the zones the Kerberos wizard enables, nonsecure and secure allowed per zone as a deviation | TSIG or GSS-TSIG only, secure only with ownership on every zone with Kerberos, unsigned rejected | Unsigned allowed | WP13.2 |
-| Kerberos account password rotation (proposed new row) | 30 days | 30 days | 30 days, a failed rotation alarms | Off allowed (30 days by default) | WP13.3 |
-| Local person accounts beside a verified directory provider (proposed new row) | Allowed | Allowed | Break-glass only | Allowed | WP13.5 |
-| Directory transport for LDAP (proposed new row) | LDAPS or StartTLS, verified | LDAPS or StartTLS, verified | LDAPS only, verified | Plain allowed | WP13.6 |
-| Directory check interval and grace (proposed new row) | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | WP13.6 |
-| Personal tokens of directory users (proposed new row) | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | WP13.5 |
+| TGL-32 Kerberos account password rotation | 30 days | 30 days | 30 days, a failed rotation alarms | Off allowed (30 days by default) | WP13.3 |
+| TGL-33 Local person accounts beside a verified directory provider | Allowed | Allowed | Break-glass only | Allowed | WP13.5 |
+| TGL-34 Directory transport for LDAP | LDAPS or StartTLS, verified | LDAPS or StartTLS, verified | LDAPS only, verified | Plain allowed, with the clear-text warning | WP13.6 |
+| TGL-35 Directory check interval and grace | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | WP13.6 |
+| TGL-36 Personal tokens of directory users | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | WP13.5 |
 
 **ID-Q1. How does Tenko accept Kerberos?**
 - Options: (a) the system GSSAPI library; (b) a pure-Rust stack on `sspi` and `picky-krb`; (b') Tenko's own acceptor over `picky-krb`; (c) SSPI on Windows with (b) on Linux; (d) a helper process.
 - Trade-offs: section 2.3. (a) breaks the static musl binary and the distroless image and puts a keytab file on disk; (c) needs `unsafe` or `cross-krb5` and a domain-joined Windows identity, and two code paths; (d) is two artifacts for no gain under ADR 0023's threat model; (b) and (b') keep one binary, one code path, no `unsafe`, keys in the vault, and differ in dependency weight against interop already met.
 - **Recommendation: (b), confirmed or replaced by (b') by the spike of WP13.0 against the criteria of section 2.4, behind the one crate `tenko-krb`.**
+- **Decided (2026-10-25): (b), the pure-Rust stack on `sspi` and `picky-krb` behind `tenko-krb`, confirmed or replaced by (b') by the spike of WP13.0.**
 
 **ID-Q2. On Windows: the same pure-Rust acceptor, or native SSPI under a gMSA (OPS-11)?**
 - Options: (a) the same acceptor and keys from the vault, the service under its virtual account; (b) native SSPI with the service running as a gMSA or domain account holding the SPN.
 - Trade-offs: (a) is one code path, needs no domain-joined host and no change to the MSI or to ADR 0023's Windows terms, and tests on Linux what runs on Windows; the key is in Tenko's vault rather than the LSA. (b) keeps the key in the LSA and rotates it with the gMSA, but needs `unsafe` FFI, a joined host, and a second implementation to keep in step.
 - **Recommendation: (a); OPS-11 is rewritten (section 8).**
+- **Decided (2026-10-25): (a), the same acceptor on Windows, keys from the vault.**
 
 **ID-Q3. What kind of account, with which encryption types?**
 - Options: (a) a computer account, AES only (`msDS-SupportedEncryptionTypes` = 24); (b) a user account; (c) a gMSA.
 - Trade-offs: (a) has a computable salt, can change its own password, and is what CON-03 names; (b) works but its salt depends on the UPN and its password falls under user password policies; (c) needs an LDAP read of a constructed attribute by an allowed principal and was not verified for key versions.
 - **Recommendation: (a); (b) is accepted through the keytab import.**
+- **Decided (2026-10-25): (a), a computer account with AES only; a user account through the keytab import.**
 
 **ID-Q4. Who creates the account, and who owns its password?**
 - Options: (a) the administrator pre-stages it with a static PowerShell block and a one-time password, and Tenko takes the password over; (b) the administrator creates it and a keytab with `ktpass` or `msktutil` and uploads the keytab; (c) a Tenko wizard binds to LDAP with an administrator's credential and creates it.
 - Trade-offs: (a) keeps every directory credential and every script out of Tenko and makes the password Tenko's alone, so rotation is possible; (b) leaves the password with the administrator and rotation manual; (c) is the least friction but hands a credential that can create directory objects to a system assumed compromisable (ADR 0023) and breaks the owner's privilege boundary.
 - **Recommendation: (a) as the default, (b) supported; (c) not built.**
+- **Decided (2026-10-25): (a), pre-staged with a one-time password that Tenko takes over; (b) the keytab import supported; (c) not built.**
 
 **ID-Q5. Is the account's password rotated, and by whom?**
 - Options: (a) Tenko rotates every 30 days through the change-password protocol, keeping the previous key version; (b) no rotation; (c) rotation on demand only.
 - Trade-offs: (a) limits the life of a stolen key and keeps the account active for clean-up scripts, at the cost of a job that must survive a crash between the change and the commit (the pending state); (b) is simpler and is what most standalone service accounts get; (c) leaves it to memory.
 - **Recommendation: (a), with the toggle row above; for an imported keytab (ID-Q4 (b)) rotation is (b) and the self-test reports the password's age.**
+- **Decided (2026-10-25): (a), rotation every 30 days through the change-password protocol; none for an imported keytab.**
 
 **ID-Q6. One account per installation, or one per node?**
 - Options: (a) one account holding `DNS/<fqdn>` of every node (and `HTTP/<fqdn>`); (b) one account per node.
 - Trade-offs: (a) is one key to rotate and deliver, a second node is one more SPN; (b) separates keys per node, which buys nothing while every node holds the vault's other secrets anyway.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), one account per installation.**
 
 **ID-Q7. Ownership per name or per RRset?**
 - Options: (a) per name, as Windows secures a `dnsNode`; (b) per RRset, as DNS-28 and MIG-06 say today.
 - Trade-offs: (a) is what Windows clients and controllers expect and what the owner SIDs from the directory describe; (b) would let a second principal add another type at an owned name, which Windows does not allow.
 - **Recommendation: (a), with DNS-28 and MIG-06 reworded.**
+- **Decided (2026-10-25): (a), ownership per name.**
 
 **ID-Q8. Which ownership rules?**
 - Options: (a) Windows' rules (any authenticated principal creates, the creator owns, DnsUpdateProxy leaves names unowned, privileged groups by SID) plus Tenko's protections (locator names for privileged principals only, manual records protected, imported names claimable only by their own host, an owner hold after removal); (b) Windows' rules alone; (c) BIND's `krb5-self`/`ms-self` rules (a host updates only its own name).
 - Trade-offs: (a) behaves like Windows for every client and closes the take-over's gap that an imported record has no owner; (b) would let the first authenticated client claim every imported record, the controllers' included; (c) breaks controllers, which register names that are not their own, and PTR records.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), Windows' rules plus Tenko's protections.**
 
 **ID-Q9. How do the zone modes and the profiles combine?**
 - Options: (a) the Windows modes mapped onto the existing policy (section 3.5) with TGL-09's values above; (b) a new mode field replacing `require_tsig`.
 - Trade-offs: (a) changes no field of the existing API and keeps every Phase 2 zone as it is; (b) is cleaner to read but is an API change for every client of the zone settings.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), the Windows modes mapped onto the existing policy.**
 
 **ID-Q10. Where does the slice sit, and what happens to IAM-11 to IAM-13?**
 - Options: (a) Slice 13 in Phase 4 for both halves, with IAM-11 and IAM-12 moved to Phase 4 as Must and IAM-13 to Phase 4 as Should; (b) the Kerberos half in Phase 4, directory sign-in in Phase 5 as the ROADMAP says; (c) the directory half first, now.
 - Trade-offs: (a) is what the owner's "right and well from the start" asks for and shares the lab and the acceptor; it adds about 25 builder-days to Phase 4. (b) keeps Phase 4 smaller and leaves the take-over's administrators on local accounts. (c) delivers SSO soonest but the take-over waits.
 - **Recommendation: (a), Kerberos line first.**
+- **Decided (2026-10-25): (a), Slice 13 in Phase 4 for both halves, the Kerberos line first.**
 
 **ID-Q11. SAML?**
 - Options: (a) not built, Keycloak as the bridge for a SAML-only provider; (b) built over `samael`; (c) built over a pure-Rust crate such as `saml-rs`.
 - Trade-offs: (b) needs libxmlsec1 and OpenSSL, which the static binary and `deny.toml` exclude; (c) relies on a crate created in 2026 without an audit, for the protocol whose signature wrapping flaws are the classic SSO break; every reference target (Entra ID, AD FS, Okta, Keycloak) speaks OIDC.
 - **Recommendation: (a); IAM-11's text drops SAML (section 8).**
+- **Decided (2026-10-25): (a), SAML not built; Keycloak bridges a SAML-only provider.**
 
 **ID-Q12. RADIUS or TACACS+?**
 - Options: (a) neither; (b) RADIUS for administrators.
 - Trade-offs: (b) serves sites that keep administrators in a RADIUS server with tokens; it is an MD5-based UDP protocol (Blast-RADIUS) and its crates are stale; such sites have an IdP or AD as well.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), neither RADIUS nor TACACS+.**
 
 **ID-Q13. How does Tenko bind to LDAP?**
 - Options: (a) a read-only service account finds the user and checks the directory later, the user's own bind checks the password, over LDAPS (StartTLS allowed), `tokenGroups` on AD; (b) the user's bind only, no service account; (c) SASL GSSAPI binds.
 - Trade-offs: (a) allows the directory check during a session (disabled accounts and removed groups take effect); (b) needs no stored credential but can only check at sign-in; (c) needs the system GSSAPI in `ldap3`.
 - **Recommendation: (a); (b) allowed under Home as a provider setting, with the check limited to sign-in.**
+- **Decided (2026-10-25): (a), a read-only service account and the user's own bind over LDAPS, StartTLS allowed, `tokenGroups` on AD; (b) allowed under Home as a provider setting. The owner added: configuring LDAPS must be easy enough that nobody drops to the Lab profile to run plain LDAP with cleartext credentials, so the provider setup fetches the certificate chain of the domain controllers from the configured server, shows it with the fingerprints for confirmation and pins it, takes a pasted or uploaded PEM file or the system trust store as the other sources, and shows a clear-text warning on the plain-LDAP option (Lab only). The acceptance test is LDAPS configured against the lab's Samba AD with a private CA in under five minutes using only the UI (section 3.13, WP13.6, E48).**
 
 **ID-Q14. How do directory groups become rights?**
 - Options: (a) mappings of group to role and scope, evaluated at sign-in and at each check, held on the session, with a Tenko record created at first sign-in keyed by the immutable subject; (b) groups copied into stored grants by a synchronisation job; (c) SCIM.
 - Trade-offs: (a) never leaves a stale grant beyond a check interval and needs no job; (b) grants persist when the job fails; (c) is Phase 5 and needs the IdP to push.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), mappings evaluated at sign-in and at each check.**
 
 **ID-Q15. Do local person accounts remain beside a directory?**
 - Options: (a) under Hardened only break-glass once a provider is verified, elsewhere allowed; (b) allowed everywhere; (c) break-glass only in every profile.
 - Trade-offs: (a) gives Hardened one source of truth for people, keeps home use simple; (c) would be wrong for a home with one local administrator and a Keycloak for the family.
 - **Recommendation: (a), the toggle row above.**
+- **Decided (2026-10-25): (a), break-glass only under Hardened once a provider is verified, allowed elsewhere.**
 
 **ID-Q16. MFA and step-up for directory users?**
 - Options: (a) trust the provider's `amr` for the values the provider lists, else a Tenko factor; LDAP and Kerberos users count as password strength and enrol a Tenko factor where the profile asks; Hardened's passkey step-up met by a Tenko passkey; (b) always a Tenko factor; (c) always trust the provider.
 - Trade-offs: (a) avoids double prompts where the IdP does MFA and stays strict where it cannot be seen; (b) annoys every Entra user with a second prompt; (c) trusts a claim the provider may not send.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), trust the provider's `amr` for the values it lists, else a Tenko factor.**
 
 **ID-Q17. Personal API tokens for directory users?**
 - Options: (a) allowed within TGL-05, suspended by the directory check and after 30 days without a sign-in, not under Hardened; (b) not allowed, service accounts only; (c) allowed as for local users.
 - Trade-offs: (c) lets a token outlive the person's directory account; (b) is safest and the Hardened answer; (a) keeps the CLI convenient for administrators elsewhere.
 - **Recommendation: (a), the toggle row above.**
+- **Decided (2026-10-25): (a), allowed within TGL-05 and suspended by the directory check, not under Hardened.**
 
 **ID-Q18. How is interoperability proven?**
 - Options: (a) a weekly container lab on hosted runners (Samba AD as controller and LDAP server, MIT clients, Keycloak) plus the owner-run Windows lab and an optional Entra ID test tenant; (b) the owner-run Windows lab only; (c) Windows on hosted runners.
 - Trade-offs: (a) catches regressions every week without Windows and keeps the real Windows proof for the slice's exit; (b) leaves every change unproven until the owner runs the lab; (c) a domain controller on a hosted runner per run is slow and fragile.
 - **Recommendation: (a).**
+- **Decided (2026-10-25): (a), the weekly container lab plus the owner-run Windows lab and an optional Entra ID tenant.**
 
 ## 8. Requirement rows touched
 
-No new requirement IDs. Proposed edits (REQUIREMENTS.md is the lead's file):
+No new requirement IDs. Edits to the lead's files, applied on 2026-10-25 after the decisions (the IAM-12 text carries the chain-import sentence of the owner's addition to ID-Q13):
 
-| Row | Today | Proposed |
+| Row | Today | Applied |
 |---|---|---|
 | CON-03 (constraint text) | "... an AD computer account with the SPN `DNS/<host>`, a keytab (Linux) or SSPI under that identity (Windows), and ownership per RRset ..." | "... an AD computer account with the SPN `DNS/<host>`, its AES keys held in Tenko's vault on every platform (no keytab file, no system Kerberos library, ADR 0026), and ownership per name with the Windows rules ..." |
 | DNS-28 | "AD secure dynamic updates: GSS-TSIG (RFC 3645) over TKEY, SSPI on Windows and krb5 on Linux. A wizard sets up the computer account and the SPN `DNS/<host>`. Ownership is tracked per RRset, with a 'secure only' mode per zone (CON-03)." | "AD secure dynamic updates: GSS-TSIG (RFC 3645) over TKEY with Kerberos in SPNEGO, accepted by Tenko's own Kerberos acceptor on Linux and Windows (ADR 0026). A wizard takes over a pre-staged computer account with the SPN `DNS/<host>` (or imports a keytab) and rotates its password. Ownership is tracked per name with the Windows rules, and each zone has the Windows modes (none, nonsecure and secure, secure only) (CON-03)." |
 | DNS-30 | "... Netlogon re-registers them every hour; the DNS client refreshes the host records every 24 h." | Adds: "Both register with GSS-TSIG in zones set to secure only (DNS-28)." |
 | OPS-11 | "On Windows, Tenko runs as a gMSA or domain account so that Kerberos works (CON-03)." | "On Windows, Tenko runs under its virtual service account; Kerberos for GSS-TSIG and web sign-in uses the keys of its AD computer account from the vault, as on Linux, so neither a gMSA nor a domain account is needed (CON-03, ADR 0026)." |
 | IAM-11 | "SSO via OIDC and SAML. Reference targets: AD FS, Entra ID and Okta." Phase 5, Should | "SSO via OIDC (authorization code with PKCE). Reference targets: Entra ID, AD FS, Keycloak and Okta. SAML is not built; a SAML-only provider is bridged through Keycloak (ADR 0026)." Phase 4, Must (ID-Q10) |
-| IAM-12 | "LDAP/AD group mapping." Phase 5, Should | "Directory sign-in over LDAP (LDAPS or StartTLS) against AD and other directories, with nested AD groups through `tokenGroups`; directory groups of every provider map onto roles and scopes, re-checked during the session." Phase 4, Must |
+| IAM-12 | "LDAP/AD group mapping." Phase 5, Should | "Directory sign-in over LDAP (LDAPS or StartTLS) against AD and other directories, with nested AD groups through `tokenGroups`; directory groups of every provider map onto roles and scopes, re-checked during the session. The LDAPS setup fetches the certificate chain from the configured server, shows it with its fingerprints for confirmation and pins it; a PEM file or the system trust store are the alternatives." Phase 4, Must |
 | IAM-13 | "Kerberos SPNEGO, which is expected in AD environments." Phase 5, Should | "Kerberos SPNEGO sign-in to the web UI with the acceptor of DNS-28." Phase 4, Should |
 | MIG-06 | "... for ownership per RRset ..." | "... for ownership per name (the owner SID of each `dnsNode`) ..." |
 | API-18 | "... Netlogon re-registration against Tenko with GSS-TSIG." | Adds: "A container lab (Samba AD, MIT clients, Keycloak) runs the GSS-TSIG, LDAP, Kerberos and OIDC rows weekly." |
@@ -586,12 +607,13 @@ ROADMAP: the Phase 4 GSS-TSIG bullet reworded as DNS-28 above and "Identity" mov
 | R133 | Binary size and idle memory grow (M23 is already at its limit) | M47 and M48 thresholds; `sspi` without `network_client` in the data plane if it fits, the controller's client exchanges over Tenko's own sockets |
 | R134 | Forests with several domains: tickets from a child domain, SID filtering, a realm Tenko does not list | `realms` per zone; the Windows lab with one domain at the exit, a child domain as an owner-run extension; documented limit |
 | R135 | Clock skew between the node and the controllers | OPS-09; the self-test's skew finding at 60 s, well before Kerberos' 300 s |
+| R136 | The chain import is trust on first use: an attacker on the path at the moment of setup could present a chain of their own, and an administrator who confirms without comparing would pin it | The confirmation screen shows the fingerprints and the commands that print them on a controller; the pin is made only after the confirmation, by an administrator's interactive session; a later change of the chain is refused and shown, never pinned again silently; a PEM file from the organisation's CA is the alternative that needs no first use |
 
 ## 10. Owner actions
 
 | When | Action |
 |---|---|
-| Before WP13.0 | Read the plan; answer ID-Q1 to ID-Q18 |
+| Before WP13.0 | Read the plan; answer ID-Q1 to ID-Q18 (done on 2026-10-25) |
 | During WP13.0 | One Windows Server VM with a test domain (a controller and a client) to record a SPNEGO token for the spike; the lead gives the commands |
 | During WP13.2 | The early probe (R120): the test controller pointed at the lab node for an hour |
 | WP13.4, E44 | The Windows interop lab: two controllers and a Windows 11 client, the runbook's steps, the captures |
@@ -602,7 +624,7 @@ ROADMAP: the Phase 4 GSS-TSIG bullet reworded as DNS-28 above and "Identity" mov
 
 | Document | Package |
 |---|---|
-| ADR 0026: Kerberos and directory identity | Written as Proposed with this plan; refined by WP13.0; Accepted with the exit document |
+| ADR 0026: Kerberos and directory identity | Written as Proposed with this plan; Accepted on 2026-10-25 with the decisions; refined by WP13.0 |
 | [dns.md](../dns.md) section 13 (GSS-TSIG, ownership, the modes, the audit), a new section on the Kerberos account | WP13.2, WP13.3 |
 | [active-directory.md](../active-directory.md) sections 4 to 6 (section 3.9) | WP13.3, WP13.4 |
 | `docs/sign-in.md` (new: providers, mappings, the profile rules, the UI) and [access.md](../access.md) (mappings beside grants) | WP13.5, WP13.6, WP13.7 |

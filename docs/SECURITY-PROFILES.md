@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-31 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-36 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -41,7 +41,7 @@ Reading the matrix:
 | TGL-06 | Breached-password check (HIBP) | On, online k-anonymity | On, online k-anonymity | On, offline corpus preferred | Off | 1 | IAM-04 |
 | TGL-07 | Lockout | On, progressive delay | On, progressive delay then temporary lock | On, lock until timeout or administrator unlock, with alert | Off | 1 | IAM-05 |
 | TGL-08 | TLS on API and UI | On, certificate from the internal CA | On, internal CA or imported certificate | On, TLS 1.3 only, HSTS | Optional, plain HTTP allowed | 1 | API-01, OPS-04 (internal CA) |
-| TGL-09 | DNS dynamic updates from external clients | None | TSIG; GSS-TSIG for AD zones | TSIG or GSS-TSIG only, "secure only" on every AD zone, unsigned rejected | Unsigned allowed | 2 (GSS-TSIG in 4) | DNS-11, DNS-28 |
+| TGL-09 | DNS dynamic updates from external clients | None by default; any mode per zone | TSIG; secure only for the zones the Kerberos wizard enables, nonsecure and secure allowed per zone as a deviation | TSIG or GSS-TSIG only, secure only with ownership on every zone with Kerberos, unsigned rejected | Unsigned allowed | 2 (GSS-TSIG in 4) | DNS-11, DNS-28 |
 | TGL-10 | Zone transfer ACL | Deny all | Listed secondaries with TSIG | Listed secondaries, TSIG required, XoT for transfers that leave the site | Allow any | 2 | DNS-09, DNS-19 |
 | TGL-11 | Response Rate Limiting | On | On | On, stricter limits | Off | 2 | DNS-17 |
 | TGL-12 | DNSSEC validation | On | On | On, negative trust anchors must have an expiry | Off allowed | 3 (Slice 10) | DNS-13 |
@@ -64,6 +64,11 @@ Reading the matrix:
 | TGL-29 | DDNS from DHCP (`UpdatePolicy.dhcp` unset; the internal path, not TGL-09) | Writes into the scope's zones | Only zones with `dhcp: true` | Only zones with `dhcp: true`; name protection forced | Writes | 3 | DHCP-13 |
 | TGL-30 | Bug report link from the web UI to GitHub ("Report a bug": the new-issue page prefilled with the redacted diagnostics, filed under the person's own account) | On | On | Off: the dialog copies the diagnostics to the clipboard only, no outbound link from the interface | On | 3 | OPS-05 |
 | TGL-31 | Automatic partner-down in a DHCP failover pair | Automatic with evidence after 600 s | Automatic with evidence after 600 s | Automatic on the controllers' witness only, else by hand | Automatic with evidence after 60 s | 3 (Slice 12) | DHCP-12 |
+| TGL-32 | Kerberos account password rotation | 30 days | 30 days | 30 days, a failed rotation alarms | Off allowed (30 days by default) | 4 (Slice 13) | DNS-28 |
+| TGL-33 | Local person accounts beside a verified directory provider | Allowed | Allowed | Break-glass only | Allowed | 4 (Slice 13) | IAM-09, IAM-12 |
+| TGL-34 | Directory transport for LDAP | LDAPS or StartTLS, verified | LDAPS or StartTLS, verified | LDAPS only, verified | Plain allowed, with the clear-text warning | 4 (Slice 13) | IAM-12 |
+| TGL-35 | Directory check interval and grace | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | 4 (Slice 13) | IAM-12 |
+| TGL-36 | Personal tokens of directory users | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | 4 (Slice 13) | IAM-10 |
 
 Notes:
 

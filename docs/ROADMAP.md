@@ -18,6 +18,7 @@ Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). It
 | 3 DHCP | In progress: the DHCPv4 engine, the `dhcp` role, reservations from intent, DDNS, classes and policies, conflict detection, the UI and the Kea export (DHCPv4) are merged; DHCPv6 (WP9.1, WP9.2, WP9.4) and the exit (WP9.5) are open | [phase-3-plan.md](plans/phase-3-plan.md), [phase-3-status.md](plans/phase-3-status.md) |
 | Recursion (Slice 10, beside Phase 3) | In progress: the contracts and the iterative engine with the lab root are merged; validation (WP10.2) is being built; WP10.3 to WP10.5 are open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
 | High availability of the data plane (Slice 12, after Phase 3) | Planned: the plan is accepted and ADR 0025 is Accepted (2026-10-25); WP12.0 to WP12.8 are open | [ha-plan.md](plans/ha-plan.md), [ADR 0025](adr/0025-dhcp-failover-and-data-plane-ha.md) |
+| Kerberos and directory identity (Slice 13, in Phase 4) | Planned: the plan is accepted and ADR 0026 is Accepted (2026-10-25); WP13.0 to WP13.8 are open | [identity-plan.md](plans/identity-plan.md), [ADR 0026](adr/0026-kerberos-and-directory-identity.md) |
 | 4 AD integration and migration | Not started | [MIGRATION.md](MIGRATION.md) |
 | 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
 
@@ -31,7 +32,7 @@ Packages that stand on their own and are free to take, with where their specific
 - **Recursion after WP10.2**: WP10.3 (QNAME minimisation, the denial cache, RFC 8020 and RFC 9520) and WP10.4 (the API, the CLI and the UI): [dns-recursion-plan.md](plans/dns-recursion-plan.md) section 4. RFC 5011 key revocation in Tenko's own signer is a small package of its own once WP10.2 lands.
 - **Migration connectors** that need no AD: BIND (MIG-09), OPNsense (MIG-10), dnsmasq and Pi-hole (MIG-11), Kea and ISC dhcpd (MIG-12), NetBox and phpIPAM (MIG-13): [MIGRATION.md](MIGRATION.md) and the IR in `docs/dhcp-contracts.md` section 11; the Kea export in `crates/tenko-dhcp/src/export/` is the mirror image of MIG-12.
 - **Measurements that fail their threshold**: M23, idle memory of the musl binary with the home zones and a full cache, 100.05 MiB against 100 MB ([phase-2-exit.md](plans/phase-2-exit.md), deviation 145); M31, the DDNS answer latency from DHCP, p99 699 ms against 250 ms (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`). Each needs a profile first and a measured fix second.
-- **Sign-in with OIDC** (IAM-11, Phase 5, but self-contained): a design note as an ADR first, then the provider flow, the group claim mapping onto the roles and the UI.
+- **Sign-in with OIDC** (IAM-11, Phase 4, Slice 13, self-contained): planned in [identity-plan.md](plans/identity-plan.md) with ADR 0026 Accepted; the provider flow, the group claim mapping onto the roles and the UI are WP13.5.
 - **Smaller**: the UI test suite is flaky under a loaded machine (one failure in about 4,300 tests per full gate; a worker-count or timing fix with evidence); the weekly lab workflows run on hosted runners since 2026-10-22 and their first runs need watching.
 
 To take one: open an issue with the feature-request form naming the package, and you get the package's brief there (the plan section, the files it owns, what done looks like, the checks). Then the rules of [CONTRIBUTING.md](../CONTRIBUTING.md): one branch per package, Conventional Commits in English, the checks before the pull request, a result file behind every performance claim, the Contributor License Agreement, and never a real network's names or addresses in the repository.
@@ -216,13 +217,14 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 
 ### Deliverables
 
-- **GSS-TSIG**: TKEY exchange via SSPI on Windows and krb5 on Linux, computer account and SPN setup in a wizard, ownership per RRset, and a "secure only" mode per zone (DNS-28).
+- **GSS-TSIG**: TKEY exchange with Kerberos in SPNEGO, accepted by Tenko's own Kerberos acceptor on Linux and Windows (ADR 0026); a wizard takes over a pre-staged computer account with the SPN `DNS/<host>` (or imports a keytab) and rotates its password; ownership per name with the Windows rules, and the Windows modes per zone (DNS-28).
 - **AD behaviors**: aging and scavenging with Windows semantics (DNS-29), DC locator validation of SRV records in `_msdcs` and `_sites` (DNS-30), and AD Sites and Services sync with IPAM sites (IPAM-22).
 - **Migration connectors** as specified in MIGRATION.md: Windows DNS (cmdlets, LDAP and `.dns` files), Windows DHCP (XML and cmdlets), BIND, OPNsense, dnsmasq and Pi-hole, Kea and dhcpd, and NetBox and phpIPAM. Proxmox inventory already exists from Phase 1 (MIG-01, MIG-06 to MIG-13).
 - **Migration pipeline**: `tenko migrate plan`, `tenko migrate apply` and `tenko migrate verify`; coexistence modes (secondary, forward, flip); query-replay parity; runbooks in MIGRATION.md (MIG-03 to MIG-05, MIG-17).
 - **Inventory sources**: Hyper-V and VMware vSphere (CONN-10, CONN-11).
 - **External actuators for coexistence**: DHCP (CONN-12) and DNS (CONN-13).
 - **Windows interop lab**: a Windows Server 2016 or later test domain (API-18).
+- **Identity** (Slice 13, the owner's decisions ID-Q1 to ID-Q18 of 2026-10-25, moved here from Phase 5): OIDC sign-in, LDAP sign-in with group mapping, LDAPS set up from the UI by importing the domain controllers' certificate chain, and Kerberos sign-in to the web UI (IAM-11 to IAM-13), planned in [identity-plan.md](plans/identity-plan.md) and ADR 0026.
 
 ### Coexistence and verification
 
@@ -248,7 +250,7 @@ Verification is by query replay (MIG-05): live queries are sampled from dnstap o
 
 - **Multi-node data plane**: the cluster labs on VMs (E9, M2, M4 and M7 of Phase 1, deviation 74 of its exit document), the single-node figures of Phases 2 and 3 compared against the cluster (owner's direction of 2026-10-17: single node first).
 - **Multi-site ownership**: site-local Raft groups for the objects a site owns, so a cut-off site keeps changing its own prefixes, scopes and zones (OPS-27).
-- **Identity**: OIDC and SAML, LDAP group mapping, SPNEGO and SCIM; PKCS#11 and KMS support for the KEK (IAM-11 to IAM-14, IAM-17).
+- **Identity**: SCIM; PKCS#11 and KMS support for the KEK (IAM-14, IAM-17). OIDC, LDAP sign-in and SPNEGO (IAM-11 to IAM-13) moved to Phase 4 (Slice 13, [identity-plan.md](plans/identity-plan.md)).
 - **Scaling hooks**: anycast health hooks (BGP withdrawal) and autoscaling hooks for the Kubernetes, Nomad and Proxmox APIs (OPS-17, OPS-18).
 - **Ecosystem**: Terraform provider, Ansible collection, webhooks, and a NetBox-compatible API for Proxmox SDN (API-06, API-07, CONN-17).
 - **Remote access gateway**: HTML5 RDP/SSH gateway as an opt-in module with credential injection, session recording and just-in-time access (API-12).

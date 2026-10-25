@@ -104,7 +104,7 @@ These are corrected premises: assumptions that were examined and replaced.
 
 **Premise.** "Secure updates" in AD can be replaced by TSIG keys or IP ACLs.
 
-**Constraint.** "Secure updates" in AD means GSS-TSIG (RFC 3645) over TKEY with Kerberos. Tenko DNS needs an AD computer account with the SPN `DNS/<host>`, a keytab (Linux) or SSPI under that identity (Windows), and ownership per RRset. Without it, domain controllers fall back to insecure updates and protection is reduced to IP ACLs.
+**Constraint.** "Secure updates" in AD means GSS-TSIG (RFC 3645) over TKEY with Kerberos. Tenko DNS needs an AD computer account with the SPN `DNS/<host>`, its AES keys held in Tenko's vault on every platform (no keytab file, no system Kerberos library, ADR 0026), and ownership per name with the Windows rules. Without it, domain controllers fall back to insecure updates and protection is reduced to IP ACLs.
 
 **Affects.** DNS-28, OPS-11.
 
@@ -213,9 +213,9 @@ Tenko DNS has three engines, not one, because AD clients expect a single server 
 | DNS-25 | UI wizard and validator for SPF, DKIM and DMARC records (CON-02). | 2 | Could |
 | DNS-26 | dnstap output, also usable as the sampling source for query-replay verification (MIG-05). | 2 | Should |
 | DNS-27 | Performance: a single core sustains more than 100k QPS; dnsperf and flamethrower results are documented. | 2 | Should |
-| DNS-28 | AD secure dynamic updates: GSS-TSIG (RFC 3645) over TKEY, SSPI on Windows and krb5 on Linux. A wizard sets up the computer account and the SPN `DNS/<host>`. Ownership is tracked per RRset, with a "secure only" mode per zone (CON-03). | 4 | Must |
+| DNS-28 | AD secure dynamic updates: GSS-TSIG (RFC 3645) over TKEY with Kerberos in SPNEGO, accepted by Tenko's own Kerberos acceptor on Linux and Windows (ADR 0026). A wizard takes over a pre-staged computer account with the SPN `DNS/<host>` (or imports a keytab) and rotates its password. Ownership is tracked per name with the Windows rules, and each zone has the Windows modes (none, nonsecure and secure, secure only) (CON-03). | 4 | Must |
 | DNS-29 | Aging and scavenging with Windows semantics: a per-record timestamp (null means static), NoRefresh and Refresh intervals, and designated scavenging servers. Timestamps survive replication and import (MIG-06, MIG-07). | 4 | Must |
-| DNS-30 | AD DC locator: SRV records in `_msdcs` and `_sites` are served and validated. Netlogon re-registers them every hour; the DNS client refreshes the host records every 24 h. | 4 | Must |
+| DNS-30 | AD DC locator: SRV records in `_msdcs` and `_sites` are served and validated. Netlogon re-registers them every hour; the DNS client refreshes the host records every 24 h. Both register with GSS-TSIG in zones set to secure only (DNS-28). | 4 | Must |
 | DNS-31 | Global Query Block List, with `wpad` and `isatap` as default entries. | 4 | Must |
 | DNS-32 | GlobalNames zone. | 4 | Should |
 | DNS-33 | Netmask ordering and round robin as toggles. | 4 | Should |
@@ -327,9 +327,9 @@ Access is object-scoped, and authentication strength follows the security profil
 | IAM-08 | Session management: lifetime and revocation. | 1 | Must |
 | IAM-09 | Break-glass local account, usable with a hardware security key only. | 1 | Must |
 | IAM-10 | Scoped API tokens with expiry, and service accounts. | 1 | Must |
-| IAM-11 | SSO via OIDC and SAML. Reference targets: AD FS, Entra ID and Okta. | 5 | Should |
-| IAM-12 | LDAP/AD group mapping. | 5 | Should |
-| IAM-13 | Kerberos SPNEGO, which is expected in AD environments. | 5 | Should |
+| IAM-11 | SSO via OIDC (authorization code with PKCE). Reference targets: Entra ID, AD FS, Keycloak and Okta. SAML is not built; a SAML-only provider is bridged through Keycloak (ADR 0026). | 4 | Must |
+| IAM-12 | Directory sign-in over LDAP (LDAPS or StartTLS) against AD and other directories, with nested AD groups through `tokenGroups`; directory groups of every provider map onto roles and scopes, re-checked during the session. The LDAPS setup fetches the certificate chain from the configured server, shows it with its fingerprints for confirmation and pins it; a PEM file or the system trust store are the alternatives. | 4 | Must |
+| IAM-13 | Kerberos SPNEGO sign-in to the web UI with the acceptor of DNS-28. | 4 | Should |
 | IAM-14 | SCIM provisioning. | 5 | Could |
 | IAM-15 | Vault with envelope encryption: a DEK per secret, with the KEK taken from the OS key store (DPAPI on Windows, TPM or keyring on Linux). | 1 | Must |
 | IAM-16 | Vault handling: rotation, zeroization in memory and audit on every reveal. The vault holds TSIG keys, SNMPv3 credentials, DDNS credentials, connector credentials and host credentials. Operator secrets are first-class objects (name, kind, purpose tags, optional user name, notes) bound to hosts by role and referenced by connectors by purpose; a reveal returns the value once to a person with an interactive session of password strength or stronger under the reveal policy (TGL-24), is rate limited, and is audited with the principal, the secret, the host and the reason, never the value. | 1 | Must |
@@ -353,7 +353,7 @@ The data plane survives the control plane. At home, all roles run in one process
 | OPS-08 | Rolling upgrades with protocol version negotiation between nodes. | 1 | Should |
 | OPS-09 | Time synchronization is treated as a dependency: Kerberos tolerates 5 minutes of skew and DNSSEC signatures have validity windows. NTP is distributed via DHCP option 42 (DHCP-15). | 2 | Should |
 | OPS-10 | Windows service: Service Control Manager integration and Windows Event Log. | 1 | Must |
-| OPS-11 | On Windows, Tenko runs as a gMSA or domain account so that Kerberos works (CON-03). | 4 | Must |
+| OPS-11 | On Windows, Tenko runs under its virtual service account; Kerberos for GSS-TSIG and web sign-in uses the keys of its AD computer account from the vault, as on Linux, so neither a gMSA nor a domain account is needed (CON-03, ADR 0026). | 4 | Must |
 | OPS-12 | MSI and winget packaging. | 4 | Should |
 | OPS-13 | Linux: systemd unit, capabilities instead of root, seccomp and a non-root user. | 1 | Must |
 | OPS-14 | Containers: Docker bridge NAT breaks DHCP broadcast and DNS source addresses, so macvlan or host networking is required. This is documented with examples (compose with macvlan, LXC notes). | 1 | Must |
@@ -395,7 +395,7 @@ The REST API is the only interface the UI uses. This section also holds product-
 | API-15 | Every parser of network data has a cargo-fuzz target before it is merged. | 0 | Must |
 | API-16 | `#![forbid(unsafe_code)]` in all crates unless an ADR allows `unsafe` (I/O layer). | 0 | Must |
 | API-17 | Published conformance matrix (CONFORMANCE.md) with a target phase per RFC, and conformance tests per RFC as engines land (CON-08). | 0 | Must |
-| API-18 | Windows interop lab: a test domain on Windows Server 2016 or later (Query Resolution Policies require 2016+) for domain join, DC locator, GPO retrieval and Netlogon re-registration against Tenko with GSS-TSIG. | 4 | Must |
+| API-18 | Windows interop lab: a test domain on Windows Server 2016 or later (Query Resolution Policies require 2016+) for domain join, DC locator, GPO retrieval and Netlogon re-registration against Tenko with GSS-TSIG. A container lab (Samba AD, MIT clients, Keycloak) runs the GSS-TSIG, LDAP, Kerberos and OIDC rows weekly. | 4 | Must |
 | API-19 | Signed releases (Sigstore, Authenticode) and SBOM. | 5 | Must |
 | API-20 | License decision before any publication: decided on 2026-10-22 as the Business Source License 1.1 with an internal-use grant and AGPL-3.0-or-later as the Change License, with a contributor license agreement (ADR 0022); a lawyer's review before publication remains. | 5 | Must |
 | API-21 | Language packs: every UI string is externalized under a stable key. Additional languages are XLIFF 2.0 files (XML) named by BCP 47 tag (for example `fr.xlf`, `fr-CA.xlf`) with display name, author, version and source language as metadata inside the file. A pack is uploaded in the UI or dropped in the data directory and activated at runtime without a rebuild. Upload validates the schema, reports missing and extra keys and a completeness percentage, and previews before activation. Missing strings fall back to English; translations are rendered as text (no markup injection) and use ICU MessageFormat for plurals, gender and placeholders; dates, numbers and sort order come from the locale. The built-in Swedish and English ship in the same format and double as templates, and the current key set can be exported with one click. The layout supports right-to-left languages. | 1 | Must |
@@ -440,7 +440,7 @@ Migration from mixed sources (AD-integrated, file-based, BIND, OPNsense, Proxmox
 | MIG-03 | One pipeline for all sources: `plan` (dry-run diff), `apply`, and `verify` (parity check against the old server), exposed as `tenko migrate plan`, `tenko migrate apply` and `tenko migrate verify`. It runs on the job engine (IPAM-17). | 4 | Must |
 | MIG-04 | Coexistence modes, selected per zone or scope in the UI: secondary (Tenko is an AXFR secondary and stays in sync until the flip, with a nightly parity diff), forward (Tenko forwards some zones to the old server while taking over others) and flip (Tenko becomes primary; the old server becomes its secondary or is switched off after a rollback window). | 4 | Must |
 | MIG-05 | Verify by query replay: sampled live queries (dnstap or query log) are asked of both servers and the RCODE and answers are diffed, ignoring TTL drift. | 4 | Must |
-| MIG-06 | Source: Windows DNS, AD-integrated. AXFR or `Get-DnsServerResourceRecord`, plus an LDAP read of `dnsRecord` in `DomainDnsZones` and `ForestDnsZones` for ownership per RRset, aging timestamps and tombstones, plus PowerShell remoting (DnsServer module) for forwarders, conditional forwarders, root hints, zone scopes, client subnets, recursion scopes, Query Resolution Policies, aging settings, GQBL and RRL. | 4 | Must |
+| MIG-06 | Source: Windows DNS, AD-integrated. AXFR or `Get-DnsServerResourceRecord`, plus an LDAP read of `dnsRecord` in `DomainDnsZones` and `ForestDnsZones` for ownership per name (the owner SID of each `dnsNode`), aging timestamps and tombstones, plus PowerShell remoting (DnsServer module) for forwarders, conditional forwarders, root hints, zone scopes, client subnets, recursion scopes, Query Resolution Policies, aging settings, GQBL and RRL. | 4 | Must |
 | MIG-07 | Source: Windows DNS, file-backed. The same cmdlets (they do not distinguish storage) or `%SystemRoot%\System32\dns\*.dns` files. The zone file parser understands the Windows `[AGE:n]` comment so that timestamps are kept. | 4 | Must |
 | MIG-08 | Source: Windows DHCP. `Export-DhcpServer -Leases` (XML) plus the `Get-DhcpServerv4*` cmdlets for scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings and failover relationships, mapped to a Tenko pair (the shared secret is neither exported nor needed). Coexistence uses split scopes (CON-05). | 4 | Must |
 | MIG-09 | Source: BIND. AXFR or zone files (RFC 1035) plus a `named.conf` parser: `view` becomes Tenko views, `acl` becomes client subnets, and `forwarders`, `also-notify`, `allow-transfer` and RPZ zones are carried over. | 4 | Must |
