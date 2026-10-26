@@ -522,6 +522,106 @@ pub fn lease_conflicts(view: &dyn ReadView, now: Timestamp) -> IpamResult<Vec<Re
     Ok(rows)
 }
 
+/// A sighting at an edge address of a network (its network or broadcast address, or the
+/// subnet-router anycast address of an IPv6 network): a scan artifact, which the view does
+/// not list and which no rule turns into a conflict ([`crate::findings`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScanArtifact {
+    /// The VRF.
+    pub vrf: VrfId,
+    /// The edge address.
+    pub address: IpAddr,
+    /// The network prefix whose edge it is.
+    pub prefix: PrefixId,
+    /// Which edge address it is.
+    pub edge: crate::net::EdgeAddress,
+    /// The MAC addresses that answered there.
+    pub macs: Vec<MacAddr>,
+    /// The sources that saw it.
+    pub sources: Vec<String>,
+    /// The first sighting among the facts.
+    pub first_seen: Timestamp,
+    /// The latest sighting among the facts.
+    pub last_seen: Timestamp,
+}
+
+/// What the findings read of the view at `now`: every row, the scan artifacts, and for each
+/// ghost row the time since which it is unseen (its last sighting, or, never seen, the
+/// creation of its address: there is no stored "first unseen" time, so it is derived from
+/// the observation history).
+pub(crate) struct ViewFindings {
+    pub rows: Vec<ReconcileRow>,
+    pub artifacts: Vec<ScanArtifact>,
+    pub unseen_since: BTreeMap<String, Timestamp>,
+}
+
+/// The rows, the artifacts and the ghosts' unseen times of the view at `now`.
+///
+/// # Errors
+///
+/// Store and decoding errors.
+pub(crate) fn findings_view(view: &dyn ReadView, now: Timestamp) -> IpamResult<ViewFindings> {
+    let snapshot = Snapshot::load(view, now)?;
+    let mut rows = build(view, &snapshot)?;
+    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    let unseen_since = rows
+        .iter()
+        .filter(|row| row.kind == ReconcileKind::Ghost)
+        .filter_map(|row| {
+            let since = row.last_seen.or_else(|| {
+                let address = row.intent.as_ref()?.address?;
+                let address = snapshot.intent.addresses.get(&address)?;
+                Some(address.meta.created.at)
+            })?;
+            Some((row.key.clone(), since))
+        })
+        .collect();
+    let mut grouped: BTreeMap<(VrfId, IpAddr), ScanArtifact> = BTreeMap::new();
+    for pair in &snapshot.artifacts {
+        let (Some(ip), Some(vrf), Some((prefix, edge))) = (
+            pair.ip,
+            pair.placement.and_then(super::snapshot::Placement::vrf),
+            super::snapshot::edge_of(&snapshot.intent, pair),
+        ) else {
+            continue;
+        };
+        let fact = &snapshot.facts[pair.fact];
+        let entry = grouped.entry((vrf, ip)).or_insert_with(|| ScanArtifact {
+            vrf,
+            address: ip,
+            prefix,
+            edge,
+            macs: Vec::new(),
+            sources: Vec::new(),
+            first_seen: fact.first_seen,
+            last_seen: fact.last_seen,
+        });
+        if let Some(mac) = pair.mac
+            && !entry.macs.contains(&mac)
+        {
+            entry.macs.push(mac);
+        }
+        if !entry.sources.contains(&fact.source_key) {
+            entry.sources.push(fact.source_key.clone());
+        }
+        entry.first_seen = entry.first_seen.min(fact.first_seen);
+        entry.last_seen = entry.last_seen.max(fact.last_seen);
+    }
+    let artifacts = grouped
+        .into_values()
+        .map(|mut artifact| {
+            artifact.macs.sort();
+            artifact.sources.sort();
+            artifact
+        })
+        .collect();
+    Ok(ViewFindings {
+        rows,
+        artifacts,
+        unseen_since,
+    })
+}
+
 /// A name as the view compares it: lowercase, without the trailing dot.
 fn norm(name: &str) -> String {
     name.trim().trim_end_matches('.').to_ascii_lowercase()

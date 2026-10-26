@@ -92,10 +92,24 @@ export function stepStateClass(state: StepStateKind): string {
 // ---------------------------------------------------------------------------------
 // Titles, steps and tasks
 
-/** The translated title of a job (a `Job`, a `JobSummary` or a bare spec). */
-export function jobTitle(job: { title: string } | { spec: { title: string } }): string {
-  const key = "spec" in job ? job.spec.title : job.title;
-  return tDynamic(key) ?? key;
+/** What the title of a job needs: the title key, and the kind and targets for the label of its kind. */
+interface Titled {
+  title: string;
+  kind?: string;
+  targets?: readonly unknown[];
+}
+
+/**
+ * The translated title of a job (a `Job`, a `JobSummary` or a bare spec): the message of its title
+ * key, else the label of its kind (`jobs.title.<kind>`, with the number of targets as `count`), else
+ * the title key as it is.
+ */
+export function jobTitle(job: Titled | { spec: Titled }): string {
+  const spec = "spec" in job ? job.spec : job;
+  const own = tDynamic(spec.title);
+  if (own !== undefined) return own;
+  const label = spec.kind ? tDynamic(`jobs.title.${spec.kind}`, { count: spec.targets?.length ?? 0 }) : undefined;
+  return label ?? spec.title;
 }
 
 /** A step kind as the tail of a message key: `dhcp.manual` is `dhcp_manual`. */

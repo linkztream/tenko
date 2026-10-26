@@ -1,7 +1,7 @@
 # IPAM utilization and counts
 
 - Status: Phase 1 (the prefix tree with utilization and alarms); one definition for networks and supernets since the release after 0.0.7
-- Requirements: IPAM-02, IPAM-07, IPAM-10, IPAM-12; the API fields are in `docs/api/openapi.json` (`UtilizationView`, `TreeNode`)
+- Requirements: IPAM-02, IPAM-07, IPAM-10, IPAM-12, IPAM-21; the API fields are in `docs/api/openapi.json` (`UtilizationView`, `TreeNode`)
 
 This page says what the numbers on the Networks page, a prefix's page, its Addresses tab and the Hosts page count, and which of them an alarm follows. The counting lives in `tenko_ipam::tree` (`Utilization`), and the web UI's mock API counts the same way (`ui/src/api/mock/ipam/tree.ts`).
 
@@ -49,7 +49,15 @@ The level is computed in tenths of a percent (`permille`) and written as an `ipa
 
 The network and broadcast addresses of a network are neither recorded (IPAM refuses an address object on them, `ipam.address.network_or_broadcast`) nor usable. A DHCP reservation is an address object bound to a host's interface, so it is recorded and has a host; a lease inside a DHCP pool without an address object is held by the pool.
 
-## 5 API
+## 5 Findings: alarms and ghost ageing
+
+The findings model ([reconciliation.md](reconciliation.md) section 12) lists the IPAM conditions that may need a person beside the proposals, and `GET /api/v1/findings/counts` counts them for the rail and the status bar:
+
+- **Utilization alarms.** A prefix at `critical` is a finding to act on, one at `warning` a finding to review, both of the kind `utilization` with the action "Open the prefix"; a prefix back at `normal` has none. The finding carries the percent with one decimal, the threshold, `used` and `capacity` of section 1.
+- **Ghost addresses.** An active address of a managed or dynamic host that nothing has shown for longer than the lease time of its network's DHCP scope (or the reconciler's orphan age) is a ghost of the reconciliation view. It is information while it is young, and becomes a finding to review with the action "Decommission" once it has been unseen for `[ipam.findings] ghost_review_after_secs` of the configuration file (30 days by default, 1 to 365 days). The age counts from its last sighting, or, never seen, from the creation of the address; no "first unseen" time is stored, it is derived from the observation history.
+- **Edge addresses.** A sighting of a network's network or broadcast address (IPv4 up to /30) or its subnet-router anycast address (IPv6 up to /126), the addresses section 1 leaves out of the usable ones, is a scan artifact: information, never a conflict.
+
+## 6 API
 
 `GET /api/v1/prefixes/tree` answers every node with `utilization`:
 

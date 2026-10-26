@@ -61,7 +61,7 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 25] = [
+const TOP_LEVEL_KEYS: [&str; 26] = [
     "audit_export",
     "dns",
     // WP7.5: the dhcp role.
@@ -86,6 +86,7 @@ const TOP_LEVEL_KEYS: [&str; 25] = [
     "rate_limit",
     "store",
     "jobs",
+    "ipam",
     "log",
     "runtime",
 ];
@@ -131,6 +132,8 @@ pub struct Config {
     pub store: StoreSection,
     /// The job engine.
     pub jobs: JobsSection,
+    /// The IPAM module of a controller: `[ipam.findings]`, the findings index (U1).
+    pub ipam: IpamSection,
     /// The core runtime of the process.
     pub runtime: RuntimeSection,
     /// Logging.
@@ -173,6 +176,7 @@ impl Default for Config {
             rate_limit: RateLimitSection::default(),
             store: StoreSection::default(),
             jobs: JobsSection::default(),
+            ipam: IpamSection::default(),
             runtime: RuntimeSection::default(),
             log: LogSection::default(),
             modules: None,
@@ -2659,6 +2663,16 @@ impl Default for StoreSection {
     }
 }
 
+/// `[ipam]`: the IPAM module of a controller.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IpamSection {
+    /// `[ipam.findings]`: the findings index (U1, `docs/reconciliation.md` section 12):
+    /// when a ghost address becomes a finding to review, and how often the findings of the
+    /// reconciliation view are refreshed. Keep it equal on every controller.
+    pub findings: tenko_ipam::findings::FindingsConfig,
+}
+
 /// `[jobs]`: the job engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -3240,6 +3254,10 @@ impl Config {
             .map_err(|error| ConfigError::invalid(format!("rate_limit: {error}")))?;
         self.store.validate()?;
         self.jobs.validate()?;
+        self.ipam
+            .findings
+            .validate()
+            .map_err(ConfigError::invalid)?;
         if !(1..=64).contains(&self.runtime.workers) {
             return Err(ConfigError::invalid(
                 "runtime.workers must be between 1 and 64",
@@ -4042,6 +4060,37 @@ days = 400
         )
         .expect("the example parses");
         loaded.config.resolve().expect("the example is valid");
+    }
+
+    #[test]
+    fn the_findings_settings_are_read_and_checked() {
+        let loaded = from_text(
+            "data_dir = \"/d\"\n[ipam.findings]\nghost_review_after_secs = 86400\n",
+            &[("TENKO_IPAM__FINDINGS__RECONCILE_REFRESH_SECS", "10")],
+        )
+        .expect("loads");
+        assert_eq!(loaded.config.ipam.findings.ghost_review_after_secs, 86_400);
+        assert_eq!(loaded.config.ipam.findings.reconcile_refresh_secs, 10);
+        loaded.config.resolve().expect("valid");
+        assert_eq!(
+            Config::default().ipam.findings.ghost_review_after_secs,
+            30 * 86_400,
+            "30 days by default"
+        );
+        let short = from_text(
+            "data_dir = \"/d\"\n[ipam.findings]\nghost_review_after_secs = 60\n",
+            &[],
+        )
+        .expect("loads");
+        let error = short.config.resolve().expect_err("too short");
+        assert!(
+            error.to_string().contains("ghost_review_after_secs"),
+            "{error}"
+        );
+        assert!(
+            from_text("data_dir = \"/d\"\n[ipam.findings]\nunknown = 1\n", &[]).is_err(),
+            "unknown keys are refused"
+        );
     }
 
     #[test]

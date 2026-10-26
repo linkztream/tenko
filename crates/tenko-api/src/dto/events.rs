@@ -49,11 +49,17 @@ pub enum Topic {
     /// The DHCP module (Phase 3): the configuration, and lease events for the live lease
     /// view (sampled to at most 50 a second per subscriber, with counts when sampled).
     Dhcp,
+    /// The findings index (U1): published by the index after it applied a change, kind
+    /// `findings.changed` with the source records whose findings changed (proposals,
+    /// prefixes, jobs) or none for the reconciliation view and health; `params.revision` is
+    /// the store revision the index applied. Not from the journal and never replayed: a
+    /// client reloads `GET /findings/counts` when it connects.
+    Findings,
 }
 
 impl Topic {
     /// Every topic, in declaration order.
-    pub const ALL: [Topic; 13] = [
+    pub const ALL: [Topic; 14] = [
         Topic::Ipam,
         Topic::Jobs,
         Topic::Audit,
@@ -67,6 +73,7 @@ impl Topic {
         Topic::Metrics,
         Topic::Dns,
         Topic::Dhcp,
+        Topic::Findings,
     ];
 
     /// The stable lower-case name, also the SSE `event` field.
@@ -85,6 +92,7 @@ impl Topic {
             Topic::Metrics => "metrics",
             Topic::Dns => "dns",
             Topic::Dhcp => "dhcp",
+            Topic::Findings => "findings",
         }
     }
 
@@ -117,7 +125,7 @@ pub struct TopicSet(u16);
 
 impl TopicSet {
     /// Every topic.
-    pub const ALL: TopicSet = TopicSet(0b1_1111_1111_1111);
+    pub const ALL: TopicSet = TopicSet(0b11_1111_1111_1111);
     /// No topic.
     pub const EMPTY: TopicSet = TopicSet(0);
     /// The topics of a subscription that names none: every topic except `metrics`, whose

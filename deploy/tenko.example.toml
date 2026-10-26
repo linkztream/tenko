@@ -226,6 +226,17 @@ default_group_limit = 10
 lease_ttl_secs = 30
 scan_interval_secs = 15
 
+[ipam.findings]
+# The findings index of a controller (docs/reconciliation.md section 12): one list and one
+# count of everything that may need a person. A ghost address (intent nothing has shown for
+# longer than its lease time) is information until it has been unseen for
+# ghost_review_after_secs (86400 to 31536000, 30 days by default), then a finding to review
+# with the action "Decommission". The findings of the reconciliation view are refreshed at
+# most once per reconcile_refresh_secs (5 to 3600) after intent or observations changed, and
+# once a minute. Keep both equal on every controller, so that each counts the same.
+ghost_review_after_secs = 2592000
+reconcile_refresh_secs = 30
+
 [runtime]
 # Worker threads of the core runtime (store, authentication, jobs), 1 to 64.
 workers = 2

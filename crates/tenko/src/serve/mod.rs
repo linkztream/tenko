@@ -1690,6 +1690,8 @@ async fn start(
     let dhcp_on = dhcp::runs(resolved, modules);
     let dhcp_slot = tenko_api::routes::dhcp::DhcpNodeSlot::default();
     let metrics_stop = running.stop.subscribe();
+    // U1: the findings index follows the store from the start of the API.
+    let findings_stop = running.stop.subscribe();
     let (server, events, warnings_state, metrics_tasks) = steps
         .run("api", async {
             let mut state = AppState::with_options(
@@ -1835,6 +1837,16 @@ async fn start(
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
             }
+            // U1: one derived index over proposals, alarms, the reconciliation view, waiting
+            // jobs and health, for `/findings` and the topic `findings`.
+            let findings = tenko_api::findings::FindingsService::new(
+                Arc::clone(&store_dyn),
+                config.ipam.findings,
+                ipam.is_some(),
+                state.events().clone(),
+            );
+            let findings_task = findings.spawn(findings_stop);
+            server.extensions.insert(findings);
             server.extensions.insert(Arc::clone(&operator_secrets));
             // The audit export (WP3.3): the settings service for the API on every
             // controller, the exporter as a leader service.
@@ -1888,7 +1900,7 @@ async fn start(
                 .metrics
                 .listen_addr()
                 .map_err(|error| StartError::new("api", "config.invalid", error.to_string()))?;
-            let (metrics_tasks, metrics_summary) = Box::pin(metrics::start(
+            let (mut metrics_tasks, metrics_summary) = Box::pin(metrics::start(
                 gauges,
                 Duration::from_secs(config.metrics.gauge_interval_secs),
                 metrics_listen,
@@ -1896,6 +1908,7 @@ async fn start(
             ))
             .await
             .map_err(|error| StartError::new("api", "start.metrics.bind", error.to_string()))?;
+            metrics_tasks.push(findings_task);
             let events = state.events().clone();
             let warnings_state = state.clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {

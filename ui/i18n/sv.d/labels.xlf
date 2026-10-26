@@ -1,0 +1,1155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="labels">
+      <unit id="jobs.title.backup.create">
+        <notes><note category="description">What the job kind backup.create is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Create a backup</source><target>Skapa en säkerhetskopia</target></segment>
+      </unit>
+      <unit id="jobs.title.cluster.edit">
+        <notes><note category="description">What the job kind cluster.edit is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Edit the cluster</source><target>Redigera klustret</target></segment>
+      </unit>
+      <unit id="jobs.title.connect.edit">
+        <notes><note category="description">What the job kind connect.edit is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Edit a connector</source><target>Redigera en anslutning</target></segment>
+      </unit>
+      <unit id="jobs.title.connect.run">
+        <notes><note category="description">What the job kind connect.run is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Run a connector</source><target>Kör en anslutning</target></segment>
+      </unit>
+      <unit id="jobs.title.dhcp.edit">
+        <notes><note category="description">What the job kind dhcp.edit is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Edit DHCP settings</source><target>Redigera DHCP-inställningar</target></segment>
+      </unit>
+      <unit id="jobs.title.dns.dnssec.rollover">
+        <notes><note category="description">What the job kind dns.dnssec.rollover is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Roll over a DNSSEC key</source><target>Byt en DNSSEC-nyckel</target></segment>
+      </unit>
+      <unit id="jobs.title.dns.edit">
+        <notes><note category="description">What the job kind dns.edit is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Edit DNS zones</source><target>Redigera DNS-zoner</target></segment>
+      </unit>
+      <unit id="jobs.title.dns.import">
+        <notes><note category="description">What the job kind dns.import is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Import a DNS zone file</source><target>Importera en DNS-zonfil</target></segment>
+      </unit>
+      <unit id="jobs.title.dns.list.compile">
+        <notes><note category="description">What the job kind dns.list.compile is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Compile a block list</source><target>Kompilera en blocklista</target></segment>
+      </unit>
+      <unit id="jobs.title.import.apply">
+        <notes><note category="description">What the job kind import.apply is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Apply an import</source><target>Tillämpa en import</target></segment>
+      </unit>
+      <unit id="jobs.title.ipam.edit">
+        <notes><note category="description">What the job kind ipam.edit is called in the jobs list, on a job page and on the dashboard. The argument count is the number of the objects the job changes.</note></notes>
+        <segment><source>Edit {count, plural, one {# IPAM object} other {# IPAM objects}}</source><target>Redigera {count, plural, one {# IPAM-objekt} other {# IPAM-objekt}}</target></segment>
+      </unit>
+      <unit id="jobs.title.ipam.move">
+        <notes><note category="description">What the job kind ipam.move is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Move a host to a new address</source><target>Flytta en värd till en ny adress</target></segment>
+      </unit>
+      <unit id="jobs.title.ipam.vlan.provision">
+        <notes><note category="description">What the job kind ipam.vlan.provision is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Provision a VLAN</source><target>Etablera ett VLAN</target></segment>
+      </unit>
+      <unit id="jobs.title.scan.edit">
+        <notes><note category="description">What the job kind scan.edit is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Edit scan settings</source><target>Redigera skanningsinställningar</target></segment>
+      </unit>
+      <unit id="jobs.title.scan.run">
+        <notes><note category="description">What the job kind scan.run is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Run a scan</source><target>Kör en skanning</target></segment>
+      </unit>
+      <unit id="jobs.title.sys.update">
+        <notes><note category="description">What the job kind sys.update is called in the jobs list, on a job page and on the dashboard.</note></notes>
+        <segment><source>Install an update</source><target>Installera en uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.auth.access.denied">
+        <notes><note category="description">What the audit action auth.access.denied is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Access denied</source><target>Åtkomst nekad</target></segment>
+      </unit>
+      <unit id="audit.action.auth.break_glass.set">
+        <notes><note category="description">What the audit action auth.break_glass.set is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Set the break-glass account</source><target>Ange kontot för nödåtkomst</target></segment>
+      </unit>
+      <unit id="audit.action.auth.grant.create">
+        <notes><note category="description">What the audit action auth.grant.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a grant</source><target>Skapa en grant</target></segment>
+      </unit>
+      <unit id="audit.action.auth.grant.revoke">
+        <notes><note category="description">What the audit action auth.grant.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revoke a grant</source><target>Återkalla en grant</target></segment>
+      </unit>
+      <unit id="audit.action.auth.installation.language">
+        <notes><note category="description">What the audit action auth.installation.language is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the default language</source><target>Ändra standardspråket</target></segment>
+      </unit>
+      <unit id="audit.action.auth.login.break_glass">
+        <notes><note category="description">What the audit action auth.login.break_glass is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Sign in with break-glass access</source><target>Logga in med nödåtkomst</target></segment>
+      </unit>
+      <unit id="audit.action.auth.login.password">
+        <notes><note category="description">What the audit action auth.login.password is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Sign in with a password</source><target>Logga in med lösenord</target></segment>
+      </unit>
+      <unit id="audit.action.auth.login.recovery">
+        <notes><note category="description">What the audit action auth.login.recovery is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Sign in with a recovery code</source><target>Logga in med en återställningskod</target></segment>
+      </unit>
+      <unit id="audit.action.auth.login.totp">
+        <notes><note category="description">What the audit action auth.login.totp is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Verify a one-time code</source><target>Verifiera en engångskod</target></segment>
+      </unit>
+      <unit id="audit.action.auth.login.webauthn">
+        <notes><note category="description">What the audit action auth.login.webauthn is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Sign in with a passkey</source><target>Logga in med en nyckel (passkey)</target></segment>
+      </unit>
+      <unit id="audit.action.auth.logout">
+        <notes><note category="description">What the audit action auth.logout is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Sign out</source><target>Logga ut</target></segment>
+      </unit>
+      <unit id="audit.action.auth.password.change">
+        <notes><note category="description">What the audit action auth.password.change is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change a password</source><target>Byt lösenord</target></segment>
+      </unit>
+      <unit id="audit.action.auth.recovery.regenerate">
+        <notes><note category="description">What the audit action auth.recovery.regenerate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Generate new recovery codes</source><target>Skapa nya återställningskoder</target></segment>
+      </unit>
+      <unit id="audit.action.auth.role_policy.update">
+        <notes><note category="description">What the audit action auth.role_policy.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the MFA policy of a role</source><target>Ändra MFA-policyn för en roll</target></segment>
+      </unit>
+      <unit id="audit.action.auth.service_account.create">
+        <notes><note category="description">What the audit action auth.service_account.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a service account</source><target>Skapa ett tjänstkonto</target></segment>
+      </unit>
+      <unit id="audit.action.auth.session.revoke">
+        <notes><note category="description">What the audit action auth.session.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>End a session</source><target>Avsluta en session</target></segment>
+      </unit>
+      <unit id="audit.action.auth.settings.update">
+        <notes><note category="description">What the audit action auth.settings.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the security settings</source><target>Ändra säkerhetsinställningarna</target></segment>
+      </unit>
+      <unit id="audit.action.auth.setup.complete">
+        <notes><note category="description">What the audit action auth.setup.complete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Complete the first-run setup</source><target>Slutför den första konfigurationen</target></segment>
+      </unit>
+      <unit id="audit.action.auth.token.create">
+        <notes><note category="description">What the audit action auth.token.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an API token</source><target>Skapa ett API-token</target></segment>
+      </unit>
+      <unit id="audit.action.auth.token.revoke">
+        <notes><note category="description">What the audit action auth.token.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revoke an API token</source><target>Återkalla ett API-token</target></segment>
+      </unit>
+      <unit id="audit.action.auth.totp.enrol">
+        <notes><note category="description">What the audit action auth.totp.enrol is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Add an authenticator app</source><target>Lägg till en autentiseringsapp</target></segment>
+      </unit>
+      <unit id="audit.action.auth.totp.remove">
+        <notes><note category="description">What the audit action auth.totp.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove an authenticator app</source><target>Ta bort en autentiseringsapp</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.create">
+        <notes><note category="description">What the audit action auth.user.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a user</source><target>Skapa en användare</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.delete">
+        <notes><note category="description">What the audit action auth.user.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a user</source><target>Ta bort en användare</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.lock">
+        <notes><note category="description">What the audit action auth.user.lock is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Lock a user</source><target>Lås en användare</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.roles">
+        <notes><note category="description">What the audit action auth.user.roles is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the roles of a user</source><target>Ändra en användares roller</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.unlock">
+        <notes><note category="description">What the audit action auth.user.unlock is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Unlock a user</source><target>Lås upp en användare</target></segment>
+      </unit>
+      <unit id="audit.action.auth.user.update">
+        <notes><note category="description">What the audit action auth.user.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a user</source><target>Redigera en användare</target></segment>
+      </unit>
+      <unit id="audit.action.auth.webauthn.register">
+        <notes><note category="description">What the audit action auth.webauthn.register is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Register a passkey</source><target>Registrera en nyckel (passkey)</target></segment>
+      </unit>
+      <unit id="audit.action.auth.webauthn.remove">
+        <notes><note category="description">What the audit action auth.webauthn.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a passkey</source><target>Ta bort en nyckel (passkey)</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.ca.create">
+        <notes><note category="description">What the audit action cluster.ca.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create the cluster certificate authority</source><target>Skapa klustrets certifikatutfärdare</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.enrolment.create">
+        <notes><note category="description">What the audit action cluster.enrolment.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an enrolment token</source><target>Skapa en registreringstoken</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.enrolment.delete">
+        <notes><note category="description">What the audit action cluster.enrolment.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an enrolment token</source><target>Ta bort en registreringstoken</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.member.announce">
+        <notes><note category="description">What the audit action cluster.member.announce is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Report a new member version</source><target>Rapportera en ny medlemsversion</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.member.join">
+        <notes><note category="description">What the audit action cluster.member.join is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Join a controller to the cluster</source><target>Lägg till en controller i klustret</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.member.promote">
+        <notes><note category="description">What the audit action cluster.member.promote is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Promote a controller to voter</source><target>Befordra en controller till röstande</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.member.remove">
+        <notes><note category="description">What the audit action cluster.member.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a controller from the cluster</source><target>Ta bort en controller från klustret</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.member.step_down">
+        <notes><note category="description">What the audit action cluster.member.step_down is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Hand over leadership</source><target>Lämna över ledarskapet</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.controller_cert">
+        <notes><note category="description">What the audit action cluster.node.controller_cert is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Issue a controller certificate</source><target>Utfärda ett controllercertifikat</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.enrol">
+        <notes><note category="description">What the audit action cluster.node.enrol is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Enrol a node</source><target>Registrera en nod</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.renew">
+        <notes><note category="description">What the audit action cluster.node.renew is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Renew a node certificate</source><target>Förnya en nods certifikat</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.revoke">
+        <notes><note category="description">What the audit action cluster.node.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revoke a node</source><target>Återkalla en nod</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.secrets">
+        <notes><note category="description">What the audit action cluster.node.secrets is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Pass secrets to a node</source><target>Skicka hemligheter till en nod</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.node.version_mismatch">
+        <notes><note category="description">What the audit action cluster.node.version_mismatch is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a node with an incompatible version</source><target>Neka en nod med inkompatibel version</target></segment>
+      </unit>
+      <unit id="audit.action.cluster.tls.issue">
+        <notes><note category="description">What the audit action cluster.tls.issue is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Issue a server certificate</source><target>Utfärda ett servercertifikat</target></segment>
+      </unit>
+      <unit id="audit.action.connect.guardrails.update">
+        <notes><note category="description">What the audit action connect.guardrails.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the connector guardrails</source><target>Ändra skyddsräckena för anslutningar</target></segment>
+      </unit>
+      <unit id="audit.action.connect.instance.create">
+        <notes><note category="description">What the audit action connect.instance.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a connector</source><target>Skapa en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.instance.delete">
+        <notes><note category="description">What the audit action connect.instance.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a connector</source><target>Ta bort en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.instance.disable">
+        <notes><note category="description">What the audit action connect.instance.disable is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Disable a connector</source><target>Inaktivera en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.instance.enable">
+        <notes><note category="description">What the audit action connect.instance.enable is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Enable a connector</source><target>Aktivera en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.instance.update">
+        <notes><note category="description">What the audit action connect.instance.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a connector</source><target>Redigera en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.port.bounce">
+        <notes><note category="description">What the audit action connect.port.bounce is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Bounce a switch port for a move</source><target>Slå av och på en switchport för en flytt</target></segment>
+      </unit>
+      <unit id="audit.action.connect.port.enable">
+        <notes><note category="description">What the audit action connect.port.enable is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Enable a switch port again after a bounce</source><target>Slå på en switchport igen efter en avstängning</target></segment>
+      </unit>
+      <unit id="audit.action.connect.client.kick">
+        <notes><note category="description">What the audit action connect.client.kick is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Disconnect a wireless client for a move</source><target>Koppla från en trådlös klient för en flytt</target></segment>
+      </unit>
+      <unit id="audit.action.connect.secret.inject">
+        <notes><note category="description">What the audit action connect.secret.inject is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Pass credentials to a connector</source><target>Skicka inloggningsuppgifter till en anslutning</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.class.create">
+        <notes><note category="description">What the audit action dhcp.class.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DHCP class</source><target>Skapa en DHCP-klass</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.class.delete">
+        <notes><note category="description">What the audit action dhcp.class.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DHCP class</source><target>Ta bort en DHCP-klass</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.class.update">
+        <notes><note category="description">What the audit action dhcp.class.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a DHCP class</source><target>Redigera en DHCP-klass</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.decline">
+        <notes><note category="description">What the audit action dhcp.decline is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Hold an address declined by a client</source><target>Håll kvar en adress som en klient avvisat</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.exclusion.create">
+        <notes><note category="description">What the audit action dhcp.exclusion.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DHCP exclusion</source><target>Skapa ett DHCP-undantag</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.exclusion.delete">
+        <notes><note category="description">What the audit action dhcp.exclusion.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DHCP exclusion</source><target>Ta bort ett DHCP-undantag</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.export">
+        <notes><note category="description">What the audit action dhcp.export is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Export the DHCP configuration</source><target>Exportera DHCP-konfigurationen</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.filter.create">
+        <notes><note category="description">What the audit action dhcp.filter.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a MAC filter entry</source><target>Skapa en MAC-filterpost</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.filter.delete">
+        <notes><note category="description">What the audit action dhcp.filter.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a MAC filter entry</source><target>Ta bort en MAC-filterpost</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.filter.update">
+        <notes><note category="description">What the audit action dhcp.filter.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a MAC filter entry</source><target>Redigera en MAC-filterpost</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.history.purge">
+        <notes><note category="description">What the audit action dhcp.history.purge is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Purge the lease history</source><target>Rensa lånehistoriken</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.lease.read">
+        <notes><note category="description">What the audit action dhcp.lease.read is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read DHCP leases</source><target>Läs DHCP-adresslån</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.lease.release">
+        <notes><note category="description">What the audit action dhcp.lease.release is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Release a lease</source><target>Frigör ett adresslån</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.option.def_create">
+        <notes><note category="description">What the audit action dhcp.option.def_create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DHCP option definition</source><target>Skapa en DHCP-optionsdefinition</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.option.def_delete">
+        <notes><note category="description">What the audit action dhcp.option.def_delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DHCP option definition</source><target>Ta bort en DHCP-optionsdefinition</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.option.def_update">
+        <notes><note category="description">What the audit action dhcp.option.def_update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a DHCP option definition</source><target>Redigera en DHCP-optionsdefinition</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.option.set">
+        <notes><note category="description">What the audit action dhcp.option.set is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change DHCP options</source><target>Ändra DHCP-optioner</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.policy.create">
+        <notes><note category="description">What the audit action dhcp.policy.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DHCP policy</source><target>Skapa en DHCP-princip</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.policy.delete">
+        <notes><note category="description">What the audit action dhcp.policy.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DHCP policy</source><target>Ta bort en DHCP-princip</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.policy.update">
+        <notes><note category="description">What the audit action dhcp.policy.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a DHCP policy</source><target>Redigera en DHCP-princip</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.pool.delete">
+        <notes><note category="description">What the audit action dhcp.pool.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove pool settings</source><target>Ta bort poolinställningar</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.pool.update">
+        <notes><note category="description">What the audit action dhcp.pool.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change pool settings</source><target>Ändra poolinställningar</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.scope.create">
+        <notes><note category="description">What the audit action dhcp.scope.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DHCP scope</source><target>Skapa ett DHCP-omfång</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.scope.delete">
+        <notes><note category="description">What the audit action dhcp.scope.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DHCP scope</source><target>Ta bort ett DHCP-omfång</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.scope.update">
+        <notes><note category="description">What the audit action dhcp.scope.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a DHCP scope</source><target>Redigera ett DHCP-omfång</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.settings.update">
+        <notes><note category="description">What the audit action dhcp.settings.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the DHCP server settings</source><target>Ändra DHCP-serverns inställningar</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.shared_network.create">
+        <notes><note category="description">What the audit action dhcp.shared_network.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a shared network</source><target>Skapa ett delat nätverk</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.shared_network.delete">
+        <notes><note category="description">What the audit action dhcp.shared_network.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a shared network</source><target>Ta bort ett delat nätverk</target></segment>
+      </unit>
+      <unit id="audit.action.dhcp.shared_network.update">
+        <notes><note category="description">What the audit action dhcp.shared_network.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a shared network</source><target>Redigera ett delat nätverk</target></segment>
+      </unit>
+      <unit id="audit.action.dns.acl.create">
+        <notes><note category="description">What the audit action dns.acl.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an access list</source><target>Skapa en åtkomstlista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.acl.delete">
+        <notes><note category="description">What the audit action dns.acl.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an access list</source><target>Ta bort en åtkomstlista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.acl.update">
+        <notes><note category="description">What the audit action dns.acl.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit an access list</source><target>Redigera en åtkomstlista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.blocking.allow">
+        <notes><note category="description">What the audit action dns.blocking.allow is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Allow a blocked name</source><target>Tillåt ett blockerat namn</target></segment>
+      </unit>
+      <unit id="audit.action.dns.blocking.pause">
+        <notes><note category="description">What the audit action dns.blocking.pause is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Pause blocking on a node</source><target>Pausa blockeringen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.blocking.resume">
+        <notes><note category="description">What the audit action dns.blocking.resume is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Resume blocking on a node</source><target>Återuppta blockeringen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.blocking.stats">
+        <notes><note category="description">What the audit action dns.blocking.stats is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read blocking statistics</source><target>Läs blockeringsstatistik</target></segment>
+      </unit>
+      <unit id="audit.action.dns.cache.flush">
+        <notes><note category="description">What the audit action dns.cache.flush is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Flush a DNS cache</source><target>Töm en DNS-cache</target></segment>
+      </unit>
+      <unit id="audit.action.dns.cache.read">
+        <notes><note category="description">What the audit action dns.cache.read is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read a DNS cache</source><target>Läs en DNS-cache</target></segment>
+      </unit>
+      <unit id="audit.action.dns.dnssec.disable">
+        <notes><note category="description">What the audit action dns.dnssec.disable is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Turn off DNSSEC signing for a zone</source><target>Stäng av DNSSEC-signering för en zon</target></segment>
+      </unit>
+      <unit id="audit.action.dns.dnssec.enable">
+        <notes><note category="description">What the audit action dns.dnssec.enable is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Turn on DNSSEC signing for a zone</source><target>Slå på DNSSEC-signering för en zon</target></segment>
+      </unit>
+      <unit id="audit.action.dns.dnssec.key_create">
+        <notes><note category="description">What the audit action dns.dnssec.key_create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Generate a DNSSEC key</source><target>Skapa en DNSSEC-nyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.dnssec.key_state">
+        <notes><note category="description">What the audit action dns.dnssec.key_state is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the state of a DNSSEC key</source><target>Ändra tillstånd för en DNSSEC-nyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.dnssec.rollover">
+        <notes><note category="description">What the audit action dns.dnssec.rollover is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Run a DNSSEC key rollover step</source><target>Utför ett steg i ett DNSSEC-nyckelbyte</target></segment>
+      </unit>
+      <unit id="audit.action.dns.forwarder.create">
+        <notes><note category="description">What the audit action dns.forwarder.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a forwarding rule</source><target>Skapa en vidarebefordringsregel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.forwarder.delete">
+        <notes><note category="description">What the audit action dns.forwarder.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a forwarding rule</source><target>Ta bort en vidarebefordringsregel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.forwarder.update">
+        <notes><note category="description">What the audit action dns.forwarder.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a forwarding rule</source><target>Redigera en vidarebefordringsregel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.infra.flush">
+        <notes><note category="description">What the audit action dns.infra.flush is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Flush the infrastructure cache of a node</source><target>Töm infrastrukturcachen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.key.create">
+        <notes><note category="description">What the audit action dns.key.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a TSIG key</source><target>Skapa en TSIG-nyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.key.delete">
+        <notes><note category="description">What the audit action dns.key.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a TSIG key</source><target>Ta bort en TSIG-nyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.key.rollover">
+        <notes><note category="description">What the audit action dns.key.rollover is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Roll over a DNSSEC key</source><target>Byt en DNSSEC-nyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.compile">
+        <notes><note category="description">What the audit action dns.list.compile is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Compile a block list</source><target>Kompilera en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.create">
+        <notes><note category="description">What the audit action dns.list.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a block list</source><target>Skapa en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.delete">
+        <notes><note category="description">What the audit action dns.list.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a block list</source><target>Ta bort en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.fetch">
+        <notes><note category="description">What the audit action dns.list.fetch is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Fetch a block list</source><target>Hämta en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.update">
+        <notes><note category="description">What the audit action dns.list.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a block list</source><target>Redigera en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.list.upload">
+        <notes><note category="description">What the audit action dns.list.upload is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Upload a block list</source><target>Ladda upp en blocklista</target></segment>
+      </unit>
+      <unit id="audit.action.dns.log.read">
+        <notes><note category="description">What the audit action dns.log.read is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read the query log of a node</source><target>Läs frågeloggen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.log.start">
+        <notes><note category="description">What the audit action dns.log.start is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start the query log of a node</source><target>Starta frågeloggen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.log.stop">
+        <notes><note category="description">What the audit action dns.log.stop is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Stop the query log of a node</source><target>Stoppa frågeloggen på en nod</target></segment>
+      </unit>
+      <unit id="audit.action.dns.nta.create">
+        <notes><note category="description">What the audit action dns.nta.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a negative trust anchor</source><target>Skapa ett negativt förtroendeankare</target></segment>
+      </unit>
+      <unit id="audit.action.dns.nta.delete">
+        <notes><note category="description">What the audit action dns.nta.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a negative trust anchor</source><target>Ta bort ett negativt förtroendeankare</target></segment>
+      </unit>
+      <unit id="audit.action.dns.nta.expire">
+        <notes><note category="description">What the audit action dns.nta.expire is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Expire a negative trust anchor</source><target>Låt ett negativt förtroendeankare löpa ut</target></segment>
+      </unit>
+      <unit id="audit.action.dns.record.actuate">
+        <notes><note category="description">What the audit action dns.record.actuate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change DNS records from IPAM</source><target>Ändra DNS-poster från IPAM</target></segment>
+      </unit>
+      <unit id="audit.action.dns.record.change">
+        <notes><note category="description">What the audit action dns.record.change is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change DNS records</source><target>Ändra DNS-poster</target></segment>
+      </unit>
+      <unit id="audit.action.dns.record.import">
+        <notes><note category="description">What the audit action dns.record.import is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Import DNS records</source><target>Importera DNS-poster</target></segment>
+      </unit>
+      <unit id="audit.action.dns.recursion.prime">
+        <notes><note category="description">What the audit action dns.recursion.prime is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Prime a resolver</source><target>Förladda en resolver</target></segment>
+      </unit>
+      <unit id="audit.action.dns.recursion.unwanted_flush">
+        <notes><note category="description">What the audit action dns.recursion.unwanted_flush is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Flush the answer cache after unwanted answers</source><target>Töm svarscachen efter oönskade svar</target></segment>
+      </unit>
+      <unit id="audit.action.dns.transfer.trigger">
+        <notes><note category="description">What the audit action dns.transfer.trigger is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start a zone transfer</source><target>Starta en zonöverföring</target></segment>
+      </unit>
+      <unit id="audit.action.dns.trust_anchor.add">
+        <notes><note category="description">What the audit action dns.trust_anchor.add is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Add a trust anchor</source><target>Lägg till ett förtroendeankare</target></segment>
+      </unit>
+      <unit id="audit.action.dns.trust_anchor.refresh">
+        <notes><note category="description">What the audit action dns.trust_anchor.refresh is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refresh a trust anchor</source><target>Uppdatera ett förtroendeankare</target></segment>
+      </unit>
+      <unit id="audit.action.dns.trust_anchor.remove">
+        <notes><note category="description">What the audit action dns.trust_anchor.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a trust anchor</source><target>Ta bort ett förtroendeankare</target></segment>
+      </unit>
+      <unit id="audit.action.dns.trust_anchor.state">
+        <notes><note category="description">What the audit action dns.trust_anchor.state is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the state of a trust anchor key</source><target>Ändra tillstånd för en förtroendeankarnyckel</target></segment>
+      </unit>
+      <unit id="audit.action.dns.update.apply">
+        <notes><note category="description">What the audit action dns.update.apply is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Apply a dynamic update</source><target>Tillämpa en dynamisk uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.dns.update.refuse">
+        <notes><note category="description">What the audit action dns.update.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a dynamic update</source><target>Neka en dynamisk uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.dns.view.create">
+        <notes><note category="description">What the audit action dns.view.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a DNS view</source><target>Skapa en DNS-vy</target></segment>
+      </unit>
+      <unit id="audit.action.dns.view.delete">
+        <notes><note category="description">What the audit action dns.view.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a DNS view</source><target>Ta bort en DNS-vy</target></segment>
+      </unit>
+      <unit id="audit.action.dns.view.update">
+        <notes><note category="description">What the audit action dns.view.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a DNS view</source><target>Redigera en DNS-vy</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.create">
+        <notes><note category="description">What the audit action dns.zone.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a zone</source><target>Skapa en zon</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.delete">
+        <notes><note category="description">What the audit action dns.zone.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a zone</source><target>Ta bort en zon</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.export">
+        <notes><note category="description">What the audit action dns.zone.export is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Export a zone file</source><target>Exportera en zonfil</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.transfer_in">
+        <notes><note category="description">What the audit action dns.zone.transfer_in is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Receive a zone transfer</source><target>Ta emot en zonöverföring</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.transfer_out">
+        <notes><note category="description">What the audit action dns.zone.transfer_out is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Send a zone transfer</source><target>Skicka en zonöverföring</target></segment>
+      </unit>
+      <unit id="audit.action.dns.zone.update">
+        <notes><note category="description">What the audit action dns.zone.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a zone</source><target>Redigera en zon</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.activate">
+        <notes><note category="description">What the audit action i18n.pack.activate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Activate a language pack</source><target>Aktivera ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.discard">
+        <notes><note category="description">What the audit action i18n.pack.discard is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Discard a language pack preview</source><target>Kassera en förhandsvisning av ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.import">
+        <notes><note category="description">What the audit action i18n.pack.import is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Import a language pack</source><target>Importera ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.preview">
+        <notes><note category="description">What the audit action i18n.pack.preview is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Preview a language pack</source><target>Förhandsgranska ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.remove">
+        <notes><note category="description">What the audit action i18n.pack.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a language pack</source><target>Ta bort ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.i18n.pack.upload">
+        <notes><note category="description">What the audit action i18n.pack.upload is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Upload a language pack</source><target>Ladda upp ett språkpaket</target></segment>
+      </unit>
+      <unit id="audit.action.import.apply">
+        <notes><note category="description">What the audit action import.apply is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Apply an import</source><target>Tillämpa en import</target></segment>
+      </unit>
+      <unit id="audit.action.import.delete">
+        <notes><note category="description">What the audit action import.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an import</source><target>Ta bort en import</target></segment>
+      </unit>
+      <unit id="audit.action.import.expire">
+        <notes><note category="description">What the audit action import.expire is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Expire an import</source><target>Låt en import löpa ut</target></segment>
+      </unit>
+      <unit id="audit.action.import.mapping">
+        <notes><note category="description">What the audit action import.mapping is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Map the columns of an import</source><target>Mappa kolumnerna i en import</target></segment>
+      </unit>
+      <unit id="audit.action.import.prepare">
+        <notes><note category="description">What the audit action import.prepare is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Prepare an import</source><target>Förbered en import</target></segment>
+      </unit>
+      <unit id="audit.action.import.upload">
+        <notes><note category="description">What the audit action import.upload is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Upload an import file</source><target>Ladda upp en importfil</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.address.create">
+        <notes><note category="description">What the audit action ipam.address.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an address</source><target>Skapa en adress</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.address.delete">
+        <notes><note category="description">What the audit action ipam.address.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an address</source><target>Ta bort en adress</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.address.reserve">
+        <notes><note category="description">What the audit action ipam.address.reserve is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Reserve an address</source><target>Reservera en adress</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.address.restore">
+        <notes><note category="description">What the audit action ipam.address.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore an address</source><target>Återställ en adress</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.address.update">
+        <notes><note category="description">What the audit action ipam.address.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit an address</source><target>Redigera en adress</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.adoption.clear">
+        <notes><note category="description">What the audit action ipam.adoption.clear is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove an adoption policy</source><target>Ta bort en adoptionsprincip</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.adoption.set">
+        <notes><note category="description">What the audit action ipam.adoption.set is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Set an adoption policy</source><target>Ange en adoptionsprincip</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.custom_field.create">
+        <notes><note category="description">What the audit action ipam.custom_field.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a custom field</source><target>Skapa ett eget fält</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.custom_field.remove">
+        <notes><note category="description">What the audit action ipam.custom_field.remove is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a custom field</source><target>Ta bort ett eget fält</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.custom_field.update">
+        <notes><note category="description">What the audit action ipam.custom_field.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a custom field</source><target>Redigera ett eget fält</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.create">
+        <notes><note category="description">What the audit action ipam.host.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a host</source><target>Skapa en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.decommission">
+        <notes><note category="description">What the audit action ipam.host.decommission is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Decommission a host</source><target>Avveckla en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.delete">
+        <notes><note category="description">What the audit action ipam.host.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a host</source><target>Ta bort en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.lock">
+        <notes><note category="description">What the audit action ipam.host.lock is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Lock a host</source><target>Lås en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.reinstate">
+        <notes><note category="description">What the audit action ipam.host.reinstate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Reinstate a host</source><target>Återinför en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.restore">
+        <notes><note category="description">What the audit action ipam.host.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a host</source><target>Återställ en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.unlock">
+        <notes><note category="description">What the audit action ipam.host.unlock is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Unlock a host</source><target>Lås upp en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.host.update">
+        <notes><note category="description">What the audit action ipam.host.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a host</source><target>Redigera en värd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.interface.create">
+        <notes><note category="description">What the audit action ipam.interface.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an interface</source><target>Skapa ett gränssnitt</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.interface.delete">
+        <notes><note category="description">What the audit action ipam.interface.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an interface</source><target>Ta bort ett gränssnitt</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.interface.restore">
+        <notes><note category="description">What the audit action ipam.interface.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore an interface</source><target>Återställ ett gränssnitt</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.interface.update">
+        <notes><note category="description">What the audit action ipam.interface.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit an interface</source><target>Redigera ett gränssnitt</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.name_authority.clear">
+        <notes><note category="description">What the audit action ipam.name_authority.clear is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove a name authority rule</source><target>Ta bort en regel för namnauktoritet</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.name_authority.set">
+        <notes><note category="description">What the audit action ipam.name_authority.set is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Set a name authority rule</source><target>Ange en regel för namnauktoritet</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.name_preference.clear">
+        <notes><note category="description">What the audit action ipam.name_preference.clear is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Forget the preferred name source of a host</source><target>Glöm en värds föredragna namnkälla</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.observation.ingest">
+        <notes><note category="description">What the audit action ipam.observation.ingest is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Record observations</source><target>Registrera observationer</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.observation.purge">
+        <notes><note category="description">What the audit action ipam.observation.purge is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Purge old observations</source><target>Rensa gamla observationer</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.prefix.alarm">
+        <notes><note category="description">What the audit action ipam.prefix.alarm is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Record a prefix utilization alarm</source><target>Registrera ett användningslarm för ett prefix</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.prefix.create">
+        <notes><note category="description">What the audit action ipam.prefix.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a prefix</source><target>Skapa ett prefix</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.prefix.delete">
+        <notes><note category="description">What the audit action ipam.prefix.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a prefix</source><target>Ta bort ett prefix</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.prefix.restore">
+        <notes><note category="description">What the audit action ipam.prefix.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a prefix</source><target>Återställ ett prefix</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.prefix.update">
+        <notes><note category="description">What the audit action ipam.prefix.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a prefix</source><target>Redigera ett prefix</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.adopt">
+        <notes><note category="description">What the audit action ipam.proposal.adopt is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Adopt a proposal by policy</source><target>Adoptera ett förslag enligt princip</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.adopt_failed">
+        <notes><note category="description">What the audit action ipam.proposal.adopt_failed is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Adoption of a proposal failed</source><target>Adoptionen av ett förslag misslyckades</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.approve">
+        <notes><note category="description">What the audit action ipam.proposal.approve is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Approve a proposal</source><target>Godkänn ett förslag</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.expire">
+        <notes><note category="description">What the audit action ipam.proposal.expire is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Expire a proposal</source><target>Låt ett förslag löpa ut</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.keep">
+        <notes><note category="description">What the audit action ipam.proposal.keep is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Keep an address conflict as intended</source><target>Behåll en adresskonflikt som avsedd</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.open">
+        <notes><note category="description">What the audit action ipam.proposal.open is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Open a proposal</source><target>Öppna ett förslag</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.reject">
+        <notes><note category="description">What the audit action ipam.proposal.reject is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Reject a proposal</source><target>Avslå ett förslag</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.proposal.supersede">
+        <notes><note category="description">What the audit action ipam.proposal.supersede is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Replace a proposal with a newer one</source><target>Ersätt ett förslag med ett nyare</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.range.create">
+        <notes><note category="description">What the audit action ipam.range.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an address range</source><target>Skapa ett adressintervall</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.range.delete">
+        <notes><note category="description">What the audit action ipam.range.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete an address range</source><target>Ta bort ett adressintervall</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.range.restore">
+        <notes><note category="description">What the audit action ipam.range.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore an address range</source><target>Återställ ett adressintervall</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.range.update">
+        <notes><note category="description">What the audit action ipam.range.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit an address range</source><target>Redigera ett adressintervall</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.reconcile.run">
+        <notes><note category="description">What the audit action ipam.reconcile.run is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Reconcile IPAM</source><target>Stäm av IPAM</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.reconciler.settings.update">
+        <notes><note category="description">What the audit action ipam.reconciler.settings.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the reconciler settings</source><target>Ändra avstämningens inställningar</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.site.create">
+        <notes><note category="description">What the audit action ipam.site.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a site</source><target>Skapa en plats</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.site.delete">
+        <notes><note category="description">What the audit action ipam.site.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a site</source><target>Ta bort en plats</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.site.restore">
+        <notes><note category="description">What the audit action ipam.site.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a site</source><target>Återställ en plats</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.site.update">
+        <notes><note category="description">What the audit action ipam.site.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a site</source><target>Redigera en plats</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.tenant.create">
+        <notes><note category="description">What the audit action ipam.tenant.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a tenant</source><target>Skapa en organisation</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.tenant.delete">
+        <notes><note category="description">What the audit action ipam.tenant.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a tenant</source><target>Ta bort en organisation</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.tenant.restore">
+        <notes><note category="description">What the audit action ipam.tenant.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a tenant</source><target>Återställ en organisation</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.tenant.update">
+        <notes><note category="description">What the audit action ipam.tenant.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a tenant</source><target>Redigera en organisation</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vlan.create">
+        <notes><note category="description">What the audit action ipam.vlan.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a VLAN</source><target>Skapa ett VLAN</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vlan.delete">
+        <notes><note category="description">What the audit action ipam.vlan.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a VLAN</source><target>Ta bort ett VLAN</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vlan.restore">
+        <notes><note category="description">What the audit action ipam.vlan.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a VLAN</source><target>Återställ ett VLAN</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vlan.update">
+        <notes><note category="description">What the audit action ipam.vlan.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a VLAN</source><target>Redigera ett VLAN</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vrf.create">
+        <notes><note category="description">What the audit action ipam.vrf.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a VRF</source><target>Skapa en VRF</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vrf.delete">
+        <notes><note category="description">What the audit action ipam.vrf.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a VRF</source><target>Ta bort en VRF</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vrf.restore">
+        <notes><note category="description">What the audit action ipam.vrf.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a VRF</source><target>Återställ en VRF</target></segment>
+      </unit>
+      <unit id="audit.action.ipam.vrf.update">
+        <notes><note category="description">What the audit action ipam.vrf.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a VRF</source><target>Redigera en VRF</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.cancel">
+        <notes><note category="description">What the audit action jobs.job.cancel is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Cancel a job</source><target>Avbryt ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.cancel_request">
+        <notes><note category="description">What the audit action jobs.job.cancel_request is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Request cancellation of a job</source><target>Begär att ett jobb avbryts</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.claim">
+        <notes><note category="description">What the audit action jobs.job.claim is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Pick up a job</source><target>Plocka upp ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.complete">
+        <notes><note category="description">What the audit action jobs.job.complete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Complete a job</source><target>Slutför ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.fail">
+        <notes><note category="description">What the audit action jobs.job.fail is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Mark a job as failed</source><target>Markera ett jobb som misslyckat</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.finish_cancel">
+        <notes><note category="description">What the audit action jobs.job.finish_cancel is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Finish cancelling a job</source><target>Slutför avbrytandet av ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.finish_rollback">
+        <notes><note category="description">What the audit action jobs.job.finish_rollback is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Finish rolling back a job</source><target>Slutför återställningen av ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.resume">
+        <notes><note category="description">What the audit action jobs.job.resume is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Resume a job</source><target>Återuppta ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.roll_back">
+        <notes><note category="description">What the audit action jobs.job.roll_back is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Roll back a job</source><target>Återställ ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.start">
+        <notes><note category="description">What the audit action jobs.job.start is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start a job</source><target>Starta ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.submit">
+        <notes><note category="description">What the audit action jobs.job.submit is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Submit a job</source><target>Skicka in ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.update">
+        <notes><note category="description">What the audit action jobs.job.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Update a job</source><target>Uppdatera ett jobb</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.job.wait">
+        <notes><note category="description">What the audit action jobs.job.wait is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Put a job on hold</source><target>Försätt ett jobb i väntläge</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.compensated">
+        <notes><note category="description">What the audit action jobs.step.compensated is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Finish undoing a job step</source><target>Slutför ångrandet av ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.compensating">
+        <notes><note category="description">What the audit action jobs.step.compensating is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Undo a job step</source><target>Ångra ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.compensation_failed">
+        <notes><note category="description">What the audit action jobs.step.compensation_failed is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Fail to undo a job step</source><target>Misslyckas med att ångra ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.done">
+        <notes><note category="description">What the audit action jobs.step.done is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Finish a job step</source><target>Slutför ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.failed">
+        <notes><note category="description">What the audit action jobs.step.failed is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Mark a job step as failed</source><target>Markera ett jobbsteg som misslyckat</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.pending">
+        <notes><note category="description">What the audit action jobs.step.pending is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Queue a job step</source><target>Köa ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.running">
+        <notes><note category="description">What the audit action jobs.step.running is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start a job step</source><target>Starta ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.skipped">
+        <notes><note category="description">What the audit action jobs.step.skipped is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Skip a job step</source><target>Hoppa över ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.update">
+        <notes><note category="description">What the audit action jobs.step.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Update a job step</source><target>Uppdatera ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.waiting_for_manual">
+        <notes><note category="description">What the audit action jobs.step.waiting_for_manual is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Wait for a person in a job step</source><target>Vänta på en person i ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.jobs.step.waiting_for_observation">
+        <notes><note category="description">What the audit action jobs.step.waiting_for_observation is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Wait for an observation in a job step</source><target>Vänta på en observation i ett jobbsteg</target></segment>
+      </unit>
+      <unit id="audit.action.nodes.roles">
+        <notes><note category="description">What the audit action nodes.roles is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the roles of a node</source><target>Ändra en nods roller</target></segment>
+      </unit>
+      <unit id="audit.action.scan.config.offer">
+        <notes><note category="description">What the audit action scan.config.offer is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Store the own configuration of a probe</source><target>Spara en sonds egen konfiguration</target></segment>
+      </unit>
+      <unit id="audit.action.scan.config.update">
+        <notes><note category="description">What the audit action scan.config.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the configuration of a probe</source><target>Ändra en sonds konfiguration</target></segment>
+      </unit>
+      <unit id="audit.action.scan.resume">
+        <notes><note category="description">What the audit action scan.resume is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Resume scanning</source><target>Återuppta skanningen</target></segment>
+      </unit>
+      <unit id="audit.action.scan.run">
+        <notes><note category="description">What the audit action scan.run is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Run a scan</source><target>Kör en skanning</target></segment>
+      </unit>
+      <unit id="audit.action.scan.stop">
+        <notes><note category="description">What the audit action scan.stop is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Stop scanning</source><target>Stoppa skanningen</target></segment>
+      </unit>
+      <unit id="audit.action.sys.audit_export.failing">
+        <notes><note category="description">What the audit action sys.audit_export.failing is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Raise an audit export alarm</source><target>Utlös ett larm för granskningsexporten</target></segment>
+      </unit>
+      <unit id="audit.action.sys.audit_export.recovered">
+        <notes><note category="description">What the audit action sys.audit_export.recovered is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Clear an audit export alarm</source><target>Avsluta ett larm för granskningsexporten</target></segment>
+      </unit>
+      <unit id="audit.action.sys.audit_export.test">
+        <notes><note category="description">What the audit action sys.audit_export.test is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Send an audit export test message</source><target>Skicka ett testmeddelande för granskningsexporten</target></segment>
+      </unit>
+      <unit id="audit.action.sys.audit_export.update">
+        <notes><note category="description">What the audit action sys.audit_export.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the audit export settings</source><target>Ändra inställningarna för granskningsexport</target></segment>
+      </unit>
+      <unit id="audit.action.sys.backup.create">
+        <notes><note category="description">What the audit action sys.backup.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a backup</source><target>Skapa en säkerhetskopia</target></segment>
+      </unit>
+      <unit id="audit.action.sys.backup.restore">
+        <notes><note category="description">What the audit action sys.backup.restore is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Restore a backup</source><target>Återställ en säkerhetskopia</target></segment>
+      </unit>
+      <unit id="audit.action.sys.backup.settings">
+        <notes><note category="description">What the audit action sys.backup.settings is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the backup settings</source><target>Ändra inställningarna för säkerhetskopiering</target></segment>
+      </unit>
+      <unit id="audit.action.sys.diagnostics">
+        <notes><note category="description">What the audit action sys.diagnostics is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Read the diagnostics</source><target>Läs diagnostiken</target></segment>
+      </unit>
+      <unit id="audit.action.sys.modules.update">
+        <notes><note category="description">What the audit action sys.modules.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the enabled modules</source><target>Ändra de aktiverade modulerna</target></segment>
+      </unit>
+      <unit id="audit.action.sys.update.confirm">
+        <notes><note category="description">What the audit action sys.update.confirm is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Confirm an update</source><target>Bekräfta en uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.sys.update.install">
+        <notes><note category="description">What the audit action sys.update.install is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Install an update</source><target>Installera en uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.sys.update.manifest">
+        <notes><note category="description">What the audit action sys.update.manifest is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Check for updates</source><target>Sök efter uppdateringar</target></segment>
+      </unit>
+      <unit id="audit.action.sys.update.rollback">
+        <notes><note category="description">What the audit action sys.update.rollback is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Roll back an update</source><target>Återställ en uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.sys.update.upload">
+        <notes><note category="description">What the audit action sys.update.upload is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Upload an update</source><target>Ladda upp en uppdatering</target></segment>
+      </unit>
+      <unit id="audit.action.sys.upgrade.migrate">
+        <notes><note category="description">What the audit action sys.upgrade.migrate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Migrate the data directory</source><target>Migrera datakatalogen</target></segment>
+      </unit>
+      <unit id="audit.action.vault.host.credentials">
+        <notes><note category="description">What the audit action vault.host.credentials is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Change the credentials of a host</source><target>Ändra en värds inloggningsuppgifter</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.activate">
+        <notes><note category="description">What the audit action vault.kek.activate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Activate a new vault key</source><target>Aktivera en ny valvnyckel</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.downgrade">
+        <notes><note category="description">What the audit action vault.kek.downgrade is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Detect weaker vault key protection</source><target>Upptäck svagare skydd av valvnyckeln</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.rotate">
+        <notes><note category="description">What the audit action vault.kek.rotate is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Rotate the vault key</source><target>Rotera valvnyckeln</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.rotate_failed">
+        <notes><note category="description">What the audit action vault.kek.rotate_failed is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Vault key rotation failed</source><target>Rotationen av valvnyckeln misslyckades</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.rotate_request">
+        <notes><note category="description">What the audit action vault.kek.rotate_request is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Request a vault key rotation</source><target>Begär rotation av valvnyckeln</target></segment>
+      </unit>
+      <unit id="audit.action.vault.kek.transfer">
+        <notes><note category="description">What the audit action vault.kek.transfer is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Transfer the vault key to a controller</source><target>Överför valvnyckeln till en controller</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.adopt">
+        <notes><note category="description">What the audit action vault.secret.adopt is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Adopt secrets into the vault records</source><target>Ta in hemligheter i valvets register</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.create">
+        <notes><note category="description">What the audit action vault.secret.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create a secret</source><target>Skapa en hemlighet</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.delete">
+        <notes><note category="description">What the audit action vault.secret.delete is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Delete a secret</source><target>Ta bort en hemlighet</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.replace">
+        <notes><note category="description">What the audit action vault.secret.replace is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Replace the value of a secret</source><target>Ersätt värdet på en hemlighet</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.reveal">
+        <notes><note category="description">What the audit action vault.secret.reveal is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Reveal a secret</source><target>Visa en hemlighet</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.rotate_dek">
+        <notes><note category="description">What the audit action vault.secret.rotate_dek is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Re-encrypt a secret</source><target>Kryptera om en hemlighet</target></segment>
+      </unit>
+      <unit id="audit.action.vault.secret.update">
+        <notes><note category="description">What the audit action vault.secret.update is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Edit a secret</source><target>Redigera en hemlighet</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

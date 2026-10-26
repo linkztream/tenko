@@ -51,6 +51,7 @@
 //! | [`service`] | [`IpamService`]: apply, execute, allocation protocol, alarms |
 //! | [`tree`] | the prefix tree index, utilization, next free |
 //! | [`alarm`] | alarm levels and events (IPAM-10) |
+//! | [`findings`] | the findings model: one derived index over proposals, alarms, the reconciliation view, waiting jobs and health |
 //! | [`jobs`] | the inline job of a change, [`JobSink`], [`DirectJobs`] |
 //! | [`moves`] | moving hosts and addresses to another network (IPAM-19) |
 //! | [`dns`] | the records of the intent, the reverse zones and the DNS actuator (DNS-22, IPAM-13) |
@@ -74,6 +75,7 @@ pub mod diff;
 pub mod dns;
 pub mod error;
 pub mod export;
+pub mod findings;
 pub mod history;
 pub mod import;
 pub mod jobs;

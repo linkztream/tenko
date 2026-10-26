@@ -285,6 +285,277 @@ export type MessageKey =
   | "account.totp.status_on"
   | "account.totp.title"
   | "account.totp.verify"
+  | "audit.action.auth.access.denied"
+  | "audit.action.auth.break_glass.set"
+  | "audit.action.auth.grant.create"
+  | "audit.action.auth.grant.revoke"
+  | "audit.action.auth.installation.language"
+  | "audit.action.auth.login.break_glass"
+  | "audit.action.auth.login.password"
+  | "audit.action.auth.login.recovery"
+  | "audit.action.auth.login.totp"
+  | "audit.action.auth.login.webauthn"
+  | "audit.action.auth.logout"
+  | "audit.action.auth.password.change"
+  | "audit.action.auth.recovery.regenerate"
+  | "audit.action.auth.role_policy.update"
+  | "audit.action.auth.service_account.create"
+  | "audit.action.auth.session.revoke"
+  | "audit.action.auth.settings.update"
+  | "audit.action.auth.setup.complete"
+  | "audit.action.auth.token.create"
+  | "audit.action.auth.token.revoke"
+  | "audit.action.auth.totp.enrol"
+  | "audit.action.auth.totp.remove"
+  | "audit.action.auth.user.create"
+  | "audit.action.auth.user.delete"
+  | "audit.action.auth.user.lock"
+  | "audit.action.auth.user.roles"
+  | "audit.action.auth.user.unlock"
+  | "audit.action.auth.user.update"
+  | "audit.action.auth.webauthn.register"
+  | "audit.action.auth.webauthn.remove"
+  | "audit.action.cluster.ca.create"
+  | "audit.action.cluster.enrolment.create"
+  | "audit.action.cluster.enrolment.delete"
+  | "audit.action.cluster.member.announce"
+  | "audit.action.cluster.member.join"
+  | "audit.action.cluster.member.promote"
+  | "audit.action.cluster.member.remove"
+  | "audit.action.cluster.member.step_down"
+  | "audit.action.cluster.node.controller_cert"
+  | "audit.action.cluster.node.enrol"
+  | "audit.action.cluster.node.renew"
+  | "audit.action.cluster.node.revoke"
+  | "audit.action.cluster.node.secrets"
+  | "audit.action.cluster.node.version_mismatch"
+  | "audit.action.cluster.tls.issue"
+  | "audit.action.connect.client.kick"
+  | "audit.action.connect.guardrails.update"
+  | "audit.action.connect.instance.create"
+  | "audit.action.connect.instance.delete"
+  | "audit.action.connect.instance.disable"
+  | "audit.action.connect.instance.enable"
+  | "audit.action.connect.instance.update"
+  | "audit.action.connect.port.bounce"
+  | "audit.action.connect.port.enable"
+  | "audit.action.connect.secret.inject"
+  | "audit.action.dhcp.class.create"
+  | "audit.action.dhcp.class.delete"
+  | "audit.action.dhcp.class.update"
+  | "audit.action.dhcp.decline"
+  | "audit.action.dhcp.exclusion.create"
+  | "audit.action.dhcp.exclusion.delete"
+  | "audit.action.dhcp.export"
+  | "audit.action.dhcp.filter.create"
+  | "audit.action.dhcp.filter.delete"
+  | "audit.action.dhcp.filter.update"
+  | "audit.action.dhcp.history.purge"
+  | "audit.action.dhcp.lease.read"
+  | "audit.action.dhcp.lease.release"
+  | "audit.action.dhcp.option.def_create"
+  | "audit.action.dhcp.option.def_delete"
+  | "audit.action.dhcp.option.def_update"
+  | "audit.action.dhcp.option.set"
+  | "audit.action.dhcp.policy.create"
+  | "audit.action.dhcp.policy.delete"
+  | "audit.action.dhcp.policy.update"
+  | "audit.action.dhcp.pool.delete"
+  | "audit.action.dhcp.pool.update"
+  | "audit.action.dhcp.scope.create"
+  | "audit.action.dhcp.scope.delete"
+  | "audit.action.dhcp.scope.update"
+  | "audit.action.dhcp.settings.update"
+  | "audit.action.dhcp.shared_network.create"
+  | "audit.action.dhcp.shared_network.delete"
+  | "audit.action.dhcp.shared_network.update"
+  | "audit.action.dns.acl.create"
+  | "audit.action.dns.acl.delete"
+  | "audit.action.dns.acl.update"
+  | "audit.action.dns.blocking.allow"
+  | "audit.action.dns.blocking.pause"
+  | "audit.action.dns.blocking.resume"
+  | "audit.action.dns.blocking.stats"
+  | "audit.action.dns.cache.flush"
+  | "audit.action.dns.cache.read"
+  | "audit.action.dns.dnssec.disable"
+  | "audit.action.dns.dnssec.enable"
+  | "audit.action.dns.dnssec.key_create"
+  | "audit.action.dns.dnssec.key_state"
+  | "audit.action.dns.dnssec.rollover"
+  | "audit.action.dns.forwarder.create"
+  | "audit.action.dns.forwarder.delete"
+  | "audit.action.dns.forwarder.update"
+  | "audit.action.dns.infra.flush"
+  | "audit.action.dns.key.create"
+  | "audit.action.dns.key.delete"
+  | "audit.action.dns.key.rollover"
+  | "audit.action.dns.list.compile"
+  | "audit.action.dns.list.create"
+  | "audit.action.dns.list.delete"
+  | "audit.action.dns.list.fetch"
+  | "audit.action.dns.list.update"
+  | "audit.action.dns.list.upload"
+  | "audit.action.dns.log.read"
+  | "audit.action.dns.log.start"
+  | "audit.action.dns.log.stop"
+  | "audit.action.dns.nta.create"
+  | "audit.action.dns.nta.delete"
+  | "audit.action.dns.nta.expire"
+  | "audit.action.dns.record.actuate"
+  | "audit.action.dns.record.change"
+  | "audit.action.dns.record.import"
+  | "audit.action.dns.recursion.prime"
+  | "audit.action.dns.recursion.unwanted_flush"
+  | "audit.action.dns.transfer.trigger"
+  | "audit.action.dns.trust_anchor.add"
+  | "audit.action.dns.trust_anchor.refresh"
+  | "audit.action.dns.trust_anchor.remove"
+  | "audit.action.dns.trust_anchor.state"
+  | "audit.action.dns.update.apply"
+  | "audit.action.dns.update.refuse"
+  | "audit.action.dns.view.create"
+  | "audit.action.dns.view.delete"
+  | "audit.action.dns.view.update"
+  | "audit.action.dns.zone.create"
+  | "audit.action.dns.zone.delete"
+  | "audit.action.dns.zone.export"
+  | "audit.action.dns.zone.transfer_in"
+  | "audit.action.dns.zone.transfer_out"
+  | "audit.action.dns.zone.update"
+  | "audit.action.i18n.pack.activate"
+  | "audit.action.i18n.pack.discard"
+  | "audit.action.i18n.pack.import"
+  | "audit.action.i18n.pack.preview"
+  | "audit.action.i18n.pack.remove"
+  | "audit.action.i18n.pack.upload"
+  | "audit.action.import.apply"
+  | "audit.action.import.delete"
+  | "audit.action.import.expire"
+  | "audit.action.import.mapping"
+  | "audit.action.import.prepare"
+  | "audit.action.import.upload"
+  | "audit.action.ipam.address.create"
+  | "audit.action.ipam.address.delete"
+  | "audit.action.ipam.address.reserve"
+  | "audit.action.ipam.address.restore"
+  | "audit.action.ipam.address.update"
+  | "audit.action.ipam.adoption.clear"
+  | "audit.action.ipam.adoption.set"
+  | "audit.action.ipam.custom_field.create"
+  | "audit.action.ipam.custom_field.remove"
+  | "audit.action.ipam.custom_field.update"
+  | "audit.action.ipam.host.create"
+  | "audit.action.ipam.host.decommission"
+  | "audit.action.ipam.host.delete"
+  | "audit.action.ipam.host.lock"
+  | "audit.action.ipam.host.reinstate"
+  | "audit.action.ipam.host.restore"
+  | "audit.action.ipam.host.unlock"
+  | "audit.action.ipam.host.update"
+  | "audit.action.ipam.interface.create"
+  | "audit.action.ipam.interface.delete"
+  | "audit.action.ipam.interface.restore"
+  | "audit.action.ipam.interface.update"
+  | "audit.action.ipam.name_authority.clear"
+  | "audit.action.ipam.name_authority.set"
+  | "audit.action.ipam.name_preference.clear"
+  | "audit.action.ipam.observation.ingest"
+  | "audit.action.ipam.observation.purge"
+  | "audit.action.ipam.prefix.alarm"
+  | "audit.action.ipam.prefix.create"
+  | "audit.action.ipam.prefix.delete"
+  | "audit.action.ipam.prefix.restore"
+  | "audit.action.ipam.prefix.update"
+  | "audit.action.ipam.proposal.adopt"
+  | "audit.action.ipam.proposal.adopt_failed"
+  | "audit.action.ipam.proposal.approve"
+  | "audit.action.ipam.proposal.expire"
+  | "audit.action.ipam.proposal.keep"
+  | "audit.action.ipam.proposal.open"
+  | "audit.action.ipam.proposal.reject"
+  | "audit.action.ipam.proposal.supersede"
+  | "audit.action.ipam.range.create"
+  | "audit.action.ipam.range.delete"
+  | "audit.action.ipam.range.restore"
+  | "audit.action.ipam.range.update"
+  | "audit.action.ipam.reconcile.run"
+  | "audit.action.ipam.reconciler.settings.update"
+  | "audit.action.ipam.site.create"
+  | "audit.action.ipam.site.delete"
+  | "audit.action.ipam.site.restore"
+  | "audit.action.ipam.site.update"
+  | "audit.action.ipam.tenant.create"
+  | "audit.action.ipam.tenant.delete"
+  | "audit.action.ipam.tenant.restore"
+  | "audit.action.ipam.tenant.update"
+  | "audit.action.ipam.vlan.create"
+  | "audit.action.ipam.vlan.delete"
+  | "audit.action.ipam.vlan.restore"
+  | "audit.action.ipam.vlan.update"
+  | "audit.action.ipam.vrf.create"
+  | "audit.action.ipam.vrf.delete"
+  | "audit.action.ipam.vrf.restore"
+  | "audit.action.ipam.vrf.update"
+  | "audit.action.jobs.job.cancel"
+  | "audit.action.jobs.job.cancel_request"
+  | "audit.action.jobs.job.claim"
+  | "audit.action.jobs.job.complete"
+  | "audit.action.jobs.job.fail"
+  | "audit.action.jobs.job.finish_cancel"
+  | "audit.action.jobs.job.finish_rollback"
+  | "audit.action.jobs.job.resume"
+  | "audit.action.jobs.job.roll_back"
+  | "audit.action.jobs.job.start"
+  | "audit.action.jobs.job.submit"
+  | "audit.action.jobs.job.update"
+  | "audit.action.jobs.job.wait"
+  | "audit.action.jobs.step.compensated"
+  | "audit.action.jobs.step.compensating"
+  | "audit.action.jobs.step.compensation_failed"
+  | "audit.action.jobs.step.done"
+  | "audit.action.jobs.step.failed"
+  | "audit.action.jobs.step.pending"
+  | "audit.action.jobs.step.running"
+  | "audit.action.jobs.step.skipped"
+  | "audit.action.jobs.step.update"
+  | "audit.action.jobs.step.waiting_for_manual"
+  | "audit.action.jobs.step.waiting_for_observation"
+  | "audit.action.nodes.roles"
+  | "audit.action.scan.config.offer"
+  | "audit.action.scan.config.update"
+  | "audit.action.scan.resume"
+  | "audit.action.scan.run"
+  | "audit.action.scan.stop"
+  | "audit.action.sys.audit_export.failing"
+  | "audit.action.sys.audit_export.recovered"
+  | "audit.action.sys.audit_export.test"
+  | "audit.action.sys.audit_export.update"
+  | "audit.action.sys.backup.create"
+  | "audit.action.sys.backup.restore"
+  | "audit.action.sys.backup.settings"
+  | "audit.action.sys.diagnostics"
+  | "audit.action.sys.modules.update"
+  | "audit.action.sys.update.confirm"
+  | "audit.action.sys.update.install"
+  | "audit.action.sys.update.manifest"
+  | "audit.action.sys.update.rollback"
+  | "audit.action.sys.update.upload"
+  | "audit.action.sys.upgrade.migrate"
+  | "audit.action.vault.host.credentials"
+  | "audit.action.vault.kek.activate"
+  | "audit.action.vault.kek.downgrade"
+  | "audit.action.vault.kek.rotate"
+  | "audit.action.vault.kek.rotate_failed"
+  | "audit.action.vault.kek.rotate_request"
+  | "audit.action.vault.kek.transfer"
+  | "audit.action.vault.secret.adopt"
+  | "audit.action.vault.secret.create"
+  | "audit.action.vault.secret.delete"
+  | "audit.action.vault.secret.replace"
+  | "audit.action.vault.secret.reveal"
+  | "audit.action.vault.secret.rotate_dek"
+  | "audit.action.vault.secret.update"
   | "audit.chain.advice"
   | "audit.chain.broken"
   | "audit.chain.checked"
@@ -3559,6 +3830,8 @@ export type MessageKey =
   | "errors.dns.zone.not_found"
   | "errors.dns.zone.secondary"
   | "errors.dns.zonefile.invalid"
+  | "errors.findings.not_found"
+  | "errors.findings.unavailable"
   | "errors.generic.client"
   | "errors.generic.field"
   | "errors.generic.not_implemented"
@@ -5006,12 +5279,28 @@ export type MessageKey =
   | "jobs.task.dns_revert"
   | "jobs.task.dns_update"
   | "jobs.title"
+  | "jobs.title.backup.create"
+  | "jobs.title.cluster.edit"
+  | "jobs.title.connect.edit"
+  | "jobs.title.connect.run"
+  | "jobs.title.dhcp.edit"
+  | "jobs.title.dns.dnssec.rollover"
+  | "jobs.title.dns.edit"
+  | "jobs.title.dns.import"
+  | "jobs.title.dns.list.compile"
   | "jobs.title.dns_import"
   | "jobs.title.dns_list_fetch"
   | "jobs.title.dns_list_upload"
+  | "jobs.title.import.apply"
   | "jobs.title.import_apply"
+  | "jobs.title.ipam.edit"
+  | "jobs.title.ipam.move"
+  | "jobs.title.ipam.vlan.provision"
   | "jobs.title.ipam_apply"
   | "jobs.title.move"
+  | "jobs.title.scan.edit"
+  | "jobs.title.scan.run"
+  | "jobs.title.sys.update"
   | "jobs.title.update_install"
   | "jobs.undo.step"
   | "jobs.undo.step_named"
@@ -8169,6 +8458,7 @@ export interface MessageArgs {
   "jobs.task.dhcp_reserve": { host: string | number; ip: string | number; mac: string | number; prefix: string | number };
   "jobs.task.dns_revert": { name: string | number; old_ip: string | number };
   "jobs.task.dns_update": { name: string | number; new_ip: string | number; old_ip: string | number };
+  "jobs.title.ipam.edit": { count: number };
   "jobs.undo.step": { kind: string | number; step: string | number };
   "jobs.undo.step_named": { name: string | number; step: string | number };
   "languages.action.template_of": { name: string | number };
@@ -8876,6 +9166,277 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.status_on",
   "account.totp.title",
   "account.totp.verify",
+  "audit.action.auth.access.denied",
+  "audit.action.auth.break_glass.set",
+  "audit.action.auth.grant.create",
+  "audit.action.auth.grant.revoke",
+  "audit.action.auth.installation.language",
+  "audit.action.auth.login.break_glass",
+  "audit.action.auth.login.password",
+  "audit.action.auth.login.recovery",
+  "audit.action.auth.login.totp",
+  "audit.action.auth.login.webauthn",
+  "audit.action.auth.logout",
+  "audit.action.auth.password.change",
+  "audit.action.auth.recovery.regenerate",
+  "audit.action.auth.role_policy.update",
+  "audit.action.auth.service_account.create",
+  "audit.action.auth.session.revoke",
+  "audit.action.auth.settings.update",
+  "audit.action.auth.setup.complete",
+  "audit.action.auth.token.create",
+  "audit.action.auth.token.revoke",
+  "audit.action.auth.totp.enrol",
+  "audit.action.auth.totp.remove",
+  "audit.action.auth.user.create",
+  "audit.action.auth.user.delete",
+  "audit.action.auth.user.lock",
+  "audit.action.auth.user.roles",
+  "audit.action.auth.user.unlock",
+  "audit.action.auth.user.update",
+  "audit.action.auth.webauthn.register",
+  "audit.action.auth.webauthn.remove",
+  "audit.action.cluster.ca.create",
+  "audit.action.cluster.enrolment.create",
+  "audit.action.cluster.enrolment.delete",
+  "audit.action.cluster.member.announce",
+  "audit.action.cluster.member.join",
+  "audit.action.cluster.member.promote",
+  "audit.action.cluster.member.remove",
+  "audit.action.cluster.member.step_down",
+  "audit.action.cluster.node.controller_cert",
+  "audit.action.cluster.node.enrol",
+  "audit.action.cluster.node.renew",
+  "audit.action.cluster.node.revoke",
+  "audit.action.cluster.node.secrets",
+  "audit.action.cluster.node.version_mismatch",
+  "audit.action.cluster.tls.issue",
+  "audit.action.connect.client.kick",
+  "audit.action.connect.guardrails.update",
+  "audit.action.connect.instance.create",
+  "audit.action.connect.instance.delete",
+  "audit.action.connect.instance.disable",
+  "audit.action.connect.instance.enable",
+  "audit.action.connect.instance.update",
+  "audit.action.connect.port.bounce",
+  "audit.action.connect.port.enable",
+  "audit.action.connect.secret.inject",
+  "audit.action.dhcp.class.create",
+  "audit.action.dhcp.class.delete",
+  "audit.action.dhcp.class.update",
+  "audit.action.dhcp.decline",
+  "audit.action.dhcp.exclusion.create",
+  "audit.action.dhcp.exclusion.delete",
+  "audit.action.dhcp.export",
+  "audit.action.dhcp.filter.create",
+  "audit.action.dhcp.filter.delete",
+  "audit.action.dhcp.filter.update",
+  "audit.action.dhcp.history.purge",
+  "audit.action.dhcp.lease.read",
+  "audit.action.dhcp.lease.release",
+  "audit.action.dhcp.option.def_create",
+  "audit.action.dhcp.option.def_delete",
+  "audit.action.dhcp.option.def_update",
+  "audit.action.dhcp.option.set",
+  "audit.action.dhcp.policy.create",
+  "audit.action.dhcp.policy.delete",
+  "audit.action.dhcp.policy.update",
+  "audit.action.dhcp.pool.delete",
+  "audit.action.dhcp.pool.update",
+  "audit.action.dhcp.scope.create",
+  "audit.action.dhcp.scope.delete",
+  "audit.action.dhcp.scope.update",
+  "audit.action.dhcp.settings.update",
+  "audit.action.dhcp.shared_network.create",
+  "audit.action.dhcp.shared_network.delete",
+  "audit.action.dhcp.shared_network.update",
+  "audit.action.dns.acl.create",
+  "audit.action.dns.acl.delete",
+  "audit.action.dns.acl.update",
+  "audit.action.dns.blocking.allow",
+  "audit.action.dns.blocking.pause",
+  "audit.action.dns.blocking.resume",
+  "audit.action.dns.blocking.stats",
+  "audit.action.dns.cache.flush",
+  "audit.action.dns.cache.read",
+  "audit.action.dns.dnssec.disable",
+  "audit.action.dns.dnssec.enable",
+  "audit.action.dns.dnssec.key_create",
+  "audit.action.dns.dnssec.key_state",
+  "audit.action.dns.dnssec.rollover",
+  "audit.action.dns.forwarder.create",
+  "audit.action.dns.forwarder.delete",
+  "audit.action.dns.forwarder.update",
+  "audit.action.dns.infra.flush",
+  "audit.action.dns.key.create",
+  "audit.action.dns.key.delete",
+  "audit.action.dns.key.rollover",
+  "audit.action.dns.list.compile",
+  "audit.action.dns.list.create",
+  "audit.action.dns.list.delete",
+  "audit.action.dns.list.fetch",
+  "audit.action.dns.list.update",
+  "audit.action.dns.list.upload",
+  "audit.action.dns.log.read",
+  "audit.action.dns.log.start",
+  "audit.action.dns.log.stop",
+  "audit.action.dns.nta.create",
+  "audit.action.dns.nta.delete",
+  "audit.action.dns.nta.expire",
+  "audit.action.dns.record.actuate",
+  "audit.action.dns.record.change",
+  "audit.action.dns.record.import",
+  "audit.action.dns.recursion.prime",
+  "audit.action.dns.recursion.unwanted_flush",
+  "audit.action.dns.transfer.trigger",
+  "audit.action.dns.trust_anchor.add",
+  "audit.action.dns.trust_anchor.refresh",
+  "audit.action.dns.trust_anchor.remove",
+  "audit.action.dns.trust_anchor.state",
+  "audit.action.dns.update.apply",
+  "audit.action.dns.update.refuse",
+  "audit.action.dns.view.create",
+  "audit.action.dns.view.delete",
+  "audit.action.dns.view.update",
+  "audit.action.dns.zone.create",
+  "audit.action.dns.zone.delete",
+  "audit.action.dns.zone.export",
+  "audit.action.dns.zone.transfer_in",
+  "audit.action.dns.zone.transfer_out",
+  "audit.action.dns.zone.update",
+  "audit.action.i18n.pack.activate",
+  "audit.action.i18n.pack.discard",
+  "audit.action.i18n.pack.import",
+  "audit.action.i18n.pack.preview",
+  "audit.action.i18n.pack.remove",
+  "audit.action.i18n.pack.upload",
+  "audit.action.import.apply",
+  "audit.action.import.delete",
+  "audit.action.import.expire",
+  "audit.action.import.mapping",
+  "audit.action.import.prepare",
+  "audit.action.import.upload",
+  "audit.action.ipam.address.create",
+  "audit.action.ipam.address.delete",
+  "audit.action.ipam.address.reserve",
+  "audit.action.ipam.address.restore",
+  "audit.action.ipam.address.update",
+  "audit.action.ipam.adoption.clear",
+  "audit.action.ipam.adoption.set",
+  "audit.action.ipam.custom_field.create",
+  "audit.action.ipam.custom_field.remove",
+  "audit.action.ipam.custom_field.update",
+  "audit.action.ipam.host.create",
+  "audit.action.ipam.host.decommission",
+  "audit.action.ipam.host.delete",
+  "audit.action.ipam.host.lock",
+  "audit.action.ipam.host.reinstate",
+  "audit.action.ipam.host.restore",
+  "audit.action.ipam.host.unlock",
+  "audit.action.ipam.host.update",
+  "audit.action.ipam.interface.create",
+  "audit.action.ipam.interface.delete",
+  "audit.action.ipam.interface.restore",
+  "audit.action.ipam.interface.update",
+  "audit.action.ipam.name_authority.clear",
+  "audit.action.ipam.name_authority.set",
+  "audit.action.ipam.name_preference.clear",
+  "audit.action.ipam.observation.ingest",
+  "audit.action.ipam.observation.purge",
+  "audit.action.ipam.prefix.alarm",
+  "audit.action.ipam.prefix.create",
+  "audit.action.ipam.prefix.delete",
+  "audit.action.ipam.prefix.restore",
+  "audit.action.ipam.prefix.update",
+  "audit.action.ipam.proposal.adopt",
+  "audit.action.ipam.proposal.adopt_failed",
+  "audit.action.ipam.proposal.approve",
+  "audit.action.ipam.proposal.expire",
+  "audit.action.ipam.proposal.keep",
+  "audit.action.ipam.proposal.open",
+  "audit.action.ipam.proposal.reject",
+  "audit.action.ipam.proposal.supersede",
+  "audit.action.ipam.range.create",
+  "audit.action.ipam.range.delete",
+  "audit.action.ipam.range.restore",
+  "audit.action.ipam.range.update",
+  "audit.action.ipam.reconcile.run",
+  "audit.action.ipam.reconciler.settings.update",
+  "audit.action.ipam.site.create",
+  "audit.action.ipam.site.delete",
+  "audit.action.ipam.site.restore",
+  "audit.action.ipam.site.update",
+  "audit.action.ipam.tenant.create",
+  "audit.action.ipam.tenant.delete",
+  "audit.action.ipam.tenant.restore",
+  "audit.action.ipam.tenant.update",
+  "audit.action.ipam.vlan.create",
+  "audit.action.ipam.vlan.delete",
+  "audit.action.ipam.vlan.restore",
+  "audit.action.ipam.vlan.update",
+  "audit.action.ipam.vrf.create",
+  "audit.action.ipam.vrf.delete",
+  "audit.action.ipam.vrf.restore",
+  "audit.action.ipam.vrf.update",
+  "audit.action.jobs.job.cancel",
+  "audit.action.jobs.job.cancel_request",
+  "audit.action.jobs.job.claim",
+  "audit.action.jobs.job.complete",
+  "audit.action.jobs.job.fail",
+  "audit.action.jobs.job.finish_cancel",
+  "audit.action.jobs.job.finish_rollback",
+  "audit.action.jobs.job.resume",
+  "audit.action.jobs.job.roll_back",
+  "audit.action.jobs.job.start",
+  "audit.action.jobs.job.submit",
+  "audit.action.jobs.job.update",
+  "audit.action.jobs.job.wait",
+  "audit.action.jobs.step.compensated",
+  "audit.action.jobs.step.compensating",
+  "audit.action.jobs.step.compensation_failed",
+  "audit.action.jobs.step.done",
+  "audit.action.jobs.step.failed",
+  "audit.action.jobs.step.pending",
+  "audit.action.jobs.step.running",
+  "audit.action.jobs.step.skipped",
+  "audit.action.jobs.step.update",
+  "audit.action.jobs.step.waiting_for_manual",
+  "audit.action.jobs.step.waiting_for_observation",
+  "audit.action.nodes.roles",
+  "audit.action.scan.config.offer",
+  "audit.action.scan.config.update",
+  "audit.action.scan.resume",
+  "audit.action.scan.run",
+  "audit.action.scan.stop",
+  "audit.action.sys.audit_export.failing",
+  "audit.action.sys.audit_export.recovered",
+  "audit.action.sys.audit_export.test",
+  "audit.action.sys.audit_export.update",
+  "audit.action.sys.backup.create",
+  "audit.action.sys.backup.restore",
+  "audit.action.sys.backup.settings",
+  "audit.action.sys.diagnostics",
+  "audit.action.sys.modules.update",
+  "audit.action.sys.update.confirm",
+  "audit.action.sys.update.install",
+  "audit.action.sys.update.manifest",
+  "audit.action.sys.update.rollback",
+  "audit.action.sys.update.upload",
+  "audit.action.sys.upgrade.migrate",
+  "audit.action.vault.host.credentials",
+  "audit.action.vault.kek.activate",
+  "audit.action.vault.kek.downgrade",
+  "audit.action.vault.kek.rotate",
+  "audit.action.vault.kek.rotate_failed",
+  "audit.action.vault.kek.rotate_request",
+  "audit.action.vault.kek.transfer",
+  "audit.action.vault.secret.adopt",
+  "audit.action.vault.secret.create",
+  "audit.action.vault.secret.delete",
+  "audit.action.vault.secret.replace",
+  "audit.action.vault.secret.reveal",
+  "audit.action.vault.secret.rotate_dek",
+  "audit.action.vault.secret.update",
   "audit.chain.advice",
   "audit.chain.broken",
   "audit.chain.checked",
@@ -12150,6 +12711,8 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.dns.zone.not_found",
   "errors.dns.zone.secondary",
   "errors.dns.zonefile.invalid",
+  "errors.findings.not_found",
+  "errors.findings.unavailable",
   "errors.generic.client",
   "errors.generic.field",
   "errors.generic.not_implemented",
@@ -13597,12 +14160,28 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.task.dns_revert",
   "jobs.task.dns_update",
   "jobs.title",
+  "jobs.title.backup.create",
+  "jobs.title.cluster.edit",
+  "jobs.title.connect.edit",
+  "jobs.title.connect.run",
+  "jobs.title.dhcp.edit",
+  "jobs.title.dns.dnssec.rollover",
+  "jobs.title.dns.edit",
+  "jobs.title.dns.import",
+  "jobs.title.dns.list.compile",
   "jobs.title.dns_import",
   "jobs.title.dns_list_fetch",
   "jobs.title.dns_list_upload",
+  "jobs.title.import.apply",
   "jobs.title.import_apply",
+  "jobs.title.ipam.edit",
+  "jobs.title.ipam.move",
+  "jobs.title.ipam.vlan.provision",
   "jobs.title.ipam_apply",
   "jobs.title.move",
+  "jobs.title.scan.edit",
+  "jobs.title.scan.run",
+  "jobs.title.sys.update",
   "jobs.title.update_install",
   "jobs.undo.step",
   "jobs.undo.step_named",

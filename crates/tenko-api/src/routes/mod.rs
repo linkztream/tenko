@@ -88,6 +88,7 @@ pub mod dhcp;
 pub mod dns;
 pub mod events;
 pub mod export;
+pub mod findings;
 pub mod guardrails;
 // The lifecycle of a host: decommission and reinstate.
 pub mod host_lifecycle;
@@ -149,6 +150,7 @@ pub mod vlans;
         (name = "connectors", description = "Connector plugins and connector instances"),
         (name = "guardrails", description = "Guardrails of network-controller writes: protected paths and move parallelism"),
         (name = "observations", description = "Observations of connectors and probes, per source and across sources"),
+        (name = "findings", description = "Findings: everything that may need a person, from every source, with severity, subject, evidence and action"),
         (name = "proposals", description = "Proposals of the reconciler, their decisions and adoption policies"),
         (name = "reconciler", description = "Settings of the reconciler: intervals, retention and adoption"),
         (name = "nodes", description = "Cluster nodes: enrolment tokens, enrolment, the node registry and revocation"),
@@ -229,6 +231,7 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(users::routes())
         .merge(settings::routes())
         .merge(jobs::routes())
+        .merge(findings::routes())
         .merge(audit::routes())
         .merge(events::routes())
         .merge(system::routes())

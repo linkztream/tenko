@@ -228,6 +228,10 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/exports/prefixes.csv", "export_prefixes_csv"),
     ("GET", "/exports/addresses.csv", "export_addresses_csv"),
     ("GET", "/exports/hosts.csv", "export_hosts_csv"),
+    // findings (U1)
+    ("GET", "/findings", "list_findings"),
+    ("GET", "/findings/counts", "count_findings"),
+    ("GET", "/findings/{id}", "get_finding"),
     // jobs
     ("GET", "/jobs", "list_jobs"),
     ("GET", "/jobs/{id}", "get_job"),
@@ -844,7 +848,8 @@ fn operations_have_a_declared_tag_and_a_summary() {
     // empty: access, i18n), reconciler and guardrails (WP3.12a).
     // dns (WP4.0).
     // dhcp (WP7.0).
-    assert_eq!(tags.len(), 35, "one tag per area");
+    // findings (U1).
+    assert_eq!(tags.len(), 36, "one tag per area");
     for (path, item) in &document.paths.paths {
         for (method, operation) in operations(item) {
             let operation_tags = operation.tags.as_deref().unwrap_or_default();

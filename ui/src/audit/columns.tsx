@@ -7,6 +7,7 @@ import { paths } from "../app/paths";
 import { PrincipalLabel, principalText } from "../components/Principal";
 import type { Column } from "../grid/types";
 import { formatDateTime, formatRelative, t } from "../i18n";
+import { AuditAction } from "./actionLabel";
 import { Maybe, ObjectList, OutcomeBadge } from "./cells";
 import { kindWord } from "./model";
 import { objectViews } from "./objects";
@@ -53,9 +54,9 @@ export function auditColumns(): Column<AuditRecord>[] {
     {
       id: "action",
       header: () => t("audit.col.action"),
-      width: 210,
+      width: 380,
       text: (r) => r.draft.action,
-      render: (r) => <span class="mono">{r.draft.action}</span>,
+      render: (r) => <AuditAction draft={r.draft} />,
     },
     {
       id: "objects",

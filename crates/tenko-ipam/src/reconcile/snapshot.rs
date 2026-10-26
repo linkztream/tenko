@@ -18,7 +18,7 @@ use tenko_store::{KeyRange, ReadView, ReadViewExt};
 use super::scopes::ScanScope;
 use crate::{
     error::IpamResult,
-    net::{Family, contains_ip, contains_net, ip_to_u128},
+    net::{EdgeAddress, Family, contains_ip, contains_net, edge_address, ip_to_u128},
     observe::{
         model::{IntentSighting, ObservedFact, observed_placeholder},
         tables::{FACTS, LAST_SEEN},
@@ -370,6 +370,10 @@ pub(crate) struct Snapshot {
     /// device (or a device without a MAC address). They are not in [`Self::seen`], so no rule
     /// sees them; the views show them as configured on the stopped host.
     pub dormant: Vec<Seen>,
+    /// The pairs at an edge address of their network (network, broadcast or subnet-router
+    /// anycast address): scan artifacts, never a conflict, a discovered host or a mismatch.
+    /// They are not in [`Self::seen`]; the findings list them as `scan_artifact`.
+    pub artifacts: Vec<Seen>,
 }
 
 impl Snapshot {
@@ -425,6 +429,12 @@ impl Snapshot {
             pair.mac
                 .is_none_or(|mac| !intent.decommissioned_macs.contains(&mac))
         });
+        // A sighting of a network's edge address (its network or broadcast address, the
+        // subnet-router anycast address of an IPv6 network) is a scan artifact: no device
+        // holds such an address, so no rule sees it (the guard rail of the findings model).
+        let (artifacts, seen): (Vec<Seen>, Vec<Seen>) = seen
+            .into_iter()
+            .partition(|pair| edge_of(&intent, pair).is_some());
         let (seen, dormant) = super::dormant::split(seen);
         let mut open = BTreeMap::new();
         for (key, id, revision) in
@@ -471,8 +481,18 @@ impl Snapshot {
             scopes: super::scopes::load(view)?,
             networks,
             dormant,
+            artifacts,
         })
     }
+}
+
+/// The edge address a pair reports, if its address is one of its network prefix
+/// ([`crate::net::edge_address`]).
+pub(crate) fn edge_of(intent: &Intent, pair: &Seen) -> Option<(PrefixId, EdgeAddress)> {
+    let ip = pair.ip?;
+    let prefix = pair.placement?.prefix()?;
+    let network = intent.prefixes.get(&prefix)?;
+    edge_address(&network.cidr, ip).map(|edge| (prefix, edge))
 }
 
 /// The pairs one current fact reports. A host with exactly one MAC address pairs it with

@@ -10,6 +10,7 @@ root.
 | `release-manifest.mjs` | Builds `releases.json` (the manifest running installations read) and `SHA256SUMS` from the changelog and the release binaries. |
 | `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` or `--phase 3` `docs/plans/phase-2-trace.md` or `docs/plans/phase-3-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
 | `root-anchors.mjs` | WP10.0: converts the shipped DNS root trust anchors (`crates/tenko-dns/anchors/root-anchors.xml`, RFC 7958) and root hints (`named.root`) into `crates/tenko-dns/src/recursion/shipped.rs`, and with `--check` (exit 1) verifies that the committed file is current. `crates/tenko-dns/anchors/README.md` says how to refresh the inputs. |
+| `label-catalog.mjs` | Finds the job kinds and audit actions the Rust code can write; `label-catalog.test.mjs` fails, naming each one, when `ui/i18n/<language>.d/labels.xlf` has no `jobs.title.<kind>` or `audit.action.<code>` unit (with a Swedish target) for it. |
 | `*.test.mjs` | Tests with `node:test`. |
 
 ```sh

@@ -23,10 +23,39 @@ use super::model::{
     IntentProposal, IntentProposalKind, IntentProposalState, KeptConflict, OPEN_KEYS, PROPOSALS,
     REJECTIONS, actions,
 };
-use crate::{error::IpamResult, reconcile::rules::Candidate, reconcile::snapshot::Snapshot};
+use crate::{
+    error::IpamResult, net::edge_address, reconcile::rules::Candidate,
+    reconcile::snapshot::Snapshot,
+};
 
 /// The reason recorded on a proposal whose observation no longer holds.
 pub const EXPIRED_REASON: &str = "the observation behind it no longer holds";
+
+/// The reason recorded on a conflict about an edge address of its network (the network or
+/// broadcast address, the subnet-router anycast address of an IPv6 network), which the
+/// guard rail of the findings model closes: no device holds such an address, so a sighting
+/// of it is a scan artifact. `{edge}` is the address's name
+/// ([`crate::net::EdgeAddress::text`]).
+pub const ARTIFACT_REASON: &str =
+    "{edge} of its network is never the subject of a conflict: a sighting of it is a scan artifact";
+
+/// Why an open proposal expires: [`ARTIFACT_REASON`] for a conflict about an edge address of
+/// its network, [`EXPIRED_REASON`] otherwise.
+fn expiry_reason(snapshot: &Snapshot, proposal: &IntentProposal) -> String {
+    let subject = &proposal.subject;
+    let edge = if proposal.kind == IntentProposalKind::Conflict {
+        subject.ip.zip(subject.vrf).and_then(|(ip, vrf)| {
+            let network = snapshot.intent.network_of(vrf, ip)?;
+            edge_address(&network.cidr, ip)
+        })
+    } else {
+        None
+    };
+    match edge {
+        Some(edge) => ARTIFACT_REASON.replace("{edge}", edge.text()),
+        None => EXPIRED_REASON.to_owned(),
+    }
+}
 
 /// What the fingerprint covers.
 #[derive(Serialize)]
@@ -317,16 +346,17 @@ fn expire(snapshot: &Snapshot, keys: &BTreeSet<&str>, plan: &mut SyncPlan) -> Ip
         }
         let mut batch = scratch(now);
         let mut old = current.clone();
+        let reason = expiry_reason(snapshot, current);
         old.state = IntentProposalState::Expired;
         old.decided = Some(reconciler_stamp(now));
-        old.reason = Some(EXPIRED_REASON.to_owned());
+        old.reason = Some(reason.clone());
         old.updated = now;
         old.revision = Revision::ZERO;
         batch.put_typed(&PROPOSALS, &old.id, &old)?;
         batch.expect_typed(&PROPOSALS, &old.id, Some(current.revision));
         batch.delete_typed(&OPEN_KEYS, key);
         batch.expect_typed(&OPEN_KEYS, key, Some(*key_revision));
-        batch.audit(audit(actions::EXPIRE, &old));
+        batch.audit(audit(actions::EXPIRE, &old).with_context("reason", reason));
         let counts = SyncCounts {
             expired: 1,
             ..SyncCounts::default()

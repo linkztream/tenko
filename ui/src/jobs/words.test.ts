@@ -92,6 +92,19 @@ describe("titles, step summaries and tasks", () => {
     expect(jobTitle({ title: "jobs.title.something_new" })).toBe("jobs.title.something_new");
   });
 
+  it("labels a job by its kind when its title key has no message", () => {
+    expect(jobTitle({ title: "ipam.job.edit", kind: "ipam.move", targets: [] })).toBe("Move a host to a new address");
+    expect(jobTitle({ spec: { title: "ipam.job.edit", kind: "ipam.edit", targets: [{}, {}, {}] } })).toBe("Edit 3 IPAM objects");
+    expect(jobTitle({ title: "ipam.job.edit", kind: "ipam.edit", targets: [{}] })).toBe("Edit 1 IPAM object");
+    // The message of the title key wins over the label of the kind.
+    expect(jobTitle({ title: "jobs.title.move", kind: "ipam.edit", targets: [] })).toBe("Move host to another network");
+  });
+
+  it("falls back to the title key for a kind without a label", () => {
+    expect(jobTitle({ title: "vendor.job.title", kind: "vendor.unknown", targets: [] })).toBe("vendor.job.title");
+    expect(jobTitle({ title: "vendor.job.title" })).toBe("vendor.job.title");
+  });
+
   it("builds the summary key of a step kind", () => {
     expect(stepKey("dhcp.manual")).toBe("jobs.step.dhcp_manual");
     expect(stepKey("import.apply_chunk")).toBe("jobs.step.import_apply_chunk");
@@ -408,6 +421,8 @@ describe("titles, step summaries and tasks", () => {
     expect(jobStateWord("waiting")).toBe("Väntar");
     expect(jobTitle({ title: "jobs.title.move" })).toBe("Flytta värd till ett annat nätverk");
     expect(stepSummary("l2.move", { host: "h1", vlan: "30" })).toBe("Flytta h1 till VLAN 30");
+    expect(jobTitle({ title: "ipam.job.edit", kind: "ipam.move", targets: [] })).toBe("Flytta en värd till en ny adress");
+    expect(jobTitle({ title: "ipam.job.edit", kind: "ipam.edit", targets: [{}, {}] })).toBe("Redigera 2 IPAM-objekt");
   });
 });
 

@@ -17,6 +17,7 @@ import { Addr } from "../components/Addr";
 import { Icon } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
 import { PageHead } from "../components/PageHead";
+import { AuditAction } from "../audit/actionLabel";
 import { PrincipalLabel } from "../components/Principal";
 import { Si } from "../components/Si";
 import { AlarmFlag, Count, TimeAgo, UtilizationMeter } from "../grid/cells";
@@ -288,8 +289,8 @@ export default function Dashboard() {
                 <For each={audit.value.latest ?? []}>
                   {(r) => (
                     <li data-seq={r.seq}>
-                      <A href={paths.auditRecord(r.seq)} class="mono">
-                        {r.draft.action}
+                      <A href={paths.auditRecord(r.seq)}>
+                        <AuditAction draft={r.draft} />
                       </A>
                       <PrincipalLabel principal={r.principal} />
                       <TimeAgo at={r.at} />

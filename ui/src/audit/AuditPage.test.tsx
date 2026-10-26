@@ -50,6 +50,7 @@ describe("the audit log", () => {
     const first = rows()[0]!;
     expect(within(first).getByText("Alex Example (you)")).toBeTruthy();
     expect(within(first).getByText("ipam.host.update")).toBeTruthy();
+    expect(within(first).getByText("Edit a host")).toBeTruthy();
     expect(within(first).getByText("Success")).toBeTruthy();
     expect(within(first).getByText(/Host/)).toBeTruthy();
     // A record by another user shows the name, a failed login the word Denied and its source.
@@ -58,6 +59,8 @@ describe("the audit log", () => {
     const denied = rows().find((r) => r.getAttribute("data-key") === "17")!;
     expect(within(denied).getByText("Denied")).toBeTruthy();
     expect(within(denied).getByText("auth.login.failure")).toBeTruthy();
+    // A code without a label shows the code alone.
+    expect(denied.querySelector(".audit-action")).toBeNull();
     expect(within(denied).getByText("203.0.113.77")).toBeTruthy();
     expect(within(denied).getByText("Tenko (auth)")).toBeTruthy();
   });
@@ -67,7 +70,7 @@ describe("the audit log", () => {
     const want = expected((r) => r.draft.action.startsWith("ipam."));
     await waitFor(() => expect(keys()).toEqual(want.slice(0, keys().length)));
     expect(keys().length).toBe(want.length);
-    for (const row of rows()) expect(row.querySelector('td[data-col="action"]')?.textContent).toMatch(/^ipam\./);
+    for (const row of rows()) expect(row.querySelector('td[data-col="action"]')?.textContent).toMatch(/\bipam\./);
     expect((screen.getByTestId("audit-filter-action") as HTMLInputElement).value).toBe("ipam.");
     expect(screen.getByTestId("audit-filter-clear")).toBeTruthy();
   });

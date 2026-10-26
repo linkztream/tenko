@@ -63,3 +63,6 @@ table.changes td, table.changes th { vertical-align: top; }
 table.changes td { padding-top: var(--sp-3); padding-bottom: var(--sp-3); height: auto; white-space: normal; overflow-wrap: anywhere; }
 table.changes tr:hover td { background: transparent; }
 .hash { font-family: var(--font-data); font-variant-ligatures: none; overflow-wrap: anywhere; user-select: all; }
+
+/* The label of an action with its code: after it in a row, below it on the record page. */
+.audit-action.stacked .audit-action-code { display: block; font-size: var(--fs-12); }

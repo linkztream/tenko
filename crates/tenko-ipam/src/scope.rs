@@ -919,6 +919,53 @@ impl ScopeIndex {
         })
     }
 
+    /// The anchors of a finding ([`crate::findings`]), as those of the record it stands for:
+    /// a job's are its targets' ([`Self::anchors_of_targets`]); every other finding's are the
+    /// chain of its subject prefix, or of the prefix holding its subject address or network
+    /// (in every VRF that holds it when the VRF is not known), merged with the anchors of its
+    /// objects, as for a proposal ([`Self::anchors_of_proposal`]). `object` is the record:
+    /// the proposal, the prefix of an alarm, the job, an observation for a row of the
+    /// reconciliation view, the system for a health condition.
+    pub fn anchors_of_finding(
+        &self,
+        object: ObjectRef,
+        finding: &crate::findings::Finding,
+    ) -> Anchors {
+        let subject = &finding.subject;
+        if finding.source == crate::findings::FindingSource::Job {
+            return self.anchors_of_targets(object, &subject.objects);
+        }
+        self.with(|image| {
+            let mut parts = Vec::new();
+            let prefixes: Vec<PrefixId> = match (subject.prefix, subject.vrf) {
+                (Some(prefix), _) => vec![prefix],
+                (None, vrf) => {
+                    let address = subject.ip.or(subject.cidr.map(|cidr| cidr.network()));
+                    match (address, vrf) {
+                        (Some(ip), Some(vrf)) => image.containing(vrf, ip).into_iter().collect(),
+                        (Some(ip), None) => image
+                            .vrfs_holding(ip)
+                            .into_iter()
+                            .filter_map(|vrf| image.containing(vrf, ip))
+                            .collect(),
+                        (None, _) => Vec::new(),
+                    }
+                }
+            };
+            for prefix in prefixes {
+                parts.push(prefix_anchors(image, object, prefix));
+            }
+            for target in &subject.objects {
+                parts.push(anchors_with(image, *target));
+            }
+            if parts.is_empty() {
+                Anchors::of(object)
+            } else {
+                merge(object, &parts)
+            }
+        })
+    }
+
     /// The anchors of an address in a VRF, or in every VRF that holds it when the VRF is
     /// not known (an observation that names only the address).
     pub fn anchors_of_ip(&self, object: ObjectRef, vrf: Option<VrfId>, ip: IpAddr) -> Anchors {

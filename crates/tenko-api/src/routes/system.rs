@@ -680,15 +680,83 @@ async fn system_status(
     ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
     // ADR 0028: the switch ports a bounce left down.
     connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
+    // U1: the warnings are the health conditions of the findings index.
+    findings: Option<Extension<Arc<crate::findings::FindingsService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
-    Ok(Json(
+    let status = assemble(
+        &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
+    )
+    .await;
+    if let Some(Extension(findings)) = findings {
+        findings.set_health(&status.warnings, ctx.now);
+    }
+    Ok(Json(status))
+}
+
+/// Every source of the status document that the server binary provides as a request
+/// extension, for routes that assemble the status themselves (the health conditions of the
+/// findings). The lease conflicts are left out: they are findings of their own.
+#[derive(Clone, Default)]
+pub(crate) struct StatusSources {
+    running: Option<RunningVersion>,
+    leader: Option<LeaderSource>,
+    backup: Option<Arc<dyn super::backup::BackupService>>,
+    format: Option<DataFormatSource>,
+    dns: Option<super::dns::DnsNodeSlot>,
+    zones: Option<Arc<tenko_dns::zone::ZoneService>>,
+    dhcp: Option<super::dhcp::DhcpNodeSlot>,
+    // ADR 0028: the switch ports a bounce left down.
+    connectors: Option<Arc<tenko_connect::host::ConnectorHost>>,
+}
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        let extensions = &parts.extensions;
+        std::future::ready(Ok(Self {
+            running: extensions.get::<RunningVersion>().cloned(),
+            leader: extensions.get::<LeaderSource>().cloned(),
+            backup: extensions
+                .get::<Arc<dyn super::backup::BackupService>>()
+                .cloned(),
+            format: extensions.get::<DataFormatSource>().cloned(),
+            dns: extensions.get::<super::dns::DnsNodeSlot>().cloned(),
+            zones: extensions
+                .get::<Arc<tenko_dns::zone::ZoneService>>()
+                .cloned(),
+            dhcp: extensions.get::<super::dhcp::DhcpNodeSlot>().cloned(),
+            connectors: extensions
+                .get::<Arc<tenko_connect::host::ConnectorHost>>()
+                .cloned(),
+        }))
+    }
+}
+
+impl StatusSources {
+    /// The warnings of the status document without the lease conflicts.
+    pub(crate) async fn warnings(self, state: &AppState, now: Timestamp) -> Vec<StatusWarning> {
         assemble(
-            &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
+            state,
+            now,
+            self.running.map(Extension),
+            self.leader.map(Extension),
+            self.backup.map(Extension),
+            self.format.map(Extension),
+            self.dns.map(Extension),
+            self.zones.map(Extension),
+            self.dhcp.map(Extension),
+            None,
+            self.connectors.map(Extension),
         )
-        .await,
-    ))
+        .await
+        .warnings
+    }
 }
 
 /// The status document with every part the server binary provides: what

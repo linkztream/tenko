@@ -13,6 +13,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { PrincipalLabel, shortId } from "../components/Principal";
 import { formatDateTime, formatRelative, t } from "../i18n";
+import { AuditAction } from "./actionLabel";
 import { Dash, Maybe, OutcomeBadge } from "./cells";
 import { isZeroHash, kindWord, principalSubject } from "./model";
 import { objectFilter, objectLabel, objectViews } from "./objects";
@@ -121,7 +122,7 @@ function Content(props: { record: AuditRecord }) {
           </dd>
           <dt>{t("audit.col.action")}</dt>
           <dd>
-            <span class="mono">{draft().action}</span>
+            <AuditAction draft={draft()} stacked />
           </dd>
           <dt>{t("audit.col.outcome")}</dt>
           <dd>

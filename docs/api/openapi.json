@@ -15430,6 +15430,277 @@
         }
       }
     },
+    "/api/v1/findings": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "List findings",
+        "description": "U1. Everything Tenko noticed that a person may need to decide on, from every source (open proposals, utilization alarms, the reconciliation view and scan artifacts, jobs waiting for a person, health conditions), each with a severity (`act`, `review`, `info`), a subject, the evidence by reference and a default action. Ordered by severity, then the newest first. A principal sees the findings whose source it may read.",
+        "operationId": "list_findings",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1,000 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page's `next_cursor`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at_least",
+            "in": "query",
+            "description": "Read at least this store revision (read-your-writes after a write).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "description": "Only findings of these severities: `act`, `review`, `info`. Repeat the parameter or separate the values with commas.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "description": "Only findings whose subject is of these kinds: `address`, `host`, `prefix`, `record`, `job`, `node`, `device`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "description": "Only findings of these areas: `ipam`, `dns`, `dhcp`, `discovery`, `topology`, `jobs`, `connectors`, `nodes`, `settings`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "Only findings about this prefix (identifier): its own subject, an address or a network inside it.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "site",
+            "in": "query",
+            "description": "Only findings about the prefixes of this site (identifier).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Only findings whose summary, subject or code contains this text (without case).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Finding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`, `ipam.invalid_filter`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The prefix or site filter names no prefix or site (`ipam.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The findings index does not run on this server (`findings.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/findings/counts": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "Count findings per severity, area and source",
+        "description": "U1. The counts every surface reads: the rail badges, the status bar and the dashboard. `problems` is `act` plus `review`; information is never counted as a problem. `sources.proposal` equals the open proposals of `GET /proposals?state=open`. A principal counts the findings whose source it may read.",
+        "operationId": "count_findings",
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingCounts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The findings index does not run on this server (`findings.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/findings/{id}": {
+      "get": {
+        "tags": [
+          "findings"
+        ],
+        "summary": "Get one finding",
+        "operationId": "get_finding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Finding identifier, such as `proposal:<id>` or `reconcile:<digest>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The finding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Finding"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such finding, or none the principal may read (`findings.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The findings index does not run on this server (`findings.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -37206,6 +37477,59 @@
         },
         "additionalProperties": false
       },
+      "AreaCounts": {
+        "type": "object",
+        "description": "Findings of each severity per area, one member per area of the rail.",
+        "required": [
+          "ipam",
+          "dns",
+          "dhcp",
+          "discovery",
+          "topology",
+          "jobs",
+          "connectors",
+          "nodes",
+          "settings"
+        ],
+        "properties": {
+          "connectors": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Connectors."
+          },
+          "dhcp": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "DHCP."
+          },
+          "discovery": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Discovery (the proposals)."
+          },
+          "dns": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "DNS."
+          },
+          "ipam": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "IPAM."
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Jobs."
+          },
+          "nodes": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Nodes."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Settings."
+          },
+          "topology": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Topology."
+          }
+        }
+      },
       "AssertionResponse": {
         "type": "object",
         "description": "The `response` member of an assertion (`AuthenticatorAssertionResponseJSON`).",
@@ -45374,6 +45698,196 @@
           "deny"
         ]
       },
+      "Finding": {
+        "type": "object",
+        "description": "Anything Tenko noticed that a person may need to decide on, in one shape for every\nsource (the findings model). Derived from the sources on read and never stored.",
+        "required": [
+          "id",
+          "kind",
+          "severity",
+          "area",
+          "subject",
+          "summary",
+          "code",
+          "evidence",
+          "action",
+          "since",
+          "source"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/FindingAction",
+            "description": "The default action."
+          },
+          "area": {
+            "$ref": "#/components/schemas/FindingArea",
+            "description": "The area of the UI it belongs to."
+          },
+          "code": {
+            "type": "string",
+            "description": "The source's own code: a proposal's rule (`ipam.reconcile.discovered_mac`), a\nreconciliation kind (`ipam.reconcile.view.ghost`), an alarm level\n(`ipam.prefix.alarm.critical`), a job kind, a health code."
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/FindingEvidence",
+            "description": "The source's own view, by reference."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable identifier derived from the source's identifier: `proposal:<id>`,\n`alarm:<prefix>`, `job:<id>`, `reconcile:<digest of the row key>`,\n`health:<digest of the code and its parameters>`."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FindingKind",
+            "description": "What it is about."
+          },
+          "params": {
+            "type": "object",
+            "description": "Named parameters of the summary, for translation.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FindingLevel",
+            "description": "How much it needs a person."
+          },
+          "since": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Since when it holds: a proposal's opening, an alarm's change, the start of a job's\nwaiting step, the last sighting of a ghost, the first sighting of an artifact, the\nfirst time this controller saw a health condition."
+          },
+          "source": {
+            "$ref": "#/components/schemas/FindingSource",
+            "description": "Where it comes from."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/FindingSubject",
+            "description": "The subject."
+          },
+          "summary": {
+            "type": "string",
+            "description": "English one-line summary."
+          }
+        }
+      },
+      "FindingAction": {
+        "type": "string",
+        "description": "The default action of a finding, which the UI maps to its button.",
+        "enum": [
+          "resolve",
+          "open_manual_step",
+          "open_prefix",
+          "adopt",
+          "delete_record",
+          "fix_ptr",
+          "open_host",
+          "decide",
+          "decommission",
+          "open_status",
+          "none"
+        ]
+      },
+      "FindingArea": {
+        "type": "string",
+        "description": "The area of the UI a finding belongs to: the rail entry whose badge counts it.",
+        "enum": [
+          "ipam",
+          "dns",
+          "dhcp",
+          "discovery",
+          "topology",
+          "jobs",
+          "connectors",
+          "nodes",
+          "settings"
+        ]
+      },
+      "FindingCounts": {
+        "type": "object",
+        "description": "`GET /findings/counts`: the counts every surface reads (the rail badges, the status bar,\nthe dashboard), so that a count never differs between two screens.",
+        "required": [
+          "total",
+          "problems",
+          "areas",
+          "sources",
+          "revision"
+        ],
+        "properties": {
+          "areas": {
+            "$ref": "#/components/schemas/AreaCounts",
+            "description": "By area."
+          },
+          "problems": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The problems: act and review (info is never counted).",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The store revision the index has applied.",
+            "minimum": 0
+          },
+          "sources": {
+            "$ref": "#/components/schemas/SourceCounts",
+            "description": "By source, every severity included."
+          },
+          "total": {
+            "$ref": "#/components/schemas/LevelCounts",
+            "description": "Every finding by severity."
+          }
+        }
+      },
+      "FindingEvidence": {
+        "type": "object",
+        "description": "The source's own view of a finding, by reference: the record the finding stands for and\nthe API path that reads it.",
+        "required": [
+          "id",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The identifier of the source's record: a proposal, a prefix (its alarm), a job, the\nkey of a reconciliation row, a health code."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path under `/api/v1` that answers the source's view, such as `/proposals/<id>`."
+          }
+        }
+      },
+      "FindingKind": {
+        "type": "string",
+        "description": "What a finding is about.",
+        "enum": [
+          "conflict",
+          "job_waiting",
+          "utilization",
+          "unknown_device",
+          "orphaned_record",
+          "orphaned_address",
+          "ptr_mismatch",
+          "intent_differs",
+          "outside_prefixes",
+          "vlan",
+          "host_name",
+          "dns",
+          "ghost",
+          "scan_artifact",
+          "health"
+        ]
+      },
+      "FindingLevel": {
+        "type": "string",
+        "description": "How much a finding needs a person: the severity of the findings model. Only `act` colors\nthe dashboard, the rail and the status bar; `info` is listed but never counted as a\nproblem.",
+        "enum": [
+          "act",
+          "review",
+          "info"
+        ]
+      },
       "FindingSeverity": {
         "type": "string",
         "description": "How serious a health finding is, as `GET /system/diagnostics` reports it.",
@@ -45382,6 +45896,100 @@
           "warning",
           "error"
         ]
+      },
+      "FindingSource": {
+        "type": "string",
+        "description": "Where a finding comes from. Every source keeps its own records and routes; the findings\nindex only reads them.",
+        "enum": [
+          "proposal",
+          "alarm",
+          "reconcile",
+          "job",
+          "health"
+        ]
+      },
+      "FindingSubject": {
+        "type": "object",
+        "description": "The subject of a finding: what it is about, with the identities the filters and the\nscope of a reader use.",
+        "required": [
+          "kind",
+          "label"
+        ],
+        "properties": {
+          "cidr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network."
+          },
+          "host": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The host of intent."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IP address."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SubjectKind",
+            "description": "What kind of object it is."
+          },
+          "label": {
+            "type": "string",
+            "description": "The subject as text: an address, a host name, a network, a record name, a job kind, a\nMAC address or a health code."
+          },
+          "mac": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr",
+                "description": "The MAC address."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "objects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectRef"
+            },
+            "description": "The objects involved (hosts, addresses, prefixes, a job's targets)."
+          },
+          "prefix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PrefixId",
+                "description": "The prefix the subject lies in, when the source names it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vrf": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VrfId",
+                "description": "The VRF."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "Fingerprint": {
         "type": "object",
@@ -50495,6 +51103,35 @@
             ],
             "format": "int32",
             "description": "The rebinding time (option 59); none for seven eighths of the granted time.",
+            "minimum": 0
+          }
+        }
+      },
+      "LevelCounts": {
+        "type": "object",
+        "description": "Findings of each severity.",
+        "required": [
+          "act",
+          "review",
+          "info"
+        ],
+        "properties": {
+          "act": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Findings to act on now.",
+            "minimum": 0
+          },
+          "info": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Findings for information, never counted as problems.",
+            "minimum": 0
+          },
+          "review": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Findings to review.",
             "minimum": 0
           }
         }
@@ -58888,6 +59525,104 @@
                 }
               ],
               "description": "An exclusion range as the API reads it."
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
+      "Page_Finding": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Anything Tenko noticed that a person may need to decide on, in one shape for every\nsource (the findings model). Derived from the sources on read and never stored.",
+              "required": [
+                "id",
+                "kind",
+                "severity",
+                "area",
+                "subject",
+                "summary",
+                "code",
+                "evidence",
+                "action",
+                "since",
+                "source"
+              ],
+              "properties": {
+                "action": {
+                  "$ref": "#/components/schemas/FindingAction",
+                  "description": "The default action."
+                },
+                "area": {
+                  "$ref": "#/components/schemas/FindingArea",
+                  "description": "The area of the UI it belongs to."
+                },
+                "code": {
+                  "type": "string",
+                  "description": "The source's own code: a proposal's rule (`ipam.reconcile.discovered_mac`), a\nreconciliation kind (`ipam.reconcile.view.ghost`), an alarm level\n(`ipam.prefix.alarm.critical`), a job kind, a health code."
+                },
+                "evidence": {
+                  "$ref": "#/components/schemas/FindingEvidence",
+                  "description": "The source's own view, by reference."
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Stable identifier derived from the source's identifier: `proposal:<id>`,\n`alarm:<prefix>`, `job:<id>`, `reconcile:<digest of the row key>`,\n`health:<digest of the code and its parameters>`."
+                },
+                "kind": {
+                  "$ref": "#/components/schemas/FindingKind",
+                  "description": "What it is about."
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Named parameters of the summary, for translation.",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                },
+                "severity": {
+                  "$ref": "#/components/schemas/FindingLevel",
+                  "description": "How much it needs a person."
+                },
+                "since": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "Since when it holds: a proposal's opening, an alarm's change, the start of a job's\nwaiting step, the last sighting of a ghost, the first sighting of an artifact, the\nfirst time this controller saw a health condition."
+                },
+                "source": {
+                  "$ref": "#/components/schemas/FindingSource",
+                  "description": "Where it comes from."
+                },
+                "subject": {
+                  "$ref": "#/components/schemas/FindingSubject",
+                  "description": "The subject."
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "English one-line summary."
+                }
+              }
             },
             "description": "The items of this page, at most `limit` of them."
           },
@@ -71459,6 +72194,49 @@
           "desc"
         ]
       },
+      "SourceCounts": {
+        "type": "object",
+        "description": "Findings of each source, every severity included.",
+        "required": [
+          "proposal",
+          "alarm",
+          "reconcile",
+          "job",
+          "health"
+        ],
+        "properties": {
+          "alarm": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Prefixes over their alarm threshold.",
+            "minimum": 0
+          },
+          "health": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Health conditions.",
+            "minimum": 0
+          },
+          "job": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Jobs waiting for a person.",
+            "minimum": 0
+          },
+          "proposal": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Open proposals: equal to the open proposals `GET /proposals?state=open` lists.",
+            "minimum": 0
+          },
+          "reconcile": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows of the reconciliation view and scan artifacts not covered by a proposal.",
+            "minimum": 0
+          }
+        }
+      },
       "SourceFormat": {
         "type": "string",
         "description": "The format of an uploaded file.",
@@ -72153,6 +72931,19 @@
             "description": "Who set it and when."
           }
         }
+      },
+      "SubjectKind": {
+        "type": "string",
+        "description": "What kind of object the subject of a finding is.",
+        "enum": [
+          "address",
+          "host",
+          "prefix",
+          "record",
+          "job",
+          "node",
+          "device"
+        ]
       },
       "SubjectSummary": {
         "type": "object",
@@ -73589,7 +74380,8 @@
           "cluster",
           "metrics",
           "dns",
-          "dhcp"
+          "dhcp",
+          "findings"
         ]
       },
       "TopologyEdge": {
@@ -78539,6 +79331,10 @@
     {
       "name": "observations",
       "description": "Observations of connectors and probes, per source and across sources"
+    },
+    {
+      "name": "findings",
+      "description": "Findings: everything that may need a person, from every source, with severity, subject, evidence and action"
     },
     {
       "name": "proposals",

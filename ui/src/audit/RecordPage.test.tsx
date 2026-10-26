@@ -48,6 +48,7 @@ describe("one audit record", () => {
 
     // Overview and principal.
     expect(screen.getByText("ipam.host.update")).toBeTruthy();
+    expect(screen.getByText("Edit a host")).toBeTruthy();
     expect(screen.getByText("Success")).toBeTruthy();
     expect(screen.getByText("192.0.2.50")).toBeTruthy();
     expect(await screen.findByText("Sam Example")).toBeTruthy();

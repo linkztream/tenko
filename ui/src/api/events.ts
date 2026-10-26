@@ -20,7 +20,7 @@ import { createSignal, type Accessor } from "solid-js";
  * events that name no object), `metrics` one snapshot of the controllers' metrics per second
  * (only for a stream that names it; the start page opens a stream of its own for it), `dns` the
  * zones, records, views, forwarders, access lists, keys and block lists of the DNS module, `dhcp` the
- * scopes, leases and policies of the DHCP module.
+ * scopes, leases and policies of the DHCP module, `findings` the changes of the findings index (U1).
  */
 export type Topic =
   | "ipam"
@@ -35,8 +35,9 @@ export type Topic =
   | "cluster"
   | "metrics"
   | "dns"
-  | "dhcp";
-export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns", "dhcp"];
+  | "dhcp"
+  | "findings";
+export const TOPICS: readonly Topic[] = ["ipam", "jobs", "audit", "import", "system", "admin", "connectors", "discovery", "secrets", "cluster", "metrics", "dns", "dhcp", "findings"];
 
 export interface ObjectRef {
   kind: string;

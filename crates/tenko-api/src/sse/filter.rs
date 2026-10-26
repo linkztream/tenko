@@ -144,6 +144,14 @@ impl ScopedEvents {
             Topic::Dns => global(ObjectRef::singleton(ObjectKind::Zone)),
             // WP7.0: lease events are personal data; global DHCP readers only.
             Topic::Dhcp => global(tenko_core::dhcp::server_object()),
+            // An event of the findings index that names no record (the reconciliation view,
+            // health): for anyone who reads some finding.
+            Topic::Findings => {
+                reaches(ObjectKind::Proposal)
+                    || reaches(ObjectKind::Job)
+                    || reaches(ObjectKind::Prefix)
+                    || reaches(ObjectKind::Observation)
+            }
         }
     }
 }

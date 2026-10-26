@@ -2384,6 +2384,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List findings
+         * @description U1. Everything Tenko noticed that a person may need to decide on, from every source (open proposals, utilization alarms, the reconciliation view and scan artifacts, jobs waiting for a person, health conditions), each with a severity (`act`, `review`, `info`), a subject, the evidence by reference and a default action. Ordered by severity, then the newest first. A principal sees the findings whose source it may read.
+         */
+        get: operations["list_findings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count findings per severity, area and source
+         * @description U1. The counts every surface reads: the rail badges, the status bar and the dashboard. `problems` is `act` plus `review`; information is never counted as a problem. `sources.proposal` equals the open proposals of `GET /proposals?state=open`. A principal counts the findings whose source it may read.
+         */
+        get: operations["count_findings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/findings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one finding */
+        get: operations["get_finding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -5697,6 +5754,27 @@ export interface components {
             choice?: string | null;
             remember?: components["schemas"]["Remember"] | null;
         };
+        /** @description Findings of each severity per area, one member per area of the rail. */
+        AreaCounts: {
+            /** @description Connectors. */
+            connectors: components["schemas"]["LevelCounts"];
+            /** @description DHCP. */
+            dhcp: components["schemas"]["LevelCounts"];
+            /** @description Discovery (the proposals). */
+            discovery: components["schemas"]["LevelCounts"];
+            /** @description DNS. */
+            dns: components["schemas"]["LevelCounts"];
+            /** @description IPAM. */
+            ipam: components["schemas"]["LevelCounts"];
+            /** @description Jobs. */
+            jobs: components["schemas"]["LevelCounts"];
+            /** @description Nodes. */
+            nodes: components["schemas"]["LevelCounts"];
+            /** @description Settings. */
+            settings: components["schemas"]["LevelCounts"];
+            /** @description Topology. */
+            topology: components["schemas"]["LevelCounts"];
+        };
         /** @description The `response` member of an assertion (`AuthenticatorAssertionResponseJSON`). */
         AssertionResponse: {
             /** @description The authenticator data, base64url. */
@@ -8953,10 +9031,140 @@ export interface components {
          */
         FilterKind: "allow" | "deny";
         /**
+         * @description Anything Tenko noticed that a person may need to decide on, in one shape for every
+         *     source (the findings model). Derived from the sources on read and never stored.
+         */
+        Finding: {
+            /** @description The default action. */
+            action: components["schemas"]["FindingAction"];
+            /** @description The area of the UI it belongs to. */
+            area: components["schemas"]["FindingArea"];
+            /**
+             * @description The source's own code: a proposal's rule (`ipam.reconcile.discovered_mac`), a
+             *     reconciliation kind (`ipam.reconcile.view.ghost`), an alarm level
+             *     (`ipam.prefix.alarm.critical`), a job kind, a health code.
+             */
+            code: string;
+            /** @description The source's own view, by reference. */
+            evidence: components["schemas"]["FindingEvidence"];
+            /**
+             * @description Stable identifier derived from the source's identifier: `proposal:<id>`,
+             *     `alarm:<prefix>`, `job:<id>`, `reconcile:<digest of the row key>`,
+             *     `health:<digest of the code and its parameters>`.
+             */
+            id: string;
+            /** @description What it is about. */
+            kind: components["schemas"]["FindingKind"];
+            /** @description Named parameters of the summary, for translation. */
+            params?: {
+                [key: string]: string;
+            };
+            /** @description How much it needs a person. */
+            severity: components["schemas"]["FindingLevel"];
+            /**
+             * @description Since when it holds: a proposal's opening, an alarm's change, the start of a job's
+             *     waiting step, the last sighting of a ghost, the first sighting of an artifact, the
+             *     first time this controller saw a health condition.
+             */
+            since: components["schemas"]["Timestamp"];
+            /** @description Where it comes from. */
+            source: components["schemas"]["FindingSource"];
+            /** @description The subject. */
+            subject: components["schemas"]["FindingSubject"];
+            /** @description English one-line summary. */
+            summary: string;
+        };
+        /**
+         * @description The default action of a finding, which the UI maps to its button.
+         * @enum {string}
+         */
+        FindingAction: "resolve" | "open_manual_step" | "open_prefix" | "adopt" | "delete_record" | "fix_ptr" | "open_host" | "decide" | "decommission" | "open_status" | "none";
+        /**
+         * @description The area of the UI a finding belongs to: the rail entry whose badge counts it.
+         * @enum {string}
+         */
+        FindingArea: "ipam" | "dns" | "dhcp" | "discovery" | "topology" | "jobs" | "connectors" | "nodes" | "settings";
+        /**
+         * @description `GET /findings/counts`: the counts every surface reads (the rail badges, the status bar,
+         *     the dashboard), so that a count never differs between two screens.
+         */
+        FindingCounts: {
+            /** @description By area. */
+            areas: components["schemas"]["AreaCounts"];
+            /**
+             * Format: int64
+             * @description The problems: act and review (info is never counted).
+             */
+            problems: number;
+            /**
+             * Format: int64
+             * @description The store revision the index has applied.
+             */
+            revision: number;
+            /** @description By source, every severity included. */
+            sources: components["schemas"]["SourceCounts"];
+            /** @description Every finding by severity. */
+            total: components["schemas"]["LevelCounts"];
+        };
+        /**
+         * @description The source's own view of a finding, by reference: the record the finding stands for and
+         *     the API path that reads it.
+         */
+        FindingEvidence: {
+            /**
+             * @description The identifier of the source's record: a proposal, a prefix (its alarm), a job, the
+             *     key of a reconciliation row, a health code.
+             */
+            id: string;
+            /** @description The path under `/api/v1` that answers the source's view, such as `/proposals/<id>`. */
+            path: string;
+        };
+        /**
+         * @description What a finding is about.
+         * @enum {string}
+         */
+        FindingKind: "conflict" | "job_waiting" | "utilization" | "unknown_device" | "orphaned_record" | "orphaned_address" | "ptr_mismatch" | "intent_differs" | "outside_prefixes" | "vlan" | "host_name" | "dns" | "ghost" | "scan_artifact" | "health";
+        /**
+         * @description How much a finding needs a person: the severity of the findings model. Only `act` colors
+         *     the dashboard, the rail and the status bar; `info` is listed but never counted as a
+         *     problem.
+         * @enum {string}
+         */
+        FindingLevel: "act" | "review" | "info";
+        /**
          * @description How serious a health finding is, as `GET /system/diagnostics` reports it.
          * @enum {string}
          */
         FindingSeverity: "info" | "warning" | "error";
+        /**
+         * @description Where a finding comes from. Every source keeps its own records and routes; the findings
+         *     index only reads them.
+         * @enum {string}
+         */
+        FindingSource: "proposal" | "alarm" | "reconcile" | "job" | "health";
+        /**
+         * @description The subject of a finding: what it is about, with the identities the filters and the
+         *     scope of a reader use.
+         */
+        FindingSubject: {
+            /** @description The network. */
+            cidr?: string | null;
+            host?: components["schemas"]["HostId"] | null;
+            /** @description The IP address. */
+            ip?: string | null;
+            /** @description What kind of object it is. */
+            kind: components["schemas"]["SubjectKind"];
+            /**
+             * @description The subject as text: an address, a host name, a network, a record name, a job kind, a
+             *     MAC address or a health code.
+             */
+            label: string;
+            mac?: components["schemas"]["MacAddr"] | null;
+            /** @description The objects involved (hosts, addresses, prefixes, a job's targets). */
+            objects?: components["schemas"]["ObjectRef"][];
+            prefix?: components["schemas"]["PrefixId"] | null;
+            vrf?: components["schemas"]["VrfId"] | null;
+        };
         /**
          * @description What a request says about the client's system (DHCP-14, plan section 2.8): the parameter
          *     request list in the client's order, the vendor class and which identifying options it
@@ -10769,6 +10977,24 @@ export interface components {
              * @description The rebinding time (option 59); none for seven eighths of the granted time.
              */
             t2_secs?: number | null;
+        };
+        /** @description Findings of each severity. */
+        LevelCounts: {
+            /**
+             * Format: int64
+             * @description Findings to act on now.
+             */
+            act: number;
+            /**
+             * Format: int64
+             * @description Findings for information, never counted as problems.
+             */
+            info: number;
+            /**
+             * Format: int64
+             * @description Findings to review.
+             */
+            review: number;
         };
         /**
          * @description How a link was learned.
@@ -14140,6 +14366,61 @@ export interface components {
                 /** @description The store revision of the row. */
                 revision: components["schemas"]["Revision"];
             })[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
+        Page_Finding: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The default action. */
+                action: components["schemas"]["FindingAction"];
+                /** @description The area of the UI it belongs to. */
+                area: components["schemas"]["FindingArea"];
+                /**
+                 * @description The source's own code: a proposal's rule (`ipam.reconcile.discovered_mac`), a
+                 *     reconciliation kind (`ipam.reconcile.view.ghost`), an alarm level
+                 *     (`ipam.prefix.alarm.critical`), a job kind, a health code.
+                 */
+                code: string;
+                /** @description The source's own view, by reference. */
+                evidence: components["schemas"]["FindingEvidence"];
+                /**
+                 * @description Stable identifier derived from the source's identifier: `proposal:<id>`,
+                 *     `alarm:<prefix>`, `job:<id>`, `reconcile:<digest of the row key>`,
+                 *     `health:<digest of the code and its parameters>`.
+                 */
+                id: string;
+                /** @description What it is about. */
+                kind: components["schemas"]["FindingKind"];
+                /** @description Named parameters of the summary, for translation. */
+                params?: {
+                    [key: string]: string;
+                };
+                /** @description How much it needs a person. */
+                severity: components["schemas"]["FindingLevel"];
+                /**
+                 * @description Since when it holds: a proposal's opening, an alarm's change, the start of a job's
+                 *     waiting step, the last sighting of a ghost, the first sighting of an artifact, the
+                 *     first time this controller saw a health condition.
+                 */
+                since: components["schemas"]["Timestamp"];
+                /** @description Where it comes from. */
+                source: components["schemas"]["FindingSource"];
+                /** @description The subject. */
+                subject: components["schemas"]["FindingSubject"];
+                /** @description English one-line summary. */
+                summary: string;
+            }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
             /** @description Store revision the page was read at. */
@@ -19442,6 +19723,34 @@ export interface components {
          * @enum {string}
          */
         SortOrder: "asc" | "desc";
+        /** @description Findings of each source, every severity included. */
+        SourceCounts: {
+            /**
+             * Format: int64
+             * @description Prefixes over their alarm threshold.
+             */
+            alarm: number;
+            /**
+             * Format: int64
+             * @description Health conditions.
+             */
+            health: number;
+            /**
+             * Format: int64
+             * @description Jobs waiting for a person.
+             */
+            job: number;
+            /**
+             * Format: int64
+             * @description Open proposals: equal to the open proposals `GET /proposals?state=open` lists.
+             */
+            proposal: number;
+            /**
+             * Format: int64
+             * @description Rows of the reconciliation view and scan artifacts not covered by a proposal.
+             */
+            reconcile: number;
+        };
         /**
          * @description The format of an uploaded file.
          * @enum {string}
@@ -19703,6 +20012,11 @@ export interface components {
             /** @description Who set it and when. */
             updated: components["schemas"]["Stamp"];
         };
+        /**
+         * @description What kind of object the subject of a finding is.
+         * @enum {string}
+         */
+        SubjectKind: "address" | "host" | "prefix" | "record" | "job" | "node" | "device";
         /**
          * @description The picture of one subject across sources, computed from its facts. Lists are sorted
          *     and without duplicates; they draw on the current facts, or on every fact when none is
@@ -20255,7 +20569,7 @@ export interface components {
          *     parameter subscribes to all of them except `metrics`, which a client names to receive it.
          * @enum {string}
          */
-        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics" | "dns" | "dhcp";
+        Topic: "ipam" | "jobs" | "audit" | "import" | "system" | "admin" | "connectors" | "discovery" | "secrets" | "cluster" | "metrics" | "dns" | "dhcp" | "findings";
         /** @description An edge of the graph. */
         TopologyEdge: {
             /** @description One end: the switch, access point or hypervisor for client edges. */
@@ -33639,6 +33953,173 @@ export interface operations {
                 };
             };
             /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_findings: {
+        parameters: {
+            query?: {
+                /** @description Page size, 1 to 1,000 (default 100). */
+                limit?: number;
+                /** @description Opaque cursor from the previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Read at least this store revision (read-your-writes after a write). */
+                at_least?: number;
+                /** @description Only findings of these severities: `act`, `review`, `info`. Repeat the parameter or separate the values with commas. */
+                severity?: string;
+                /** @description Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`. */
+                kind?: string;
+                /** @description Only findings whose subject is of these kinds: `address`, `host`, `prefix`, `record`, `job`, `node`, `device`. */
+                subject?: string;
+                /** @description Only findings of these areas: `ipam`, `dns`, `dhcp`, `discovery`, `topology`, `jobs`, `connectors`, `nodes`, `settings`. */
+                area?: string;
+                /** @description Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`. */
+                source?: string;
+                /** @description Only findings about this prefix (identifier): its own subject, an address or a network inside it. */
+                prefix?: string;
+                /** @description Only findings about the prefixes of this site (identifier). */
+                site?: string;
+                /** @description Only findings whose summary, subject or code contains this text (without case). */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of findings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Finding"];
+                };
+            };
+            /** @description Invalid parameter (`sys.invalid_query`, `sys.invalid_cursor`, `ipam.invalid_filter`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The prefix or site filter names no prefix or site (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The findings index does not run on this server (`findings.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    count_findings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingCounts"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The findings index does not run on this server (`findings.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_finding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Finding identifier, such as `proposal:<id>` or `reconcile:<digest>` */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The finding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Finding"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such finding, or none the principal may read (`findings.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The findings index does not run on this server (`findings.unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

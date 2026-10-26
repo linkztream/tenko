@@ -133,6 +133,60 @@ pub fn host_bounds(net: &IpNet) -> (u128, u128) {
     }
 }
 
+/// What an address at the edge of a network prefix is: the addresses [`host_bounds`] leaves
+/// out, which no device holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeAddress {
+    /// The first address of an IPv4 network up to /30.
+    Network,
+    /// The last address of an IPv4 network up to /30.
+    Broadcast,
+    /// The first address of an IPv6 network up to /126 (RFC 4291 section 2.6.1).
+    SubnetRouterAnycast,
+}
+
+impl EdgeAddress {
+    /// The `snake_case` name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EdgeAddress::Network => "network",
+            EdgeAddress::Broadcast => "broadcast",
+            EdgeAddress::SubnetRouterAnycast => "subnet_router_anycast",
+        }
+    }
+
+    /// The address in English: "the network address".
+    pub const fn text(self) -> &'static str {
+        match self {
+            EdgeAddress::Network => "the network address",
+            EdgeAddress::Broadcast => "the broadcast address",
+            EdgeAddress::SubnetRouterAnycast => "the subnet-router anycast address",
+        }
+    }
+}
+
+/// Whether `ip` is an edge address of the network prefix `net` ([`EdgeAddress`]): the network
+/// and broadcast address of an IPv4 network up to /30, the subnet-router anycast address of
+/// an IPv6 network up to /126. A /31, /32, /127 or /128 has none, and an address outside
+/// `net` is none of them.
+pub fn edge_address(net: &IpNet, ip: IpAddr) -> Option<EdgeAddress> {
+    if !contains_ip(net, ip) {
+        return None;
+    }
+    let value = ip_to_u128(ip);
+    let (first, last) = bounds(net);
+    let (host_first, host_last) = host_bounds(net);
+    match Family::of_net(net) {
+        Family::V4 if value == first && host_first != first => Some(EdgeAddress::Network),
+        Family::V4 if value == last && host_last != last => Some(EdgeAddress::Broadcast),
+        Family::V6 if value == first && host_first != first => {
+            Some(EdgeAddress::SubnetRouterAnycast)
+        }
+        _ => None,
+    }
+}
+
 /// Number of assignable addresses of a network prefix (see [`host_bounds`]).
 pub fn host_capacity(net: &IpNet) -> u128 {
     let (first, last) = host_bounds(net);
@@ -194,6 +248,48 @@ mod tests {
         assert!(contains_net(&net("192.0.2.0/24"), &net("192.0.2.128/25")));
         assert!(!contains_net(&net("192.0.2.128/25"), &net("192.0.2.0/24")));
         assert!(!contains_net(&net("192.0.2.0/24"), &net("2001:db8::/64")));
+    }
+
+    #[test]
+    fn edge_addresses_of_both_families() {
+        let ip = |text: &str| -> IpAddr { text.parse().expect("ip") };
+        let v4 = net("192.0.2.0/24");
+        assert_eq!(
+            edge_address(&v4, ip("192.0.2.0")),
+            Some(EdgeAddress::Network)
+        );
+        assert_eq!(
+            edge_address(&v4, ip("192.0.2.255")),
+            Some(EdgeAddress::Broadcast)
+        );
+        assert_eq!(edge_address(&v4, ip("192.0.2.1")), None);
+        assert_eq!(edge_address(&v4, ip("198.51.100.0")), None, "outside");
+        assert_eq!(
+            edge_address(&net("192.0.2.4/30"), ip("192.0.2.7")),
+            Some(EdgeAddress::Broadcast)
+        );
+        assert_eq!(
+            edge_address(&net("192.0.2.0/31"), ip("192.0.2.0")),
+            None,
+            "RFC 3021"
+        );
+        assert_eq!(edge_address(&net("192.0.2.9/32"), ip("192.0.2.9")), None);
+        let v6 = net("2001:db8::/64");
+        assert_eq!(
+            edge_address(&v6, ip("2001:db8::")),
+            Some(EdgeAddress::SubnetRouterAnycast)
+        );
+        assert_eq!(
+            edge_address(&v6, ip("2001:db8::ffff:ffff:ffff:ffff")),
+            None,
+            "IPv6 has no broadcast"
+        );
+        assert_eq!(
+            edge_address(&net("2001:db8::/127"), ip("2001:db8::")),
+            None,
+            "RFC 6164"
+        );
+        assert_eq!(edge_address(&v6, ip("192.0.2.0")), None, "other family");
     }
 
     #[test]

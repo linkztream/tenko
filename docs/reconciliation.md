@@ -17,6 +17,7 @@ Contents:
 9. [Tables, endpoints and events](#9-tables-endpoints-and-events)
 10. [The DNS actuator](#10-the-dns-actuator)
 11. [The reconciliation view](#11-the-reconciliation-view)
+12. [The findings model](#12-the-findings-model)
 
 ## 1. Intent and observation
 
@@ -300,6 +301,8 @@ A conflict is a contradiction between observations, or between an observation an
 
 A probe keeps one fact per address and method, so a second device on the same address shows up there only through another method or another source.
 
+**The guard rail: edge addresses are never a conflict.** No device holds a network's network or broadcast address (IPv4 up to /30) or its subnet-router anycast address (IPv6 up to /126; IPv6 has no broadcast address, and a /31, /32, /127 or /128 has no edge address). A sighting of one, typically a host answering a ping of the network address, is a scan artifact: the reconciler sets it aside before any rule runs, so it raises no conflict, no discovered host and no address mismatch, and the reconciliation view lists no row for it. The findings list it as information (`scan_artifact`, section 12). A conflict on such an address that an earlier version opened expires at the next run with the reason "the network address of its network is never the subject of a conflict: a sighting of it is a scan artifact" on the proposal and in the `reason` context of its `ipam.proposal.expire` audit record (every expiry now carries its reason there).
+
 **Resolving an address conflict.** The two address conflicts (`conflict_shared_address` and `conflict_address_taken`) carry the parameter `hosts`, the hosts of intent in the conflict (for a taken address the intended host first), and the taken address also `dormant_hosts`, the intended host when its own claim on the address is only dormant (its MAC address is seen there only from a stopped guest). Beside Dismiss (the rejection of section 5.2), the Discovery page offers:
 
 | Action | What it does |
@@ -540,7 +543,7 @@ The index tables follow their fact in the same batch.
 
 ### 9.3 Live updates
 
-Changes of `ipam.proposals` and `ipam.adoption` are events of the `ipam` topic. Changes of `ipam.obs.facts` and `ipam.obs.last_seen` are table-level events of the `discovery` topic: they name the changed table and no object, because a poll can change many facts at once. Like every event they carry references, not bodies, so a client refetches what it shows.
+Changes of `ipam.proposals` and `ipam.adoption` are events of the `ipam` topic. Changes of `ipam.obs.facts` and `ipam.obs.last_seen` are table-level events of the `discovery` topic: they name the changed table and no object, because a poll can change many facts at once. Like every event they carry references, not bodies, so a client refetches what it shows. The findings index announces its own changes on the `findings` topic (section 12.4).
 
 ## 10. The DNS actuator
 
@@ -598,3 +601,73 @@ The system status (`GET /api/v1/system/status`) carries the warning `ipam.lease_
 ### 11.5 Tests
 
 `crates/tenko-ipam/tests/reconcile_view.rs` seeds one case of every kind beside quiet hosts and checks that the view lists exactly those, with their rules, the proposal link, the filters, the paging and the refusals, and the OS precedence (the DHCP guess, then a probe's, then an inventory's). E28 (`crates/tenko/tests/acceptance_reconcile.rs`) does the same through the binary: intent through the API, leases through the `dhcp` role in relay mode on loopback with Windows's and Android's options 55 and 60, records written by hand, and the sample connector's inventory sighting for the scans (a probe's own sighting of a non-loopback address needs a network the test does not have); the unmanaged TV's OS field comes from its lease, the health view names the conflict, and `tenko ipam reconcile` prints the same rows.
+
+## 12. The findings model
+
+A finding is anything Tenko noticed that a person may need to decide on (U1 of the UI proposal; IPAM-10, IPAM-15, IPAM-19, IPAM-21, IPAM-23). The same idea lives in five sources under their own names: the open proposals (section 4), the utilization alarms ([ipam.md](ipam.md) section 3), the rows of the reconciliation view (section 11), the jobs that wait for a person at a manual step, and the health conditions of `GET /api/v1/system/status`. The findings model gives each of them one shape: a `kind`, a `severity`, a `subject` (an address, a host, a prefix, a record, a job, a node or a device known by its MAC address), the `evidence` by reference (the source's record and the API path that reads it), a default `action` the UI maps to a button, `since`, the `area` of the UI it belongs to and the `source`. Every surface (the dashboard, the status bar, the rail badges, the lists) reads the same index through one query and one subscription, so a count never differs between two screens. The sources keep their own tables and routes; nothing about them changes.
+
+### 12.1 Severities
+
+| Severity | Meaning | Counted |
+|---|---|---|
+| `act` | Something is broken or waits for a person now. Only these color the dashboard, the rail and the status bar | yes |
+| `review` | A decision is open | yes |
+| `info` | Worth knowing; listed where it lives | never as a problem |
+
+### 12.2 The mapping
+
+| Source | Finding kind | Severity | Default action | Area |
+|---|---|---|---|---|
+| Open conflict proposal (every rule of the kind `conflict`, `dns_record_held` among them) | `conflict` | act | `resolve` (pick the device that stays) | discovery |
+| Open discovered host | `unknown_device` | review | `adopt` (adopt or ignore) | discovery |
+| Open orphaned DNS record (`dns_orphaned_record`) | `orphaned_record` | review | `delete_record` | discovery |
+| Open orphaned address (`orphaned_address`) | `orphaned_address` | review | `decide` | discovery |
+| Open address mismatch | `intent_differs` | review | `open_host` | discovery |
+| Open outside-prefixes, VLAN, host-name or other DNS proposal | `outside_prefixes`, `vlan`, `host_name`, `dns` | review | `decide` | discovery |
+| Utilization alarm `critical` / `warning` | `utilization` | act / review | `open_prefix` | ipam |
+| Job with a step waiting for a person (a manual task, or the undo task of a rollback) | `job_waiting` | act | `open_manual_step` | jobs |
+| View row `conflict`, while no open conflict proposal is about its address | `conflict` | act | `resolve` | ipam |
+| View row `orphan` of a record written by hand (no proposal) | `orphaned_record` | review | `delete_record` | dns |
+| View row `ptr_mismatch` | `ptr_mismatch` | review | `fix_ptr` | dns |
+| View row `ghost` (intent wins, or the lease for a dynamic host) | `ghost` | info; review once unseen for `ghost_review_after_secs` | none; `decommission` | ipam |
+| View row `rogue` whose discovered-host proposal was decided | `unknown_device` | info | none | ipam |
+| A sighting of a network's edge address (section 4.8) | `scan_artifact` | info | none | ipam |
+| Health condition: error / warning / informational (the severities of `GET /system/diagnostics`) | `health` | act / review / info | `open_status` | by its code: `dns.*` dns, `dhcp.*` dhcp, `ipam.*` ipam, `connect.*` connectors, `cluster.*` and the store nodes, the rest settings |
+
+Rules that keep the counts honest:
+
+- **An open proposal is never information**: it waits for a person's decision. Every proposal belongs to the Discovery area, the inbox that lists them, so `sources.proposal` of the counts and the Discovery badge equal the open proposals that `GET /proposals?state=open` lists.
+- **Nothing is listed twice.** A view row that an open proposal stands for is left out: a rogue with its discovered-host proposal, an orphan with its orphaned-record proposal, and a conflict row of an address that an open conflict proposal is about (the proposal is the finding). The health warning `ipam.lease_conflict` is left out because its conflict rows are findings of their own.
+- **The utilization alarm** is to act on at its critical threshold and to review at its warning threshold, so a network filling up is seen before it is full without coloring the status bar.
+- **Sources without severities** (the view's rows, jobs) get theirs from the table above.
+
+### 12.3 Ghost ageing
+
+A ghost (section 11.2) is intent that nothing has shown for longer than its lease time. While it is young it is information: a device that is off for a weekend is no problem. Once it has been unseen for `[ipam.findings] ghost_review_after_secs` (30 days by default, 1 to 365 days) it becomes a finding to review with the action `decommission` (`POST /api/v1/hosts/{id}/decommission`). There is no stored "first unseen" time: the age is derived from the observation history, from the ghost's last sighting (the newest fact within retention, or the reconciler's last sighting of the address or its interface), or, for an address never seen, from the creation of the address. Its `since` is that time, and its identifier stays the same as it ages.
+
+### 12.4 The index, the API and the topic
+
+The index lives in memory on every controller (`tenko_ipam::findings::FindingsIndex`, driven by `tenko_api::findings::FindingsService`); there is no stored table. At the start it reads the open proposals, the alarm rows, the jobs in the states `waiting` and `rolling_back`, and the view; then it follows the store journal:
+
+- each changed proposal, alarm row and job is read once and its finding replaced or removed;
+- a change of a table the view reads (the `ipam`, `dhcp` and `scan` namespaces) schedules a refresh of the view's findings, debounced by two seconds and at most once per `[ipam.findings] reconcile_refresh_secs` (30 by default); the view is also refreshed once a minute, for what ages with time;
+- the health conditions are set by every read of the status, and by a findings request when they are older than 15 seconds;
+- a lag behind the journal or a gap reloads the index.
+
+The counts are cached until the next change, so a read of the counts costs a copy; on 10,000 open proposals the first count stays well under its budget of 50 ms (`findings::tests::the_counts_of_ten_thousand_proposals_stay_within_budget`).
+
+| Endpoint | Operation | Notes |
+|---|---|---|
+| `GET /api/v1/findings` | `list_findings` | filters `severity`, `kind`, `subject`, `area`, `source` (repeatable or comma-separated), `prefix` (a prefix identifier), `site` (a site identifier: its prefixes) and `q` (text of the summary, the subject or the code); ordered by severity, then the newest first; paged with `limit` (1 to 1,000) and `cursor` |
+| `GET /api/v1/findings/counts` | `count_findings` | `total` and `problems`, `areas` (one member per area: ipam, dns, dhcp, discovery, topology, jobs, connectors, nodes, settings, each with `act`, `review` and `info`) and `sources`; the rail badges and the status bar read it |
+| `GET /api/v1/findings/{id}` | `get_finding` | one finding; 404 `findings.not_found` |
+
+A server without the service answers 503 `findings.unavailable`. A principal sees the findings whose source it may read: a proposal's where it may read the proposal (a scoped reader: where the proposal's subject lies in its scope), an alarm's where it may read the prefix, a job's where it may read the job, a view row's where it may read observations, a health condition's where it may read the system. The counts count what the principal sees.
+
+Identifiers are derived from the source's and stay the same while the source lasts: `proposal:<id>`, `alarm:<prefix id>`, `job:<id>`, `reconcile:<digest of the view row's key>` and `health:<digest of the code and its parameters>`.
+
+The topic `findings` of `GET /api/v1/events` carries one event per change of the index, kind `findings.changed`, with the proposals, prefixes and jobs whose findings changed among `objects` (none for a change of the view or of health) and `params.revision`, the store revision the index applied. It is published after the index applied the change, so a client that reloads on the event reads the new state. These events come from the index, not the journal, and are not replayed: a client reloads the counts when it connects.
+
+### 12.5 Tests
+
+`crates/tenko-ipam/src/findings/tests.rs` covers the mapping per source and severity, the ghost ageing, the counts per severity, area and source, the conflict listed once, and the budget of the counts. `crates/tenko-ipam/tests/findings.rs` runs the reconciler: the guard rail for IPv4 (network and broadcast address) and IPv6 (the subnet-router anycast address is an artifact, the last address an ordinary one), an open conflict on the network address closed with its reason in the audit record, a ghost that ages into a finding to review, and the index following a proposal through change sets. `crates/tenko-api/src/routes/findings/tests.rs` checks that the counts equal the open proposals of the Discovery list, that a decision reaches the counts and the `findings` topic, the filters and the paging, and that a principal counts only what it may read.
