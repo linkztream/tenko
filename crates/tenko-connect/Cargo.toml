@@ -1,6 +1,6 @@
 [package]
 name = "tenko-connect"
-version = "0.0.7"
+version = "0.0.8"
 description = "Connector plugin SDK: protocol, host runner, helper library, manifest and conformance suite"
 edition.workspace = true
 rust-version.workspace = true

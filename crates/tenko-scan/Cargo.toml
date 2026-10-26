@@ -1,6 +1,6 @@
 [package]
 name = "tenko-scan"
-version = "0.0.7"
+version = "0.0.8"
 description = "Probe role: passive and active discovery, SNMP polling"
 edition.workspace = true
 rust-version.workspace = true

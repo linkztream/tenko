@@ -1,6 +1,6 @@
 [package]
 name = "tenko-dhcp"
-version = "0.0.7"
+version = "0.0.8"
 description = "DHCPv4 and DHCPv6, failover, relay handling, dynamic DNS"
 edition.workspace = true
 rust-version.workspace = true

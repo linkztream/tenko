@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-10-26
+
 ### Added
 
 - A backup before every update (OPS-07, OPS-24, TGL-23, the new TGL-37; ADR 0023): the confirmation before an install or an upload on the Updates page says how old the newest good backup is and installs at once when it is younger than one hour ("Backed up 12 min ago."); otherwise it asks "Are you sure you do not want a backup first?" with **Backup now** (the default) and **No, don't back up**. Backup now writes the backup (asking for a passphrase when no recipient is set up), shows it running, and starts the install only once it is recorded good; a failed backup shows its error and offers the choices again. Under the Hardened profile the backup is required and only Backup now is offered. The Updates page shows the newest good backup's age next to the install and upload buttons, with a link to the Backup page. A backup taken before an update is listed as "Before update <version>" (`reason: before_update` with `before_update` on `BackupRunView`, `before_update` on the body of `POST /api/v1/system/backups`); it is stored as a manual backup with the version beside it, so no new data format is needed and a previous release reads it after a switch back. Every install is audited as `sys.update.install` with what was decided about the backup (`recent`, `run` or `skipped`) and by whom. See `docs/upgrades.md` section 8.12.
