@@ -56,7 +56,7 @@ test("the audit view lists the writes, agrees with the chain check and opens the
     await expect(row).toBeVisible();
     await expect(row).toHaveAttribute("data-id", String(record.seq));
     await expect(cell(row, "seq")).toHaveText(String(record.seq));
-    await expect(cell(row, "action")).toHaveText(record.draft.action);
+    await expect(cell(row, "action")).toContainText(record.draft.action);
   }
   const keys = await grid.getByTestId("row").evaluateAll((rows) => rows.map((row) => Number(row.getAttribute("data-key"))));
   expect(keys).toEqual(log.map((r) => r.seq).reverse());

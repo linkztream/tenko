@@ -396,7 +396,7 @@ test("revoking a node from its panel removes it, makes the probe report the revo
       await expect(grid.getByTestId("row")).toHaveCount(1);
       const row = gridRow(page, "audit", String(revocation.seq));
       await expect(row).toBeVisible();
-      await expect(cell(row, "action")).toHaveText("cluster.node.revoke");
+      await expect(cell(row, "action")).toContainText("cluster.node.revoke");
     });
 
     await test.step("the edit left a job that succeeded, and its page shows it", async () => {

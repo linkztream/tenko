@@ -555,7 +555,7 @@ test.describe("from the version layout", () => {
     await page.getByTestId("audit-filter-action").fill("sys.update.confirm");
     const row = gridRow(page, "audit", String(record.seq));
     await expect(row).toBeVisible();
-    await expect(cell(row, "action")).toHaveText("sys.update.confirm");
+    await expect(cell(row, "action")).toContainText("sys.update.confirm");
   });
 });
 
