@@ -14,8 +14,9 @@
 //! - A job past its deadline (first step start plus `JobSpec::timeout`) rolls back with
 //!   `jobs.timeout`. A waiting step past its deadline rolls back with
 //!   `jobs.step.deadline_passed`: the observation deadline of the step, or for a manual
-//!   task the step timeout from the step's first start, whichever of these and the job
-//!   deadline is earlier.
+//!   task the deadline set on the waiting task (`JobEngine::set_manual_deadline`), else the
+//!   step timeout from the step's first start, whichever of these and the job deadline is
+//!   earlier.
 //! - A cancel request takes effect at the next boundary: the current step is aborted with
 //!   `jobs.cancelled` and the job rolls back, ending in `cancelled` (`FinishCancel`).
 //! - A step found `running` with no result to apply was interrupted by a crash: an
@@ -132,6 +133,14 @@ pub enum ResultOp {
     ManualDone {
         /// The step.
         step: u16,
+    },
+    /// The deadline of a step that waits for a person was set
+    /// ([`JobEngine::set_manual_deadline`](crate::JobEngine::set_manual_deadline)).
+    Deadline {
+        /// The step.
+        step: u16,
+        /// The new deadline.
+        deadline: Timestamp,
     },
     /// `compensate` succeeded.
     Compensated {
@@ -353,6 +362,26 @@ impl<'a> Machine<'a> {
                     _ => false,
                 }
             }
+            ResultOp::Deadline { step, deadline } => {
+                let Some(S::WaitingForManual {
+                    task,
+                    deadline: current,
+                }) = self.state_of(*step).cloned()
+                else {
+                    return false;
+                };
+                if self.job.state != JobState::Waiting || current == Some(*deadline) {
+                    return false;
+                }
+                self.set_step(
+                    *step,
+                    S::WaitingForManual {
+                        task,
+                        deadline: Some(*deadline),
+                    },
+                );
+                true
+            }
             ResultOp::Compensated { step } => {
                 if !matches!(self.state_of(*step), Some(S::Compensating)) {
                     return false;
@@ -485,14 +514,20 @@ impl<'a> Machine<'a> {
         started.checked_add(self.job.spec.timeout)
     }
 
-    /// The deadline of a manual task: its step timeout from the first start, capped by the
-    /// job deadline.
+    /// The deadline of a manual task: the deadline set on the waiting task, else its step
+    /// timeout from the first start; capped by the job deadline.
     fn manual_deadline(&self, step: u16) -> Option<Timestamp> {
         let index = usize::from(step);
-        let own = self.job.spec.steps[index]
-            .timeout
-            .zip(self.job.steps[index].started)
-            .and_then(|(timeout, started)| started.checked_add(timeout));
+        let own = match &self.job.steps[index].state {
+            StepState::WaitingForManual {
+                deadline: Some(deadline),
+                ..
+            } => Some(*deadline),
+            _ => self.job.spec.steps[index]
+                .timeout
+                .zip(self.job.steps[index].started)
+                .and_then(|(timeout, started)| started.checked_add(timeout)),
+        };
         earliest(own, self.job_deadline())
     }
 

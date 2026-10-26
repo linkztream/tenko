@@ -616,8 +616,11 @@ mod tests {
             .await;
         reply.assert_json(200);
         let body = &reply.body;
-        assert_eq!(body["timeout_secs"], 3_600, "half the lease of two hours");
-        assert_eq!(body["timeout_source"], "lease");
+        assert_eq!(
+            body["timeout_secs"], 7_260,
+            "the pools' lease of two hours plus the margin"
+        );
+        assert_eq!(body["timeout_source"], "pool");
         assert_eq!(body["target"]["lease_secs"], 7_200);
         assert_eq!(body["parallelism"], 4);
         let item = &body["items"][0];

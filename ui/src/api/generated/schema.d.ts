@@ -11940,6 +11940,11 @@ export interface components {
             /** @description The modules to run. */
             modules: components["schemas"]["ModuleSet"];
         };
+        /**
+         * @description How the next expected DHCP activity of a client was found.
+         * @enum {string}
+         */
+        MoveActivitySource: "lease" | "pool" | "unknown";
         /** @description Where the network controller sees a device now. */
         MoveAttachment: {
             /** @description The switch or access point, by controller reference. */
@@ -12022,6 +12027,8 @@ export interface components {
             same_host_part: boolean;
             /** @description The steps of the item's job, in order. */
             steps: components["schemas"]["MoveStepPreview"][];
+            /** @description The two times: the client's next expected DHCP activity and the migration deadline. */
+            timing?: components["schemas"]["MoveTiming"];
             /** @description Warnings of this item. */
             warnings?: components["schemas"]["PlanWarning"][];
         };
@@ -12083,6 +12090,11 @@ export interface components {
          * @enum {string}
          */
         MoveMedium: "wired" | "wireless";
+        /**
+         * @description What the job does before it changes the client's network.
+         * @enum {string}
+         */
+        MovePrepare: "short_lease" | "limit" | "move_now" | "not_served" | "no_mac";
         /** @description The preview of a move (the dry run). */
         MovePreview: {
             /**
@@ -12099,6 +12111,8 @@ export interface components {
             fingerprint?: string;
             /** @description One item per moved address. */
             items: components["schemas"]["MoveItem"][];
+            /** @description Whether the jobs change the network at once (`move_now`). */
+            move_now?: boolean;
             /**
              * Format: int32
              * @description How many jobs run at once.
@@ -12108,10 +12122,11 @@ export interface components {
             target: components["schemas"]["MoveTarget"];
             /**
              * Format: int32
-             * @description The observation timeout in seconds.
+             * @description The longest migration deadline of the items, in seconds from the start of their
+             *     observation (each item's own is in its `timing`).
              */
             timeout_secs: number;
-            /** @description How the timeout was chosen. */
+            /** @description How that deadline was chosen. */
             timeout_source: components["schemas"]["MoveTimeoutSource"];
             /** @description Warning codes that need an acknowledgement before a submit. */
             unacknowledged?: string[];
@@ -12127,6 +12142,12 @@ export interface components {
              *     answers 409 `ipam.move.plan_changed` and starts nothing.
              */
             expect_fingerprint?: string | null;
+            /**
+             * @description Change the network at once instead of waiting for the client's next renewal, which
+             *     would get the short lease first: for a client known to ask for a new lease when its
+             *     link changes.
+             */
+            move_now?: boolean;
             /** @description Hosts or addresses to move. */
             objects: components["schemas"]["ObjectRef"][];
             /**
@@ -12138,8 +12159,8 @@ export interface components {
             target: components["schemas"]["PrefixId"];
             /**
              * Format: int32
-             * @description Observation timeout in seconds, 300 to 604,800; half the target's DHCP lease (else
-             *     3,600) when absent.
+             * @description The migration deadline in seconds from the start of the observation, 300 to
+             *     604,800; computed from each client's lease when absent (`docs/moves.md` section 5).
              */
             timeout_secs?: number | null;
         };
@@ -12211,10 +12232,34 @@ export interface components {
             vrf: components["schemas"]["VrfId"];
         };
         /**
-         * @description How the observation timeout of a move was chosen.
+         * @description How the migration deadline of a move was chosen (the observation's timeout,
+         *     [`timing::migration_deadline`]).
          * @enum {string}
          */
-        MoveTimeoutSource: "request" | "lease" | "default";
+        MoveTimeoutSource: "request" | "short_lease" | "lease" | "pool" | "default";
+        /** @description The two times of one moved address, as the preview estimates them. */
+        MoveTiming: {
+            /**
+             * Format: int32
+             * @description The migration deadline in seconds from the start of the observation, as if it
+             *     started now; the job computes it again from the lease when the observation starts.
+             */
+            deadline_secs: number;
+            /** @description How the deadline was chosen. */
+            deadline_source: components["schemas"]["MoveTimeoutSource"];
+            lease_end?: components["schemas"]["Timestamp"] | null;
+            lease_start?: components["schemas"]["Timestamp"] | null;
+            next_activity?: components["schemas"]["Timestamp"] | null;
+            /** @description How that was found. */
+            next_activity_source: components["schemas"]["MoveActivitySource"];
+            /** @description What the job does before the network change. */
+            prepare: components["schemas"]["MovePrepare"];
+            /**
+             * Format: int32
+             * @description The short lease the job asks for, in seconds.
+             */
+            short_lease_secs?: number | null;
+        };
         /** @description The body of a change of a rule. */
         NameAuthorityRule: {
             /** @description The kinds of sources, the most trusted first: one to ten, each once. */

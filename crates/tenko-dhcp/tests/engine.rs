@@ -260,6 +260,21 @@ fn rows() -> Vec<Row> {
             Expect::AfterCommit(Ack),
         )
         .dest(relay_dest()),
+        // A moved client (docs/moves.md section 5): its rebinding broadcast reaches the
+        // relay of its new network, whose giaddr selects scope B; its address of scope A is
+        // not on that network, so the NAK goes back through that relay.
+        row(
+            "rebinding an address of another network through the relay of the new one is refused to that relay",
+            with(ask(Request, 0x10), |a| {
+                a.giaddr = Some(ip("198.51.100.1"));
+                a.ciaddr = Some(ip("192.0.2.110"));
+            }),
+            Expect::Reply(Nak),
+        )
+        .dest(Destination::Relay(SocketAddrV4::new(
+            ip("198.51.100.1"),
+            67,
+        ))),
         row(
             "renewing another client's address is refused by broadcast",
             with(ask(Request, 0x32), |a| {

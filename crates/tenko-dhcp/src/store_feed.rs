@@ -37,8 +37,8 @@ use tenko_core::{
     Revision, TableName,
     codec::KeyCodec,
     dhcp::tables::{
-        CLASSES, EXCLUSIONS, FILTERS, LEASES, LEASES6, NODE_IPAM_TABLES, NODE_TABLES, OPTION_DEFS,
-        OPTION_SETS, POLICIES, POOLS, SCOPES, SETTINGS, SHARED_NETWORKS,
+        CLASSES, EXCLUSIONS, FILTERS, LEASES, LEASES6, MOVING, NODE_IPAM_TABLES, NODE_TABLES,
+        OPTION_DEFS, OPTION_SETS, POLICIES, POOLS, SCOPES, SETTINGS, SHARED_NETWORKS,
     },
     table::TableDef,
 };
@@ -201,6 +201,8 @@ fn decode_one(row: &RawRow) -> Result<Option<Change>, StoreError> {
         LEASES => Lease,
         // WP9.1: the DHCPv6 leases.
         LEASES6 => Lease6,
+        // The clients of move jobs (ADR 0027).
+        MOVING => Moving,
         PREFIXES => Prefix,
         RANGES => Range,
         HOSTS => Host,

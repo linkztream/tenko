@@ -24,7 +24,8 @@
 //!   `no_identity` (IPAM-18). The first reservation of an identity or an address in a scope
 //!   wins; the check reports the collision (IPAM-23).
 //! - **The rest.** Every filter and class by id; the enabled policies of the server and of
-//!   the scopes in the image, sorted by the builder.
+//!   the scopes in the image, sorted by the builder; the clients of move jobs
+//!   (`dhcp.moving`, ADR 0027), as [`crate::moving`] serves them.
 //! - **DHCPv6** (WP9.1, [`crate::v6::image`]). An enabled scope whose prefix is a live IPv6
 //!   network, with the same rules for lease times, pools, exclusions and options (its
 //!   `dhcp6` values are the DHCPv6 options), its DHCPv6 settings and the Interface-Id that
@@ -520,7 +521,9 @@ pub fn build(data: &DhcpData) -> Built {
                 })
                 .cloned()
                 .collect(),
-        );
+        )
+        // ADR 0027: the clients of move jobs.
+        .moving(data.moving.values());
     Built {
         image: builder.build(),
         warnings: check_reservations(&candidates),

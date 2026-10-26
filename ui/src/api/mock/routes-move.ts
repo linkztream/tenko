@@ -2,20 +2,25 @@
 // answers the preview, without it the IPAM intent changes and one job per object starts, all
 // in one group. It follows the generated Move* types (src/api/moves.ts) and the decisions
 // of 2026-10-09: the same host part when it is free, else the next free address; steps by
-// mode; the timeout from the request, else half the longest DHCP lease of the target, else
-// 3,600 s, never below 300 s. The L2 step of each device comes from the mock network
+// mode. Every item has its two times (`timing`): the next DHCP activity and the migration
+// deadline, from the request, the short lease, the client's lease in the mock lease table,
+// the longest lease of the target's pools plus a margin, else 3,600 s, never below 300 s; the
+// longest deadline is the move's timeout. A client with a lease starts with `dhcp.prepare` and
+// waits for its renewal with the short lease (`dhcp.short_lease`, a manual step) unless the
+// request has `move_now`. The L2 step of each device comes from the mock network
 // controller (move-l2.ts): through the controller (`l2.controller`), by a person (`l2.move`,
 // with the reason), or none; a refusal of a guardrail is a warning to acknowledge, and a
 // submit with `expect_fingerprint` runs the confirmed plan or answers 409
 // `ipam.move.plan_changed`.
 import { http, type HttpHandler } from "msw";
-import type { MoveItem, MovePreview, MoveStepPreview, MoveSubmitted, MoveTimeoutSource } from "../moves";
+import type { MoveItem, MovePreview, MoveStepPreview, MoveSubmitted, MoveTimeoutSource, MoveTiming } from "../moves";
 import type { Address, AssignmentMode, Host, Interface, ObjectRef, PlanWarning } from "../types";
 import { cidrOf, compareIp, formatIp, hostPart, parseCidr, parseIp, usableRange, withHostPart, addToIp, containsIp } from "../../ipam/ip";
 import { requireSession } from "./auth";
 import { applyCommands, ipamState, longestLeaseSecs } from "./ipam/api";
 import { createJob, MOVE_STEP, moveSteps, type MockStepInput } from "./job-store";
 import { decideL2, fingerprintOf, L2_CODES, l2Args, l2Step } from "./move-l2";
+import { dhcpLeaseState } from "./routes-dhcp-leases";
 import { Problem } from "./reply";
 import { randomId } from "./util";
 
@@ -38,7 +43,7 @@ function readRequest(raw: unknown) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) problem("sys.invalid_request", 400, "the body must be a JSON object");
   const body = raw as Record<string, unknown>;
   for (const key of Object.keys(body)) {
-    if (!["objects", "target", "timeout_secs", "parallelism", "acknowledge", "expect_fingerprint"].includes(key)) {
+    if (!["objects", "target", "timeout_secs", "parallelism", "acknowledge", "expect_fingerprint", "move_now"].includes(key)) {
       problem("sys.invalid_request", 400, `unknown member ${key}`);
     }
   }
@@ -59,7 +64,72 @@ function readRequest(raw: unknown) {
   const parallelism = typeof body.parallelism === "number" ? Math.max(1, Math.min(32, Math.floor(body.parallelism))) : 2;
   const acknowledge = Array.isArray(body.acknowledge) ? body.acknowledge.filter((c): c is string => typeof c === "string") : [];
   const expectFingerprint = typeof body.expect_fingerprint === "string" ? body.expect_fingerprint : null;
-  return { refs, target: body.target, timeout, parallelism, acknowledge, expectFingerprint };
+  const moveNow = body.move_now === true;
+  if (body.move_now !== undefined && typeof body.move_now !== "boolean") problem("ipam.validation", 400, "move_now must be true or false");
+  return { refs, target: body.target, timeout, parallelism, acknowledge, expectFingerprint, moveNow };
+}
+
+// ---------------------------------------------------------------------------------
+// The two times of an item and the preparation (crates/tenko-ipam/src/moves/timing.rs, lease.rs)
+
+/** The short lease a renewal gets, the margin after a lease, and the longest wait for a renewal. */
+const SHORT_LEASE_SECS = 120;
+const MARGIN_SECS = 60;
+const PREPARE_LIMIT_SECS = 3600;
+
+/** The client's active lease on its old address in the mock lease table, when Tenko holds one. */
+function heldLease(mac: string | null | undefined, ip: string, now: number) {
+  if (!mac) return undefined;
+  return dhcpLeaseState().leases.find(
+    (l) => l.family === "v4" && l.addr === ip && l.state === "active" && l.mac?.toLowerCase() === mac.toLowerCase() && Date.parse(l.ends) > now,
+  );
+}
+
+/** The next DHCP message of a client with a lease: T1 (half), then T2 (seven eighths), then the end. */
+function nextActivityOf(start: number, end: number, now: number): number {
+  const secs = end - start;
+  const t1 = start + secs / 2;
+  const t2 = start + (secs * 7) / 8;
+  return now <= t1 ? t1 : now < t2 ? t2 : end;
+}
+
+/** The timing of one item: where its next DHCP activity comes from, the deadline, what the job does first. */
+function timingOf(item: MoveItem, input: { now: number; moveNow: boolean; requestSecs: number | null; poolSecs: number | null }): MoveTiming {
+  const { now, moveNow, requestSecs, poolSecs } = input;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const held = heldLease(item.mac, item.old_ip, now);
+  const start = held ? Date.parse(held.cltt) : 0;
+  const end = held ? Date.parse(held.ends) : 0;
+  const next = held ? nextActivityOf(start, end, now) : null;
+  let prepare: MoveTiming["prepare"];
+  if (!item.mac) prepare = "no_mac";
+  else if (!held || next === null) prepare = "not_served";
+  else if (moveNow) prepare = "move_now";
+  else prepare = end - start <= SHORT_LEASE_SECS * 1000 || (next - now) / 1000 <= PREPARE_LIMIT_SECS ? "short_lease" : "limit";
+
+  let deadline: number;
+  let source: MoveTimeoutSource;
+  if (requestSecs !== null) [deadline, source] = [requestSecs, "request"];
+  else if (prepare === "short_lease") [deadline, source] = [SHORT_LEASE_SECS + MARGIN_SECS, "short_lease"];
+  else if (held) [deadline, source] = [Math.ceil((end - now) / 1000) + MARGIN_SECS, "lease"];
+  else if (poolSecs) [deadline, source] = [poolSecs + MARGIN_SECS, "pool"];
+  else [deadline, source] = [DEFAULT_TIMEOUT, "default"];
+
+  const timing: MoveTiming = {
+    next_activity_source: held ? "lease" : poolSecs ? "pool" : "unknown",
+    prepare,
+    deadline_secs: Math.min(MAX_TIMEOUT, Math.max(MIN_TIMEOUT, deadline)),
+    deadline_source: source,
+  };
+  if (held && next !== null) {
+    timing.next_activity = iso(next);
+    timing.lease_start = held.cltt;
+    timing.lease_end = held.ends;
+    if (!moveNow) timing.short_lease_secs = SHORT_LEASE_SECS;
+  } else if (poolSecs) {
+    timing.next_activity = iso(now + (poolSecs / 2) * 1000);
+  }
+  return timing;
 }
 
 function interfaceOf(address: Address): { iface: Interface | null; host: Host | null } {
@@ -87,6 +157,8 @@ function addressesOf(ref: ObjectRef, version: 4 | 6): Address[] {
 /** The step kind of the job for each kind of the preview (crates/tenko-ipam/src/moves/preview.rs). */
 const STEP_KIND: Readonly<Record<string, string>> = {
   "ipam.intent": MOVE_STEP.intent,
+  "dhcp.prepare": MOVE_STEP.prepare,
+  "dhcp.short_lease": MOVE_STEP.lease,
   "dhcp.manual": MOVE_STEP.dhcp,
   "dns.manual": MOVE_STEP.dns,
   "device.manual": MOVE_STEP.device,
@@ -224,17 +296,16 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
   }
 
   const lease = longestLeaseSecs(prefix.id);
-  let timeout: number;
-  let source: MoveTimeoutSource;
-  if (request.timeout !== null) {
-    timeout = request.timeout;
-    source = "request";
-  } else if (lease) {
-    timeout = Math.max(MIN_TIMEOUT, Math.floor(lease / 2));
-    source = "lease";
-  } else {
-    timeout = DEFAULT_TIMEOUT;
-    source = "default";
+  const now = Date.now();
+  for (const p of planned) {
+    p.item.timing = timingOf(p.item, { now, moveNow: request.moveNow, requestSecs: request.timeout, poolSecs: lease });
+  }
+  // The longest deadline of the items, and how it was chosen.
+  let timeout = 0;
+  let source: MoveTimeoutSource = "default";
+  for (const { item } of planned) {
+    const timing = item.timing as MoveTiming;
+    if (timing.deadline_secs > timeout) [timeout, source] = [timing.deadline_secs, timing.deadline_source];
   }
   const vlan = prefix.vlan ? data.vlan.get(prefix.vlan) : undefined;
   const targetView: MovePreview["target"] = {
@@ -266,6 +337,35 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
     });
     p.item.warnings = [...(p.item.warnings ?? []), ...l2.warnings.filter((w) => w.object?.id === p.item.object.id)];
   });
+  // The DHCP preparation: a client Tenko serves is marked as moving first; unless the operator
+  // moves at once, a manual step waits for its renewal with the short lease right before the
+  // network change. (The server also prepares a client of an enabled target scope; the mock
+  // does so for clients with a lease only.)
+  for (const p of planned) {
+    const timing = p.item.timing as MoveTiming;
+    if (!["short_lease", "limit", "move_now"].includes(timing.prepare)) continue;
+    const base = p.item.steps[0]?.params ?? {};
+    const prepare: MoveStepPreview = {
+      kind: "dhcp.prepare",
+      step_kind: MOVE_STEP.prepare,
+      automatic: true,
+      text: "move.step.dhcp_prepare",
+      params: base,
+    };
+    const steps = [prepare, ...p.item.steps];
+    if (timing.prepare === "short_lease" && timing.next_activity) {
+      const wait: MoveStepPreview = {
+        kind: "dhcp.short_lease",
+        step_kind: MOVE_STEP.lease,
+        automatic: false,
+        text: "move.step.dhcp_short_lease",
+        params: { ...base, short_secs: String(timing.short_lease_secs ?? SHORT_LEASE_SECS), next_activity: timing.next_activity },
+      };
+      const at = steps.findIndex((s) => s.kind === "l2.move" || s.kind === "l2.controller" || s.kind === "observe");
+      steps.splice(at < 0 ? steps.length : at, 0, wait);
+    }
+    p.item.steps = steps;
+  }
   const warnings: PlanWarning[] = l2.warnings.map((w) => ({ ...w, acknowledged: request.acknowledge.includes(w.code) }));
   const unacknowledged = [...new Set(warnings.filter((w) => w.requires_ack && !w.acknowledged).map((w) => w.code))];
   const items = planned.map((p) => p.item);
@@ -276,13 +376,15 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
       target: targetView,
       timeout_secs: timeout,
       timeout_source: source,
+      move_now: request.moveNow,
       parallelism: request.parallelism,
       base_revision: 0,
       items,
       warnings,
       unacknowledged,
       controllers: l2.controllers,
-      fingerprint: fingerprintOf(items, prefix.id),
+      // "Move now" is part of the plan, so a preview made without it is not the one confirmed with it.
+      fingerprint: fingerprintOf(items, request.moveNow ? `${prefix.id}#now` : prefix.id),
     },
   };
 }
@@ -308,6 +410,11 @@ function jobSteps(item: MoveItem, target: MovePreview["target"], timeoutSecs: nu
       mode: item.mode ?? null,
       timeoutSecs,
       l2: l2Step(item),
+      prepare: item.steps.some((s) => s.kind === "dhcp.prepare"),
+      shortLease:
+        item.steps.some((s) => s.kind === "dhcp.short_lease") && item.timing?.next_activity
+          ? { secs: item.timing.short_lease_secs ?? SHORT_LEASE_SECS, nextActivity: item.timing.next_activity }
+          : undefined,
     },
     { changes },
   );
@@ -370,7 +477,7 @@ const moves = http.post("/api/v1/moves", async ({ request }) => {
           group,
           groupLimit: req.parallelism,
           timeoutSecs: preview.timeout_secs,
-          steps: jobSteps(p.item, preview.target, preview.timeout_secs),
+          steps: jobSteps(p.item, preview.target, p.item.timing?.deadline_secs ?? preview.timeout_secs),
         },
         { startedSteps: 1 },
       ),

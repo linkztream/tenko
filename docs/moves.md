@@ -1,7 +1,7 @@
 # Moving devices between networks
 
-- Status: Slice 2 (WP2.8); the automatic DNS step from Phase 2 (WP4.4); the automatic DHCP step, the lease observations and the release of the old lease from Phase 3 (WP8.1)
-- Requirements: IPAM-19, IPAM-16, IPAM-18, CON-10, CONN-06, CONN-08, CONN-09, CONN-18, TGL-20, DNS-22, DHCP-16; acceptance E8, E17 and E25
+- Status: Slice 2 (WP2.8); the automatic DNS step from Phase 2 (WP4.4); the automatic DHCP step, the lease observations and the release of the old lease from Phase 3 (WP8.1); the short lease before the move, the two times and the clock of moves (ADR 0027, Proposed)
+- Requirements: IPAM-19, IPAM-16, IPAM-18, CON-10, CONN-06, CONN-08, CONN-09, CONN-18, TGL-20, DNS-22, DHCP-16, DHCP-07; acceptance E8, E17 and E25
 
 A move takes hosts or addresses into another network: the operator drags them onto a network in the IPAM tree (or presses M and picks the network), checks the preview and starts the move. Dragging moves nothing physically (CON-10). A device stays in its old VLAN and keeps getting the old scope's address until its switch port or wireless association changes, and it takes its new address only after a link flap or a lease renewal. A move is therefore a job per device: it changes the intended state, gets the device into the target VLAN through the network controller where it can, waits until the device is seen at its new address, and cleans up. It rolls back when the device does not show up in time.
 
@@ -25,10 +25,13 @@ The new address keeps the host part (the last octet, or the interface ID for IPv
 - the DHCP step of a `reserved` host: `dhcp.reservation` (automatic) when the target network has an enabled Tenko scope and the interface a MAC address or client identifier, else `dhcp.manual` (a task for a person; section 4);
 - the DNS change (the name keeps pointing to the device, now at the new address): when the name falls under a zone Tenko serves, `dns.zone` names the zone and `dns.remove` and `dns.add` list the records the DNS step removes and writes, from the dry run of the DNS actuator ([dns.md](dns.md) section 7); otherwise the step is a task for a person;
 - the **L2 step** (`l2`). This is a port profile on which switch port, a per-client VLAN override on which access point, a manual step and why, or a refusal of a guardrail with its code. It comes with the diff from the controller's current state, notes about side effects, and the SSIDs that carry the target VLAN;
+- the **two times** (`timing`, section 5): when the device's next DHCP message is expected (`next_activity`, from its lease in Tenko's lease table, else half the target pools' lease time, else unknown) and the migration deadline in seconds from the start of the observation (`deadline_secs`), each with how it was chosen; the device's old lease (`lease_start`, `lease_end`) when Tenko serves its old network; and what the job does before the network change (`prepare`: wait for the next renewal, which gets the short lease of `short_lease_secs`; move at once because that renewal is expected later than the preparation limit, or because the operator chose "move now"; nothing, because Tenko holds no lease of the device or the interface has no MAC address);
 - the steps of the device's job, automatic and manual, in order;
 - the warnings of the device.
 
-For the whole move, the preview shows the observation timeout and how it was chosen, the parallelism, the network controllers that were read, the warnings that need an acknowledgement, and a `fingerprint`.
+For the whole move, the preview shows the longest migration deadline of its devices and how it was chosen (`timeout_secs`, `timeout_source`), whether the move changes the networks at once (`move_now`), the parallelism, the network controllers that were read, the warnings that need an acknowledgement, and a `fingerprint`.
+
+**Move now.** By default a device whose lease Tenko holds keeps its network until its next renewal, which gets the short lease (section 5). The preview's "Move now" choice (`move_now: true` in the request) changes the network at once instead: for a device known to ask for a new lease when its link changes, and for the port bounce of a later release. It removes the wait from the job and changes the fingerprint.
 
 The web UI shows the L2 action in the "Network change" column, and the diff and notes under a device's steps. Below the table it groups every manual task of the batch by step, so a person can work through them in one pass.
 
@@ -106,18 +109,22 @@ A submit starts one job per item. All jobs of a move share one job group named `
 
 | Step kind | Preview kind | Automatic | When |
 |---|---|---|---|
+| `ipam.move.prepare` | `dhcp.prepare` | Yes: marks the device as moving in Tenko DHCP (the moving client, below) | A `reserved` or `dynamic` host with a MAC address on IPv4, when Tenko holds its lease on the old network or the target has an enabled Tenko scope |
 | `ipam.move.intent` | `ipam.intent` | Yes: the new address as `planned` on the interface; the old one stays | Always |
 | `ipam.move.dhcp` | `dhcp.reservation` | Yes: the reservation in the target scope comes from the planned address; the step waits until the `dhcp` role's image holds it | `reserved` hosts, the target network has an enabled Tenko scope and the interface a MAC address or client identifier |
 | `ipam.move.dhcp` | `dhcp.manual` | No: create the reservation in the target scope, keep the old one | Other `reserved` hosts |
 | `ipam.move.dns` | `dns.records` | Yes: the DNS actuator removes the A or AAAA record and the PTR record of the old address and writes those of the new one, with the origin `ipam` | An address whose DNS name falls under a zone Tenko serves |
 | `ipam.move.dns` | `dns.manual` | No: point the name to the new address, address and reverse records | An address whose DNS name has no zone in Tenko |
 | `ipam.move.device` | `device.manual` | No: reconfigure the device | `static` hosts |
+| `ipam.move.lease` | `dhcp.short_lease` | Completed by the move's clock when the device renewed with the short lease or the renewal did not come (section 5); a person completing it moves the device at once | The prepare step names the device's old lease (not "move now") |
 | `ipam.move.controller` | `l2.controller` | Yes: the L2 change through the network controller | Section 3 found a change the controller can make |
 | `ipam.move.l2` | `l2.move` | No: the exact manual action of section 3.4 | The controller cannot make it |
-| `ipam.move.observe` | `observe` | Completed by the reconciler on a sighting (section 5), or by a person | Always |
-| `ipam.move.cleanup` | `cleanup` | Yes: remove the old address, make the new one active, clear `move-failed`, release the old lease | Always |
+| `ipam.move.observe` | `observe` | Completed by the reconciler on a sighting, by the move's clock on the device's new lease (section 5), or by a person | Always |
+| `ipam.move.cleanup` | `cleanup` | Yes: remove the old address, make the new one active, clear `move-failed`, release the old lease, remove the moving client | Always |
 
-The manual tasks come before the L2 change: a device waits for its ticked tasks before it moves (IPAM-19).
+The manual tasks come before the L2 change: a device waits for its ticked tasks before it moves (IPAM-19). The wait for the short lease comes right before the L2 change, so the device's last renewal on its old network is as close to the change as possible.
+
+**The moving client** (ADR 0027). The prepare step writes the device's row of `dhcp.moving`, keyed by the job: its MAC address, its old lease (VRF and address, unless "move now"), the short lease's time, the target scope and the job's deadline. The `dhcp` role serves the row in its configuration image: while the job is active, the device's next REQUEST for its old address gets at most the short lease (`[dhcp.moves] short_lease_secs`, 120 seconds by default; T1 and T2 derived from it as for any grant), and every DHCP message of its MAC address is noted, so the job sees the device's exchange near the deadline and its reconnection on the target scope. The stored lease row does not change. The row is the job's: the cleanup removes it, the rollback removes it first (section 6), and the leader's lease expiry removes a row whose job ended or that ran past the job's deadline; the role ignores a row past its deadline in any case.
 
 **The DHCP step.** A Tenko reservation is the IPAM host of mode `reserved` ([dhcp.md](dhcp.md) section 12): the intent step's planned address on the interface already gives the reservation in the target scope, while the old address keeps the old one, so both scopes hold a reservation until the cleanup. The step waits until the configuration image the `dhcp` role serves is at the revision of the new address (the revision `GET /nodes/{id}/dhcp` reports), so the device finds its reservation when it moves. It waits at most 60 seconds; then it fails with 503 `ipam.move.dhcp_not_served` and the job rolls back. A server without the role in its process records that the reservation is intent and goes on. Its output (JSON of `MoveDhcpOutput`) keeps both revisions. When the target has no Tenko scope (or the scope is disabled, or the network is IPv6 before Slice 9), or the interface has neither a MAC address nor a client identifier (IPAM-18), the step is the task for a person of Phase 1.
 
@@ -143,11 +150,54 @@ The observation step waits until the device is seen at its new address from its 
 - the network controller's client table, which the UniFi connector reports as `host` facts with the MAC address and the addresses of every connected client at each inventory poll ([connectors-unifi.md](connectors-unifi.md#44-the-facts-this-yields));
 - DHCP leases, when Tenko DHCP serves the target network: the `dhcp` role writes the lease's fact (source `dhcp:<node>`) in the commit of the lease itself, and the fact starts a reconciler run like any new fact, so the step completes a moment after the device takes its lease, without polling. A lease counts at any address of the target network when it comes from the interface's MAC address: a reserved device takes its new address, a dynamic one an address of the pool ([reconciliation.md](reconciliation.md#7-moves)).
 
-A person can confirm the step by hand at any time. The timeout comes from the request (300 to 604,800 seconds). Without one, it is half the longest DHCP lease of the target's pools (the renewal point), never below 300 seconds, and 3,600 seconds when the target has no lease time. With a Tenko scope on the target, a pool's lease is the default time its clients get: the pool's DHCP settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day unless set); a scope without a pool counts its own. It runs from the start of the observation step.
+A person can confirm the step by hand at any time. With Tenko DHCP on the target, the move's clock also confirms it when the device holds a lease of the target scope given after the job started: the prepared address for a `reserved` host, any address of the network for a `dynamic` one.
+
+### 5.1 What a moved device does
+
+A device whose network changed under it keeps its old address. RFC 2131 section 4.4.5 says what it does next. At T1 (half its lease) it unicasts a REQUEST to its server; that REQUEST never leaves it, because it cannot reach its old gateway, and a NAK the server could send would go out on the server's own link or to the old network (`crates/tenko-dhcp/tests/engine_moves.rs` documents it), so T1 is no deadline and a NAK at T1 is no way. Without an answer it sends again after half the time left to T2, at least 60 seconds. At T2 (seven eighths) it broadcasts the REQUEST; the relay of the new network adds its `giaddr`, which selects the target scope, the engine NAKs the address of another network (when the scope is authoritative), and the device DISCOVERs and gets its new address. Then it sends again after half the time left to the end of its lease, and at the end it starts over with a DISCOVER. A device that does not react to the link change therefore comes back at T2 or at the end of its lease.
+
+What shortens the wait, within the RFCs, is a short lease before the move: the job's prepare step marks the device (section 4), its next renewal still reaches Tenko on the old network and gets the short lease, and only then does the job change the network. The device then rebinds within the short lease, two minutes by default.
+
+### 5.2 The two times
+
+Both come from the device's own lease when Tenko serves its old network (the row of `dhcp.leases`: its `cltt` is the start, its `ends` the end; the row keeps no T1 or T2, so they are the RFC defaults of 50 and 87.5 percent), and from the target pools' default lease time otherwise, as before. A pool's lease is the default time its clients get: the pool's DHCP settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day unless set); a scope without a pool counts its own.
+
+- **Next expected DHCP activity**: before T1, T1; after T1 the next retransmission of the schedule of section 5.1 (half the time left to T2, then to the end, at least 60 seconds); at the end, the end. Without the device's lease, half the pools' lease from now.
+- **Migration deadline**, when the job gives up and rolls back, from the start of the observation step: the request's `timeout_secs` (300 to 604,800) when it names one; else the end of the short lease plus `[dhcp.moves] margin_secs` (60) when the preparation succeeded; else the end of the device's lease plus the margin, at most `deadline_limit_secs` (172,800); else the pools' lease plus the margin, at most the limit; else 3,600 seconds. Never below 300 seconds.
+
+The preview estimates both as if the observation started now (with a planned preparation, as if the short lease started now). The job computes the deadline again from the lease table when its observation starts; the step timeout from the submit holds until then.
+
+### 5.3 The wait for the short lease
+
+`ipam.move.lease` is done at once when the device's lease is already short, when the device holds no lease on its old network any more, or when its next renewal is expected later than `[dhcp.moves] prepare_limit_secs` (3,600 seconds; 0 never waits). Otherwise it waits: the move's clock completes it when the lease table shows the renewal with the short lease, or when the renewal did not come by its expected time plus the margin (at most the preparation limit), and the job then changes the network without the short lease. A person completing the task moves the device at once, as "move now" does from the start.
+
+### 5.4 The clock
+
+The leader service `ipam.moves` looks at the waiting move jobs every second. Besides the wait of section 5.3, it handles the observation step of a job that follows the device's DHCP (it has a moving client):
+
+1. **Verified.** The device holds its new lease on the target scope (above): the step is done.
+2. **The deadline.** When the step starts waiting, the clock sets the migration deadline of section 5.2 from the lease table as it is then; the preparation succeeded when the device's lease is the short lease.
+3. **The verification window.** Once the role saw the device's DHCP message on the target scope (its rebinding through the new relay, or its DISCOVER), the deadline becomes that time plus `verify_secs` (90) when that is earlier: the device should hold its new lease within seconds.
+4. **The extension.** When the role saw a DHCP message of the device in the last `extend_window_secs` (15) before the deadline, the deadline moves by `extend_secs` (60), once per job, so the job does not roll back in the middle of the device's exchange.
+
+Every change of the deadline is a transition of the job with a note that says why (`JobEngine::set_manual_deadline`).
+
+### 5.5 Settings
+
+`[dhcp.moves]` of `tenko.toml` (`deploy/tenko.example.toml`); the submit copies them into the job, so a running job keeps the values it was previewed with.
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `short_lease_secs` | 120 | 30 to 3,600 | The lease a device gets at its renewal before the network change |
+| `prepare_limit_secs` | 3,600 | 0 to 86,400 | The longest wait for that renewal |
+| `margin_secs` | 60 | 0 to 3,600 | What the deadline adds to a lease's end |
+| `deadline_limit_secs` | 172,800 | 300 to 604,800 | The longest deadline computed from a lease; a request's timeout is not bounded by it |
+| `extend_window_secs`, `extend_secs` | 15, 60 | 1 to 300, 1 to 3,600 | The extension near the deadline |
+| `verify_secs` | 90 | 10 to 3,600 | The window after the device's exchange on the target is seen |
 
 ## 6 Rollback
 
-The job rolls back when the observation timeout passes, when a step fails, or when the job is cancelled. Steps are undone in reverse:
+The job rolls back when the migration deadline passes, when a step fails, or when the job is cancelled. Before anything is undone, the first compensation removes the moving client (section 4); the compensations of the observation and of the preparation wait until the role's image no longer holds it (at most 60 seconds), so a device that comes back to its old network renews with its normal lease. The restored reservation is served again, and a device already in DISCOVER on its old network gets its old address back by itself. Then the steps are undone in reverse:
 
 - The **controller step** is undone with the undo steps of its receipt: the previous port profile, or the previous per-client override, or none. A person is asked instead, with a manual undo task on the step that the jobs view explains with the previous value, in three cases: the receipt has no undo steps (the port had no profile on record), the undo fails (writes off by now, a guardrail refuses, or the controller changed since the write and Tenko will not overwrite that), or an interrupted attempt may have written without keeping the receipt.
 - The automatic **DNS step** plans again without the move and writes the old address's records back; when that fails the reconciler's next run does it.
@@ -200,3 +250,4 @@ A submit needs `Update` on every named object, `Execute` on jobs and `Execute` o
 - Whether an access point carries a VLAN is inferred from its SSIDs and its uplink port's profile. A controller that places VLANs some other way, for example per-client VLANs from RADIUS, is not modeled.
 - Two addresses of one interface in one move share the first address's L2 step. A rollback of that job puts the device back for both.
 - The parallelism default (4) is a constant of the IPAM service; there is no `tenko.toml` key yet. There is no association between sites and controllers: every enabled controller is read, and a device seen by several of them is left to a person.
+- The clock sees the device's DHCP messages (the extension, the verification window) only from a `dhcp` role in its own process; with the role elsewhere it still sets the deadline from the lease table and confirms on the new lease. The short lease needs Tenko to serve the old network; a device on a network served by another DHCP server moves without it, with the deadline from the target pools' lease.

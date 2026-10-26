@@ -11,7 +11,7 @@ use sha2::{Digest as _, Sha256};
 use tenko_core::{
     AddressId, ObjectKind, ObjectRef, RequestCtx,
     codec::{canonical_sha256, encode_key},
-    dhcp::{DhcpSettings, LeaseTimes, Scope, tables as dhcp_tables},
+    dhcp::{DhcpSettings, Lease, LeaseTimes, MovingLease, Scope, tables as dhcp_tables},
     ipam::{
         Address, AssignmentMode, Host, Interface, Prefix, PrefixRole, Range, RangeRole, Status,
         Tag, Vlan,
@@ -28,7 +28,13 @@ use super::{
     MoveDns, MoveItem, MoveL2, MoveL2Action, MovePreview, MoveRequest, MoveStepPreview, MoveTarget,
     MoveTimeoutSource, codes,
     l2::{self, L2Plans},
+    lease::{self, LeasePlan, is_short},
+    settings::MoveSettings,
     steps::L2StepPlan,
+    timing::{
+        self, DeadlineInputs, LeaseClock, MoveActivitySource, MovePrepare, MoveTiming,
+        migration_deadline,
+    },
 };
 use crate::{
     alloc::first_free,
@@ -83,6 +89,8 @@ impl StepPlan {
 pub(super) struct Computed {
     pub preview: MovePreview,
     pub steps: Vec<Vec<StepPlan>>,
+    /// The DHCP timing plan of each item, which every step of its job carries.
+    pub leases: Vec<Option<LeasePlan>>,
 }
 
 fn invalid(detail: impl Into<String>) -> IpamError {
@@ -167,7 +175,7 @@ pub(super) fn compute(
     let ranges = live_ranges(view, &target)?;
     let scope = tenko_scope(view, &target)?;
     let lease = target_lease(view, &ranges, scope.as_ref())?;
-    let (timeout_secs, timeout_source) = timeout(request.timeout_secs, lease)?;
+    let request_secs = requested_timeout(request.timeout_secs)?;
     let parallelism = request.parallelism.unwrap_or(config.move_parallelism);
     if !(1..=64).contains(&parallelism) {
         return Err(invalid("parallelism must be 1 to 64").param("parallelism", parallelism));
@@ -188,6 +196,15 @@ pub(super) fn compute(
     let mut taken: BTreeSet<u128> = BTreeSet::new();
     let mut items = Vec::with_capacity(candidates.len());
     let mut commands = Vec::with_capacity(candidates.len());
+    let mut leases = Vec::with_capacity(candidates.len());
+    let timing_of = TimingInputs {
+        now: cx.now,
+        settings: &config.moves,
+        move_now: request.move_now,
+        request_secs,
+        pool_secs: lease,
+        target: scope.as_ref().map(|scope| scope.prefix),
+    };
     for (index, candidate) in candidates.iter().enumerate() {
         let (new_ip, reason) = choose(view, &target, &ranges, candidate.address.ip, &taken)?;
         taken.insert(ip_to_u128(new_ip));
@@ -206,6 +223,8 @@ pub(super) fn compute(
             description: candidate.address.meta.description.clone(),
         }));
         let mac = candidate.interface.as_ref().and_then(|i| i.mac);
+        let (plan, timing) = timing_of.item(view, candidate, mac)?;
+        leases.push(plan);
         items.push(MoveItem {
             object: candidate.address.id.into(),
             requested: candidate.requested,
@@ -228,10 +247,17 @@ pub(super) fn compute(
                 add: Vec::new(),
             }),
             l2: MoveL2::default(),
+            timing,
             steps: Vec::new(),
             warnings: Vec::new(),
         });
     }
+    // The move's deadline is the longest of its items' (each has its own in `timing`).
+    let (timeout_secs, timeout_source) = items
+        .iter()
+        .map(|item| (item.timing.deadline_secs, item.timing.deadline_source))
+        .max_by_key(|(secs, _)| *secs)
+        .unwrap_or((DEFAULT_TIMEOUT_SECS, MoveTimeoutSource::Default));
 
     // The new addresses must plan cleanly; their warnings belong to the items.
     let options = PlanOptions::acknowledging(request.acknowledge.iter().cloned());
@@ -263,8 +289,10 @@ pub(super) fn compute(
         },
         timeout_secs,
         timeout_source,
+        move_now: request.move_now,
         parallelism,
         revision: view.revision().0,
+        leases,
         hosts: candidates
             .iter()
             .map(|c| c.host.as_ref().map(|h| ObjectRef::from(h.id)))
@@ -335,14 +363,129 @@ fn dhcp_plan(scope: Option<&Scope>, candidate: &Candidate) -> Option<super::dhcp
     )
 }
 
+/// What the DHCP timing of every item is computed from.
+struct TimingInputs<'a> {
+    now: tenko_core::Timestamp,
+    settings: &'a MoveSettings,
+    move_now: bool,
+    request_secs: Option<u32>,
+    pool_secs: Option<u32>,
+    target: Option<tenko_core::PrefixId>,
+}
+
+impl TimingInputs<'_> {
+    /// The lease plan of a candidate (none when the job does not follow its DHCP) and its
+    /// two times (`docs/moves.md` section 5).
+    fn item(
+        &self,
+        view: &dyn ReadView,
+        candidate: &Candidate,
+        mac: Option<tenko_core::MacAddr>,
+    ) -> IpamResult<(Option<LeasePlan>, MoveTiming)> {
+        let now = self.now;
+        let held: Option<Lease> = match (candidate.address.ip, mac) {
+            (IpAddr::V4(addr), Some(mac)) => view
+                .get_typed(&dhcp_tables::LEASES, &(candidate.address.vrf, addr))?
+                .map(|(lease, _): (Lease, _)| lease)
+                .filter(|lease| lease.is_bound(now) && lease.client.mac() == Some(mac.octets())),
+            _ => None,
+        };
+        let prepare = match (mac, &held) {
+            (None, _) => MovePrepare::NoMac,
+            (Some(_), None) => MovePrepare::NotServed,
+            (Some(_), Some(_)) if self.move_now => MovePrepare::MoveNow,
+            (Some(_), Some(lease)) => {
+                if is_short(lease, self.settings)
+                    || lease::wait_until(lease, now, self.settings).is_some()
+                {
+                    MovePrepare::ShortLease
+                } else {
+                    MovePrepare::Limit
+                }
+            }
+        };
+        let (next_activity, next_activity_source) = match &held {
+            Some(lease) => (
+                LeaseClock::of(lease).next_activity(now),
+                MoveActivitySource::Lease,
+            ),
+            None => match self.pool_secs {
+                Some(secs) => (
+                    Some(timing::plus(now, u64::from(secs / 2))),
+                    MoveActivitySource::Pool,
+                ),
+                None => (None, MoveActivitySource::Unknown),
+            },
+        };
+        let prepared = prepare == MovePrepare::ShortLease;
+        let short = u64::from(self.settings.short_lease_secs);
+        let clock = held.as_ref().map(|lease| {
+            if prepared && !is_short(lease, self.settings) {
+                // The renewal that the job waits for starts the short lease.
+                LeaseClock::new(now, short)
+            } else {
+                LeaseClock::of(lease)
+            }
+        });
+        let inputs = DeadlineInputs {
+            request_secs: self.request_secs,
+            lease: clock,
+            prepared,
+            pool_secs: self.pool_secs,
+        };
+        let (deadline, deadline_source) = migration_deadline(now, &inputs, self.settings);
+        let old = held.as_ref().map(|lease| MovingLease {
+            vrf: lease.vrf,
+            addr: lease.addr,
+        });
+        let shortened = old.filter(|_| !self.move_now);
+        // A client that asks for its address: reserved and dynamic hosts (a static device
+        // sends no DHCP).
+        let asks = matches!(
+            candidate.host.as_ref().map(|host| host.mode),
+            Some(AssignmentMode::Reserved | AssignmentMode::Dynamic)
+        );
+        let plan = match (mac, candidate.address.ip) {
+            (Some(mac), IpAddr::V4(_)) if asks && (held.is_some() || self.target.is_some()) => {
+                Some(LeasePlan {
+                    mac,
+                    lease: old,
+                    shorten: shortened.is_some(),
+                    target: self.target,
+                    reserved: candidate.host.as_ref().map(|host| host.mode)
+                        == Some(AssignmentMode::Reserved),
+                    request_secs: self.request_secs,
+                    pool_secs: self.pool_secs,
+                    settings: *self.settings,
+                })
+            }
+            _ => None,
+        };
+        let timing = MoveTiming {
+            next_activity,
+            next_activity_source,
+            lease_start: held.as_ref().map(|lease| lease.cltt),
+            lease_end: held.as_ref().map(|lease| lease.ends),
+            prepare,
+            short_lease_secs: shortened.map(|_| self.settings.short_lease_secs),
+            deadline_secs: u32::try_from(timing::secs_between(now, deadline)).unwrap_or(u32::MAX),
+            deadline_source,
+        };
+        Ok((plan, timing))
+    }
+}
+
 /// The part of a move computed from the store, before the L2 steps.
 #[derive(Debug, Clone)]
 pub(super) struct Base {
     pub target: MoveTarget,
     pub timeout_secs: u32,
     pub timeout_source: MoveTimeoutSource,
+    pub move_now: bool,
     pub parallelism: u32,
     pub revision: u64,
+    /// The DHCP timing plan of each item.
+    pub leases: Vec<Option<LeasePlan>>,
     /// The items, without their L2 step and steps.
     pub items: Vec<MoveItem>,
     /// The host of each item.
@@ -364,8 +507,10 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
         target,
         timeout_secs,
         timeout_source,
+        move_now,
         parallelism,
         revision,
+        leases,
         mut items,
         hosts,
         dhcp,
@@ -376,7 +521,13 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
         warning.acknowledged = warning.requires_ack && request.acknowledge.contains(&warning.code);
     }
     let mut all_steps = Vec::with_capacity(items.len());
-    for (((item, host_ref), l2), dhcp) in items.iter_mut().zip(&hosts).zip(l2.items).zip(&dhcp) {
+    for ((((item, host_ref), l2), dhcp), lease) in items
+        .iter_mut()
+        .zip(&hosts)
+        .zip(l2.items)
+        .zip(&dhcp)
+        .zip(&leases)
+    {
         item.l2 = l2;
         item.warnings = warnings
             .iter()
@@ -387,7 +538,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
             })
             .cloned()
             .collect();
-        let steps = step_plans(item, &target, timeout_secs, dhcp.as_ref());
+        let steps = step_plans(item, &target, dhcp.as_ref(), lease.as_ref());
         item.steps = steps.iter().map(StepPlan::preview).collect();
         all_steps.push(steps);
     }
@@ -402,6 +553,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
             target,
             timeout_secs,
             timeout_source,
+            move_now,
             parallelism,
             base_revision: revision,
             items,
@@ -411,6 +563,7 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
             fingerprint,
         },
         steps: all_steps,
+        leases,
     })
 }
 
@@ -462,21 +615,17 @@ fn lease_of(range: &Range) -> Option<u32> {
     range.lease_secs
 }
 
-/// The observation timeout and how it was chosen.
-fn timeout(requested: Option<u32>, lease: Option<u32>) -> IpamResult<(u32, MoveTimeoutSource)> {
-    if let Some(secs) = requested {
-        if !(MIN_TIMEOUT_SECS..=MAX_TIMEOUT_SECS).contains(&secs) {
-            return Err(invalid(format!(
-                "timeout_secs must be {MIN_TIMEOUT_SECS} to {MAX_TIMEOUT_SECS}"
-            ))
-            .param("timeout_secs", secs));
-        }
-        return Ok((secs, MoveTimeoutSource::Request));
+/// The request's own migration deadline, checked against its bounds.
+fn requested_timeout(requested: Option<u32>) -> IpamResult<Option<u32>> {
+    if let Some(secs) = requested
+        && !(MIN_TIMEOUT_SECS..=MAX_TIMEOUT_SECS).contains(&secs)
+    {
+        return Err(invalid(format!(
+            "timeout_secs must be {MIN_TIMEOUT_SECS} to {MAX_TIMEOUT_SECS}"
+        ))
+        .param("timeout_secs", secs));
     }
-    Ok(match lease {
-        Some(lease) => ((lease / 2).max(MIN_TIMEOUT_SECS), MoveTimeoutSource::Lease),
-        None => (DEFAULT_TIMEOUT_SECS, MoveTimeoutSource::Default),
-    })
+    Ok(requested)
 }
 
 fn live_ranges(view: &dyn ReadView, prefix: &Prefix) -> IpamResult<Vec<Range>> {
@@ -847,9 +996,10 @@ fn manual(instruction: &'static str, args: &BTreeMap<String, String>) -> ManualT
 pub(super) fn step_plans(
     item: &MoveItem,
     target: &MoveTarget,
-    timeout_secs: u32,
     dhcp: Option<&super::dhcp::DhcpStepPlan>,
+    lease: Option<&LeasePlan>,
 ) -> Vec<StepPlan> {
+    let timeout_secs = item.timing.deadline_secs;
     let mut base = params(&[
         ("prefix", target.prefix.to_string()),
         ("cidr", target.cidr.to_string()),
@@ -875,7 +1025,34 @@ pub(super) fn step_plans(
         .host_name
         .as_ref()
         .map_or_else(|| item.old_ip.to_string(), ToString::to_string);
-    let mut steps = vec![StepPlan {
+    let mut steps = Vec::new();
+    // ADR 0027: the moving client first, so that its next renewal gets the short lease.
+    if let Some(plan) = lease {
+        let text = match plan.lease.filter(|_| plan.shorten) {
+            Some(_) => format!(
+                "Mark {who} ({}) as moving: its next renewal of {} gets a {} s lease, and \
+                 Tenko DHCP follows its messages",
+                plan.mac, item.old_ip, plan.settings.short_lease_secs
+            ),
+            None => format!(
+                "Mark {who} ({}) as moving, so that Tenko DHCP follows its messages",
+                plan.mac
+            ),
+        };
+        steps.push(StepPlan {
+            kind: super::lease::PREPARE_KIND,
+            step_kind: super::lease::PREPARE,
+            automatic: true,
+            text,
+            params: base.clone(),
+            task: None,
+            timeout: None,
+            l2: None,
+            dns: None,
+            dhcp: None,
+        });
+    }
+    steps.push(StepPlan {
         kind: "ipam.intent",
         step_kind: super::steps::INTENT,
         automatic: true,
@@ -894,7 +1071,7 @@ pub(super) fn step_plans(
         l2: None,
         dns: None,
         dhcp: None,
-    }];
+    });
     if item.mode == Some(AssignmentMode::Reserved)
         && let Some(plan) = dhcp
     {
@@ -997,19 +1174,63 @@ pub(super) fn step_plans(
             dhcp: None,
         });
     }
+    // ADR 0027: the wait for the renewal with the short lease, right before the network
+    // change.
+    if let Some(plan) = lease
+        && plan.shorten
+        && plan.lease.is_some()
+    {
+        let mut args = base.clone();
+        args.insert(
+            "short_secs".to_owned(),
+            plan.settings.short_lease_secs.to_string(),
+        );
+        steps.push(StepPlan {
+            kind: super::lease::LEASE_KIND,
+            step_kind: super::lease::LEASE,
+            automatic: false,
+            text: format!(
+                "Wait until {who} renews {} with the {} s lease (at most {} s), then change \
+                 its network; completing this task moves it at once",
+                item.old_ip, plan.settings.short_lease_secs, plan.settings.prepare_limit_secs
+            ),
+            params: args.clone(),
+            task: Some(manual("ipam.move.task.short_lease", &args)),
+            timeout: None,
+            l2: None,
+            dns: None,
+            dhcp: None,
+        });
+    }
     if let Some(step) = l2_step(item, target, &base, &who) {
         steps.push(step);
     }
     let mut observe = base.clone();
     observe.insert("timeout_secs".to_owned(), timeout_secs.to_string());
+    observe.insert(
+        "timeout_source".to_owned(),
+        serde_json::to_value(item.timing.deadline_source)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+    );
     steps.push(StepPlan {
         kind: "observe",
         step_kind: super::steps::OBSERVE,
         automatic: false,
-        text: format!(
-            "Confirm that {who} is seen at {} in {}; the move rolls back after {timeout_secs} s",
-            item.new_ip, target.cidr
-        ),
+        text: if lease.is_some() {
+            format!(
+                "Confirm that {who} is seen at {} in {}; the move rolls back after about \
+                 {timeout_secs} s, computed again from its lease when the observation starts",
+                item.new_ip, target.cidr
+            )
+        } else {
+            format!(
+                "Confirm that {who} is seen at {} in {}; the move rolls back after \
+                 {timeout_secs} s",
+                item.new_ip, target.cidr
+            )
+        },
         params: observe.clone(),
         task: Some(manual("ipam.move.task.observe", &observe)),
         timeout: Some(Duration::from_secs(u64::from(timeout_secs))),
@@ -1098,22 +1319,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timeout_rules() {
-        assert_eq!(
-            timeout(None, None).expect("default"),
-            (DEFAULT_TIMEOUT_SECS, MoveTimeoutSource::Default)
-        );
-        assert_eq!(
-            timeout(None, Some(86_400)).expect("half"),
-            (43_200, MoveTimeoutSource::Lease)
-        );
-        assert_eq!(timeout(None, Some(300)).expect("floor").0, MIN_TIMEOUT_SECS);
-        assert_eq!(
-            timeout(Some(900), Some(86_400)).expect("asked"),
-            (900, MoveTimeoutSource::Request)
-        );
-        assert!(timeout(Some(299), None).is_err());
-        assert!(timeout(Some(MAX_TIMEOUT_SECS + 1), None).is_err());
+    fn a_requested_timeout_is_bounded() {
+        assert_eq!(requested_timeout(None).expect("none"), None);
+        assert_eq!(requested_timeout(Some(900)).expect("asked"), Some(900));
+        assert!(requested_timeout(Some(299)).is_err());
+        assert!(requested_timeout(Some(MAX_TIMEOUT_SECS + 1)).is_err());
     }
 
     #[test]

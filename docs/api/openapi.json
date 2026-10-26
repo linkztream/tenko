@@ -53005,6 +53005,15 @@
           }
         }
       },
+      "MoveActivitySource": {
+        "type": "string",
+        "description": "How the next expected DHCP activity of a client was found.",
+        "enum": [
+          "lease",
+          "pool",
+          "unknown"
+        ]
+      },
       "MoveAttachment": {
         "type": "object",
         "description": "Where the network controller sees a device now.",
@@ -53255,6 +53264,10 @@
             },
             "description": "The steps of the item's job, in order."
           },
+          "timing": {
+            "$ref": "#/components/schemas/MoveTiming",
+            "description": "The two times: the client's next expected DHCP activity and the migration deadline."
+          },
           "warnings": {
             "type": "array",
             "items": {
@@ -53449,6 +53462,17 @@
           "wireless"
         ]
       },
+      "MovePrepare": {
+        "type": "string",
+        "description": "What the job does before it changes the client's network.",
+        "enum": [
+          "short_lease",
+          "limit",
+          "move_now",
+          "not_served",
+          "no_mac"
+        ]
+      },
       "MovePreview": {
         "type": "object",
         "description": "The preview of a move (the dry run).",
@@ -53485,6 +53509,10 @@
             },
             "description": "One item per moved address."
           },
+          "move_now": {
+            "type": "boolean",
+            "description": "Whether the jobs change the network at once (`move_now`)."
+          },
           "parallelism": {
             "type": "integer",
             "format": "int32",
@@ -53498,12 +53526,12 @@
           "timeout_secs": {
             "type": "integer",
             "format": "int32",
-            "description": "The observation timeout in seconds.",
+            "description": "The longest migration deadline of the items, in seconds from the start of their\nobservation (each item's own is in its `timing`).",
             "minimum": 0
           },
           "timeout_source": {
             "$ref": "#/components/schemas/MoveTimeoutSource",
-            "description": "How the timeout was chosen."
+            "description": "How that deadline was chosen."
           },
           "unacknowledged": {
             "type": "array",
@@ -53543,6 +53571,10 @@
             ],
             "description": "The `fingerprint` of the preview the caller confirms: a submit whose plan differs\nanswers 409 `ipam.move.plan_changed` and starts nothing."
           },
+          "move_now": {
+            "type": "boolean",
+            "description": "Change the network at once instead of waiting for the client's next renewal, which\nwould get the short lease first: for a client known to ask for a new lease when its\nlink changes."
+          },
           "objects": {
             "type": "array",
             "items": {
@@ -53569,7 +53601,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "Observation timeout in seconds, 300 to 604,800; half the target's DHCP lease (else\n3,600) when absent.",
+            "description": "The migration deadline in seconds from the start of the observation, 300 to\n604,800; computed from each client's lease when absent (`docs/moves.md` section 5).",
             "minimum": 0
           }
         },
@@ -53723,12 +53755,86 @@
       },
       "MoveTimeoutSource": {
         "type": "string",
-        "description": "How the observation timeout of a move was chosen.",
+        "description": "How the migration deadline of a move was chosen (the observation's timeout,\n[`timing::migration_deadline`]).",
         "enum": [
           "request",
+          "short_lease",
           "lease",
+          "pool",
           "default"
         ]
+      },
+      "MoveTiming": {
+        "type": "object",
+        "description": "The two times of one moved address, as the preview estimates them.",
+        "required": [
+          "next_activity_source",
+          "prepare",
+          "deadline_secs",
+          "deadline_source"
+        ],
+        "properties": {
+          "deadline_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The migration deadline in seconds from the start of the observation, as if it\nstarted now; the job computes it again from the lease when the observation starts.",
+            "minimum": 0
+          },
+          "deadline_source": {
+            "$ref": "#/components/schemas/MoveTimeoutSource",
+            "description": "How the deadline was chosen."
+          },
+          "lease_end": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Its end."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease_start": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "The start of the client's lease on its old network, when Tenko serves it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_activity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the client's next DHCP message is expected."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_activity_source": {
+            "$ref": "#/components/schemas/MoveActivitySource",
+            "description": "How that was found."
+          },
+          "prepare": {
+            "$ref": "#/components/schemas/MovePrepare",
+            "description": "What the job does before the network change."
+          },
+          "short_lease_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The short lease the job asks for, in seconds.",
+            "minimum": 0
+          }
+        }
       },
       "NameAuthorityRule": {
         "type": "object",

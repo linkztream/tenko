@@ -27,6 +27,8 @@ The owner decided on 2026-10-21 (plan section 7): a lease is a row in the replic
 
 Note (E32, 2026-10-26): the memory this decision costs on one node was measured in WP9.5 and reduced without changing the decision. The fixed tables that point 7's allocation-free path needs (the workers' pending commits, the hand-off queue of point 4's `LeaseStore`, the offer slots, the conflict probe's tables) are sized from the configuration image, a slot per address it can lease with a floor of 256 and the configured sizes as caps, and grow when a new image is applied, off the DORA path; point 5's lease table keeps a compact row (the fields the DORA path reads inline, the rest in one boxed byte string) instead of the store's row. The rows in the store, the wire format and the commit before the answer are unchanged ([dhcp.md](../dhcp.md) section 10.8, `bench/phase3-dhcp/results/2026-10-26-e32-after-memory.md`).
 
+Note (moves, 2026-10-26): the clients of move jobs, whose next renewal gets a short lease before the move changes their network, are a table of their own, `dhcp.moving`, served in point 5's configuration image; the lease row and its format are unchanged ([ADR 0027](0027-moving-clients-and-the-short-lease.md), Proposed).
+
 ## Refinements from the contracts (WP7.0)
 
 The contracts package wrote the decision into code and settled what it left open (`docs/dhcp-contracts.md`, section 14, has the full list); the status stays Proposed until the owner accepts the plan.

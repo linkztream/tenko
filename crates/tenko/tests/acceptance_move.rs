@@ -24,10 +24,11 @@
 //! - E25 (Phase 3, WP8.1): the five-device lab with the `dhcp` role serving both networks
 //!   in relay mode on loopback (the test is the relay agent and selects the scope with
 //!   option 118). The reserved devices get their reservations from intent; the preview
-//!   shows the DHCP step automatic (`dhcp.reservation`) with the timeout from the scope's
-//!   lease time; while the move waits for the L2 change both scopes offer the device its
-//!   reservation; the lease the device then takes in the target network confirms the
-//!   observation step without anyone ticking it, and the cleanup releases the old lease
+//!   shows the DHCP step automatic (`dhcp.reservation`), the moving client marked first
+//!   (`dhcp.prepare`) and the deadline from the device's own lease (ADR 0027); while the
+//!   move waits for the L2 change both scopes offer the device its reservation; the lease
+//!   the device then takes in the target network confirms the observation step without
+//!   anyone ticking it, and the cleanup releases the old lease
 //!   while the old reservation goes with the old address. The dynamic device's pool lease
 //!   confirms its move, the static device stops at its manual step, and a cancel of a
 //!   waiting move restores both reservations (the new one removed, the old one kept). A
@@ -1040,7 +1041,10 @@ fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_
     assert!(lab.facts_counted("unchanged") > unchanged);
 
     // The preview of the printer and cam2: the DHCP step automatic for both, the DNS step
-    // automatic for the printer, the timeout half the scope's lease (one day by default).
+    // automatic for the printer. Both hold their lease of a day in the source scope, whose
+    // next renewal (T1, twelve hours away) is later than the preparation limit of an hour:
+    // no wait for the short lease, and the deadline is the end of that lease plus the
+    // margin (docs/moves.md section 5).
     let preview = lab
         .api()
         .post(
@@ -1055,25 +1059,41 @@ fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_
         )
         .expect(200);
     assert_eq!(preview["timeout_source"], "lease", "{preview}");
-    assert_eq!(preview["timeout_secs"], 43_200, "{preview}");
+    let longest = preview["timeout_secs"].as_u64().expect("secs");
+    assert!((86_000..=86_460).contains(&longest), "{preview}");
+    assert_eq!(
+        preview["items"][0]["timing"]["prepare"], "limit",
+        "{preview}"
+    );
+    assert_eq!(
+        preview["items"][0]["timing"]["next_activity_source"], "lease",
+        "{preview}"
+    );
     let printer = &preview["items"][0];
     assert_eq!(
         step_kinds(printer),
         [
+            "dhcp.prepare",
             "ipam.intent",
             "dhcp.reservation",
             "dns.records",
+            "dhcp.short_lease",
             "l2.move",
             "observe",
             "cleanup"
         ]
     );
-    assert_eq!(automatic(printer), [true, true, true, false, false, true]);
+    assert_eq!(
+        automatic(printer),
+        [true, true, true, true, false, false, false, true]
+    );
     assert_eq!(
         step_kinds(&preview["items"][1]),
         [
+            "dhcp.prepare",
             "ipam.intent",
             "dhcp.reservation",
+            "dhcp.short_lease",
             "l2.move",
             "observe",
             "cleanup"

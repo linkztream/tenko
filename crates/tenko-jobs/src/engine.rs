@@ -746,6 +746,74 @@ impl JobEngine {
         .map(|_| ())
     }
 
+    /// Sets the deadline of a step that waits for a person: past it the job rolls back with
+    /// `jobs.step.deadline_passed`, as past a step timeout. It replaces the step timeout
+    /// (earlier or later), is capped by the job's own deadline, and is recorded in the
+    /// transition log with `note`. A move job's clock sets the observation deadline it
+    /// computes when the step starts and moves it (IPAM-19, `tenko_ipam::moves`). Setting
+    /// the deadline the step has already writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JobError::NotFound`], `jobs.step.not_found` (404) for an index outside the
+    /// job, `jobs.note.too_long` (400), [`JobError::InvalidTransition`] when the step is
+    /// not waiting for a person, or a store error.
+    pub async fn set_manual_deadline(
+        &self,
+        id: JobId,
+        step: u16,
+        deadline: Timestamp,
+        note: Option<String>,
+        cx: &RequestCtx,
+    ) -> Result<(), JobError> {
+        if note
+            .as_ref()
+            .is_some_and(|note| note.len() > MAX_NOTE_BYTES)
+        {
+            return Err(invalid(
+                "jobs.note.too_long",
+                400,
+                format!("a note has at most {MAX_NOTE_BYTES} bytes"),
+            ));
+        }
+        self.change_job(id, &self.author(cx), |machine| {
+            let Some(record) = machine.job.steps.get(usize::from(step)) else {
+                return Err(JobError::Step(StepError::Coded(Box::new(
+                    CodedError::new(
+                        "jobs.step.not_found",
+                        404,
+                        format!("job {id} has no step {step}"),
+                    )
+                    .with_param("job", id.to_string())
+                    .with_param("step", step.to_string()),
+                ))));
+            };
+            match &record.state {
+                StepState::WaitingForManual {
+                    deadline: Some(current),
+                    ..
+                } if *current == deadline => return Ok(false),
+                StepState::WaitingForManual { .. } => {}
+                _ => {
+                    return Err(JobError::InvalidTransition {
+                        from: machine.job.state,
+                        action: "set_manual_deadline",
+                    });
+                }
+            }
+            if !machine.apply(&ResultOp::Deadline { step, deadline }) {
+                return Err(JobError::InvalidTransition {
+                    from: machine.job.state,
+                    action: "set_manual_deadline",
+                });
+            }
+            machine.note_step(step, note.clone());
+            Ok(true)
+        })
+        .await
+        .map(|_| ())
+    }
+
     /// Wakes the steps an observation satisfies (`AddressSeen`, `LeaseInPrefix`): the step
     /// is done with the observation id as output and the job continues. Observations older
     /// than the waiting step (minus `observation_skew`) do not count. Failures are logged;

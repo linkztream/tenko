@@ -117,6 +117,11 @@ const SUMMARY_ARGS: Readonly<Record<string, readonly string[]>> = {
   // The steps of a move job as the server sends them: automatic steps by summary, manual steps by task.
   "ipam.move.step.intent": ["old_ip", "new_ip"],
   "ipam.move.step.cleanup": ["old_ip", "new_ip"],
+  // The DHCP preparation (WP: moves and the lease): the client is marked as moving, then the job
+  // waits for the renewal with the short lease. `next_activity` is an RFC 3339 time (see `messageValues`).
+  "ipam.move.step.prepare": ["old_ip", "new_ip", "cidr"],
+  "ipam.move.step.short_lease": ["old_ip", "new_ip", "cidr"],
+  "ipam.move.task.short_lease": ["old_ip", "new_ip", "cidr", "mac", "short_secs", "next_activity"],
   "ipam.move.task.dhcp": ["new_ip", "cidr"],
   "ipam.move.task.dns": ["name", "new_ip"],
   "ipam.move.task.device": ["new_ip", "cidr"],
@@ -161,6 +166,26 @@ export function stepName(kind: string): string {
   return tDynamic(`jobs.stepname.${snake(kind)}`) ?? kind;
 }
 
+/** The arguments the server sends as RFC 3339 times; the messages format them as dates and times. */
+const TIME_ARGS: readonly string[] = ["next_activity"];
+
+/**
+ * The values of a message: the arguments as sent, with the times as dates. A time that does not
+ * parse is left out, so the message counts as lacking it and the step kind stands in.
+ */
+function messageValues(args: Readonly<Record<string, string>> | undefined): Record<string, string | Date> | undefined {
+  if (!args) return undefined;
+  const out: Record<string, string | Date> = { ...args };
+  for (const name of TIME_ARGS) {
+    const value = args[name];
+    if (value === undefined) continue;
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) delete out[name];
+    else out[name] = at;
+  }
+  return out;
+}
+
 /** Formats a summary key when the step carries its arguments, else names the step kind. */
 function summaryFor(
   key: string,
@@ -169,8 +194,9 @@ function summaryFor(
   last: string,
 ): string {
   const needed = SUMMARY_ARGS[key] ?? [];
-  if (needed.every((name) => args?.[name] !== undefined)) {
-    const text = tDynamic(key, args);
+  const values = messageValues(args);
+  if (needed.every((name) => values?.[name] !== undefined)) {
+    const text = tDynamic(key, values);
     if (text !== undefined) return text;
   }
   return tDynamic(`jobs.stepname.${snake(kind)}`) ?? last;
@@ -201,7 +227,7 @@ export function taskText(task: ManualTask, undo = false): string {
   if (key === "jobs.undo.step" && task.args?.kind && task.args.step !== undefined) {
     return t("jobs.undo.step_named", { step: task.args.step, name: stepName(task.args.kind) });
   }
-  return tDynamic(key, task.args) ?? key;
+  return tDynamic(key, messageValues(task.args)) ?? key;
 }
 
 // ---------------------------------------------------------------------------------

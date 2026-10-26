@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type { MoveItem, MoveL2, MovePreview, MoveStepPreview } from "../../api/moves";
-import { l2DiffText, l2Headline, l2NoteText, l2ReasonText, l2SsidsText, l2TaskKey, l2TaskText, problemText, stepText } from "./moveText";
+import {
+  activitySourceText,
+  deadlineSourceText,
+  groupTitle,
+  l2DiffText,
+  l2Headline,
+  l2NoteText,
+  l2ReasonText,
+  l2SsidsText,
+  l2TaskKey,
+  l2TaskText,
+  leaseSpanText,
+  prepareText,
+  problemText,
+  stepText,
+  STEP_ORDER,
+  timeoutText,
+  whenText,
+} from "./moveText";
 
 const preview = {
   target: { prefix: "p", cidr: "198.51.100.0/24", vrf: "v", vlan: "l", vid: 30, lease_secs: null },
@@ -166,5 +184,66 @@ describe("the words of the network column", () => {
     );
     expect(l2SsidsText({ action: "manual", ssids: [] }, preview)).toBeUndefined();
     expect(l2SsidsText({ action: "manual", reason: "ipam.move.l2.join_ssid", ssids: ["a.example.test"] }, preview)).toBeUndefined();
+  });
+});
+
+describe("the two times and the preparation", () => {
+  it("says how the longest deadline was chosen", () => {
+    expect(timeoutText("request", 1800, null)).toBe("Timeout 30 min, as chosen.");
+    expect(timeoutText("short_lease", 300, null)).toBe("The longest deadline is 5 min: the short lease plus a margin, never below 5 min.");
+    expect(timeoutText("lease", 3660, null)).toBe("The longest deadline is 61 min: the end of the client's lease plus a margin.");
+    // The pool's lease is the target's: the words name it when it is known.
+    expect(timeoutText("pool", 3660, 3600)).toBe("Pool lease 1 hr, so the longest deadline is 61 min: the lease plus a margin.");
+    expect(timeoutText("pool", 3660, null)).toBe("The longest deadline is 61 min: the pool's lease time plus a margin.");
+    expect(timeoutText("default", 3600, null)).toBe("No DHCP lease is known for the target network, so the timeout is 1 hr.");
+  });
+
+  it("labels the source of each time", () => {
+    expect(activitySourceText("lease")).toBe("from the lease");
+    expect(activitySourceText("pool")).toBe("from the pool's lease time");
+    expect(activitySourceText("unknown")).toBe("unknown");
+    expect(deadlineSourceText("request")).toBe("as chosen");
+    expect(deadlineSourceText("short_lease")).toBe("short lease");
+    expect(deadlineSourceText("lease")).toBe("the client's lease");
+    expect(deadlineSourceText("pool")).toBe("the pool's lease time");
+    expect(deadlineSourceText("default")).toBe("default");
+  });
+
+  it("writes a time relative and absolute, and the lease of the old network", () => {
+    const at = new Date(Date.now() + 12 * 60_000).toISOString();
+    expect(whenText(at)).toMatch(/^in 1[12] minutes, .+/);
+    expect(leaseSpanText("2026-10-26T09:00:00Z", "2026-10-26T10:00:00Z")).toMatch(/^Lease on the old network: .+2026.+ to .+2026.+/);
+  });
+
+  it("says what the job does before the network change", () => {
+    expect(prepareText({ prepare: "short_lease", short_lease_secs: 120 })).toBe("Waits for the next renewal, which gets a short lease of 2 min.");
+    expect(prepareText({ prepare: "short_lease", short_lease_secs: 45 })).toBe("Waits for the next renewal, which gets a short lease of 45 sec.");
+    expect(prepareText({ prepare: "short_lease" })).toBe("Waits for the next renewal, which gets a short lease.");
+    expect(prepareText({ prepare: "limit", short_lease_secs: 120 })).toBe("The renewal is expected after the preparation limit: the network changes at once.");
+    expect(prepareText({ prepare: "move_now" })).toBe("Moves at once, as chosen.");
+    expect(prepareText({ prepare: "not_served" })).toBe("Not served by Tenko DHCP: nothing to wait for.");
+    expect(prepareText({ prepare: "no_mac" })).toBe("No MAC address: nothing to prepare in DHCP.");
+  });
+
+  it("words the two steps of the preparation and groups the manual one before the network change", () => {
+    const timing = {
+      next_activity_source: "lease" as const,
+      prepare: "short_lease" as const,
+      short_lease_secs: 120,
+      deadline_secs: 300,
+      deadline_source: "short_lease" as const,
+    };
+    const device = item(undefined, { timing });
+    expect(stepText(step("dhcp.prepare", {}, true), device, preview)).toBe(
+      "Mark cam-door as moving in Tenko DHCP; its next renewal gets a short lease of 2 min.",
+    );
+    expect(stepText(step("dhcp.prepare", {}, true), item(undefined, { timing: { ...timing, prepare: "move_now", short_lease_secs: null } }), preview)).toBe(
+      "Mark cam-door as moving in Tenko DHCP, so its DHCP messages are followed during the move.",
+    );
+    expect(stepText(step("dhcp.short_lease"), device, preview)).toBe(
+      "Wait until cam-door renews 192.0.2.43 with the short lease of 2 min; then its network changes. Marking this step done changes it at once.",
+    );
+    expect(STEP_ORDER.indexOf("dhcp.short_lease")).toBe(STEP_ORDER.indexOf("l2.move") - 1);
+    expect(groupTitle("dhcp.short_lease", 2)).toBe("Wait for the short lease (2)");
   });
 });

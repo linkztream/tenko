@@ -191,6 +191,7 @@ impl Moving {
             objects: vec![host.into()],
             target: self.target,
             timeout_secs: None,
+            move_now: false,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,
@@ -320,17 +321,21 @@ async fn a_tenko_scope_makes_the_dhcp_step_automatic_and_sets_the_timeout() {
         .move_preview(&request, &person(), None)
         .await
         .expect("preview");
-    // The pool has no lease time of its own: the scope's two hours, half of it.
+    // The pool has no lease time of its own: the scope's two hours. Tenko does not serve
+    // the old network, so the deadline is that lease plus the margin (docs/moves.md
+    // section 5).
     assert_eq!(preview.target.lease_secs, Some(7_200));
-    assert_eq!(preview.timeout_secs, 3_600);
+    assert_eq!(preview.timeout_secs, 7_260);
     assert_eq!(
         preview.timeout_source,
-        tenko_ipam::moves::MoveTimeoutSource::Lease
+        tenko_ipam::moves::MoveTimeoutSource::Pool
     );
     let printer_item = &preview.items[0];
+    // The target is Tenko's: the job follows the client's DHCP from its first step.
     assert_eq!(
         kinds(printer_item),
         [
+            "dhcp.prepare",
             "ipam.intent",
             "dhcp.reservation",
             "l2.move",
@@ -338,8 +343,8 @@ async fn a_tenko_scope_makes_the_dhcp_step_automatic_and_sets_the_timeout() {
             "cleanup"
         ]
     );
-    assert!(printer_item.steps[1].automatic);
-    assert!(printer_item.steps[1].text.contains("198.51.100.15"));
+    assert!(printer_item.steps[2].automatic);
+    assert!(printer_item.steps[2].text.contains("198.51.100.15"));
     // No MAC address and no client identifier: no reservation can exist (IPAM-18).
     assert_eq!(
         kinds(&preview.items[1]),

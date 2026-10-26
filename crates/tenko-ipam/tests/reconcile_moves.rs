@@ -81,6 +81,7 @@ impl Moving {
             objects: vec![host.into()],
             target: self.target,
             timeout_secs: None,
+            move_now: false,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,

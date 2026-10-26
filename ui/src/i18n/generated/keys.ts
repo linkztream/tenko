@@ -4468,6 +4468,8 @@ export type MessageKey =
   | "ipam.move.step.controller_port"
   | "ipam.move.step.dhcp"
   | "ipam.move.step.intent"
+  | "ipam.move.step.prepare"
+  | "ipam.move.step.short_lease"
   | "ipam.move.task.device"
   | "ipam.move.task.dhcp"
   | "ipam.move.task.dns"
@@ -4482,6 +4484,7 @@ export type MessageKey =
   | "ipam.move.task.l2_ssid"
   | "ipam.move.task.l2_vlan"
   | "ipam.move.task.observe"
+  | "ipam.move.task.short_lease"
   | "ipam.move.title"
   | "ipam.nav.addresses"
   | "ipam.nav.custom_fields"
@@ -4960,7 +4963,9 @@ export type MessageKey =
   | "jobs.stepname.ipam_move_dns"
   | "jobs.stepname.ipam_move_intent"
   | "jobs.stepname.ipam_move_l2"
+  | "jobs.stepname.ipam_move_lease"
   | "jobs.stepname.ipam_move_observe"
+  | "jobs.stepname.ipam_move_prepare"
   | "jobs.stepname.ipam_vlan_activate"
   | "jobs.stepname.ipam_vlan_controller"
   | "jobs.stepname.ipam_vlan_intent"
@@ -5172,11 +5177,14 @@ export type MessageKey =
   | "move.col.ip"
   | "move.col.l2"
   | "move.col.manual"
+  | "move.col.timing"
   | "move.confirm"
   | "move.devices"
   | "move.group.cleanup"
   | "move.group.device_manual"
   | "move.group.dhcp_manual"
+  | "move.group.dhcp_prepare"
+  | "move.group.dhcp_short_lease"
   | "move.group.dns_manual"
   | "move.group.ipam_intent"
   | "move.group.l2_move"
@@ -5225,6 +5233,9 @@ export type MessageKey =
   | "move.legend.auto"
   | "move.legend.manual"
   | "move.nothing"
+  | "move.now"
+  | "move.now_help"
+  | "move.now_label"
   | "move.open_jobs"
   | "move.other_host_part"
   | "move.parallelism"
@@ -5245,6 +5256,9 @@ export type MessageKey =
   | "move.step.device_manual"
   | "move.step.dhcp_manual"
   | "move.step.dhcp_manual_no_mac"
+  | "move.step.dhcp_prepare"
+  | "move.step.dhcp_prepare_short"
+  | "move.step.dhcp_short_lease"
   | "move.step.dns_manual"
   | "move.step.ipam_intent"
   | "move.step.l2_controller"
@@ -5257,8 +5271,30 @@ export type MessageKey =
   | "move.timeout"
   | "move.timeout.default"
   | "move.timeout.lease"
+  | "move.timeout.pool"
+  | "move.timeout.pool_any"
   | "move.timeout.request"
+  | "move.timeout.short_lease"
   | "move.timeout_auto"
+  | "move.timing.deadline"
+  | "move.timing.deadline_source.default"
+  | "move.timing.deadline_source.lease"
+  | "move.timing.deadline_source.pool"
+  | "move.timing.deadline_source.request"
+  | "move.timing.deadline_source.short_lease"
+  | "move.timing.lease"
+  | "move.timing.next"
+  | "move.timing.next_unknown"
+  | "move.timing.prepare.limit"
+  | "move.timing.prepare.move_now"
+  | "move.timing.prepare.no_mac"
+  | "move.timing.prepare.not_served"
+  | "move.timing.prepare.short_lease"
+  | "move.timing.prepare.short_lease_any"
+  | "move.timing.source.lease"
+  | "move.timing.source.pool"
+  | "move.timing.source.unknown"
+  | "move.timing.when"
   | "move.title"
   | "node.role.controller"
   | "node.role.dhcp"
@@ -7970,6 +8006,8 @@ export interface MessageArgs {
   "ipam.move.step.controller_port": { after: string | number; connector: string | number; device: string | number; port: string | number };
   "ipam.move.step.dhcp": { cidr: string | number; new_ip: string | number };
   "ipam.move.step.intent": { new_ip: string | number; old_ip: string | number };
+  "ipam.move.step.prepare": { cidr: string | number; new_ip: string | number; old_ip: string | number };
+  "ipam.move.step.short_lease": { cidr: string | number; new_ip: string | number; old_ip: string | number };
   "ipam.move.task.device": { cidr: string | number; new_ip: string | number };
   "ipam.move.task.dhcp": { cidr: string | number; new_ip: string | number };
   "ipam.move.task.dns": { name: string | number; new_ip: string | number };
@@ -7984,6 +8022,7 @@ export interface MessageArgs {
   "ipam.move.task.l2_ssid": { device: string | number; ssid: string | number; vid: string | number };
   "ipam.move.task.l2_vlan": { vid: string | number };
   "ipam.move.task.observe": { cidr: string | number; new_ip: string | number; timeout_secs: string | number };
+  "ipam.move.task.short_lease": { cidr: string | number; mac: string | number; new_ip: string | number; next_activity: Date | number; old_ip: string | number; short_secs: number };
   "ipam.next_free.address": { ip: string | number };
   "ipam.next_free.address_title": { cidr: string | number };
   "ipam.next_free.create": { cidr: string | number };
@@ -8148,6 +8187,8 @@ export interface MessageArgs {
   "move.group.cleanup": { count: number };
   "move.group.device_manual": { count: number };
   "move.group.dhcp_manual": { count: number };
+  "move.group.dhcp_prepare": { count: number };
+  "move.group.dhcp_short_lease": { count: number };
   "move.group.dns_manual": { count: number };
   "move.group.ipam_intent": { count: number };
   "move.group.l2_move": { count: number };
@@ -8184,6 +8225,9 @@ export interface MessageArgs {
   "move.step.device_manual": { host: string | number; ip: string | number; length: string | number };
   "move.step.dhcp_manual": { cidr: string | number; ip: string | number; mac: string | number };
   "move.step.dhcp_manual_no_mac": { cidr: string | number; host: string | number; ip: string | number };
+  "move.step.dhcp_prepare": { host: string | number };
+  "move.step.dhcp_prepare_short": { duration: string | number; host: string | number };
+  "move.step.dhcp_short_lease": { duration: string | number; host: string | number; ip: string | number };
   "move.step.dns_manual": { ip: string | number; name: string | number };
   "move.step.ipam_intent": { new_ip: string | number; old_ip: string | number };
   "move.step.l2_controller": { connector: string | number; host: string | number; vid: string | number };
@@ -8192,9 +8236,15 @@ export interface MessageArgs {
   "move.step.observe": { host: string | number; ip: string | number };
   "move.tasks": { count: number };
   "move.timeout.default": { timeout: string | number };
-  "move.timeout.lease": { lease: string | number; timeout: string | number };
+  "move.timeout.lease": { timeout: string | number };
+  "move.timeout.pool": { lease: string | number; timeout: string | number };
+  "move.timeout.pool_any": { timeout: string | number };
   "move.timeout.request": { timeout: string | number };
+  "move.timeout.short_lease": { timeout: string | number };
   "move.timeout_auto": { timeout: string | number };
+  "move.timing.lease": { end: string | number; start: string | number };
+  "move.timing.prepare.short_lease": { duration: string | number };
+  "move.timing.when": { absolute: string | number; relative: string | number };
   "nodes.cert.days_left": { days: number };
   "nodes.col.major": { major: string | number };
   "nodes.enrol.next": { roles: string | number };
@@ -12961,6 +13011,8 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.move.step.controller_port",
   "ipam.move.step.dhcp",
   "ipam.move.step.intent",
+  "ipam.move.step.prepare",
+  "ipam.move.step.short_lease",
   "ipam.move.task.device",
   "ipam.move.task.dhcp",
   "ipam.move.task.dns",
@@ -12975,6 +13027,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.move.task.l2_ssid",
   "ipam.move.task.l2_vlan",
   "ipam.move.task.observe",
+  "ipam.move.task.short_lease",
   "ipam.move.title",
   "ipam.nav.addresses",
   "ipam.nav.custom_fields",
@@ -13453,7 +13506,9 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.ipam_move_dns",
   "jobs.stepname.ipam_move_intent",
   "jobs.stepname.ipam_move_l2",
+  "jobs.stepname.ipam_move_lease",
   "jobs.stepname.ipam_move_observe",
+  "jobs.stepname.ipam_move_prepare",
   "jobs.stepname.ipam_vlan_activate",
   "jobs.stepname.ipam_vlan_controller",
   "jobs.stepname.ipam_vlan_intent",
@@ -13665,11 +13720,14 @@ export const messageKeys: readonly MessageKey[] = [
   "move.col.ip",
   "move.col.l2",
   "move.col.manual",
+  "move.col.timing",
   "move.confirm",
   "move.devices",
   "move.group.cleanup",
   "move.group.device_manual",
   "move.group.dhcp_manual",
+  "move.group.dhcp_prepare",
+  "move.group.dhcp_short_lease",
   "move.group.dns_manual",
   "move.group.ipam_intent",
   "move.group.l2_move",
@@ -13718,6 +13776,9 @@ export const messageKeys: readonly MessageKey[] = [
   "move.legend.auto",
   "move.legend.manual",
   "move.nothing",
+  "move.now",
+  "move.now_help",
+  "move.now_label",
   "move.open_jobs",
   "move.other_host_part",
   "move.parallelism",
@@ -13738,6 +13799,9 @@ export const messageKeys: readonly MessageKey[] = [
   "move.step.device_manual",
   "move.step.dhcp_manual",
   "move.step.dhcp_manual_no_mac",
+  "move.step.dhcp_prepare",
+  "move.step.dhcp_prepare_short",
+  "move.step.dhcp_short_lease",
   "move.step.dns_manual",
   "move.step.ipam_intent",
   "move.step.l2_controller",
@@ -13750,8 +13814,30 @@ export const messageKeys: readonly MessageKey[] = [
   "move.timeout",
   "move.timeout.default",
   "move.timeout.lease",
+  "move.timeout.pool",
+  "move.timeout.pool_any",
   "move.timeout.request",
+  "move.timeout.short_lease",
   "move.timeout_auto",
+  "move.timing.deadline",
+  "move.timing.deadline_source.default",
+  "move.timing.deadline_source.lease",
+  "move.timing.deadline_source.pool",
+  "move.timing.deadline_source.request",
+  "move.timing.deadline_source.short_lease",
+  "move.timing.lease",
+  "move.timing.next",
+  "move.timing.next_unknown",
+  "move.timing.prepare.limit",
+  "move.timing.prepare.move_now",
+  "move.timing.prepare.no_mac",
+  "move.timing.prepare.not_served",
+  "move.timing.prepare.short_lease",
+  "move.timing.prepare.short_lease_any",
+  "move.timing.source.lease",
+  "move.timing.source.pool",
+  "move.timing.source.unknown",
+  "move.timing.when",
   "move.title",
   "node.role.controller",
   "node.role.dhcp",

@@ -25,6 +25,9 @@
 //!   REBINDING gets an ACK after the commit or a NAK; DECLINE and RELEASE commit and get no
 //!   reply; INFORM gets an ACK without lease times. The NAK rules are in [`handle`]'s
 //!   request path.
+//! - **Moves** (ADR 0027, [`crate::moving`]): a client a move job moves gets at most the
+//!   job's short lease for its old address (T1 and T2 derived from it as for any grant),
+//!   and its messages are noted for the job.
 //! - **The reply** ([`assemble`]): option 53, 54, the lease times, the subnet mask, the
 //!   options the client asked for in the order of its option 55, the options the server
 //!   always sends, option 61, option 81 and last option 82 unchanged (RFC 3046), within the
@@ -358,6 +361,8 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     let Some((scope, selector)) = select::select(ctx.image, &message, kind, relay, received) else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
+    // ADR 0027: the activity of a client a move job is moving (two relaxed stores).
+    note_moving(ctx, &message, scope);
     // WP8.4: a reservation by client identity or by hardware address.
     let reserved = ctx
         .image
@@ -442,6 +447,31 @@ fn times_of<'a>(
     (decision.lease().copied().unwrap_or(times), pool)
 }
 
+/// Notes a message of a client a move job moves, on `scope` (ADR 0027); nothing without
+/// moving clients.
+fn note_moving(ctx: &Context<'_>, message: &Message<'_>, scope: &ScopeImage) {
+    if !ctx.image.moving().is_empty()
+        && let Ok(mac) = message.mac()
+    {
+        ctx.image.moving().note(&mac, scope.prefix, ctx.now);
+    }
+}
+
+/// The time to grant `addr` of `vrf` to the client of `message`: `granted`, or the short
+/// lease of a move job that moves the client (ADR 0027) when that is shorter.
+fn shortened(
+    ctx: &Context<'_>,
+    vrf: VrfId,
+    addr: Ipv4Addr,
+    message: &Message<'_>,
+    granted: u32,
+) -> u32 {
+    ctx.image
+        .moving()
+        .short_lease(vrf, addr, message.mac().ok(), ctx.now)
+        .map_or(granted, |short| granted.min(short))
+}
+
 fn later(now: Timestamp, secs: u32) -> Timestamp {
     now.checked_add(Duration::from_secs(u64::from(secs)))
         .unwrap_or(now)
@@ -519,6 +549,8 @@ fn discover(
         }
         let (times, pool) = times_of(home, addr, client.decision);
         let granted = grant_time(&times, client.message.lease_time().ok().flatten(), None);
+        // ADR 0027: the short lease of a moving client.
+        let granted = shortened(ctx, home.vrf, addr, client.message, granted);
         let host = host_options(ctx, client, home, choice);
         let lease = Some(assemble::LeaseGrant {
             granted,
@@ -679,6 +711,9 @@ fn request(
         return refuse(scratch, b"the address is not available");
     }
     let granted = grant_time(&times, message.lease_time().ok().flatten(), None);
+    // ADR 0027: a client a move job is moving renews with the short lease, so that it
+    // comes back soon after the move changes its network.
+    let granted = shortened(ctx, home.vrf, target, message, granted);
     let kind = match (bound.is_some(), state) {
         (true, State::Rebinding) => LeaseEventKind::Rebound,
         (true, _) => LeaseEventKind::Renewed,

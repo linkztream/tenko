@@ -13,6 +13,10 @@
 //! Expiry does not decide whether an address is free: the allocator already treats a
 //! binding past its end as free (`Lease::blocks`). The state change makes the row say so,
 //! puts the event in the history and lets DDNS (WP8.3) remove the client's records.
+//!
+//! The same round removes the rows of `dhcp.moving` (ADR 0027) whose move job ended
+//! without removing its row (a job that failed), or that ran past their `until`; the role
+//! already ignores a row past its `until`.
 
 use std::{sync::Arc, time::Duration};
 
@@ -56,6 +60,8 @@ pub struct ExpiryRound {
     pub expired: usize,
     /// Batches that failed on a row that changed meanwhile (tried again next round).
     pub raced: usize,
+    /// Rows of `dhcp.moving` removed because their job ended or they ran out (ADR 0027).
+    pub moving: usize,
 }
 
 /// The expiry leader service (`dhcp.expiry`).
@@ -148,6 +154,38 @@ impl ExpiryService {
         Ok(due)
     }
 
+    // ADR 0027: the rows of move jobs that ended without removing them.
+    /// Removes the rows of `dhcp.moving` whose job ended or is gone, or that ran past their
+    /// `until` (`tenko_ipam::moves::lease::is_stale`), each with its version and the fence.
+    async fn prune_moving(
+        &self,
+        view: &dyn ReadView,
+        epoch: u64,
+        now: Timestamp,
+    ) -> Result<usize, StoreError> {
+        let mut removed = 0;
+        for (job, row, revision) in
+            view.scan_typed(&tables::MOVING, KeyRange::all(), usize::MAX, false)?
+        {
+            if !tenko_ipam::moves::lease::is_stale(view, &row, now)? {
+                continue;
+            }
+            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+            batch.preconditions.push(fence(epoch));
+            batch.expect_typed(&tables::MOVING, &job, Some(revision));
+            batch.delete_typed(&tables::MOVING, &job);
+            match self.store.propose(batch).await {
+                Ok(_) => removed += 1,
+                Err(StoreError::PreconditionFailed(failures))
+                    if failures
+                        .iter()
+                        .all(|failure| matches!(failure, FailedPrecondition::Version { .. })) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(removed)
+    }
+
     /// One round at `now` under the leader `epoch`.
     ///
     /// # Errors
@@ -162,6 +200,7 @@ impl ExpiryService {
         let keys = self.due(view.as_ref(), now)?;
         let mut round = ExpiryRound {
             due: keys.len(),
+            moving: self.prune_moving(view.as_ref(), epoch, now).await?,
             ..ExpiryRound::default()
         };
         for chunk in keys.chunks(self.settings.batch.max(1)) {

@@ -201,6 +201,29 @@ pub trait JobSink: Send + Sync + 'static {
             "background jobs need the job engine, which this server does not run",
         )))))
     }
+
+    /// Sets the deadline of a manual step of a waiting job, as `cx`: the move's clock sets
+    /// the migration deadline when the observation starts and moves it
+    /// ([`crate::moves::clock`]).
+    ///
+    /// # Errors
+    ///
+    /// The engine's errors; without an engine, `ipam.move.no_engine` (503).
+    async fn set_manual_deadline(
+        &self,
+        job: JobId,
+        step: u16,
+        deadline: tenko_core::Timestamp,
+        note: Option<String>,
+        cx: &RequestCtx,
+    ) -> Result<(), JobError> {
+        let _ = (job, step, deadline, note, cx);
+        Err(JobError::Step(StepError::Coded(Box::new(CodedError::new(
+            crate::moves::codes::NO_ENGINE,
+            503,
+            "background jobs need the job engine, which this server does not run",
+        )))))
+    }
 }
 
 /// The job engine runs the inline job and commits the staged batch together with the job
@@ -228,6 +251,17 @@ impl JobSink for tenko_jobs::JobEngine {
         cx: &RequestCtx,
     ) -> Result<(), JobError> {
         tenko_jobs::JobEngine::complete_manual(self, job, step, note, cx).await
+    }
+
+    async fn set_manual_deadline(
+        &self,
+        job: JobId,
+        step: u16,
+        deadline: tenko_core::Timestamp,
+        note: Option<String>,
+        cx: &RequestCtx,
+    ) -> Result<(), JobError> {
+        tenko_jobs::JobEngine::set_manual_deadline(self, job, step, deadline, note, cx).await
     }
 }
 

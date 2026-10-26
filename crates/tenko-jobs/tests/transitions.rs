@@ -801,6 +801,70 @@ async fn waiting_roll_back_at_the_deadline() {
     .await;
 }
 
+/// The deadline set on a task waiting for a person (`set_manual_deadline`, the clock of a
+/// move) replaces the step timeout, later or earlier, is recorded with its note, and rolls
+/// the job back when it passes.
+#[tokio::test]
+async fn a_deadline_set_on_a_waiting_task_replaces_the_step_timeout() {
+    let t = engine_with(&[]);
+    let id = submit(
+        &t,
+        vec![manual(HAND_OVER, None, Some(Duration::from_secs(60)))],
+    )
+    .await;
+    assert_eq!(drive(&t, id).await.state, JobState::Waiting);
+    let start = t.clock.now();
+    let at = |secs: u64| start.checked_add(Duration::from_secs(secs)).expect("time");
+
+    // Later than the step timeout: the job still waits past it.
+    within(
+        t.engine
+            .set_manual_deadline(id, 0, at(120), Some("later".to_owned()), &t.ctx()),
+    )
+    .await
+    .expect("set");
+    t.clock.advance(Duration::from_secs(90));
+    let job = drive(&t, id).await;
+    assert_eq!(job.state, JobState::Waiting);
+    assert!(matches!(
+        job.steps[0].state,
+        StepState::WaitingForManual { deadline: Some(deadline), .. } if deadline == at(120)
+    ));
+    let rows = t.transitions(id).await;
+    assert!(
+        rows.iter()
+            .any(|row| row.step == Some(0) && row.note.as_deref() == Some("later")),
+        "{rows:?}"
+    );
+    // The same deadline again writes nothing.
+    let before = t.transitions(id).await.len();
+    within(t.engine.set_manual_deadline(id, 0, at(120), None, &t.ctx()))
+        .await
+        .expect("set");
+    assert_eq!(t.transitions(id).await.len(), before);
+    // Earlier: it passes at once.
+    within(
+        t.engine
+            .set_manual_deadline(id, 0, at(80), Some("earlier".to_owned()), &t.ctx()),
+    )
+    .await
+    .expect("set");
+    let job = drive(&t, id).await;
+    assert_eq!(job.state, JobState::RolledBack);
+    assert_eq!(error_code(&job), Some("jobs.step.deadline_passed"));
+    // A step that does not wait for a person, or is not there, is refused.
+    assert!(matches!(
+        within(t.engine.set_manual_deadline(id, 0, at(200), None, &t.ctx())).await,
+        Err(JobError::InvalidTransition { .. })
+    ));
+    assert_eq!(
+        within(t.engine.set_manual_deadline(id, 9, at(200), None, &t.ctx()))
+            .await
+            .map_err(|error| error.to_coded_error().code.to_string()),
+        Err("jobs.step.not_found".to_owned())
+    );
+}
+
 /// `Waiting` + `Cancel` -> `RollingBack`: a person cancels a job that waits for a manual task.
 #[tokio::test]
 async fn waiting_cancel() {

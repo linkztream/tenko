@@ -665,10 +665,13 @@ export function recordInlineJob(input: InlineJobInput): string {
 
 /**
  * The step kinds of a move job, in the order of the job (crates/tenko-ipam/src/moves/steps.rs).
- * The job has an intent step, a DHCP step for a reserved host, a DNS step for an address with a
- * name, a device step for a static host, then the layer 2 change, the observation and the cleanup.
+ * The job has a prepare step when Tenko DHCP follows the client, an intent step, a DHCP step for a
+ * reserved host, a DNS step for an address with a name, a device step for a static host, the wait
+ * for the short lease, then the layer 2 change, the observation and the cleanup.
  */
 export const MOVE_STEP = {
+  prepare: "ipam.move.prepare",
+  lease: "ipam.move.lease",
   intent: "ipam.move.intent",
   dhcp: "ipam.move.dhcp",
   dns: "ipam.move.dns",
@@ -684,6 +687,7 @@ export const MOVE_STEP = {
  * move have no undo task: a rollback never waits for a person.
  */
 const TASK_KEYS: Readonly<Record<string, { instruction: string; undo?: string }>> = {
+  [MOVE_STEP.lease]: { instruction: "ipam.move.task.short_lease" },
   [MOVE_STEP.dhcp]: { instruction: "ipam.move.task.dhcp" },
   [MOVE_STEP.dns]: { instruction: "ipam.move.task.dns" },
   [MOVE_STEP.device]: { instruction: "ipam.move.task.device" },
@@ -729,6 +733,10 @@ export interface MoveArgs {
   timeoutSecs: number;
   /** The L2 step as the preview decided it; without it the L2 step is the generic manual task. */
   l2?: MockMoveL2 | null;
+  /** Tenko DHCP follows the client: the job starts with the prepare step. */
+  prepare?: boolean;
+  /** The job waits for the client's renewal with the short lease before the L2 change. */
+  shortLease?: { secs: number; nextActivity: string };
 }
 
 /** The L2 step of a mock move (crates/tenko-ipam/src/moves/l2.rs). */
@@ -780,12 +788,17 @@ export function moveSteps(move: MoveArgs, options: MoveStepOptions = {}): MockSt
     changes,
   });
 
-  const steps: MockStepInput[] = [
-    { kind: MOVE_STEP.intent, automatic: true, summary: "ipam.move.step.intent", args: plain, changes },
-  ];
+  const steps: MockStepInput[] = [];
+  if (move.prepare) steps.push({ kind: MOVE_STEP.prepare, automatic: true, summary: "ipam.move.step.prepare", args: plain, changes });
+  steps.push({ kind: MOVE_STEP.intent, automatic: true, summary: "ipam.move.step.intent", args: plain, changes });
   if (move.mode === "reserved") steps.push(manual(MOVE_STEP.dhcp, base));
   if (move.dnsName) steps.push(manual(MOVE_STEP.dns, { ...base, name: move.dnsName }));
   if (move.mode === "static") steps.push(manual(MOVE_STEP.device, base));
+  if (move.shortLease) {
+    steps.push(
+      manual(MOVE_STEP.lease, { ...base, short_secs: String(move.shortLease.secs), next_activity: move.shortLease.nextActivity }),
+    );
+  }
   const l2 = move.l2;
   if (options.l2FailsWith) {
     steps.push({

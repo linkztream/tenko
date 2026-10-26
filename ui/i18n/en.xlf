@@ -4026,6 +4026,18 @@
         <notes><note category="description">Automatic step of a move when Tenko DHCP serves the target network. The reservation comes from the planned address.</note></notes>
         <segment><source>Reserve {new_ip} in the DHCP scope of {cidr} and wait until the DHCP server serves it; keep the old reservation until cleanup.</source></segment>
       </unit>
+      <unit id="ipam.move.step.prepare">
+        <notes><note category="description">Automatic first step of a move: the client is marked as moving in Tenko DHCP. The server sends the arguments new_ip, old_ip and cidr.</note></notes>
+        <segment><source>Mark the device as moving from {old_ip} to {new_ip} in {cidr}, so Tenko DHCP follows its DHCP messages.</source></segment>
+      </unit>
+      <unit id="ipam.move.step.short_lease">
+        <notes><note category="description">Summary of the step that waits for the client's renewal with the short lease before the network change. The server sends the arguments new_ip, old_ip and cidr.</note></notes>
+        <segment><source>Wait for the device at {old_ip} to renew with the short lease before it moves to {new_ip} in {cidr}.</source></segment>
+      </unit>
+      <unit id="ipam.move.task.short_lease">
+        <notes><note category="description">Manual task of a move: wait for the client's renewal with the short lease. The argument next_activity is the time of the expected renewal, short_secs the short lease in seconds; completing the task moves the client at once.</note></notes>
+        <segment><source>Wait until {mac} renews {old_ip} (expected {next_activity, date, medium}, {next_activity, time, short}); it then gets a short lease of {short_secs, number} s and moves to {new_ip} in {cidr}. Mark this step done to move it at once.</source></segment>
+      </unit>
       <unit id="ipam.move.step.cleanup">
         <segment><source>Remove {old_ip} and make {new_ip} active.</source></segment>
       </unit>
@@ -4795,6 +4807,10 @@
       <unit id="move.col.l2">
         <segment><source>Network change</source></segment>
       </unit>
+      <unit id="move.col.timing">
+        <notes><note category="description">Heading of the column with the two times of each device of a move and what the move does before the network change.</note></notes>
+        <segment><source>DHCP timing</source></segment>
+      </unit>
       <unit id="move.col.manual">
         <segment><source>Manual steps</source></segment>
       </unit>
@@ -4839,6 +4855,23 @@
       </unit>
       <unit id="move.step.cleanup">
         <segment><source>Remove the old reservation, lease and DNS records of {ip}.</source></segment>
+      </unit>
+      <unit id="move.step.dhcp_prepare">
+        <notes><note category="description">Automatic first step of a move in the preview: the client is marked as moving in Tenko DHCP.</note></notes>
+        <segment><source>Mark {host} as moving in Tenko DHCP, so its DHCP messages are followed during the move.</source></segment>
+      </unit>
+      <unit id="move.step.dhcp_prepare_short">
+        <segment><source>Mark {host} as moving in Tenko DHCP; its next renewal gets a short lease of {duration}.</source></segment>
+      </unit>
+      <unit id="move.step.dhcp_short_lease">
+        <notes><note category="description">Manual step right before the network change: the move waits for the client's renewal with the short lease. Completing it moves the client at once.</note></notes>
+        <segment><source>Wait until {host} renews {ip} with the short lease of {duration}; then its network changes. Marking this step done changes it at once.</source></segment>
+      </unit>
+      <unit id="move.group.dhcp_prepare">
+        <segment><source>Prepare in DHCP ({count, number})</source></segment>
+      </unit>
+      <unit id="move.group.dhcp_short_lease">
+        <segment><source>Wait for the short lease ({count, number})</source></segment>
       </unit>
       <unit id="move.group.ipam_intent">
         <segment><source>IPAM changes ({count, number})</source></segment>
@@ -4892,13 +4925,99 @@
         <segment><source>Automatic: {timeout}</source></segment>
       </unit>
       <unit id="move.timeout.lease">
-        <segment><source>Lease {lease}, so the timeout is {timeout}: half the lease, when devices renew, never below 5 min.</source></segment>
+        <notes><note category="description">Why the longest migration deadline of a move is what it is: the longest one comes from the end of a client's lease on its old network.</note></notes>
+        <segment><source>The longest deadline is {timeout}: the end of the client's lease plus a margin.</source></segment>
+      </unit>
+      <unit id="move.timeout.pool">
+        <notes><note category="description">The longest migration deadline comes from the default lease time of the target network's pools.</note></notes>
+        <segment><source>Pool lease {lease}, so the longest deadline is {timeout}: the lease plus a margin.</source></segment>
+      </unit>
+      <unit id="move.timeout.pool_any">
+        <segment><source>The longest deadline is {timeout}: the pool's lease time plus a margin.</source></segment>
+      </unit>
+      <unit id="move.timeout.short_lease">
+        <segment><source>The longest deadline is {timeout}: the short lease plus a margin, never below 5 min.</source></segment>
       </unit>
       <unit id="move.timeout.request">
         <segment><source>Timeout {timeout}, as chosen.</source></segment>
       </unit>
       <unit id="move.timeout.default">
         <segment><source>No DHCP lease is known for the target network, so the timeout is {timeout}.</source></segment>
+      </unit>
+      <unit id="move.timing.next">
+        <notes><note category="description">Label of the time when the client is expected to send its next DHCP message, in the timing column of the move preview.</note></notes>
+        <segment><source>Next DHCP activity</source></segment>
+      </unit>
+      <unit id="move.timing.next_unknown">
+        <segment><source>Not known</source></segment>
+      </unit>
+      <unit id="move.timing.deadline">
+        <notes><note category="description">Label of how long after the start of the observation the move gives up and rolls the device back.</note></notes>
+        <segment><source>Migration deadline</source></segment>
+      </unit>
+      <unit id="move.timing.when">
+        <notes><note category="description">A time, first relative to now (for example "in 12 minutes"), then the date and time.</note></notes>
+        <segment><source>{relative}, {absolute}</source></segment>
+      </unit>
+      <unit id="move.timing.source.lease">
+        <notes><note category="description">Short label: the time comes from the client's lease in Tenko's lease table.</note></notes>
+        <segment><source>from the lease</source></segment>
+      </unit>
+      <unit id="move.timing.source.pool">
+        <notes><note category="description">Short label: the time is half the default lease time of the target network's pools.</note></notes>
+        <segment><source>from the pool's lease time</source></segment>
+      </unit>
+      <unit id="move.timing.source.unknown">
+        <segment><source>unknown</source></segment>
+      </unit>
+      <unit id="move.timing.deadline_source.request">
+        <notes><note category="description">Short label of how the migration deadline was chosen: the person chose it.</note></notes>
+        <segment><source>as chosen</source></segment>
+      </unit>
+      <unit id="move.timing.deadline_source.short_lease">
+        <segment><source>short lease</source></segment>
+      </unit>
+      <unit id="move.timing.deadline_source.lease">
+        <segment><source>the client's lease</source></segment>
+      </unit>
+      <unit id="move.timing.deadline_source.pool">
+        <segment><source>the pool's lease time</source></segment>
+      </unit>
+      <unit id="move.timing.deadline_source.default">
+        <segment><source>default</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.short_lease">
+        <notes><note category="description">What the move does before the network change: it waits for the client's next renewal, which gets a short lease. The argument duration is a length of time such as "2 min".</note></notes>
+        <segment><source>Waits for the next renewal, which gets a short lease of {duration}.</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.short_lease_any">
+        <segment><source>Waits for the next renewal, which gets a short lease.</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.limit">
+        <notes><note category="description">The client's renewal is expected later than the preparation limit, so the move does not wait for it.</note></notes>
+        <segment><source>The renewal is expected after the preparation limit: the network changes at once.</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.move_now">
+        <segment><source>Moves at once, as chosen.</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.not_served">
+        <segment><source>Not served by Tenko DHCP: nothing to wait for.</source></segment>
+      </unit>
+      <unit id="move.timing.prepare.no_mac">
+        <segment><source>No MAC address: nothing to prepare in DHCP.</source></segment>
+      </unit>
+      <unit id="move.timing.lease">
+        <notes><note category="description">The client's lease on its old network, from its start to its end, in the expanded row of a device.</note></notes>
+        <segment><source>Lease on the old network: {start} to {end}</source></segment>
+      </unit>
+      <unit id="move.now_label">
+        <segment><source>Timing</source></segment>
+      </unit>
+      <unit id="move.now">
+        <segment><source>Move now</source></segment>
+      </unit>
+      <unit id="move.now_help">
+        <segment><source>Changes the network at once instead of after the client's next renewal, which would first get a short lease. For a client that asks for a new lease when its link changes.</source></segment>
       </unit>
       <unit id="move.rollback_note">
         <segment><source>A device that is not seen within the timeout is rolled back automatically.</source></segment>
@@ -5467,6 +5586,12 @@
       </unit>
       <unit id="jobs.kind.import">
         <segment><source>import</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_prepare">
+        <segment><source>Mark the device as moving</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_lease">
+        <segment><source>Wait for the short lease</source></segment>
       </unit>
       <unit id="jobs.stepname.ipam_move_intent">
         <segment><source>Add the new address in IPAM</source></segment>

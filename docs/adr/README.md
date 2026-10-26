@@ -78,3 +78,4 @@ The date is the date the ADR was written or last changed status.
 | [0023](0023-no-root-after-installation.md) | No root after the first installation | Accepted | 2026-10-24 |
 | [0025](0025-dhcp-failover-and-data-plane-ha.md) | DHCP failover and data-plane high availability | Accepted | 2026-10-25 |
 | [0026](0026-kerberos-and-directory-identity.md) | Kerberos and directory identity | Accepted | 2026-10-25 |
+| [0027](0027-moving-clients-and-the-short-lease.md) | Moving clients and the short lease before a move | Proposed | 2026-10-26 |

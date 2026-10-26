@@ -231,6 +231,7 @@ fn item(mac: Option<MacAddr>) -> MoveItem {
         reason: None,
         dns: None,
         l2: MoveL2::default(),
+        timing: crate::moves::timing::MoveTiming::default(),
         steps: Vec::new(),
         warnings: Vec::new(),
     }

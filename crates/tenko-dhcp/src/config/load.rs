@@ -15,8 +15,8 @@ use tenko_core::{
     dhcp::{
         OptionOwner,
         tables::{
-            CLASSES, EXCLUSIONS, FILTERS, LEASES, LEASES6, OPTION_DEFS, OPTION_SETS, POLICIES,
-            POOLS, SCOPES, SETTINGS, SHARED_NETWORKS,
+            CLASSES, EXCLUSIONS, FILTERS, LEASES, LEASES6, MOVING, OPTION_DEFS, OPTION_SETS,
+            POLICIES, POOLS, SCOPES, SETTINGS, SHARED_NETWORKS,
         },
     },
     ipam::{Address, Prefix, Range},
@@ -77,6 +77,8 @@ pub fn data(view: &dyn ReadView, with_leases: bool) -> ConfigResult<DhcpData> {
         } else {
             BTreeMap::new()
         },
+        // The clients of move jobs (ADR 0027): part of the configuration image.
+        moving: all(view, &MOVING)?,
         prefixes: all(view, &PREFIXES)?,
         ranges: all(view, &RANGES)?,
         hosts: all(view, &HOSTS)?,

@@ -17,6 +17,8 @@
 // WP8.4: the world of the classes, policies and boot paths.
 mod class_world;
 mod dora;
+// ADR 0027: the world of the engine tests with moving clients.
+mod engine_world;
 mod support;
 
 use std::{alloc::System, hint::black_box, net::Ipv4Addr};
@@ -192,6 +194,69 @@ fn the_codec_and_the_dora_path_do_not_allocate() {
     conflict_section(&requests);
     // WP8.4: classes, policies, network boot and proxy DHCP.
     class_section();
+    // ADR 0027: the short lease and the activity of a client a move job moves.
+    moving_section();
+}
+
+// ADR 0027: with clients of move jobs in the image, the renewal that gets the short lease,
+// the renewal of another client, the rebinding through the new network's relay that is
+// NAKed and the DISCOVER there (both noted as the client's activity) do not allocate.
+fn moving_section() {
+    use engine_world::{Ask, World, at, ip, mac};
+    use tenko_core::{
+        JobId, MacAddr,
+        dhcp::{MovingClient, MovingLease},
+    };
+    use tenko_dhcp::v4::engine::{Action, Scratch};
+
+    let world = World::moving(|vrf, target| {
+        (0x10..0x18u8)
+            .map(|k| MovingClient {
+                job: JobId::generate(),
+                mac: MacAddr::new(mac(k)),
+                lease: Some(MovingLease {
+                    vrf,
+                    addr: Ipv4Addr::new(192, 0, 2, 100 + k),
+                }),
+                short_secs: 120,
+                target: Some(target),
+                until: at(3_000),
+                extended: false,
+            })
+            .collect()
+    });
+    let renew = |k: u8| {
+        let mut ask = Ask::new(MessageType::Request, k);
+        ask.giaddr = None;
+        ask.ciaddr = Some(ip("192.0.2.110"));
+        ask.bytes()
+    };
+    let rebind = {
+        let mut ask = Ask::new(MessageType::Request, 0x10);
+        ask.giaddr = Some(ip("198.51.100.1"));
+        ask.ciaddr = Some(ip("192.0.2.110"));
+        ask.bytes()
+    };
+    let discover = {
+        let mut ask = Ask::new(MessageType::Discover, 0x10);
+        ask.giaddr = Some(ip("198.51.100.1"));
+        ask.bytes()
+    };
+    let requests = [renew(0x10), renew(0x32), rebind, discover];
+    let mut scratch = Scratch::new();
+    let mut acked = 0;
+    let (allocations, reallocations, bytes) = measure(50, || {
+        for bytes in &requests {
+            let answer = world.run(black_box(bytes), at(60), &mut scratch);
+            acked += usize::from(matches!(answer.action, Action::CommitThenReply { .. }));
+        }
+    });
+    assert!(acked > 0, "the engine answers the renewals");
+    assert_eq!(
+        (allocations, reallocations, bytes),
+        (0, 0, 0),
+        "the short lease and the activity of moving clients"
+    );
 }
 
 // WP8.4: the engine over an image with classes and policies (the matcher's decision, the

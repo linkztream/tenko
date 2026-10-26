@@ -168,6 +168,8 @@ pub struct ConfigImage {
     matcher: Matcher,
     // WP9.1: the DHCPv6 scopes and reservations.
     v6: crate::v6::image::Image6,
+    // ADR 0027: the clients of move jobs.
+    moving: crate::moving::Moving,
 }
 
 impl ConfigImage {
@@ -292,6 +294,18 @@ impl ConfigImage {
     pub fn v6(&self) -> &crate::v6::image::Image6 {
         &self.v6
     }
+
+    // ADR 0027: the clients of move jobs.
+    /// The clients move jobs are moving: their short leases and their activity.
+    pub fn moving(&self) -> &crate::moving::Moving {
+        &self.moving
+    }
+
+    /// Takes the activity of the moving clients it keeps from `previous`, the image it
+    /// replaces; the server calls it before it installs the image.
+    pub fn adopt_activity(&mut self, previous: &ConfigImage) {
+        self.moving.adopt(&previous.moving);
+    }
 }
 
 /// Puts a [`ConfigImage`] together.
@@ -362,6 +376,16 @@ impl ImageBuilder {
     /// The DHCPv6 part, to add scopes and reservations to.
     pub fn v6(&mut self) -> &mut crate::v6::image::Image6 {
         &mut self.image.v6
+    }
+
+    // ADR 0027: the clients of move jobs.
+    /// Sets the clients move jobs are moving.
+    pub fn moving<'a>(
+        &mut self,
+        rows: impl IntoIterator<Item = &'a tenko_core::dhcp::MovingClient>,
+    ) -> &mut Self {
+        self.image.moving = crate::moving::Moving::of(rows);
+        self
     }
 
     /// Sets the filters.

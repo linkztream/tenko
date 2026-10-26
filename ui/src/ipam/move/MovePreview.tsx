@@ -4,8 +4,12 @@
 // network's policy), the DNS change, the network (L2) step and the manual steps; below, one
 // grouped checklist of every manual task of the whole batch. Nothing changes until "Start"
 // is confirmed: then one job per device starts, all in one group with the chosen
-// parallelism, and the page hands over to the jobs list of that group. The observation
-// timeout defaults to half the DHCP lease of the target and rolls a device back on expiry.
+// parallelism, and the page hands over to the jobs list of that group. Per device the
+// DHCP timing column shows the two times (the client's next expected DHCP activity and the
+// migration deadline, each with where it comes from) and what the job does before the network
+// change: it waits for the next renewal, which gets a short lease, or, with "Move now", changes
+// the network at once. The migration deadline rolls a device back on expiry; the longest one
+// of the batch is the default of the timeout choice.
 //
 // The network (L2) column says per device what happens: a port profile or a per-client VLAN
 // through the network controller, nothing (in the VLAN already, or moving with another
@@ -26,12 +30,15 @@ import { Icon } from "../../components/Icon";
 import { Kbd } from "../../components/Kbd";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { Segmented } from "../../components/Segmented";
+import { Switch } from "../../components/Switch";
 import { toast } from "../../components/toast";
 import { DnsName, ModeBadge } from "../../grid/cells";
 import { formatDuration, t } from "../../i18n";
 import { IpamNav } from "../IpamNav";
 import { warningText } from "../plan/describe";
 import {
+  activitySourceText,
+  deadlineSourceText,
   deviceName,
   groupTitle,
   L2_REASON,
@@ -41,11 +48,14 @@ import {
   l2Headline,
   l2NoteText,
   l2SsidsText,
+  leaseSpanText,
   PLAN_CHANGED,
+  prepareText,
   reasonText,
   STEP_ORDER,
   stepText,
   timeoutText,
+  whenText,
 } from "./moveText";
 import "./move.css";
 
@@ -105,6 +115,68 @@ function L2Cell(props: { item: MoveItem; preview: Preview; legacy: string }) {
   );
 }
 
+/**
+ * The two times of one device, compact: the client's next expected DHCP activity (the time,
+ * relative and absolute, and where it comes from) and the migration deadline (the duration and
+ * how it was chosen), then what the job does before the network change. The cell carries the
+ * preparation and the two sources for tests and scripts.
+ */
+function TimingCell(props: { item: MoveItem }) {
+  const timing = () => props.item.timing;
+  return (
+    <td
+      data-col="timing"
+      data-testid="move-timing"
+      data-prepare={timing()?.prepare}
+      data-activity-source={timing()?.next_activity_source}
+      data-deadline-source={timing()?.deadline_source}
+    >
+      <Show when={timing()} fallback={<span class="muted">–</span>}>
+        {(x) => (
+          <dl class="tmc">
+            <dt>{t("move.timing.next")}</dt>
+            <dd data-testid="move-next-activity">
+              <Show when={x().next_activity} fallback={<span class="muted">{t("move.timing.next_unknown")}</span>}>
+                {(at) => <time dateTime={at()}>{whenText(at())}</time>}
+              </Show>
+              <span class="tag" data-source={x().next_activity_source}>
+                {activitySourceText(x().next_activity_source)}
+              </span>
+            </dd>
+            <dt>{t("move.timing.deadline")}</dt>
+            <dd data-testid="move-deadline">
+              <span>{formatDuration(x().deadline_secs)}</span>
+              <span class="tag" data-source={x().deadline_source}>
+                {deadlineSourceText(x().deadline_source)}
+              </span>
+            </dd>
+            <dd class="tmp" data-testid="move-prepare">
+              {prepareText(x())}
+            </dd>
+          </dl>
+        )}
+      </Show>
+    </td>
+  );
+}
+
+/** The client's lease on its old network in the expanded row, when Tenko holds one. */
+function LeaseDetail(props: { item: MoveItem }) {
+  const span = () => {
+    const x = props.item.timing;
+    return x?.lease_start && x.lease_end ? leaseSpanText(x.lease_start, x.lease_end) : undefined;
+  };
+  return (
+    <Show when={span()}>
+      {(text) => (
+        <p class="l2d tml" data-testid="move-lease-span">
+          {text()}
+        </p>
+      )}
+    </Show>
+  );
+}
+
 /** The details of the network change in the expanded row: the diff, the notes and the SSID alternative. */
 function L2Details(props: { item: MoveItem; preview: Preview }) {
   const l2 = () => props.item.l2;
@@ -154,6 +226,8 @@ export default function MovePreview() {
   const [excluded, setExcluded] = createSignal<ObjectRef[]>([]);
   const [parallelism, setParallelism] = createSignal<string>("2");
   const [timeout, setTimeout_] = createSignal<number | null>(null);
+  // Change the network at once, not after the client's next renewal with a short lease.
+  const [moveNow, setMoveNow] = createSignal(false);
   const [acked, setAcked] = createSignal<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = createSignal<Preview | null>(null);
   const [error, setError] = createSignal<unknown>(null);
@@ -176,6 +250,7 @@ export default function MovePreview() {
     target: target(),
     timeout_secs: timeout(),
     parallelism: Number(parallelism()),
+    move_now: moveNow(),
     acknowledge: [...acked()],
   });
 
@@ -436,6 +511,7 @@ export default function MovePreview() {
             <col class="c-ip" />
             <col class="c-dns" />
             <col class="c-l2" />
+            <col class="c-timing" />
             <col class="c-manual" />
           </colgroup>
           <thead>
@@ -448,6 +524,7 @@ export default function MovePreview() {
               <th scope="col">{t("move.col.ip")}</th>
               <th scope="col">{t("move.col.dns")}</th>
               <th scope="col">{t("move.col.l2")}</th>
+              <th scope="col">{t("move.col.timing")}</th>
               <th scope="col">{t("move.col.manual")}</th>
             </tr>
           </thead>
@@ -511,6 +588,7 @@ export default function MovePreview() {
                   <Show when={preview()}>
                     {(p) => <L2Cell item={item} preview={p()} legacy={l2Step(item) ? stepText(l2Step(item)!, item, p()) : ""} />}
                   </Show>
+                  <TimingCell item={item} />
                   <td data-col="manual">
                     <span class="mt">{t("move.tasks", { count: manualCount(item) })}</span>
                   </td>
@@ -518,7 +596,7 @@ export default function MovePreview() {
                 <Show when={reasonText(item)}>
                   <tr class="note">
                     <td />
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <div class="nt">{reasonText(item)}</div>
                     </td>
                   </tr>
@@ -528,7 +606,7 @@ export default function MovePreview() {
                   {(w) => (
                     <tr class="note warn">
                       <td />
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <div class="nt">
                           <Icon name="alert" size="xs" /> {warningText(w)}
                         </div>
@@ -539,7 +617,7 @@ export default function MovePreview() {
                 <Show when={isOpen(item)}>
                   <tr class="sd">
                     <td />
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <ol class="steps" data-testid="move-steps">
                         <For each={item.steps}>
                           {(s) => (
@@ -555,6 +633,7 @@ export default function MovePreview() {
                           )}
                         </For>
                       </ol>
+                      <LeaseDetail item={item} />
                       <Show when={preview()}>{(p) => <L2Details item={item} preview={p()} />}</Show>
                     </td>
                   </tr>
@@ -615,6 +694,15 @@ export default function MovePreview() {
                 onChange={setParallelism}
               />
               <span class="help">{t("move.parallelism_help")}</span>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">{t("move.now_label")}</span>
+            <div class="cf-inline">
+              <Switch id="move-now" label={t("move.now")} checked={moveNow()} onChange={setMoveNow} />
+              <span class="help" data-testid="move-now-help">
+                {t("move.now_help")}
+              </span>
             </div>
           </div>
           <div class="field">

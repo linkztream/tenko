@@ -427,6 +427,7 @@ The node-local keys (`docs/dhcp-contracts.md` section 9, `deploy/tenko.example.t
 | `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
 | `[dhcp.ddns] retries`, `backoff_ms` | 5, 1,000 | The DDNS worker (WP8.3) |
 | `[dhcp.history] days` | the installation's setting, else the profile's | A node-local retention of the lease history, 1 to 3,650 days |
+| `[dhcp.moves] short_lease_secs`, `prepare_limit_secs`, `margin_secs`, `deadline_limit_secs`, `extend_window_secs`, `extend_secs`, `verify_secs` | 120, 3,600, 60, 172,800, 15, 60, 90 | The DHCP timing of moves (section 12.5, [moves.md](moves.md) section 5.5): read by the controller's move jobs; the short lease is carried in each moving client's row, so the role needs no copy |
 
 `tenko config check` refuses an entry that is not a unicast address, an interface on a relay listener, an address listed twice, and values outside the ranges above.
 
@@ -556,7 +557,7 @@ The step reaches the role through `tenko_ipam::moves::dhcp::DhcpRolePort` (the r
 
 - **Rollback.** The intent step's compensation removes the new address, and with it the new reservation; the DHCP step's compensation releases a lease the device already took at the new address. The old address and its reservation were never touched, so a cancelled move leaves both scopes as they were.
 - **Cleanup.** The cleanup removes the old address, which removes the old reservation, and releases the old lease when the moved interface's MAC address still holds it bound, through `dhcp.lease.release` with its version precondition (history kind `reclaimed`). A release that fails is logged and left to the lease's expiry; the cleanup never rolls a confirmed move back. Its output records `released_old_lease`.
-- **Timeout.** The observation timeout keeps IPAM-19's rule, half the target's lease time and at least 300 seconds. With a Tenko scope the lease time is the longest default time a pool's client gets: the pool's settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day by default); a scope without a pool counts its own.
+- **Timeout.** The migration deadline comes from the client's own lease when Tenko serves its old network, and from the target pools' default lease time otherwise ([moves.md](moves.md) section 5.2). With a Tenko scope a pool's lease time is the longest default time a pool's client gets: the pool's settings, else the range's `lease_secs`, else the scope's lease times, else the server's (one day by default); a scope without a pool counts its own.
 
 ### 12.3 Leases as observations
 
@@ -581,6 +582,17 @@ A new fact wakes the reconciler like any write to the facts table; its run confi
 - `crates/tenko-ipam/src/observe/dhcp/tests.rs`: a renewal within the refresh interval writes nothing and is counted, the refresh at the renewal point adds a sighting, another client starts the fact again, a release expires both facts, a conflict names the answering MAC address, and the index is built from the stored facts of its own node only.
 - `crates/tenko-ipam/tests/move_dhcp.rs`: the preview kind and the timeout from the scope, the step that waits for the image (and the rollback when the image stays behind), the cleanup that releases the device's old lease and no other, the compensation that releases a new lease, and the lease of a dynamic device in the target's pool that confirms its move.
 - `crates/tenko/tests/acceptance_move.rs`, E25: the five-device lab through the binary with the role in relay mode on loopback.
+- `crates/tenko-ipam/tests/move_lease.rs` (section 12.5): the preview's two times and how they were chosen, the job that marks the client, waits for its short lease, changes the network and is verified by the new lease, the rollback that removes the marker before it undoes the network change, the deadline from the client's lease with its verification window and its single extension, and the stale marker.
+
+### 12.5 Moving clients and the short lease
+
+Before a move changes a client's network, the job marks the client as moving (ADR 0027, [moves.md](moves.md) sections 4 and 5): its first step writes a row of `dhcp.moving` (`MovingClient`, keyed by the job) with the client's MAC address, its old lease (VRF and address; none for "move now"), the short lease's time, the target scope and the job's deadline (`until`). The table belongs to the `dhcp` node role (`NODE_TABLES`); the feed carries it and the configuration image serves it (`tenko_dhcp::moving`). The lease rows and their format are unchanged.
+
+- **The short lease.** A REQUEST of the client for the address of its old lease, and the OFFER before it, is granted at most the row's short lease (`[dhcp.moves] short_lease_secs`, 120 by default), with T1 and T2 derived from it as for any grant (half and seven eighths, or the configured T1 and T2 scaled to it). The client's next renewal on its old network therefore gets two minutes, and after the network change the client rebinds through the new network's relay within them, gets its NAK there (the address is not on that network) and DISCOVERs.
+- **The activity.** Every message of a moving client's MAC address is noted with its time, and apart when its scope is the move's target: two relaxed atomic stores on the image's row. The move job reads them through the role (`DhcpRolePort::activity`) to extend its deadline once when the client is in the middle of an exchange and to start its verification window when the client reconnects on the target scope. A new image takes the activity of the rows it keeps from the image it replaces.
+- **Only while the job is active.** The engine ignores a row past its `until`. The job removes its row when it confirms the move and first thing in its rollback; the leader service `dhcp.expiry` removes rows whose job is gone or ended and rows past their `until` in every round.
+- **Cost.** Without moves the engine checks one empty list per message; with moves, a binary search over the clients moving at the moment. Nothing allocates (`tests/alloc.rs`, section `moving_section`); the M26 loopback ceiling with the queue store and four workers did not move (`bench/phase3-dhcp/results/2026-10-26-moves-short-lease.md`).
+- **Tests.** `crates/tenko-dhcp/tests/engine_moves.rs`: a marked renewal gets the short lease with its own T1 and T2, an unmarked one, another client's and an ended marker do not, the rebinding through the new network's relay is NAKed to that relay and noted as the reconnection, and why no NAK at T1 reaches a moved client; `tests/engine.rs` has the NAK row (`ciaddr` of scope A, `giaddr` of scope B); `tests/lease_services.rs` the expiry's removal of stale rows; `src/moving.rs` the image's rows and the activity across images.
 
 ## 13. DDNS
 

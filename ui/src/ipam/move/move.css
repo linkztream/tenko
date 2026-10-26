@@ -16,7 +16,8 @@
 .legend2 .auto::before { background: var(--accent); }
 .legend2 .manual::before { border: 1.5px dashed var(--ink-2); }
 
-.pvt { min-width: 1240px; }
+.pvt { min-width: 1520px; }
+.pvt col.c-timing { width: 280px; }
 .pvt col.c-check { width: 34px; }
 .pvt col.c-device { width: 152px; }
 .pvt col.c-mode { width: 88px; }
@@ -67,6 +68,14 @@ details.pv-manual > summary .tk-aff { margin-inline-start: auto; }
 .l2c { display: grid; gap: 1px; min-width: 0; font-size: var(--fs-12); }
 .l2m { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-width: 0; color: var(--ink); font-size: var(--fs-12); overflow-wrap: anywhere; }
 .l2s { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ink-3); overflow-wrap: anywhere; }
+
+/* The DHCP timing column: the two times as a label and a value each, the preparation below. */
+.pvt td[data-col="timing"] { height: auto; padding-top: var(--sp-2); padding-bottom: var(--sp-2); white-space: normal; line-height: var(--lh-text); }
+.tmc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px var(--sp-4); margin: 0; font-size: var(--fs-12); }
+.tmc dt { color: var(--ink-3); }
+.tmc dd { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 var(--sp-3); min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.tmc dd.tmp { grid-column: 1 / -1; color: var(--ink-3); }
+.l2d.tml { margin: 0; padding-inline-start: 0; }
 
 /* The details of the network change in the expanded row: diff, notes, SSID alternative. */
 .l2d { display: grid; gap: var(--sp-3); padding-block: var(--sp-3) var(--sp-4); padding-inline: 0 var(--sp-6); border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--fs-12); line-height: var(--lh-text); }

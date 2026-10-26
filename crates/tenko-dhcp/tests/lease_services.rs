@@ -231,6 +231,51 @@ fn the_offer_hold_keeps_an_address_for_one_client() {
     assert!(hold.is_empty());
 }
 
+// ADR 0027: a marker of an inactive job is ignored by the engine (its `until`) and removed
+// by the leader that follows `dhcp.leases`.
+#[tokio::test]
+async fn expiry_removes_the_moving_clients_of_jobs_that_are_gone_or_ran_out() {
+    let store = mem_store();
+    let row = |until: Timestamp| tenko_core::dhcp::MovingClient {
+        job: tenko_core::JobId::generate(),
+        mac: tenko_core::MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, 0x31]),
+        lease: Some(tenko_core::dhcp::MovingLease {
+            vrf: VrfId::generate(),
+            addr: addr(70),
+        }),
+        short_secs: 120,
+        target: None,
+        until,
+        extended: false,
+    };
+    // A job that does not exist (it crashed and was purged) and a row past its end.
+    let (gone, ended) = (row(from_now(3_600)), row(ago(1)));
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Ipam), Timestamp::now());
+    for moving in [&gone, &ended] {
+        batch
+            .put_typed(&tables::MOVING, &moving.job, moving)
+            .expect("a row");
+    }
+    store.propose(batch).await.expect("written");
+    let service = ExpiryService::new(Arc::clone(&store), NODE, ExpirySettings::default());
+    let round = service.round(0, Timestamp::now()).await.expect("a round");
+    assert_eq!(round.moving, 2);
+    let view = store.read(ReadConsistency::Local).await.expect("a view");
+    let left = view
+        .scan_typed(&tables::MOVING, KeyRange::all(), usize::MAX, false)
+        .expect("a scan");
+    assert!(left.is_empty(), "{left:?}");
+    // The next round has nothing to do.
+    assert_eq!(
+        service
+            .round(0, Timestamp::now())
+            .await
+            .expect("a round")
+            .moving,
+        0
+    );
+}
+
 #[tokio::test]
 async fn expiry_prunes_the_offer_hold() {
     let hold = Arc::new(OfferTable::new(Duration::from_millis(1), 8));

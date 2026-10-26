@@ -252,6 +252,11 @@ pub struct DhcpSection {
     // WP9.1: the DHCPv6 ports and the server's DUID.
     /// DHCPv6.
     pub v6: DhcpV6Section,
+    // ADR 0027: the DHCP timing of moves.
+    /// Moves: the short lease before the network change, the wait for it, the migration
+    /// deadline's margin and limit, its extension and the verification window
+    /// (`docs/moves.md` section 5).
+    pub moves: tenko_ipam::moves::settings::MoveSettings,
 }
 
 impl Default for DhcpSection {
@@ -270,6 +275,7 @@ impl Default for DhcpSection {
             proxy: Vec::new(),
             proxy_port: 4011,
             v6: DhcpV6Section::default(),
+            moves: tenko_ipam::moves::settings::MoveSettings::default(),
         }
     }
 }
@@ -377,6 +383,8 @@ impl DhcpSection {
         }
         // WP8.4: the proxy DHCP listeners.
         self.validate_proxy()?;
+        // ADR 0027: the DHCP timing of moves.
+        self.moves.validate().map_err(ConfigError::invalid)?;
         check(self.port > 0, "dhcp.port must be between 1 and 65535")?;
         check(
             self.relay_port > 0 && self.client_port > 0,

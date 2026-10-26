@@ -20,11 +20,11 @@ use std::{
 };
 
 use tenko_core::{
-    AddressId, HostId, InterfaceId, PrefixId, RangeId, Revision, VrfId,
+    AddressId, HostId, InterfaceId, JobId, PrefixId, RangeId, Revision, VrfId,
     dhcp::{
         Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
-        OptionDef, OptionDefId, OptionOwner, OptionSet, Policy, PolicyId, PoolSettings, Scope,
-        SharedNetwork, SharedNetworkId,
+        MovingClient, OptionDef, OptionDefId, OptionOwner, OptionSet, Policy, PolicyId,
+        PoolSettings, Scope, SharedNetwork, SharedNetworkId,
     },
     ipam::{Address, Host, Interface, Prefix, Range},
 };
@@ -63,6 +63,8 @@ pub struct DhcpData {
     // WP9.1: the DHCPv6 leases.
     /// `dhcp.leases6`.
     pub leases6: BTreeMap<(VrfId, Ipv6Addr), Lease6>,
+    /// `dhcp.moving`: the clients of move jobs (ADR 0027).
+    pub moving: BTreeMap<JobId, MovingClient>,
     /// `ipam.prefixes`.
     pub prefixes: BTreeMap<PrefixId, Prefix>,
     /// `ipam.ranges`.
@@ -107,6 +109,8 @@ pub enum Change {
     // WP9.1: a DHCPv6 lease.
     /// A DHCPv6 lease.
     Lease6((VrfId, Ipv6Addr), Option<Lease6>),
+    /// A client of a move job (ADR 0027); part of the configuration image.
+    Moving(JobId, Option<MovingClient>),
     /// An IPAM prefix.
     Prefix(PrefixId, Option<Prefix>),
     /// An IPAM range.
@@ -164,6 +168,7 @@ impl DhcpData {
             Change::Filter(key, value) => set(&mut self.filters, key, value.as_ref()),
             Change::Lease(key, value) => set(&mut self.leases, key, value.as_ref()),
             Change::Lease6(key, value) => set(&mut self.leases6, key, value.as_ref()),
+            Change::Moving(key, value) => set(&mut self.moving, key, value.as_ref()),
             Change::Prefix(key, value) => set(&mut self.prefixes, key, value.as_ref()),
             Change::Range(key, value) => set(&mut self.ranges, key, value.as_ref()),
             Change::Host(key, value) => set(&mut self.hosts, key, value.as_ref()),

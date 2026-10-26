@@ -569,8 +569,10 @@ impl<H: TableHandle> DhcpServer<H> {
     /// Replaces the image and, through `reset`, the lease table under the table's write
     /// guard, so that the workers see both or neither (a snapshot install). The fixed
     /// tables grow for the new image first (E32).
-    pub fn swap(&self, image: ConfigImage, reset: impl FnOnce(&mut H::Table)) {
+    pub fn swap(&self, mut image: ConfigImage, reset: impl FnOnce(&mut H::Table)) {
         self.fit(&image);
+        // ADR 0027: what the role saw of moving clients outlives the image.
+        image.adopt_activity(&self.image());
         let mut table = self.shared.table.write();
         reset(&mut table);
         *self
@@ -605,8 +607,10 @@ impl<H: TableHandle> DhcpServer<H> {
     }
 
     /// Swaps the configuration image; the fixed tables grow for it first (E32).
-    pub fn set_image(&self, image: ConfigImage) {
+    pub fn set_image(&self, mut image: ConfigImage) {
         self.fit(&image);
+        // ADR 0027: what the role saw of moving clients outlives the image.
+        image.adopt_activity(&self.image());
         *self
             .shared
             .image

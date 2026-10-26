@@ -178,6 +178,18 @@ pub trait DhcpNode: Send + Sync {
     /// Runs one command of the kinds of [`commands`]; `args` is the CBOR of the kind's
     /// arguments.
     async fn execute(&self, kind: &str, args: &[u8]) -> CommandResult;
+
+    // ADR 0027: what the role saw of a client a move job moves.
+    /// What the role saw of the client `mac` of the move job `job`; none when its image
+    /// holds no such client (or the node is not local).
+    fn moving_activity(
+        &self,
+        job: tenko_core::JobId,
+        mac: [u8; 6],
+    ) -> Option<crate::moving::Activity> {
+        let _ = (job, mac);
+        None
+    }
 }
 
 /// The `dhcp` role of this process, as the API and the metrics read it.
@@ -544,6 +556,14 @@ pub fn state_name(state: BindingState) -> &'static str {
 impl DhcpNode for LocalNode {
     fn node(&self) -> NodeId {
         self.node
+    }
+
+    fn moving_activity(
+        &self,
+        job: tenko_core::JobId,
+        mac: [u8; 6],
+    ) -> Option<crate::moving::Activity> {
+        self.server()?.image().moving().activity(job, &mac)
     }
 
     fn status(&self) -> DhcpStatus {

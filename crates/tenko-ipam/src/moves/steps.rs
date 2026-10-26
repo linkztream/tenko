@@ -98,6 +98,10 @@ pub struct MoveStepParams {
     /// The Tenko scope of an automatic DHCP step; absent, the step is a task for a person.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dhcp: Option<super::dhcp::DhcpStepPlan>,
+    /// The DHCP timing of the item: the moving client, the short lease and the deadline's
+    /// inputs (ADR 0027); absent when the job does not follow the client's DHCP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<super::lease::LeasePlan>,
 }
 
 /// What the controller step changes, as the submit planned it.
@@ -340,6 +344,8 @@ impl StepHandler for MoveIntentStep {
         cx: &StepContext,
     ) -> Result<(), StepError> {
         let params = MoveStepParams::decode(params)?;
+        // ADR 0027: the moving client goes first, before anything is undone.
+        super::lease::clear(cx, None).await?;
         let view = view_of(cx).await?;
         let mut commands = Vec::new();
         if live_address(view.as_ref(), params.new_address)?.is_some() {
@@ -481,6 +487,8 @@ impl StepHandler for MoveCleanupStep {
         }
         let released_old_lease = self.release_old(view.as_ref(), &params, cx).await;
         write(cx, view.as_ref(), &commands).await?;
+        // ADR 0027: the move is confirmed; the client is no longer moving.
+        super::lease::stage_clear(cx, view.as_ref()).await?;
         if self.dhcp.is_none() {
             return Ok(StepOutcome::Done { output: None });
         }
@@ -553,13 +561,14 @@ impl StepHandler for MoveManualStep {
         Ok(StepOutcome::Manual(Self::task(&params)))
     }
 
+    /// Nothing to undo but the moving client (ADR 0027).
     async fn compensate(
         &self,
         _params: &[u8],
         _output: Option<&[u8]>,
-        _cx: &StepContext,
+        cx: &StepContext,
     ) -> Result<(), StepError> {
-        Ok(())
+        super::lease::clear(cx, None).await
     }
 }
 
@@ -773,6 +782,9 @@ impl StepHandler for MoveControllerStep {
         output: Option<&[u8]>,
         cx: &StepContext,
     ) -> Result<(), StepError> {
+        // ADR 0027: the moving client goes before the L2 change is undone, so that the
+        // client renews with its normal lease when it is back on its old network.
+        super::lease::clear(cx, None).await?;
         let Some(output) = output else {
             return Ok(());
         };
@@ -808,12 +820,15 @@ impl StepHandler for MoveControllerStep {
 /// Every step handler of a move job.
 pub fn move_step_handlers() -> Vec<Arc<dyn StepHandler>> {
     vec![
+        // ADR 0027: the moving client and the wait for the short lease.
+        Arc::new(super::lease::MovePrepareStep::default()),
+        Arc::new(super::lease::MoveLeaseStep),
         Arc::new(MoveIntentStep),
         Arc::new(MoveCleanupStep::default()),
         Arc::new(super::dhcp::MoveDhcpStep::default()),
         Arc::new(super::dns::MoveDnsStep::manual()),
         Arc::new(MoveManualStep::new(DEVICE)),
         Arc::new(MoveManualStep::new(L2)),
-        Arc::new(MoveManualStep::new(OBSERVE)),
+        Arc::new(super::lease::MoveObserveStep::default()),
     ]
 }

@@ -52,6 +52,8 @@ pub struct IpamConfig {
     /// How many jobs of one move run at once when the request does not say (IPAM-19,
     /// design decision 8).
     pub move_parallelism: u32,
+    /// The DHCP timing of moves (`[dhcp.moves]`, `docs/moves.md` section 5).
+    pub moves: crate::moves::settings::MoveSettings,
 }
 
 impl Default for IpamConfig {
@@ -60,6 +62,7 @@ impl Default for IpamConfig {
             max_attempts: 16,
             max_commands: 10_000,
             move_parallelism: 4,
+            moves: crate::moves::settings::MoveSettings::default(),
         }
     }
 }

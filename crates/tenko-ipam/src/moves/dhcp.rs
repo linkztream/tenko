@@ -33,7 +33,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    CodedError, MacAddr, MessageKey, PrefixId, Revision, Timestamp, VrfId,
+    CodedError, JobId, MacAddr, MessageKey, PrefixId, Revision, Timestamp, VrfId,
     dhcp::{Lease, tables::LEASES},
 };
 use tenko_jobs::{
@@ -104,6 +104,37 @@ pub trait DhcpRolePort: Send + Sync {
         addr: Ipv4Addr,
         reason: &str,
     ) -> Result<Released, CodedError>;
+
+    /// What the role saw of the client `mac` the move job `job` moves (its row of
+    /// `dhcp.moving`, ADR 0027): its last DHCP message and its last one on the move's
+    /// target scope. None when the role's image holds no such client.
+    fn activity(&self, job: JobId, mac: MacAddr) -> Option<ClientActivity> {
+        let _ = (job, mac);
+        None
+    }
+}
+
+/// What the `dhcp` role saw of a client a move job moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ClientActivity {
+    /// The client's last DHCP message.
+    pub last: Option<Timestamp>,
+    /// Its last message whose scope is the move's target: the client reconnected.
+    pub on_target: Option<Timestamp>,
+}
+
+/// Waits at most `wait` until the role's image is at `revision`; whether it got there.
+pub(super) async fn image_at(role: &dyn DhcpRolePort, revision: Revision, wait: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if role.image_revision() >= revision {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 /// The slot of the role: empty until the role runs, filled once by `tenko serve`.
@@ -147,6 +178,8 @@ impl DhcpMoves {
 pub fn register_steps(engine: &mut JobEngine, slot: &DhcpMoves) {
     engine.register(Arc::new(MoveDhcpStep::new(slot.clone())));
     engine.register(Arc::new(MoveCleanupStep::with_dhcp(slot.clone())));
+    // ADR 0027: the moving client, whose removal waits for the role's image.
+    super::lease::register_steps(engine, slot);
 }
 
 /// The MAC address of the moved interface.
@@ -353,6 +386,8 @@ impl StepHandler for MoveDhcpStep {
         cx: &StepContext,
     ) -> Result<(), StepError> {
         let params = MoveStepParams::decode(params)?;
+        // ADR 0027: the moving client goes first, before anything is undone.
+        super::lease::clear(cx, Some(&self.slot)).await?;
         let (Some(_), Some(role)) = (&params.dhcp, self.slot.get()) else {
             return Ok(());
         };

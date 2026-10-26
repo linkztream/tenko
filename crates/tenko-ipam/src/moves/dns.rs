@@ -213,6 +213,8 @@ impl StepHandler for MoveDnsStep {
         cx: &StepContext,
     ) -> Result<(), StepError> {
         let params = MoveStepParams::decode(params)?;
+        // ADR 0027: the moving client goes first, before anything is undone.
+        super::lease::clear(cx, None).await?;
         let Some((actuator, name)) = self.automatic(&params) else {
             return Ok(());
         };

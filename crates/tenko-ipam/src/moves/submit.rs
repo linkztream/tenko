@@ -69,6 +69,7 @@ pub async fn preview_move(
 /// The errors of the preview, 409 `ipam.move.plan_changed`, 409
 /// `ipam.plan.unacknowledged`, the refusal of `authorize`, 503 `ipam.move.no_engine`
 /// without the job engine, and the engine's errors.
+#[allow(clippy::too_many_lines)] // One pass from the request to the jobs and the receipt.
 pub async fn submit_move(
     ipam: &IpamService,
     controllers: &Controllers,
@@ -90,7 +91,11 @@ pub async fn submit_move(
     let base = compute(view.as_ref(), cx, &ipam.config(), request)?;
     drop(view);
     let plans = l2::plan(controllers, &base.items, &base.target, cx).await;
-    let Computed { preview, steps } = finish(base, plans, request)?;
+    let Computed {
+        preview,
+        steps,
+        leases,
+    } = finish(base, plans, request)?;
     if let Some(expected) = &request.expect_fingerprint
         && *expected != preview.fingerprint
     {
@@ -126,8 +131,18 @@ pub async fn submit_move(
     let group = group_name(cx);
     let group_key = GroupKey::new(group.clone())?;
     let mut jobs = Vec::with_capacity(preview.items.len());
-    for (index, (item, plans)) in preview.items.iter().zip(&steps).enumerate() {
-        let spec = job_spec(&preview, item, plans, &group, &group_key, cx, index)?;
+    for (index, ((item, plans), lease)) in preview.items.iter().zip(&steps).zip(&leases).enumerate()
+    {
+        let spec = job_spec(
+            &preview,
+            item,
+            plans,
+            lease.as_ref(),
+            &group,
+            &group_key,
+            cx,
+            index,
+        )?;
         let job_id = ipam.jobs().submit(spec, cx).await?;
         jobs.push(MoveJob {
             object: item.object,
@@ -249,10 +264,12 @@ fn group_name(cx: &RequestCtx) -> String {
 }
 
 /// The job of one item.
+#[allow(clippy::too_many_arguments)] // The item, its plans and the move's context.
 fn job_spec(
     preview: &MovePreview,
     item: &MoveItem,
     plans: &[StepPlan],
+    lease: Option<&super::lease::LeasePlan>,
     group: &str,
     group_key: &GroupKey,
     cx: &RequestCtx,
@@ -277,6 +294,7 @@ fn job_spec(
         l2: None,
         dns: None,
         dhcp: None,
+        lease: lease.cloned(),
     };
     let mut steps = Vec::with_capacity(plans.len());
     for plan in plans {

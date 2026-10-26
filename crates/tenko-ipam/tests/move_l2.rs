@@ -253,8 +253,8 @@ fn has_tag(host: &Host) -> bool {
 
 impl World {
     /// The service, the engine with the IPAM and move steps registered, and the controller
-    /// behind the slot. The target 198.51.100.0/24 has a DHCP pool leasing 600 s, so the
-    /// observation timeout is 300 s.
+    /// behind the slot. The target 198.51.100.0/24 has a DHCP pool leasing 240 s, so the
+    /// observation timeout is the floor of 300 s (the lease plus the margin is less).
     async fn new() -> Self {
         let store: Arc<dyn Store> = Arc::new(MemStore::default());
         let clock = Arc::new(MockClock::new(Timestamp::now()));
@@ -282,7 +282,8 @@ impl World {
         target.vlan = iot.id;
         let target_id = target.id.expect("id");
         let pool = RangeInput {
-            lease_secs: Some(600),
+            // With the margin of 60 s the deadline is the floor of 300 s.
+            lease_secs: Some(240),
             ..range(
                 target_id,
                 "198.51.100.100",
@@ -404,6 +405,7 @@ impl World {
             objects: hosts.iter().map(|host| ObjectRef::from(*host)).collect(),
             target: self.target,
             timeout_secs: None,
+            move_now: false,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,

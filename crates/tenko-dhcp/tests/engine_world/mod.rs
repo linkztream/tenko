@@ -152,6 +152,18 @@ fn text(code: u8, value: &str) -> OptionValue {
 impl World {
     /// The world of the module comment.
     pub fn new() -> Self {
+        Self::moving(|_, _| Vec::new())
+    }
+
+    /// The same world with the clients of move jobs in its image (ADR 0027): `moving` gets
+    /// the VRF of every scope and the prefix of scope B.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the world of the module comment, scope by scope"
+    )]
+    pub fn moving(
+        moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
+    ) -> Self {
         let vrf = VrfId::generate();
         let (a, b, c) = (
             PrefixId::generate(),
@@ -230,6 +242,8 @@ impl World {
             created: stamp(),
             updated: stamp(),
         }]);
+        let moving = moving(vrf, b);
+        builder.moving(&moving);
         let image = builder.build();
         let mut world = Self {
             image,

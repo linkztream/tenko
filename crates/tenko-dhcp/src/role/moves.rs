@@ -1,11 +1,12 @@
 //! The role as a move job reaches it (WP8.1, `tenko_ipam::moves::dhcp`): the revision of
-//! the configuration image it serves, from the report `dhcp.status`, and the release of a
-//! lease through the node command `dhcp.lease.release`, as the lease routes run it.
+//! the configuration image it serves, from the report `dhcp.status`, the release of a
+//! lease through the node command `dhcp.lease.release`, as the lease routes run it, and
+//! what the image saw of a moving client (ADR 0027).
 
 use std::{net::Ipv4Addr, sync::Arc};
 
-use tenko_core::{CodedError, Revision, VrfId, codec::to_cbor, dhcp::codes};
-use tenko_ipam::moves::dhcp::{DhcpRolePort, Released};
+use tenko_core::{CodedError, JobId, MacAddr, Revision, VrfId, codec::to_cbor, dhcp::codes};
+use tenko_ipam::moves::dhcp::{ClientActivity, DhcpRolePort, Released};
 
 use super::{
     DhcpNode, Outcome,
@@ -69,5 +70,15 @@ impl DhcpRolePort for MovePort {
                 result.detail,
             )),
         }
+    }
+
+    // ADR 0027: what the role's image saw of the moving client.
+    fn activity(&self, job: JobId, mac: MacAddr) -> Option<ClientActivity> {
+        self.node
+            .moving_activity(job, mac.octets())
+            .map(|seen| ClientActivity {
+                last: seen.last,
+                on_target: seen.on_target,
+            })
     }
 }

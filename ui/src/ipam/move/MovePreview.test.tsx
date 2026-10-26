@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HOST_IDS, IPAM_IDS, findAddress, ADDRESS_IDS } from "../../api/mock/ipam/api";
 import { jobStore } from "../../api/mock/job-store";
 import { server } from "../../api/mock/node";
+import { grantMockLease } from "../../api/mock/routes-dhcp-leases";
 import { mockVlanController } from "../../api/mock/topology-store";
 import { previewMove, type MoveItem, type MovePreview as Preview } from "../../api/moves";
 import type { ObjectRef } from "../../api/types";
@@ -131,7 +132,8 @@ describe("move preview", () => {
     const groups = within(checklist).getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(groups[0]).toMatch(/^DHCP reservations \(2\)/);
     expect(groups).toEqual(expect.arrayContaining([expect.stringMatching(/^DNS records/), expect.stringMatching(/^Network changes/)]));
-    expect(screen.getByTestId("move-timeout-help").textContent).toMatch(/Lease 1 hr?, so the timeout is 30 min/);
+    // No client of the batch holds a lease Tenko knows: the deadline comes from the pool's lease time.
+    expect(screen.getByTestId("move-timeout-help").textContent).toMatch(/Pool lease 1 hr?, so the longest deadline is 61 min/);
   });
 
   it("shows the steps of one device with Enter and leaves a device out with Space", async () => {
@@ -199,6 +201,215 @@ describe("move preview", () => {
   it("passes axe", async () => {
     await open("thermostat-1");
     expect(await axeViolations(screen.getByTestId("page-move-preview"))).toEqual([]);
+  });
+});
+
+/** The two times and the preparation of a device, as the timing column shows them. */
+function timingOf(table: HTMLElement, name: string) {
+  const cell = within(item(table, name)).getByTestId("move-timing");
+  const text = (id: string) => within(cell).getByTestId(id).textContent ?? "";
+  return { cell, next: text("move-next-activity"), deadline: text("move-deadline"), prepare: text("move-prepare") };
+}
+
+/** The kinds of the steps of a device, in order (the steps are opened first). */
+async function stepKinds(table: HTMLElement, name: string): Promise<(string | undefined)[]> {
+  const steps = await openSteps(table, name);
+  return within(steps)
+    .getAllByRole("listitem")
+    .map((li) => li.dataset.kind);
+}
+
+describe("the two times of each device and the preparation", () => {
+  it("shows the next DHCP activity and the migration deadline with their sources", async () => {
+    // The thermostat holds a lease of an hour that Tenko serves; the speaker is not served.
+    grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
+    const { table } = await open("thermostat-1", "speaker-den");
+
+    const thermo = timingOf(table, "thermostat-1");
+    // Half of the hour: the renewal, relative and absolute, from the client's own lease.
+    expect(thermo.next).toMatch(/in (29|30) minutes, .+from the lease$/);
+    expect(within(thermo.cell).getByTestId("move-next-activity").querySelector("time")?.getAttribute("datetime")).toMatch(/^\d{4}-\d\d-\d\dT/);
+    // The short lease plus the margin is below the floor of five minutes.
+    expect(thermo.deadline).toBe("5 minshort lease");
+    expect(thermo.prepare).toBe("Waits for the next renewal, which gets a short lease of 2 min.");
+    expect(thermo.cell.dataset.prepare).toBe("short_lease");
+    expect(thermo.cell.dataset.activitySource).toBe("lease");
+    expect(thermo.cell.dataset.deadlineSource).toBe("short_lease");
+
+    const speaker = timingOf(table, "speaker-den");
+    // No lease: half the pool's lease time, and the pool's lease time plus the margin.
+    expect(speaker.next).toMatch(/in (29|30) minutes, .+from the pool's lease time$/);
+    expect(speaker.deadline).toBe("61 minthe pool's lease time");
+    expect(speaker.prepare).toBe("Not served by Tenko DHCP: nothing to wait for.");
+    expect(speaker.cell.dataset.prepare).toBe("not_served");
+
+    // The move-level text names the longest deadline and how it was chosen.
+    expect(screen.getByTestId("move-timeout-help").textContent).toMatch(/Pool lease 1 hr?, so the longest deadline is 61 min/);
+    expect(screen.getByText(/Automatic: 61 min/)).toBeTruthy();
+  });
+
+  it("puts the preparation into the steps: the mark first, the wait for the short lease right before the network change", async () => {
+    grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
+    const { table } = await open("thermostat-1", "speaker-den");
+    expect(await stepKinds(table, "thermostat-1")).toEqual([
+      "dhcp.prepare",
+      "ipam.intent",
+      "dhcp.manual",
+      "dns.manual",
+      "dhcp.short_lease",
+      "l2.controller",
+      "observe",
+      "cleanup",
+    ]);
+    const steps = within(item(table, "thermostat-1")).getByTestId("move-steps");
+    const [prepare, , , , wait] = within(steps).getAllByRole("listitem");
+    expect(prepare?.classList.contains("auto")).toBe(true);
+    expect(prepare?.textContent).toMatch(/Mark thermostat-1 as moving in Tenko DHCP; its next renewal gets a short lease of 2 min\./);
+    expect(wait?.classList.contains("manual")).toBe(true);
+    expect(wait?.textContent).toMatch(/Wait until thermostat-1 renews 192\.0\.2\.41 with the short lease of 2 min/);
+    // The client's lease on its old network is in the expanded row.
+    expect(within(item(table, "thermostat-1")).getByTestId("move-lease-span").textContent).toMatch(/^Lease on the old network: .+ to .+/);
+    // A client Tenko does not serve has no preparation.
+    expect(await stepKinds(table, "speaker-den")).not.toContain("dhcp.prepare");
+    // The wait is a manual task of the batch, before the network changes.
+    const groups = within(screen.getByTestId("move-checklist")).getAllByTestId("move-checklist-group");
+    const wait1 = groups.find((g) => g.dataset.key === "dhcp.short_lease");
+    expect(wait1?.querySelector("h3")?.textContent).toBe("Wait for the short lease (1)");
+    expect(groups.findIndex((g) => g.dataset.key === "dhcp.short_lease")).toBeLessThan(groups.findIndex((g) => g.dataset.key === "l2.move"));
+  });
+
+  it("shows each preparation, an unknown activity and a deadline from the request", async () => {
+    await serveEdited(["thermostat-1", "speaker-den", "cam-door"], (preview) => {
+      const [a, b, c] = preview.items;
+      if (!a || !b || !c) throw new Error("three items");
+      a.timing = { next_activity_source: "unknown", prepare: "no_mac", deadline_secs: 3600, deadline_source: "default" };
+      b.timing = {
+        next_activity: "2030-01-01T10:00:00Z",
+        next_activity_source: "lease",
+        lease_start: "2030-01-01T00:00:00Z",
+        lease_end: "2030-01-02T00:00:00Z",
+        prepare: "limit",
+        short_lease_secs: 120,
+        deadline_secs: 86_400,
+        deadline_source: "lease",
+      };
+      c.timing = { next_activity_source: "unknown", prepare: "move_now", deadline_secs: 1800, deadline_source: "request" };
+    });
+    const { table } = await open("thermostat-1", "speaker-den", "cam-door");
+    const no = timingOf(table, "thermostat-1");
+    expect(no.next).toBe("Not knownunknown");
+    expect(no.deadline).toBe("1 hrdefault");
+    expect(no.prepare).toBe("No MAC address: nothing to prepare in DHCP.");
+    const limit = timingOf(table, "speaker-den");
+    expect(limit.next).toMatch(/2030.+from the lease$/);
+    expect(limit.deadline).toBe("1 daythe client's lease");
+    expect(limit.prepare).toBe("The renewal is expected after the preparation limit: the network changes at once.");
+    const now = timingOf(table, "cam-door");
+    expect(now.deadline).toBe("30 minas chosen");
+    expect(now.prepare).toBe("Moves at once, as chosen.");
+  });
+
+  it("shows a server without timing as a dash", async () => {
+    await serveEdited(["thermostat-1"], (preview) => {
+      for (const i of preview.items) delete i.timing;
+    });
+    const { table } = await open("thermostat-1");
+    expect(within(item(table, "thermostat-1")).getByTestId("move-timing").textContent).toBe("–");
+  });
+});
+
+describe("move now", () => {
+  const moveNowSwitch = () => screen.getByRole("switch", { name: "Move now" }) as HTMLInputElement;
+
+  it("is off at first and explains itself in one line", async () => {
+    const sent = capture();
+    await open("thermostat-1");
+    expect(moveNowSwitch().checked).toBe(false);
+    expect(screen.getByTestId("move-now-help").textContent).toMatch(/at once instead of after the client's next renewal.+asks for a new lease when its link changes\.$/);
+    await waitFor(() => expect(sent.filter((s) => s.dryRun).length).toBeGreaterThan(0));
+    expect(sent.filter((s) => s.dryRun).every((s) => s.body.move_now === false)).toBe(true);
+  });
+
+  it("previews again with move_now, drops the wait for the short lease and sends the same choice with Start", async () => {
+    grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
+    const sent = capture();
+    const view = await open("thermostat-1");
+    const waiting = (await previewMove({ objects: refs(["thermostat-1"]), target: TARGET, parallelism: 2 })).fingerprint;
+    expect(await stepKinds(screen.getByTestId("move-devices"), "thermostat-1")).toContain("dhcp.short_lease");
+
+    fireEvent.click(moveNowSwitch());
+    await waitFor(() => expect(sent.some((s) => s.dryRun && s.body.move_now === true)).toBe(true));
+    const table = screen.getByTestId("move-devices");
+    await settled(table);
+    const timing = timingOf(table, "thermostat-1");
+    expect(timing.prepare).toBe("Moves at once, as chosen.");
+    // At once, the deadline is the end of the client's lease plus the margin.
+    expect(timing.deadline).toBe("61 minthe client's lease");
+    // The steps stay open over the new preview.
+    const steps = within(item(table, "thermostat-1")).getByTestId("move-steps");
+    const kinds = within(steps)
+      .getAllByRole("listitem")
+      .map((li) => li.dataset.kind);
+    expect(kinds).toContain("dhcp.prepare");
+    expect(kinds).not.toContain("dhcp.short_lease");
+    expect(screen.queryByTestId("move-checklist")?.querySelector('[data-key="dhcp.short_lease"]') ?? null).toBeNull();
+
+    // The confirmed plan is the one with the choice: its fingerprint differs from the one without it.
+    const expected = (await previewMove({ objects: refs(["thermostat-1"]), target: TARGET, parallelism: 2, move_now: true })).fingerprint;
+    expect(expected).not.toBe(waiting);
+    const before = jobStore.jobs.length;
+    fireEvent.click(screen.getByTestId("move-start"));
+    await waitFor(() => expect(view.location()).toMatch(/^\/jobs\?group=/));
+    const started = sent.filter((s) => !s.dryRun);
+    expect(started).toHaveLength(1);
+    expect(started[0]?.body.move_now).toBe(true);
+    expect(started[0]?.body.expect_fingerprint).toBe(expected);
+    // The job marks the client as moving and does not wait for a renewal.
+    const created = jobStore.jobs.slice(0, jobStore.jobs.length - before).filter((r) => r.job.spec.kind === "ipam.move");
+    expect(created.flatMap((r) => r.job.spec.steps.map((s) => s.kind))).toEqual([
+      "ipam.move.prepare",
+      "ipam.move.intent",
+      "ipam.move.dhcp",
+      "ipam.move.dns",
+      "ipam.move.controller",
+      "ipam.move.observe",
+      "ipam.move.cleanup",
+    ]);
+  });
+
+  it("starts a job that waits for the short lease when the choice is off", async () => {
+    grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
+    const sent = capture();
+    const view = await open("thermostat-1");
+    const before = jobStore.jobs.length;
+    fireEvent.click(screen.getByTestId("move-start"));
+    await waitFor(() => expect(view.location()).toMatch(/^\/jobs\?group=/));
+    expect(sent.filter((s) => !s.dryRun)[0]?.body.move_now).toBe(false);
+    const created = jobStore.jobs.slice(0, jobStore.jobs.length - before).filter((r) => r.job.spec.kind === "ipam.move");
+    const record = created[0];
+    const spec = record?.job.spec;
+    expect(spec?.steps.map((s) => s.kind)).toEqual([
+      "ipam.move.prepare",
+      "ipam.move.intent",
+      "ipam.move.dhcp",
+      "ipam.move.dns",
+      "ipam.move.lease",
+      "ipam.move.controller",
+      "ipam.move.observe",
+      "ipam.move.cleanup",
+    ]);
+    // The wait is a task of a person with the arguments of the server's message.
+    const task = record?.plan[spec?.steps.findIndex((s) => s.kind === "ipam.move.lease") ?? -1]?.manual;
+    expect(task?.instruction).toBe("ipam.move.task.short_lease");
+    expect(task?.args).toMatchObject({ short_secs: "120", mac: "00:00:5e:00:53:29", old_ip: "192.0.2.41" });
+    expect(task?.args?.next_activity).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
+  it("passes axe with the timing column and the choice", async () => {
+    grantMockLease({ mac: "00:00:5e:00:53:29", addr: "192.0.2.41" });
+    const { table } = await open("thermostat-1", "speaker-den");
+    await openSteps(table, "thermostat-1");
+    expect(await axeViolations(table.closest("[data-testid='page-move-preview']") as HTMLElement)).toEqual([]);
   });
 });
 

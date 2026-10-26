@@ -672,6 +672,25 @@ relay_port = 547
 client_port = 546
 # server_duid = "0004a8b1c2d3e4f5061728394a5b6c7d8e9f"
 
+[dhcp.moves]
+# The DHCP timing of moves (docs/moves.md section 5, ADR 0027). Before a move changes a
+# client's network, its next renewal of the old lease gets a short lease of
+# short_lease_secs (30 to 3600), so that it rebinds on the new network soon after; the job
+# waits for that renewal at most prepare_limit_secs (0 to 86400; 0 never waits), or moves at
+# once when the operator chose "move now". The migration deadline is the end of the short
+# lease, else of the client's lease, plus margin_secs (0 to 3600), at most
+# deadline_limit_secs (300 to 604800) and never below 300 seconds. A DHCP message of the
+# client in the last extend_window_secs (1 to 300) before the deadline moves it once by
+# extend_secs (1 to 3600); once the client's exchange on the target network is seen, its
+# new lease is verified within verify_secs (10 to 3600).
+short_lease_secs = 120
+prepare_limit_secs = 3600
+margin_secs = 60
+deadline_limit_secs = 172800
+extend_window_secs = 15
+extend_secs = 60
+verify_secs = 90
+
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own
 # tenko.toml until the controller hands out scan configuration (a later release).

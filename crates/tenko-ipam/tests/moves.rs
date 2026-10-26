@@ -112,6 +112,7 @@ impl World {
             objects,
             target: self.target,
             timeout_secs: None,
+            move_now: false,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,
@@ -199,7 +200,14 @@ async fn the_preview_keeps_the_host_part_and_lists_the_steps_by_mode() {
         .expect("preview");
     assert_eq!(preview.target.vid, Some(30));
     assert_eq!(preview.target.lease_secs, Some(86_400));
-    assert_eq!(preview.timeout_secs, 43_200, "half the lease");
+    assert_eq!(
+        preview.timeout_secs, 86_460,
+        "the pools' lease plus the margin: Tenko does not serve the old network"
+    );
+    assert_eq!(
+        preview.timeout_source,
+        tenko_ipam::moves::MoveTimeoutSource::Pool
+    );
     assert_eq!(preview.parallelism, 4);
     assert_eq!(preview.items.len(), 3);
 

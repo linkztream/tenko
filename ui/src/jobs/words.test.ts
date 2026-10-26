@@ -215,6 +215,27 @@ describe("titles, step summaries and tasks", () => {
     expect(jobTitle({ title: "ipam.move.title" })).toBe("Move");
   });
 
+  it("words the DHCP preparation of a move: the mark, the wait for the short lease and its manual task", () => {
+    const args = { old_ip: "192.0.2.41", new_ip: "198.51.100.41", cidr: "198.51.100.0/24" };
+    const prepare: StepRecord = { index: 0, kind: "ipam.move.prepare", state: { state: "done" }, attempts: 1 };
+    const lease: StepRecord = { index: 4, kind: "ipam.move.lease", state: { state: "pending" }, attempts: 0 };
+    expect(stepName("ipam.move.prepare")).toBe("Mark the device as moving");
+    expect(stepName("ipam.move.lease")).toBe("Wait for the short lease");
+    expect(describeStep(prepare, { summary: "ipam.move.step.prepare", args })).toBe(
+      "Mark the device as moving from 192.0.2.41 to 198.51.100.41 in 198.51.100.0/24, so Tenko DHCP follows its DHCP messages.",
+    );
+    expect(describeStep(lease, { summary: "ipam.move.step.short_lease", args })).toBe(
+      "Wait for the device at 192.0.2.41 to renew with the short lease before it moves to 198.51.100.41 in 198.51.100.0/24.",
+    );
+    // The task names the expected renewal as a date and a time and the short lease in seconds.
+    const task = { instruction: "ipam.move.task.short_lease", args: { ...args, mac: "00:00:5e:00:53:29", short_secs: "120", next_activity: "2026-10-26T10:42:00Z" } };
+    expect(taskText(task)).toMatch(
+      /^Wait until 00:00:5e:00:53:29 renews 192\.0\.2\.41 \(expected .*2026.*\); it then gets a short lease of 120 s and moves to 198\.51\.100\.41 in 198\.51\.100\.0\/24\. Mark this step done to move it at once\.$/,
+    );
+    // A time that does not parse counts as missing: the name of the step stands in, never a key.
+    expect(describeStep(lease, { summary: "ipam.move.task.short_lease", args: { ...task.args, next_activity: "soon" } })).toBe("Wait for the short lease");
+  });
+
   it("names and summarizes the L2 step through the network controller", async () => {
     expect(stepName("ipam.move.controller")).toBe("Move on the network controller");
     const port = { connector: "unifi-lab", device: "sw-desk", port: "7", after: "IoT", mac: "00:00:5e:00:53:2b" };
@@ -436,18 +457,21 @@ describe("rules of the views", () => {
 
   it("orders the checklist like the job of a move, unknown kinds last", () => {
     expect(STEP_ORDER).toEqual([
+      "ipam.move.prepare",
       "ipam.move.intent",
       "ipam.move.dhcp",
       "ipam.move.dns",
       "ipam.move.device",
+      "ipam.move.lease",
       "ipam.move.l2",
       "ipam.move.observe",
       "ipam.move.cleanup",
     ]);
-    expect(STEP_ORDER.map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(STEP_ORDER.map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(kindRank("vendor.step")).toBe(STEP_ORDER.length);
-    // The kinds of earlier versions keep their place.
-    expect(["ipam.intent", "dhcp.manual", "dns.manual", "device.manual", "l2.move", "observe", "cleanup"].map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // The kinds of earlier versions keep their place, and the preview kinds of the DHCP preparation theirs.
+    expect(["ipam.intent", "dhcp.manual", "dns.manual", "device.manual", "l2.move", "observe", "cleanup"].map(kindRank)).toEqual([1, 2, 3, 4, 6, 7, 8]);
+    expect(["dhcp.prepare", "dhcp.short_lease"].map(kindRank)).toEqual([0, 5]);
     // The L2 change through the network controller takes the place of the manual L2 step.
     expect(kindRank("ipam.move.controller")).toBe(kindRank("ipam.move.l2"));
     expect(kindRank("l2.controller")).toBe(kindRank("ipam.move.l2"));

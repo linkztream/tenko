@@ -96,13 +96,19 @@
 //! that address only; a bulk move runs as one job group of at most `parallelism` jobs
 //! between "moved" and "confirmed" (CONN-09).
 
+// The clock of a move: the deadlines of its waiting steps (moves.md section 5).
+pub mod clock;
 // WP8.1: the automatic DHCP step with Tenko DHCP.
 pub mod dhcp;
 pub mod dns;
 mod l2;
+// The short lease before the network change and the moving client (ADR 0027).
+pub mod lease;
 mod preview;
+pub mod settings;
 pub mod steps;
 mod submit;
+pub mod timing;
 
 use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 
@@ -245,10 +251,15 @@ pub struct MoveRequest {
     pub objects: Vec<ObjectRef>,
     /// The target network prefix.
     pub target: PrefixId,
-    /// Observation timeout in seconds, 300 to 604,800; half the target's DHCP lease (else
-    /// 3,600) when absent.
+    /// The migration deadline in seconds from the start of the observation, 300 to
+    /// 604,800; computed from each client's lease when absent (`docs/moves.md` section 5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u32>,
+    /// Change the network at once instead of waiting for the client's next renewal, which
+    /// would get the short lease first: for a client known to ask for a new lease when its
+    /// link changes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub move_now: bool,
     /// Warning codes the caller acknowledges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acknowledge: Vec<String>,
@@ -510,6 +521,9 @@ pub struct MoveItem {
     /// The L2 step: how the device gets into the target VLAN.
     #[serde(default)]
     pub l2: MoveL2,
+    /// The two times: the client's next expected DHCP activity and the migration deadline.
+    #[serde(default)]
+    pub timing: timing::MoveTiming,
     /// The steps of the item's job, in order.
     pub steps: Vec<MoveStepPreview>,
     /// Warnings of this item.
@@ -517,15 +531,24 @@ pub struct MoveItem {
     pub warnings: Vec<PlanWarning>,
 }
 
-/// How the observation timeout of a move was chosen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// How the migration deadline of a move was chosen (the observation's timeout,
+/// [`timing::migration_deadline`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MoveTimeoutSource {
     /// The request named it (`timeout_secs`).
     Request,
-    /// Half the longest DHCP lease of the target's pools, at least 300 s.
+    /// The end of the short lease the job asked for before the network change, plus the
+    /// margin, at least 300 s.
+    ShortLease,
+    /// The end of the client's lease on its old network (Tenko's lease table) plus the
+    /// margin, at least 300 s and at most the configured limit.
     Lease,
+    /// The longest default lease of the target's pools plus the margin (Tenko does not
+    /// serve the old network), at least 300 s and at most the limit.
+    Pool,
     /// The target has no lease time: 3,600 s.
+    #[default]
     Default,
 }
 
@@ -534,10 +557,14 @@ pub enum MoveTimeoutSource {
 pub struct MovePreview {
     /// The target.
     pub target: MoveTarget,
-    /// The observation timeout in seconds.
+    /// The longest migration deadline of the items, in seconds from the start of their
+    /// observation (each item's own is in its `timing`).
     pub timeout_secs: u32,
-    /// How the timeout was chosen.
+    /// How that deadline was chosen.
     pub timeout_source: MoveTimeoutSource,
+    /// Whether the jobs change the network at once (`move_now`).
+    #[serde(default)]
+    pub move_now: bool,
     /// How many jobs run at once.
     pub parallelism: u32,
     /// The store revision the preview was computed at.

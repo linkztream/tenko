@@ -27,7 +27,8 @@
 //! controller that is at once. The steps register their services in the
 //! [`leader::LeaderRegistry`] that the start sequence hands around: the online KEK rotation
 //! (`vault.kek_rotation`, step `vault`), the reconciler with its purge (`ipam.reconcile`,
-//! step `ipam`, which also seeds its settings in the store), the job runner (`jobs.runner`,
+//! step `ipam`, which also seeds its settings in the store), the clock of moves
+//! (`ipam.moves`, step `ipam`), the job runner (`jobs.runner`,
 //! step `jobs`), the fetches of the URL block lists (`dns.lists`, with the zone service
 //! of the DNS module), the poll schedule of the connectors (`connect.poll`, step
 //! `connectors`), the prune of the node registry (`cluster.prune`, step `nodes`), the
@@ -1331,7 +1332,11 @@ async fn start(
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),
-                IpamConfig::default(),
+                IpamConfig {
+                    // ADR 0027: `[dhcp.moves]`.
+                    moves: config.dhcp.moves,
+                    ..IpamConfig::default()
+                },
             )
             .map_err(|error| StartError::coded("ipam", &error))?;
             store_dyn
@@ -1465,6 +1470,16 @@ async fn start(
             }
         }
         leaders.register(reconciler.leader_service());
+    }
+    // The clock of moves (`ipam.moves`, ADR 0027): the short lease's wait, the migration
+    // deadline, its verification window and its extension, on the leader with the runner.
+    if let Some(ipam) = &ipam {
+        let clock = tenko_ipam::moves::clock::MoveClock::new(
+            Arc::clone(ipam.store()),
+            Arc::clone(ipam.jobs()),
+            dhcp_moves.clone(),
+        );
+        leaders.register(clock.leader_service());
     }
     let sink: Arc<dyn tenko_connect::host::normalize::ObservationSink> = match &reconciler {
         Some(reconciler) => {

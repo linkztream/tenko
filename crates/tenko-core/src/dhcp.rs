@@ -55,8 +55,8 @@ pub use class::{
 };
 pub use lease::{
     BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event, Lease6Kind,
-    LeaseEvent, LeaseEventKind, LeaseRef, PoolShare, Relay6Info, RelayInfo, write_identity,
-    write_identity6,
+    LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease, PoolShare, Relay6Info,
+    RelayInfo, write_identity, write_identity6,
 };
 pub use option::{
     CATALOG_V4, CATALOG_V6, Catalog6Entry, CatalogEntry, OptionData, OptionDef, OptionKind,
@@ -1118,12 +1118,12 @@ pub mod tables {
 
     use super::{
         Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
-        Lease6Event, LeaseEvent, LeaseRef, OptionDef, OptionDefId, OptionOwner, OptionSet, Policy,
-        PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
+        Lease6Event, LeaseEvent, LeaseRef, MovingClient, OptionDef, OptionDefId, OptionOwner,
+        OptionSet, Policy, PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
     };
     use crate::{
         Timestamp,
-        id::{PrefixId, RangeId, VrfId},
+        id::{JobId, PrefixId, RangeId, VrfId},
         names::TableName,
         table::TableDef,
     };
@@ -1167,11 +1167,15 @@ pub mod tables {
     pub static HISTORY6: TableDef<(Timestamp, VrfId, Ipv6Addr), Lease6Event> =
         TableDef::new("dhcp.history6");
 
+    /// The clients move jobs are moving, by job (ADR 0027): written by the move job and
+    /// served in the role's configuration image.
+    pub static MOVING: TableDef<JobId, MovingClient> = TableDef::new("dhcp.moving");
+
     /// The tables a node with the `dhcp` role receives through node sync: every table of the
     /// namespace except `dhcp.history` (plan section 3.2). Declared now and consumed by no
     /// node in Phase 3: the one node runs the role in the controller's process and reads
     /// the store directly (plan section 2.12); the fed `dhcp` node is Phase 5.
-    pub static NODE_TABLES: [TableName; 13] = [
+    pub static NODE_TABLES: [TableName; 14] = [
         TableName::from_static("dhcp.settings"),
         TableName::from_static("dhcp.scopes"),
         TableName::from_static("dhcp.shared_networks"),
@@ -1186,6 +1190,8 @@ pub mod tables {
         TableName::from_static("dhcp.leases.by_client"),
         // WP9.1: the DHCPv6 leases.
         TableName::from_static("dhcp.leases6"),
+        // The clients of move jobs (ADR 0027).
+        TableName::from_static("dhcp.moving"),
     ];
 
     /// The IPAM tables a `dhcp` node also receives, filtered to the rows its reservations
@@ -1202,7 +1208,7 @@ pub mod tables {
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 15] {
+    pub fn all() -> [&'static TableName; 16] {
         [
             SETTINGS.name(),
             SCOPES.name(),
@@ -1220,6 +1226,8 @@ pub mod tables {
             // WP9.1: the DHCPv6 leases and their history.
             LEASES6.name(),
             HISTORY6.name(),
+            // The clients of move jobs (ADR 0027).
+            MOVING.name(),
         ]
     }
 }

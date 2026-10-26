@@ -39,6 +39,9 @@ pub mod fingerprint;
 pub mod image;
 pub mod lease;
 pub mod metrics;
+// The clients of move jobs: the short lease before a move and the client's activity
+// (ADR 0027).
+pub mod moving;
 pub mod probe;
 // WP9.2: the router advertisement check of DHCP-10.
 pub mod ra;

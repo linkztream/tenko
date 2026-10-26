@@ -3,25 +3,38 @@
 // whatever arguments the server attaches to a step. A step kind this UI does not know falls
 // back to the server's text. The L2 step (IPAM-19 step 4) has its own words: what happens
 // in the table, why a person does it, the exact manual task, the notes and the diff.
-import type { MoveItem, MoveL2, MoveL2Problem, MovePreview, MoveStepPreview, MoveTimeoutSource } from "../../api/moves";
-import { formatDuration, t, tDynamic, type MessageKey } from "../../i18n";
+import type {
+  MoveActivitySource,
+  MoveItem,
+  MoveL2,
+  MoveL2Problem,
+  MovePrepare,
+  MovePreview,
+  MoveStepPreview,
+  MoveTimeoutSource,
+} from "../../api/moves";
+import { formatDateTime, formatDuration, formatRelative, t, tDynamic, type MessageKey } from "../../i18n";
 
 /** The order of the checklist groups (IPAM-19, design decision 7). */
 export const STEP_ORDER: readonly string[] = [
+  "dhcp.prepare",
   "ipam.intent",
   "dhcp.manual",
   "device.manual",
   "dns.manual",
+  "dhcp.short_lease",
   "l2.move",
   "observe",
   "cleanup",
 ];
 
 const GROUP: Record<string, MessageKey> = {
+  "dhcp.prepare": "move.group.dhcp_prepare",
   "ipam.intent": "move.group.ipam_intent",
   "dhcp.manual": "move.group.dhcp_manual",
   "device.manual": "move.group.device_manual",
   "dns.manual": "move.group.dns_manual",
+  "dhcp.short_lease": "move.group.dhcp_short_lease",
   "l2.move": "move.group.l2_move",
   observe: "move.group.observe",
   cleanup: "move.group.cleanup",
@@ -47,6 +60,16 @@ export function stepText(step: MoveStepPreview, item: MoveItem, preview: MovePre
   const host = deviceName(item);
   const target = preview.target;
   switch (step.kind) {
+    case "dhcp.prepare":
+      return item.timing?.prepare === "short_lease" && item.timing.short_lease_secs
+        ? t("move.step.dhcp_prepare_short", { host, duration: formatDuration(item.timing.short_lease_secs) })
+        : t("move.step.dhcp_prepare", { host });
+    case "dhcp.short_lease":
+      return t("move.step.dhcp_short_lease", {
+        host,
+        ip: item.old_ip,
+        duration: item.timing?.short_lease_secs ? formatDuration(item.timing.short_lease_secs) : "–",
+      });
     case "ipam.intent":
       return t("move.step.ipam_intent", { old_ip: item.old_ip, new_ip: item.new_ip });
     case "dhcp.manual":
@@ -82,12 +105,79 @@ export function reasonText(item: MoveItem): string | undefined {
   return tDynamic(`move.reason.${item.reason.replace(/^ipam\.move\./, "")}`, { ip: item.new_ip, old_ip: item.old_ip }) ?? item.reason;
 }
 
-/** How the timeout was chosen, in words ("lease 24 h, timeout 12 h"). */
+/**
+ * How the longest migration deadline was chosen, in words ("pool lease 1 hr, deadline 61 min").
+ * `leaseSecs` is the default lease of the target's pools.
+ */
 export function timeoutText(source: MoveTimeoutSource, timeoutSecs: number, leaseSecs: number | null | undefined): string {
   const timeout = formatDuration(timeoutSecs);
-  if (source === "lease" && leaseSecs) return t("move.timeout.lease", { lease: formatDuration(leaseSecs), timeout });
-  if (source === "request") return t("move.timeout.request", { timeout });
-  return t("move.timeout.default", { timeout });
+  switch (source) {
+    case "request":
+      return t("move.timeout.request", { timeout });
+    case "short_lease":
+      return t("move.timeout.short_lease", { timeout });
+    case "lease":
+      return t("move.timeout.lease", { timeout });
+    case "pool":
+      return leaseSecs ? t("move.timeout.pool", { lease: formatDuration(leaseSecs), timeout }) : t("move.timeout.pool_any", { timeout });
+    default:
+      return t("move.timeout.default", { timeout });
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// The two times of a device and its preparation
+
+const ACTIVITY_SOURCE: Record<MoveActivitySource, MessageKey> = {
+  lease: "move.timing.source.lease",
+  pool: "move.timing.source.pool",
+  unknown: "move.timing.source.unknown",
+};
+
+/** Where the next DHCP activity was taken from, as a short label. */
+export function activitySourceText(source: MoveActivitySource): string {
+  return t(ACTIVITY_SOURCE[source] as "move.timing.source.lease");
+}
+
+const DEADLINE_SOURCE: Record<MoveTimeoutSource, MessageKey> = {
+  request: "move.timing.deadline_source.request",
+  short_lease: "move.timing.deadline_source.short_lease",
+  lease: "move.timing.deadline_source.lease",
+  pool: "move.timing.deadline_source.pool",
+  default: "move.timing.deadline_source.default",
+};
+
+/** How the migration deadline was chosen, as a short label. */
+export function deadlineSourceText(source: MoveTimeoutSource): string {
+  return t(DEADLINE_SOURCE[source] as "move.timing.deadline_source.request");
+}
+
+/** A time as "in 12 minutes, Oct 26, 2026, 10:42 AM": relative first, then absolute. */
+export function whenText(at: string): string {
+  return t("move.timing.when", { relative: formatRelative(at), absolute: formatDateTime(at) });
+}
+
+/** What the job does before it changes the network of a device, in words. */
+export function prepareText(timing: { prepare: MovePrepare; short_lease_secs?: number | null }): string {
+  switch (timing.prepare) {
+    case "short_lease":
+      return timing.short_lease_secs
+        ? t("move.timing.prepare.short_lease", { duration: formatDuration(timing.short_lease_secs) })
+        : t("move.timing.prepare.short_lease_any");
+    case "limit":
+      return t("move.timing.prepare.limit");
+    case "move_now":
+      return t("move.timing.prepare.move_now");
+    case "not_served":
+      return t("move.timing.prepare.not_served");
+    default:
+      return t("move.timing.prepare.no_mac");
+  }
+}
+
+/** The client's lease on its old network, from its start to its end. */
+export function leaseSpanText(start: string, end: string): string {
+  return t("move.timing.lease", { start: formatDateTime(start), end: formatDateTime(end) });
 }
 
 // ---------------------------------------------------------------------------------

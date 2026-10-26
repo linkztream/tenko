@@ -20,8 +20,8 @@ use utoipa::ToSchema;
 
 use crate::{
     dns::DnsName,
-    id::{NodeId, PrefixId, VrfId},
-    net::Duid,
+    id::{JobId, NodeId, PrefixId, VrfId},
+    net::{Duid, MacAddr},
     serde_util::HexBytes,
     timestamp::Timestamp,
 };
@@ -280,6 +280,58 @@ impl Lease {
     pub fn blocks(&self, now: Timestamp) -> bool {
         self.state.holds_address() && self.ends > now
     }
+}
+
+/// A client a move job is moving to another network (`docs/moves.md` section 4, ADR
+/// 0027): the row of `dhcp.moving`, keyed by the job. The move job writes it in its first
+/// step and removes it when it ends; the `dhcp` role serves it in its configuration image.
+///
+/// While the row is active (before `until`), a REQUEST of the client for the address of
+/// `lease` gets a lease of `short_secs` instead of the pool's time, so that the client
+/// comes back soon after the move changes its network, and the role notes every DHCP
+/// message of the client's MAC address, so that the job sees the client's exchange (the
+/// deadline's extension, the reconnection on the target scope). The role acts on no row
+/// past `until`; the leader's lease expiry removes the rows of jobs that ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MovingClient {
+    /// The move job.
+    pub job: JobId,
+    /// The client's MAC address.
+    #[schema(value_type = String, example = "00:00:5e:00:53:31")]
+    pub mac: MacAddr,
+    /// The lease of the client on its old network that a renewal answers with the short
+    /// lease; none when Tenko does not serve the old network or the move does not shorten
+    /// the lease ("move now").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<MovingLease>,
+    /// The time of the short lease in seconds (`[dhcp.moves] short_lease_secs`).
+    pub short_secs: u32,
+    /// The Tenko scope of the target network, where a message of the client counts as its
+    /// reconnection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<PrefixId>,
+    /// When the row stops counting: the job's own deadline.
+    pub until: Timestamp,
+    /// Whether the job extended its observation deadline once already.
+    #[serde(default)]
+    pub extended: bool,
+}
+
+impl MovingClient {
+    /// Whether the row counts at `now`.
+    pub fn is_active(&self, now: Timestamp) -> bool {
+        now < self.until
+    }
+}
+
+/// The old lease of a [`MovingClient`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MovingLease {
+    /// The VRF of the old scope.
+    pub vrf: VrfId,
+    /// The address the client holds.
+    #[schema(value_type = String, example = "192.0.2.50")]
+    pub addr: Ipv4Addr,
 }
 
 /// The value of `dhcp.leases.by_client`: where the client's lease in a scope is.
