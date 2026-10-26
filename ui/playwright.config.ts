@@ -17,8 +17,9 @@ export default defineConfig({
   retries: ci ? 1 : 0,
   workers: ci ? 2 : 4,
   timeout: 120_000,
-  // The whole run must fit the ten-minute budget of the CI job; past it the run fails.
-  globalTimeout: 10 * 60_000,
+  // The whole run must fit this budget, well inside the CI job's thirty minutes; past it the run
+  // fails. With two workers on the runner the suite (252 scenarios) needs a little over ten minutes.
+  globalTimeout: 20 * 60_000,
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { outputFolder: "e2e/.artifacts/report", open: "never" }]],
   use: {
