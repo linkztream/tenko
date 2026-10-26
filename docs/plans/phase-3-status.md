@@ -10,6 +10,8 @@ The data-plane HA plan (`docs/plans/ha-plan.md`, with ADR 0025, Accepted on 2026
 
 The identity plan (`docs/plans/identity-plan.md`, with ADR 0026, Accepted on 2026-10-25) followed the same day, merged as `9278e0b8` after the docs gate: GSS-TSIG from Windows accepted in pure Rust (the sspi and picky-krb crates, a spike in WP13.0 deciding), a pre-staged AES-only computer account whose password Tenko takes over and rotates, ownership per name with the Windows rules, OIDC and LDAP sign-in with group mapping and Kerberos web sign-in, no SAML, RADIUS or TACACS+; decisions ID-Q1 to ID-Q18 decided by the owner on 2026-10-25 as recommended, ID-Q13 with the addition that LDAPS is set up in the UI by importing the certificate chain of the domain controllers (fetch, confirm the fingerprints, pin; a PEM file or the system trust store as alternatives; a clear-text warning on plain LDAP), and ADR 0026 Accepted, Slice 13 (WP13.0 to WP13.8) in Phase 4 (ID-Q10).
 
+The UI plan (`docs/plans/ui-plan.md`, 2026-10-26) turns the owner's design proposal of that day into the work packages U1 to U8 (the findings index with the label catalog and the guard rail against network and broadcast addresses first, then the shell, the dashboard, reconciliation with Discovery as the findings list, jobs, IPAM networks with the address map and the saved table layouts, topology with the SSID view, and the DNS cache), with the design guide's ten principles, the severity and paired `-on` tokens, and TGL-38 (a second person's approval under Hardened, built in Slice 13); the owner accepted the lead's decisions UI-Q1 to UI-Q11 the same day. It adds no requirement and no change to the product yet.
+
 ## Slice 7 work packages
 
 | Package | State | Commit | Notes |

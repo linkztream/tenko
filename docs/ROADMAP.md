@@ -19,6 +19,7 @@ Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). It
 | Recursion (Slice 10, beside Phase 3) | In progress: the contracts and the iterative engine with the lab root are merged; validation (WP10.2) is being built; WP10.3 to WP10.5 are open | [dns-recursion-plan.md](plans/dns-recursion-plan.md), [dns-recursion-status.md](plans/dns-recursion-status.md) |
 | High availability of the data plane (Slice 12, after Phase 3) | Planned: the plan is accepted and ADR 0025 is Accepted (2026-10-25); WP12.0 to WP12.8 are open | [ha-plan.md](plans/ha-plan.md), [ADR 0025](adr/0025-dhcp-failover-and-data-plane-ha.md) |
 | Kerberos and directory identity (Slice 13, in Phase 4) | Planned: the plan is accepted and ADR 0026 is Accepted (2026-10-25); WP13.0 to WP13.8 are open | [identity-plan.md](plans/identity-plan.md), [ADR 0026](adr/0026-kerberos-and-directory-identity.md) |
+| User interface overhaul (U1 to U8, beside Phase 3) | Planned: the plan is accepted (2026-10-26) with its decisions UI-Q1 to UI-Q11; U1 to U8 are open | [ui-plan.md](plans/ui-plan.md) |
 | 4 AD integration and migration | Not started | [MIGRATION.md](MIGRATION.md) |
 | 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
 

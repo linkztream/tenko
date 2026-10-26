@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-37 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-38 and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -70,6 +70,7 @@ Reading the matrix:
 | TGL-35 | Directory check interval and grace | 15 minutes, 15 minutes grace | 15 minutes, 15 minutes grace | 5 minutes, no grace | 15 minutes, 15 minutes grace | 4 (Slice 13) | IAM-12 |
 | TGL-36 | Personal tokens of directory users | Allowed within TGL-05 | Allowed within TGL-05 | Not allowed (service accounts only) | Allowed | 4 (Slice 13) | IAM-10 |
 | TGL-37 | Backup before an update (ADR 0023) | Asked, default yes; "no backup" allowed and audited | Asked, default yes; "no backup" allowed and audited | Required: `backup: "skip"` is refused | Asked, default yes; "no backup" allowed and audited | 2 | OPS-07, OPS-24 |
+| TGL-38 | A second person's approval of a change (the UI plan, UI-Q9) | Off | Off | On: a change job waits for approval by a second person before it runs; the approver is recorded in the audit entry and in the recent changes | Off | Planned, 4 (Slice 13) | IAM-02, API-09 |
 
 Notes:
 
@@ -79,6 +80,8 @@ Notes:
 - **TGL-24 and the PIN rule.** The PIN coupling rule applies on top of every value: a PIN-strength session never reveals, and personal API tokens never reveal. No value is weaker than Home, so the toggle never raises the banner. Operators may reveal (administrators create, change, bind and delete), so they count as accounts that can reach the vault.
 - **TGL-08 and a replaced certificate.** With an imported certificate, whether the node loads a certificate that is replaced in its files while it runs is a decision of the profile: on under Lab and Home, off under Standard unless `tls.accept_external_replacement = true`, never under Hardened (the key is refused there). Where it is off, the new certificate is reported as pending (`sys.tls.certificate_pending`) and the next restart loads it. See [certificates.md](certificates.md) section 4.
 - **TGL-37 follows the profile.** Like TGL-30 it is decided by the selected profile and has no stored value of its own yet; an install that does not answer still needs a good backup younger than one hour in every profile, so no profile installs without a restore point by accident ([upgrades.md](upgrades.md) section 8.12).
+- **TGL-38 and Slice 13.** A second person needs a second identity, so the toggle ships with the directory identity of Slice 13 ([identity-plan.md](plans/identity-plan.md)); until then a Hardened change is a job with a preview and no approval step. It is a guard rail of the Hardened profile: only an administrator can lift it, and the lifted state is a weakened setting (next note). The approval workflow beyond one approver (IAM-02) stays in Phase 5.
+- **A setting weaker than the profile is a finding.** Besides the banner, a toggle set weaker than the selected profile's value raises the finding "A setting is weaker than the profile allows" of the findings model ([ui-plan.md](plans/ui-plan.md) section 2.2). Its subject is the toggle, its evidence the profile's value and the current one, and its action opens the setting. The severity is Review under Home and Standard and Act now under Hardened; under Lab the banner already says so and no finding is raised. The Settings entry of the navigation rail shows a dot while any such finding is open. Every change of a toggle stays in the audit log as before (NEVER-03).
 - **TGL-19 values.** The packet rates are starting points. The slower profiles exist because IDS/EDR products (for example Defender for Identity) flag port scans (SCAN-07).
 
 ## Never-off list

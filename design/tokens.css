@@ -175,6 +175,33 @@
   --locked: #464D5C;          /* lock glyph; automation stopped */
   --locked-wash: #EEF0F3;
 
+  /* Text on a colored fill (map cells, badges, counters). Each fill token that can
+     carry text has a paired -on token, checked once against its fill: at least 4.5:1
+     (3:1 only for text of 24 px and up). A component never picks a text color by eye:
+     it uses the -on token of the fill it draws. The -on value is a shade of the fill's
+     own hue: a light tint on the saturated fills of the light theme, a dark shade on the
+     lighter fills of the dark theme. The accent's pair is --accent-ink. Washes carry
+     ordinary ink and need no pair. */
+  --mode-reserved-on: #F2FCFA;     /* 4.66:1 on --mode-reserved */
+  --mode-static-on: #EEF3FB;       /* 5.26:1 on --mode-static */
+  --mode-dynamic-on: #FFFFFF;      /* 4.70:1 on --mode-dynamic */
+  --proposal-on: #FDF5FA;          /* 5.17:1 on --proposal */
+  --conflict-on: #FFF6F5;          /* 5.00:1 on --conflict */
+  --discrepancy-on: #4E3913;       /* 5.19:1 on --discrepancy-mark */
+  --job-done-on: #F3FCF6;          /* 4.83:1 on --job-done */
+  --job-rolledback-on: #FFF7F2;    /* 4.88:1 on --job-rolledback */
+  --job-failed-on: var(--conflict-on);
+  --severity-info-on: #F6F7F8;     /* 5.06:1 on --ink-3 */
+
+  /* Severity roles (the findings model): a component asks for a severity, not for a
+     domain color. They point at the existing colors and follow them in both themes.
+     --ok-wash and --job-done-wash are for chips only; no row or column is filled with them. */
+  --severity-act: var(--conflict);
+  --severity-act-on: var(--conflict-on);
+  --severity-review: var(--proposal);
+  --severity-review-on: var(--proposal-on);
+  --severity-info: var(--ink-3);
+
   /* Job states (IPAM-17). Running and waiting share the accent hue:
      running is filled, waiting is a hollow ring with a countdown. */
   --job-queued: #7C8496;
@@ -280,6 +307,16 @@
     --discrepancy-wash: #362A12;
     --locked: #B0B7C4;
     --locked-wash: #232832;
+    /* Paired text tokens for colored fills (see the light block for the rule). */
+    --mode-reserved-on: #0E3732;     /* 5.93:1 */
+    --mode-static-on: #122B54;       /* 5.82:1 */
+    --mode-dynamic-on: #232832;      /* 5.82:1 */
+    --proposal-on: #4F1239;          /* 5.74:1 */
+    --conflict-on: #4D1411;          /* 5.81:1 */
+    --discrepancy-on: #4A3510;       /* 6.34:1 */
+    --job-done-on: #0F3320;          /* 6.14:1 */
+    --job-rolledback-on: #472610;    /* 5.94:1 */
+    --severity-info-on: #21252B;     /* 5.11:1 on --ink-3 */
     --job-queued: #8D96A6;
     --job-running: #9C97FF;
     --job-waiting: #9C97FF;
@@ -364,6 +401,16 @@
   --discrepancy-wash: #362A12;
   --locked: #B0B7C4;
   --locked-wash: #232832;
+  /* Paired text tokens for colored fills (see the light block for the rule). */
+  --mode-reserved-on: #0E3732;     /* 5.93:1 */
+  --mode-static-on: #122B54;       /* 5.82:1 */
+  --mode-dynamic-on: #232832;      /* 5.82:1 */
+  --proposal-on: #4F1239;          /* 5.74:1 */
+  --conflict-on: #4D1411;          /* 5.81:1 */
+  --discrepancy-on: #4A3510;       /* 6.34:1 */
+  --job-done-on: #0F3320;          /* 6.14:1 */
+  --job-rolledback-on: #472610;    /* 5.94:1 */
+  --severity-info-on: #21252B;     /* 5.11:1 on --ink-3 */
   --job-queued: #8D96A6;
   --job-running: #9C97FF;
   --job-waiting: #9C97FF;

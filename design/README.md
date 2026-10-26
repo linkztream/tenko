@@ -8,20 +8,28 @@ Start with [`mockups/index.html`](mockups/index.html). The owner has reviewed th
 
 Double-click `mockups/index.html`. Every page is static HTML, CSS and a little plain JavaScript, with no build step and no framework. Each page loads three local files (`../tokens.css`, `shell.css`, `shell.js`) and one stylesheet from Google Fonts for the identifier face (JetBrains Mono). Offline, the pages fall back to the platform monospace face and still work. The product will not call Google: it embeds the font file (SIL Open Font License) in the binary next to the UI bundle, served from `/assets/` like every other asset (ADR 0008).
 
-Theme, density and the "Emphasize host part" preference are remembered per browser in `localStorage` (`tenko-theme`, `tenko-density`, `tenko-emphasize`) and can all be changed in the account menu (the AK avatar, top right); the theme button in the top bar also cycles system, light, dark. Every mockup has a collapsed "Mockup notes" drawer, opened from the right end of the status bar (from the header in the wizard and on the sign-in page), with the decisions and open questions for that view, and an "All mockups" link back to the index. Some have a dashed "Mockup scene" switcher to show states that would otherwise need live data. Dashed borders always mean mockup-only, never product UI.
+Theme, density and the "Emphasize host part" preference are remembered per browser in `localStorage` (`tenko-theme`, `tenko-density`, `tenko-emphasize`) and can all be changed in the account menu (the AK avatar, top right); the theme button in the top bar also cycles system, light, dark. Every mockup has a collapsed "Mockup notes" drawer, opened from the right end of the status bar (from the header in the wizard and on the sign-in page), with the decisions and open questions for that view, and an "All mockups" link back to the index. Some have a "Mockup scene" switcher to show states that would otherwise need live data; mockup-only chrome carries the word "Mockup" and is never drawn with a dashed border. A dashed border means a proposal (not yet intent), in the mockups and in the product alike.
 
 ## Principles
 
-1. **Speed and density first.** Compact 28 px rows by default, 13 px text, no hero banners. The screen is for data, not chrome. Every view must render its first useful rows before anything else is fetched.
-2. **Anything in three clicks or one keystroke.** Ctrl+K finds any address, host, MAC, prefix, record or command. `g` chords jump between areas. The palette shows each command's shortcut, so it is also where shortcuts are learned.
-3. **Keyboard first, mouse equal.** Grids have a cell focus ring, Space selects, Enter edits, Esc backs out. Every drag gesture has a keyboard twin (`M` for move to network).
-4. **Nothing happens silently.** Every change is a job with a preview, visible steps, a state and a way back. Background work never takes over the screen. Live changes arrive as a short flash on the cell that changed.
-5. **Dark and light with equal care.** Both themes are designed, not inverted. Each has its own validated steps for state and chart colors.
-6. **Color is for exceptions.** A healthy grid is calm and almost monochrome. Color appears where a person must act (conflict, proposal, intent and observation disagree, failed job) and for the accent (selection, focus, primary action). State never relies on color alone: it always has a glyph and a word.
+The ten principles come from the design proposal of 2026-10-26, carried out in [`docs/plans/ui-plan.md`](../docs/plans/ui-plan.md). Five of the earlier six stay (one is sharpened) and five are added.
+
+1. **Exceptions first, everything reachable.** The umbrella. Every view has three layers in this order: what needs a person, a summary in counts, the full detail. Healthy state is never hidden, only collapsed.
+2. **Speed and density first.** Compact 28 px rows by default, 13 px text, no hero banners, and the same 28 px in every list, reconciliation included. A cell that needs more lines expands on demand in the side panel instead of making every row tall. Every view must render its first useful rows before anything else is fetched.
+3. **Anything in three clicks or one keystroke.** Ctrl+K finds any address, host, MAC, prefix, record or command. `g` chords jump between areas. The palette shows each command's shortcut, so it is also where shortcuts are learned. A convenience, not a goal in itself.
+4. **Keyboard first, mouse equal.** Grids have a cell focus ring, Space selects, Enter edits, Esc backs out. Every drag gesture has a keyboard twin (`M` for move to network).
+5. **Nothing happens silently.** Every change is a job with a preview, visible steps, a state and a way back. Background work never takes over the screen. Live changes arrive as a short flash on the cell that changed.
+6. **Color is for exceptions.** A healthy grid is calm and almost monochrome. Agreeing, managed and done states never get a colored fill or wash; green appears only as a small glyph next to a word. A colored fill means a person should look. Color appears where a person must act (conflict, proposal, intent and observation disagree, failed job) and for the accent (selection, focus, primary action). State never relies on color alone: it always has a glyph and a word.
+7. **Aggregate before you repeat.** When most rows share a value, say it once: in a group row, a column header or a count chip. Only the rows that differ carry a badge.
+8. **Words before codes.** Every job kind, event and record type has a sentence-case label. The code stays available, in the data font and secondary (see [Label catalog](#label-catalog)).
+9. **Explain once, on demand.** A view's explanation lives behind an info button next to its title, not in a paragraph above the data. An explanation repeated per row moves to the group header.
+10. **Empty is a state, not a card.** A metric with no source is not drawn; it is listed in one "Hidden" line. A feature that is not set up shows one sentence and one action.
+
+Dark and light are both designed with equal care, not inverted: each theme has its own validated steps for state and chart colors (see [Tokens](#tokens)).
 
 ## Decisions
 
-The owner reviewed all mockups on 2026-10-09 and answered the review guide. These decisions are applied everywhere in this folder.
+The owner reviewed all mockups on 2026-10-09 and answered the review guide. These decisions are applied everywhere in this folder. Decisions 17 to 20 come from the design proposal of 2026-10-26 ([ui-plan.md](../docs/plans/ui-plan.md)).
 
 | # | Topic | Decision | Where it shows |
 |---|---|---|---|
@@ -41,6 +49,10 @@ The owner reviewed all mockups on 2026-10-09 and answered the review guide. Thes
 | 14 | Status bar | Stays. | All pages |
 | 15 | Logo | The fox is approved. The lockup keeps exactly the letterforms of the 16 px header wordmark. The two-tone fox (tails in the accent) is used on the sign-in page and in the wizard, one color everywhere else. | Logo, sign-in, wizard |
 | 16 | SSIDs (owner's request) | Wireless networks are IPAM objects, read from UniFi with their VLAN mapping and shown under the network that carries their VLAN. A wireless client moves to the SSID that carries the target VLAN instead of getting a per-client VLAN override. Access points are labeled with their SSIDs on the map. | IPAM tree, move job, topology |
+| 17 | Rail in three groups (proposal of 2026-10-26) | The rail keeps its 12 items in their order; a hairline separates three groups (Operate, Work, System) and Settings sits at the bottom. A badge per group shows the findings of that area, colored by the worst severity. | Rail, status bar |
+| 18 | Findings model with three severities | Conflicts, proposals, ghost addresses, disagreements, alarms and jobs that wait for a person are one object, a finding, with a severity: Act now, Review or Info. Only Act now colors the dashboard, the rail and the status bar; Info is listed where it lives and never counted as a problem. Components ask for a severity (`--severity-act`, `--severity-review`, `--severity-info`), not for a domain color. | Dashboard, rail, status bar, Discovery, Reconcile |
+| 19 | Label catalog for codes | Job kinds and audit events read as sentence-case labels from the language files; the code stays one line below, in the data font. | Jobs, Audit, dashboard |
+| 20 | Empty states and the Hidden line | A metric without a source is not drawn; one "Hidden" line names it with the reason. A feature that is not set up shows one sentence and one action, on a quiet fill and never dashed. | Dashboard, every panel |
 
 ## Visual direction
 
@@ -48,7 +60,7 @@ The owner reviewed all mockups on 2026-10-09 and answered the review guide. Thes
 
 **The address treatment.** Addresses and MACs render plain in the data font by default, one color and one weight. The markup always carries the split (network part and host part of an address, vendor part of a MAC), so the per-user preference "Emphasize host part" in the account menu can gray the network part and set the host part in bold (`192.0.2.`**`41`**), and gray a MAC's vendor part. The same applies to IPv6 (prefix and interface identifier).
 
-**Color.** Cool, slightly ink-blue neutrals in both themes, and one accent: *kikyo*, a bellflower blue-violet (`#4B44CF` light, `#9C97FF` dark). The accent marks only selection, focus, the primary action and running work. Domain states have their own reserved hues (below). Charts use a validated categorical palette that never borrows the accent or a state color.
+**Color.** Cool, slightly ink-blue neutrals in both themes, and one accent: *kikyo*, a bellflower blue-violet (`#4B44CF` light, `#9C97FF` dark). The accent marks only selection, focus, the primary action, running work and link hover; identifiers in grids (prefixes, addresses, MACs) render in `--ink`, not in the accent. Domain states have their own reserved hues (below). Charts use a validated categorical palette that never borrows the accent or a state color.
 
 **Shape.** Hierarchy comes from hairlines and spacing, not from shadows or cards. Radius grows with the size of the thing: 3 px for badges, 5 px for buttons and inputs, 8 px for panels and popovers, 12 px for dialogs. Shadows exist only on floating layers: menus, palette, toasts, drag ghosts.
 
@@ -131,6 +143,22 @@ Job states (IPAM-17). Running and waiting share the accent: running is a filled 
 | Failed | diamond | `#C8322F` | `#FF7A72` |
 | Rolled back | open ring | `#B0521A` | `#F0965A` |
 
+### Severity
+
+Components ask for a severity, not for a domain color. The three roles point at the existing colors and follow them in both themes:
+
+| Role | Points at | Used for |
+|---|---|---|
+| `--severity-act` | `--conflict` | Act now: a person must decide now (conflict, waiting job, over the alarm) |
+| `--severity-review` | `--proposal` | Review: a person should look (unknown device, orphaned record, PTR mismatch, intent and observation differ) |
+| `--severity-info` | `--ink-3` | Info: listed where it lives, never counted as a problem |
+
+`--ok-wash` and `--job-done-wash` are for chips only; no row or column is filled with them.
+
+### Text on a colored fill
+
+Text on a colored fill (map cells, badges, counters) is a dark shade of the fill's own hue on light fills and a light shade on dark fills, never plain white or black by default. It must reach 4.5:1 against the fill; 3:1 is allowed only at 24 px and up. Each fill token that can carry text has a paired `-on` token (`--mode-static-on`, `--conflict-on`, `--proposal-on`, `--severity-act-on` and so on in `tokens.css`) that is checked once, so no component picks a text color by eye. The accent's pair is `--accent-ink`. Washes carry ordinary ink and need no pair. The address map's 11 px octets follow this rule, with `--ink-3` on free cells.
+
 ### Charts and VLANs
 
 Chart colors follow the data-visualization method used for the dashboard: eight categorical hues in a fixed order (`--series-1` to `--series-8`), a single-hue sequential ramp (`--seq-*`) and a fixed status scale (`--status-good`, `-warning`, `-serious`, `-critical`), each validated for color-vision deficiency and contrast against Tenko's own surfaces (`#FFFFFF` and `#171A21`). Status colors always come with an icon and a label.
@@ -143,13 +171,30 @@ With 150 or more VLANs no palette stays readable, so color follows attention: co
 
 `--dur-1` 80 ms, `--dur-2` 160 ms, `--dur-3` 240 ms, and `--dur-flash` 1400 ms for the live-update flash. Motion only answers an action (opening, expanding, confirming), except the flash, which is the one deliberate exception because a remote change needs to be noticed. With reduced motion, the flash becomes a static underline and nothing animates.
 
+## Navigation shell
+
+The shell keeps its parts and tells you where the findings are, from any page.
+
+| Group | Items | Badge |
+|---|---|---|
+| Operate | Dashboard, IPAM, DNS, DHCP, Discovery, Topology | The count of findings for that area, colored by the worst severity |
+| Work | Jobs, Audit | Jobs: the count of jobs waiting for you |
+| System | Connectors, Nodes, Cluster | A dot when a connector or node is unhealthy |
+| Bottom | Settings | A dot when a setting is weaker than the profile allows |
+
+- **Rail.** Twelve items in the order of decision 13, separated into the three groups by a hairline. Info findings never raise a badge.
+- **Top bar.** Mark, command field, node status, profile, theme, help and account. The node chip is cluster-aware ("Leader · 1 node", "Follower · 3 nodes, 1 behind") and opens a short cluster card; the profile chip opens what the profile changes.
+- **Page header.** One pattern for every view: title (18 px) with an info button, one subtitle line of facts (counts, scope, freshness), primary actions on the right, sub-navigation tabs under it.
+- **Filter bar.** One pattern for every list: query field, exception chips with counts, density, columns. Each list shows the chips its findings need.
+- **Status bar.** Live, last event, running and waiting jobs and the version, then open findings as one count per severity; each count links to the filtered findings list. Info is a plain count outside the totals.
+
 ## Component inventory
 
 All of these exist in [`mockups/shell.css`](mockups/shell.css) and are used across the mockups.
 
 | Component | Class | Notes |
 |---|---|---|
-| Navigation shell | `.app`, `.topbar`, `.rail`, `.main`, `.statusbar` | Top bar: mark, command field (Ctrl+K), cluster and node status, security profile, theme, keyboard sheet, account. Rail: Dashboard, IPAM, DNS, DHCP, Topology, Jobs, Settings, with labels under icons. Status bar: live connection, last event, running and waiting jobs, selection count. |
+| Navigation shell | `.app`, `.topbar`, `.rail`, `.main`, `.statusbar` | Top bar: mark, command field (Ctrl+K), cluster and node status, security profile, theme, keyboard sheet, account. Rail: the 12 items in three groups with badges, and Settings, with labels under icons (see [Navigation shell](#navigation-shell)). Status bar: live connection, last event, running and waiting jobs, open findings per severity, selection count. |
 | Security banner | `.banner.danger` | Persistent while the Lab profile or any weakened setting is active. Hatched edge, cannot be dismissed. |
 | Grid | `table.grid` | Sticky header, cell-level focus ring (`td.focus`), selected rows with an accent edge, proposal rows dashed, conflict rows with a red edge, free runs collapsed into one striped row, ranges as collapsible group rows. |
 | Inline editor | `.cell-input`, `.cell-hint` | Enter or double-click edits a hostname in place; a one-line hint states the consequence ("updates A and PTR as a job"). Mode opens a small list with each mode's consequence. |
@@ -163,7 +208,14 @@ All of these exist in [`mockups/shell.css`](mockups/shell.css) and are used acro
 | Account menu | `.acct` (shell.js) | Opens from the avatar: theme, row density, "Emphasize host part", keyboard shortcuts, sign out. |
 | Number formatter | `tenko.si()`, `data-si` (shell.js) | 982, 1.2K, 48K, 1.3M: at most three significant digits so tiles and cells never grow; the exact value goes into the title. |
 | Wizard and sign-in | wizard and sign-in mockups | Focused pages without the rail; the two-tone mark. The wizard has numbered steps on the left and one card on the right; sign-in is passkey first. |
-| Badges | `.mode`, `.src`, `.flag`, `.tag`, `.vlan`, `.meter` | Mode glyph and word; source badges (agrees, differs, only observed, stale); flags; VLAN swatch and number; utilization meter neutral until it crosses the alarm. |
+| Badges | `.mode`, `.src`, `.flag`, `.tag`, `.vlan`, `.meter` | Mode glyph and word; source badges (agrees, differs, only observed, stale); flags; VLAN swatch and number; utilization meter neutral until it crosses the alarm. A badge appears only where a row differs from its column's majority. |
+| Finding (row, chip, strip) | `.finding`, `.finding-chip`, `.attention` (planned) | The glyph of the kind, one word, one default action. The chip carries a count; the strip is the dashboard's needs-attention strip, or one "All clear" line. |
+| Metric block | `.metric` (planned) | Label (12 px, `--ink-3`), value (24 px, SI), unit, one line of context. A sparkline only with a window and its scale. A metric without a source is not drawn; it joins the Hidden line. |
+| Empty state | `.empty` (planned) | One sentence of what is missing and one action, on a `--surface-2` fill. Never dashed. |
+| Group row | `tr.group` (planned) | Collapses a run of similar rows with a count ("Intent wins · 23", "Today · 4 jobs"); the sentence that would repeat per row is said once here. |
+| Info button | `.info` (planned) | Beside a view's title; opens its explanation in a popover. |
+| Hidden line | `.hidden-line` (planned) | One line at the foot of a view naming the metrics that are not drawn and why. |
+| Address map | `.amap` (planned) | One CSS grid cell per address, colored only where a finding sits, last octet in the cell's `-on` token; up to 1,024 cells (a /22), one cell per /24 above that. No chart library. |
 
 ## Keyboard map
 
@@ -203,9 +255,35 @@ Single-key shortcuts never fire while focus is in a text field.
 - **No modal spinners for background work.** Scans, moves and imports run as jobs. The status bar and the Jobs badge show them; the rest of the UI stays usable. A spinner is allowed only inside the control that is waiting, for less than a second.
 - **Drag and drop has a keyboard twin.** Dragging a selection lifts it as a stacked ghost with a count. Valid targets highlight with a dashed accent outline, invalid ones dim and say why on hover. Dropping opens the preview; it never changes anything by itself.
 - **Errors say what happened and what to do.** "No ARP or lease from 00-00-5E-00-53-2C within 5:00. The client did not reconnect." followed by Retry and Roll back. No apologies, no codes without words.
+- **Durations read as people say them.** 17 h 17 min, not 1,037 min. A number nobody can judge is noise: a ratio says what it is a ratio of, and a value that cannot be a real count (1.8e19 addresses) is shown as what it means.
+- **Every chart names its window and its scale.** A sparkline without a window ("last 60 s") and a scale (the axis maximum) is not drawn.
 - **Numbers never resize their container.** Counts that can grow use SI suffixes with at most three significant digits (1.2K, 48K, 1.3M), with the exact value on hover. Queries per second is a number, never a dial.
 - **Moves wait for the network, then clean up after themselves.** A move waits for each device up to half the target network's DHCP lease (never less than 5 minutes) and rolls back automatically on timeout. Other failures wait for a decision (Retry or Roll back).
 - **Insecure state is loud.** The Lab profile and any setting weaker than the Home profile show a persistent banner.
+
+## Label catalog
+
+Codes are for the author; labels are for the person. Every job kind and audit event has a sentence-case label that names its object, and the code stays one line below it in the data font and secondary ink. The catalog lives in the language files (`ui/i18n/en.d` and `sv.d`), one XLIFF unit per code, and the hook is `tDynamic(key) ?? code`: a code without a label shows the code and nothing breaks. There is no separate catalog format.
+
+Template rules:
+
+- A label is a verb phrase in sentence case with no trailing period: "Edit host controller-1 (3 objects)".
+- The object (name, address, count) fills a placeholder from the job's or event's parameters; code never builds a label by joining strings.
+- A count reads through a plural unit ("1 object", "3 objects").
+- A label never contains a secret, a token or a credential value, and never contains the code.
+- A name that can be long is truncated by the cell, not by the template.
+- Record data gets the same treatment: an HTTPS or SVCB record reads `alpn=h2,h3 ipv4hint=192.0.2.10`, not JSON keys.
+
+The first codes:
+
+| Code | Label |
+|---|---|
+| `ipam.job.edit` | Edit host controller-1 (3 objects) |
+| `dhcp.job.edit` | Edit DHCP scope 192.0.2.0/24 |
+| `scan.job.run` | Scan host-192-0-2-11 |
+| `ipam.reconcile.run` | Reconcile IPAM |
+| `ipam.observation.ingest` | Ingest observations (UniFi) |
+| `connect.secret.inject` | Pass credentials to a connector |
 
 ## The mark
 
@@ -217,7 +295,8 @@ The Tenko mark is a nine-tailed fox, the form a tenko takes. A geometric fox hea
 |---|---|
 | `README.md` | This document |
 | `REVIEW.md` | Questions for the owner while clicking through, and what was left out on purpose |
-| `tokens.css` | Design tokens for light and dark |
+| `tokens.css` | Design tokens for light and dark, with the severity roles and the paired `-on` text tokens |
+| `../docs/plans/ui-plan.md` | The plan that turns the 2026-10-26 proposal into work packages U1 to U8 |
 | `logo/tenko-mark.svg` | The mark, one color (`currentColor`) |
 | `logo/tenko-mark-duo.svg` | The mark, two-tone (tails in the accent) |
 | `logo/tenko-favicon.svg` | The small cut for 16 to 24 px, adapts to the system theme |
