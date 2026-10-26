@@ -6,6 +6,7 @@
 //!                   [--store mem|queue] [--seconds 60] [--lease-secs 3600]
 //! dhcp_server load  [--server 127.0.0.1:6767] [--bind 127.0.0.1:6868] [--mode dora|renew]
 //!                   [--clients 10000] [--rate 0] [--window 64] [--seconds 30]
+//!                   [--subnet 198.18.0.0]
 //! ```
 //!
 //! `serve` runs the engine's listener in relay mode over one scope, `198.18.0.0/15` (the
@@ -27,7 +28,9 @@
 //! (open loop, the latency at that rate). An exchange without its ACK after two seconds is
 //! lost. It prints the rate, the losses and the latency percentiles from the first message
 //! to the ACK. Clients are told apart by option 61; `chaddr` uses the documentation MACs
-//! (RFC 7042).
+//! (RFC 7042). `--subnet` is the address option 118 carries (default `198.18.0.0`, the
+//! scope of `serve`), so that the client can also fill a scope of `tenko serve` on another
+//! network.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -394,6 +397,8 @@ struct Load {
     socket: UdpSocket,
     server: SocketAddrV4,
     relay: Ipv4Addr,
+    /// The address option 118 carries.
+    subnet: Ipv4Addr,
     clients: Clients,
     in_flight: AtomicUsize,
     stop: AtomicBool,
@@ -434,7 +439,7 @@ impl Load {
             builder.server_identifier(*self.server.ip()).expect("54");
         }
         builder
-            .option(code::SUBNET_SELECTION, &network().network().octets())
+            .option(code::SUBNET_SELECTION, &self.subnet.octets())
             .expect("118");
         builder
             .option(code::PARAMETER_REQUEST_LIST, &[1, 3, 6, 15, 51, 54])
@@ -635,6 +640,7 @@ fn load(args: &Args) -> Result<(), Error> {
     let window: usize = args.parse("--window", 64)?;
     let seconds: u64 = args.parse("--seconds", 30)?;
     let mode = args.get("--mode").unwrap_or("dora").to_owned();
+    let subnet: Ipv4Addr = args.parse("--subnet", network().network())?;
     let socket = UdpSocket::bind(bind)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
     let socket2 = socket2::SockRef::from(&socket);
@@ -648,6 +654,7 @@ fn load(args: &Args) -> Result<(), Error> {
         socket,
         server,
         relay,
+        subnet,
         clients: Clients::new(clients),
         in_flight: AtomicUsize::new(0),
         stop: AtomicBool::new(false),

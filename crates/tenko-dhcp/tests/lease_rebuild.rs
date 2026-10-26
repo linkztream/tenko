@@ -9,9 +9,14 @@
 //!   renewals at a paced rate (`TENKO_LATENCY_RATE`, default 1,000 per second, for
 //!   `TENKO_LATENCY_SECS`, default 10) through the production lease store, timed from the
 //!   hand-off to the completion that releases the ACK.
+//! - **The memory of 100,000 leases** (M30, ignored by default;
+//!   `bench/phase3-dhcp/scripts/m30-lease-memory.ps1` runs it in release): the same fill
+//!   and rebuild, stopping at each stage (`MEMORY stage=...`) for
+//!   `TENKO_MEMORY_PAUSE_SECS` (default 10) so that a script outside the process can read
+//!   its resident set.
 //!
-//! Each prints one line (`REBUILD ...`, `LATENCY ...`) and appends it to the file
-//! `TENKO_LEASE_FIGURES` names, when set.
+//! Each prints one line (`REBUILD ...`, `LATENCY ...`, `MEMORY ...`) and appends it to the
+//! file `TENKO_LEASE_FIGURES` names, when set.
 
 mod lease_support;
 
@@ -66,6 +71,44 @@ fn key_of(i: u32, vrfs: &[VrfId]) -> (VrfId, Ipv4Addr) {
     )
 }
 
+/// Writes `count` active lease rows and their client index rows in batches of 1,000.
+async fn fill(raft: &RaftStore, count: u32, vrfs: &[VrfId], scope: PrefixId) {
+    let now = Timestamp::now();
+    let mut i = 0;
+    while i < count {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+        for _ in 0..1_000 {
+            if i == count {
+                break;
+            }
+            let (vrf, addr) = key_of(i, vrfs);
+            let lease = change(
+                LeaseEventKind::Granted,
+                vrf,
+                scope,
+                addr,
+                i + 256,
+                BindingState::Active,
+                now,
+                from_now(3_600),
+            )
+            .to_lease(NODE, None);
+            batch
+                .put_typed(&tables::LEASES, &(vrf, addr), &lease)
+                .expect("encodes");
+            batch
+                .put_typed(
+                    &tables::LEASES_BY_CLIENT,
+                    &(scope, lease.client.identity()),
+                    &LeaseRef { vrf, addr },
+                )
+                .expect("encodes");
+            i += 1;
+        }
+        raft.propose(batch).await.expect("written");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_large_table_rebuilds_from_the_store_in_time() {
     let count: u32 = std::env::var("TENKO_REBUILD_LEASES")
@@ -87,40 +130,7 @@ async fn a_large_table_rebuilds_from_the_store_in_time() {
         let raft = RaftStore::open(config(&data))
             .await
             .expect("the store opens");
-        let now = Timestamp::now();
-        let mut i = 0;
-        while i < count {
-            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-            for _ in 0..1_000 {
-                if i == count {
-                    break;
-                }
-                let (vrf, addr) = key_of(i, &vrfs);
-                let lease = change(
-                    LeaseEventKind::Granted,
-                    vrf,
-                    scope,
-                    addr,
-                    i + 256,
-                    BindingState::Active,
-                    now,
-                    from_now(3_600),
-                )
-                .to_lease(NODE, None);
-                batch
-                    .put_typed(&tables::LEASES, &(vrf, addr), &lease)
-                    .expect("encodes");
-                batch
-                    .put_typed(
-                        &tables::LEASES_BY_CLIENT,
-                        &(scope, lease.client.identity()),
-                        &LeaseRef { vrf, addr },
-                    )
-                    .expect("encodes");
-                i += 1;
-            }
-            raft.propose(batch).await.expect("written");
-        }
+        fill(&raft, count, &vrfs, scope).await;
         raft.shutdown().await.expect("the store shuts down");
     }
     let filled = filling.elapsed();
@@ -155,6 +165,85 @@ async fn a_large_table_rebuilds_from_the_store_in_time() {
     );
     drop(view);
     raft.shutdown().await.expect("the store shuts down");
+}
+
+/// Prints the stage line and waits, so that a script outside the process can read its
+/// memory while nothing changes.
+async fn stage(name: &str, pause: Duration, detail: &str) {
+    figure(&format!("MEMORY stage={name} {detail}"));
+    let _ = std::io::stdout().flush();
+    tokio::time::sleep(pause).await;
+}
+
+/// E32 and OPS-15 (M30): the memory of 100,000 leases. The process stops at each stage
+/// for `TENKO_MEMORY_PAUSE_SECS`: `start` (the runtime only), `store-empty` (a new Raft
+/// store open), `store-filled` (100,000 lease rows and their client index rows written,
+/// the store still open), `store-reopened` (closed and opened again, as after a restart),
+/// `table` (the role's table and its client index rebuilt from the store, the view
+/// dropped) and `table-dropped` (the table dropped, the store still open). The table's
+/// share is `table` less `table-dropped`; the store's share after a restart is
+/// `table-dropped` less `store-empty`. `bench/phase3-dhcp/scripts/m30-lease-memory.ps1`
+/// reads the resident set at each stage; the figures are in the results file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement; bench/phase3-dhcp/scripts/m30-lease-memory.ps1 runs it in release"]
+async fn e32_ops_15_the_memory_of_100000_leases_by_stage() {
+    let count: u32 = std::env::var("TENKO_REBUILD_LEASES")
+        .ok()
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(100_000);
+    let pause = Duration::from_secs(
+        std::env::var("TENKO_MEMORY_PAUSE_SECS")
+            .ok()
+            .and_then(|secs| secs.parse().ok())
+            .unwrap_or(10),
+    );
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    stage("start", pause, &format!("leases={count} build={build}")).await;
+    let dir = tempfile::tempdir().expect("a directory");
+    let data = dir.path().join("data");
+    let vrfs: Vec<VrfId> = (0..count.div_ceil(250))
+        .map(|_| VrfId::generate())
+        .collect();
+    let scope = PrefixId::generate();
+    {
+        let raft = RaftStore::open(config(&data))
+            .await
+            .expect("the store opens");
+        stage("store-empty", pause, "").await;
+        fill(&raft, count, &vrfs, scope).await;
+        stage("store-filled", pause, &format!("rows={count}")).await;
+        raft.shutdown().await.expect("the store shuts down");
+    }
+    let raft = RaftStore::open(config(&data))
+        .await
+        .expect("the store reopens");
+    stage("store-reopened", pause, "").await;
+    let table = {
+        let view = raft.read(ReadConsistency::Local).await.expect("a view");
+        rebuild_from_view(view.as_ref()).expect("the table rebuilds")
+    };
+    assert_eq!(table.len(), count as usize);
+    assert_eq!(table.client_index().len(), count as usize);
+    stage(
+        "table",
+        pause,
+        &format!(
+            "leases={} client_index={} lease_struct_bytes={} pending_change_bytes={}",
+            table.len(),
+            table.client_index().len(),
+            std::mem::size_of::<tenko_core::dhcp::Lease>(),
+            std::mem::size_of::<tenko_dhcp::lease::PendingChange>()
+        ),
+    )
+    .await;
+    drop(table);
+    stage("table-dropped", pause, "").await;
+    raft.shutdown().await.expect("the store shuts down");
+    figure("MEMORY stage=end");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

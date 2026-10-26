@@ -92,3 +92,11 @@ ISC publishes performance reports per Kea release (reports.kea.isc.org) with DOR
 ### The lab
 
 `deploy/compose/lab-dhcp` runs perfdhcp too, as one functional row among real clients behind a real relay; it measures nothing.
+
+## E32 on the workstation (WP9.5)
+
+Three measurements of E32 need no lab VM; their results are in `results/2026-10-26-e32-rss-leases-metrics.md`:
+
+- **M34, idle RSS with every role** (Windows): `scripts/m34-idle-rss.ps1 -Binary <tenko.exe> -LoadClient <dhcp_server.exe>` runs the M9 procedure of `bench/phase1-server/m9-idle-rss.ps1` with the roles `controller,dns,dhcp,probe`, the three home scopes on the documentation networks and 200 leases from the example's load client (`dhcp_server load --subnet <network>` selects a scope of `tenko serve` with option 118). `-Roles` without `dhcp` gives the baselines, `-Prefixes 200` adds the M9 data set; the port options let several runs go at once. The musl figure needs `m9-idle-rss.sh` with a `[dhcp]` section and a hook for the scopes and the leases, which do not exist yet.
+- **M30, the memory of 100,000 leases**: `scripts/m30-lease-memory.ps1 -TestBinary <lease_rebuild-<hash>.exe>` runs the ignored test `e32_ops_15_the_memory_of_100000_leases_by_stage` of `crates/tenko-dhcp/tests/lease_rebuild.rs` and reads the process's memory at each stage of the fill, the restart and the rebuild.
+- **M33, the metrics cost**: neither `tenko serve` nor the example server can turn the DHCP metrics off, so M33 by its method (M26 with the metrics on and off) cannot run; the ignored test `e32_ops_21_the_metrics_of_one_dora_exchange_cost_in_isolation` of `crates/tenko-dhcp/tests/metrics_cost.rs` times the metrics work of one exchange in isolation as a stand-in.

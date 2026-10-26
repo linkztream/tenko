@@ -4,6 +4,10 @@
 //! `tenko dhcp export --format kea --leases --out <dir>` in a separate process writes
 //! `kea-dhcp4.json`, `kea-leases4.csv`, `kea-dhcp6.json`, `kea-leases6.csv` and
 //! `kea-export-report.json`, and without `--out` prints the whole answer.
+//!
+//! This is the binary half of E30; the Kea half (`kea-dhcp4 -t`, `kea-dhcp6 -t` and a Kea
+//! server handing out the exported reservations) runs in the lab rows `export.kea*` of
+//! `deploy/compose/lab-dhcp`.
 
 mod serve_support;
 
