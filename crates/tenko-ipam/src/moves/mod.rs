@@ -36,6 +36,7 @@
 //! | `ipam.move.device` | `device.manual` | no: reconfigure the device | `static` hosts |
 //! | `ipam.move.controller` | `l2.controller` | yes: the port profile or the per-client VLAN through the network controller | the controller can make the change |
 //! | `ipam.move.l2` | `l2.move` | no: a person moves the device, with the exact action | the controller cannot (see below) |
+//! | `ipam.move.nudge` | `l2.nudge` | yes: waits `reappear_secs` for the client to come back, then bounces its port or kicks it, once | the controller step runs, the controller offers it, its guardrails let it and the move did not switch it off (ADR 0028) |
 //! | `ipam.move.observe` | `observe` | completed by the reconciler on a sighting of the device at its new address (WP2.4) or on a lease of its MAC address in the target network (WP8.1), or by a person; the timeout runs from its start | always |
 //! | `ipam.move.cleanup` | `cleanup` | yes: remove the old address, activate the new one, release the old lease | always |
 //!
@@ -65,6 +66,17 @@
 //!   refusal: a manual step says exactly what a person has to do. A refusal is a warning to
 //!   acknowledge (`ipam.move.l2_refused`), and so is a controller that cannot be read
 //!   (`ipam.move.controller_unavailable`).
+//!
+//! # Making the client start over (ADR 0028)
+//!
+//! A client that does not notice the VLAN change waits for its short lease. When the
+//! controller offers it, the job forces it to start over: after the L2 change and a wait of
+//! `[dhcp.moves] reappear_secs` for the client to come back by itself (its DHCP exchange on
+//! the target network or its lease there), it bounces the client's switch port (wired) or
+//! disconnects it from its access point (wireless), once ([`nudge`]). On a rollback, the same
+//! bounce or kick follows the L2 undo, so the client gets its old address back at once. The
+//! preview says which of the two will run, or why neither (`ipam.move.nudge.*`), and a move
+//! can switch it off (`MoveRequest::nudge`).
 //!
 //! The job's `ipam.move.controller` step reads the controller again when it runs and
 //! refuses with 409 `ipam.move.l2_changed` when the device or its port is no longer as the
@@ -104,6 +116,8 @@ pub mod dns;
 mod l2;
 // The short lease before the network change and the moving client (ADR 0027).
 pub mod lease;
+// ADR 0028: the port bounce or client kick after the network change.
+pub mod nudge;
 mod preview;
 pub mod settings;
 pub mod steps;
@@ -135,10 +149,16 @@ use crate::{
     vlan::controllers::{AttachmentChange, ControllerInfo, Controllers, DiffEntry},
 };
 
-/// Registers the step that needs the network controllers, `ipam.move.controller`, with
-/// the engine; the other steps of a move come with [`crate::jobs::register_steps`].
+/// Registers the steps that need the network controllers, `ipam.move.controller` and
+/// `ipam.move.nudge`, with the engine; the other steps of a move come with
+/// [`crate::jobs::register_steps`]. [`nudge::register_steps`] registers the nudge again with
+/// the dhcp role's slot, so that it sees the client's exchange on the target network.
 pub fn register_steps(engine: &mut JobEngine, controllers: &Arc<Controllers>) {
     engine.register(Arc::new(MoveControllerStep::new(Arc::clone(controllers))));
+    engine.register(Arc::new(nudge::MoveNudgeStep::new(
+        Arc::clone(controllers),
+        None,
+    )));
 }
 
 /// Job kind of a move.
@@ -241,6 +261,14 @@ pub mod codes {
     pub const NOTE_RECONNECT: &str = "ipam.move.l2.note.reconnect";
     /// Note: Tenko cannot tell whether the access point carries the VLAN.
     pub const NOTE_CARRY_UNKNOWN: &str = "ipam.move.l2.note.carry_unknown";
+
+    /// Reason of no nudge: the move switched it off (`nudge: false`).
+    pub const NUDGE_OFF: &str = "ipam.move.nudge.off";
+    /// Reason of no nudge: the controller offers neither a port bounce (wired) nor a client
+    /// kick (wireless).
+    pub const NUDGE_NO_CAPABILITY: &str = "ipam.move.nudge.no_capability";
+    /// Reason of no nudge: a guardrail refuses it (see `problem`).
+    pub const NUDGE_REFUSED: &str = "ipam.move.nudge.refused";
 }
 
 /// A move request.
@@ -260,6 +288,11 @@ pub struct MoveRequest {
     /// link changes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub move_now: bool,
+    /// After the network change, bounce the client's switch port or disconnect it from its
+    /// access point when it does not come back by itself (ADR 0028); on when absent. It
+    /// runs only where the controller offers it and its guardrails let it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub nudge: bool,
     /// Warning codes the caller acknowledges.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acknowledge: Vec<String>,
@@ -270,6 +303,53 @@ pub struct MoveRequest {
     /// answers 409 `ipam.move.plan_changed` and starts nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect_fingerprint: Option<String>,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the signature serde asks for"
+)]
+const fn is_yes(value: &bool) -> bool {
+    *value
+}
+
+/// How the job makes the client start over after the network change (ADR 0028).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveNudgeAction {
+    /// The connector host takes the client's switch port down for a few seconds and brings
+    /// it up again.
+    Bounce,
+    /// The controller disconnects the wireless client, which associates again.
+    Kick,
+    /// Neither; `reason` says why.
+    #[default]
+    None,
+}
+
+/// The nudge of a device after its network change, as previewed (ADR 0028).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub struct MoveNudge {
+    /// What the job does when the client does not come back by itself.
+    pub action: MoveNudgeAction,
+    /// Why there is none (`ipam.move.nudge.*`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The guardrail refusal behind `ipam.move.nudge.refused`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<MoveL2Problem>,
+    /// The bounce or kick, also when it is switched off or refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::vlan::controllers::NudgeChange>,
+    /// How long the job waits for the client to come back by itself first.
+    #[serde(default)]
+    pub reappear_secs: u32,
 }
 
 /// How a device gets into the target VLAN (IPAM-19 step 4).
@@ -393,6 +473,11 @@ pub struct MoveL2 {
     /// When the controller was read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_at: Option<Timestamp>,
+    /// What the job does after the change when the client does not come back by itself:
+    /// a port bounce, a client kick, or neither and why (ADR 0028). Present with an
+    /// automatic change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudge: Option<MoveNudge>,
 }
 
 impl MoveL2 {
@@ -565,6 +650,14 @@ pub struct MovePreview {
     /// Whether the jobs change the network at once (`move_now`).
     #[serde(default)]
     pub move_now: bool,
+    /// Whether the jobs bounce or kick a client that does not come back by itself
+    /// (`nudge`, ADR 0028).
+    #[serde(default)]
+    pub nudge: bool,
+    /// Whether a controller that sees a device of the move offers the port bounce or the
+    /// client kick: the preview shows the switch then.
+    #[serde(default)]
+    pub nudge_offered: bool,
     /// How many jobs run at once.
     pub parallelism: u32,
     /// The store revision the preview was computed at.

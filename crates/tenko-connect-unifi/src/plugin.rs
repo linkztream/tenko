@@ -319,5 +319,8 @@ fn change_kind(change: &L2Change) -> &'static str {
         L2Change::SetClientVlan { .. } => "client VLAN",
         L2Change::ClearClientVlan { .. } => "client VLAN removal",
         L2Change::RemoveNetwork { .. } => "network removal",
+        L2Change::BouncePort { .. } => "port bounce (down)",
+        L2Change::EnablePort { .. } => "port bounce (up)",
+        L2Change::KickClient { .. } => "client kick",
     }
 }

@@ -112,8 +112,25 @@ impl v1::inventory_server::Inventory for InventoryService {
     }
 }
 
-/// `NetworkController`: topology, plan, apply, revert.
-pub(super) struct NetworkService(pub(super) Arc<dyn NetworkController>);
+/// `NetworkController`: topology, plan, apply, revert. A port bounce or a client kick the
+/// manifest does not declare (`port_bounce`, `client_kick`) is answered with `UNIMPLEMENTED`
+/// before the plugin sees it.
+pub(super) struct NetworkService {
+    pub(super) controller: Arc<dyn NetworkController>,
+    pub(super) declared: Vec<crate::Capability>,
+}
+
+impl NetworkService {
+    /// Refuses a change whose capability the manifest does not declare.
+    fn declared(&self, change: &crate::L2Change) -> Result<(), Status> {
+        match change.capability() {
+            Some(capability) if !self.declared.contains(&capability) => {
+                Err(failed(&crate::ConnectorError::Unsupported))
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 #[tonic::async_trait]
 impl v1::network_controller_server::NetworkController for NetworkService {
@@ -122,7 +139,11 @@ impl v1::network_controller_server::NetworkController for NetworkService {
         request: Request<v1::TopologyRequest>,
     ) -> Result<Response<v1::TopologyResponse>, Status> {
         let ctx = convert::context_from_proto(request.into_inner().context).map_err(malformed)?;
-        let topology = self.0.topology(&ctx).await.map_err(|e| failed(&e))?;
+        let topology = self
+            .controller
+            .topology(&ctx)
+            .await
+            .map_err(|e| failed(&e))?;
         Ok(Response::new(v1::TopologyResponse {
             topology: Some(convert::topology_to_proto(&topology)),
         }))
@@ -135,7 +156,12 @@ impl v1::network_controller_server::NetworkController for NetworkService {
         let request = request.into_inner();
         let ctx = convert::context_from_proto(request.context).map_err(malformed)?;
         let change = convert::change_from_proto("change", request.change).map_err(malformed)?;
-        let plan = self.0.plan(&ctx, &change).await.map_err(|e| failed(&e))?;
+        self.declared(&change)?;
+        let plan = self
+            .controller
+            .plan(&ctx, &change)
+            .await
+            .map_err(|e| failed(&e))?;
         Ok(Response::new(v1::L2PlanResponse {
             plan: Some(convert::plan_to_proto(&plan)),
         }))
@@ -148,9 +174,10 @@ impl v1::network_controller_server::NetworkController for NetworkService {
         let request = request.into_inner();
         let ctx = convert::context_from_proto(request.context).map_err(malformed)?;
         let plan = convert::plan_from_proto("plan", request.plan).map_err(malformed)?;
+        self.declared(&plan.change)?;
         let mode = convert::mode_from_proto(request.mode);
         let receipt = self
-            .0
+            .controller
             .apply(&ctx, &plan, mode)
             .await
             .map_err(|e| failed(&e))?;
@@ -166,7 +193,8 @@ impl v1::network_controller_server::NetworkController for NetworkService {
         let request = request.into_inner();
         let ctx = convert::context_from_proto(request.context).map_err(malformed)?;
         let receipt = convert::receipt_from_proto("receipt", request.receipt).map_err(malformed)?;
-        self.0
+        self.declared(&receipt.plan.change)?;
+        self.controller
             .revert(&ctx, &receipt)
             .await
             .map_err(|e| failed(&e))?;

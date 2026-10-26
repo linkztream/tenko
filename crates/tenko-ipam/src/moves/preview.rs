@@ -560,6 +560,8 @@ pub(super) fn finish(base: Base, l2: L2Plans, request: &MoveRequest) -> IpamResu
             warnings,
             unacknowledged: unacknowledged.into_iter().collect(),
             controllers: l2.controllers,
+            nudge: request.nudge,
+            nudge_offered: l2.nudge_offered,
             fingerprint,
         },
         steps: all_steps,
@@ -587,6 +589,9 @@ struct FingerprintedItem<'a> {
     connector: Option<tenko_core::ConnectorId>,
     change: Option<&'a crate::vlan::controllers::AttachmentChange>,
     diff: &'a [crate::vlan::controllers::DiffEntry],
+    // ADR 0028: the bounce or kick after the change; absent from older fingerprints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nudge: Option<super::MoveNudgeAction>,
 }
 
 fn fingerprint(target: &MoveTarget, items: &[MoveItem]) -> IpamResult<String> {
@@ -603,6 +608,12 @@ fn fingerprint(target: &MoveTarget, items: &[MoveItem]) -> IpamResult<String> {
                 connector: item.l2.connector_id(),
                 change: item.l2.change.as_ref(),
                 diff: &item.l2.diff,
+                nudge: item
+                    .l2
+                    .nudge
+                    .as_ref()
+                    .map(|nudge| nudge.action)
+                    .filter(|action| *action != super::MoveNudgeAction::None),
             })
             .collect(),
     };
@@ -1203,7 +1214,10 @@ pub(super) fn step_plans(
         });
     }
     if let Some(step) = l2_step(item, target, &base, &who) {
+        let nudge = nudge_step(&step, &base, &who);
         steps.push(step);
+        // ADR 0028: the bounce or kick right after the network change.
+        steps.extend(nudge);
     }
     let mut observe = base.clone();
     observe.insert("timeout_secs".to_owned(), timeout_secs.to_string());
@@ -1289,6 +1303,7 @@ fn l2_step(
                 attachment: attachment.clone(),
                 action: l2.action,
                 diff: l2.diff.clone(),
+                nudge: nudge_plan(l2),
             }),
             dns: None,
             dhcp: None,
@@ -1304,6 +1319,69 @@ fn l2_step(
         task: Some(manual(l2::instruction(l2), &args)),
         timeout: None,
         l2: None,
+        dns: None,
+        dhcp: None,
+    })
+}
+
+/// The nudge an automatic L2 step carries: the bounce or kick the preview chose.
+fn nudge_plan(l2: &super::MoveL2) -> Option<super::nudge::NudgePlan> {
+    let nudge = l2.nudge.as_ref()?;
+    if nudge.action == super::MoveNudgeAction::None {
+        return None;
+    }
+    Some(super::nudge::NudgePlan {
+        change: nudge.change.clone()?,
+        reappear_secs: nudge.reappear_secs,
+    })
+}
+
+/// The step `ipam.move.nudge` after the automatic L2 step `controller`, when the preview
+/// chose a bounce or a kick.
+fn nudge_step(
+    controller: &StepPlan,
+    base: &BTreeMap<String, String>,
+    who: &str,
+) -> Option<StepPlan> {
+    let l2 = controller.l2.as_ref()?;
+    let nudge = l2.nudge.as_ref()?;
+    let connector = &l2.connector_name;
+    let device = &l2.attachment.device_name;
+    let wait = nudge.reappear_secs;
+    let mut params = base.clone();
+    params.insert("connector".to_owned(), connector.clone());
+    params.insert("device".to_owned(), device.clone());
+    params.insert("reappear_secs".to_owned(), wait.to_string());
+    let text = match &nudge.change {
+        crate::vlan::controllers::NudgeChange::BouncePort {
+            port, down_secs, ..
+        } => {
+            params.insert("action".to_owned(), "bounce".to_owned());
+            params.insert("port".to_owned(), port.to_string());
+            params.insert("down_secs".to_owned(), down_secs.to_string());
+            format!(
+                "Wait up to {wait} s for {who} to come back by itself, then take port {port} of                  {device} down for {down_secs} s through {connector}; Tenko brings it up again,                  and does the same after a rollback"
+            )
+        }
+        crate::vlan::controllers::NudgeChange::KickClient { mac } => {
+            params.insert("action".to_owned(), "kick".to_owned());
+            params.insert("mac".to_owned(), mac.to_string());
+            format!(
+                "Wait up to {wait} s for {who} to come back by itself, then disconnect it from                  {device} through {connector} so that it reconnects and asks for an address;                  the same after a rollback"
+            )
+        }
+    };
+    Some(StepPlan {
+        kind: super::nudge::NUDGE_KIND,
+        step_kind: super::nudge::NUDGE,
+        automatic: true,
+        text,
+        params,
+        task: None,
+        timeout: Some(Duration::from_secs(
+            u64::from(wait) + super::nudge::STEP_MARGIN_SECS,
+        )),
+        l2: Some(l2.clone()),
         dns: None,
         dhcp: None,
     })

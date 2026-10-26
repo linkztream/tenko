@@ -8,6 +8,7 @@ import type {
   MoveItem,
   MoveL2,
   MoveL2Problem,
+  MoveNudge,
   MovePrepare,
   MovePreview,
   MoveStepPreview,
@@ -24,6 +25,7 @@ export const STEP_ORDER: readonly string[] = [
   "dns.manual",
   "dhcp.short_lease",
   "l2.move",
+  "l2.nudge",
   "observe",
   "cleanup",
 ];
@@ -36,6 +38,7 @@ const GROUP: Record<string, MessageKey> = {
   "dns.manual": "move.group.dns_manual",
   "dhcp.short_lease": "move.group.dhcp_short_lease",
   "l2.move": "move.group.l2_move",
+  "l2.nudge": "move.group.l2_nudge",
   observe: "move.group.observe",
   cleanup: "move.group.cleanup",
 };
@@ -361,4 +364,44 @@ export function l2SsidsText(l2: MoveL2, preview: MovePreview): string | undefine
   const ssids = l2.ssids ?? [];
   if (ssids.length === 0 || l2.reason === L2_REASON.joinSsid) return undefined;
   return fill("move.l2.ssids", ["vid", "ssids"], { vid: preview.target.vid, ssids: ssids.join(", ") });
+}
+
+// ---------------------------------------------------------------------------------
+// The nudge after the network change (ADR 0028)
+
+/** Reason codes of a nudge that is not made (crates/tenko-ipam/src/moves/mod.rs, `codes`). */
+export const NUDGE_REASON = {
+  off: "ipam.move.nudge.off",
+  noCapability: "ipam.move.nudge.no_capability",
+  refused: "ipam.move.nudge.refused",
+} as const;
+
+/**
+ * What the job does when the client does not come back by itself after the network change, in
+ * one line: the bounce of its switch port, the kick from its access point, or why neither
+ * (switched off for the move, the controller offers neither, a guardrail refuses).
+ */
+export function nudgeText(nudge: MoveNudge, l2: MoveL2): string {
+  const device = l2.attachment?.device_name;
+  const wait = nudge.reappear_secs ? formatDuration(nudge.reappear_secs) : "?";
+  const change = nudge.change;
+  if (nudge.action === "bounce" && change?.type === "bounce_port") {
+    return t("move.nudge.bounce", {
+      port: change.data.port,
+      device: device ?? change.data.device,
+      down: formatDuration(change.data.down_secs),
+      wait,
+    });
+  }
+  if (nudge.action === "kick") return t("move.nudge.kick", { device: device ?? "?", wait });
+  switch (nudge.reason) {
+    case NUDGE_REASON.off:
+      return t("move.nudge.reason.off");
+    case NUDGE_REASON.noCapability:
+      return t("move.nudge.reason.no_capability");
+    case NUDGE_REASON.refused:
+      return nudge.problem ? t("move.nudge.reason.refused", { rule: problemText(nudge.problem) }) : t("move.nudge.reason.refused_any");
+    default:
+      return t("move.nudge.none");
+  }
 }

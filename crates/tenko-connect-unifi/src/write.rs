@@ -12,9 +12,26 @@
 //! | `SetPortProfile` | `stat/device`, `rest/portconf` | `PUT rest/device/<id>` with the whole `port_overrides` | `SetPortProfile` with the old profile |
 //! | `SetClientVlan`, `ClearClientVlan` | `stat/user/<mac>`, `rest/networkconf` | `PUT rest/user/<id>` (`virtual_network_override_*`) | the opposite change |
 //! | `RemoveNetwork` | `rest/networkconf` | `DELETE rest/networkconf/<id>` | `EnsureNetwork` with the old name and DHCP mode |
+//! | `BouncePort` | `stat/device`, `rest/portconf` | `PUT rest/device/<id>` with the whole `port_overrides`, the port's entry with `forward: disabled` | `EnablePort` with the port's previous `forward` (in the plan's `undo`) |
+//! | `EnablePort` | `stat/device`, `rest/portconf` | `PUT rest/device/<id>` with the port's previous `forward` back, or without the entry the bounce added | none |
+//! | `KickClient` | `stat/sta` | `POST cmd/stamgr` (`kick-sta`) | none |
+//!
+//! A port bounce (ADR 0028) switches the port off through its override's `forward` member,
+//! which a Network Application of release 7.4 and later keeps per port (the recorded 10.6
+//! controller of `tests/fixtures/recorded` configures every port inline that way), and
+//! touches no other member. The way back up writes the previous value of that one member
+//! back, or removes the entry when the bounce added it, so it restores the port exactly
+//! even when someone changed another member meanwhile. Whether a port is off is read from
+//! the configuration (the override, or a profile that forwards nothing), which the
+//! controller answers at once; the port table follows when the switch has applied it. The
+//! Integration API offers no administrative down and no client disconnect (its only port
+//! action is a power cycle of the port's power over Ethernet, which Tenko never sends), so both go through the classic
+//! API. A kick is the station manager's `kick-sta`: the client is disconnected, not
+//! blocked, and associates again by itself.
 
 use std::{collections::HashMap, fmt::Write as _};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tenko_connect::{
@@ -24,10 +41,41 @@ use tenko_connect::{
 use tenko_core::{MacAddr, Timestamp};
 
 use crate::{
-    classic::{Device, Network, Profile, Session, User},
+    classic::{Client, Device, Network, Profile, Session, User},
     json as j,
     model::dhcp_of,
 };
+
+/// What the way back up of a bounce restores: whether the port had an override entry
+/// before the bounce, and the `forward` member it had (absent: no such member).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Restore {
+    entry: bool,
+    #[serde(default)]
+    forward: Option<String>,
+}
+
+impl Restore {
+    fn parse(text: &str) -> Result<Self, ConnectorError> {
+        let restore: Self = serde_json::from_str(text).map_err(|_| {
+            ConnectorError::invalid_settings(
+                "the way back up of a bounce is not one this plugin wrote",
+            )
+        })?;
+        if restore.forward.as_deref().is_some_and(|forward| {
+            forward.is_empty()
+                || forward.len() > 32
+                || !forward.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+                || forward == "disabled"
+        }) {
+            return Err(ConnectorError::invalid_settings(
+                "the way back up of a bounce names an unknown forwarding mode",
+            ));
+        }
+        Ok(restore)
+    }
+}
 
 /// What a change touches, as read from the controller.
 #[derive(Debug, Clone)]
@@ -50,6 +98,36 @@ enum State {
     },
     /// `RemoveNetwork`: the network, when it still exists.
     Removal { existing: Option<Network> },
+    /// `BouncePort` and `EnablePort`: the device with its overrides, and whether the
+    /// configuration switches the port off.
+    Switch { device: Box<Device>, off: bool },
+    /// `KickClient`: the connected wireless client.
+    Station { client: Client },
+}
+
+/// Reads the device of a bounce and whether its configuration switches the port off: its
+/// override's `forward`, or a profile that forwards nothing.
+async fn read_switch(
+    session: &mut Session,
+    device: &DeviceRef,
+    port: u16,
+) -> Result<State, ConnectorError> {
+    let device = find_device(session.devices().await?, device)?;
+    if !device.ports.iter().any(|p| p.idx == port) {
+        return Err(ConnectorError::NotFound);
+    }
+    let by_profile = match device.profile_of(port) {
+        Some(id) => session
+            .profiles()
+            .await?
+            .iter()
+            .any(|profile| profile.id == id && profile.forward == "disabled"),
+        None => false,
+    };
+    Ok(State::Switch {
+        off: device.disabled_by_override(port) || by_profile,
+        device: Box::new(device),
+    })
 }
 
 fn find_device(devices: Vec<Device>, device: &DeviceRef) -> Result<Device, ConnectorError> {
@@ -69,6 +147,10 @@ fn lan_names(networks: &[Network]) -> HashMap<String, String> {
 }
 
 /// Reads what `change` touches. Fails for a change the controller cannot carry out.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per change, in the order of the table above"
+)]
 async fn read(session: &mut Session, change: &L2Change) -> Result<State, ConnectorError> {
     match change {
         L2Change::EnsureNetwork { vlan, name, dhcp } => {
@@ -157,6 +239,29 @@ async fn read(session: &mut Session, change: &L2Change) -> Result<State, Connect
             }
             Ok(State::Removal { existing })
         }
+        L2Change::BouncePort { device, port, .. } => read_switch(session, device, *port).await,
+        L2Change::EnablePort {
+            device,
+            port,
+            restore,
+        } => {
+            Restore::parse(restore)?;
+            read_switch(session, device, *port).await
+        }
+        L2Change::KickClient { mac } => {
+            let client = session
+                .clients()
+                .await?
+                .into_iter()
+                .find(|client| client.mac == *mac)
+                .ok_or(ConnectorError::NotFound)?;
+            if client.wired {
+                return Err(ConnectorError::invalid_settings(
+                    "the client is wired; only a wireless client is disconnected",
+                ));
+            }
+            Ok(State::Station { client })
+        }
     }
 }
 
@@ -228,10 +333,75 @@ fn diff(change: &L2Change, state: &State) -> Result<Diff, ConnectorError> {
                 Vec::new(),
             ))
         }
+        (
+            L2Change::BouncePort {
+                port, down_secs, ..
+            },
+            State::Switch { device, off },
+        ) => {
+            if *off {
+                return Ok((Vec::new(), Vec::new()));
+            }
+            Ok((
+                vec![line(
+                    format!("devices/{}/ports/{port}/enabled", device.mac),
+                    Some("true".to_owned()),
+                    Some("false".to_owned()),
+                )],
+                vec![format!(
+                    "port {port} goes down for {down_secs} s; Tenko brings it up again"
+                )],
+            ))
+        }
+        (L2Change::EnablePort { port, .. }, State::Switch { device, off }) => Ok((
+            if *off {
+                vec![line(
+                    format!("devices/{}/ports/{port}/enabled", device.mac),
+                    Some("false".to_owned()),
+                    Some("true".to_owned()),
+                )]
+            } else {
+                Vec::new()
+            },
+            Vec::new(),
+        )),
+        (L2Change::KickClient { mac }, State::Station { client }) => Ok((
+            vec![line(
+                format!("clients/{mac}/association"),
+                Some(format!(
+                    "{} on {}",
+                    client.essid.as_deref().unwrap_or("?"),
+                    client
+                        .ap
+                        .map_or_else(|| "?".to_owned(), |ap| ap.to_string())
+                )),
+                Some("reconnects".to_owned()),
+            )],
+            vec!["the client is disconnected, associates again and asks for an address".to_owned()],
+        )),
         _ => Err(ConnectorError::PluginFailed(
             "a state of another change".to_owned(),
         )),
     }
+}
+
+/// The way back up of a bounce of `port`, from the device as read before the down.
+fn enable_of(
+    reference: &DeviceRef,
+    port: u16,
+    device: &Device,
+) -> Result<L2Change, ConnectorError> {
+    let entry = device.override_of(port);
+    let restore = Restore {
+        entry: entry.is_some(),
+        forward: entry.and_then(|entry| j::text(entry, "forward")),
+    };
+    Ok(L2Change::EnablePort {
+        device: reference.clone(),
+        port,
+        restore: serde_json::to_string(&restore)
+            .map_err(|error| ConnectorError::PluginFailed(format!("restore: {error}")))?,
+    })
 }
 
 fn diff_network(
@@ -373,6 +543,16 @@ fn fingerprint(state: &State) -> String {
         State::Removal { existing } => json!({
             "network": existing.as_ref().map(network_material),
         }),
+        State::Switch { device, off } => json!({
+            "device": device.id,
+            "overrides": device.overrides,
+            "off": off,
+        }),
+        State::Station { client } => json!({
+            "client": client.mac.to_string(),
+            "ap": client.ap.map(|ap| ap.to_string()),
+            "essid": client.essid,
+        }),
     };
     let digest = Sha256::digest(material.to_string().as_bytes());
     digest[..16]
@@ -403,16 +583,29 @@ fn network_material(network: &Network) -> Value {
 pub async fn plan(session: &mut Session, change: &L2Change) -> Result<L2Plan, ConnectorError> {
     let state = read(session, change).await?;
     let (diff, warnings) = diff(change, &state)?;
+    // ADR 0028: the plan of a bounce carries its way back up, so the host can bring the
+    // port up even without the receipt.
+    let undo = match (change, &state) {
+        (L2Change::BouncePort { device, port, .. }, State::Switch { device: read, .. }) => {
+            vec![enable_of(device, *port, read)?]
+        }
+        _ => Vec::new(),
+    };
     Ok(L2Plan {
         change: change.clone(),
         read_at: Timestamp::now(),
         fingerprint: fingerprint(&state),
         diff,
         warnings,
+        undo,
     })
 }
 
 /// Writes what `state` lacks; returns the undo changes.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per change, in the order of the table above"
+)]
 async fn write(
     session: &mut Session,
     change: &L2Change,
@@ -462,6 +655,65 @@ async fn write(
                 )
                 .await?;
             Ok(vec![undo_client(*mac, user)])
+        }
+        (
+            L2Change::BouncePort {
+                device: reference,
+                port,
+                ..
+            },
+            State::Switch { device, .. },
+        ) => {
+            let undo = enable_of(reference, *port, device)?;
+            let mut overrides = device.overrides.clone();
+            match overrides
+                .iter_mut()
+                .find(|entry| j::u16(entry, "port_idx") == Some(*port))
+            {
+                Some(Value::Object(entry)) => {
+                    entry.insert("forward".to_owned(), json!("disabled"));
+                }
+                Some(_) => {
+                    return Err(ConnectorError::protocol(
+                        "a port override of the device is not an object",
+                    ));
+                }
+                None => overrides.push(json!({ "port_idx": port, "forward": "disabled" })),
+            }
+            session.set_port_overrides(&device.id, &overrides).await?;
+            Ok(vec![undo])
+        }
+        (L2Change::EnablePort { port, restore, .. }, State::Switch { device, .. }) => {
+            let restore = Restore::parse(restore)?;
+            let mut overrides = device.overrides.clone();
+            let Some(index) = overrides
+                .iter()
+                .position(|entry| j::u16(entry, "port_idx") == Some(*port))
+            else {
+                // Nothing of the bounce is left in the configuration.
+                return Ok(Vec::new());
+            };
+            let Value::Object(entry) = &mut overrides[index] else {
+                return Err(ConnectorError::protocol(
+                    "a port override of the device is not an object",
+                ));
+            };
+            let only_bounce = entry
+                .keys()
+                .all(|key| key == "port_idx" || key == "forward");
+            if !restore.entry && only_bounce {
+                overrides.remove(index);
+            } else if let Some(forward) = restore.forward {
+                entry.insert("forward".to_owned(), json!(forward));
+            } else {
+                entry.remove("forward");
+            }
+            session.set_port_overrides(&device.id, &overrides).await?;
+            Ok(Vec::new())
+        }
+        (L2Change::KickClient { mac }, State::Station { .. }) => {
+            session.kick(*mac).await?;
+            Ok(Vec::new())
         }
         (L2Change::RemoveNetwork { vlan, .. }, State::Removal { existing }) => match existing {
             None => Ok(Vec::new()),
@@ -590,6 +842,16 @@ pub async fn apply(
     }
     let undo = write(session, &planned.change, &state).await?;
     let applied_at = Timestamp::now();
+    if matches!(planned.change, L2Change::KickClient { .. }) {
+        // A kick leaves no state to read back: the controller accepted the command.
+        return Ok(L2Receipt {
+            plan: planned.clone(),
+            mode,
+            applied_at,
+            verified: true,
+            undo,
+        });
+    }
     let after = read(session, &planned.change).await?;
     let (remaining, _) = diff(&planned.change, &after)?;
     Ok(L2Receipt {

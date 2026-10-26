@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createJob, findJob, MOCK_HOST_IDS, MOCK_JOB_IDS, MOCK_MOVE_GROUP, moveJobInput } from "../api/mock/job-store";
-import { encodeMoveL2Output, type MoveL2Output } from "../api/moves";
+import { encodeMoveL2Output, encodeMoveNudgeOutput, type MoveL2Output } from "../api/moves";
 import type { CodedError } from "../api/types";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -493,6 +493,31 @@ describe("a move whose L2 step goes through the network controller", () => {
     const warnings = controller.getByTestId("job-l2-warnings");
     expect(within(warnings).getByText("The network controller warned")).toBeTruthy();
     expect(within(warnings).getByText(WARNING)).toBeTruthy();
+  });
+
+  it("shows what the bounce of the port did under its own step", async () => {
+    const change = { type: "bounce_port", data: { device: SWITCH, port: 7, down_secs: 5 } } as const;
+    const report = { connector: CONNECTOR, change, at: new Date(Date.now() - 4 * 60_000).toISOString(), up_at: new Date(Date.now() - 3 * 60_000).toISOString(), outcome: "done" } as const;
+    const input = moveJobInput({
+      host: { kind: "host", id: MOCK_HOST_IDS.camDoor },
+      name: "cam-door",
+      mac: "00:00:5e:00:53:2b",
+      ip: "198.51.100.43",
+      oldIp: "192.0.2.43",
+      mode: "dynamic",
+      l2: {
+        action: "port_profile",
+        args: l2Args,
+        output: encodeMoveL2Output(output()),
+        nudge: { key: "ipam.move.step.nudge_bounce", args: { ...l2Args, down_secs: "5", reappear_secs: "30" }, output: encodeMoveNudgeOutput({ change, report }) },
+      },
+    });
+    await openJob(createJob(input));
+    expect(steps()).toHaveLength(5);
+    const nudge = within(step(2));
+    expect(nudge.getByText("If the device is not back within 30 s, bounce port 7 of sw-desk (down for 5 s) through unifi-lab.")).toBeTruthy();
+    expect(nudge.getByTestId("job-nudge-bounced").textContent).toBe("Port 7 of sw-desk went down 4 minutes ago and was up again 3 minutes ago.");
+    expect(within(step(1)).queryByTestId("job-nudge")).toBeNull();
   });
 
   it("shows no diff for output that cannot be read", async () => {

@@ -13,6 +13,10 @@
 //!
 //! Every call is recorded ([`MemoryControllers::calls`]), and a test can make the next call
 //! of a kind fail ([`MemoryControllers::fail_next`]).
+//!
+//! A controller whose info offers the port bounce or the client kick (ADR 0028) records each
+//! nudge and answers it at once, with the guardrails of [`derived_nudge_guardrails`]; a
+//! test can make a bounce leave the port stuck ([`MemoryController::stuck_bounce`]).
 
 // The port reports `CodedError`s, so the helpers that produce them return it as well.
 #![allow(clippy::result_large_err)]
@@ -35,7 +39,8 @@ use super::controllers::{
     AttachmentChange, AttachmentPlan, ControllerAttachments, ControllerClient, ControllerDevice,
     ControllerInfo, ControllerLink, ControllerNetwork, ControllerPortState, ControllerProfile,
     ControllerTopology, ControllerWlan, DiffEntry, NetworkControllers, NetworkPlan, NetworkReceipt,
-    NetworkSpec, PortFuture, derived_guardrails,
+    NetworkSpec, NudgeChange, NudgeOutcome, NudgeReport, PortFuture, derived_guardrails,
+    derived_nudge_guardrails,
 };
 
 /// One call the controllers received.
@@ -99,6 +104,15 @@ pub enum Call {
         /// The change that is undone.
         change: AttachmentChange,
     },
+    /// `nudge()`.
+    Nudge {
+        /// The controller.
+        connector: ConnectorId,
+        /// The bounce or kick.
+        change: NudgeChange,
+        /// The job it was for.
+        job: Option<tenko_core::JobId>,
+    },
 }
 
 /// The kind of a call, for [`MemoryControllers::fail_next`].
@@ -126,6 +140,8 @@ pub enum CallKind {
     AttachmentWrite,
     /// `revert_network()` of an attachment change.
     RevertAttachment,
+    /// `nudge()`.
+    Nudge,
 }
 
 /// One controller of the memory implementation.
@@ -151,6 +167,8 @@ pub struct MemoryController {
     pub links: Vec<ControllerLink>,
     /// Per-client VLAN overrides: the client and the network it is put into.
     pub overrides: BTreeMap<MacAddr, String>,
+    /// Whether a bounce leaves the port down (its way back up fails).
+    pub stuck_bounce: bool,
 }
 
 impl MemoryController {
@@ -164,6 +182,8 @@ impl MemoryController {
                 plugin: "memory".to_owned(),
                 enabled: true,
                 writes_enabled: true,
+                bounce: false,
+                kick: false,
             },
             networks: vec![ControllerNetwork {
                 id: "net-mgmt".to_owned(),
@@ -181,6 +201,7 @@ impl MemoryController {
             profiles: Vec::new(),
             links: Vec::new(),
             overrides: BTreeMap::new(),
+            stuck_bounce: false,
         }
     }
 
@@ -857,6 +878,68 @@ impl MemoryControllers {
     }
 }
 
+impl MemoryControllers {
+    fn nudge_now(
+        &self,
+        connector: ConnectorId,
+        change: &NudgeChange,
+        job: Option<tenko_core::JobId>,
+    ) -> Result<NudgeReport, CodedError> {
+        let mut state = self.lock();
+        state.calls.push(Call::Nudge {
+            connector,
+            change: change.clone(),
+            job,
+        });
+        Self::take_failure(&mut state, CallKind::Nudge)?;
+        let controller = controller_mut(&mut state, connector)?;
+        let offered = match change {
+            NudgeChange::BouncePort { .. } => controller.info.bounce,
+            NudgeChange::KickClient { .. } => controller.info.kick,
+        };
+        if !offered {
+            return Err(CodedError::new(
+                "connect.unsupported",
+                501,
+                "the controller cannot bounce a port or disconnect a client",
+            ));
+        }
+        if !controller.info.writes_enabled {
+            return Err(writes_disabled());
+        }
+        derived_nudge_guardrails(&controller.attachments(), change)?;
+        let now = Timestamp::now();
+        let outcome = match change {
+            NudgeChange::BouncePort { device, port, .. } if controller.stuck_bounce => {
+                if let Some(state) = controller
+                    .ports
+                    .iter_mut()
+                    .find(|p| p.device == *device && p.index == *port)
+                {
+                    state.enabled = Some(false);
+                    state.up = false;
+                }
+                NudgeOutcome::Stuck {
+                    code: "connect.unreachable".to_owned(),
+                    detail: "the port did not come up again".to_owned(),
+                }
+            }
+            _ => NudgeOutcome::Done,
+        };
+        Ok(NudgeReport {
+            connector,
+            change: change.clone(),
+            at: Some(now),
+            up_at: matches!(
+                (&outcome, change),
+                (NudgeOutcome::Done, NudgeChange::BouncePort { .. })
+            )
+            .then_some(now),
+            outcome,
+        })
+    }
+}
+
 impl NetworkControllers for MemoryControllers {
     fn controllers(&self) -> PortFuture<'_, Vec<ControllerInfo>> {
         Box::pin(std::future::ready(self.list_now()))
@@ -940,6 +1023,16 @@ impl NetworkControllers for MemoryControllers {
             dry_run,
             on_behalf_of,
         )))
+    }
+
+    fn nudge<'a>(
+        &'a self,
+        connector: ConnectorId,
+        change: &'a NudgeChange,
+        job: Option<tenko_core::JobId>,
+        _on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'a, NudgeReport> {
+        Box::pin(std::future::ready(self.nudge_now(connector, change, job)))
     }
 }
 
@@ -1066,6 +1159,8 @@ mod tests {
             uplink: false,
             management: false,
             up: true,
+            enabled: None,
+            learned_macs: None,
         }
     }
 

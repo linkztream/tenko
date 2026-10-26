@@ -934,9 +934,11 @@ export type MessageKey =
   | "connectors.action.run"
   | "connectors.action.toggle"
   | "connectors.capability.actuator"
+  | "connectors.capability.client_kick"
   | "connectors.capability.inventory"
   | "connectors.capability.migration"
   | "connectors.capability.network_controller"
+  | "connectors.capability.port_bounce"
   | "connectors.capability.webhook"
   | "connectors.col.capabilities"
   | "connectors.col.health"
@@ -3453,12 +3455,17 @@ export type MessageKey =
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
   | "errors.cluster.single"
+  | "errors.connect.guardrail.client_unknown"
   | "errors.connect.guardrail.management_client"
   | "errors.connect.guardrail.management_port"
+  | "errors.connect.guardrail.not_wireless"
+  | "errors.connect.guardrail.port_down"
+  | "errors.connect.guardrail.port_unknown"
   | "errors.connect.guardrail.protected_client"
   | "errors.connect.guardrail.protected_network"
   | "errors.connect.guardrail.protected_port"
   | "errors.connect.guardrail.protected_vlan"
+  | "errors.connect.guardrail.shared_port"
   | "errors.connect.guardrail.uplink"
   | "errors.connect.instance.call_timeout"
   | "errors.connect.instance.conflict"
@@ -3472,6 +3479,7 @@ export type MessageKey =
   | "errors.connect.plugin.unavailable"
   | "errors.connect.plugin.unknown"
   | "errors.connect.plugin.unusable"
+  | "errors.connect.port_stuck"
   | "errors.connect.run.failed"
   | "errors.connect.secret.missing"
   | "errors.connect.secret.not_found"
@@ -4468,6 +4476,8 @@ export type MessageKey =
   | "ipam.move.step.controller_port"
   | "ipam.move.step.dhcp"
   | "ipam.move.step.intent"
+  | "ipam.move.step.nudge_bounce"
+  | "ipam.move.step.nudge_kick"
   | "ipam.move.step.prepare"
   | "ipam.move.step.short_lease"
   | "ipam.move.task.device"
@@ -4899,6 +4909,14 @@ export type MessageKey =
   | "jobs.note.help"
   | "jobs.note.label"
   | "jobs.note.over"
+  | "jobs.nudge.bounced"
+  | "jobs.nudge.bounced_down"
+  | "jobs.nudge.failed"
+  | "jobs.nudge.interrupted"
+  | "jobs.nudge.kicked"
+  | "jobs.nudge.reappeared_dhcp"
+  | "jobs.nudge.reappeared_lease"
+  | "jobs.nudge.title"
   | "jobs.observe.address_seen"
   | "jobs.observe.address_seen_mac"
   | "jobs.observe.lease"
@@ -4964,6 +4982,7 @@ export type MessageKey =
   | "jobs.stepname.ipam_move_intent"
   | "jobs.stepname.ipam_move_l2"
   | "jobs.stepname.ipam_move_lease"
+  | "jobs.stepname.ipam_move_nudge"
   | "jobs.stepname.ipam_move_observe"
   | "jobs.stepname.ipam_move_prepare"
   | "jobs.stepname.ipam_vlan_activate"
@@ -5188,6 +5207,7 @@ export type MessageKey =
   | "move.group.dns_manual"
   | "move.group.ipam_intent"
   | "move.group.l2_move"
+  | "move.group.l2_nudge"
   | "move.group.observe"
   | "move.heading"
   | "move.heading_vlan"
@@ -5236,6 +5256,16 @@ export type MessageKey =
   | "move.now"
   | "move.now_help"
   | "move.now_label"
+  | "move.nudge"
+  | "move.nudge.bounce"
+  | "move.nudge.kick"
+  | "move.nudge.none"
+  | "move.nudge.reason.no_capability"
+  | "move.nudge.reason.off"
+  | "move.nudge.reason.refused"
+  | "move.nudge.reason.refused_any"
+  | "move.nudge_help"
+  | "move.nudge_label"
   | "move.open_jobs"
   | "move.other_host_part"
   | "move.parallelism"
@@ -7797,6 +7827,7 @@ export interface MessageArgs {
   "errors.auth.throttled": { retry_after: string | number };
   "errors.auth.token.lifetime_exceeded": { max_days: string | number };
   "errors.client.bad_response": { status: string | number };
+  "errors.connect.port_stuck": { cause: string | number; connector: string | number; device: string | number; port: string | number };
   "errors.connect.secret.missing": { purpose: string | number };
   "errors.connect.secret.not_found": { purpose: string | number };
   "errors.connect.secret.not_operator": { purpose: string | number };
@@ -8009,6 +8040,8 @@ export interface MessageArgs {
   "ipam.move.step.controller_port": { after: string | number; connector: string | number; device: string | number; port: string | number };
   "ipam.move.step.dhcp": { cidr: string | number; new_ip: string | number };
   "ipam.move.step.intent": { new_ip: string | number; old_ip: string | number };
+  "ipam.move.step.nudge_bounce": { connector: string | number; device: string | number; down_secs: string | number; port: string | number; reappear_secs: string | number };
+  "ipam.move.step.nudge_kick": { connector: string | number; device: string | number; mac: string | number; reappear_secs: string | number };
   "ipam.move.step.prepare": { cidr: string | number; new_ip: string | number; old_ip: string | number };
   "ipam.move.step.short_lease": { cidr: string | number; new_ip: string | number; old_ip: string | number };
   "ipam.move.task.device": { cidr: string | number; new_ip: string | number };
@@ -8108,6 +8141,12 @@ export interface MessageArgs {
   "jobs.log.change": { from: string | number; to: string | number };
   "jobs.note.counter": { max: number; used: number };
   "jobs.note.over": { over: number };
+  "jobs.nudge.bounced": { device: string | number; down: string | number; port: string | number; up: string | number };
+  "jobs.nudge.bounced_down": { device: string | number; down: string | number; port: string | number };
+  "jobs.nudge.failed": { reason: string | number };
+  "jobs.nudge.kicked": { when: string | number };
+  "jobs.nudge.reappeared_dhcp": { when: string | number };
+  "jobs.nudge.reappeared_lease": { when: string | number };
   "jobs.observe.address_seen": { ip: string | number };
   "jobs.observe.address_seen_mac": { ip: string | number; mac: string | number };
   "jobs.observe.lease": { mac: string | number };
@@ -8195,6 +8234,7 @@ export interface MessageArgs {
   "move.group.dns_manual": { count: number };
   "move.group.ipam_intent": { count: number };
   "move.group.l2_move": { count: number };
+  "move.group.l2_nudge": { count: number };
   "move.group.observe": { count: number };
   "move.heading": { count: number };
   "move.heading_vlan": { vid: string | number };
@@ -8218,6 +8258,9 @@ export interface MessageArgs {
   "move.l2.reason.shared_port": { count: number };
   "move.l2.ssids": { ssids: string | number; vid: string | number };
   "move.l2.through": { connector: string | number };
+  "move.nudge.bounce": { device: string | number; down: string | number; port: string | number; wait: string | number };
+  "move.nudge.kick": { device: string | number; wait: string | number };
+  "move.nudge.reason.refused": { rule: string | number };
   "move.reason.host_part_outside": { ip: string | number };
   "move.reason.host_part_reserved": { ip: string | number };
   "move.reason.host_part_taken": { ip: string | number };
@@ -9482,9 +9525,11 @@ export const messageKeys: readonly MessageKey[] = [
   "connectors.action.run",
   "connectors.action.toggle",
   "connectors.capability.actuator",
+  "connectors.capability.client_kick",
   "connectors.capability.inventory",
   "connectors.capability.migration",
   "connectors.capability.network_controller",
+  "connectors.capability.port_bounce",
   "connectors.capability.webhook",
   "connectors.col.capabilities",
   "connectors.col.health",
@@ -12001,12 +12046,17 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",
   "errors.cluster.single",
+  "errors.connect.guardrail.client_unknown",
   "errors.connect.guardrail.management_client",
   "errors.connect.guardrail.management_port",
+  "errors.connect.guardrail.not_wireless",
+  "errors.connect.guardrail.port_down",
+  "errors.connect.guardrail.port_unknown",
   "errors.connect.guardrail.protected_client",
   "errors.connect.guardrail.protected_network",
   "errors.connect.guardrail.protected_port",
   "errors.connect.guardrail.protected_vlan",
+  "errors.connect.guardrail.shared_port",
   "errors.connect.guardrail.uplink",
   "errors.connect.instance.call_timeout",
   "errors.connect.instance.conflict",
@@ -12020,6 +12070,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.connect.plugin.unavailable",
   "errors.connect.plugin.unknown",
   "errors.connect.plugin.unusable",
+  "errors.connect.port_stuck",
   "errors.connect.run.failed",
   "errors.connect.secret.missing",
   "errors.connect.secret.not_found",
@@ -13016,6 +13067,8 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.move.step.controller_port",
   "ipam.move.step.dhcp",
   "ipam.move.step.intent",
+  "ipam.move.step.nudge_bounce",
+  "ipam.move.step.nudge_kick",
   "ipam.move.step.prepare",
   "ipam.move.step.short_lease",
   "ipam.move.task.device",
@@ -13447,6 +13500,14 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.note.help",
   "jobs.note.label",
   "jobs.note.over",
+  "jobs.nudge.bounced",
+  "jobs.nudge.bounced_down",
+  "jobs.nudge.failed",
+  "jobs.nudge.interrupted",
+  "jobs.nudge.kicked",
+  "jobs.nudge.reappeared_dhcp",
+  "jobs.nudge.reappeared_lease",
+  "jobs.nudge.title",
   "jobs.observe.address_seen",
   "jobs.observe.address_seen_mac",
   "jobs.observe.lease",
@@ -13512,6 +13573,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.ipam_move_intent",
   "jobs.stepname.ipam_move_l2",
   "jobs.stepname.ipam_move_lease",
+  "jobs.stepname.ipam_move_nudge",
   "jobs.stepname.ipam_move_observe",
   "jobs.stepname.ipam_move_prepare",
   "jobs.stepname.ipam_vlan_activate",
@@ -13736,6 +13798,7 @@ export const messageKeys: readonly MessageKey[] = [
   "move.group.dns_manual",
   "move.group.ipam_intent",
   "move.group.l2_move",
+  "move.group.l2_nudge",
   "move.group.observe",
   "move.heading",
   "move.heading_vlan",
@@ -13784,6 +13847,16 @@ export const messageKeys: readonly MessageKey[] = [
   "move.now",
   "move.now_help",
   "move.now_label",
+  "move.nudge",
+  "move.nudge.bounce",
+  "move.nudge.kick",
+  "move.nudge.none",
+  "move.nudge.reason.no_capability",
+  "move.nudge.reason.off",
+  "move.nudge.reason.refused",
+  "move.nudge.reason.refused_any",
+  "move.nudge_help",
+  "move.nudge_label",
   "move.open_jobs",
   "move.other_host_part",
   "move.parallelism",

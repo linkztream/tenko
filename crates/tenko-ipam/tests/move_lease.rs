@@ -242,6 +242,7 @@ impl World {
             target: self.target,
             timeout_secs: None,
             move_now,
+            nudge: true,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,

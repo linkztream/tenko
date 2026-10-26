@@ -1,8 +1,8 @@
 //! The settings of a move's DHCP timing (`[dhcp.moves]` of `tenko.toml`, `docs/moves.md`
 //! section 5): the short lease before the network change, how long the job waits for it,
 //! the migration deadline's margin and limit, the extension near the deadline and the
-//! verification window after the client reconnects. Nothing of this is a constant of the
-//! job.
+//! verification window after the client reconnects, and how the job makes a client start
+//! over after the network change (ADR 0028). Nothing of this is a constant of the job.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,12 @@ pub struct MoveSettings {
     pub extend_window_secs: u32,
     /// How far the deadline moves then, once per job (default 60, 1 to 3,600).
     pub extend_secs: u32,
+    /// After the network change, how long the job waits for the client to come back by
+    /// itself before it bounces its switch port or disconnects it from its access point
+    /// (default 30, 0 to 600; ADR 0028).
+    pub reappear_secs: u32,
+    /// How long a port bounce keeps the port down (default 5, 1 to 30).
+    pub bounce_down_secs: u16,
 }
 
 impl Default for MoveSettings {
@@ -43,6 +49,8 @@ impl Default for MoveSettings {
             deadline_limit_secs: 172_800,
             extend_window_secs: 15,
             extend_secs: 60,
+            reappear_secs: 30,
+            bounce_down_secs: 5,
         }
     }
 }
@@ -73,7 +81,9 @@ impl MoveSettings {
             "deadline_limit_secs",
         )?;
         check(self.extend_window_secs, 1, 300, "extend_window_secs")?;
-        check(self.extend_secs, 1, 3_600, "extend_secs")
+        check(self.extend_secs, 1, 3_600, "extend_secs")?;
+        check(self.reappear_secs, 0, 600, "reappear_secs")?;
+        check(u32::from(self.bounce_down_secs), 1, 30, "bounce_down_secs")
     }
 }
 
@@ -102,5 +112,26 @@ mod tests {
             ..MoveSettings::default()
         };
         assert_eq!(never.validate(), Ok(()));
+        let long_bounce = MoveSettings {
+            bounce_down_secs: 31,
+            ..MoveSettings::default()
+        };
+        assert_eq!(
+            long_bounce.validate(),
+            Err("dhcp.moves.bounce_down_secs must be between 1 and 30".to_owned())
+        );
+        let no_wait = MoveSettings {
+            reappear_secs: 0,
+            ..MoveSettings::default()
+        };
+        assert_eq!(no_wait.validate(), Ok(()));
+        assert!(
+            MoveSettings {
+                reappear_secs: 601,
+                ..MoveSettings::default()
+            }
+            .validate()
+            .is_err()
+        );
     }
 }

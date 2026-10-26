@@ -56,6 +56,7 @@ fn site_route(state: &mut State, req: &Req, route: &[&str]) -> Response {
         ("DELETE", ["rest", "networkconf", id]) => delete_network(state, id),
         ("PUT", ["rest", "device", id]) => update_device(state, id, &req.body),
         ("PUT", ["rest", "user", id]) => update_user(state, id, &req.body),
+        ("POST", ["cmd", "stamgr"]) => station_command(state, &req.body),
         _ => not_found(),
     }
 }
@@ -277,6 +278,22 @@ fn update_device(state: &mut State, id: &str, body: &Value) -> Response {
     replace_overrides(&mut answer, overrides, false);
     replace_overrides(device, overrides, drift);
     ok(vec![answer])
+}
+
+/// The station manager: `kick-sta` disconnects a connected client (it leaves the client
+/// list, as it does on a controller until the client associates again).
+fn station_command(state: &mut State, body: &Value) -> Response {
+    let (Some("kick-sta"), Some(mac)) = (text_of(body, "cmd"), text_of(body, "mac")) else {
+        return bad_payload();
+    };
+    let before = state.clients.len();
+    state
+        .clients
+        .retain(|client| text_of(client, "mac").is_none_or(|m| !m.eq_ignore_ascii_case(mac)));
+    if state.clients.len() == before {
+        return error(StatusCode::BAD_REQUEST, "api.err.UnknownStation");
+    }
+    ok(Vec::new())
 }
 
 fn update_user(state: &mut State, id: &str, body: &Value) -> Response {

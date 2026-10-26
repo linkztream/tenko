@@ -35,7 +35,7 @@ pub(super) fn fold_into_report(error: ConnectorError) -> Result<HealthReport, Co
     })
 }
 
-fn capability(
+pub(super) fn capability(
     host: &ConnectorHost,
     id: ConnectorId,
     capability: Capability,
@@ -79,7 +79,8 @@ impl ConnectorHost {
     /// # Errors
     ///
     /// `connect.guardrail.*` when a guardrail refuses the change, `connect.protocol` when
-    /// the plugin planned another change, or the errors of [`topology`](Self::topology).
+    /// the plugin planned another change, `connect.nudge.direct` for a bounce or a kick
+    /// (they have their own calls), or the errors of [`topology`](Self::topology).
     pub async fn plan_l2(
         &self,
         id: ConnectorId,
@@ -87,6 +88,7 @@ impl ConnectorHost {
         guardrails: &Guardrails,
         on_behalf_of: Option<UserId>,
     ) -> Result<L2Plan, HostError> {
+        super::bounce::refuse_direct(change)?;
         capability(self, id, Capability::NetworkController)?;
         let (runtime, client) = self.client(id).await?;
         let _slot = runtime.calls.acquire().await;
@@ -119,6 +121,7 @@ impl ConnectorHost {
         guardrails: &Guardrails,
         on_behalf_of: Option<UserId>,
     ) -> Result<L2Receipt, HostError> {
+        super::bounce::refuse_direct(&plan.change)?;
         capability(self, id, Capability::NetworkController)?;
         let (runtime, client) = self.client(id).await?;
         if mode == WriteMode::Apply && !runtime.instance().writes_enabled {
@@ -180,6 +183,7 @@ impl ConnectorHost {
         guardrails: &Guardrails,
         on_behalf_of: Option<UserId>,
     ) -> Result<(), HostError> {
+        super::bounce::refuse_direct(&receipt.plan.change)?;
         capability(self, id, Capability::NetworkController)?;
         let (runtime, client) = self.client(id).await?;
         if !runtime.instance().writes_enabled {

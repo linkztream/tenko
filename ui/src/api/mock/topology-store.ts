@@ -52,6 +52,9 @@ export interface MockVlanController {
   enabled: boolean;
   /** Whether writes through the connector are allowed. */
   writes_enabled: boolean;
+  /** Whether it can bounce a switch port (`port_bounce`) and disconnect a wireless client (`client_kick`), ADR 0028. */
+  bounce: boolean;
+  kick: boolean;
   /** The networks it has. Management on VLAN 10 is marked management and never written. */
   networks: ControllerNetwork[];
 }
@@ -64,6 +67,8 @@ function freshController(): MockVlanController {
     plugin: "unifi",
     enabled: true,
     writes_enabled: true,
+    bounce: true,
+    kick: true,
     networks: [
       { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true, dhcp: "server" },
       { id: "net-iot", name: "IoT", vlan: 30, subnet: "198.51.100.0/24", management: false, dhcp: "relay" },
@@ -85,6 +90,8 @@ export function controllerInfo(): ControllerInfo {
     plugin: mockVlanController.plugin,
     enabled: mockVlanController.enabled,
     writes_enabled: mockVlanController.writes_enabled,
+    bounce: mockVlanController.bounce,
+    kick: mockVlanController.kick,
   };
 }
 

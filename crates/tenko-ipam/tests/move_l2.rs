@@ -19,14 +19,18 @@ use tenko_core::{
 use tenko_ipam::{
     IpamCommand, IpamConfig, IpamResult, IpamService, MovePreview, MoveSubmitted, codes,
     command::{RangeInput, VlanInput},
-    moves::{self, MoveL2Action, MoveL2Output, MoveMedium, MoveRequest},
+    moves::{
+        self, MoveL2Action, MoveL2Output, MoveMedium, MoveNudgeAction, MoveRequest,
+        nudge::MoveNudgeOutput, settings::MoveSettings,
+    },
     query,
     reconcile::ReconcilerConfig,
     vlan::{
         Controllers, DiffEntry,
         controllers::{
             AttachmentChange, ControllerClient, ControllerDevice, ControllerDeviceKind,
-            ControllerNetwork, ControllerPortState, ControllerProfile, ControllerWlan,
+            ControllerNetwork, ControllerPortState, ControllerProfile, ControllerWlan, NudgeChange,
+            NudgeOutcome,
         },
         memory::{Call, CallKind, MemoryController, MemoryControllers},
     },
@@ -114,6 +118,8 @@ fn port_state(index: u16) -> ControllerPortState {
         uplink: index == 1,
         management: false,
         up: true,
+        enabled: None,
+        learned_macs: None,
     }
 }
 
@@ -256,6 +262,11 @@ impl World {
     /// behind the slot. The target 198.51.100.0/24 has a DHCP pool leasing 240 s, so the
     /// observation timeout is the floor of 300 s (the lease plus the margin is less).
     async fn new() -> Self {
+        Self::with_moves(MoveSettings::default()).await
+    }
+
+    /// [`World::new`] with other `[dhcp.moves]` settings.
+    async fn with_moves(moves_settings: MoveSettings) -> Self {
         let store: Arc<dyn Store> = Arc::new(MemStore::default());
         let clock = Arc::new(MockClock::new(Timestamp::now()));
         let controller = home_controller();
@@ -272,7 +283,10 @@ impl World {
         let service = IpamService::new(
             Arc::clone(&store),
             Arc::new(engine.clone()),
-            IpamConfig::default(),
+            IpamConfig {
+                moves: moves_settings,
+                ..IpamConfig::default()
+            },
         )
         .expect("service");
         let (home, iot) = (vlan_input(20), vlan_input(30));
@@ -406,6 +420,7 @@ impl World {
             target: self.target,
             timeout_secs: None,
             move_now: false,
+            nudge: true,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,
@@ -1435,4 +1450,212 @@ async fn a_device_in_the_target_vlan_already_has_no_l2_step() {
     assert_eq!(world.drive(job_id).await.state, JobState::Succeeded);
     world.assert_done(&tv).await;
     assert!(!changed_something(&world.memory.calls()));
+}
+
+// ---------------------------------------------------------------------------------------
+// ADR 0028: the port bounce and the client kick after the network change.
+
+const NUDGE: &str = "ipam.move.nudge";
+
+/// `[dhcp.moves]` without the wait for the client to come back by itself: these tests have
+/// no DHCP role, so the client never comes back on its own.
+fn no_wait() -> MoveSettings {
+    MoveSettings {
+        reappear_secs: 0,
+        ..MoveSettings::default()
+    }
+}
+
+/// The nudges the controller received, with their job, in order.
+fn nudges(calls: &[Call]) -> Vec<(NudgeChange, Option<JobId>)> {
+    calls
+        .iter()
+        .filter_map(|call| match call {
+            Call::Nudge { change, job, .. } => Some((change.clone(), *job)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn position(calls: &[Call], test: impl Fn(&Call) -> bool) -> usize {
+    calls.iter().position(test).expect("the call")
+}
+
+fn nudge_output(job: &Job) -> MoveNudgeOutput {
+    let record = &job.steps[usize::from(step_index(job, NUDGE))];
+    serde_json::from_slice(&record.output.as_ref().expect("output").0).expect("json")
+}
+
+fn bounce_of(port: u16) -> NudgeChange {
+    NudgeChange::BouncePort {
+        device: SWITCH.to_owned(),
+        port,
+        down_secs: 5,
+    }
+}
+
+#[tokio::test]
+async fn a_wired_move_bounces_the_port_once_after_the_change_and_again_after_the_rollback() {
+    let world = World::with_moves(no_wait()).await;
+    world.edit(|controller| controller.info.bounce = true);
+    let tv = world.wired(11, 2).await;
+    let request = world.request(&[tv.host]);
+
+    let preview = world.preview(&request).await;
+    assert!(preview.nudge && preview.nudge_offered);
+    let item = &preview.items[0];
+    let nudge = item.l2.nudge.as_ref().expect("a nudge");
+    assert_eq!(nudge.action, MoveNudgeAction::Bounce);
+    assert_eq!(nudge.change, Some(bounce_of(2)));
+    assert_eq!(nudge.reason, None);
+    assert_eq!(
+        kinds(item),
+        [
+            "ipam.intent",
+            "l2.controller",
+            "l2.nudge",
+            "observe",
+            "cleanup"
+        ]
+    );
+
+    let submitted = world.submit(&request).await;
+    let job_id = submitted.jobs[0].job_id;
+    let mark = world.memory.calls().len();
+    let job = world.drive(job_id).await;
+    assert_eq!(job.state, JobState::Waiting);
+    assert_eq!(
+        step_kinds(&job),
+        [INTENT, CONTROLLER, NUDGE, OBSERVE, CLEANUP]
+    );
+    let calls = world.calls_since(mark);
+    let write = position(&calls, |call| {
+        matches!(call, Call::ApplyAttachment { dry_run: false, .. })
+    });
+    let bounced = position(&calls, |call| matches!(call, Call::Nudge { .. }));
+    assert!(write < bounced, "the bounce follows the write: {calls:?}");
+    assert_eq!(nudges(&calls), [(bounce_of(2), Some(job_id))], "once");
+    let output = nudge_output(&job);
+    assert_eq!(output.change, bounce_of(2));
+    assert_eq!(output.reappeared_at, None);
+    assert_eq!(
+        output.report.map(|report| report.outcome),
+        Some(NudgeOutcome::Done)
+    );
+
+    // The deadline passes: the L2 undo, then the same bounce, so the client takes its old
+    // address at once.
+    world.clock.advance(Duration::from_secs(301));
+    let job = world.drive(job_id).await;
+    assert_eq!(job.state, JobState::RolledBack);
+    let calls = world.calls_since(mark);
+    assert_eq!(nudges(&calls).len(), 2);
+    let reverted = position(&calls, |call| matches!(call, Call::RevertAttachment { .. }));
+    let last = calls.len() - 1;
+    assert!(reverted < last);
+    assert_eq!(
+        calls[last],
+        Call::Nudge {
+            connector: world.controller,
+            change: bounce_of(2),
+            job: Some(job_id)
+        },
+        "the rollback's bounce comes after the undo"
+    );
+    assert_eq!(world.port(2).profile.as_deref(), Some("prof-home"));
+}
+
+#[tokio::test]
+async fn a_wireless_move_kicks_the_client_after_the_override() {
+    let world = World::with_moves(no_wait()).await;
+    world.edit(|controller| controller.info.kick = true);
+    let phone = world.wireless(12).await;
+    let request = world.request(&[phone.host]);
+    let preview = world.preview(&request).await;
+    let nudge = preview.items[0].l2.nudge.as_ref().expect("a nudge");
+    assert_eq!(nudge.action, MoveNudgeAction::Kick);
+    let kick = NudgeChange::KickClient { mac: phone.mac };
+    assert_eq!(nudge.change, Some(kick.clone()));
+
+    let submitted = world.submit(&request).await;
+    let job_id = submitted.jobs[0].job_id;
+    let job = world.drive(job_id).await;
+    assert_eq!(job.state, JobState::Waiting);
+    assert_eq!(nudges(&world.memory.calls()), [(kick, Some(job_id))]);
+    world.complete(job_id, OBSERVE).await;
+    assert_eq!(world.drive(job_id).await.state, JobState::Succeeded);
+    assert_eq!(
+        nudges(&world.memory.calls()).len(),
+        1,
+        "no rollback, no second kick"
+    );
+}
+
+#[tokio::test]
+async fn the_preview_says_why_there_is_no_nudge() {
+    // The controller offers neither.
+    let world = World::with_moves(no_wait()).await;
+    let tv = world.wired(11, 2).await;
+    let preview = world.preview(&world.request(&[tv.host])).await;
+    assert!(!preview.nudge_offered);
+    let nudge = preview.items[0].l2.nudge.clone().expect("a decision");
+    assert_eq!(nudge.action, MoveNudgeAction::None);
+    assert_eq!(
+        nudge.reason.as_deref(),
+        Some(moves::codes::NUDGE_NO_CAPABILITY)
+    );
+    assert!(!kinds(&preview.items[0]).contains(&"l2.nudge"));
+
+    // The move switches it off; the fingerprint follows.
+    world.edit(|controller| controller.info.bounce = true);
+    let on = world.preview(&world.request(&[tv.host])).await;
+    let mut request = world.request(&[tv.host]);
+    request.nudge = false;
+    let off = world.preview(&request).await;
+    assert!(!off.nudge && off.nudge_offered);
+    let nudge = off.items[0].l2.nudge.clone().expect("a decision");
+    assert_eq!(nudge.action, MoveNudgeAction::None);
+    assert_eq!(nudge.reason.as_deref(), Some(moves::codes::NUDGE_OFF));
+    assert_eq!(nudge.change, Some(bounce_of(2)), "what it would have done");
+    assert!(!kinds(&off.items[0]).contains(&"l2.nudge"));
+    assert_ne!(on.fingerprint, off.fingerprint);
+
+    // A dock behind the port: the guardrail refuses the bounce, the move still runs.
+    world.edit(|controller| port_mut(controller, 2).learned_macs = Some(3));
+    let refused = world.preview(&world.request(&[tv.host])).await;
+    let item = &refused.items[0];
+    assert_eq!(item.l2.action, MoveL2Action::PortProfile);
+    let nudge = item.l2.nudge.clone().expect("a decision");
+    assert_eq!(nudge.reason.as_deref(), Some(moves::codes::NUDGE_REFUSED));
+    assert_eq!(
+        nudge.problem.map(|problem| problem.code),
+        Some("connect.guardrail.shared_port".to_owned())
+    );
+    assert!(
+        refused.unacknowledged.is_empty(),
+        "a refused nudge needs no acknowledgement"
+    );
+}
+
+#[tokio::test]
+async fn a_port_left_down_by_the_bounce_rolls_the_move_back_and_names_the_port() {
+    let world = World::with_moves(no_wait()).await;
+    world.edit(|controller| {
+        controller.info.bounce = true;
+        controller.stuck_bounce = true;
+    });
+    let tv = world.wired(11, 2).await;
+    let submitted = world.submit(&world.request(&[tv.host])).await;
+    let job = world.drive(submitted.jobs[0].job_id).await;
+    assert_eq!(job.state, JobState::RolledBack);
+    let error = job.error.expect("an error");
+    assert_eq!(error.code.as_ref(), "connect.port_stuck");
+    assert_eq!(error.params.get("port").map(String::as_str), Some("2"));
+    assert_eq!(
+        error.params.get("device").map(String::as_str),
+        Some(SWITCH_NAME)
+    );
+    // The profile is undone; the bounce after the undo is refused, the port being down.
+    assert_eq!(world.port(2).profile.as_deref(), Some("prof-home"));
+    assert_eq!(nudges(&world.memory.calls()).len(), 2);
 }

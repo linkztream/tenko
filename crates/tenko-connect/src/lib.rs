@@ -14,13 +14,14 @@
 //! | [`host`] | the host: launch, handshake, supervision, typed calls, the connector service |
 //! | [`conformance`] | the conformance suite behind `tenko plugin test` |
 //! | [`sample`] | the sample inventory plugin (documentation data) used by the suite and the tests |
+//! | [`sample_switch`] | the sample network controller (an in-memory switch) used by the tests of the port bounce and the client kick |
 //!
 //! The four interfaces of ADR 0006 are the traits a plugin implements:
 //!
 //! | Trait | gRPC service | Capability |
 //! |---|---|---|
 //! | [`InventorySource`] | `Inventory` | `inventory`, `webhook` |
-//! | [`NetworkController`] | `NetworkController` | `network_controller` |
+//! | [`NetworkController`] | `NetworkController` | `network_controller`, `port_bounce`, `client_kick` |
 //! | [`Actuator`] | `Actuator` | `actuator` |
 //! | [`MigrationSource`] | `Migration` | `migration` |
 //!
@@ -42,6 +43,7 @@ mod migration;
 mod network;
 pub mod proto;
 pub mod sample;
+pub mod sample_switch;
 pub mod sdk;
 pub mod status;
 #[cfg(any(test, feature = "testing"))]
@@ -55,9 +57,10 @@ pub use inventory::{Cursor, InventoryBatch, InventorySource, VendorFact, Webhook
 pub use manifest::{Capability, Manifest};
 pub use migration::{MigrationArea, MigrationScope, MigrationSource};
 pub use network::{
-    ClientAttachment, ControllerDhcp, ControllerNetwork, DeviceKind, DevicePort, DeviceRef,
-    Guardrails, L2Change, L2Plan, L2Receipt, NetworkController, NetworkDevice, NetworkRef,
-    PortProfile, ProfileRef, ProtectedPath, TopologyLink, TopologySnapshot, WirelessNetwork,
+    ClientAttachment, ControllerDhcp, ControllerNetwork, DEFAULT_DOWN_SECS, DeviceKind, DevicePort,
+    DeviceRef, Guardrails, L2Change, L2Plan, L2Receipt, MAX_DOWN_SECS, MAX_RESTORE_BYTES,
+    MIN_DOWN_SECS, NetworkController, NetworkDevice, NetworkRef, PortProfile, ProfileRef,
+    ProtectedPath, TopologyLink, TopologySnapshot, WirelessNetwork, guardrail,
 };
 pub use tenko_core::secret::SecretRef;
 

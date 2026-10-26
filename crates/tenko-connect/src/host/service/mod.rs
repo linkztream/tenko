@@ -54,6 +54,15 @@
 //! scheduled runs are skipped, and the refusal is logged once until the instance or the
 //! profile changes.
 //!
+//! # Port bounces and client kicks
+//!
+//! [`ConnectorHost::bounce_port`] and [`ConnectorHost::kick_client`] are the writes that make
+//! a moved client start over (ADR 0028). The way back up of a bounce is the host's: a
+//! pending record in `connect.bounces` before the down, a task of the host that brings the
+//! port up whatever happens to the caller, a sweep that brings up every pending port at the
+//! start and every overdue one each second, and the condition `connect.port_stuck` for a
+//! port that does not come up ([`ConnectorHost::stuck_ports`]).
+//!
 //! # Health changes
 //!
 //! The process state and the remote health live in memory on this node, not in the store,
@@ -63,14 +72,18 @@
 //! changes. The server turns these into `connectors` events, so the views that show an
 //! instance read it again.
 
+pub mod bounce;
 mod calls;
 pub mod model;
 mod poll;
 mod steps;
 
 use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex, OnceLock, PoisonError, RwLock},
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -93,6 +106,10 @@ use tokio::{
     time::Instant,
 };
 
+pub use self::bounce::{
+    BOUNCE_INVALID, BOUNCE_NO_UNDO, BOUNCE_PENDING, BOUNCES, BounceKey, BounceOutcome,
+    BounceReport, KickReport, NUDGE_DIRECT, PORT_STUCK, PendingBounce,
+};
 pub use self::model::{
     ConnectorHealth, ConnectorInstance, ConnectorPatch, ConnectorView, HostError, LastRun,
     NewConnector, RunOutcome, RunTrigger, actions, bounds, kinds, tables,
@@ -126,6 +143,9 @@ pub struct HostConfig {
     pub full_poll_interval: Duration,
     /// How old a network-controller plan may be when it is applied.
     pub plan_max_age: Duration,
+    /// The first pause before another attempt to bring up a port that a bounce left down;
+    /// later pauses are 3, 12 and then 60 times as long (ADR 0028).
+    pub bounce_retry: Duration,
     /// Whether the host reads instances on their schedule (off in tests that drive runs).
     /// Scheduled runs start only while this controller holds the leader service
     /// `connect.poll`.
@@ -145,6 +165,7 @@ impl Default for HostConfig {
             first_run_delay: Duration::from_secs(5),
             full_poll_interval: Duration::from_secs(3600),
             plan_max_age: Duration::from_secs(600),
+            bounce_retry: Duration::from_secs(5),
             schedule: true,
             insecure_tls: watch::channel(false).1,
         }
@@ -245,6 +266,10 @@ pub struct ConnectorHost {
     /// The instances refused for `tls = insecure`, with the change time of the instance
     /// when the refusal was logged (logged once per change).
     refused: Mutex<HashMap<ConnectorId, Timestamp>>,
+    /// The pending bounces a task of this host handles (ADR 0028).
+    bouncing: Mutex<HashSet<BounceKey>>,
+    /// Whether a sweep of the pending bounces runs.
+    sweeping: AtomicBool,
 }
 
 /// How many health changes a slow receiver may fall behind before it lags.
@@ -281,6 +306,8 @@ impl ConnectorHost {
             health: broadcast::channel(HEALTH_CHANGES).0,
             poll_epoch: Mutex::new(None),
             refused: Mutex::new(HashMap::new()),
+            bouncing: Mutex::new(HashSet::new()),
+            sweeping: AtomicBool::new(false),
         })
     }
 
@@ -627,24 +654,50 @@ impl ConnectorHost {
     }
 
     /// Deletes an instance and its last run; its plugin stops. The vault secrets it
-    /// referenced stay (they belong to the vault).
+    /// referenced stay (they belong to the vault). Pending bounces of the instance go with
+    /// it, named in the audit record and the log: nothing can bring their ports up once the
+    /// instance is gone.
     ///
     /// # Errors
     ///
     /// `connect.instance.not_found`, `connect.instance.conflict` or the store's error.
     pub async fn delete(&self, cx: &RequestCtx, id: ConnectorId) -> Result<Revision, HostError> {
         let (current, revision) = self.current(id).await?;
+        let pending: Vec<PendingBounce> = self
+            .pending_bounces()
+            .await?
+            .into_iter()
+            .filter(|record| record.connector == id)
+            .collect();
         let mut batch = WriteBatch::for_request(cx);
         batch.expect_typed(&tables::INSTANCES, &id, Some(revision));
         batch.delete_typed(&tables::INSTANCES, &id);
         batch.delete_typed(&tables::NAMES, &name_key(&current.name));
         batch.delete_typed(&tables::RUNS, &id);
-        batch.audit(
-            AuditDraft::success(actions::DELETE, objects(&current))
-                .with_source_ip(cx.source_ip)
-                .with_context("plugin", current.plugin.clone())
-                .with_context("name", current.name.clone()),
-        );
+        for record in &pending {
+            batch.delete_typed(&BOUNCES, &record.key());
+            tracing::warn!(
+                connector = %id,
+                device = %record.device,
+                port = record.port,
+                "the connector is deleted with a bounce pending; switch the port on at the controller if it is down"
+            );
+        }
+        let mut draft = AuditDraft::success(actions::DELETE, objects(&current))
+            .with_source_ip(cx.source_ip)
+            .with_context("plugin", current.plugin.clone())
+            .with_context("name", current.name.clone());
+        if !pending.is_empty() {
+            draft = draft.with_context(
+                "pending_bounces",
+                pending
+                    .iter()
+                    .map(|record| format!("{} port {}", record.device, record.port))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        batch.audit(draft);
         let revision = self
             .commit(cx, id, format!("delete connector {}", current.name), batch)
             .await?;
@@ -962,6 +1015,8 @@ impl ConnectorHost {
             if let Err(error) = host.sync().await {
                 tracing::error!(%error, "connector instances could not be loaded");
             }
+            // ADR 0028: every port a bounce left pending comes up again.
+            host.sweep_bounces(true).await;
             let filter = WatchFilter::tables([tables::INSTANCES.name().clone()]);
             let mut changes = host.store.watch(None, filter.clone()).ok();
             let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -980,7 +1035,16 @@ impl ConnectorHost {
                             tracing::warn!(%error, "connector instances could not be reconciled");
                         }
                     }
-                    _ = tick.tick() => host.schedule(&mut tasks),
+                    _ = tick.tick() => {
+                        host.schedule(&mut tasks);
+                        if !host.sweeping.swap(true, Ordering::AcqRel) {
+                            let sweeper = Arc::clone(&host);
+                            tasks.spawn(async move {
+                                sweeper.sweep_bounces(false).await;
+                                sweeper.sweeping.store(false, Ordering::Release);
+                            });
+                        }
+                    }
                     Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
                 }
             }

@@ -147,6 +147,7 @@ describe("move preview", () => {
       "dhcp.manual",
       "dns.manual",
       "l2.controller",
+      "l2.nudge",
       "observe",
       "cleanup",
     ]);
@@ -176,6 +177,7 @@ describe("move preview", () => {
       "ipam.move.dhcp",
       "ipam.move.dns",
       "ipam.move.controller",
+      "ipam.move.nudge",
       "ipam.move.observe",
       "ipam.move.cleanup",
     ]);
@@ -258,6 +260,7 @@ describe("the two times of each device and the preparation", () => {
       "dns.manual",
       "dhcp.short_lease",
       "l2.controller",
+      "l2.nudge",
       "observe",
       "cleanup",
     ]);
@@ -372,6 +375,7 @@ describe("move now", () => {
       "ipam.move.dhcp",
       "ipam.move.dns",
       "ipam.move.controller",
+      "ipam.move.nudge",
       "ipam.move.observe",
       "ipam.move.cleanup",
     ]);
@@ -395,6 +399,7 @@ describe("move now", () => {
       "ipam.move.dns",
       "ipam.move.lease",
       "ipam.move.controller",
+      "ipam.move.nudge",
       "ipam.move.observe",
       "ipam.move.cleanup",
     ]);
@@ -697,6 +702,90 @@ describe("starting a confirmed plan", () => {
     expect(location()).not.toMatch(/^\/jobs/);
     await settled(table);
     expect(start.disabled).toBe(false);
+  });
+});
+
+describe("the bounce or kick after the network change", () => {
+  const nudgeSwitch = () => screen.getByRole("switch", { name: "Bounce the port or disconnect the device" }) as HTMLInputElement;
+  /** The nudge line of a device. */
+  const nudgeLine = (table: HTMLElement, name: string) => within(item(table, name)).getByTestId("move-nudge");
+
+  afterEach(() => {
+    mockVlanController.bounce = true;
+    mockVlanController.kick = true;
+  });
+
+  it("says per device which of the two is used: the port of a wired one, the access point of a wireless one", async () => {
+    const { table } = await open("thermostat-1", "cam-door");
+    expect(nudgeLine(table, "cam-door").dataset.action).toBe("bounce");
+    expect(nudgeLine(table, "cam-door").textContent).toBe("Bounces port 7 of sw-desk for 5 sec if it is not back within 30 sec.");
+    expect(nudgeLine(table, "thermostat-1").dataset.action).toBe("kick");
+    expect(nudgeLine(table, "thermostat-1").textContent).toBe("Disconnects it from ap-hall if it is not back within 30 sec.");
+    // The steps of the job: the bounce follows the network change.
+    expect(await stepKinds(table, "cam-door")).toEqual(expect.arrayContaining(["l2.controller", "l2.nudge"]));
+  });
+
+  it("offers the switch, on at first, and previews again with nudge false when it is turned off", async () => {
+    const sent = capture();
+    const view = await open("cam-door");
+    expect(nudgeSwitch().checked).toBe(true);
+    expect(screen.getByTestId("move-nudge-help").textContent).toMatch(/not back by itself after the network change/);
+    await waitFor(() => expect(sent.filter((s) => s.dryRun).length).toBeGreaterThan(0));
+    // On is the absence of the member.
+    expect(sent.filter((s) => s.dryRun).every((s) => s.body.nudge === undefined)).toBe(true);
+
+    fireEvent.click(nudgeSwitch());
+    await waitFor(() => expect(sent.some((s) => s.dryRun && s.body.nudge === false)).toBe(true));
+    const table = screen.getByTestId("move-devices");
+    await settled(table);
+    expect(nudgeLine(table, "cam-door").textContent).toBe("No bounce or kick: switched off for this move.");
+    expect(nudgeLine(table, "cam-door").dataset.reason).toBe("ipam.move.nudge.off");
+    expect(await stepKinds(table, "cam-door")).not.toContain("l2.nudge");
+    // The switch stays, so the choice can be undone; Start sends the same choice and the job has no nudge step.
+    expect(nudgeSwitch().checked).toBe(false);
+    const before = jobStore.jobs.length;
+    fireEvent.click(screen.getByTestId("move-start"));
+    await waitFor(() => expect(view.location()).toMatch(/^\/jobs\?group=/));
+    expect(sent.filter((s) => !s.dryRun)[0]?.body.nudge).toBe(false);
+    const created = jobStore.jobs.slice(0, jobStore.jobs.length - before).filter((r) => r.job.spec.kind === "ipam.move");
+    expect(created.flatMap((r) => r.job.spec.steps.map((s) => s.kind))).not.toContain("ipam.move.nudge");
+  });
+
+  it("starts a job with the nudge step when the switch is on", async () => {
+    const view = await open("cam-door");
+    const before = jobStore.jobs.length;
+    fireEvent.click(screen.getByTestId("move-start"));
+    await waitFor(() => expect(view.location()).toMatch(/^\/jobs\?group=/));
+    const created = jobStore.jobs.slice(0, jobStore.jobs.length - before).filter((r) => r.job.spec.kind === "ipam.move");
+    const kinds = created.flatMap((r) => r.job.spec.steps.map((s) => s.kind));
+    expect(kinds.indexOf("ipam.move.nudge")).toBe(kinds.indexOf("ipam.move.controller") + 1);
+  });
+
+  it("has no switch where no controller offers the bounce or the kick, and says so per device", async () => {
+    mockVlanController.bounce = false;
+    mockVlanController.kick = false;
+    const { table } = await open("thermostat-1", "cam-door");
+    expect(screen.queryByRole("switch", { name: "Bounce the port or disconnect the device" })).toBeNull();
+    for (const name of ["thermostat-1", "cam-door"]) {
+      expect(nudgeLine(table, name).dataset.reason).toBe("ipam.move.nudge.no_capability");
+      expect(nudgeLine(table, name).textContent).toBe("No bounce or kick: the network controller offers neither.");
+    }
+  });
+
+  it("has no switch and no line where a person makes the network change", async () => {
+    mockVlanController.present = false;
+    await open("thermostat-1");
+    expect(screen.queryByRole("switch", { name: "Bounce the port or disconnect the device" })).toBeNull();
+    expect(screen.queryByTestId("move-nudge")).toBeNull();
+  });
+
+  it("says which guardrail refuses it", async () => {
+    await serveEdited(["cam-door"], (preview) => {
+      const l2 = preview.items[0]?.l2;
+      if (l2) l2.nudge = { action: "none", reason: "ipam.move.nudge.refused", problem: { code: "connect.guardrail.port_down", detail: "port 7 is down" } };
+    });
+    const { table } = await open("cam-door");
+    expect(nudgeLine(table, "cam-door").textContent).toBe("No bounce or kick, refused by a guardrail: This switch port is down already; Tenko does not bounce it.");
   });
 });
 

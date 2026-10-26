@@ -124,11 +124,16 @@ pub enum Mode {
     MalformedHosts,
     /// Freezes every worker thread on the first `Check`, so that not even `Ping` answers.
     FreezeOnCheck,
+    /// Runs the sample network controller with the port bounce and the client kick
+    /// ([`crate::sample_switch`]) instead of the inventory.
+    Switch,
+    /// Runs the sample network controller without the port bounce and the client kick.
+    SwitchPlain,
 }
 
 impl Mode {
     /// Every mode with its command-line name.
-    pub const ALL: [(Mode, &'static str); 12] = [
+    pub const ALL: [(Mode, &'static str); 14] = [
         (Mode::Normal, "normal"),
         (Mode::HangHandshake, "hang-handshake"),
         (Mode::BrokenHandshake, "broken-handshake"),
@@ -141,6 +146,8 @@ impl Mode {
         (Mode::IgnoreStdinClose, "ignore-stdin-close"),
         (Mode::MalformedHosts, "malformed-hosts"),
         (Mode::FreezeOnCheck, "freeze-on-check"),
+        (Mode::Switch, "switch"),
+        (Mode::SwitchPlain, "switch-plain"),
     ];
 
     /// The mode of a command-line name.
@@ -322,6 +329,11 @@ fn freeze() {
 
 /// The sample as an SDK plugin in a mode.
 pub fn plugin(mode: Mode) -> Plugin {
+    match mode {
+        Mode::Switch => return crate::sample_switch::plugin(true),
+        Mode::SwitchPlain => return crate::sample_switch::plugin(false),
+        _ => {}
+    }
     let mut manifest = manifest();
     match mode {
         Mode::ProtocolTwo => manifest.protocol = vec![2],

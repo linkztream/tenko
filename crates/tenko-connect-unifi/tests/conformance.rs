@@ -37,6 +37,8 @@ async fn the_plugin_passes_the_conformance_suite_without_a_controller() {
         "check",
         "capability.inventory",
         "capability.network_controller",
+        "capability.port_bounce",
+        "capability.client_kick",
         "undeclared",
         "malformed_request",
         "shutdown",

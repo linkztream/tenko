@@ -249,35 +249,7 @@ impl MoveClock {
         since: Timestamp,
         now: Timestamp,
     ) -> Result<Option<Lease>, StoreError> {
-        let mac = w.plan.mac.octets();
-        let fits = |lease: &Lease| {
-            lease.is_bound(now) && lease.client.mac() == Some(mac) && lease.cltt >= since
-        };
-        if w.plan.reserved {
-            let IpAddr::V4(addr) = w.params.new_ip else {
-                return Ok(None);
-            };
-            return Ok(view
-                .get_typed(&dhcp_tables::LEASES, &(w.params.vrf, addr))?
-                .map(|(lease, _)| lease)
-                .filter(fits));
-        }
-        let ipnet::IpNet::V4(net) = w.params.cidr else {
-            return Ok(None);
-        };
-        let range = KeyRange {
-            start: std::ops::Bound::Included(
-                dhcp_tables::LEASES.key(&(w.params.vrf, net.network())),
-            ),
-            end: std::ops::Bound::Included(
-                dhcp_tables::LEASES.key(&(w.params.vrf, net.broadcast())),
-            ),
-        };
-        Ok(view
-            .scan_typed(&dhcp_tables::LEASES, range, usize::MAX, false)?
-            .into_iter()
-            .map(|(_, lease, _)| lease)
-            .find(fits))
+        target_lease(view, &w.params, &w.plan, since, now)
     }
 
     /// The migration deadline of an observation that started at `started`, from the
@@ -404,6 +376,46 @@ impl MoveClock {
         }
         Ok(())
     }
+}
+
+/// The client's lease on the target scope of a move, given after `since`: the prepared
+/// address of a reserved host, any address of the target network otherwise.
+///
+/// # Errors
+///
+/// A store error.
+pub(super) fn target_lease(
+    view: &dyn ReadView,
+    params: &MoveStepParams,
+    plan: &LeasePlan,
+    since: Timestamp,
+    now: Timestamp,
+) -> Result<Option<Lease>, StoreError> {
+    let mac = plan.mac.octets();
+    let fits = |lease: &Lease| {
+        lease.is_bound(now) && lease.client.mac() == Some(mac) && lease.cltt >= since
+    };
+    if plan.reserved {
+        let IpAddr::V4(addr) = params.new_ip else {
+            return Ok(None);
+        };
+        return Ok(view
+            .get_typed(&dhcp_tables::LEASES, &(params.vrf, addr))?
+            .map(|(lease, _)| lease)
+            .filter(fits));
+    }
+    let ipnet::IpNet::V4(net) = params.cidr else {
+        return Ok(None);
+    };
+    let range = KeyRange {
+        start: std::ops::Bound::Included(dhcp_tables::LEASES.key(&(params.vrf, net.network()))),
+        end: std::ops::Bound::Included(dhcp_tables::LEASES.key(&(params.vrf, net.broadcast()))),
+    };
+    Ok(view
+        .scan_typed(&dhcp_tables::LEASES, range, usize::MAX, false)?
+        .into_iter()
+        .map(|(_, lease, _)| lease)
+        .find(fits))
 }
 
 struct ClockService(Arc<MoveClock>);

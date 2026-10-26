@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MoveItem, MoveL2, MovePreview, MoveStepPreview } from "../../api/moves";
+import type { MoveItem, MoveL2, MoveNudge, MovePreview, MoveStepPreview } from "../../api/moves";
 import {
   activitySourceText,
   deadlineSourceText,
@@ -12,6 +12,8 @@ import {
   l2TaskKey,
   l2TaskText,
   leaseSpanText,
+  NUDGE_REASON,
+  nudgeText,
   prepareText,
   problemText,
   stepText,
@@ -245,5 +247,50 @@ describe("the two times and the preparation", () => {
     );
     expect(STEP_ORDER.indexOf("dhcp.short_lease")).toBe(STEP_ORDER.indexOf("l2.move") - 1);
     expect(groupTitle("dhcp.short_lease", 2)).toBe("Wait for the short lease (2)");
+  });
+});
+
+describe("the nudge line of a device", () => {
+  const wired: MoveL2 = {
+    action: "port_profile",
+    attachment: { medium: "wired", device: "00:00:5e:00:53:03", device_name: "sw1", port: 5 },
+  };
+  const wireless: MoveL2 = { action: "client_vlan", attachment: { medium: "wireless", device: "00:00:5e:00:53:04", device_name: "ap1" } };
+  const bounce: MoveNudge = {
+    action: "bounce",
+    change: { type: "bounce_port", data: { device: "00:00:5e:00:53:03", port: 5, down_secs: 5 } },
+    reappear_secs: 30,
+  };
+  const kick: MoveNudge = { action: "kick", change: { type: "kick_client", data: { mac: "00:00:5e:00:53:2b" } }, reappear_secs: 30 };
+
+  it("says which port is bounced, or from which access point the device is disconnected", () => {
+    expect(nudgeText(bounce, wired)).toBe("Bounces port 5 of sw1 for 5 sec if it is not back within 30 sec.");
+    expect(nudgeText(kick, wireless)).toBe("Disconnects it from ap1 if it is not back within 30 sec.");
+    // Without the device's name the controller's reference stands in for the switch.
+    expect(nudgeText(bounce, { action: "port_profile" })).toBe("Bounces port 5 of 00:00:5e:00:53:03 for 5 sec if it is not back within 30 sec.");
+  });
+
+  it("says why neither is made", () => {
+    expect(nudgeText({ action: "none", reason: NUDGE_REASON.off }, wired)).toBe("No bounce or kick: switched off for this move.");
+    expect(nudgeText({ action: "none", reason: NUDGE_REASON.noCapability }, wired)).toBe("No bounce or kick: the network controller offers neither.");
+    expect(nudgeText({ action: "none", reason: NUDGE_REASON.refused }, wired)).toBe("No bounce or kick: refused by a guardrail.");
+    expect(
+      nudgeText({ action: "none", reason: NUDGE_REASON.refused, problem: { code: "connect.guardrail.shared_port", detail: "d" } }, wired),
+    ).toBe("No bounce or kick, refused by a guardrail: Other devices use this switch port; Tenko does not bounce it.");
+    expect(nudgeText({ action: "none", reason: "ipam.move.nudge.future" }, wired)).toBe("No bounce or kick.");
+  });
+
+  it("translates the guardrails of the bounce and the kick and keeps the detail of a rule it does not know", () => {
+    const text = (code: string) => problemText({ code, detail: "the detail" });
+    expect(text("connect.guardrail.port_down")).toBe("This switch port is down already; Tenko does not bounce it.");
+    expect(text("connect.guardrail.port_unknown")).toBe("The network controller does not know this switch port.");
+    expect(text("connect.guardrail.client_unknown")).toBe("The network controller does not know this device.");
+    expect(text("connect.guardrail.not_wireless")).toBe("This device is not wireless; it cannot be disconnected from an access point.");
+    expect(text("connect.guardrail.next_one")).toBe("the detail");
+  });
+
+  it("groups the nudge after the network change", () => {
+    expect(STEP_ORDER.indexOf("l2.nudge")).toBe(STEP_ORDER.indexOf("l2.move") + 1);
+    expect(groupTitle("l2.nudge", 2)).toBe("Bounce or disconnect (2)");
   });
 });

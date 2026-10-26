@@ -16,10 +16,10 @@ pub fn manifest() -> Manifest {
         "manifest_version": 1,
         "name": NAME,
         "version": crate::version(),
-        "description": "Reads devices, ports, LLDP, clients, networks and wireless networks from a UniFi Network application, and performs the VLAN, port-profile and per-client VLAN writes the host has planned and checked.",
+        "description": "Reads devices, ports, LLDP, clients, networks and wireless networks from a UniFi Network application, and performs the VLAN, port-profile and per-client VLAN writes, port bounces and client kicks the host has planned and checked.",
         "license": "LicenseRef-Proprietary",
         "protocol": [tenko_connect::PROTOCOL_VERSION],
-        "capabilities": ["inventory", "network_controller"],
+        "capabilities": ["inventory", "network_controller", "port_bounce", "client_kick"],
         "settings": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",

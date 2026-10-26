@@ -34,6 +34,8 @@ fn info(name: &str) -> ControllerInfo {
         plugin: "memory".to_owned(),
         enabled: true,
         writes_enabled: true,
+        bounce: false,
+        kick: false,
     }
 }
 
@@ -79,6 +81,8 @@ fn switch_port(index: u16, profile: Option<&str>, up: bool) -> ControllerPortSta
         uplink: false,
         management: false,
         up,
+        enabled: None,
+        learned_macs: None,
     }
 }
 

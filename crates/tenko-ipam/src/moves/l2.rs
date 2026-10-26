@@ -10,13 +10,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use tenko_core::{AddressId, CodedError, InterfaceId, ObjectRef, RequestCtx};
 
 use super::{
-    MoveAttachment, MoveItem, MoveL2, MoveL2Action, MoveL2Problem, MoveMedium, MoveTarget, codes,
+    MoveAttachment, MoveItem, MoveL2, MoveL2Action, MoveL2Problem, MoveMedium, MoveNudge,
+    MoveNudgeAction, MoveTarget, codes,
 };
 use crate::{
     plan::PlanWarning,
     vlan::controllers::{
         AttachmentChange, ControllerAttachments, ControllerClient, ControllerInfo,
-        ControllerNetwork, Controllers, DiffEntry, guardrail,
+        ControllerNetwork, Controllers, DiffEntry, NudgeChange, guardrail,
     },
 };
 
@@ -29,6 +30,108 @@ pub(super) struct L2Plans {
     pub warnings: Vec<PlanWarning>,
     /// The enabled network controllers that were read.
     pub controllers: Vec<ControllerInfo>,
+    /// Whether a controller that sees a device of the move offers a nudge (ADR 0028).
+    pub nudge_offered: bool,
+}
+
+/// What the nudges of a move follow (ADR 0028): the request's switch and `[dhcp.moves]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct NudgeOptions {
+    /// Whether the move bounces or kicks at all (`MoveRequest::nudge`).
+    pub enabled: bool,
+    /// How long a bounce keeps the port down.
+    pub down_secs: u16,
+    /// How long the job waits for the client to come back by itself first.
+    pub reappear_secs: u32,
+}
+
+/// A guardrail check of a nudge (`NetworkControllers::check_nudge`).
+pub(super) type NudgeCheck<'a> =
+    &'a (dyn Fn(&ControllerAttachments, &NudgeChange) -> Result<(), CodedError> + Sync);
+
+/// Decides the nudge of every automatic L2 step from the controllers' reads (ADR 0028): a
+/// port bounce after a port profile change, a client kick after a per-client VLAN, when the
+/// controller offers it and its guardrails let it; otherwise none, with the reason. Returns
+/// whether a controller that sees a device of the move offers a nudge at all.
+pub(super) fn nudge_all(
+    items: &mut [MoveL2],
+    reads: &[Read],
+    options: NudgeOptions,
+    check: NudgeCheck<'_>,
+) -> bool {
+    let mut offered = false;
+    for l2 in items.iter_mut() {
+        let Some(info) = &l2.connector else {
+            continue;
+        };
+        offered |= info.bounce || info.kick;
+        if !l2.automatic() {
+            continue;
+        }
+        let Some(state) = reads
+            .iter()
+            .find(|read| read.info.id == info.id)
+            .and_then(|read| read.state.as_ref().ok())
+        else {
+            continue;
+        };
+        l2.nudge = nudge_of(l2, info, state, options, check);
+    }
+    offered
+}
+
+fn nudge_of(
+    l2: &MoveL2,
+    info: &ControllerInfo,
+    state: &ControllerAttachments,
+    options: NudgeOptions,
+    check: NudgeCheck<'_>,
+) -> Option<MoveNudge> {
+    let (change, action, capable) = match (&l2.change, &l2.attachment) {
+        (Some(AttachmentChange::SetPortProfile { device, port, .. }), _) => (
+            NudgeChange::BouncePort {
+                device: device.clone(),
+                port: *port,
+                down_secs: options.down_secs,
+            },
+            MoveNudgeAction::Bounce,
+            info.bounce,
+        ),
+        (Some(AttachmentChange::SetClientVlan { mac, .. }), _) => (
+            NudgeChange::KickClient { mac: *mac },
+            MoveNudgeAction::Kick,
+            info.kick,
+        ),
+        _ => return None,
+    };
+    let mut nudge = MoveNudge {
+        action: MoveNudgeAction::None,
+        reason: None,
+        problem: None,
+        change: Some(change),
+        reappear_secs: options.reappear_secs,
+    };
+    if !capable {
+        nudge.reason = Some(codes::NUDGE_NO_CAPABILITY.to_owned());
+        nudge.change = None;
+        return Some(nudge);
+    }
+    if let Some(change) = &nudge.change
+        && let Err(error) = check(state, change)
+    {
+        nudge.reason = Some(codes::NUDGE_REFUSED.to_owned());
+        nudge.problem = Some(MoveL2Problem {
+            code: error.code.to_string(),
+            detail: error.detail,
+        });
+        return Some(nudge);
+    }
+    if !options.enabled {
+        nudge.reason = Some(codes::NUDGE_OFF.to_owned());
+        return Some(nudge);
+    }
+    nudge.action = action;
+    Some(nudge)
 }
 
 /// What one enabled controller answered.
@@ -97,6 +200,7 @@ pub(super) async fn plan(
     items: &[MoveItem],
     target: &MoveTarget,
     cx: &RequestCtx,
+    nudges: NudgeOptions,
 ) -> L2Plans {
     let Some(vid) = target.vid else {
         return offline(items, target);
@@ -119,6 +223,7 @@ pub(super) async fn plan(
                 }),
                 warnings: vec![unavailable_warning(None, &error, true)],
                 controllers: Vec::new(),
+                nudge_offered: false,
             };
         }
     };
@@ -139,6 +244,9 @@ pub(super) async fn plan(
         port.check_attachment(state, change)
     };
     let mut plans = decide_all(items, vid, &reads, &check);
+    let check_nudge =
+        |state: &ControllerAttachments, change: &NudgeChange| port.check_nudge(state, change);
+    plans.nudge_offered = nudge_all(&mut plans.items, &reads, nudges, &check_nudge);
     plans.controllers = enabled;
     plans
 }
@@ -173,6 +281,7 @@ pub(super) fn decide_all(
         items: decided,
         warnings,
         controllers: Vec::new(),
+        nudge_offered: false,
     }
 }
 

@@ -381,6 +381,7 @@ mod tests {
                 fingerprint: "abc".to_owned(),
                 diff: Vec::new(),
                 warnings: Vec::new(),
+                undo: Vec::new(),
             },
             mode,
             applied_at: tenko_core::Timestamp::now(),

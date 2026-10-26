@@ -123,6 +123,34 @@ fn port(path: &str, value: u32) -> Result<u16> {
         .map_err(|_| ConvertError::new(path, format!("{value} is not a port index")))
 }
 
+fn down_secs(path: &str, value: u32) -> Result<u16> {
+    match u16::try_from(value) {
+        Ok(secs)
+            if (crate::network::MIN_DOWN_SECS..=crate::network::MAX_DOWN_SECS).contains(&secs) =>
+        {
+            Ok(secs)
+        }
+        _ => Err(ConvertError::new(
+            path,
+            format!(
+                "{value} is not a down time ({} to {} seconds)",
+                crate::network::MIN_DOWN_SECS,
+                crate::network::MAX_DOWN_SECS
+            ),
+        )),
+    }
+}
+
+fn restore(path: &str, value: String) -> Result<String> {
+    if value.len() > crate::network::MAX_RESTORE_BYTES {
+        return Err(ConvertError::new(
+            path,
+            format!("is longer than {} bytes", crate::network::MAX_RESTORE_BYTES),
+        ));
+    }
+    Ok(value)
+}
+
 fn text(path: &str, value: String) -> Result<String> {
     if value.len() > MAX_TEXT {
         return Err(ConvertError::new(
@@ -565,6 +593,27 @@ pub fn change_to_proto(change: &L2Change) -> v1::L2Change {
                 network: network.0.clone(),
                 vlan: u32::from(*vlan),
             }),
+            L2Change::BouncePort {
+                device,
+                port,
+                down_secs,
+            } => Change::BouncePort(v1::BouncePort {
+                device: device.0.clone(),
+                port: u32::from(*port),
+                down_secs: u32::from(*down_secs),
+            }),
+            L2Change::EnablePort {
+                device,
+                port,
+                restore,
+            } => Change::EnablePort(v1::EnablePort {
+                device: device.0.clone(),
+                port: u32::from(*port),
+                restore: restore.clone(),
+            }),
+            L2Change::KickClient { mac } => Change::KickClient(v1::KickClient {
+                mac: mac.to_string(),
+            }),
         }),
     }
 }
@@ -599,6 +648,19 @@ pub fn change_from_proto(path: &str, change: Option<v1::L2Change>) -> Result<L2C
             network: NetworkRef(nonempty(&format!("{path}.network"), remove.network)?),
             vlan: vlan(&format!("{path}.vlan"), remove.vlan)?,
         }),
+        Some(Change::BouncePort(bounce)) => Ok(L2Change::BouncePort {
+            device: DeviceRef(nonempty(&format!("{path}.device"), bounce.device)?),
+            port: port(&format!("{path}.port"), bounce.port)?,
+            down_secs: down_secs(&format!("{path}.down_secs"), bounce.down_secs)?,
+        }),
+        Some(Change::EnablePort(enable)) => Ok(L2Change::EnablePort {
+            device: DeviceRef(nonempty(&format!("{path}.device"), enable.device)?),
+            port: port(&format!("{path}.port"), enable.port)?,
+            restore: restore(&format!("{path}.restore"), enable.restore)?,
+        }),
+        Some(Change::KickClient(kick)) => Ok(L2Change::KickClient {
+            mac: mac(&format!("{path}.mac"), &kick.mac)?,
+        }),
     }
 }
 
@@ -610,6 +672,7 @@ pub fn plan_to_proto(plan: &L2Plan) -> v1::L2Plan {
         fingerprint: plan.fingerprint.clone(),
         diff: diff_to_proto(&plan.diff),
         warnings: plan.warnings.clone(),
+        undo: plan.undo.iter().map(change_to_proto).collect(),
     }
 }
 
@@ -630,6 +693,12 @@ pub fn plan_from_proto(path: &str, plan: Option<v1::L2Plan>) -> Result<L2Plan> {
             .into_iter()
             .enumerate()
             .map(|(i, warning)| text(&format!("{path}.warnings[{i}]"), warning))
+            .collect::<Result<_>>()?,
+        undo: plan
+            .undo
+            .into_iter()
+            .enumerate()
+            .map(|(i, change)| change_from_proto(&format!("{path}.undo[{i}]"), Some(change)))
             .collect::<Result<_>>()?,
     })
 }
@@ -749,6 +818,8 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                         uplink: port.uplink,
                         up: port.up,
                         management: port.management,
+                        enabled: port.enabled,
+                        learned_macs: port.learned_macs,
                     })
                     .collect(),
             })
@@ -848,6 +919,8 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                 uplink: entry.uplink,
                 up: entry.up,
                 management: entry.management,
+                enabled: entry.enabled,
+                learned_macs: entry.learned_macs,
             });
         }
         devices.push(NetworkDevice {
@@ -1555,6 +1628,8 @@ mod tests {
                         uplink: true,
                         up: true,
                         management: false,
+                        enabled: Some(true),
+                        learned_macs: Some(12),
                     },
                     DevicePort {
                         index: 2,
@@ -1564,6 +1639,8 @@ mod tests {
                         uplink: false,
                         up: true,
                         management: true,
+                        enabled: None,
+                        learned_macs: None,
                     },
                 ],
             }],
@@ -1647,6 +1724,7 @@ mod tests {
                 after: Some("iot".to_owned()),
             }],
             warnings: vec![],
+            undo: vec![],
         };
         assert_eq!(
             plan_from_proto("plan", Some(plan_to_proto(&plan))).expect("plan"),
@@ -1676,6 +1754,71 @@ mod tests {
             change_from_proto("c", Some(change_to_proto(&ensure))).expect("change"),
             ensure
         );
+    }
+
+    #[test]
+    fn bounces_kicks_and_their_undo_round_trip_strictly() {
+        let device = DeviceRef("00:00:5e:00:53:a0".to_owned());
+        let bounce = L2Change::BouncePort {
+            device: device.clone(),
+            port: 5,
+            down_secs: 5,
+        };
+        let enable = L2Change::EnablePort {
+            device,
+            port: 5,
+            restore: r#"{"forward":"all"}"#.to_owned(),
+        };
+        let kick = L2Change::KickClient {
+            mac: "00:00:5e:00:53:21".parse().expect("mac"),
+        };
+        for change in [&bounce, &enable, &kick] {
+            assert_eq!(
+                change_from_proto("c", Some(change_to_proto(change))).expect("change"),
+                *change
+            );
+        }
+        let plan = L2Plan {
+            change: bounce.clone(),
+            read_at: at("2026-10-26T12:00:00Z"),
+            fingerprint: "f2".to_owned(),
+            diff: vec![DiffLine {
+                path: "devices/00:00:5e:00:53:a0/ports/5/enabled".to_owned(),
+                before: Some("true".to_owned()),
+                after: Some("false".to_owned()),
+            }],
+            warnings: vec![],
+            undo: vec![enable],
+        };
+        assert_eq!(
+            plan_from_proto("plan", Some(plan_to_proto(&plan))).expect("plan"),
+            plan
+        );
+        for secs in [0, 31, 70_000] {
+            let mut message = change_to_proto(&bounce);
+            if let Some(v1::l2_change::Change::BouncePort(inner)) = message.change.as_mut() {
+                inner.down_secs = secs;
+            }
+            assert_eq!(
+                change_from_proto("c", Some(message))
+                    .expect_err("down time")
+                    .path,
+                "c.down_secs"
+            );
+        }
+        let mut message = change_to_proto(&plan.undo[0]);
+        if let Some(v1::l2_change::Change::EnablePort(inner)) = message.change.as_mut() {
+            inner.restore = "x".repeat(crate::network::MAX_RESTORE_BYTES + 1);
+        }
+        assert_eq!(
+            change_from_proto("c", Some(message))
+                .expect_err("restore")
+                .path,
+            "c.restore"
+        );
+        assert_eq!(bounce.capability(), Some(crate::Capability::PortBounce));
+        assert_eq!(kick.capability(), Some(crate::Capability::ClientKick));
+        assert_eq!(plan_to_proto(&plan).undo.len(), 1);
     }
 
     #[test]

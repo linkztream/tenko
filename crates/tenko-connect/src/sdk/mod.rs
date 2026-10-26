@@ -340,7 +340,9 @@ impl Plugin {
         for capability in &self.manifest.capabilities {
             let present = match capability {
                 Capability::Inventory | Capability::Webhook => self.inventory.is_some(),
-                Capability::NetworkController => self.network.is_some(),
+                Capability::NetworkController | Capability::PortBounce | Capability::ClientKick => {
+                    self.network.is_some()
+                }
                 Capability::Actuator => self.actuator.is_some(),
                 Capability::Migration => self.migration.is_some(),
             };
@@ -447,7 +449,10 @@ impl Plugin {
         {
             router = router.add_service(InterceptedService::new(
                 v1::network_controller_server::NetworkControllerServer::new(
-                    services::NetworkService(network),
+                    services::NetworkService {
+                        controller: network,
+                        declared: self.manifest.capabilities.clone(),
+                    },
                 )
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),

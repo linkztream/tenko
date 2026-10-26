@@ -326,6 +326,23 @@ fn check_capabilities(capabilities: &[Capability], problems: &mut Vec<ManifestPr
             "`webhook` needs the `inventory` capability",
         );
     }
+    // ADR 0028: the port bounce and the client kick are part of the network controller.
+    for needs in [Capability::PortBounce, Capability::ClientKick] {
+        if let Some(index) = capabilities
+            .iter()
+            .position(|capability| *capability == needs)
+            && !capabilities.contains(&Capability::NetworkController)
+        {
+            push(
+                problems,
+                format!("/capabilities/{index}"),
+                format!(
+                    "`{}` needs the `network_controller` capability",
+                    needs.as_str()
+                ),
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1325,6 +1342,24 @@ mod tests {
             &json!({ "capabilities": ["actuator", "webhook"] }),
             "/capabilities/1",
             "needs the `inventory`",
+        );
+    }
+
+    #[test]
+    fn port_bounce_and_client_kick_require_the_network_controller() {
+        assert_valid(&json!({
+            "capabilities": ["network_controller", "port_bounce", "client_kick"]
+        }));
+        assert_valid(&json!({ "capabilities": ["client_kick", "network_controller"] }));
+        assert_only_problem(
+            &json!({ "capabilities": ["inventory", "port_bounce"] }),
+            "/capabilities/1",
+            "`port_bounce` needs the `network_controller` capability",
+        );
+        assert_only_problem(
+            &json!({ "capabilities": ["client_kick"] }),
+            "/capabilities/0",
+            "`client_kick` needs the `network_controller` capability",
         );
     }
 

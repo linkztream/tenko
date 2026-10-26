@@ -1329,6 +1329,8 @@ async fn start(
             tenko_ipam::moves::register_steps(&mut engine, &vlan_controllers);
             // WP8.1: the automatic DHCP step and the cleanup that releases the old lease.
             tenko_ipam::moves::dhcp::register_steps(&mut engine, &dhcp_moves);
+            // ADR 0028: the nudge after the network change sees the client's DHCP exchange.
+            tenko_ipam::moves::nudge::register_steps(&mut engine, &vlan_controllers, &dhcp_moves);
             let ipam = IpamService::new(
                 Arc::clone(&store_dyn),
                 Arc::new(engine.clone()),

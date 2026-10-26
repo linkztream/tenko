@@ -678,6 +678,7 @@ export const MOVE_STEP = {
   device: "ipam.move.device",
   l2: "ipam.move.l2",
   controller: "ipam.move.controller",
+  nudge: "ipam.move.nudge",
   observe: "ipam.move.observe",
   cleanup: "ipam.move.cleanup",
 } as const;
@@ -753,6 +754,8 @@ export interface MockMoveL2 {
   undoFails?: boolean;
   /** Changes of the step besides the moved objects (the connector). */
   changes?: ObjectRef[];
+  /** The bounce or kick after the controller step (`ipam.move.nudge`): the summary key, its arguments and the output (hex). */
+  nudge?: { key: string; args: Record<string, string>; output: string };
 }
 
 export interface MoveStepOptions {
@@ -822,6 +825,16 @@ export function moveSteps(move: MoveArgs, options: MoveStepOptions = {}): MockSt
     if (l2.output) step.output = l2.output;
     if (l2.undoFails) step.undoFails = true;
     steps.push(step);
+    if (l2.nudge) {
+      steps.push({
+        kind: MOVE_STEP.nudge,
+        automatic: true,
+        summary: l2.nudge.key,
+        args: { ...plain, ...l2.nudge.args },
+        changes: [...changes, ...(l2.changes ?? [])],
+        output: l2.nudge.output,
+      });
+    }
   } else if (l2.action === "manual") {
     steps.push({
       kind: MOVE_STEP.l2,

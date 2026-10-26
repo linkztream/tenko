@@ -4,8 +4,8 @@
 // (`mockVlanController`): `present = false` means no network controller, `enabled = false` a
 // disabled one, `writes_enabled = false` writes off (TGL-20). The attachment table is fixed and
 // describes the lab before the IoT move: the IoT devices are still in the LAN (VLAN 10).
-import type { MoveItem, MoveL2, MoveL2Output, MoveTarget } from "../moves";
-import { encodeMoveL2Output } from "../moves";
+import type { MoveItem, MoveL2, MoveL2Output, MoveNudge, MoveNudgeOutput, MoveTarget } from "../moves";
+import { encodeMoveL2Output, encodeMoveNudgeOutput } from "../moves";
 import type { PlanWarning } from "../types";
 import type { MockMoveL2 } from "./job-store";
 import { controllerInfo, mockVlanController } from "./topology-store";
@@ -28,6 +28,15 @@ export const L2_CODES = {
   alreadyThere: "ipam.move.l2.already_there",
   sameInterface: "ipam.move.l2.same_interface",
 } as const;
+
+/** Codes and timing of the nudge after the network change (ADR 0028, crates/tenko-ipam/src/moves/mod.rs). */
+export const NUDGE_CODES = {
+  off: "ipam.move.nudge.off",
+  noCapability: "ipam.move.nudge.no_capability",
+  refused: "ipam.move.nudge.refused",
+} as const;
+const NUDGE_REAPPEAR_SECS = 30;
+const NUDGE_DOWN_SECS = 5;
 
 interface Port {
   device: string;
@@ -101,7 +110,7 @@ export interface MockL2Decision {
   controllers: ReturnType<typeof controllerInfo>[];
 }
 
-export function decideL2(items: readonly MoveItem[], target: MoveTarget): MockL2Decision {
+export function decideL2(items: readonly MoveItem[], target: MoveTarget, nudge = true): MockL2Decision {
   const controller = mockVlanController.present && mockVlanController.enabled;
   const vid = target.vid ?? null;
   const first = new Map<string, string>();
@@ -117,7 +126,7 @@ export function decideL2(items: readonly MoveItem[], target: MoveTarget): MockL2
     if (!item.mac) return manual(L2_CODES.noMac, { ssids: [IOT_SSID] });
     const client = CLIENTS[lastByte(item.mac)];
     if (!client) return manual(L2_CODES.notSeen, { ssids: [IOT_SSID] });
-    const l2 = decideClient(item, client, vid);
+    const l2 = decideClient(item, client, vid, nudge);
     if (l2.reason === L2_CODES.refused) {
       const who = item.host_name ?? item.old_ip;
       warnings.push({
@@ -134,7 +143,18 @@ export function decideL2(items: readonly MoveItem[], target: MoveTarget): MockL2
   return { items: decided, warnings, controllers: controller ? [controllerInfo()] : [] };
 }
 
-function decideClient(item: MoveItem, client: Client, vid: number): MoveL2 {
+/** What the job does when the client is not back by itself: bounce its port, kick it, or (switched off) nothing. */
+function nudgeOf(item: MoveItem, client: Client, on: boolean): MoveNudge {
+  if (!on) return { action: "none", reason: NUDGE_CODES.off };
+  if (client.wired ? !mockVlanController.bounce : !mockVlanController.kick) return { action: "none", reason: NUDGE_CODES.noCapability };
+  if (client.wired) {
+    const change = { type: "bounce_port", data: { device: client.wired.device, port: client.wired.index, down_secs: NUDGE_DOWN_SECS } } as const;
+    return { action: "bounce", change, reappear_secs: NUDGE_REAPPEAR_SECS };
+  }
+  return { action: "kick", change: { type: "kick_client", data: { mac: item.mac ?? "" } }, reappear_secs: NUDGE_REAPPEAR_SECS };
+}
+
+function decideClient(item: MoveItem, client: Client, vid: number, nudge: boolean): MoveL2 {
   const now = new Date().toISOString();
   const network = mockVlanController.networks.find((n) => n.vlan === vid && !n.management);
   const base: MoveL2 = {
@@ -208,7 +228,7 @@ function decideClient(item: MoveItem, client: Client, vid: number): MoveL2 {
     };
   }
   if (!mockVlanController.writes_enabled) return { ...l2, action: "manual", reason: L2_CODES.readOnly };
-  return l2;
+  return { ...l2, nudge: nudgeOf(item, client, nudge) };
 }
 
 /** The message key of the manual task of an L2 step (crates/tenko-ipam/src/moves/l2.rs, `instruction`). */
@@ -280,12 +300,34 @@ export function l2Step(item: MoveItem): MockMoveL2 | null {
     receipt: { connector, dry_run: false, applied_at: now, verified: true, undo_steps: 1, token: "00" },
   };
   const args: Record<string, string> = { ...l2Args(l2), mac: item.mac ?? "" };
-  return {
+  const step: MockMoveL2 = {
     action: l2.action,
     args,
     output: encodeMoveL2Output(output),
     changes: connector ? [{ kind: "connector", id: connector }] : [],
   };
+  const nudge = nudgeMessage(item, l2);
+  if (nudge) {
+    // The mock client never comes back by itself, so the step did its bounce or kick.
+    const change = l2.nudge?.change as NonNullable<MoveNudge["change"]>;
+    const up = change.type === "bounce_port" ? { up_at: new Date(Date.parse(now) + 6000).toISOString() } : {};
+    const done: MoveNudgeOutput = { change, report: { connector, change, at: now, ...up, outcome: "done" } };
+    step.nudge = { ...nudge, output: encodeMoveNudgeOutput(done) };
+  }
+  return step;
+}
+
+/**
+ * The summary key and the arguments of the nudge step of a device (`ipam.move.step.nudge_bounce`
+ * or `nudge_kick`), or undefined when the job neither bounces nor kicks.
+ */
+export function nudgeMessage(item: MoveItem, l2: MoveL2): { key: string; args: Record<string, string> } | undefined {
+  const nudge = l2.nudge;
+  const change = nudge?.change;
+  if (!nudge || !change || (nudge.action !== "bounce" && nudge.action !== "kick")) return undefined;
+  const args: Record<string, string> = { ...l2Args(l2), mac: item.mac ?? "", reappear_secs: String(nudge.reappear_secs ?? NUDGE_REAPPEAR_SECS) };
+  if (change.type === "bounce_port") args.down_secs = String(change.data.down_secs);
+  return { key: nudge.action === "bounce" ? "ipam.move.step.nudge_bounce" : "ipam.move.step.nudge_kick", args };
 }
 
 /** A fingerprint of what a move would run: the addresses, the steps and the L2 decisions. */

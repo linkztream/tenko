@@ -289,6 +289,8 @@ impl<'a> View<'a> {
                             .and_then(|id| self.profiles.get(id))
                             .and_then(|p| p.native.clone())
                     });
+                    let off = port.switched_off() || device.disabled_by_override(port.idx);
+                    let known = port.enable.is_some() || port.forward.is_some();
                     DevicePort {
                         index: port.idx,
                         name: port.name.clone(),
@@ -297,6 +299,8 @@ impl<'a> View<'a> {
                         uplink: self.link_ports.contains(&(device.mac, port.idx)),
                         up: port.up,
                         management: self.management_ports.contains(&(device.mac, port.idx)),
+                        enabled: (known || off).then_some(!off),
+                        learned_macs: port.learned_macs,
                     }
                 })
                 .collect(),

@@ -6526,7 +6526,7 @@ export interface components {
          * @description An interface a plugin implements.
          * @enum {string}
          */
-        Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration";
+        Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration" | "port_bounce" | "client_kick";
         /** @description A certificate issued to a node, as the registry remembers it. */
         CertificateRef: {
             /** @description End of validity. */
@@ -6910,10 +6910,14 @@ export interface components {
         ContextKind: "user_name" | "display_name" | "host_name" | "product";
         /** @description A connector instance that can act as a network controller. */
         ControllerInfo: {
+            /** @description Whether the controller can bounce a switch port (capability `port_bounce`, ADR 0028). */
+            bounce?: boolean;
             /** @description Whether the instance is enabled. */
             enabled: boolean;
             /** @description The connector instance. */
             id: components["schemas"]["ConnectorId"];
+            /** @description Whether the controller can disconnect a wireless client (capability `client_kick`). */
+            kick?: boolean;
             /** @description Its display name. */
             name: string;
             /** @description The plugin, such as `unifi`. */
@@ -12055,6 +12059,7 @@ export interface components {
             network_name?: string | null;
             /** @description Notes about the change (`ipam.move.l2.note.*`). */
             notes?: string[];
+            nudge?: components["schemas"]["MoveNudge"] | null;
             /**
              * Format: int32
              * @description How many other devices are on the switch port.
@@ -12090,6 +12095,25 @@ export interface components {
          * @enum {string}
          */
         MoveMedium: "wired" | "wireless";
+        /** @description The nudge of a device after its network change, as previewed (ADR 0028). */
+        MoveNudge: {
+            /** @description What the job does when the client does not come back by itself. */
+            action: components["schemas"]["MoveNudgeAction"];
+            change?: components["schemas"]["NudgeChange"] | null;
+            problem?: components["schemas"]["MoveL2Problem"] | null;
+            /**
+             * Format: int32
+             * @description How long the job waits for the client to come back by itself first.
+             */
+            reappear_secs?: number;
+            /** @description Why there is none (`ipam.move.nudge.*`). */
+            reason?: string | null;
+        };
+        /**
+         * @description How the job makes the client start over after the network change (ADR 0028).
+         * @enum {string}
+         */
+        MoveNudgeAction: "bounce" | "kick" | "none";
         /**
          * @description What the job does before it changes the client's network.
          * @enum {string}
@@ -12113,6 +12137,16 @@ export interface components {
             items: components["schemas"]["MoveItem"][];
             /** @description Whether the jobs change the network at once (`move_now`). */
             move_now?: boolean;
+            /**
+             * @description Whether the jobs bounce or kick a client that does not come back by itself
+             *     (`nudge`, ADR 0028).
+             */
+            nudge?: boolean;
+            /**
+             * @description Whether a controller that sees a device of the move offers the port bounce or the
+             *     client kick: the preview shows the switch then.
+             */
+            nudge_offered?: boolean;
             /**
              * Format: int32
              * @description How many jobs run at once.
@@ -12148,6 +12182,12 @@ export interface components {
              *     link changes.
              */
             move_now?: boolean;
+            /**
+             * @description After the network change, bounce the client's switch port or disconnect it from its
+             *     access point when it does not come back by itself (ADR 0028); on when absent. It
+             *     runs only where the controller offers it and its guardrails let it.
+             */
+            nudge?: boolean;
             /** @description Hosts or addresses to move. */
             objects: components["schemas"]["ObjectRef"][];
             /**
@@ -12746,6 +12786,39 @@ export interface components {
         NtaItem: components["schemas"]["NegativeTrustAnchor"] & {
             /** @description The store revision of the row. */
             revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description What makes a moved client start over at once (ADR 0028): a bounce of its switch port or
+         *     a disconnect from its access point.
+         *
+         *     Adjacently tagged because a variant carries a MAC address (see `tenko_core::codec`).
+         */
+        NudgeChange: {
+            /** @description Take the switch port down for `down_secs` and bring it up again. */
+            data: {
+                /** @description The switch, by controller reference. */
+                device: string;
+                /**
+                 * Format: int32
+                 * @description How long the port stays down, 1 to 30 seconds.
+                 */
+                down_secs: number;
+                /**
+                 * Format: int32
+                 * @description The port index.
+                 */
+                port: number;
+            };
+            /** @enum {string} */
+            type: "bounce_port";
+        } | {
+            /** @description Disconnect the wireless client so that it associates again. */
+            data: {
+                /** @description The client. */
+                mac: components["schemas"]["MacAddr"];
+            };
+            /** @enum {string} */
+            type: "kick_client";
         };
         /**
          * @description The kind of an object: one variant per entity.

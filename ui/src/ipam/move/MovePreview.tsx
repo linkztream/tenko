@@ -49,6 +49,7 @@ import {
   l2NoteText,
   l2SsidsText,
   leaseSpanText,
+  nudgeText,
   PLAN_CHANGED,
   prepareText,
   reasonText,
@@ -105,6 +106,13 @@ function L2Cell(props: { item: MoveItem; preview: Preview; legacy: string }) {
               {(detail) => (
                 <span class="l2s" title={detail()}>
                   {detail()}
+                </span>
+              )}
+            </Show>
+            <Show when={x().nudge}>
+              {(nudge) => (
+                <span class="l2s" data-testid="move-nudge" data-action={nudge().action} data-reason={nudge().reason ?? undefined} title={nudgeText(nudge(), x())}>
+                  {nudgeText(nudge(), x())}
                 </span>
               )}
             </Show>
@@ -228,6 +236,9 @@ export default function MovePreview() {
   const [timeout, setTimeout_] = createSignal<number | null>(null);
   // Change the network at once, not after the client's next renewal with a short lease.
   const [moveNow, setMoveNow] = createSignal(false);
+  // Bounce the client's switch port or disconnect it from its access point when it does not come
+  // back by itself after the network change (ADR 0028); on unless the request says otherwise.
+  const [nudge, setNudge] = createSignal(true);
   const [acked, setAcked] = createSignal<ReadonlySet<string>>(new Set());
   const [preview, setPreview] = createSignal<Preview | null>(null);
   const [error, setError] = createSignal<unknown>(null);
@@ -251,6 +262,7 @@ export default function MovePreview() {
     timeout_secs: timeout(),
     parallelism: Number(parallelism()),
     move_now: moveNow(),
+    ...(nudge() ? {} : { nudge: false }),
     acknowledge: [...acked()],
   });
 
@@ -705,6 +717,17 @@ export default function MovePreview() {
               </span>
             </div>
           </div>
+          <Show when={preview()?.nudge_offered}>
+            <div class="field">
+              <span class="label">{t("move.nudge_label")}</span>
+              <div class="cf-inline">
+                <Switch id="move-nudge" label={t("move.nudge")} checked={nudge()} onChange={setNudge} />
+                <span class="help" data-testid="move-nudge-help">
+                  {t("move.nudge_help")}
+                </span>
+              </div>
+            </div>
+          </Show>
           <div class="field">
             <label for="move-timeout">{t("move.timeout")}</label>
             <div class="cf-inline">

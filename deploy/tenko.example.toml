@@ -690,6 +690,12 @@ deadline_limit_secs = 172800
 extend_window_secs = 15
 extend_secs = 60
 verify_secs = 90
+# After the network change, a move job waits up to reappear_secs (0 to 600) for the client to
+# come back by itself; when it does not, and the network controller offers it, the job bounces
+# its switch port (down for bounce_down_secs, 1 to 30; the connector host brings it up again)
+# or disconnects it from its access point, once, and again after a rollback (ADR 0028).
+reappear_secs = 30
+bounce_down_secs = 5
 
 [scan]
 # The scanner of the probe role (SCAN-01 to SCAN-09). A probe reads this section of its own

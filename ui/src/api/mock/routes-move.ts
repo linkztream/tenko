@@ -11,7 +11,8 @@
 // controller (move-l2.ts): through the controller (`l2.controller`), by a person (`l2.move`,
 // with the reason), or none; a refusal of a guardrail is a warning to acknowledge, and a
 // submit with `expect_fingerprint` runs the confirmed plan or answers 409
-// `ipam.move.plan_changed`.
+// `ipam.move.plan_changed`. After an automatic network change the job bounces the client's port or
+// kicks it (`l2.nudge`, ADR 0028) unless the request has `nudge: false`; the mock controller offers both.
 import { http, type HttpHandler } from "msw";
 import type { MoveItem, MovePreview, MoveStepPreview, MoveSubmitted, MoveTimeoutSource, MoveTiming } from "../moves";
 import type { Address, AssignmentMode, Host, Interface, ObjectRef, PlanWarning } from "../types";
@@ -19,7 +20,7 @@ import { cidrOf, compareIp, formatIp, hostPart, parseCidr, parseIp, usableRange,
 import { requireSession } from "./auth";
 import { applyCommands, ipamState, longestLeaseSecs } from "./ipam/api";
 import { createJob, MOVE_STEP, moveSteps, type MockStepInput } from "./job-store";
-import { decideL2, fingerprintOf, L2_CODES, l2Args, l2Step } from "./move-l2";
+import { decideL2, fingerprintOf, L2_CODES, l2Args, l2Step, NUDGE_CODES, nudgeMessage } from "./move-l2";
 import { dhcpLeaseState } from "./routes-dhcp-leases";
 import { Problem } from "./reply";
 import { randomId } from "./util";
@@ -43,7 +44,7 @@ function readRequest(raw: unknown) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) problem("sys.invalid_request", 400, "the body must be a JSON object");
   const body = raw as Record<string, unknown>;
   for (const key of Object.keys(body)) {
-    if (!["objects", "target", "timeout_secs", "parallelism", "acknowledge", "expect_fingerprint", "move_now"].includes(key)) {
+    if (!["objects", "target", "timeout_secs", "parallelism", "acknowledge", "expect_fingerprint", "move_now", "nudge"].includes(key)) {
       problem("sys.invalid_request", 400, `unknown member ${key}`);
     }
   }
@@ -66,7 +67,9 @@ function readRequest(raw: unknown) {
   const expectFingerprint = typeof body.expect_fingerprint === "string" ? body.expect_fingerprint : null;
   const moveNow = body.move_now === true;
   if (body.move_now !== undefined && typeof body.move_now !== "boolean") problem("ipam.validation", 400, "move_now must be true or false");
-  return { refs, target: body.target, timeout, parallelism, acknowledge, expectFingerprint, moveNow };
+  if (body.nudge !== undefined && typeof body.nudge !== "boolean") problem("ipam.validation", 400, "nudge must be true or false");
+  const nudge = body.nudge !== false;
+  return { refs, target: body.target, timeout, parallelism, acknowledge, expectFingerprint, moveNow, nudge };
 }
 
 // ---------------------------------------------------------------------------------
@@ -164,6 +167,7 @@ const STEP_KIND: Readonly<Record<string, string>> = {
   "device.manual": MOVE_STEP.device,
   "l2.move": MOVE_STEP.l2,
   "l2.controller": MOVE_STEP.controller,
+  "l2.nudge": MOVE_STEP.nudge,
   observe: MOVE_STEP.observe,
   cleanup: MOVE_STEP.cleanup,
 };
@@ -321,6 +325,7 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
   const l2 = decideL2(
     planned.map((p) => p.item),
     targetView,
+    request.nudge,
   );
   planned.forEach((p, index) => {
     const decided = l2.items[index];
@@ -331,7 +336,20 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
       if (decided.action === "unchanged" || decided.action === "shared") return [];
       const args = { ...step.params, ...l2Args(decided) };
       if (decided.action === "port_profile" || decided.action === "client_vlan") {
-        return [{ kind: "l2.controller", step_kind: MOVE_STEP.controller, automatic: true, text: "move.step.l2_controller", params: args }];
+        const controller: MoveStepPreview = {
+          kind: "l2.controller",
+          step_kind: MOVE_STEP.controller,
+          automatic: true,
+          text: "move.step.l2_controller",
+          params: args,
+        };
+        // After the change the job bounces the port or kicks the client that is not back by itself.
+        const nudge = nudgeMessage(p.item, decided);
+        if (!nudge) return [controller];
+        return [
+          controller,
+          { kind: "l2.nudge", step_kind: MOVE_STEP.nudge, automatic: true, text: nudge.key, params: { ...step.params, ...nudge.args } },
+        ];
       }
       return [{ ...step, params: args }];
     });
@@ -377,6 +395,8 @@ function plan(raw: unknown): { preview: MovePreview; planned: Planned[]; request
       timeout_secs: timeout,
       timeout_source: source,
       move_now: request.moveNow,
+      nudge: request.nudge,
+      nudge_offered: items.some((item) => !!item.l2?.nudge && item.l2.nudge.reason !== NUDGE_CODES.noCapability),
       parallelism: request.parallelism,
       base_revision: 0,
       items,

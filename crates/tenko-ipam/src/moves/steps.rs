@@ -122,6 +122,9 @@ pub struct L2StepPlan {
     pub action: MoveL2Action,
     /// What the preview showed would change.
     pub diff: Vec<DiffEntry>,
+    /// The bounce or kick after the change and after its undo (ADR 0028).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudge: Option<super::nudge::NudgePlan>,
 }
 
 /// What the controller step did, kept as JSON in the step's output so the jobs view can
@@ -778,13 +781,14 @@ impl StepHandler for MoveControllerStep {
 
     async fn compensate(
         &self,
-        _params: &[u8],
+        params: &[u8],
         output: Option<&[u8]>,
         cx: &StepContext,
     ) -> Result<(), StepError> {
         // ADR 0027: the moving client goes before the L2 change is undone, so that the
         // client renews with its normal lease when it is back on its old network.
         super::lease::clear(cx, None).await?;
+        let plan = MoveStepParams::decode(params)?.l2;
         let Some(output) = output else {
             return Ok(());
         };
@@ -813,7 +817,13 @@ impl StepHandler for MoveControllerStep {
                     "the L2 change of a move could not be undone; a person is asked"
                 );
                 StepError::NotCompensable
-            })
+            })?;
+        // ADR 0028: the same bounce or kick after the undo, so that the client takes its old
+        // address at once.
+        if let Some(plan) = &plan {
+            super::nudge::on_rollback(&self.controllers, plan, cx).await;
+        }
+        Ok(())
     }
 }
 

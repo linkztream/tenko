@@ -6,6 +6,12 @@
 //! [`plan`](NetworkController::plan) and shows the plan as a preview; only then does it
 //! call [`apply`](NetworkController::apply) with that plan, and after a real write it plans
 //! the same change again and expects an empty diff.
+//!
+//! Two optional changes force a client to start over (ADR 0028): [`L2Change::BouncePort`]
+//! takes a switch port down for a few seconds (capability `port_bounce`), and
+//! [`L2Change::KickClient`] disconnects a wireless client (capability `client_kick`). The
+//! host owns the way back up of a bounce ([`L2Change::EnablePort`],
+//! `ConnectorHost::bounce_port`), never the plugin or the caller.
 
 use std::{fmt, net::IpAddr};
 
@@ -14,9 +20,46 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{MacAddr, Timestamp, observe::Endpoint, observe::LinkKind};
 
 use crate::{
-    CallContext, ConnectorError,
+    CallContext, Capability, ConnectorError,
     actuator::{DiffLine, WriteMode},
 };
+
+/// The shortest down time of a port bounce, in seconds.
+pub const MIN_DOWN_SECS: u16 = 1;
+/// The longest down time of a port bounce, in seconds.
+pub const MAX_DOWN_SECS: u16 = 30;
+/// The default down time of a port bounce, in seconds.
+pub const DEFAULT_DOWN_SECS: u16 = 5;
+/// The longest `restore` of an [`L2Change::EnablePort`], in bytes.
+pub const MAX_RESTORE_BYTES: usize = 16 * 1024;
+
+/// The codes of the guardrails (CONN-09) the host answers with.
+pub mod guardrail {
+    /// The port is an uplink or links to another managed device.
+    pub const UPLINK: &str = "connect.guardrail.uplink";
+    /// Tenko or the controller is reached through the port.
+    pub const MANAGEMENT_PORT: &str = "connect.guardrail.management_port";
+    /// The client is the controller or Tenko's host.
+    pub const MANAGEMENT_CLIENT: &str = "connect.guardrail.management_client";
+    /// An administrator protected the port.
+    pub const PROTECTED_PORT: &str = "connect.guardrail.protected_port";
+    /// An administrator protected the client.
+    pub const PROTECTED_CLIENT: &str = "connect.guardrail.protected_client";
+    /// The network is a management network or a protected one.
+    pub const PROTECTED_NETWORK: &str = "connect.guardrail.protected_network";
+    /// The VLAN is a management VLAN or a protected one.
+    pub const PROTECTED_VLAN: &str = "connect.guardrail.protected_vlan";
+    /// A bounce of a port that more than one client, or another device, sits behind.
+    pub const SHARED_PORT: &str = "connect.guardrail.shared_port";
+    /// A bounce of a port that is down already (no link, or switched off).
+    pub const PORT_DOWN: &str = "connect.guardrail.port_down";
+    /// A bounce of a port the fresh topology does not have.
+    pub const PORT_UNKNOWN: &str = "connect.guardrail.port_unknown";
+    /// A kick of a client the fresh topology does not have.
+    pub const CLIENT_UNKNOWN: &str = "connect.guardrail.client_unknown";
+    /// A kick of a client that is not wireless.
+    pub const NOT_WIRELESS: &str = "connect.guardrail.not_wireless";
+}
 
 /// Reads topology from, and writes VLANs, port profiles and per-client VLANs to, a network
 /// controller (capability `network_controller`).
@@ -138,6 +181,53 @@ pub enum L2Change {
         /// The VLAN it carries.
         vlan: u16,
     },
+    /// The down half of a port bounce (capability `port_bounce`): switch the port off. The
+    /// plan's `undo` carries the [`L2Change::EnablePort`] that brings it back; the host
+    /// sends it after `down_secs`. Never a power cycle of the port's power over Ethernet.
+    BouncePort {
+        /// The switch.
+        device: DeviceRef,
+        /// The port index.
+        port: u16,
+        /// How long the port stays down ([`MIN_DOWN_SECS`] to [`MAX_DOWN_SECS`]).
+        down_secs: u16,
+    },
+    /// Switch a port on again as it was before a bounce: only ever the undo of a
+    /// [`L2Change::BouncePort`], sent by the host.
+    EnablePort {
+        /// The switch.
+        device: DeviceRef,
+        /// The port index.
+        port: u16,
+        /// What the plugin needs to restore the port exactly (opaque to the host, at most
+        /// [`MAX_RESTORE_BYTES`], possibly empty).
+        restore: String,
+    },
+    /// Disconnect a wireless client so that it associates again and starts over with DHCP
+    /// (capability `client_kick`). Nothing is left to undo.
+    KickClient {
+        /// The client.
+        mac: MacAddr,
+    },
+}
+
+impl L2Change {
+    /// The capability a plugin declares for this change on top of `network_controller`.
+    pub const fn capability(&self) -> Option<Capability> {
+        match self {
+            L2Change::BouncePort { .. } | L2Change::EnablePort { .. } => {
+                Some(Capability::PortBounce)
+            }
+            L2Change::KickClient { .. } => Some(Capability::ClientKick),
+            _ => None,
+        }
+    }
+
+    /// Whether the change is one of the actions that force a client to start over (a
+    /// bounce, its way back up, a kick), which only the host's own calls send.
+    pub const fn is_nudge(&self) -> bool {
+        self.capability().is_some()
+    }
 }
 
 /// The controller's own DHCP for a network: Tenko serves DHCP, so it is off or relays.
@@ -170,6 +260,11 @@ pub struct L2Plan {
     /// English warnings for the preview.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// The changes that restore the state as read, for a change the host must be able to
+    /// undo without its receipt: a [`L2Change::BouncePort`] carries its
+    /// [`L2Change::EnablePort`] here. Empty for every other change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undo: Vec<L2Change>,
 }
 
 /// What `apply` did.
@@ -275,6 +370,14 @@ pub struct DevicePort {
     /// Whether Tenko or the controller is reached through this port (always protected).
     #[serde(default)]
     pub management: bool,
+    /// The administrative state: `Some(false)` when the port is switched off; `None` when
+    /// the controller does not report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// How many MAC addresses the switch learned on the port, when the controller reports
+    /// its MAC table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned_macs: Option<u32>,
 }
 
 /// A link between two devices.
@@ -519,6 +622,98 @@ impl Guardrails {
                     return refuse("connect.guardrail.protected_vlan");
                 }
             }
+            L2Change::BouncePort { device, port, .. } => {
+                return self.check_bounce(device, *port, topology);
+            }
+            // Only ever the way back up of a bounce: it restores what Tenko changed seconds
+            // before, and a port left down is worse than any path it could touch.
+            L2Change::EnablePort { .. } => {}
+            L2Change::KickClient { mac } => return self.check_kick(*mac, topology),
+        }
+        Ok(())
+    }
+
+    /// The guardrails of a port bounce (ADR 0028): never a port that is not on record in
+    /// the fresh topology, an uplink or a port that links to another device, the port
+    /// through which Tenko or the controller is reached or to which the controller or
+    /// Tenko's host is attached, a protected port or the port of a protected client, a port
+    /// with more than one client behind it (a dock, an unmanaged switch, an access point),
+    /// or a port that is down already.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectorError::GuardrailRefused`] with the rule that refused.
+    pub fn check_bounce(
+        &self,
+        device: &DeviceRef,
+        index: u16,
+        topology: &TopologySnapshot,
+    ) -> Result<(), ConnectorError> {
+        let refuse = |rule| Err(ConnectorError::GuardrailRefused { rule });
+        let Some(port) = topology
+            .device(device)
+            .and_then(|d| d.ports.iter().find(|p| p.index == index))
+        else {
+            return refuse(guardrail::PORT_UNKNOWN);
+        };
+        let text = index.to_string();
+        let linked = topology.links.iter().any(|link| {
+            [&link.a, &link.b]
+                .iter()
+                .any(|end| end.device == device.0 && end.port.as_deref() == Some(text.as_str()))
+        });
+        if port.uplink || linked {
+            return refuse(guardrail::UPLINK);
+        }
+        let on_port: Vec<&ClientAttachment> = topology
+            .clients
+            .iter()
+            .filter(|c| &c.device == device && c.port == Some(index))
+            .collect();
+        if port.management || on_port.iter().any(|c| c.management) {
+            return refuse(guardrail::MANAGEMENT_PORT);
+        }
+        if self.protected.iter().any(|path| {
+            matches!(path, ProtectedPath::Port { device: d, port: p } if d == device && *p == index)
+        }) {
+            return refuse(guardrail::PROTECTED_PORT);
+        }
+        if on_port.iter().any(|c| self.is_protected_client(c.mac)) {
+            return refuse(guardrail::PROTECTED_CLIENT);
+        }
+        if on_port.len() > 1 || port.learned_macs.is_some_and(|macs| macs > 1) {
+            return refuse(guardrail::SHARED_PORT);
+        }
+        if !port.up || port.enabled == Some(false) {
+            return refuse(guardrail::PORT_DOWN);
+        }
+        Ok(())
+    }
+
+    /// The guardrails of a client kick (ADR 0028): never a client the fresh topology does
+    /// not have, the controller or Tenko's host, a protected client, or a client that is
+    /// not wireless.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectorError::GuardrailRefused`] with the rule that refused.
+    pub fn check_kick(
+        &self,
+        mac: MacAddr,
+        topology: &TopologySnapshot,
+    ) -> Result<(), ConnectorError> {
+        let refuse = |rule| Err(ConnectorError::GuardrailRefused { rule });
+        let Some(client) = topology.clients.iter().find(|c| c.mac == mac) else {
+            return refuse(guardrail::CLIENT_UNKNOWN);
+        };
+        if client.management {
+            return refuse(guardrail::MANAGEMENT_CLIENT);
+        }
+        if self.is_protected_client(mac) {
+            return refuse(guardrail::PROTECTED_CLIENT);
+        }
+        if client.port.is_some() || client.ssid.is_none() {
+            return refuse(guardrail::NOT_WIRELESS);
         }
         Ok(())
     }
@@ -566,6 +761,8 @@ mod tests {
                         uplink: true,
                         up: true,
                         management: false,
+                        enabled: None,
+                        learned_macs: None,
                     },
                     DevicePort {
                         index: 5,
@@ -575,6 +772,8 @@ mod tests {
                         uplink: false,
                         up: true,
                         management: false,
+                        enabled: None,
+                        learned_macs: None,
                     },
                     DevicePort {
                         index: 8,
@@ -584,6 +783,8 @@ mod tests {
                         uplink: false,
                         up: true,
                         management: true,
+                        enabled: None,
+                        learned_macs: None,
                     },
                 ],
             }],

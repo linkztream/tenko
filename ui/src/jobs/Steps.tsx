@@ -2,7 +2,7 @@
 // a step that waits for a person the task, a note and "Mark done". The list keeps one element
 // per step across refreshes (`Index`), so a note that is being typed survives a live update.
 import { createSignal, createUniqueId, Index, Match, Show, Switch } from "solid-js";
-import { MOVE_CONTROLLER_STEP } from "../api/moves";
+import { MOVE_CONTROLLER_STEP, MOVE_NUDGE_STEP } from "../api/moves";
 import type { JobDetail, ManualTask, StepRecord } from "../api/types";
 import { Icon } from "../components/Icon";
 import { toast } from "../components/toast";
@@ -11,6 +11,7 @@ import { formatList, t, tx } from "../i18n";
 import { completeStep } from "./data";
 import { Deadline } from "./Deadline";
 import { L2Step } from "./L2Step";
+import { NudgeStep } from "./NudgeStep";
 import { MAX_NOTE_BYTES, manualOf, noteBytes, observationOf, stepErrorOf } from "./model";
 import { StepStateChip } from "./StateChip";
 import { codedErrorDetail, codedErrorText, describeStep, problemText, stepName, taskText } from "./words";
@@ -180,6 +181,9 @@ function StepItem(props: {
         </Show>
         <Show when={props.step.kind === MOVE_CONTROLLER_STEP}>
           <L2Step step={props.step} preview={props.detail.preview?.steps[props.step.index]} jobState={props.detail.job.state} />
+        </Show>
+        <Show when={props.step.kind === MOVE_NUDGE_STEP}>
+          <NudgeStep step={props.step} preview={props.detail.preview?.steps[props.step.index]} />
         </Show>
         <Switch>
           <Match when={manual()}>

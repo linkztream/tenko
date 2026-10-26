@@ -192,6 +192,7 @@ impl Moving {
             target: self.target,
             timeout_secs: None,
             move_now: false,
+            nudge: true,
             acknowledge: Vec::new(),
             parallelism: None,
             expect_fingerprint: None,

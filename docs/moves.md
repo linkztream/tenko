@@ -1,6 +1,6 @@
 # Moving devices between networks
 
-- Status: Slice 2 (WP2.8); the automatic DNS step from Phase 2 (WP4.4); the automatic DHCP step, the lease observations and the release of the old lease from Phase 3 (WP8.1); the short lease before the move, the two times and the clock of moves (ADR 0027, Proposed)
+- Status: Slice 2 (WP2.8); the automatic DNS step from Phase 2 (WP4.4); the automatic DHCP step, the lease observations and the release of the old lease from Phase 3 (WP8.1); the short lease before the move, the two times and the clock of moves (ADR 0027, Proposed); the port bounce and the client kick after the network change (ADR 0028, Proposed)
 - Requirements: IPAM-19, IPAM-16, IPAM-18, CON-10, CONN-06, CONN-08, CONN-09, CONN-18, TGL-20, DNS-22, DHCP-16, DHCP-07; acceptance E8, E17 and E25
 
 A move takes hosts or addresses into another network: the operator drags them onto a network in the IPAM tree (or presses M and picks the network), checks the preview and starts the move. Dragging moves nothing physically (CON-10). A device stays in its old VLAN and keeps getting the old scope's address until its switch port or wireless association changes, and it takes its new address only after a link flap or a lease renewal. A move is therefore a job per device: it changes the intended state, gets the device into the target VLAN through the network controller where it can, waits until the device is seen at its new address, and cleans up. It rolls back when the device does not show up in time.
@@ -25,15 +25,18 @@ The new address keeps the host part (the last octet, or the interface ID for IPv
 - the DHCP step of a `reserved` host: `dhcp.reservation` (automatic) when the target network has an enabled Tenko scope and the interface a MAC address or client identifier, else `dhcp.manual` (a task for a person; section 4);
 - the DNS change (the name keeps pointing to the device, now at the new address): when the name falls under a zone Tenko serves, `dns.zone` names the zone and `dns.remove` and `dns.add` list the records the DNS step removes and writes, from the dry run of the DNS actuator ([dns.md](dns.md) section 7); otherwise the step is a task for a person;
 - the **L2 step** (`l2`). This is a port profile on which switch port, a per-client VLAN override on which access point, a manual step and why, or a refusal of a guardrail with its code. It comes with the diff from the controller's current state, notes about side effects, and the SSIDs that carry the target VLAN;
+- the **nudge** (`l2.nudge`, section 3.6): whether the job bounces the device's switch port or disconnects it from its access point when it does not come back by itself after the change, or why neither;
 - the **two times** (`timing`, section 5): when the device's next DHCP message is expected (`next_activity`, from its lease in Tenko's lease table, else half the target pools' lease time, else unknown) and the migration deadline in seconds from the start of the observation (`deadline_secs`), each with how it was chosen; the device's old lease (`lease_start`, `lease_end`) when Tenko serves its old network; and what the job does before the network change (`prepare`: wait for the next renewal, which gets the short lease of `short_lease_secs`; move at once because that renewal is expected later than the preparation limit, or because the operator chose "move now"; nothing, because Tenko holds no lease of the device or the interface has no MAC address);
 - the steps of the device's job, automatic and manual, in order;
 - the warnings of the device.
 
-For the whole move, the preview shows the longest migration deadline of its devices and how it was chosen (`timeout_secs`, `timeout_source`), whether the move changes the networks at once (`move_now`), the parallelism, the network controllers that were read, the warnings that need an acknowledgement, and a `fingerprint`.
+For the whole move, the preview shows the longest migration deadline of its devices and how it was chosen (`timeout_secs`, `timeout_source`), whether the move changes the networks at once (`move_now`), whether it bounces or kicks (`nudge`) and whether a controller that sees one of its devices offers that at all (`nudge_offered`), the parallelism, the network controllers that were read, the warnings that need an acknowledgement, and a `fingerprint`.
 
 **Move now.** By default a device whose lease Tenko holds keeps its network until its next renewal, which gets the short lease (section 5). The preview's "Move now" choice (`move_now: true` in the request) changes the network at once instead: for a device known to ask for a new lease when its link changes, and for the port bounce of a later release. It removes the wait from the job and changes the fingerprint.
 
 The web UI shows the L2 action in the "Network change" column, and the diff and notes under a device's steps. Below the table it groups every manual task of the batch by step, so a person can work through them in one pass.
+
+**Bounce or kick.** When a controller offers it, the preview shows a switch beside "Move now", on by default: "Bounce the port or disconnect the device". Switched off (`nudge: false` in the request), no device of the move is bounced or kicked, and the fingerprint changes.
 
 **What was previewed is what runs.** A submit (`POST /api/v1/moves` without `dry_run`) computes the plan again from a fresh read of the store and of the controllers; it never takes the client's copy. The fingerprint covers what would run: per item the address, the new address, the step kinds and the L2 decision with its change and diff. The identifiers of the new addresses and the read times are left out. A submit that names `expect_fingerprint` starts nothing and answers 409 `ipam.move.plan_changed` when its plan differs from the confirmed preview. The UI then shows the new preview to confirm. A submit also refuses while a warning that needs an acknowledgement is not listed in `acknowledge` (409 `ipam.plan.unacknowledged`).
 
@@ -101,7 +104,51 @@ Tenko never touches the port or VLAN through which Tenko or the controller is re
 | The target is a management network | `connect.guardrail.protected_network` |
 | A configured protected port or client | `connect.guardrail.protected_port`, `connect.guardrail.protected_client` |
 
+A bounce and a kick after the change have guardrails of their own (section 3.6).
+
 A refusal does not stop the move of the other devices. The refused device's L2 step becomes a task for a person (`ipam.move.l2.refused`, with the rule in `problem`), and the warning `ipam.move.l2_refused` must be acknowledged before the submit. The undo steps of a receipt are checked against a fresh topology before a rollback writes them, so an undo never touches a path that became protected.
+
+### 3.6 Bounce and kick after the change (ADR 0028)
+
+A device that does not notice its VLAN change waits for its short lease (section 5). Two optional writes of the controller make it start over at once:
+
+- a **port bounce**: the connector host takes the device's switch port administratively down for `[dhcp.moves] bounce_down_secs` (5 s, 1 to 30) and brings it up again, after a port profile change. Never a PoE power cycle, which would reboot the device;
+- a **client kick**: the controller disconnects the wireless device from its access point, which it then joins again with the new VLAN, after a per-client VLAN override. The device is not blocked.
+
+The controller offers them through its connector's capabilities `port_bounce` and `client_kick` (UniFi does, [connectors-unifi.md](connectors-unifi.md) section 5.6). Both are writes like the L2 change itself: the connector's write switch, the plan age limit, the guardrails against a fresh topology, the write slots of `max_parallel`, and an audit record with the job (`connect.port.bounce`, `connect.port.enable`, `connect.client.kick`).
+
+**Who brings the port up.** Not the job: before the connector host sends the down, it writes a pending record of the port (the controller, the device, the port, the port's state as read back and when it is due up), and its own task brings the port up after the down time, whatever happens to the job (a timeout, a cancel, a failure). The record goes only when the read-back shows the port up. When it does not come up, the health view shows the condition `connect.port_stuck` with the controller, the device and the port, and the host keeps trying (after 5 s, 15 s, 60 s, then every 5 minutes); at every start it brings up every port a record names. See [plugins.md](plugins.md) section 6 and ADR 0028.
+
+**Guardrails (CONN-09).** On top of those of section 3.5:
+
+| Refused when | Code |
+|---|---|
+| Bounce: the port is an uplink or links to another device (an access point, a switch, an LLDP neighbour) | `connect.guardrail.uplink` |
+| Bounce: Tenko or the controller is reached through the port, or the controller or Tenko's host is attached to it | `connect.guardrail.management_port` |
+| Bounce: more than one client is behind the port (two listed clients, or more than one MAC address learned on it: a dock, an unmanaged switch, a phone with a PC port) | `connect.guardrail.shared_port` |
+| Bounce: the port is down already (no link, or switched off) | `connect.guardrail.port_down` |
+| Bounce: the fresh topology has no such port | `connect.guardrail.port_unknown` |
+| Bounce: a protected port, or the port of a protected client | `connect.guardrail.protected_port`, `connect.guardrail.protected_client` |
+| Kick: the device is the controller or Tenko's host | `connect.guardrail.management_client` |
+| Kick: the device is not wireless | `connect.guardrail.not_wireless` |
+| Kick: the controller does not see the device | `connect.guardrail.client_unknown` |
+| Kick: a protected client | `connect.guardrail.protected_client` |
+
+**What the preview says** (`l2.nudge` of an item with an automatic L2 change): `action` is `bounce` or `kick` with the `change` and `reappear_secs`, or `none` with the `reason`:
+
+| Reason | Meaning |
+|---|---|
+| `ipam.move.nudge.no_capability` | The controller offers neither for this device |
+| `ipam.move.nudge.refused` | A guardrail refuses it; `problem` names the rule. The move runs without it; nothing needs an acknowledgement |
+| `ipam.move.nudge.off` | The move switched it off; `change` says what it would have done |
+
+**When a port stays down (runbook).** The health view (`GET /api/v1/system/status`, the warnings on the start page) shows `connect.port_stuck` with the controller, the device, the port, the failed attempts and their cause, and the move's job failed with the same code. Tenko keeps trying on its own. To bring the port up at once:
+
+1. Check that the controller answers: the connector's page shows its health and the last error.
+2. Switch the port on at the controller. On UniFi the port's override has `forward` set to `disabled`: set it back to what the port forwarded before (usually all), or remove the override if the port had none.
+3. The next attempt of the connector host reads the port back as up and removes the record; the warning goes away with it. A record of a connector that was deleted goes with the connector (its audit record names the port).
+
+The audit log names every bounce, every way back up and every kick with its job (`connect.port.bounce`, `connect.port.enable`, `connect.client.kick`).
 
 ## 4 The job
 
@@ -119,6 +166,7 @@ A submit starts one job per item. All jobs of a move share one job group named `
 | `ipam.move.lease` | `dhcp.short_lease` | Completed by the move's clock when the device renewed with the short lease or the renewal did not come (section 5); a person completing it moves the device at once | The prepare step names the device's old lease (not "move now") |
 | `ipam.move.controller` | `l2.controller` | Yes: the L2 change through the network controller | Section 3 found a change the controller can make |
 | `ipam.move.l2` | `l2.move` | No: the exact manual action of section 3.4 | The controller cannot make it |
+| `ipam.move.nudge` | `l2.nudge` | Yes: waits up to `reappear_secs` for the device to come back by itself, then bounces its port or kicks it, once (section 3.6) | The controller step runs and the preview chose a bounce or a kick |
 | `ipam.move.observe` | `observe` | Completed by the reconciler on a sighting, by the move's clock on the device's new lease (section 5), or by a person | Always |
 | `ipam.move.cleanup` | `cleanup` | Yes: remove the old address, make the new one active, clear `move-failed`, release the old lease, remove the moving client | Always |
 
@@ -141,6 +189,8 @@ The manual tasks come before the L2 change: a device waits for its ticked tasks 
 5. It keeps the controller's diff and the receipt with its undo steps as its output, JSON of `MoveL2Output`. The jobs view shows the diff, when it was written and verified, how many undo steps the receipt carries, and later the rollback.
 
 When the controller already has the change, nothing is written. A step that ran again after an interruption and finds the change made cannot know whether it wrote it; its rollback then asks a person. The step has a timeout of 600 seconds, and each controller call has its own.
+
+**The nudge step** (ADR 0028). Right after the controller step, `ipam.move.nudge` waits up to `[dhcp.moves] reappear_secs` (30 s) for the device to come back by itself: many switches drop the link when the profile changes, and a device that notices asks for an address at once. The job sees that when it follows the device's DHCP (it has a moving client): the `dhcp` role saw the device's exchange on the target scope, or the lease table holds its lease there. Without Tenko DHCP on the target the step simply waits. Only when the device is not back does the step bounce its port or kick it, once, through the controller (section 3.6). Its output (JSON of `MoveNudgeOutput`) says what happened: back by itself (when, and whether by its DHCP exchange or its lease), the controller's report (when the port went down and came up, or when the client was disconnected), or why nothing was done. A refusal or a controller error at that time is no failure of the move: the device still comes back with its short lease. A port that does not come up again fails the step with `connect.port_stuck` (the device and the port in its parameters), and the job rolls back. A step that runs again after an interruption does not nudge a second time.
 
 ## 5 The observation
 
@@ -194,12 +244,14 @@ Every change of the deadline is a transition of the job with a note that says wh
 | `deadline_limit_secs` | 172,800 | 300 to 604,800 | The longest deadline computed from a lease; a request's timeout is not bounded by it |
 | `extend_window_secs`, `extend_secs` | 15, 60 | 1 to 300, 1 to 3,600 | The extension near the deadline |
 | `verify_secs` | 90 | 10 to 3,600 | The window after the device's exchange on the target is seen |
+| `reappear_secs` | 30 | 0 to 600 | After the network change, how long the job waits for the device to come back by itself before it bounces or kicks (section 3.6) |
+| `bounce_down_secs` | 5 | 1 to 30 | How long a port bounce keeps the port down |
 
 ## 6 Rollback
 
 The job rolls back when the migration deadline passes, when a step fails, or when the job is cancelled. Before anything is undone, the first compensation removes the moving client (section 4); the compensations of the observation and of the preparation wait until the role's image no longer holds it (at most 60 seconds), so a device that comes back to its old network renews with its normal lease. The restored reservation is served again, and a device already in DISCOVER on its old network gets its old address back by itself. Then the steps are undone in reverse:
 
-- The **controller step** is undone with the undo steps of its receipt: the previous port profile, or the previous per-client override, or none. A person is asked instead, with a manual undo task on the step that the jobs view explains with the previous value, in three cases: the receipt has no undo steps (the port had no profile on record), the undo fails (writes off by now, a guardrail refuses, or the controller changed since the write and Tenko will not overwrite that), or an interrupted attempt may have written without keeping the receipt.
+- The **controller step** is undone with the undo steps of its receipt: the previous port profile, or the previous per-client override, or none. When the move bounces or kicks (section 3.6), the same bounce or kick follows right after the undo, without a wait, so that the device takes its old address at once; what becomes of it is logged and never stops the rollback. A person is asked instead, with a manual undo task on the step that the jobs view explains with the previous value, in three cases: the receipt has no undo steps (the port had no profile on record), the undo fails (writes off by now, a guardrail refuses, or the controller changed since the write and Tenko will not overwrite that), or an interrupted attempt may have written without keeping the receipt.
 - The automatic **DNS step** plans again without the move and writes the old address's records back; when that fails the reconciler's next run does it.
 - The automatic **DHCP step** releases a lease the device already took at the new address; the new reservation goes with the new address when the intent step is undone, and the old reservation was never touched, so a cancel restores both.
 - The **manual steps** have no undo task: a rollback never waits for a person to take back the DHCP reservation of a network outside Tenko, the DNS records of a name outside Tenko or a manual L2 change. The job's error names the reason, and the jobs view lists what was done.
@@ -238,6 +290,7 @@ The jobs of one move form one job group whose limit is the move's parallelism: 4
 | `ipam.move.dns_collision` | 409 | The automatic DNS step found the name's RRset or a PTR it needs held by another origin (a step error, the job rolls back) |
 | `ipam.move.dns_failed` | 409 | The automatic DNS step could not write (`cause` names the zone service's code; the job rolls back) |
 | `ipam.move.dhcp_not_served` | 503 | The `dhcp` role's image did not reach the new reservation within 60 seconds (a step error, the job rolls back) |
+| `connect.port_stuck` | 503 | The device's switch port did not come up again after the bounce (a step error, the job rolls back; the health view shows the port until the connector host brought it up) |
 | `ipam.move.dhcp_release_failed` | 503 | The role could not release a lease (`cause` names its code); the DHCP step's compensation reports it, the cleanup logs it and goes on |
 | `ipam.move.no_engine` | 503 | The server runs no job engine |
 
@@ -245,7 +298,8 @@ A submit needs `Update` on every named object, `Execute` on jobs and `Execute` o
 
 ## 10 Limits
 
-- The live move against the owner's controller (E8 with a real device) has not run. The L2 step is proven against the in-memory controller and through the connector host's contract, and the UniFi plugin's writes against its fake controller ([connectors-unifi.md](connectors-unifi.md#55-status-of-the-live-test)).
+- The live move against the owner's controller (E8 with a real device) has not run, and neither has a live bounce or kick: the UniFi writes are proven against the fake controller with the recorded answers of a real one ([connectors-unifi.md](connectors-unifi.md) section 5.6).
+- The nudge step sees a device come back by itself only through Tenko DHCP on the target network (its exchange, its lease); without it the step waits `reappear_secs` and then bounces or kicks. The L2 step is proven against the in-memory controller and through the connector host's contract, and the UniFi plugin's writes against its fake controller ([connectors-unifi.md](connectors-unifi.md#55-status-of-the-live-test)).
 - Tenko picks an existing port profile and never creates one; the contract has no change for it yet.
 - Whether an access point carries a VLAN is inferred from its SSIDs and its uplink port's profile. A controller that places VLANs some other way, for example per-client VLANs from RADIUS, is not modeled.
 - Two addresses of one interface in one move share the first address's L2 step. A rollback of that job puts the device back for both.

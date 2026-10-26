@@ -78,6 +78,8 @@ const ERRORS: &[&str] = &[
     super::DHCP_ROLE_STORE_REFUSED,
     super::LEADER_SERVICE_FAILING,
     "audit.export.failing",
+    // ADR 0028: a switch port a bounce left down cuts its client off.
+    tenko_connect::host::service::PORT_STUCK,
 ];
 
 /// The severity of a finding by its code.
@@ -322,12 +324,13 @@ async fn system_diagnostics(
     zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
     dhcp: Option<Extension<crate::routes::dhcp::DhcpNodeSlot>>,
     ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
+    connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
     tail: Option<Extension<Arc<LogTail>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemDiagnostics>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &super::system_object())?;
     let status = super::assemble(
-        &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam,
+        &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
     )
     .await;
     let view = state.store.read(ReadConsistency::Local).await?;

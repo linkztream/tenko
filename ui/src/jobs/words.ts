@@ -131,6 +131,9 @@ const SUMMARY_ARGS: Readonly<Record<string, readonly string[]>> = {
   // sends for that case, on top of the address and network arguments every move step carries.
   "ipam.move.step.controller_port": ["port", "device", "after", "connector"],
   "ipam.move.step.controller_client": ["mac", "after", "connector"],
+  // The bounce of the switch port or the kick of the client after the change (ADR 0028).
+  "ipam.move.step.nudge_bounce": ["port", "down_secs", "reappear_secs", "connector", "device"],
+  "ipam.move.step.nudge_kick": ["reappear_secs", "connector", "device", "mac"],
   "ipam.move.task.l2_vlan": ["vid"],
   "ipam.move.task.l2_port": ["connector", "port", "device", "profile", "vid"],
   "ipam.move.task.l2_client": ["connector", "mac", "network", "vid"],

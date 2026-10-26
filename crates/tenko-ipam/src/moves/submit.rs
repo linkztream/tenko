@@ -53,7 +53,14 @@ pub async fn preview_move(
     let view = ipam.view(at_least).await?;
     let base = compute(view.as_ref(), cx, &ipam.config(), request)?;
     drop(view);
-    let plans = l2::plan(controllers, &base.items, &base.target, cx).await;
+    let plans = l2::plan(
+        controllers,
+        &base.items,
+        &base.target,
+        cx,
+        nudge_options(&ipam.config(), request),
+    )
+    .await;
     Ok(finish(base, plans, request)?.preview)
 }
 
@@ -90,7 +97,14 @@ pub async fn submit_move(
     let view = ipam.store().read(ReadConsistency::Linearizable).await?;
     let base = compute(view.as_ref(), cx, &ipam.config(), request)?;
     drop(view);
-    let plans = l2::plan(controllers, &base.items, &base.target, cx).await;
+    let plans = l2::plan(
+        controllers,
+        &base.items,
+        &base.target,
+        cx,
+        nudge_options(&ipam.config(), request),
+    )
+    .await;
     let Computed {
         preview,
         steps,
@@ -180,6 +194,15 @@ pub async fn submit_move(
         }
     }
     Ok(submitted)
+}
+
+/// The nudges of a move: the request's switch and `[dhcp.moves]` (ADR 0028).
+fn nudge_options(config: &crate::service::IpamConfig, request: &MoveRequest) -> l2::NudgeOptions {
+    l2::NudgeOptions {
+        enabled: request.nudge,
+        down_secs: config.moves.bounce_down_secs,
+        reappear_secs: config.moves.reappear_secs,
+    }
 }
 
 /// The stored answer of a move submitted with an idempotency key (API-04).

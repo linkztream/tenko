@@ -29,7 +29,7 @@ The protocol has four interfaces from ADR 0006 and one service that every plugin
 |---|---|---|---|
 | Connector (health, lifecycle) | `Plugin` | always | `Ping` (liveness), `Check` (reachability and credentials of the remote system), `Shutdown` |
 | `InventorySource` | `Inventory` | `inventory`; `webhook` adds `HandleWebhook` | Reports observed hosts: names, MAC and IP addresses, operating system, platform, parent host, tags |
-| `NetworkController` | `NetworkController` | `network_controller` | Reports topology (devices, ports, links, clients, networks, port profiles, wireless networks) and performs guarded Layer 2 writes: VLANs and networks, port profiles, per-client VLANs |
+| `NetworkController` | `NetworkController` | `network_controller`; `port_bounce` and `client_kick` add the port bounce and the client kick | Reports topology (devices, ports, links, clients, networks, port profiles, wireless networks) and performs guarded Layer 2 writes: VLANs and networks, port profiles, per-client VLANs, and optionally the bounce of a switch port and the disconnect of a wireless client |
 | `Actuator` | `Actuator` | `actuator` | Applies IPAM intent (DHCP reservations, DNS records, guest addresses) to a system Tenko does not own |
 | `MigrationSource` | `Migration` | `migration` | Reads a system into the canonical intermediate representation (networks, VLANs, hosts, addresses) plus a loss report |
 
@@ -512,7 +512,7 @@ The manifest describes what a plugin is, what it implements, which settings it t
 | `homepage` | no | A URL starting with `https://` or `http://` and a host, no whitespace or control characters, at most 2,048 characters. |
 | `license` | no | An SPDX licence expression. Not empty, at most 100 characters, only letters, digits, spaces and `.+()-`. |
 | `protocol` | yes | The protocol major versions the plugin speaks. At least one, each at least 1, no duplicates. |
-| `capabilities` | yes | At least one of `inventory`, `webhook`, `network_controller`, `actuator`, `migration`; no duplicates. `webhook` needs `inventory`. |
+| `capabilities` | yes | At least one of `inventory`, `webhook`, `network_controller`, `actuator`, `migration`, `port_bounce`, `client_kick`; no duplicates. `webhook` needs `inventory`; `port_bounce` and `client_kick` need `network_controller`. |
 | `settings` | no | The JSON Schema of an instance's settings, in the subset below. Absent means no settings (an empty object schema that refuses any setting). |
 | `secrets` | no | The secrets the plugin may receive, at most 16. See below. |
 | `network` | no | The network targets the plugin contacts, at most 32. See below. |
@@ -575,7 +575,7 @@ The protocol is the package `tenko.connect.v1`. The `.proto` files carry the fie
 | `Actuator` | `actuator` | `Plan`, `Apply`, `Revert` | `ActuatorPlanRequest`, `ActuatorApplyRequest`, `ActuatorRevertRequest` and their responses | The same discipline for IPAM intent: DHCP reservations, DNS records, guest addresses. |
 | `Migration` | `migration` | `Read` | `MigrationReadRequest`, stream of `MigrationItem` | Streams the intermediate representation of a scope, followed by the loss entries. |
 
-The change a network controller performs is one of five: `EnsureNetwork` (create or update the network of a VLAN, with the controller's DHCP off or relaying), `SetPortProfile`, `SetClientVlan`, `ClearClientVlan` and `RemoveNetwork` (the undo of a created network). A topology reports the controller's DHCP of each network as off, relaying, or `server` when the controller serves DHCP itself; Tenko never asks for `server`, but an undo step restores it. An actuator intent is one of `DhcpReservation`, `DhcpReservationRemove`, `DnsRecords`, `DnsRecordsRemove` and `GuestAddress`; identifiers of Tenko objects in it are UUIDs in text form.
+The change a network controller performs is one of five: `EnsureNetwork` (create or update the network of a VLAN, with the controller's DHCP off or relaying), `SetPortProfile`, `SetClientVlan`, `ClearClientVlan` and `RemoveNetwork` (the undo of a created network). Three more belong to optional capabilities (ADR 0028, see "Port bounces and client kicks" below): `BouncePort` and `EnablePort` (`port_bounce`) and `KickClient` (`client_kick`). A plugin that does not declare a capability answers its changes with `UNIMPLEMENTED`; the Rust SDK does that before the plugin sees them. A topology reports the controller's DHCP of each network as off, relaying, or `server` when the controller serves DHCP itself; Tenko never asks for `server`, but an undo step restores it. An actuator intent is one of `DhcpReservation`, `DhcpReservationRemove`, `DnsRecords`, `DnsRecordsRemove` and `GuestAddress`; identifiers of Tenko objects in it are UUIDs in text form.
 
 ### CallContext
 
@@ -652,6 +652,25 @@ Writes follow one discipline, which the host drives:
 7. To undo, the host calls `Revert` with the receipt.
 
 An unspecified write mode (`WRITE_MODE_UNSPECIFIED`, the default value) is a dry run: anything but an explicit apply writes nothing. The plugin performs the concrete calls; the host decides whether to call `Apply` at all.
+
+### Port bounces and client kicks
+
+Two optional actions make a client start over, for example after a move changed its VLAN (ADR 0028). They follow the discipline above, with these additions, which a plugin in any language must keep:
+
+| Change | Capability | What the plugin does |
+|---|---|---|
+| `BouncePort` (`device`, `port`, `down_secs` 1 to 30) | `port_bounce` | The down half of a bounce: switch the port off administratively. `Plan` reads the port, diffs `enabled` from `true` to `false` (an empty diff when it is off already), and puts exactly one `EnablePort` of the same port into the plan's `undo`; `Apply` writes the down, reads back and reports `verified` when the port reads off, and repeats the `EnablePort` in the receipt's `undo`. Never a PoE power cycle |
+| `EnablePort` (`device`, `port`, `restore`) | `port_bounce` | Switch the port on as it was before the bounce. `restore` is the plugin's own text from its `BouncePort` plan (at most 16 KiB, possibly empty): what it needs to restore the port exactly, for example the previous value of the setting the down changed. Treat it as untrusted input and refuse one you did not write with `INVALID_ARGUMENT`. `Plan` diffs `enabled` from `false` to `true`, empty when the port is on |
+| `KickClient` (`mac`) | `client_kick` | Disconnect a wireless client so that it associates again; never block it. `Plan` reads the client (`NOT_FOUND` when it is not connected, `INVALID_ARGUMENT` when it is wired); `Apply` sends the command and reports `verified` when the controller accepted it. The receipt has no `undo` |
+
+**The way back up belongs to the host.** A plugin never brings a bounced port up by itself and never waits `down_secs`: it carries no state between calls (section 1), and a plugin that crashed between the down and the up would leave the port down without anyone knowing. The host writes a pending record before it sends the down, sends the `EnablePort` of the plan's `undo` after `down_secs` (also after its own restart), and removes the record only when the plan of the `EnablePort` reads back empty. So:
+
+- the `undo` of the plan is mandatory: a bounce plan without it is refused (`connect.bounce.no_undo`) and nothing is written;
+- `EnablePort` must be idempotent: the host may send it again, or twice from two controllers, and a port that is on gives an empty diff;
+- read the port's state back from the configuration the controller answers at once, not from a status that follows the switch seconds later, or the read-back fails and the host reports the port as stuck;
+- `down_secs` is for the plan's warnings; the host keeps the time.
+
+The host refuses the three changes through the generic plan and apply calls of other packages (`connect.nudge.direct`), checks the guardrails of a bounce (never an uplink, a port that links to another device, the management path, a port with more than one client behind it, a port that is down already or one the topology does not have) and of a kick (never the controller or Tenko's host, never a wired client), and audits every bounce, way back up and kick. Report `enabled` and `learned_macs` on each `DevicePort` when the controller knows them: the guardrails can only protect what they see.
 
 ### Migration sources
 
@@ -771,8 +790,8 @@ The suite launches the plugin up to three times: for the main checks, once offer
 | `token` | A call without the token and a call with a wrong token are both refused with `UNAUTHENTICATED` and the code `connect.plugin.token`. |
 | `concurrency` | 16 parallel pings all answer. |
 | `check` | `Check` answers in time with a health value or a coded error, and the plugin still answers pings afterwards. |
-| `capability.<name>` | One check per declared capability: a basic call answers in time and the answer is well-formed, with a coded error counting as an answer, and the plugin still lives. For `inventory`, the hosts have unique, non-empty identifiers and valid addresses (no lenient-conversion warnings), and paging ends. For `webhook`, a call with an empty JSON body is answered. For `network_controller`, the topology converts strictly. For `actuator`, a plan for a harmless intent is read. For `migration`, a read of the IPAM area is made. The suite never applies, reverts or writes. |
-| `undeclared` | The services that the manifest does not declare (and `HandleWebhook` when `webhook` is not declared) answer `UNIMPLEMENTED`. |
+| `capability.<name>` | One check per declared capability: a basic call answers in time and the answer is well-formed, with a coded error counting as an answer, and the plugin still lives. For `inventory`, the hosts have unique, non-empty identifiers and valid addresses (no lenient-conversion warnings), and paging ends. For `webhook`, a call with an empty JSON body is answered. For `network_controller`, the topology converts strictly. For `actuator`, a plan for a harmless intent is read. For `migration`, a read of the IPAM area is made. For `port_bounce`, the plan of a bounce of port 1 of the switch `conformance-switch` is read, and a plan that comes back must carry exactly one `EnablePort` of that port in its `undo`. For `client_kick`, the plan of a kick of `00:00:5e:00:53:fe` is read. The suite never applies, reverts or writes. |
+| `undeclared` | The services that the manifest does not declare (and `HandleWebhook` when `webhook` is not declared) answer `UNIMPLEMENTED`; so do the plans of a bounce and a kick of a network controller that does not declare `port_bounce` or `client_kick`. |
 | `malformed_request` | A `Check` whose settings are not JSON is answered with `INVALID_ARGUMENT`, and the plugin lives on. |
 | `shutdown` | `Plugin.Shutdown` answers and the process exits with status 0 within 5 seconds. |
 | `protocol_mismatch` | A launch that offers only an unknown protocol version is refused with a `protocol_mismatch` failure line that names the plugin's own versions. The plugin should exit with a non-zero status; the host stops waiting for it after half a second and kills it. |

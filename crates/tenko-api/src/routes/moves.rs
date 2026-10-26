@@ -525,6 +525,8 @@ mod tests {
                 uplink: true,
                 management: false,
                 up: true,
+                enabled: None,
+                learned_macs: None,
             },
             ControllerPortState {
                 device: "sw-1".to_owned(),
@@ -535,6 +537,8 @@ mod tests {
                 uplink: false,
                 management: false,
                 up: true,
+                enabled: None,
+                learned_macs: None,
             },
         ]);
         controller.clients.push(ControllerClient {

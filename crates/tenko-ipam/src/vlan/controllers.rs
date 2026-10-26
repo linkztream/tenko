@@ -17,6 +17,12 @@
 //! per-client VLAN with the discipline of a network write; the receipt is undone with
 //! [`revert_network`](NetworkControllers::revert_network) like any other.
 //!
+//! After the L2 change the move job can make the client start over at once (ADR 0028):
+//! [`nudge`](NetworkControllers::nudge) bounces its switch port (the connector host takes
+//! the port down and brings it up again itself) or disconnects it from its access point,
+//! when the controller offers it ([`ControllerInfo::bounce`], [`ControllerInfo::kick`]) and
+//! [`check_nudge`](NetworkControllers::check_nudge) lets it.
+//!
 //! [`MemoryControllers`](super::memory::MemoryControllers) is an in-memory implementation
 //! with the same discipline, for tests and demonstrations.
 
@@ -29,11 +35,16 @@ use arc_swap::ArcSwapOption;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    CodedError, ConnectorId, MacAddr, Timestamp, UserId, observe::Endpoint, serde_util::HexBytes,
+    CodedError, ConnectorId, JobId, MacAddr, Timestamp, UserId, observe::Endpoint,
+    serde_util::HexBytes,
 };
 use utoipa::ToSchema;
 
 /// A connector instance that can act as a network controller.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent flags of the instance and its capabilities"
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ControllerInfo {
     /// The connector instance.
@@ -46,6 +57,12 @@ pub struct ControllerInfo {
     pub enabled: bool,
     /// Whether writes through the instance are allowed (TGL-20).
     pub writes_enabled: bool,
+    /// Whether the controller can bounce a switch port (capability `port_bounce`, ADR 0028).
+    #[serde(default)]
+    pub bounce: bool,
+    /// Whether the controller can disconnect a wireless client (capability `client_kick`).
+    #[serde(default)]
+    pub kick: bool,
 }
 
 /// The network Tenko asks a controller to have for a VLAN: the controller's DHCP off, or
@@ -279,6 +296,14 @@ pub struct ControllerPortState {
     /// Link state.
     #[serde(default)]
     pub up: bool,
+    /// The administrative state: `Some(false)` when the port is switched off; `None` when
+    /// the controller does not report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// How many MAC addresses the switch learned on the port, when the controller reports
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned_macs: Option<u32>,
 }
 
 /// A port profile.
@@ -404,6 +429,71 @@ pub enum AttachmentChange {
     },
 }
 
+/// What makes a moved client start over at once (ADR 0028): a bounce of its switch port or
+/// a disconnect from its access point.
+///
+/// Adjacently tagged because a variant carries a MAC address (see `tenko_core::codec`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum NudgeChange {
+    /// Take the switch port down for `down_secs` and bring it up again.
+    BouncePort {
+        /// The switch, by controller reference.
+        device: String,
+        /// The port index.
+        port: u16,
+        /// How long the port stays down, 1 to 30 seconds.
+        down_secs: u16,
+    },
+    /// Disconnect the wireless client so that it associates again.
+    KickClient {
+        /// The client.
+        mac: MacAddr,
+    },
+}
+
+/// What became of a nudge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum NudgeOutcome {
+    /// The port went down and came up again, or the client was disconnected.
+    Done,
+    /// Nothing was done, or the port was brought up again at once: a refusal, a controller
+    /// error or a down that was not confirmed.
+    Failed {
+        /// The code, such as `connect.guardrail.shared_port`.
+        code: String,
+        /// English detail.
+        detail: String,
+    },
+    /// The port did not come up again after the bounce: the connector host keeps trying
+    /// and the health view shows `connect.port_stuck`.
+    Stuck {
+        /// The code of the last attempt.
+        code: String,
+        /// English detail.
+        detail: String,
+    },
+}
+
+/// The report of a nudge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NudgeReport {
+    /// The controller.
+    pub connector: ConnectorId,
+    /// What was asked.
+    pub change: NudgeChange,
+    /// When the port went down or the client was disconnected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Timestamp>,
+    /// When the port came up again (a bounce).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub up_at: Option<Timestamp>,
+    /// What became of it.
+    #[serde(flatten)]
+    pub outcome: NudgeOutcome,
+}
+
 /// The plan of an attachment change: read back and diffed, nothing written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentPlan {
@@ -434,6 +524,16 @@ pub mod guardrail {
     pub const MANAGEMENT_CLIENT: &str = "connect.guardrail.management_client";
     /// The network is a management network (or a configured protected one).
     pub const PROTECTED_NETWORK: &str = "connect.guardrail.protected_network";
+    /// A bounce of a port that more than one client, or another device, sits behind.
+    pub const SHARED_PORT: &str = "connect.guardrail.shared_port";
+    /// A bounce of a port that is down already.
+    pub const PORT_DOWN: &str = "connect.guardrail.port_down";
+    /// A bounce of a port the controller does not have on record.
+    pub const PORT_UNKNOWN: &str = "connect.guardrail.port_unknown";
+    /// A kick of a client the controller does not see.
+    pub const CLIENT_UNKNOWN: &str = "connect.guardrail.client_unknown";
+    /// A kick of a client that is not wireless.
+    pub const NOT_WIRELESS: &str = "connect.guardrail.not_wireless";
 }
 
 fn refused(rule: &'static str, detail: String) -> CodedError {
@@ -490,6 +590,90 @@ pub fn derived_guardrails(
                 return Err(refused(
                     guardrail::MANAGEMENT_CLIENT,
                     format!("{mac} is the controller or Tenko's host"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The guardrails of a nudge that hold for every controller, checked against what it
+/// reported (ADR 0028): a bounce never touches a port that is not on record, an uplink or a
+/// port that links to another device, the port through which Tenko or the controller is
+/// reached or to which the controller or Tenko's host is attached, a port with more than
+/// one client behind it (several clients, or more than one learned MAC address), or a port
+/// that is down already; a kick never touches a client that is not seen, the controller or
+/// Tenko's host, or a client that is not wireless. The connector host checks the same
+/// rules, plus configured protected paths, against a fresh topology before it writes.
+///
+/// # Errors
+///
+/// A 409 refusal with the code of the rule (`connect.guardrail.*`).
+pub fn derived_nudge_guardrails(
+    state: &ControllerAttachments,
+    change: &NudgeChange,
+) -> Result<(), CodedError> {
+    match change {
+        NudgeChange::BouncePort { device, port, .. } => {
+            let Some(found) = state.port(device, *port) else {
+                return Err(refused(
+                    guardrail::PORT_UNKNOWN,
+                    format!("port {port} of {device} is not on record"),
+                ));
+            };
+            let text = port.to_string();
+            let linked = state.links.iter().any(|link| {
+                [&link.a, &link.b]
+                    .iter()
+                    .any(|end| end.device == *device && end.port.as_deref() == Some(text.as_str()))
+            });
+            if found.uplink || linked {
+                return Err(refused(
+                    guardrail::UPLINK,
+                    format!("port {port} of {device} is an uplink or links to another device"),
+                ));
+            }
+            let on_port: Vec<&ControllerClient> = state
+                .clients
+                .iter()
+                .filter(|c| c.device == *device && c.port == Some(*port))
+                .collect();
+            if found.management || on_port.iter().any(|c| c.management) {
+                return Err(refused(
+                    guardrail::MANAGEMENT_PORT,
+                    format!("Tenko or the controller is reached through port {port} of {device}"),
+                ));
+            }
+            if on_port.len() > 1 || found.learned_macs.is_some_and(|macs| macs > 1) {
+                return Err(refused(
+                    guardrail::SHARED_PORT,
+                    format!("more than one client is behind port {port} of {device}"),
+                ));
+            }
+            if !found.up || found.enabled == Some(false) {
+                return Err(refused(
+                    guardrail::PORT_DOWN,
+                    format!("port {port} of {device} is down"),
+                ));
+            }
+        }
+        NudgeChange::KickClient { mac } => {
+            let Some(client) = state.client(*mac) else {
+                return Err(refused(
+                    guardrail::CLIENT_UNKNOWN,
+                    format!("the controller does not see {mac}"),
+                ));
+            };
+            if client.management {
+                return Err(refused(
+                    guardrail::MANAGEMENT_CLIENT,
+                    format!("{mac} is the controller or Tenko's host"),
+                ));
+            }
+            if client.port.is_some() || client.ssid.is_none() {
+                return Err(refused(
+                    guardrail::NOT_WIRELESS,
+                    format!("{mac} is not wireless"),
                 ));
             }
         }
@@ -607,6 +791,41 @@ pub trait NetworkControllers: Send + Sync + 'static {
     ) -> PortFuture<'a, NetworkReceipt> {
         let _ = (plan, dry_run, on_behalf_of);
         Box::pin(std::future::ready(Err(unsupported("change attachments"))))
+    }
+
+    /// Checks a nudge against the guardrails, with what
+    /// [`attachments`](Self::attachments) read; nothing is called. The default checks the
+    /// rules that hold for every controller ([`derived_nudge_guardrails`]); the connector
+    /// host adds its configured protected paths.
+    ///
+    /// # Errors
+    ///
+    /// A 409 refusal with the code of the rule (`connect.guardrail.*`).
+    fn check_nudge(
+        &self,
+        state: &ControllerAttachments,
+        change: &NudgeChange,
+    ) -> Result<(), CodedError> {
+        derived_nudge_guardrails(state, change)
+    }
+
+    /// Bounces a switch port or disconnects a wireless client for the move job `job`
+    /// (ADR 0028), with the write switch, the guardrails against a fresh read and the audit
+    /// of a write. The way back up of a bounce is the implementation's, whatever happens to
+    /// the caller. Fails before anything is written (a refusal, the capability, writes off,
+    /// a call error); what happened after is in the report. Without an implementation:
+    /// `connect.unsupported`.
+    fn nudge<'a>(
+        &'a self,
+        connector: ConnectorId,
+        change: &'a NudgeChange,
+        job: Option<JobId>,
+        on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'a, NudgeReport> {
+        let _ = (connector, change, job, on_behalf_of);
+        Box::pin(std::future::ready(Err(unsupported(
+            "bounce a port or disconnect a client",
+        ))))
     }
 }
 

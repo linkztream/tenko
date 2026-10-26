@@ -264,6 +264,43 @@ describe("titles, step summaries and tasks", () => {
     );
   });
 
+  it("names and summarizes the bounce of a port and the kick of a client", async () => {
+    expect(stepName("ipam.move.nudge")).toBe("Bounce the port or disconnect the device");
+    const args = { port: "5", down_secs: "5", reappear_secs: "30", connector: "unifi-lab", device: "sw1", mac: "00:00:5e:00:53:2b", old_ip: "192.0.2.43", new_ip: "198.51.100.43" };
+    const step: StepRecord = { index: 2, kind: "ipam.move.nudge", state: { state: "pending" }, attempts: 0 };
+    expect(describeStep(step, { summary: "ipam.move.step.nudge_bounce", args })).toBe(
+      "If the device is not back within 30 s, bounce port 5 of sw1 (down for 5 s) through unifi-lab.",
+    );
+    expect(describeStep(step, { summary: "ipam.move.step.nudge_kick", args })).toBe(
+      "If 00:00:5e:00:53:2b is not back within 30 s, disconnect it from sw1 through unifi-lab so that it connects again.",
+    );
+    // A summary that lacks an argument it needs gives way to the name of the step, never a key.
+    const { port: _port, ...noPort } = args;
+    expect(describeStep(step, { summary: "ipam.move.step.nudge_bounce", args: noPort })).toBe("Bounce the port or disconnect the device");
+    expect(summaryArgs("ipam.move.step.nudge_kick")).toEqual(["reappear_secs", "connector", "device", "mac"]);
+    // The step of the preview and of the job share their place in the checklist.
+    expect(kindRank("l2.nudge")).toBe(kindRank("ipam.move.nudge"));
+
+    await setLocale("sv");
+    expect(stepName("ipam.move.nudge")).toBe("Starta om porten eller koppla ned enheten");
+    expect(describeStep(step, { summary: "ipam.move.step.nudge_bounce", args })).toBe(
+      "Om enheten inte är tillbaka inom 30 s: starta om port 5 på sw1 (nere i 5 s) via unifi-lab.",
+    );
+  });
+
+  it("words the port that did not come up again", async () => {
+    const error = {
+      code: "connect.port_stuck",
+      status: 502,
+      title: "t",
+      detail: "port 5 of sw1 did not come up",
+      params: { connector: "unifi-lab", device: "sw1", device_id: "00:00:5e:00:53:03", port: "5", cause: "timeout" },
+    };
+    expect(codedErrorText(error)).toBe("Port 5 of sw1 on unifi-lab did not come up again after the bounce (timeout). Tenko keeps trying; you can also switch it on at the controller.");
+    await setLocale("sv");
+    expect(codedErrorText(error)).toBe("Port 5 på sw1 i unifi-lab kom inte upp igen efter omstarten (timeout). Tenko fortsätter att försöka; du kan också slå på den i kontrollern.");
+  });
+
   it("writes the manual L2 tasks of a move exactly, with the arguments the server sends", async () => {
     // The base arguments of every task come first; the L2 ones follow (crates/tenko-ipam/src/moves/l2.rs, args).
     const base = { cidr: "198.51.100.0/24", old_ip: "192.0.2.41", new_ip: "198.51.100.41", vid: "30" };
@@ -464,14 +501,15 @@ describe("rules of the views", () => {
       "ipam.move.device",
       "ipam.move.lease",
       "ipam.move.l2",
+      "ipam.move.nudge",
       "ipam.move.observe",
       "ipam.move.cleanup",
     ]);
-    expect(STEP_ORDER.map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(STEP_ORDER.map(kindRank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(kindRank("vendor.step")).toBe(STEP_ORDER.length);
     // The kinds of earlier versions keep their place, and the preview kinds of the DHCP preparation theirs.
-    expect(["ipam.intent", "dhcp.manual", "dns.manual", "device.manual", "l2.move", "observe", "cleanup"].map(kindRank)).toEqual([1, 2, 3, 4, 6, 7, 8]);
-    expect(["dhcp.prepare", "dhcp.short_lease"].map(kindRank)).toEqual([0, 5]);
+    expect(["ipam.intent", "dhcp.manual", "dns.manual", "device.manual", "l2.move", "observe", "cleanup"].map(kindRank)).toEqual([1, 2, 3, 4, 6, 8, 9]);
+    expect(["dhcp.prepare", "dhcp.short_lease", "l2.nudge"].map(kindRank)).toEqual([0, 5, 7]);
     // The L2 change through the network controller takes the place of the manual L2 step.
     expect(kindRank("ipam.move.controller")).toBe(kindRank("ipam.move.l2"));
     expect(kindRank("l2.controller")).toBe(kindRank("ipam.move.l2"));

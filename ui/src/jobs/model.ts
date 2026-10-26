@@ -99,6 +99,7 @@ export function groupLabel(group: string): string {
  * The step kinds of a move job in the order of the job, which is the order of the checklist
  * (IPAM-19, design decision 7): the mark that the client is moving, the intent, the DHCP
  * reservation, the DNS records, the device, the wait for the short lease, the layer 2 change,
+ * the bounce of the port or the kick of the client (ADR 0028),
  * the observation and the cleanup.
  */
 export const STEP_ORDER: readonly string[] = [
@@ -109,6 +110,7 @@ export const STEP_ORDER: readonly string[] = [
   "ipam.move.device",
   "ipam.move.lease",
   "ipam.move.l2",
+  "ipam.move.nudge",
   "ipam.move.observe",
   "ipam.move.cleanup",
 ];
@@ -121,6 +123,7 @@ export const STEP_ORDER: readonly string[] = [
 const KIND_ALIASES: Readonly<Record<string, string>> = {
   "dhcp.prepare": "ipam.move.prepare",
   "dhcp.short_lease": "ipam.move.lease",
+  "l2.nudge": "ipam.move.nudge",
   "ipam.intent": "ipam.move.intent",
   "dhcp.manual": "ipam.move.dhcp",
   "dns.manual": "ipam.move.dns",

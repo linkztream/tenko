@@ -101,7 +101,7 @@ function DiffTable(props: { lines: readonly DiffEntry[]; label: string; testid: 
   );
 }
 
-function Line(props: { testid: string; icon: IconName; kind?: "ok" | "warn"; children: JSX.Element }) {
+export function Line(props: { testid: string; icon: IconName; kind?: "ok" | "warn"; children: JSX.Element }) {
   return (
     <p class="l2-line" classList={{ ok: props.kind === "ok", warn: props.kind === "warn" }} data-testid={props.testid}>
       <Icon name={props.icon} size="sm" />

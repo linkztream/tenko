@@ -15,7 +15,9 @@ import "google/protobuf/timestamp.proto";
 import "tenko/connect/v1/common.proto";
 
 // Reads topology from, and writes VLANs, port profiles and per-client VLANs to, a network
-// controller.
+// controller; with the capabilities `port_bounce` and `client_kick` it also bounces a switch
+// port and disconnects a wireless client. A plugin that does not declare one of them answers
+// its changes with UNIMPLEMENTED.
 service NetworkController {
   // Devices, ports, links, clients, networks, port profiles and wireless networks.
   rpc Topology(TopologyRequest) returns (TopologyResponse);
@@ -86,6 +88,12 @@ message DevicePort {
   // Whether Tenko or the controller is reached through this port (the controller's own access
   // port). The host never touches it.
   bool management = 7;
+  // The administrative state: false when the port is switched off on the controller; absent
+  // when the controller does not report it. The host never bounces a port that is down.
+  optional bool enabled = 8;
+  // How many MAC addresses the switch learned on the port, when the controller reports its
+  // MAC table. The host never bounces a port with more than one client behind it.
+  optional uint32 learned_macs = 9;
 }
 
 // One end of a link.
@@ -199,6 +207,9 @@ message L2Change {
     SetClientVlan set_client_vlan = 3;
     ClearClientVlan clear_client_vlan = 4;
     RemoveNetwork remove_network = 5;
+    BouncePort bounce_port = 6;
+    EnablePort enable_port = 7;
+    KickClient kick_client = 8;
   }
 }
 
@@ -237,6 +248,37 @@ message RemoveNetwork {
   uint32 vlan = 2;
 }
 
+// The down half of a port bounce (capability `port_bounce`): switch a port off
+// administratively. The plugin never brings the port up by itself: the host does, after
+// `down_secs`, with the `EnablePort` of the plan's `undo`, whatever happens to the caller. The
+// plan's `undo` must carry exactly that one `EnablePort`, so that the host can bring the port
+// up again even when it never received the receipt; the receipt's `undo` repeats it. Never a
+// PoE power cycle.
+message BouncePort {
+  string device = 1;
+  uint32 port = 2;
+  // How long the port stays down, 1 to 30 seconds; the host keeps the time.
+  uint32 down_secs = 3;
+}
+
+// Switch a port on again as it was before a `BouncePort`: only ever the undo of one. The host
+// sends it whatever the guardrails, the write switch and the plan age say, because it only
+// restores the state Tenko changed. A plan whose diff is empty means the port is up.
+message EnablePort {
+  string device = 1;
+  uint32 port = 2;
+  // What the plugin needs to restore the port exactly, as its own `BouncePort` plan put it:
+  // opaque to the host, at most 16 KiB, possibly empty. Treat it as untrusted input.
+  string restore = 3;
+}
+
+// Disconnect a wireless client so that it associates again and starts over with DHCP
+// (capability `client_kick`). The client is not blocked and nothing is left to undo; the
+// receipt's `verified` says that the controller accepted the command.
+message KickClient {
+  string mac = 1;
+}
+
 // What a change would do, made against the state the fingerprint identifies.
 message L2Plan {
   L2Change change = 1;
@@ -247,6 +289,10 @@ message L2Plan {
   repeated DiffLine diff = 4;
   // English warnings for the preview.
   repeated string warnings = 5;
+  // The changes that restore the state as read, for a change the host must be able to undo
+  // without its receipt: a `BouncePort` carries its `EnablePort` here. Empty for every other
+  // change.
+  repeated L2Change undo = 6;
 }
 
 // What Apply did.

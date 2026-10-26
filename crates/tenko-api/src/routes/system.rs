@@ -40,7 +40,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_cluster::ca::{TlsMode, TlsService};
-use tenko_core::{Action, ObjectKind, ObjectRef, Timestamp};
+use tenko_core::{Action, CodedError, ObjectKind, ObjectRef, Timestamp};
 use tenko_store::{ReadConsistency, StoreRole};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -678,12 +678,14 @@ async fn system_status(
     dhcp: Option<Extension<super::dhcp::DhcpNodeSlot>>,
     // WP8.2: the lease conflicts of IPAM-23.
     ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
+    // ADR 0028: the switch ports a bounce left down.
+    connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
     Ok(Json(
         assemble(
-            &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam,
+            &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
         )
         .await,
     ))
@@ -707,6 +709,7 @@ pub(crate) async fn assemble(
     zones: Option<Extension<Arc<tenko_dns::zone::ZoneService>>>,
     dhcp: Option<Extension<super::dhcp::DhcpNodeSlot>>,
     ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
+    connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
 ) -> SystemStatus {
     let mut status = status_of(state, now);
     status.version = running_version(running.as_ref());
@@ -755,7 +758,25 @@ pub(crate) async fn assemble(
                 params: finding.params,
             }));
     }
+    // ADR 0028: every switch port a bounce left down (`connect.port_stuck`), with the
+    // connector, the device and the port, until the connector host brought it up.
+    if let Some(Extension(host)) = connectors
+        && let Ok(stuck) = host.stuck_ports().await
+    {
+        status
+            .warnings
+            .extend(stuck.into_iter().map(stuck_port_warning));
+    }
     status
+}
+
+/// The warning of a switch port a bounce left down.
+pub fn stuck_port_warning(condition: CodedError) -> StatusWarning {
+    StatusWarning {
+        code: condition.code.to_string(),
+        detail: condition.detail,
+        params: condition.params,
+    }
 }
 
 /// Downloads the root certificate of the internal CA (TLS mode a), for installation on

@@ -4,7 +4,9 @@
 //! The VLAN provision job writes networks through it, and the move job port profiles and
 //! per-client VLANs ([`attachment_change_of`]); the guardrails of an attachment change are
 //! also checked against the read the move job planned from ([`guardrail_view_of`]), and the
-//! undo steps of every receipt are checked against a fresh topology before a revert.
+//! undo steps of every receipt are checked against a fresh topology before a revert. The
+//! move job's bounce and kick after the network change go through the host's own calls
+//! (ADR 0028), which own the way back up of a bounced port and audit each one with the job.
 //!
 //! The server wires it once the connector service runs:
 //!
@@ -25,10 +27,10 @@ use tenko_connect::{
     Capability, ClientAttachment, ControllerDhcp, DeviceKind, DevicePort, DeviceRef, Guardrails,
     L2Change, L2Plan, L2Receipt, NetworkDevice, NetworkRef, ProfileRef, TopologySnapshot,
     WriteMode,
-    host::{ConnectorHost, HostError},
+    host::{ConnectorHost, HostError, service::BounceOutcome},
 };
 use tenko_core::{
-    CodedError, ConnectorId, UserId,
+    CodedError, ConnectorId, JobId, UserId,
     codec::{from_cbor, to_cbor},
     observe::NetworkDhcp,
     serde_util::HexBytes,
@@ -37,7 +39,8 @@ use tenko_ipam::vlan::controllers::{
     AttachmentChange, AttachmentPlan, ControllerAttachments, ControllerClient, ControllerDevice,
     ControllerDeviceKind, ControllerInfo, ControllerLink, ControllerNetwork, ControllerPort,
     ControllerPortState, ControllerProfile, ControllerTopology, ControllerWlan, DiffEntry,
-    NetworkControllers, NetworkPlan, NetworkReceipt, NetworkSpec, PortFuture,
+    NetworkControllers, NetworkPlan, NetworkReceipt, NetworkSpec, NudgeChange, NudgeOutcome,
+    NudgeReport, PortFuture,
 };
 use tokio::sync::{Notify, watch};
 
@@ -366,6 +369,8 @@ pub fn attachments_of(
                     uplink: port.uplink,
                     management: port.management,
                     up: port.up,
+                    enabled: port.enabled,
+                    learned_macs: port.learned_macs,
                 })
             })
             .collect(),
@@ -436,12 +441,23 @@ pub fn guardrail_view_of(state: &ControllerAttachments) -> TopologySnapshot {
             uplink: port.uplink,
             up: port.up,
             management: port.management,
+            enabled: port.enabled,
+            learned_macs: port.learned_macs,
         });
     }
     TopologySnapshot {
         observed_at: state.observed_at,
         devices,
-        links: Vec::new(),
+        // The guardrails of a bounce refuse a port that links to another device.
+        links: state
+            .links
+            .iter()
+            .map(|link| tenko_connect::TopologyLink {
+                a: link.a.clone(),
+                b: link.b.clone(),
+                kind: tenko_core::observe::LinkKind::Lldp,
+            })
+            .collect(),
         clients: state
             .clients
             .iter()
@@ -499,6 +515,8 @@ impl NetworkControllers for HostControllers {
                     plugin: view.instance.plugin,
                     enabled: view.instance.enabled,
                     writes_enabled: view.instance.writes_enabled,
+                    bounce: view.capabilities.contains(&Capability::PortBounce),
+                    kick: view.capabilities.contains(&Capability::ClientKick),
                 })
                 .collect())
         })
@@ -648,6 +666,101 @@ impl NetworkControllers for HostControllers {
             receipt_of(plan.connector, &receipt)
         })
     }
+
+    fn check_nudge(
+        &self,
+        state: &ControllerAttachments,
+        change: &NudgeChange,
+    ) -> Result<(), CodedError> {
+        nudge_check(&self.guardrails(), state, change)
+    }
+
+    fn nudge<'a>(
+        &'a self,
+        connector: ConnectorId,
+        change: &'a NudgeChange,
+        job: Option<JobId>,
+        on_behalf_of: Option<UserId>,
+    ) -> PortFuture<'a, NudgeReport> {
+        Box::pin(async move {
+            // A bounce and a kick are real writes: they count against `max_parallel`.
+            let _slot = self.write_slot(connector, false).await;
+            let guardrails = self.guardrails();
+            match change {
+                NudgeChange::BouncePort {
+                    device,
+                    port,
+                    down_secs,
+                } => {
+                    let report = self
+                        .host
+                        .bounce_port(
+                            connector,
+                            &DeviceRef(device.clone()),
+                            *port,
+                            *down_secs,
+                            &guardrails,
+                            job,
+                            on_behalf_of,
+                        )
+                        .await
+                        .map_err(coded)?;
+                    Ok(NudgeReport {
+                        connector,
+                        change: change.clone(),
+                        at: report.down_at,
+                        up_at: report.up_at,
+                        outcome: match report.outcome {
+                            BounceOutcome::Bounced => NudgeOutcome::Done,
+                            BounceOutcome::DownFailed { error } => NudgeOutcome::Failed {
+                                code: error.code.to_string(),
+                                detail: error.detail,
+                            },
+                            BounceOutcome::Stuck { error } => NudgeOutcome::Stuck {
+                                code: error.code.to_string(),
+                                detail: error.detail,
+                            },
+                        },
+                    })
+                }
+                NudgeChange::KickClient { mac } => {
+                    let report = self
+                        .host
+                        .kick_client(connector, *mac, &guardrails, job, on_behalf_of)
+                        .await
+                        .map_err(coded)?;
+                    Ok(NudgeReport {
+                        connector,
+                        change: change.clone(),
+                        at: Some(report.kicked_at),
+                        up_at: None,
+                        outcome: NudgeOutcome::Done,
+                    })
+                }
+            }
+        })
+    }
+}
+
+/// Checks a nudge against the host's guardrails (the rules of every controller and the
+/// configured protected paths), with what [`attachments_of`] read.
+///
+/// # Errors
+///
+/// A 409 refusal with the code of the rule (`connect.guardrail.*`).
+pub fn nudge_check(
+    guardrails: &Guardrails,
+    state: &ControllerAttachments,
+    change: &NudgeChange,
+) -> Result<(), CodedError> {
+    let view = guardrail_view_of(state);
+    let checked = match change {
+        NudgeChange::BouncePort { device, port, .. } => {
+            guardrails.check_bounce(&DeviceRef(device.clone()), *port, &view)
+        }
+        NudgeChange::KickClient { mac } => guardrails.check_kick(*mac, &view),
+    };
+    checked.map_err(|error| coded(error.into()))
 }
 
 #[cfg(test)]
@@ -714,6 +827,7 @@ mod tests {
                 after: Some("30".to_owned()),
             }],
             warnings: vec!["DHCP relay is off".to_owned()],
+            undo: Vec::new(),
         };
         let plan = plan_of(connector, &spec(false), &l2).expect("plan");
         assert_eq!(plan.diff[0].after.as_deref(), Some("30"));
@@ -755,6 +869,8 @@ mod tests {
                     uplink: true,
                     management: false,
                     up: true,
+                    enabled: None,
+                    learned_macs: None,
                 }],
             }],
             links: Vec::new(),
@@ -871,6 +987,8 @@ mod tests {
                 uplink: false,
                 management: false,
                 up: true,
+                enabled: None,
+                learned_macs: None,
             },
             DevicePort {
                 index: 2,
@@ -880,6 +998,8 @@ mod tests {
                 uplink: false,
                 management: false,
                 up: false,
+                enabled: None,
+                learned_macs: None,
             },
             DevicePort {
                 index: 3,
@@ -889,6 +1009,8 @@ mod tests {
                 uplink: true,
                 management: false,
                 up: true,
+                enabled: None,
+                learned_macs: None,
             },
             DevicePort {
                 index: 4,
@@ -898,6 +1020,8 @@ mod tests {
                 uplink: false,
                 management: true,
                 up: true,
+                enabled: None,
+                learned_macs: None,
             },
         ]
     }
@@ -1070,6 +1194,8 @@ mod tests {
                     uplink: flags.0,
                     management: flags.1,
                     up: flags.2,
+                    enabled: None,
+                    learned_macs: None,
                 }
             };
         assert_eq!(
@@ -1225,7 +1351,18 @@ mod tests {
             networks,
             [("net-home", false), ("net-iot", false), ("net-mgmt", true)]
         );
-        assert_eq!(view.links, Vec::new());
+        // The links stay: a bounce never touches a port a link ends on (ADR 0028).
+        assert_eq!(
+            view.links
+                .iter()
+                .map(|link| (link.a.clone(), link.b.clone()))
+                .collect::<Vec<_>>(),
+            snapshot
+                .links
+                .iter()
+                .map(|link| (link.a.clone(), link.b.clone()))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(view.profiles, Vec::new());
         assert_eq!(view.wlans, Vec::new());
     }
@@ -1455,6 +1592,7 @@ mod tests {
                 after: Some("IoT".to_owned()),
             }],
             warnings: vec!["the link drops for a moment".to_owned()],
+            undo: Vec::new(),
         };
         let plan = attachment_plan_of(connector, &change, &l2).expect("plan");
         assert_eq!(plan.connector, connector);
@@ -1483,6 +1621,7 @@ mod tests {
             fingerprint: "def".to_owned(),
             diff: Vec::new(),
             warnings: Vec::new(),
+            undo: Vec::new(),
         };
         let plan = attachment_plan_of(connector, &change, &l2).expect("plan");
         assert_eq!(plan.diff, Vec::new());
@@ -1496,6 +1635,98 @@ mod tests {
                 mac: mac(2),
                 network: NetworkRef("net-iot".to_owned()),
             }
+        );
+    }
+
+    /// ADR 0028: the host's guardrails of a nudge run on what the move job read, links and
+    /// learned MAC addresses included, with the configured protected paths on top.
+    #[test]
+    fn a_nudge_is_checked_with_the_links_learned_addresses_and_protected_paths() {
+        let port = |index: u16, learned_macs: Option<u32>| ControllerPortState {
+            device: "sw-1".to_owned(),
+            index,
+            name: None,
+            profile: None,
+            native_vlan: Some(20),
+            uplink: false,
+            management: false,
+            up: true,
+            enabled: Some(true),
+            learned_macs,
+        };
+        let client = |n: u8, port: Option<u16>| ControllerClient {
+            mac: MacAddr::new([0, 0, 0x5e, 0, 0x53, n]),
+            ip: None,
+            device: if port.is_some() { "sw-1" } else { "ap-1" }.to_owned(),
+            port,
+            ssid: port.is_none().then(|| "iot.example.test".to_owned()),
+            network: None,
+            vlan: Some(20),
+            name: None,
+            management: false,
+        };
+        let state = ControllerAttachments {
+            connector: ConnectorId::generate(),
+            observed_at: Timestamp::now(),
+            devices: Vec::new(),
+            ports: vec![port(3, Some(1)), port(6, None), port(7, Some(3))],
+            clients: vec![
+                client(0x13, Some(3)),
+                client(0x17, Some(7)),
+                client(0x21, None),
+            ],
+            networks: Vec::new(),
+            profiles: Vec::new(),
+            wlans: Vec::new(),
+            links: vec![ControllerLink {
+                a: Endpoint {
+                    device: "sw-1".to_owned(),
+                    port: Some("6".to_owned()),
+                },
+                b: Endpoint {
+                    device: "ap-1".to_owned(),
+                    port: None,
+                },
+            }],
+        };
+        let bounce = |port: u16| NudgeChange::BouncePort {
+            device: "sw-1".to_owned(),
+            port,
+            down_secs: 5,
+        };
+        let none = Guardrails::default();
+        let code = |guardrails: &Guardrails, change: &NudgeChange| {
+            nudge_check(guardrails, &state, change)
+                .err()
+                .map(|error| error.code.to_string())
+        };
+        assert_eq!(code(&none, &bounce(3)), None);
+        assert_eq!(
+            code(&none, &bounce(6)).as_deref(),
+            Some("connect.guardrail.uplink")
+        );
+        assert_eq!(
+            code(&none, &bounce(7)).as_deref(),
+            Some("connect.guardrail.shared_port")
+        );
+        let protected = Guardrails {
+            protected: vec![ProtectedPath::Port {
+                device: DeviceRef("sw-1".to_owned()),
+                port: 3,
+            }],
+            max_parallel: 10,
+        };
+        assert_eq!(
+            code(&protected, &bounce(3)).as_deref(),
+            Some("connect.guardrail.protected_port")
+        );
+        let kick = |n: u8| NudgeChange::KickClient {
+            mac: MacAddr::new([0, 0, 0x5e, 0, 0x53, n]),
+        };
+        assert_eq!(code(&none, &kick(0x21)), None);
+        assert_eq!(
+            code(&none, &kick(0x13)).as_deref(),
+            Some("connect.guardrail.not_wireless")
         );
     }
 }

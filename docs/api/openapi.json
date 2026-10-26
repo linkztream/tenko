@@ -39293,7 +39293,9 @@
           "webhook",
           "network_controller",
           "actuator",
-          "migration"
+          "migration",
+          "port_bounce",
+          "client_kick"
         ]
       },
       "CertificateRef": {
@@ -40205,6 +40207,10 @@
           "writes_enabled"
         ],
         "properties": {
+          "bounce": {
+            "type": "boolean",
+            "description": "Whether the controller can bounce a switch port (capability `port_bounce`, ADR 0028)."
+          },
           "enabled": {
             "type": "boolean",
             "description": "Whether the instance is enabled."
@@ -40212,6 +40218,10 @@
           "id": {
             "$ref": "#/components/schemas/ConnectorId",
             "description": "The connector instance."
+          },
+          "kick": {
+            "type": "boolean",
+            "description": "Whether the controller can disconnect a wireless client (capability `client_kick`)."
           },
           "name": {
             "type": "string",
@@ -53360,6 +53370,17 @@
             },
             "description": "Notes about the change (`ipam.move.l2.note.*`)."
           },
+          "nudge": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoveNudge",
+                "description": "What the job does after the change when the client does not come back by itself:\na port bounce, a client kick, or neither and why (ADR 0028). Present with an\nautomatic change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "others_on_port": {
             "type": [
               "integer",
@@ -53462,6 +53483,63 @@
           "wireless"
         ]
       },
+      "MoveNudge": {
+        "type": "object",
+        "description": "The nudge of a device after its network change, as previewed (ADR 0028).",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/MoveNudgeAction",
+            "description": "What the job does when the client does not come back by itself."
+          },
+          "change": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NudgeChange",
+                "description": "The bounce or kick, also when it is switched off or refused."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problem": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MoveL2Problem",
+                "description": "The guardrail refusal behind `ipam.move.nudge.refused`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reappear_secs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long the job waits for the client to come back by itself first.",
+            "minimum": 0
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there is none (`ipam.move.nudge.*`)."
+          }
+        }
+      },
+      "MoveNudgeAction": {
+        "type": "string",
+        "description": "How the job makes the client start over after the network change (ADR 0028).",
+        "enum": [
+          "bounce",
+          "kick",
+          "none"
+        ]
+      },
       "MovePrepare": {
         "type": "string",
         "description": "What the job does before it changes the client's network.",
@@ -53512,6 +53590,14 @@
           "move_now": {
             "type": "boolean",
             "description": "Whether the jobs change the network at once (`move_now`)."
+          },
+          "nudge": {
+            "type": "boolean",
+            "description": "Whether the jobs bounce or kick a client that does not come back by itself\n(`nudge`, ADR 0028)."
+          },
+          "nudge_offered": {
+            "type": "boolean",
+            "description": "Whether a controller that sees a device of the move offers the port bounce or the\nclient kick: the preview shows the switch then."
           },
           "parallelism": {
             "type": "integer",
@@ -53574,6 +53660,10 @@
           "move_now": {
             "type": "boolean",
             "description": "Change the network at once instead of waiting for the client's next renewal, which\nwould get the short lease first: for a client known to ask for a new lease when its\nlink changes."
+          },
+          "nudge": {
+            "type": "boolean",
+            "description": "After the network change, bounce the client's switch port or disconnect it from its\naccess point when it does not come back by itself (ADR 0028); on when absent. It\nruns only where the controller offers it and its guardrails let it."
           },
           "objects": {
             "type": "array",
@@ -55135,6 +55225,83 @@
           }
         ],
         "description": "A negative trust anchor as the API reads it."
+      },
+      "NudgeChange": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Take the switch port down for `down_secs` and bring it up again.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Take the switch port down for `down_secs` and bring it up again.",
+                "required": [
+                  "device",
+                  "port",
+                  "down_secs"
+                ],
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "description": "The switch, by controller reference."
+                  },
+                  "down_secs": {
+                    "type": "integer",
+                    "format": "int32",
+                    "description": "How long the port stays down, 1 to 30 seconds.",
+                    "minimum": 0
+                  },
+                  "port": {
+                    "type": "integer",
+                    "format": "int32",
+                    "description": "The port index.",
+                    "minimum": 0
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bounce_port"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Disconnect the wireless client so that it associates again.",
+            "required": [
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {
+                "type": "object",
+                "description": "Disconnect the wireless client so that it associates again.",
+                "required": [
+                  "mac"
+                ],
+                "properties": {
+                  "mac": {
+                    "$ref": "#/components/schemas/MacAddr",
+                    "description": "The client."
+                  }
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "kick_client"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What makes a moved client start over at once (ADR 0028): a bounce of its switch port or\na disconnect from its access point.\n\nAdjacently tagged because a variant carries a MAC address (see `tenko_core::codec`)."
       },
       "ObjectKind": {
         "type": "string",

@@ -373,6 +373,19 @@ impl Session {
             .await
             .map(drop)
     }
+
+    /// Disconnects a wireless client through the station manager (`cmd/stamgr`,
+    /// `kick-sta`): it associates again by itself. Never `block-sta`.
+    ///
+    /// # Errors
+    ///
+    /// The controller's error.
+    pub async fn kick(&mut self, mac: MacAddr) -> Result<(), ConnectorError> {
+        let body = serde_json::json!({ "cmd": "kick-sta", "mac": mac.to_string() });
+        self.site_call(Method::POST, "cmd/stamgr", Some(&body))
+            .await
+            .map(drop)
+    }
 }
 
 /// The `msg` of a classic error answer, restricted to the characters of an error code.
@@ -483,6 +496,20 @@ pub struct Port {
     pub native_networkconf_id: Option<String>,
     /// The aggregate (LAG) this port belongs to, by the index of its first port.
     pub aggregated_by: Option<u16>,
+    /// The administrative state (`enable`), when the controller reports it.
+    pub enable: Option<bool>,
+    /// What the port forwards (`all`, `native`, `customize` or `disabled`), when reported.
+    pub forward: Option<String>,
+    /// How many MAC addresses the switch learned on the port (`mac_table_count`, else the
+    /// length of `mac_table`), when reported.
+    pub learned_macs: Option<u32>,
+}
+
+impl Port {
+    /// Whether the port table shows the port switched off.
+    pub fn switched_off(&self) -> bool {
+        self.enable == Some(false) || self.forward.as_deref() == Some("disabled")
+    }
 }
 
 /// The upstream connection of a device.
@@ -535,6 +562,17 @@ impl Device {
                     portconf_id: json::id(port, "portconf_id"),
                     native_networkconf_id: json::id(port, "native_networkconf_id"),
                     aggregated_by: json::u16(port, "aggregated_by").filter(|idx| *idx > 0),
+                    enable: json::flag(port, "enable"),
+                    forward: json::text(port, "forward"),
+                    learned_macs: port
+                        .get("mac_table_count")
+                        .and_then(Value::as_u64)
+                        .or_else(|| {
+                            port.get("mac_table")
+                                .and_then(Value::as_array)
+                                .map(|table| table.len() as u64)
+                        })
+                        .map(|count| u32::try_from(count).unwrap_or(u32::MAX)),
                 })
             })
             .collect();
@@ -579,6 +617,20 @@ impl Device {
             lldp,
             vaps,
         })
+    }
+
+    /// The override entry of a port, when the device has one.
+    pub fn override_of(&self, port: u16) -> Option<&Value> {
+        self.overrides
+            .iter()
+            .find(|entry| json::u16(entry, "port_idx") == Some(port))
+    }
+
+    /// Whether the port's override switches it off (`forward` is `disabled`).
+    pub fn disabled_by_override(&self, port: u16) -> bool {
+        self.override_of(port)
+            .and_then(|entry| json::text(entry, "forward"))
+            .is_some_and(|forward| forward == "disabled")
     }
 
     /// The configured profile of a port: its override, else the effective one.

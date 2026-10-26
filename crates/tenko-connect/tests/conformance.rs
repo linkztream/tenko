@@ -174,3 +174,43 @@ async fn a_manifest_that_differs_from_plugin_json_fails_launch() {
             .contains("9.9.9")
     );
 }
+
+fn switch_spec(nudge: bool) -> LaunchSpec {
+    LaunchSpec {
+        expected: Some(tenko_connect::sample_switch::manifest(nudge)),
+        program: PathBuf::from(env!("CARGO_BIN_EXE_tenko-plugin-sample")),
+        args: vec![
+            OsString::from("--mode"),
+            OsString::from(if nudge { "switch" } else { "switch-plain" }),
+        ],
+        cwd: None,
+        env: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_switch_that_declares_the_bounce_and_the_kick_passes_their_checks() {
+    let report = run(&switch_spec(true), &options()).await;
+    assert!(report.passed(), "{report}");
+    for id in ["capability.port_bounce", "capability.client_kick"] {
+        assert_eq!(outcome(&report, id), Outcome::Pass, "{report}");
+    }
+    let bounce = report.check("capability.port_bounce").expect("bounce");
+    // The suite plans a bounce of a switch the sample does not have: a coded answer.
+    assert!(
+        bounce.detail.contains("connect.not_found") || bounce.detail.contains("does not exist"),
+        "{report}"
+    );
+}
+
+#[tokio::test]
+async fn a_switch_without_them_answers_unimplemented_for_both() {
+    let report = run(&switch_spec(false), &options()).await;
+    assert!(report.passed(), "{report}");
+    assert!(report.check("capability.port_bounce").is_none());
+    let undeclared = report.check("undeclared").expect("undeclared");
+    assert!(
+        undeclared.detail.contains("port_bounce, client_kick"),
+        "{report}"
+    );
+}

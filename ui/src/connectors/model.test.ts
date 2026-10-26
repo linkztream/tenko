@@ -120,6 +120,8 @@ describe("the words of health and process", () => {
   it("names the capabilities", () => {
     expect(capabilityWord("inventory")).toBe("inventory");
     expect(capabilityWord("network_controller")).toBe("network controller");
+    expect(capabilityWord("port_bounce")).toBe("switch port bounce");
+    expect(capabilityWord("client_kick")).toBe("client disconnect");
     expect(capabilityWord("actuator")).toBe("actuator");
     expect(capabilityWord("webhook")).toBe("webhook");
     expect(capabilityWord("migration")).toBe("migration source");

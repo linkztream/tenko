@@ -30,12 +30,12 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tenko_core::net::Fqdn;
+use tenko_core::{MacAddr, net::Fqdn};
 use tonic::Code;
 
 use crate::{
-    ActuatorIntent, CallContext, Capability, ConnectorError, MigrationArea, MigrationScope,
-    SUPPORTED_PROTOCOLS, Secrets, WebhookRequest,
+    ActuatorIntent, CallContext, Capability, ConnectorError, DeviceRef, L2Change, MigrationArea,
+    MigrationScope, SUPPORTED_PROTOCOLS, Secrets, WebhookRequest,
     host::launch::{LaunchError, LaunchOptions, LaunchSpec, Launched, launch},
     manifest::Manifest,
     proto::v1,
@@ -454,6 +454,10 @@ async fn token_check(launched: &Launched, timeout: Duration) -> Result<String, S
     Ok("calls without the token and with a wrong token are refused".to_owned())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per capability, in the order of the manifest's list"
+)]
 async fn capability_check(
     launched: &mut Launched,
     capability: Capability,
@@ -531,6 +535,22 @@ async fn capability_check(
                 .await
                 .map(|plan| format!("planned {} change(s), nothing written", plan.diff.len()))
         }
+        Capability::PortBounce => match client.plan(ctx, &probe_bounce(), timeout).await {
+            Ok(plan) => {
+                bounce_plan_problem(&plan)?;
+                Ok(format!(
+                    "planned a bounce of {} change(s) with its way back up, nothing written",
+                    plan.diff.len()
+                ))
+            }
+            Err(error) => Err(error),
+        },
+        Capability::ClientKick => client.plan(ctx, &probe_kick(), timeout).await.map(|plan| {
+            format!(
+                "planned a kick of {} change(s), nothing written",
+                plan.diff.len()
+            )
+        }),
         Capability::Migration => {
             let scope = MigrationScope {
                 areas: [MigrationArea::Ipam].into_iter().collect(),
@@ -556,6 +576,47 @@ async fn capability_check(
             still_alive(launched, format!("answered with the coded error {error}")).await
         }
         Err(error) => Err(error.to_string()),
+    }
+}
+
+/// The bounce the suite plans: a port of a switch no controller has.
+fn probe_bounce() -> L2Change {
+    L2Change::BouncePort {
+        device: DeviceRef(PROBE_DEVICE.to_owned()),
+        port: 1,
+        down_secs: crate::DEFAULT_DOWN_SECS,
+    }
+}
+
+/// The kick the suite plans: a documentation MAC address.
+fn probe_kick() -> L2Change {
+    L2Change::KickClient {
+        mac: MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, 0xfe]),
+    }
+}
+
+/// The device of [`probe_bounce`].
+const PROBE_DEVICE: &str = "conformance-switch";
+
+/// What is wrong with the plan of a bounce: it must name the planned change and carry
+/// exactly one `EnablePort` of the same port in its `undo`, so the host can bring the port
+/// up again without the receipt.
+fn bounce_plan_problem(plan: &crate::L2Plan) -> Result<(), String> {
+    let L2Change::BouncePort { device, port, .. } = &plan.change else {
+        return Err("the plan of a bounce names another change".to_owned());
+    };
+    match plan.undo.as_slice() {
+        [
+            L2Change::EnablePort {
+                device: up_device,
+                port: up_port,
+                ..
+            },
+        ] if up_device == device && up_port == port => Ok(()),
+        _ => Err(
+            "the plan of a bounce must carry exactly one EnablePort of the same port in `undo`"
+                .to_owned(),
+        ),
     }
 }
 
@@ -619,6 +680,23 @@ async fn undeclared_check(
                 .map(|_| ()),
         )?;
         probed.push("migration");
+    }
+    // ADR 0028: a network controller without the bounce or the kick refuses their changes.
+    if manifest.has(Capability::NetworkController) {
+        if !manifest.has(Capability::PortBounce) {
+            expect_unsupported(
+                "port_bounce",
+                client.plan(ctx, &probe_bounce(), timeout).await.map(|_| ()),
+            )?;
+            probed.push("port_bounce");
+        }
+        if !manifest.has(Capability::ClientKick) {
+            expect_unsupported(
+                "client_kick",
+                client.plan(ctx, &probe_kick(), timeout).await.map(|_| ()),
+            )?;
+            probed.push("client_kick");
+        }
     }
     Ok(if probed.is_empty() {
         "every capability is declared".to_owned()

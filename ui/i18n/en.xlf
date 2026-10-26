@@ -9229,6 +9229,12 @@
       <unit id="connectors.capability.migration">
         <segment><source>migration source</source></segment>
       </unit>
+      <unit id="connectors.capability.port_bounce">
+        <segment><source>switch port bounce</source></segment>
+      </unit>
+      <unit id="connectors.capability.client_kick">
+        <segment><source>client disconnect</source></segment>
+      </unit>
       <unit id="connectors.col.name">
         <segment><source>Name</source></segment>
       </unit>
@@ -10436,6 +10442,25 @@
       <unit id="errors.connect.guardrail.protected_client">
         <segment><source>This device is protected; Tenko never moves it.</source></segment>
       </unit>
+      <unit id="errors.connect.guardrail.shared_port">
+        <segment><source>Other devices use this switch port; Tenko does not bounce it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.port_down">
+        <segment><source>This switch port is down already; Tenko does not bounce it.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.port_unknown">
+        <segment><source>The network controller does not know this switch port.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.client_unknown">
+        <segment><source>The network controller does not know this device.</source></segment>
+      </unit>
+      <unit id="errors.connect.guardrail.not_wireless">
+        <segment><source>This device is not wireless; it cannot be disconnected from an access point.</source></segment>
+      </unit>
+      <unit id="errors.connect.port_stuck">
+        <notes><note category="description">Error of a move step: the switch port did not come up again after the bounce. cause is the connector's detail and may be empty.</note></notes>
+        <segment><source>Port {port} of {device} on {connector} did not come up again after the bounce ({cause}). Tenko keeps trying; you can also switch it on at the controller.</source></segment>
+      </unit>
       <unit id="ipam.move.task.l2_vlan">
         <notes><note category="description">Manual task of a move when the network controller cannot make the change.</note></notes>
         <segment><source>Move the device to VLAN {vid}: set its switch port to VLAN {vid} untagged, or join it to a wireless network that carries VLAN {vid}.</source></segment>
@@ -10469,8 +10494,49 @@
         <notes><note category="description">Summary of the automatic L2 step of a move: a per-client VLAN through the network controller.</note></notes>
         <segment><source>Set the VLAN override of {mac} to the network {after} through {connector}.</source></segment>
       </unit>
+      <unit id="ipam.move.step.nudge_bounce">
+        <notes><note category="description">Summary of the automatic step of a move that bounces the client's switch port when it is not back by itself. The server sends port, down_secs, reappear_secs, connector and device (and more).</note></notes>
+        <segment><source>If the device is not back within {reappear_secs} s, bounce port {port} of {device} (down for {down_secs} s) through {connector}.</source></segment>
+      </unit>
+      <unit id="ipam.move.step.nudge_kick">
+        <notes><note category="description">Summary of the automatic step of a move that disconnects a wireless client from its access point when it is not back by itself. The server sends reappear_secs, connector, device and mac (and more).</note></notes>
+        <segment><source>If {mac} is not back within {reappear_secs} s, disconnect it from {device} through {connector} so that it connects again.</source></segment>
+      </unit>
       <unit id="jobs.stepname.ipam_move_controller">
         <segment><source>Move on the network controller</source></segment>
+      </unit>
+      <unit id="jobs.stepname.ipam_move_nudge">
+        <segment><source>Bounce the port or disconnect the device</source></segment>
+      </unit>
+      <unit id="jobs.nudge.title">
+        <segment><source>After the network change</source></segment>
+      </unit>
+      <unit id="jobs.nudge.reappeared_dhcp">
+        <notes><note category="description">when is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>The device came back by itself {when}: its DHCP exchange on the new network was seen. Its port was not bounced and it was not disconnected.</source></segment>
+      </unit>
+      <unit id="jobs.nudge.reappeared_lease">
+        <notes><note category="description">when is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>The device came back by itself {when}: its lease on the new network was seen. Its port was not bounced and it was not disconnected.</source></segment>
+      </unit>
+      <unit id="jobs.nudge.bounced">
+        <notes><note category="description">down and up are relative times such as 5 minutes ago.</note></notes>
+        <segment><source>Port {port} of {device} went down {down} and was up again {up}.</source></segment>
+      </unit>
+      <unit id="jobs.nudge.bounced_down">
+        <notes><note category="description">down is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>Port {port} of {device} went down {down}.</source></segment>
+      </unit>
+      <unit id="jobs.nudge.kicked">
+        <notes><note category="description">when is a relative time such as 5 minutes ago.</note></notes>
+        <segment><source>The device was disconnected from its access point {when}; it connects again by itself.</source></segment>
+      </unit>
+      <unit id="jobs.nudge.failed">
+        <notes><note category="description">reason is the translated error or the English detail.</note></notes>
+        <segment><source>Not done: {reason}</source></segment>
+      </unit>
+      <unit id="jobs.nudge.interrupted">
+        <segment><source>The step ran again after an interruption; it does not bounce or disconnect a second time.</source></segment>
       </unit>
       <unit id="jobs.l2.title">
         <segment><source>On the network controller</source></segment>
@@ -10621,6 +10687,42 @@
       </unit>
       <unit id="move.step.l2_controller">
         <segment><source>Move {host} to VLAN {vid} through {connector}: dry run, write, read back and compare.</source></segment>
+      </unit>
+      <unit id="move.group.l2_nudge">
+        <segment><source>Bounce or disconnect ({count, number})</source></segment>
+      </unit>
+      <unit id="move.nudge_label">
+        <segment><source>After the change</source></segment>
+      </unit>
+      <unit id="move.nudge">
+        <segment><source>Bounce the port or disconnect the device</source></segment>
+      </unit>
+      <unit id="move.nudge_help">
+        <segment><source>A device that is not back by itself after the network change gets its switch port bounced, or is disconnected from its access point, once.</source></segment>
+      </unit>
+      <unit id="move.nudge.bounce">
+        <notes><note category="description">Line of a device in the move preview. down and wait are durations.</note></notes>
+        <segment><source>Bounces port {port} of {device} for {down} if it is not back within {wait}.</source></segment>
+      </unit>
+      <unit id="move.nudge.kick">
+        <notes><note category="description">Line of a device in the move preview. wait is a duration.</note></notes>
+        <segment><source>Disconnects it from {device} if it is not back within {wait}.</source></segment>
+      </unit>
+      <unit id="move.nudge.none">
+        <segment><source>No bounce or kick.</source></segment>
+      </unit>
+      <unit id="move.nudge.reason.off">
+        <segment><source>No bounce or kick: switched off for this move.</source></segment>
+      </unit>
+      <unit id="move.nudge.reason.no_capability">
+        <segment><source>No bounce or kick: the network controller offers neither.</source></segment>
+      </unit>
+      <unit id="move.nudge.reason.refused">
+        <notes><note category="description">rule is the translated text of the guardrail.</note></notes>
+        <segment><source>No bounce or kick, refused by a guardrail: {rule}</source></segment>
+      </unit>
+      <unit id="move.nudge.reason.refused_any">
+        <segment><source>No bounce or kick: refused by a guardrail.</source></segment>
       </unit>
       <unit id="move.plan_changed">
         <segment><source>The plan changed since this preview. Here is the new one: check it and start again.</source></segment>

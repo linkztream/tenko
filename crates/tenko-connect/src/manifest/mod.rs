@@ -128,16 +128,24 @@ pub enum Capability {
     Actuator,
     /// [`MigrationSource`](crate::MigrationSource): the `Migration` service.
     Migration,
+    /// Port bounces (`BouncePort` and its `EnablePort`) of the `NetworkController` service;
+    /// needs `network_controller` (ADR 0028).
+    PortBounce,
+    /// Client kicks (`KickClient`) of the `NetworkController` service; needs
+    /// `network_controller` (ADR 0028).
+    ClientKick,
 }
 
 impl Capability {
     /// Every capability, in declaration order.
-    pub const ALL: [Capability; 5] = [
+    pub const ALL: [Capability; 7] = [
         Capability::Inventory,
         Capability::Webhook,
         Capability::NetworkController,
         Capability::Actuator,
         Capability::Migration,
+        Capability::PortBounce,
+        Capability::ClientKick,
     ];
 
     /// The stable `snake_case` name.
@@ -148,6 +156,8 @@ impl Capability {
             Capability::NetworkController => "network_controller",
             Capability::Actuator => "actuator",
             Capability::Migration => "migration",
+            Capability::PortBounce => "port_bounce",
+            Capability::ClientKick => "client_kick",
         }
     }
 }
