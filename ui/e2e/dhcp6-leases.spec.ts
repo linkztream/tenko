@@ -16,6 +16,11 @@ import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { cell, gridRow } from "./support/ui";
 
+// The grid renders only the rows in view plus an overscan of eight (src/grid/DataGrid.tsx), and its
+// height is what the page leaves it, which depends on the fonts of the machine. All 17 leases must
+// be in the DOM on any machine: on the CI runner the grid is a few pixels lower than on a workstation
+// and the 17th row, the delegated prefix, fell outside the window.
+test.use({ viewport: { width: 1280, height: 1000 } });
 const GRID = "dhcp-leases";
 const V4 = "192.0.2.100";
 const V6 = "2001:db8:0:10::100";

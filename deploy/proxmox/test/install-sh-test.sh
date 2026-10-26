@@ -298,7 +298,7 @@ CFG_END
     }
     # Hardened: the profile is asked first, then the roles, and only those are prepared.
     fresh_defaults
-    REPLIES=(hardened controller,dns yes)
+    REPLIES=(hardened "controller,dns" yes)
     answers >"${work}/answers.out" 2>&1
     expect "hardened: the profile is the first question" "Security profile (docs/SECURITY-PROFILES.md)" "${QUESTIONS[0]}"
     has "$(asked)" "Roles of this node (the Hardened profile prepares the machine for these only)" "hardened: the roles are asked"
