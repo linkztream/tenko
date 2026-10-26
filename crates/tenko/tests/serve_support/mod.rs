@@ -32,12 +32,17 @@
 )]
 
 use std::{
+    collections::HashSet,
     fmt::Write as _,
+    hash::BuildHasher as _,
     io::{BufRead as _, BufReader, Read, Write as _},
-    net::TcpListener,
+    net::{TcpListener, UdpSocket},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -106,10 +111,91 @@ pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(90);
 /// The path of the readiness probe.
 pub const READY_PATH: &str = "/api/v1/health/ready";
 
-/// A free TCP port on the loopback interface: bind port 0, read the port, release it.
+/// The ports [`free_port`] hands out: below the ephemeral range of Linux (32768 and up, the
+/// ports the kernel gives to `bind(0)` and to the outgoing connections of every other
+/// test), of Windows and of macOS (49152 and up), so that no test, client or server of the
+/// suite takes a picked port in the window between the pick and the bind of the server.
+const PORT_POOL: std::ops::Range<u16> = 20_000..32_000;
+
+/// How often a pick is tried before the harness gives up (a pool full of ports in use is a
+/// broken machine, not a race).
+const PORT_PICKS: u32 = 500;
+
+/// A free port on the loopback interface, for TCP and UDP alike, that no other call of this
+/// process handed out and that is not in an ephemeral range.
+///
+/// The port is drawn at random from [`PORT_POOL`] and checked by binding it for both
+/// protocols, so ports the machine uses for something else (and the ranges Windows
+/// reserves) are skipped. The check cannot hold the port for a server that binds it later,
+/// which is why [`Node::start_by`] starts again on a new port when the server reports that
+/// its API listener could not bind.
 pub fn free_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a free loopback port");
-    listener.local_addr().expect("local address").port()
+    static PICKS: AtomicU64 = AtomicU64::new(0);
+    static HANDED_OUT: Mutex<Option<HashSet<u16>>> = Mutex::new(None);
+    let span = u64::from(PORT_POOL.end - PORT_POOL.start);
+    for _ in 0..PORT_PICKS {
+        // Random per process (the hasher's keys) and different on every call.
+        let draw = std::hash::RandomState::new().hash_one(PICKS.fetch_add(1, Ordering::Relaxed));
+        let port = PORT_POOL.start + u16::try_from(draw % span).expect("below the pool's end");
+        let mut handed_out = HANDED_OUT.lock().unwrap_or_else(PoisonError::into_inner);
+        let handed_out = handed_out.get_or_insert_with(HashSet::new);
+        if handed_out.contains(&port) || !is_free(port) {
+            continue;
+        }
+        handed_out.insert(port);
+        return port;
+    }
+    panic!("no free loopback port in {PORT_POOL:?} after {PORT_PICKS} picks");
+}
+
+/// Whether `port` can be bound on the loopback for TCP and for UDP right now.
+fn is_free(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok() && UdpSocket::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// How often [`retry_on_bind`] starts a server before the test fails.
+pub const START_ATTEMPTS: u32 = 3;
+
+/// Whether the standard error of a server that failed to start says that its API listener
+/// could not bind (start step `api`, code `start.api.bind`): another process took the port
+/// between the pick and the bind, which a new port cures.
+pub fn is_port_race(stderr: &str) -> bool {
+    stderr.contains("start.api.bind")
+}
+
+/// Calls `attempt` up to [`START_ATTEMPTS`] times with the state and the number of the
+/// attempt (from 1). An attempt that fails with an [`Outcome`] showing a lost port race
+/// ([`is_port_race`]) is logged to standard error, `repick` gives the state a new port, and
+/// the next attempt starts. Any other failure, and the failure of the last attempt, fails
+/// the test with the output of the server.
+#[track_caller]
+pub fn retry_on_bind<S, T>(
+    state: &mut S,
+    mut attempt: impl FnMut(&mut S, u32) -> Result<T, Outcome>,
+    mut repick: impl FnMut(&mut S),
+) -> T {
+    for number in 1..=START_ATTEMPTS {
+        let outcome = match attempt(state, number) {
+            Ok(started) => return started,
+            Err(outcome) => outcome,
+        };
+        assert!(
+            is_port_race(&outcome.stderr),
+            "the server did not start\n{}",
+            outcome.diagnostics()
+        );
+        assert!(
+            number < START_ATTEMPTS,
+            "the API port was taken in all {START_ATTEMPTS} attempts\n{}",
+            outcome.diagnostics()
+        );
+        eprintln!(
+            "start attempt {number} of {START_ATTEMPTS}: the API port was taken between the \
+             pick and the bind; picking another port"
+        );
+        repick(state);
+    }
+    unreachable!("the loop returns or panics");
 }
 
 /// A `tenko` command with an environment that cannot influence the test: no `TENKO_*`
@@ -396,6 +482,10 @@ impl Capture {
         }
     }
 
+    fn is_closed(&self) -> bool {
+        self.lock().closed
+    }
+
     fn text(&self) -> String {
         let buffer = self.lock();
         let mut text = buffer.lines.join("\n");
@@ -496,6 +586,12 @@ impl Proc {
         wanted: impl Fn(&str) -> bool,
     ) -> Option<String> {
         self.stderr.wait_for(timeout, &wanted)
+    }
+
+    /// Whether the process closed its standard output, which it does when it exits (the
+    /// exit status may follow a moment later: [`Proc::finish`] waits for it).
+    pub fn stdout_closed(&self) -> bool {
+        self.stdout.is_closed()
     }
 
     /// Standard output so far.
@@ -903,32 +999,48 @@ impl Node {
     }
 
     /// Starts the server and waits until it is ready: the `ready at` line on standard
-    /// output and a `200` from the readiness probe. When the port was taken in the
-    /// meantime (a parallel test picked it, too), the node moves to another port and
-    /// tries again; every other failure fails the test with the output.
+    /// output and a `200` from the readiness probe. See [`Node::start_by`] for the port
+    /// race and for every other failure.
     #[track_caller]
     pub fn start(&mut self) -> Proc {
-        for attempt in 1..=5 {
-            let mut server = self.spawn();
-            let ready = server.wait_stdout_line(READY_TIMEOUT, |line| line.contains(" ready at "));
-            if ready.is_some() {
-                self.wait_for_ready_probe(&mut server);
-                return server;
-            }
-            assert!(
-                !server.is_running(),
-                "the server was not ready within {READY_TIMEOUT:?}\n{}",
-                server.diagnostics()
-            );
-            let outcome = server.finish(STOP_TIMEOUT);
-            assert!(
-                attempt < 5 && outcome.stderr.contains("start.api.bind"),
-                "the server did not start\n{}",
-                outcome.diagnostics()
-            );
-            self.port = free_port();
-        }
-        unreachable!("the loop returns or panics");
+        self.start_by(Node::spawn)
+    }
+
+    /// Like [`Node::start`] with the process spawned by `launch`, which writes the
+    /// configuration (for example with other text) and adds arguments or environment
+    /// variables to [`Node::serve_command`]; it runs again on every attempt.
+    ///
+    /// The API port was picked by [`free_port`] and is bound later by the server, so
+    /// another process may take it in between. When the server exits during start with the
+    /// code `start.api.bind`, the node picks a new port and `launch` runs again, at most
+    /// [`START_ATTEMPTS`] times in all; every attempt that lost the race is logged to
+    /// standard error. Every other failure fails the test at once with the output of the
+    /// server, the bind failure of another listener (cluster, DNS, DHCP, metrics) included:
+    /// the test holds those ports, and the node cannot move them.
+    #[track_caller]
+    pub fn start_by(&mut self, launch: impl Fn(&Node) -> Proc) -> Proc {
+        retry_on_bind(
+            self,
+            |node, _| {
+                let mut server = launch(node);
+                let ready =
+                    server.wait_stdout_line(READY_TIMEOUT, |line| line.contains(" ready at "));
+                if ready.is_some() {
+                    node.wait_for_ready_probe(&mut server);
+                    return Ok(server);
+                }
+                // `None` is the end of standard output or the time limit. The output ends
+                // slightly before the exit status is available, so a server that stopped
+                // is never judged by `is_running` here: `finish` waits for the exit.
+                assert!(
+                    server.stdout_closed(),
+                    "the server was not ready within {READY_TIMEOUT:?}\n{}",
+                    server.diagnostics()
+                );
+                Err(server.finish(STOP_TIMEOUT))
+            },
+            |node| node.port = free_port(),
+        )
     }
 
     #[track_caller]

@@ -23,14 +23,11 @@
 
 mod serve_support;
 
-use std::{fmt::Write as _, fs, path::Path, time::Duration};
+use std::{fmt::Write as _, fs, path::Path};
 
 use reqwest::Method;
 use serde_json::{Value, json};
-use serve_support::{
-    Node, Proc, READY_PATH, READY_TIMEOUT, STOP_TIMEOUT, api::Api, free_port, step_marker,
-    wait_for_setup_token,
-};
+use serve_support::{Node, Proc, api::Api, step_marker, wait_for_setup_token};
 
 /// The key set of the test UI: key, English text, note for translators.
 const KEYS: [(&str, &str, &str); 5] = [
@@ -185,47 +182,12 @@ fn write_ui(dir: &Path) {
 /// the environment variable of the same key carries it).
 #[track_caller]
 fn start_node(node: &mut Node, ui: &Path) -> Proc {
-    for attempt in 1..=5 {
+    node.start_by(|node| {
         node.write_config();
         let mut command = node.serve_command();
         command.env("TENKO_SERVER__UI_DIR", ui);
-        let mut server = Proc::spawn(command);
-        if server
-            .wait_stdout_line(READY_TIMEOUT, |line| line.contains(" ready at "))
-            .is_some()
-        {
-            let deadline = std::time::Instant::now() + READY_TIMEOUT;
-            loop {
-                assert!(
-                    server.is_running(),
-                    "the server stopped while becoming ready\n{}",
-                    server.diagnostics()
-                );
-                if matches!(node.get(READY_PATH), Ok((200, _))) {
-                    return server;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the readiness probe never answered 200\n{}",
-                    server.diagnostics()
-                );
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-        assert!(
-            !server.is_running(),
-            "the server was not ready within {READY_TIMEOUT:?}\n{}",
-            server.diagnostics()
-        );
-        let outcome = server.finish(STOP_TIMEOUT);
-        assert!(
-            attempt < 5 && outcome.stderr.contains("start.api.bind"),
-            "the server did not start\n{}",
-            outcome.diagnostics()
-        );
-        node.port = free_port();
-    }
-    unreachable!("the loop returns or panics");
+        Proc::spawn(command)
+    })
 }
 
 /// A node with the test UI, started, set up, with the administrator signed in.

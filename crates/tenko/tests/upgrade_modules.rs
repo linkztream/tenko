@@ -19,21 +19,18 @@ const RESTART_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Writes the node's configuration with `top` among the top-level keys and starts it,
 /// unsupervised.
+#[track_caller]
 fn start_with(node: &mut Node, top: &str) -> Proc {
     start_as(node, top, false)
 }
 
 /// The same, with `TENKO_SUPERVISED=1` when `supervised`.
+#[track_caller]
 fn start_as(node: &mut Node, top: &str, supervised: bool) -> Proc {
-    loop {
+    node.start_by(|node| {
         let text = node.config_text().replacen(
-            "roles = \"controller\"
-",
-            &format!(
-                "roles = \"controller\"
-{top}
-"
-            ),
+            "roles = \"controller\"\n",
+            &format!("roles = \"controller\"\n{top}\n"),
             1,
         );
         std::fs::write(node.config_path(), text).expect("write tenko.toml");
@@ -49,24 +46,8 @@ fn start_as(node: &mut Node, top: &str, supervised: bool) -> Proc {
         if supervised {
             command.env("TENKO_SUPERVISED", "1");
         }
-        let mut server = Proc::spawn(command);
-        if server
-            .wait_stdout_line(serve_support::READY_TIMEOUT, |line| {
-                line.contains(" ready at ")
-            })
-            .is_some()
-        {
-            return server;
-        }
-        let outcome = server.finish(serve_support::STOP_TIMEOUT);
-        assert!(
-            outcome.stderr.contains("start.api.bind"),
-            "the server did not start
-{}",
-            outcome.diagnostics()
-        );
-        node.port = serve_support::free_port();
-    }
+        Proc::spawn(command)
+    })
 }
 
 fn assert_ipam_absent(api: &Api) {

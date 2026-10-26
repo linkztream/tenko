@@ -20,8 +20,9 @@ use serve_support::{Node, Proc, api::Api, wait_for_setup_token};
 const RESTART_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Starts the node, supervised when `supervised`, with `args` after `serve`.
+#[track_caller]
 fn start(node: &mut Node, supervised: bool, args: &[&str]) -> Proc {
-    loop {
+    node.start_by(|node| {
         node.write_config();
         let mut command = node.serve_command();
         command.args(args);
@@ -36,23 +37,8 @@ fn start(node: &mut Node, supervised: bool, args: &[&str]) -> Proc {
         if supervised {
             command.env("TENKO_SUPERVISED", "1");
         }
-        let mut server = Proc::spawn(command);
-        if server
-            .wait_stdout_line(serve_support::READY_TIMEOUT, |line| {
-                line.contains(" ready at ")
-            })
-            .is_some()
-        {
-            return server;
-        }
-        let outcome = server.finish(serve_support::STOP_TIMEOUT);
-        assert!(
-            outcome.stderr.contains("start.api.bind"),
-            "the server did not start\n{}",
-            outcome.diagnostics()
-        );
-        node.port = serve_support::free_port();
-    }
+        Proc::spawn(command)
+    })
 }
 
 /// The node id of the server, from its status.
