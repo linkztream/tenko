@@ -25,6 +25,10 @@
 //! A refusal of the store closes the [`RefusalGate`] (P3-Q14): the hand-off refuses until
 //! the gate's trial interval passes, and the worker answers from
 //! [`RefusalGate::decide`].
+//!
+//! E32: the queue is made for [`CommitSettings::queue`] changes, which the role sizes from
+//! the image ([`crate::sizing`]) with the configured value as the cap, and grows with a
+//! new image ([`StoreLeases::grow`]).
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -32,7 +36,7 @@ use std::{
     pin::pin,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -55,7 +59,8 @@ use crate::store::{CommitError, Completion, LeaseStore, SubmitError, Ticket};
 /// The committer's limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitSettings {
-    /// Changes the hand-off queue holds; a full queue drops the request (`queue`).
+    /// Changes the hand-off queue holds; a full queue drops the request (`queue`). E32: the
+    /// role starts it at the room of the image ([`crate::sizing`]), this value its cap.
     pub queue: usize,
     /// Batches proposed at once.
     pub max_in_flight: usize,
@@ -110,7 +115,8 @@ struct Queued {
 
 struct Shared {
     node: NodeId,
-    capacity: usize,
+    // E32: the queue grows with the image; read under the queue's lock.
+    capacity: AtomicUsize,
     queue: Mutex<VecDeque<Queued>>,
     wake: Notify,
     completions: Mutex<Vec<Completion>>,
@@ -186,7 +192,7 @@ impl StoreLeases {
         let capacity = settings.queue.max(1);
         let shared = Arc::new(Shared {
             node,
-            capacity,
+            capacity: AtomicUsize::new(capacity),
             queue: Mutex::new(VecDeque::with_capacity(capacity)),
             wake: Notify::new(),
             completions: Mutex::new(Vec::with_capacity(capacity)),
@@ -242,6 +248,18 @@ impl StoreLeases {
         }
     }
 
+    // E32: the queue grows with the image.
+    /// The changes the hand-off queue holds.
+    pub fn capacity(&self) -> usize {
+        self.shared.capacity.load(Ordering::Relaxed)
+    }
+
+    /// Grows the hand-off queue to `capacity` changes; a smaller one changes nothing.
+    /// Allocates: called by the role when it installs an image, never on the DORA path.
+    pub fn grow(&self, capacity: usize) {
+        grow_queue(&self.shared.queue, &self.shared.capacity, capacity);
+    }
+
     /// Changes waiting in the hand-off queue.
     pub fn queued(&self) -> usize {
         self.shared
@@ -263,7 +281,7 @@ impl LeaseStore for StoreLeases {
                 .queue
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if queue.len() >= self.shared.capacity {
+            if queue.len() >= self.shared.capacity.load(Ordering::Relaxed) {
                 return Err(SubmitError::Full);
             }
             queue.push_back(Queued {
@@ -293,6 +311,26 @@ impl LeaseStore for StoreLeases {
     fn accepting(&self) -> bool {
         self.shared.gate.accepting()
     }
+}
+
+// E32: the hand-off queues of both families grow with the image.
+/// Grows a hand-off queue whose bound is `capacity` to `to` entries: the larger queue is
+/// made outside the lock, the waiting entries move into it under the lock, and the bound
+/// rises with it, so a hand-off never pushes past the room it has.
+pub(crate) fn grow_queue<T>(queue: &Mutex<VecDeque<T>>, capacity: &AtomicUsize, to: usize) {
+    if to <= capacity.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut grown: VecDeque<T> = VecDeque::with_capacity(to);
+    let mut held = queue.lock().unwrap_or_else(PoisonError::into_inner);
+    if to <= capacity.load(Ordering::Relaxed) {
+        return;
+    }
+    grown.extend(held.drain(..));
+    let old = std::mem::replace(&mut *held, grown);
+    capacity.store(to, Ordering::Relaxed);
+    drop(held);
+    drop(old);
 }
 
 /// Whether a store error means the store cannot commit now (P3-Q14), rather than a fault
@@ -327,7 +365,9 @@ impl Committer {
             .read()
             .get(change.vrf, change.addr)
             .map_or(client, |held| {
-                self.key_of((1u8, held.scope, held.client.identity().as_slice()))
+                let mut held_identity = [0u8; MAX_IDENTITY];
+                let held_len = held.client.identity(&mut held_identity);
+                self.key_of((1u8, held.scope, &held_identity[..held_len]))
             });
         [address, client, holder]
     }
@@ -424,7 +464,7 @@ impl Committer {
         let now = Timestamp::now();
         let built = {
             let table = self.shared.leases.read();
-            let previous = table.get(queued.change.vrf, queued.change.addr).cloned();
+            let previous = table.lease(queued.change.vrf, queued.change.addr);
             batch::build(
                 &queued.change,
                 self.shared.node,

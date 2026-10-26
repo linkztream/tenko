@@ -13,10 +13,17 @@
 //! other is). The worker that offers an address claims it with [`OfferBook::hold`], which
 //! fails when another client holds it, so two workers cannot offer one address to two
 //! clients.
+//!
+//! E32: the table is made for the offers the image can need ([`crate::sizing`]) and grows
+//! with a new image ([`OfferTable::grow`]): stripe by stripe, a larger stripe is made
+//! outside its lock and the live offers move into it under the lock.
 
 use std::{
     net::Ipv4Addr,
-    sync::{Mutex, PoisonError},
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use tenko_core::{PrefixId, Timestamp};
@@ -60,39 +67,107 @@ impl Slot {
     }
 }
 
+/// The stripes of the table.
+const STRIPES: usize = 64;
+
 /// The reference [`OfferBook`]: fixed stripes of slots.
 #[derive(Debug)]
 pub struct OfferTable {
     stripes: Box<[Mutex<Box<[Slot]>>]>,
-    slots_per_stripe: usize,
+    // E32: the table grows with the image; a stripe's slot count is its own length.
+    capacity: AtomicUsize,
+}
+
+/// The slots of one stripe for about `capacity` live offers in the whole table.
+fn per_stripe(capacity: usize) -> usize {
+    (capacity.saturating_mul(2) / STRIPES).max(64)
+}
+
+/// The stripe of a scope's hash and an address, and the hash the probe window starts at.
+fn spot(scope: u64, addr: u32) -> (usize, u64) {
+    let key = hash::mix(scope ^ u64::from(addr));
+    // The table is small; the cast keeps the low bits of the hash.
+    #[allow(clippy::cast_possible_truncation, reason = "the low bits of a hash")]
+    ((key as usize) % STRIPES, key >> 32)
+}
+
+/// Where a probe window starts in a stripe of `len` slots.
+fn start_in(high: u64, len: usize) -> usize {
+    // The stripe is small; the cast keeps the low bits of the hash.
+    #[allow(clippy::cast_possible_truncation, reason = "the low bits of a hash")]
+    let high = high as usize;
+    high % len.max(1)
 }
 
 impl OfferTable {
-    /// A table for about `capacity` live offers (at least 64 slots per stripe): the number
-    /// of DISCOVERs a second the role answers times the offer lifetime, with room to spare.
+    /// A table for about `capacity` live offers (at least 64 slots per stripe): the
+    /// addresses the image can offer ([`crate::sizing`]), or for a load the number of
+    /// DISCOVERs a second times the offer lifetime.
     pub fn with_capacity(capacity: usize) -> Self {
-        let stripes = 64;
-        let slots_per_stripe = (capacity.saturating_mul(2) / stripes).max(64);
-        let stripes = (0..stripes)
-            .map(|_| Mutex::new(vec![Slot::default(); slots_per_stripe].into_boxed_slice()))
+        let slots = per_stripe(capacity);
+        let stripes = (0..STRIPES)
+            .map(|_| Mutex::new(vec![Slot::default(); slots].into_boxed_slice()))
             .collect();
         Self {
             stripes,
-            slots_per_stripe,
+            capacity: AtomicUsize::new(capacity),
         }
     }
 
-    fn place(&self, scope: PrefixId, addr: Ipv4Addr) -> (u64, u32, usize, usize) {
+    /// The live offers the table is made for.
+    pub fn capacity(&self) -> usize {
+        self.capacity.load(Ordering::Relaxed)
+    }
+
+    // E32: the offers grow with the image.
+    /// Grows the table to about `capacity` live offers; a smaller one changes nothing.
+    /// Each stripe is made anew outside its lock and its live offers move in under it, so
+    /// the workers wait at most for one stripe's move. Allocates: never on the DORA path.
+    pub fn grow(&self, capacity: usize) {
+        if capacity <= self.capacity() {
+            return;
+        }
+        let slots = per_stripe(capacity);
+        let now = Timestamp::now().unix_nanos();
+        for stripe in 0..self.stripes.len() {
+            if self.lock(stripe).len() >= slots {
+                continue;
+            }
+            let mut grown = vec![Slot::default(); slots].into_boxed_slice();
+            let old = {
+                let mut held = self.lock(stripe);
+                if held.len() >= slots {
+                    continue;
+                }
+                let len = grown.len();
+                for slot in held.iter().filter(|slot| slot.live(now)) {
+                    let (_, high) = spot(slot.scope, slot.addr);
+                    let start = start_in(high, len);
+                    let mut at = start;
+                    for step in 0..PROBE.min(len) {
+                        let index = (start + step) % len;
+                        if !grown[index].used {
+                            at = index;
+                            break;
+                        }
+                        if grown[index].until < grown[at].until {
+                            at = index;
+                        }
+                    }
+                    grown[at] = *slot;
+                }
+                std::mem::replace(&mut *held, grown)
+            };
+            drop(old);
+        }
+        self.capacity.fetch_max(capacity, Ordering::Relaxed);
+    }
+
+    fn place(scope: PrefixId, addr: Ipv4Addr) -> (u64, u32, usize, u64) {
         let scope = hash::of(&scope);
         let addr = u32::from(addr);
-        let key = hash::mix(scope ^ u64::from(addr));
-        // The table is small; the casts keep the low bits of the hash.
-        #[allow(clippy::cast_possible_truncation, reason = "the low bits of a hash")]
-        let (stripe, start) = (
-            (key as usize) % self.stripes.len(),
-            ((key >> 32) as usize) % self.slots_per_stripe,
-        );
-        (scope, addr, stripe, start)
+        let (stripe, high) = spot(scope, addr);
+        (scope, addr, stripe, high)
     }
 
     fn lock(&self, stripe: usize) -> std::sync::MutexGuard<'_, Box<[Slot]>> {
@@ -118,9 +193,10 @@ impl OfferHold for OfferTable {
         identity: &[u8],
         now: Timestamp,
     ) -> bool {
-        let (scope, addr, stripe, start) = self.place(scope, addr);
+        let (scope, addr, stripe, high) = Self::place(scope, addr);
         let now = now.unix_nanos();
         let slots = self.lock(stripe);
+        let start = start_in(high, slots.len());
         for step in 0..PROBE.min(slots.len()) {
             let slot = &slots[(start + step) % slots.len()];
             if !slot.used {
@@ -143,11 +219,12 @@ impl OfferBook for OfferTable {
         until: Timestamp,
         now: Timestamp,
     ) -> bool {
-        let (scope, addr, stripe, start) = self.place(scope, addr);
+        let (scope, addr, stripe, high) = Self::place(scope, addr);
         let (now, until) = (now.unix_nanos(), until.unix_nanos());
         let who = hash::of_bytes(identity);
         let mut slots = self.lock(stripe);
         let len = slots.len();
+        let start = start_in(high, len);
         let mut free = None;
         let mut oldest = start % len;
         for step in 0..PROBE.min(len) {
@@ -239,5 +316,38 @@ mod tests {
         let last = Ipv4Addr::from(0xc000_0000 + 19_999);
         assert!(table.held_for_other(scope, last, b"x", at(1)));
         assert!(table.live(at(1)) <= 64 * 64);
+    }
+
+    #[test]
+    fn a_grown_table_keeps_its_offers_and_holds_more() {
+        let table = OfferTable::with_capacity(1);
+        let scope = PrefixId::generate();
+        let now = Timestamp::now();
+        let until = now.checked_add(Duration::from_secs(600)).expect("a time");
+        for host in 0..2_000u32 {
+            let addr = Ipv4Addr::from(0xc000_0000 + host);
+            assert!(table.hold(scope, addr, &host.to_be_bytes(), until, now));
+        }
+        let before = table.live(now);
+        table.grow(100_000);
+        assert_eq!(table.capacity(), 100_000);
+        assert_eq!(table.live(now), before, "every live offer moved");
+        for host in 0..2_000u32 {
+            let addr = Ipv4Addr::from(0xc000_0000 + host);
+            let identity = host.to_be_bytes();
+            if table.held_for_other(scope, addr, b"another", now) {
+                assert!(!table.held_for_other(scope, addr, &identity, now));
+            }
+        }
+        for host in 2_000..60_000u32 {
+            let addr = Ipv4Addr::from(0xc000_0000 + host);
+            assert!(table.hold(scope, addr, &host.to_be_bytes(), until, now));
+        }
+        assert!(
+            table.live(now) > 55_000,
+            "room for the larger image's offers"
+        );
+        table.grow(10);
+        assert_eq!(table.capacity(), 100_000, "it never shrinks");
     }
 }

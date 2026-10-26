@@ -160,7 +160,7 @@ proptest! {
         let held: Vec<&Lease> = table.rows().values().collect();
         prop_assert_eq!(held, model.values().collect::<Vec<_>>());
         for (addr, lease) in &model {
-            prop_assert_eq!(table.get(vrf, *addr), Some(lease));
+            prop_assert_eq!(table.lease(vrf, *addr), Some(lease.clone()));
         }
 
         // The client index only names rows of the client and the scope.
@@ -168,7 +168,7 @@ proptest! {
             for client in 0..4 {
                 let identity = identity_of(client);
                 if let Some(found) = table.by_client(scope, &identity) {
-                    prop_assert_eq!(found.client.identity(), identity);
+                    prop_assert_eq!(found.client.to_key().identity(), identity);
                     prop_assert_eq!(found.scope, scope);
                     prop_assert_eq!(table.get(found.vrf, found.addr), Some(found));
                 }
@@ -222,7 +222,7 @@ proptest! {
         let before = table.clone();
         table.apply(then);
         prop_assert_eq!(&table, &before);
-        prop_assert_eq!(table.by_client(scope, &identity_of(client_a)), Some(&now));
+        prop_assert_eq!(table.client_lease(scope, &identity_of(client_a)), Some(now.clone()));
     }
 }
 
@@ -1120,7 +1120,7 @@ fn free_for(
             .is_none_or(|r| r.identity == identity)
         && table
             .get(world.vrf, addr)
-            .is_none_or(|l| !l.blocks(now) || l.client.identity() == identity)
+            .is_none_or(|l| !l.blocks(now) || l.client.is(identity))
         && hold.is_none_or(|(held, owner)| *held != addr || owner == identity)
 }
 
@@ -1282,7 +1282,7 @@ fn run_allocation(
             }
             // Not held by another client's lease.
             if let Some(lease) = table.get(world.vrf, addr) {
-                prop_assert!(!lease.blocks(now) || lease.client.identity() == identity);
+                prop_assert!(!lease.blocks(now) || lease.client.is(&identity));
             }
             // Not held by an offer for another client.
             if let Some((held, owner)) = &hold {
@@ -1312,7 +1312,7 @@ fn run_allocation(
             elapsed,
             elapsed + step.lease_secs,
         )
-        .to_lease(NodeId(1), table.get(world.vrf, addr));
+        .to_lease(NodeId(1), table.lease(world.vrf, addr).as_ref());
         table.apply(granted);
     }
     Ok(())

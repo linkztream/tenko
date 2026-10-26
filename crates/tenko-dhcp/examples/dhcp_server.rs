@@ -49,7 +49,7 @@ use tenko_core::{
 };
 use tenko_dhcp::{
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
-    lease::{LeaseTable, PendingChange},
+    lease::{LeaseTable, LeaseView, PendingChange},
     metrics::EXCHANGE_BUCKETS_US,
     server::{DhcpServer, Listen, ServerConfig},
     store::{Completion, LeaseStore, MemLeaseStore, SubmitError, Ticket},
@@ -142,13 +142,17 @@ struct HashTable {
 }
 
 impl LeaseTable for HashTable {
-    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<&Lease> {
-        self.rows.get(&(vrf, addr))
+    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<LeaseView<'_>> {
+        self.rows.get(&(vrf, addr)).map(LeaseView::of)
     }
 
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease> {
+    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<LeaseView<'_>> {
         let key = self.by_client.get(&scope)?.get(identity)?;
-        self.rows.get(key)
+        self.rows.get(key).map(LeaseView::of)
+    }
+
+    fn lease(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease> {
+        self.rows.get(&(vrf, addr)).cloned()
     }
 
     fn apply(&mut self, lease: Lease) {

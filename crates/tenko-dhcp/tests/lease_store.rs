@@ -230,7 +230,7 @@ async fn another_clients_binding_is_never_taken() {
     assert!(outcome(1).is_ok());
     assert!(matches!(outcome(2), Err(CommitError::Refused(_))));
     assert_eq!(leases_store.stats().held_by_other, 1);
-    let held = leases.read().get(vrf, addr(50)).cloned().expect("a row");
+    let held = leases.read().lease(vrf, addr(50)).expect("a row");
     assert_eq!(held.client.identity(), identity_of(1));
     // An operator's reclaim may take it.
     let mut reclaim = second.clone();
@@ -380,7 +380,7 @@ async fn a_refusing_store_closes_the_gate_until_a_commit() {
             .outcome
             .is_ok()
     );
-    let before: Lease = leases.read().get(vrf, addr(30)).cloned().expect("the row");
+    let before: Lease = leases.read().lease(vrf, addr(30)).expect("the row");
     assert!(leases_store.gate().finding().is_none());
 
     // The store refuses: the renewal's commit fails, and the gate closes.
@@ -436,7 +436,7 @@ async fn a_refusing_store_closes_the_gate_until_a_commit() {
     let finding = leases_store.gate().finding().expect("still raised");
     assert_eq!((finding.answered, finding.dropped), (1, 1));
     // Nothing was written for the renewal.
-    assert_eq!(leases.read().get(vrf, addr(30)), Some(&before));
+    assert_eq!(leases.read().lease(vrf, addr(30)), Some(before.clone()));
     assert_eq!(
         rows(store.as_ref()).await.leases.get(&(vrf, addr(30))),
         Some(&before)

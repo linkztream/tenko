@@ -1,11 +1,15 @@
 //! The role's lease table (plan section 2.2): every row of `dhcp.leases` in memory, indexed
 //! by address and by client, so that the DORA path never reads the store.
 //!
-//! [`LeaseIndex`] is the production [`LeaseTable`]: hash maps by VRF and address, and per
-//! scope by client identity, with the rows of each client kept beside the index entry so
-//! that moving the entry to a client's latest row never scans the table. It follows the
-//! rules of the reference [`MemLeaseTable`](super::MemLeaseTable) (`tests/lease_table.rs`
-//! checks the two against each other on random sequences):
+//! [`LeaseIndex`] is the production [`LeaseTable`]: a hash map by VRF and address of
+//! compact rows ([`super::row`]: the fields the DORA path reads inline, the client and the
+//! rest in one boxed byte string), and a client index by a keyed hash of the scope and the
+//! client identity whose entries list the addresses of that client's rows, so that moving
+//! the index to a client's latest row never scans the table. Two clients whose hashes
+//! collide share an entry and each lookup keeps only the rows of the client asked for, so
+//! a collision costs a comparison, never a wrong answer. It follows the rules of the
+//! reference [`MemLeaseTable`](super::MemLeaseTable) (`tests/lease_table.rs` checks the
+//! two against each other on random sequences):
 //!
 //! - a row replaces the held one unless the held one is newer: written at a later revision
 //!   when both revisions are known ([`LeaseIndex::apply_at`]), else with a later client
@@ -14,12 +18,18 @@
 //! - the client index points at the client's row with the latest `cltt` in a scope, then
 //!   the highest address, as `dhcp.leases.by_client` does.
 //!
+//! A row costs about 148 octets in the map (with its key and its share of the spare
+//! buckets) and 43 in the client index, plus its byte string: about 214 octets a lease all
+//! in for the rows of M30, against about 1 KiB when the whole `Lease` sat in the map
+//! (`bench/phase3-dhcp/results/2026-10-26-e32-after-memory.md`).
+//!
 //! [`SharedLeases`] is the handle the workers read through (a read lock per lookup, which
 //! does not allocate) and the committer and the feed write through; it also tells waiters
 //! when the table reaches a revision.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    hash::{BuildHasher, RandomState},
     net::Ipv4Addr,
     sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
     time::Duration,
@@ -31,20 +41,28 @@ use tenko_core::{
 };
 use tokio::sync::Notify;
 
-use super::LeaseTable;
+use super::{
+    LeaseTable,
+    row::{LeaseView, Row},
+};
 
-/// A held row and the revision that wrote it (`Revision::ZERO` when unknown).
+/// The key of a row: its VRF and address.
+type Key = (VrfId, Ipv4Addr);
+
+/// The rows of one entry of the client index: usually one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Held {
-    lease: Lease,
-    revision: Revision,
+enum Keys {
+    One(Key),
+    Many(Box<[Key]>),
 }
 
-/// The rows of one client in one scope, and the index entry among them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ClientRows {
-    rows: Vec<(VrfId, Ipv4Addr)>,
-    best: Option<(VrfId, Ipv4Addr)>,
+impl Keys {
+    fn as_slice(&self) -> &[Key] {
+        match self {
+            Self::One(key) => std::slice::from_ref(key),
+            Self::Many(keys) => keys,
+        }
+    }
 }
 
 /// One entry of the client index that a lease change moves: the client of `scope` and
@@ -62,9 +80,13 @@ pub struct IndexUpdate {
 /// The production lease table.
 #[derive(Debug, Clone, Default)]
 pub struct LeaseIndex {
-    rows: HashMap<(VrfId, Ipv4Addr), Held>,
-    clients: HashMap<PrefixId, HashMap<Vec<u8>, ClientRows>>,
+    rows: HashMap<Key, Row>,
+    /// The keyed hash of a scope and a client identity, to the rows of that client there.
+    clients: HashMap<u64, Keys>,
+    hasher: RandomState,
     revision: Revision,
+    /// The encoder's buffer, so that a row costs one allocation of its own size.
+    scratch: Vec<u8>,
 }
 
 /// The identity of a lease's client, written into a stack buffer.
@@ -87,8 +109,8 @@ impl LeaseIndex {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             rows: HashMap::with_capacity(capacity),
-            clients: HashMap::new(),
-            revision: Revision::ZERO,
+            clients: HashMap::with_capacity(capacity),
+            ..Self::default()
         }
     }
 
@@ -121,40 +143,51 @@ impl LeaseIndex {
 
     /// The revision that wrote the row of an address, when known.
     pub fn row_revision(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<Revision> {
-        self.rows.get(&(vrf, addr)).map(|held| held.revision)
+        self.rows.get(&(vrf, addr)).map(|row| row.revision)
     }
 
     /// The rows written at a revision after `revision`, with their revisions.
     pub fn rows_after(&self, revision: Revision) -> Vec<(Lease, Revision)> {
         self.rows
-            .values()
-            .filter(|held| held.revision > revision)
-            .map(|held| (held.lease.clone(), held.revision))
+            .iter()
+            .filter(|(_, row)| row.revision > revision)
+            .map(|(key, row)| (row.to_lease(key.0, key.1), row.revision))
             .collect()
     }
 
-    /// Every row, in no particular order.
-    pub fn iter(&self) -> impl Iterator<Item = &Lease> {
-        self.rows.values().map(|held| &held.lease)
+    /// Every row as the DORA path reads it, in no particular order.
+    pub fn iter(&self) -> impl Iterator<Item = LeaseView<'_>> {
+        self.rows.iter().map(|(key, row)| row.view(key.0, key.1))
+    }
+
+    /// Every row whole, in no particular order (allocates per row).
+    pub fn leases(&self) -> impl Iterator<Item = Lease> + '_ {
+        self.rows
+            .iter()
+            .map(|(key, row)| row.to_lease(key.0, key.1))
     }
 
     /// The rows by VRF and address, ordered: for comparisons with the store and the
     /// reference table.
-    pub fn sorted_rows(&self) -> std::collections::BTreeMap<(VrfId, Ipv4Addr), Lease> {
+    pub fn sorted_rows(&self) -> BTreeMap<(VrfId, Ipv4Addr), Lease> {
         self.rows
             .iter()
-            .map(|(key, held)| (*key, held.lease.clone()))
+            .map(|(key, row)| (*key, row.to_lease(key.0, key.1)))
             .collect()
     }
 
     /// The client index, ordered as `dhcp.leases.by_client` is keyed.
-    pub fn client_index(&self) -> std::collections::BTreeMap<(PrefixId, Vec<u8>), LeaseRef> {
-        let mut out = std::collections::BTreeMap::new();
-        for (scope, clients) in &self.clients {
-            for (identity, rows) in clients {
-                if let Some((vrf, addr)) = rows.best {
-                    out.insert((*scope, identity.clone()), LeaseRef { vrf, addr });
-                }
+    pub fn client_index(&self) -> BTreeMap<(PrefixId, Vec<u8>), LeaseRef> {
+        let mut out = BTreeMap::new();
+        let mut identity = [0u8; MAX_IDENTITY];
+        for row in self.rows.values() {
+            let len = row.client().identity(&mut identity);
+            let entry = (row.scope, identity[..len].to_vec());
+            if out.contains_key(&entry) {
+                continue;
+            }
+            if let Some((vrf, addr)) = self.best(row.scope, &identity[..len], None, None) {
+                out.insert(entry, LeaseRef { vrf, addr });
             }
         }
         out
@@ -171,11 +204,8 @@ impl LeaseIndex {
             (BindingState::Reset, 0),
             (BindingState::Backup, 0),
         ];
-        for held in self.rows.values() {
-            if let Some(slot) = counts
-                .iter_mut()
-                .find(|(state, _)| *state == held.lease.state)
-            {
+        for row in self.rows.values() {
+            if let Some(slot) = counts.iter_mut().find(|(state, _)| *state == row.state) {
                 slot.1 += 1;
             }
         }
@@ -188,11 +218,9 @@ impl LeaseIndex {
         let mut due: Vec<_> = self
             .rows
             .iter()
-            .filter(|(_, held)| {
-                matches!(
-                    held.lease.state,
-                    BindingState::Active | BindingState::Abandoned
-                ) && held.lease.ends <= now
+            .filter(|(_, row)| {
+                matches!(row.state, BindingState::Active | BindingState::Abandoned)
+                    && row.ends <= now
             })
             .map(|(key, _)| *key)
             .collect();
@@ -209,7 +237,7 @@ impl LeaseIndex {
             let newer_held = if held.revision != Revision::ZERO && revision != Revision::ZERO {
                 held.revision > revision
             } else {
-                held.lease.cltt > lease.cltt
+                held.cltt > lease.cltt
             };
             if newer_held {
                 return false;
@@ -218,15 +246,17 @@ impl LeaseIndex {
         let scope = lease.scope;
         let mut identity = [0u8; MAX_IDENTITY];
         let len = identity_of(&lease, &mut identity);
-        let previous = self.rows.insert(key, Held { lease, revision });
+        let row = Row::new(&lease, revision, &mut self.scratch);
+        drop(lease);
+        let previous = self.rows.insert(key, row);
         if revision > self.revision {
             self.revision = revision;
         }
         if let Some(previous) = previous {
             let mut held_identity = [0u8; MAX_IDENTITY];
-            let held_len = identity_of(&previous.lease, &mut held_identity);
-            if previous.lease.scope != scope || held_identity[..held_len] != identity[..len] {
-                self.detach(previous.lease.scope, &held_identity[..held_len], key);
+            let held_len = previous.client().identity(&mut held_identity);
+            if previous.scope != scope || held_identity[..held_len] != identity[..len] {
+                self.detach(previous.scope, &held_identity[..held_len], key);
             }
         }
         self.attach(scope, &identity[..len], key);
@@ -235,42 +265,92 @@ impl LeaseIndex {
 
     /// Removes the row of an address; returns it.
     pub fn take(&mut self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease> {
-        let held = self.rows.remove(&(vrf, addr))?;
+        let row = self.rows.remove(&(vrf, addr))?;
         let mut identity = [0u8; MAX_IDENTITY];
-        let len = identity_of(&held.lease, &mut identity);
-        self.detach(held.lease.scope, &identity[..len], (vrf, addr));
-        Some(held.lease)
+        let len = row.client().identity(&mut identity);
+        self.detach(row.scope, &identity[..len], (vrf, addr));
+        Some(row.to_lease(vrf, addr))
     }
 
-    fn attach(&mut self, scope: PrefixId, identity: &[u8], key: (VrfId, Ipv4Addr)) {
-        let clients = self.clients.entry(scope).or_default();
-        if !clients.contains_key(identity) {
-            clients.insert(identity.to_vec(), ClientRows::default());
-        }
-        if let Some(entry) = clients.get_mut(identity) {
-            if !entry.rows.contains(&key) {
-                entry.rows.push(key);
+    fn client_hash(&self, scope: PrefixId, identity: &[u8]) -> u64 {
+        self.hasher.hash_one((scope, identity))
+    }
+
+    fn attach(&mut self, scope: PrefixId, identity: &[u8], key: Key) {
+        let hash = self.client_hash(scope, identity);
+        match self.clients.get_mut(&hash) {
+            None => {
+                self.clients.insert(hash, Keys::One(key));
             }
-            entry.best = best_of(&self.rows, &entry.rows, None, None);
+            Some(keys) if keys.as_slice().contains(&key) => {}
+            Some(keys) => {
+                let grown: Box<[Key]> = keys
+                    .as_slice()
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(key))
+                    .collect();
+                *keys = Keys::Many(grown);
+            }
         }
     }
 
-    fn detach(&mut self, scope: PrefixId, identity: &[u8], key: (VrfId, Ipv4Addr)) {
-        let Some(clients) = self.clients.get_mut(&scope) else {
+    fn detach(&mut self, scope: PrefixId, identity: &[u8], key: Key) {
+        let hash = self.client_hash(scope, identity);
+        let Some(keys) = self.clients.get_mut(&hash) else {
             return;
         };
-        let Some(entry) = clients.get_mut(identity) else {
-            return;
-        };
-        entry.rows.retain(|held| *held != key);
-        if entry.rows.is_empty() {
-            clients.remove(identity);
-            if clients.is_empty() {
-                self.clients.remove(&scope);
+        let left: Vec<Key> = keys
+            .as_slice()
+            .iter()
+            .copied()
+            .filter(|held| *held != key)
+            .collect();
+        match left.as_slice() {
+            [] => {
+                self.clients.remove(&hash);
             }
-        } else {
-            entry.best = best_of(&self.rows, &entry.rows, None, None);
+            [one] => *keys = Keys::One(*one),
+            _ => *keys = Keys::Many(left.into_boxed_slice()),
         }
+    }
+
+    /// The client's row with the latest `cltt`, then the highest address, among its rows
+    /// in `scope` other than `skip`, and `extra` (a key and the `cltt` of a row about to be
+    /// written there). Does not allocate.
+    fn best(
+        &self,
+        scope: PrefixId,
+        identity: &[u8],
+        skip: Option<Key>,
+        extra: Option<(Key, Timestamp)>,
+    ) -> Option<Key> {
+        let mut best: Option<(Timestamp, Ipv4Addr, Key)> = None;
+        let mut consider = |key: Key, cltt: Timestamp| {
+            let rank = (cltt, key.1);
+            if best.is_none_or(|(best_cltt, best_addr, _)| rank > (best_cltt, best_addr)) {
+                best = Some((cltt, key.1, key));
+            }
+        };
+        let keys = self
+            .clients
+            .get(&self.client_hash(scope, identity))
+            .map_or(&[][..], Keys::as_slice);
+        for key in keys {
+            if Some(*key) == skip {
+                continue;
+            }
+            if let Some(row) = self.rows.get(key)
+                && row.scope == scope
+                && row.client().is(identity)
+            {
+                consider(*key, row.cltt);
+            }
+        }
+        if let Some((key, cltt)) = extra {
+            consider(key, cltt);
+        }
+        best.map(|(_, _, key)| key)
     }
 
     /// The entries of the client index that applying `lease` in place of the row held at
@@ -281,13 +361,8 @@ impl LeaseIndex {
         let key = (lease.vrf, lease.addr);
         let mut out = Vec::new();
         let identity = lease.client.identity();
-        let rows = self
-            .clients
-            .get(&lease.scope)
-            .and_then(|clients| clients.get(identity.as_slice()));
-        let current = rows.and_then(|rows| rows.best);
-        let candidates: &[(VrfId, Ipv4Addr)] = rows.map_or(&[], |rows| rows.rows.as_slice());
-        let best = best_of(&self.rows, candidates, Some(key), Some(lease));
+        let current = self.best(lease.scope, &identity, None, None);
+        let best = self.best(lease.scope, &identity, Some(key), Some((key, lease.cltt)));
         if best != current {
             out.push(IndexUpdate {
                 scope: lease.scope,
@@ -295,26 +370,17 @@ impl LeaseIndex {
                 target: best.map(|(vrf, addr)| LeaseRef { vrf, addr }),
             });
         }
-        if let Some(previous) = self.rows.get(&key).map(|held| &held.lease) {
-            let held_identity = previous.client.identity();
-            if previous.scope != lease.scope || held_identity != identity {
-                let rows = self
-                    .clients
-                    .get(&previous.scope)
-                    .and_then(|clients| clients.get(held_identity.as_slice()));
-                let current = rows.and_then(|rows| rows.best);
-                let candidates: &[(VrfId, Ipv4Addr)] =
-                    rows.map_or(&[], |rows| rows.rows.as_slice());
-                let remaining: Vec<(VrfId, Ipv4Addr)> = candidates
-                    .iter()
-                    .copied()
-                    .filter(|held| *held != key)
-                    .collect();
-                let best = best_of(&self.rows, &remaining, None, None);
+        if let Some(previous) = self.rows.get(&key) {
+            let mut held = [0u8; MAX_IDENTITY];
+            let held_len = previous.client().identity(&mut held);
+            let held_identity = &held[..held_len];
+            if previous.scope != lease.scope || held_identity != identity.as_slice() {
+                let current = self.best(previous.scope, held_identity, None, None);
+                let best = self.best(previous.scope, held_identity, Some(key), None);
                 if best != current {
                     out.push(IndexUpdate {
                         scope: previous.scope,
-                        identity: held_identity,
+                        identity: held_identity.to_vec(),
                         target: best.map(|(vrf, addr)| LeaseRef { vrf, addr }),
                     });
                 }
@@ -324,43 +390,20 @@ impl LeaseIndex {
     }
 }
 
-/// The client's row with the latest `cltt`, then the highest address, among `keys`; with
-/// `replace`, the row at that key is `lease` (added when absent from `keys`).
-fn best_of(
-    rows: &HashMap<(VrfId, Ipv4Addr), Held>,
-    keys: &[(VrfId, Ipv4Addr)],
-    replace: Option<(VrfId, Ipv4Addr)>,
-    lease: Option<&Lease>,
-) -> Option<(VrfId, Ipv4Addr)> {
-    let mut best: Option<(Timestamp, Ipv4Addr, (VrfId, Ipv4Addr))> = None;
-    let mut consider = |key: (VrfId, Ipv4Addr), cltt: Timestamp| {
-        let rank = (cltt, key.1);
-        if best.is_none_or(|(best_cltt, best_addr, _)| rank > (best_cltt, best_addr)) {
-            best = Some((cltt, key.1, key));
-        }
-    };
-    for key in keys {
-        if Some(*key) == replace {
-            continue;
-        }
-        if let Some(held) = rows.get(key) {
-            consider(*key, held.lease.cltt);
-        }
-    }
-    if let (Some(key), Some(lease)) = (replace, lease) {
-        consider(key, lease.cltt);
-    }
-    best.map(|(_, _, key)| key)
-}
-
 impl LeaseTable for LeaseIndex {
-    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<&Lease> {
-        self.rows.get(&(vrf, addr)).map(|held| &held.lease)
+    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<LeaseView<'_>> {
+        self.rows.get(&(vrf, addr)).map(|row| row.view(vrf, addr))
     }
 
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease> {
-        let key = self.clients.get(&scope)?.get(identity)?.best?;
-        self.get(key.0, key.1)
+    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<LeaseView<'_>> {
+        let (vrf, addr) = self.best(scope, identity, None, None)?;
+        self.get(vrf, addr)
+    }
+
+    fn lease(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease> {
+        self.rows
+            .get(&(vrf, addr))
+            .map(|row| row.to_lease(vrf, addr))
     }
 
     fn apply(&mut self, lease: Lease) {

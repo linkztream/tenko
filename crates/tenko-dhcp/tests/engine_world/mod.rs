@@ -310,7 +310,7 @@ impl World {
 
     /// Applies a committed change to the table, as the server does after the commit.
     pub fn commit(&mut self, change: &PendingChange) {
-        let previous = self.leases.get(change.vrf, change.addr).cloned();
+        let previous = self.leases.lease(change.vrf, change.addr);
         self.leases
             .apply(change.to_lease(NodeId(1), previous.as_ref()));
     }

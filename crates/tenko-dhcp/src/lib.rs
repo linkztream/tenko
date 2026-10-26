@@ -44,6 +44,8 @@ pub mod probe;
 pub mod ra;
 // WP7.3: the listeners, the workers and the committer around the engine.
 pub mod server;
+// E32: the room of the role's fixed tables, from the configuration image.
+pub mod sizing;
 pub mod store;
 pub mod v4;
 // WP9.1: DHCPv6: the codec, the engine, the lease path of `dhcp.leases6` and the listeners.

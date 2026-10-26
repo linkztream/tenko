@@ -29,7 +29,10 @@ use tenko_core::{
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt as _, StoreError};
 
-use crate::{lease::CommitStats, v4::engine::MetricsSnapshot};
+use crate::{
+    lease::{CommitStats, LeaseView},
+    v4::engine::MetricsSnapshot,
+};
 
 /// List a page of the node's leases.
 pub const LEASES_LIST: &str = "dhcp.leases.list";
@@ -198,6 +201,17 @@ impl LeaseListArgs {
 
     /// Whether `lease` passes the filters (the cursor aside).
     pub fn matches(&self, lease: &Lease) -> bool {
+        self.matches_view(&LeaseView::of(lease), || Some(lease.clone()))
+    }
+
+    // E32: the filters over the table's compact rows.
+    /// [`Self::matches`] over the view of a table row; `whole` gives the whole row, which
+    /// only the name filter reads.
+    pub fn matches_view(
+        &self,
+        lease: &LeaseView<'_>,
+        whole: impl FnOnce() -> Option<Lease>,
+    ) -> bool {
         self.scope.is_none_or(|scope| lease.scope == scope)
             && self.vrf.is_none_or(|vrf| lease.vrf == vrf)
             && self.exact.is_none_or(|addr| lease.addr == addr)
@@ -205,14 +219,18 @@ impl LeaseListArgs {
                 .addr
                 .as_deref()
                 .is_none_or(|text| lease.addr.to_string().starts_with(text))
-            && self.mac.is_none_or(|mac| mac_of(lease) == Some(mac))
+            && self
+                .mac
+                .is_none_or(|mac| lease.client.mac().map(MacAddr::new) == Some(mac))
             && self.state.is_none_or(|state| lease.state == state)
             && self.name.as_deref().is_none_or(|text| {
                 let text = text.to_lowercase();
-                [&lease.hostname, &lease.fqdn]
-                    .into_iter()
-                    .flatten()
-                    .any(|name| name.to_lowercase().contains(&text))
+                whole().is_some_and(|lease| {
+                    [&lease.hostname, &lease.fqdn]
+                        .into_iter()
+                        .flatten()
+                        .any(|name| name.to_lowercase().contains(&text))
+                })
             })
     }
 }

@@ -272,8 +272,7 @@ impl Lab {
     }
 
     fn row(&self, addr: Ipv4Addr) -> Option<tenko_core::dhcp::Lease> {
-        self.server
-            .with_table(|table| table.get(self.vrf, addr).cloned())
+        self.server.with_table(|table| table.lease(self.vrf, addr))
     }
 }
 

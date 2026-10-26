@@ -73,7 +73,7 @@ use crate::class::{Decision, Facts};
 use crate::{
     allocator::{Allocator, Choice, PoolOwnership, Request, grant_time},
     image::{ConfigImage, PoolImage, ScopeImage},
-    lease::{InlineBytes, LeaseTable, PendingChange, PendingFingerprint, PendingRelay},
+    lease::{InlineBytes, LeaseTable, LeaseView, PendingChange, PendingFingerprint, PendingRelay},
 };
 
 /// The largest reply the engine writes: an Ethernet MTU less the IP and UDP headers.
@@ -448,15 +448,8 @@ fn later(now: Timestamp, secs: u32) -> Timestamp {
 }
 
 /// Whether `lease` belongs to the client of `identity`.
-pub fn is_holder(lease: &Lease, identity: &[u8]) -> bool {
-    let mut held = [0u8; MAX_IDENTITY];
-    let len = write_identity(
-        lease.client.htype,
-        &lease.client.chaddr.0,
-        lease.client.client_id.as_ref().map(|id| id.0.as_slice()),
-        &mut held,
-    );
-    &held[..len] == identity
+pub fn is_holder(lease: &LeaseView<'_>, identity: &[u8]) -> bool {
+    lease.client.is(identity)
 }
 
 fn allocate(
@@ -810,7 +803,7 @@ fn decline(
     let holds = ctx
         .leases
         .get(home.vrf, addr)
-        .is_some_and(|lease| lease.state.holds_address() && is_holder(lease, client.identity));
+        .is_some_and(|lease| lease.state.holds_address() && is_holder(&lease, client.identity));
     if !holds {
         return Action::Ignore(IgnoreReason::NotHolder);
     }
@@ -852,7 +845,7 @@ fn release(
         return Action::Ignore(IgnoreReason::NotHolder);
     };
     let holds = ctx.leases.get(home.vrf, addr).is_some_and(|lease| {
-        lease.state == BindingState::Active && is_holder(lease, client.identity)
+        lease.state == BindingState::Active && is_holder(&lease, client.identity)
     });
     if !holds {
         return Action::Ignore(IgnoreReason::NotHolder);

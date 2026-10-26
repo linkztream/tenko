@@ -5,7 +5,7 @@
 //! a grant or a renewal from the committer, a release, an expiry from `dhcp.expiry`, an
 //! operator's reclaim. Nothing runs on the DORA path. For each changed row it builds a
 //! [`DdnsRequest`] (add for an active binding, remove otherwise) into a [`MemDdnsQueue`]
-//! sized at start, and takes the queue in batches:
+//! bounded at start (its room grows as it fills, E32), and takes the queue in batches:
 //!
 //! 1. the names each lease should hold ([`plan::desired`]): the scope's DDNS settings, the
 //!    zone's DHCP switch with the profile's default, the name rules, IPAM's names;

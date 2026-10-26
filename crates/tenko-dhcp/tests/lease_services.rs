@@ -97,7 +97,7 @@ async fn expiry_writes_what_ran_out_and_nothing_else() {
     for last in 10..=15 {
         let lease = &found.leases[&(vrf, addr(last))];
         assert_eq!(lease.state, BindingState::Expired, "{last}");
-        assert_eq!(leases.read().get(vrf, addr(last)), Some(lease));
+        assert_eq!(leases.read().lease(vrf, addr(last)).as_ref(), Some(lease));
     }
     assert_eq!(found.leases[&(vrf, addr(16))].state, BindingState::Active);
     assert_eq!(found.leases[&(vrf, addr(17))].state, BindingState::Released);

@@ -109,12 +109,13 @@ pub struct MemDdnsQueue {
 }
 
 impl MemDdnsQueue {
-    /// A queue of at most `limit` requests, its room taken at start (up to 65,536
-    /// requests; a larger limit grows the room as it fills).
+    /// A queue of at most `limit` requests. E32: its room starts at 1,024 requests and grows
+    /// as it fills (the queue is fed by a store watch after the commit, not by the DORA
+    /// path), so an idle role does not hold room for 65,536.
     pub fn new(limit: usize) -> Self {
         Self {
             limit,
-            queue: Mutex::new(VecDeque::with_capacity(limit.min(65_536))),
+            queue: Mutex::new(VecDeque::with_capacity(limit.min(1_024))),
         }
     }
 

@@ -107,7 +107,7 @@ fn a_relay_listener_runs_dora_renew_and_release_through_the_store() {
         .expect("committed");
     assert_eq!(row.state, BindingState::Active);
     wait_for("the table takes the commit", || {
-        server.with_table(|table| table.get(row.vrf, addr).is_some_and(|l| l == row))
+        server.with_table(|table| table.lease(row.vrf, addr).is_some_and(|l| &l == row))
     });
 
     // A renewal through the relay moves the end.

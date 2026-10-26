@@ -604,3 +604,80 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
     };
     assert!(!gone, "the role stopped answering");
 }
+
+// E32 (M34): the role's fixed tables follow the image.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn e32_ops_15_the_roles_tables_start_at_the_floor_and_grow_with_the_scopes() {
+    let installing = Installing::new();
+    let store: Arc<dyn Store> = Arc::clone(&installing) as Arc<dyn Store>;
+    let config = ConfigService::with_direct_jobs(Arc::clone(&store));
+    let vrf = VrfId::generate();
+    network(
+        &store,
+        &config,
+        vrf,
+        "192.0.2.0/24",
+        ("192.0.2.100", "192.0.2.199"),
+    )
+    .await;
+    let role = Role::start(
+        Arc::clone(&store),
+        NodeId(1),
+        RoleSettings {
+            server: ServerConfig {
+                listen: vec![Listen {
+                    address: SocketAddrV4::new(LOOPBACK, 0),
+                    mode: ListenMode::Relay,
+                    interface: None,
+                }],
+                workers: 1,
+                layout: SocketLayout::Shared,
+                ..ServerConfig::default()
+            },
+            commit: CommitSettings::default(),
+            probe: false,
+            probe_expected: false,
+            server6: tenko_dhcp::v6::server::Server6Config::default(),
+        },
+    )
+    .await
+    .expect("start");
+    let node = role.node();
+    let floor = tenko_dhcp::sizing::FLOOR;
+    let room = node.room().expect("a server");
+    assert_eq!(
+        (room.pending, room.offers),
+        (floor, floor),
+        "100 addresses get the floor"
+    );
+    assert_eq!(node.lease_store().capacity(), floor);
+    assert_eq!(node.lease_store6().capacity(), floor, "no DHCPv6 scope");
+
+    // Two more scopes with their whole host range: 100 + 254 + 254 addresses.
+    network(
+        &store,
+        &config,
+        vrf,
+        "198.51.100.0/24",
+        ("198.51.100.1", "198.51.100.254"),
+    )
+    .await;
+    network(
+        &store,
+        &config,
+        vrf,
+        "203.0.113.0/24",
+        ("203.0.113.1", "203.0.113.254"),
+    )
+    .await;
+    until("the image holds three scopes", || node.status().scopes == 3).await;
+    let room = node.room().expect("a server");
+    assert_eq!((room.pending, room.offers), (608, 608));
+    assert_eq!(node.lease_store().capacity(), 608);
+    assert_eq!(
+        node.lease_store6().capacity(),
+        floor,
+        "the DHCPv6 queue follows the DHCPv6 scopes"
+    );
+    role.stop().await;
+}

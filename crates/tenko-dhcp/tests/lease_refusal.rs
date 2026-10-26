@@ -106,7 +106,7 @@ async fn scenario(dir: PathBuf) {
     lease_store.submit(&granted, Ticket(1)).expect("queued");
     let done = completions(&lease_store, 1, Duration::from_secs(10)).await;
     assert!(done[0].outcome.is_ok(), "{done:?}");
-    let before = leases.read().get(vrf, addr(30)).cloned().expect("the row");
+    let before = leases.read().lease(vrf, addr(30)).expect("the row");
 
     // The hook refuses: the renewal's commit fails with the store's refusal.
     std::fs::write(&refuse, b"").expect("the hook file");
@@ -169,7 +169,7 @@ async fn scenario(dir: PathBuf) {
         .await
         .expect("reads go on");
     let stored = rebuild_from_view(view.as_ref()).expect("rebuilt");
-    assert_eq!(stored.get(vrf, addr(30)), Some(&before));
+    assert_eq!(stored.lease(vrf, addr(30)), Some(before.clone()));
 
     // The hook is removed: the trial after the interval commits and clears the finding.
     std::fs::remove_file(&refuse).expect("removed");

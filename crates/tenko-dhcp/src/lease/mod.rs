@@ -29,6 +29,7 @@
 //! | [`history`] | [`PurgeService`], history retention per profile (P3-Q13) |
 //! | [`refusal`] | [`RefusalGate`], the behaviour while the store refuses (P3-Q14) |
 //! | [`metrics`] | the series the lease path counts |
+//! | [`row`] | the table's compact row and [`LeaseView`], what the DORA path reads of a lease (E32) |
 
 pub mod batch;
 pub mod commit;
@@ -40,6 +41,8 @@ pub mod metrics;
 pub mod observe;
 pub mod offer;
 pub mod refusal;
+// E32: the compact row of the table and the view the DORA path reads.
+pub mod row;
 pub mod table;
 
 pub use commit::{CommitSettings, CommitStats, Committer, StoreLeases};
@@ -48,6 +51,7 @@ pub use follow::{LeaseFollower, rebuild_from_view};
 pub use history::{HistoryProfile, HistoryRetention, PurgeService, PurgeSettings};
 pub use offer::OfferTable;
 pub use refusal::{RefusalGate, WhileRefused};
+pub use row::{ClientView, LeaseView};
 pub use table::{LeaseIndex, SharedLeases};
 
 use std::{collections::BTreeMap, net::Ipv4Addr};
@@ -64,12 +68,27 @@ use tenko_core::{
 use crate::v4::RelayAgentInfo;
 
 /// The role's in-memory leases. Lookups never allocate.
+///
+/// E32: the lookups of the DORA path return a [`LeaseView`], the fields it reads borrowed
+/// from the table, so that the production table can keep a compact row instead of a whole
+/// [`Lease`]; [`LeaseTable::lease`] gives the whole row off the DORA path.
 pub trait LeaseTable {
     /// The lease of an address.
-    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<&Lease>;
+    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<LeaseView<'_>>;
 
     /// The lease of a client identity in a scope ([`ClientKey::identity`]).
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease>;
+    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<LeaseView<'_>>;
+
+    /// The whole row of an address, as the store holds it. Allocates; not for the DORA
+    /// path.
+    fn lease(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease>;
+
+    /// The whole row of a client identity in a scope ([`LeaseTable::by_client`], then
+    /// [`LeaseTable::lease`]). Allocates; not for the DORA path.
+    fn client_lease(&self, scope: PrefixId, identity: &[u8]) -> Option<Lease> {
+        let found = self.by_client(scope, identity)?;
+        self.lease(found.vrf, found.addr)
+    }
 
     /// Takes a committed row: inserted when the address has none, replaced when its
     /// `cltt` is not older than the row held, ignored otherwise. The client index follows.
@@ -139,13 +158,17 @@ pub(crate) fn latest_row(
 }
 
 impl LeaseTable for MemLeaseTable {
-    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<&Lease> {
-        self.rows.get(&(vrf, addr))
+    fn get(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<LeaseView<'_>> {
+        self.rows.get(&(vrf, addr)).map(LeaseView::of)
     }
 
-    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<&Lease> {
+    fn by_client(&self, scope: PrefixId, identity: &[u8]) -> Option<LeaseView<'_>> {
         let key = self.by_client.get(&scope)?.get(identity)?;
-        self.rows.get(key)
+        self.rows.get(key).map(LeaseView::of)
+    }
+
+    fn lease(&self, vrf: VrfId, addr: Ipv4Addr) -> Option<Lease> {
+        self.rows.get(&(vrf, addr)).cloned()
     }
 
     fn apply(&mut self, lease: Lease) {

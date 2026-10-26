@@ -11,11 +11,15 @@
 //! - E31: the DHCPv4 and DHCPv6 fuzz targets are in the fuzz crate with their sources, and
 //!   the weekly fuzz smoke of the CI workflow runs every target `cargo fuzz list` prints.
 //! - E32: the newest exit result file (`-e32-` in its name) holds the M30, M33 and M34 rows;
-//!   the thresholds (M30 below 50 MiB, M33 below 2 percent by the plan's method, M34 below
-//!   100 MB on the musl binary) are ignored tests until the rows pass.
+//!   M30 (the table of 100,000 leases below 50 MiB) and M34 on the workstation's Windows
+//!   release build (below 100 MB) pass since the role's tables were made compact and sized
+//!   from the configuration; M33 below 2 percent by the plan's method and M34 on the musl
+//!   binary are ignored tests until the rows pass.
 //!
 //! A result file is found by the date prefix of its name and a part of its name; the newest
-//! by name wins. The verdict convention is that of `bench/README.md`: one line
+//! by name wins, except that a file which names others in a `Supersedes:` line below its
+//! title replaces them (a second run of the same day whose name sorts first). The verdict
+//! convention is that of `bench/README.md`: one line
 //! `Verdict: <word>`, optionally followed by ` (<qualifier>)`, right below the title. The
 //! tests read files only, so they run anywhere.
 
@@ -32,7 +36,26 @@ fn results_dir() -> PathBuf {
         .join("results")
 }
 
-/// The newest Markdown result file whose name holds `part`, by the date prefix of its name.
+/// The file names a result file replaces: the back-quoted names of its `Supersedes:` line,
+/// one of the eight lines below its title.
+fn superseded_by(path: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    text.lines()
+        .take(8)
+        .filter_map(|line| line.strip_prefix("Supersedes:"))
+        .flat_map(|names| {
+            names
+                .split('`')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The newest Markdown result file whose name holds `part`, by the date prefix of its name,
+/// among those no other names in its `Supersedes:` line.
 fn newest_result(part: &str) -> PathBuf {
     let dir = results_dir();
     let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| {
@@ -59,6 +82,11 @@ fn newest_result(part: &str) -> PathBuf {
             candidates.push((name, path));
         }
     }
+    let superseded: Vec<String> = candidates
+        .iter()
+        .flat_map(|(_, path)| superseded_by(path))
+        .collect();
+    candidates.retain(|(name, _)| !superseded.contains(name));
     candidates.sort();
     candidates
         .pop()
@@ -244,7 +272,6 @@ fn e32_ops_15_the_exit_result_file_records_m30_m33_and_m34() {
 
 /// E32 and OPS-15 (M30): the role's table and indexes of 100,000 leases below 50 MiB.
 #[test]
-#[ignore = "M30 FAILs: the table of 100,000 leases holds about 97 MiB (phase-3-exit.md); run when M30 passes"]
 fn e32_ops_15_the_memory_of_100000_leases_is_below_50_mib() {
     let path = newest_result("-e32-");
     let (text, _) = verdict(&path, "E32 (OPS-15), M30");
@@ -264,6 +291,28 @@ fn e32_ops_21_the_metrics_cost_on_the_dora_path_is_below_2_percent() {
         "E32 (OPS-21), M33: {} carries `{line}`, not `Verdict: PASS`",
         path.display()
     );
+}
+
+/// E32 and OPS-15 (M34) on the workstation: the idle resident set of the Windows release
+/// build with every role including `dhcp` serving the home scopes is below 100 MB. The
+/// criterion's figure is the musl binary's (the next test); this is the figure measured
+/// here.
+#[test]
+fn e32_ops_15_the_idle_rss_with_every_role_on_the_workstation_is_below_100_mb() {
+    let path = newest_result("-e32-");
+    let (text, _) = verdict(&path, "E32 (OPS-15), M34");
+    let row = text
+        .lines()
+        .find(|line| line.starts_with("| M34 ") && line.contains("Windows"))
+        .unwrap_or_else(|| panic!("E32 (OPS-15), M34: {} has no Windows row", path.display()));
+    let cell = row
+        .trim()
+        .trim_end_matches('|')
+        .rsplit('|')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    assert!(cell.starts_with("PASS"), "E32 (OPS-15), M34: {row}");
 }
 
 /// E32 and OPS-15 (M34): the idle resident set with every role including `dhcp` serving

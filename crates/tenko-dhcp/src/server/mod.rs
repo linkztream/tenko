@@ -38,6 +38,13 @@
 //! the image, so [`DhcpServer::swap`], which replaces both under the table's write guard,
 //! is seen whole: no request is answered from a new image and an old table, or the
 //! reverse.
+//!
+//! E32: the fixed tables (the pending commits, the offer slots, the conflict probe's
+//! pending table and cache) are sized from the image ([`crate::sizing`]): the addresses
+//! it can lease, between a floor and the configured sizes ([`ServerConfig::pending`],
+//! [`ServerConfig::offers`], [`ConflictSettings`]), which are upper bounds. A new image
+//! ([`DhcpServer::set_image`], [`DhcpServer::swap`]) grows them before the workers see it,
+//! on the caller's thread; they never shrink while the server runs.
 
 pub mod link;
 mod socket;
@@ -69,6 +76,7 @@ use crate::{
     allocator::SingleNode,
     image::ConfigImage,
     lease::{LeaseTable, PendingChange, SharedLeases},
+    sizing::{self, Limits, Room},
     store::{Completion, LeaseStore, SubmitError, Ticket},
     v4::{
         MessageType,
@@ -122,9 +130,10 @@ pub struct ServerConfig {
     pub layout: SocketLayout,
     /// The engine's settings.
     pub engine: EngineSettings,
-    /// How many commits may be in flight; a request beyond is dropped (`queue`).
+    /// How many commits may be in flight at most; a request beyond is dropped (`queue`).
+    /// E32: the table holds as many as the image can lease ([`crate::sizing`]), up to this.
     pub pending: usize,
-    /// How many offers the offer table holds about.
+    /// How many offers the offer table holds about at most; sized as `pending` is.
     pub offers: usize,
     /// `SO_RCVBUF` (0 keeps the system's).
     pub recv_buffer: usize,
@@ -245,10 +254,10 @@ struct Pending {
     free: Vec<u32>,
 }
 
-impl Pending {
-    fn new(capacity: usize) -> Self {
+impl Slot {
+    fn empty() -> Self {
         let now = Instant::now();
-        let slot = Slot {
+        Self {
             used: false,
             generation: 0,
             change: engine::empty_change(),
@@ -260,13 +269,56 @@ impl Pending {
             request: None,
             received: now,
             submitted: now,
-        };
-        let capacity = u32::try_from(capacity.max(1)).unwrap_or(u32::MAX);
+        }
+    }
+}
+
+/// A slot count as the tickets' index half holds it.
+fn slot_count(capacity: usize) -> u32 {
+    u32::try_from(capacity.max(1)).unwrap_or(u32::MAX)
+}
+
+impl Pending {
+    fn new(capacity: usize) -> Self {
+        let capacity = slot_count(capacity);
         Self {
-            slots: vec![slot; capacity as usize].into_boxed_slice(),
+            slots: vec![Slot::empty(); capacity as usize].into_boxed_slice(),
             free: (0..capacity).rev().collect(),
         }
     }
+}
+
+// E32: the pending commits grow with the image.
+/// Grows the pending commits to `capacity` slots: the new table is made outside the lock,
+/// and under it the slots in use move to the same index, so every ticket handed out stays
+/// valid. A smaller `capacity` changes nothing.
+fn grow_pending(pending: &Mutex<Pending>, capacity: usize) {
+    let capacity = slot_count(capacity);
+    let held = pending
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .slots
+        .len();
+    if capacity as usize <= held {
+        return;
+    }
+    let mut slots = vec![Slot::empty(); capacity as usize].into_boxed_slice();
+    let mut free: Vec<u32> = Vec::with_capacity(capacity as usize);
+    let old = {
+        let mut pending = pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let held = pending.slots.len();
+        if capacity as usize <= held {
+            return;
+        }
+        for (new, old) in slots.iter_mut().zip(pending.slots.iter_mut()) {
+            std::mem::swap(new, old);
+        }
+        free.extend((u32::try_from(held).unwrap_or(u32::MAX)..capacity).rev());
+        free.extend_from_slice(&pending.free);
+        pending.free = free;
+        std::mem::replace(&mut pending.slots, slots)
+    };
+    drop(old);
 }
 
 fn ticket_of(index: u32, generation: u32) -> Ticket {
@@ -304,6 +356,8 @@ struct Shared<H> {
     node: NodeId,
     // WP8.5: the pending table, the probe cache and the DECLINE limit.
     conflicts: Arc<Conflicts>,
+    // E32: the configured sizes, the caps of the tables sized from the image.
+    limits: Limits,
 }
 
 impl<H> Shared<H> {
@@ -412,14 +466,27 @@ impl<H: TableHandle> DhcpServer<H> {
                 link_layer: link.is_some(),
             })
             .collect();
+        // E32: the tables as large as the image needs, the settings their caps.
+        let limits = Limits {
+            pending: config.pending,
+            offers: config.offers,
+            probe_pending: config.conflict.pending,
+            probe_cache: config.conflict.cache_entries,
+        };
+        let room = limits.room(sizing::leasable(&image));
+        let conflict = ConflictSettings {
+            pending: room.probe_pending,
+            cache_entries: room.probe_cache,
+            ..config.conflict.clone()
+        };
         let shared = Arc::new(Shared {
             image: RwLock::new(Arc::new(image)),
             generation: AtomicU64::new(1),
             table,
-            offers: OfferTable::with_capacity(config.offers),
+            offers: OfferTable::with_capacity(room.offers),
             store,
             drive,
-            pending: Mutex::new(Pending::new(config.pending)),
+            pending: Mutex::new(Pending::new(room.pending)),
             in_flight: AtomicUsize::new(0),
             sockets: bound.iter().map(|b| Arc::clone(&b.sockets[0])).collect(),
             links,
@@ -431,7 +498,8 @@ impl<H: TableHandle> DhcpServer<H> {
             committer: Mutex::new(None),
             settings: config.engine,
             node: config.node,
-            conflicts: Arc::new(Conflicts::new(&config.conflict)),
+            conflicts: Arc::new(Conflicts::new(&conflict)),
+            limits,
         });
         let mut threads = Vec::with_capacity(total + 1);
         let committer = {
@@ -499,8 +567,10 @@ impl<H: TableHandle> DhcpServer<H> {
 
     // WP7.5: the snapshot reset and the completion wake-up of the role.
     /// Replaces the image and, through `reset`, the lease table under the table's write
-    /// guard, so that the workers see both or neither (a snapshot install).
+    /// guard, so that the workers see both or neither (a snapshot install). The fixed
+    /// tables grow for the new image first (E32).
     pub fn swap(&self, image: ConfigImage, reset: impl FnOnce(&mut H::Table)) {
+        self.fit(&image);
         let mut table = self.shared.table.write();
         reset(&mut table);
         *self
@@ -534,14 +604,45 @@ impl<H: TableHandle> DhcpServer<H> {
         &self.locals
     }
 
-    /// Swaps the configuration image.
+    /// Swaps the configuration image; the fixed tables grow for it first (E32).
     pub fn set_image(&self, image: ConfigImage) {
+        self.fit(&image);
         *self
             .shared
             .image
             .write()
             .unwrap_or_else(PoisonError::into_inner) = Arc::new(image);
         self.shared.generation.fetch_add(1, Ordering::Release);
+    }
+
+    // E32: the fixed tables sized from the image.
+    /// Grows the fixed tables to the room `image` needs ([`crate::sizing`]); called before
+    /// the workers see the image, never by a worker.
+    fn fit(&self, image: &ConfigImage) {
+        let room = self.shared.limits.room(sizing::leasable(image));
+        grow_pending(&self.shared.pending, room.pending);
+        self.shared.offers.grow(room.offers);
+        self.shared
+            .conflicts
+            .grow(room.probe_pending, room.probe_cache);
+    }
+
+    /// The room of the fixed tables now: the pending commits, the offers, the conflict
+    /// probe's pending table and cache.
+    pub fn room(&self) -> Room {
+        let (probe_pending, probe_cache) = self.shared.conflicts.room();
+        Room {
+            pending: self
+                .shared
+                .pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .slots
+                .len(),
+            offers: self.shared.offers.capacity(),
+            probe_pending,
+            probe_cache,
+        }
     }
 
     /// Runs `f` on the lease table (the feed applies rows here).
@@ -934,7 +1035,7 @@ fn commit_loop<H: TableHandle>(shared: &Shared<H>) {
             }
             if !shared.table.applies_commits() {
                 let mut table = shared.table.write();
-                let previous = table.get(slot.change.vrf, slot.change.addr).cloned();
+                let previous = table.lease(slot.change.vrf, slot.change.addr);
                 table.apply(slot.change.to_lease(shared.node, previous.as_ref()));
             }
             let commit_us = micros(slot.submitted);
@@ -1113,7 +1214,7 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
                     // A table of the server's own (tests, benches): the row goes in now; the
                     // production table takes it from the lease store at its commit.
                     let mut table = shared.table.write();
-                    let previous = table.get(candidate.vrf, candidate.addr).cloned();
+                    let previous = table.lease(candidate.vrf, candidate.addr);
                     table.apply(change.to_lease(shared.node, previous.as_ref()));
                 }
                 shared.wake_committer();

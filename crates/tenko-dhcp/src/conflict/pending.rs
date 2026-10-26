@@ -264,6 +264,43 @@ impl PendingTable {
         )
     }
 
+    // E32: the table grows with the image.
+    /// The slots of the table.
+    pub fn capacity(&self) -> usize {
+        self.lock().slots.len()
+    }
+
+    /// Grows the table to `capacity` slots; a smaller one changes nothing. The new slots
+    /// and queue are made outside the lock and the parked requests keep their index, so
+    /// the dispatcher's `Ready` entries stay valid. Allocates: never on the DORA path.
+    pub fn grow(&self, capacity: usize) {
+        let capacity = u32::try_from(capacity.max(1)).unwrap_or(u32::MAX);
+        if capacity as usize <= self.capacity() {
+            return;
+        }
+        let mut slots = vec![Parked::empty(); capacity as usize].into_boxed_slice();
+        let mut free: Vec<u32> = Vec::with_capacity(capacity as usize);
+        let mut ready: VecDeque<u32> = VecDeque::with_capacity(capacity as usize);
+        let old = {
+            let mut inner = self.lock();
+            let inner = &mut *inner;
+            let held = inner.slots.len();
+            if capacity as usize <= held {
+                return;
+            }
+            for (new, old) in slots.iter_mut().zip(inner.slots.iter_mut()) {
+                std::mem::swap(new, old);
+            }
+            free.extend((u32::try_from(held).unwrap_or(u32::MAX)..capacity).rev());
+            free.extend_from_slice(&inner.free);
+            ready.extend(inner.ready.drain(..));
+            inner.free = free;
+            inner.ready = ready;
+            std::mem::replace(&mut inner.slots, slots)
+        };
+        drop(old);
+    }
+
     /// The requests waiting now.
     pub fn waiting(&self) -> usize {
         let inner = self.lock();
@@ -284,5 +321,51 @@ impl PendingTable {
         }
         inner.ready.clear();
         dropped
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parking(request: &[u8]) -> Parking<'_> {
+        Parking {
+            request,
+            source: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 67),
+            local: Ipv4Addr::new(192, 0, 2, 10),
+            mode: ListenMode::Relay,
+            listener: 0,
+            worker: 0,
+            reply: request,
+            dest: Destination::Broadcast(68),
+            candidate: Candidate::placeholder(),
+            received: Instant::now(),
+        }
+    }
+
+    // E32: the table grows with the image.
+    #[test]
+    fn a_grown_table_keeps_its_parked_requests() {
+        let table = PendingTable::new(2);
+        let deadline = Instant::now();
+        assert!(table.park(&parking(b"one"), deadline, 0));
+        assert!(table.park(&parking(b"two"), deadline, 0));
+        assert!(!table.park(&parking(b"three"), deadline, 0), "full");
+        table.grow(4);
+        assert_eq!(table.capacity(), 4);
+        assert_eq!(table.waiting(), 2);
+        assert!(table.park(&parking(b"three"), deadline, 0));
+        assert!(table.park(&parking(b"four"), deadline, 0));
+        assert!(!table.park(&parking(b"five"), deadline, 0), "full again");
+        // The requests parked before the growth come out first, under their tickets.
+        let mut out = Parked::boxed();
+        for expected in [&b"one"[..], b"two", b"three", b"four"] {
+            let ready = table.next_ready().expect("ready");
+            assert!(table.take(ready.index, ready.generation, &mut out));
+            assert_eq!(out.request(), expected);
+        }
+        assert_eq!(table.waiting(), 0);
+        table.grow(1);
+        assert_eq!(table.capacity(), 4, "it never shrinks");
     }
 }

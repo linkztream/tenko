@@ -361,6 +361,19 @@ impl Conflicts {
         &self.cache
     }
 
+    // E32: the pending table and the cache grow with the image.
+    /// Grows the pending table to `pending` slots and the cache to about `cache`
+    /// addresses; smaller values change nothing. Allocates: never on the DORA path.
+    pub fn grow(&self, pending: usize, cache: usize) {
+        self.pending.grow(pending);
+        self.cache.grow(cache);
+    }
+
+    /// The slots of the pending table and the addresses the cache holds about.
+    pub fn room(&self) -> (usize, usize) {
+        (self.pending.capacity(), self.cache.capacity())
+    }
+
     /// The reports for the role.
     pub fn reports(&self) -> &ReportQueue {
         &self.reports

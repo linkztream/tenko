@@ -215,12 +215,7 @@ pub fn remaining(table: &dyn LeaseTable, change: &PendingChange, now: Timestamp)
     let mut identity = [0u8; MAX_IDENTITY];
     let len = change.identity(&mut identity);
     let mut held_identity = [0u8; MAX_IDENTITY];
-    let held_len = tenko_core::dhcp::write_identity(
-        held.client.htype,
-        &held.client.chaddr.0,
-        held.client.client_id.as_ref().map(|id| id.0.as_slice()),
-        &mut held_identity,
-    );
+    let held_len = held.client.identity(&mut held_identity);
     if held.scope != change.scope
         || held_identity[..held_len] != identity[..len]
         || !held.is_bound(now)

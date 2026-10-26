@@ -111,7 +111,7 @@ pub fn candidate(
         .find(|sibling| sibling.network.contains(&addr))?;
     if leases
         .get(home.vrf, addr)
-        .is_some_and(|lease| engine::is_holder(lease, who))
+        .is_some_and(|lease| engine::is_holder(&lease, who))
     {
         return None;
     }

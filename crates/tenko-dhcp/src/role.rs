@@ -22,6 +22,11 @@
 //! [`Role::stop`] closes the listeners and waits for the workers, then stops the follower
 //! and the committer (changes still queued are failed, so no ACK leaves for them).
 //!
+//! E32: the fixed tables follow the image ([`crate::sizing`]): the committers' hand-off
+//! queues start at the room of the first image, with [`CommitSettings::queue`] as the cap,
+//! and the follower grows them before it installs an image that can lease more; the
+//! server grows its own tables in [`DhcpServer::set_image`] and [`DhcpServer::swap`].
+//!
 //! The node's commands ([`commands`]) and its report ([`DhcpStatus`]) go through
 //! [`DhcpNode`], the node-command interface: local on the one node of Phase 3, the same
 //! kinds over the command stream to a remote `dhcp` node in Phase 5. [`metrics`] registers
@@ -63,6 +68,7 @@ use crate::{
         refusal::Finding,
     },
     server::{DhcpServer, ListenerInfo, ServerConfig},
+    sizing,
     store_feed::{self, FeedProgress, StoreFeed},
     // WP9.1: the DHCPv6 server and its lease path beside the DHCPv4 ones.
     v6::{
@@ -260,6 +266,12 @@ impl LocalNode {
         &self.lease_store
     }
 
+    // E32: the room of the fixed tables, for the tests and the measurements.
+    /// The room of the DHCPv4 server's fixed tables while it runs ([`crate::sizing`]).
+    pub fn room(&self) -> Option<sizing::Room> {
+        self.server().map(|server| server.room())
+    }
+
     /// Follows a change of the profile's expectation of a probe (TGL-16).
     pub fn set_probe_expected(&self, expected: bool) {
         self.probe_expected.store(expected, Ordering::Relaxed);
@@ -439,13 +451,13 @@ impl LocalNode {
         let limit = commands::page_limit(args.limit);
         let (rows, next) = {
             let table = self.leases.read();
-            let mut matching: Vec<&Lease> = table
+            let mut matching: Vec<_> = table
                 .iter()
-                .filter(|lease| args.matches(lease))
                 .filter(|lease| {
                     args.after
                         .is_none_or(|after| (lease.vrf, lease.addr) > after)
                 })
+                .filter(|lease| args.matches_view(lease, || table.lease(lease.vrf, lease.addr)))
                 .collect();
             matching.sort_unstable_by_key(|lease| (lease.vrf, lease.addr));
             let next = (matching.len() > limit)
@@ -454,13 +466,13 @@ impl LocalNode {
             let rows: Vec<(Lease, Revision)> = matching
                 .into_iter()
                 .take(limit)
-                .map(|lease| {
-                    (
-                        lease.clone(),
+                .filter_map(|lease| {
+                    Some((
+                        table.lease(lease.vrf, lease.addr)?,
                         table
                             .row_revision(lease.vrf, lease.addr)
                             .unwrap_or(Revision::ZERO),
-                    )
+                    ))
                 })
                 .collect();
             (rows, next)
@@ -630,9 +642,23 @@ struct Follower {
     data: DhcpData,
     held: Revision,
     installs: Arc<AtomicU64>,
+    // E32: the committers' queues grow with the image.
+    lease_store: StoreLeases,
+    lease_store6: StoreLeases6,
+    /// The configured queue size, the cap of both.
+    queue_cap: usize,
 }
 
 impl Follower {
+    // E32: the hand-off queues sized from the image.
+    /// Grows the committers' queues to the room `image` needs, before the workers serve it.
+    fn fit_queues(&self, image: &crate::image::ConfigImage) {
+        self.lease_store
+            .grow(sizing::room(sizing::leasable(image), self.queue_cap));
+        self.lease_store6
+            .grow(sizing::room(sizing::leasable6(image.v6()), self.queue_cap));
+    }
+
     /// Applies a delta: the lease rows into the table at the delta's revision, the
     /// configuration rows into the image, rebuilt and swapped when one changed.
     fn apply(&mut self, delta: &crate::feed::Delta) -> Result<(), FeedError> {
@@ -676,7 +702,9 @@ impl Follower {
         self.data.revision = delta.to;
         self.held = delta.to;
         if configured {
-            self.server.set_image(build(&self.data).image);
+            let image = build(&self.data).image;
+            self.fit_queues(&image);
+            self.server.set_image(image);
             // WP9.1: the DHCPv6 workers answer from the same image.
             if let Some(server6) = &self.server6 {
                 server6.set_image(self.server.image());
@@ -696,6 +724,7 @@ impl Follower {
         data.leases.clear();
         data.leases6.clear();
         let revision = data.revision;
+        self.fit_queues(&built.image);
         self.server.swap(built.image, |held| {
             // The role's own commits after the image's revision stay in the table.
             for (lease, at) in held.rows_after(revision) {
@@ -851,11 +880,21 @@ impl Role {
         data.leases.clear();
         data.leases6.clear();
         let held = data.revision;
+        // E32: the hand-off queues as large as the first image needs, the setting their cap.
+        let queue_cap = settings.commit.queue;
+        let commit = CommitSettings {
+            queue: sizing::room(sizing::leasable(&built.image), queue_cap),
+            ..settings.commit
+        };
+        let commit6 = CommitSettings {
+            queue: sizing::room(sizing::leasable6(built.image.v6()), queue_cap),
+            ..settings.commit
+        };
         let (lease_store, committer) = StoreLeases::with_hook(
             Arc::clone(&store),
             leases.clone(),
             node,
-            settings.commit,
+            commit,
             Arc::clone(&observations),
         );
         // WP9.1: the DHCPv6 lease store shares the refusal gate.
@@ -863,7 +902,7 @@ impl Role {
             Arc::clone(&store),
             leases6.clone(),
             node,
-            settings.commit,
+            commit6,
             Arc::clone(&observations6),
             lease_store.gate_handle(),
         );
@@ -959,6 +998,9 @@ impl Role {
             data,
             held,
             installs: Arc::clone(&installs),
+            lease_store: lease_store.clone(),
+            lease_store6: lease_store6.clone(),
+            queue_cap,
         };
         let follow = tokio::spawn(follower.run(feed, stop.child_token()));
         // WP9.2: the router advertisement check runs with the probe role, whose drop-in

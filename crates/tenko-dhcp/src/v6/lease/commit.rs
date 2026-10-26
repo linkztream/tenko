@@ -17,7 +17,7 @@ use std::{
     pin::pin,
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::Instant,
 };
@@ -159,7 +159,8 @@ struct Queued {
 
 struct Shared {
     node: NodeId,
-    capacity: usize,
+    // E32: the queue grows with the image; read under the queue's lock.
+    capacity: AtomicUsize,
     queue: Mutex<VecDeque<Queued>>,
     wake: Notify,
     completions: Mutex<Vec<Completion>>,
@@ -225,7 +226,7 @@ impl StoreLeases6 {
         let capacity = settings.queue.max(1);
         let shared = Arc::new(Shared {
             node,
-            capacity,
+            capacity: AtomicUsize::new(capacity),
             queue: Mutex::new(VecDeque::with_capacity(capacity)),
             wake: Notify::new(),
             completions: Mutex::new(Vec::with_capacity(capacity)),
@@ -275,6 +276,18 @@ impl StoreLeases6 {
         }
     }
 
+    // E32: the queue grows with the image.
+    /// The changes the hand-off queue holds.
+    pub fn capacity(&self) -> usize {
+        self.shared.capacity.load(Ordering::Relaxed)
+    }
+
+    /// Grows the hand-off queue to `capacity` changes; a smaller one changes nothing.
+    /// Allocates: called by the role when it installs an image, never on the DORA path.
+    pub fn grow(&self, capacity: usize) {
+        crate::lease::commit::grow_queue(&self.shared.queue, &self.shared.capacity, capacity);
+    }
+
     /// Changes waiting in the hand-off queue.
     pub fn queued(&self) -> usize {
         self.shared
@@ -296,7 +309,7 @@ impl Lease6Store for StoreLeases6 {
                 .queue
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if queue.len() >= self.shared.capacity {
+            if queue.len() >= self.shared.capacity.load(Ordering::Relaxed) {
                 return Err(SubmitError::Full);
             }
             queue.push_back(Queued {

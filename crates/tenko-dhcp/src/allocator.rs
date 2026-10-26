@@ -13,14 +13,11 @@
 
 use std::net::Ipv4Addr;
 
-use tenko_core::{
-    PrefixId, Timestamp,
-    dhcp::{Lease, LeaseTimes},
-};
+use tenko_core::{PrefixId, Timestamp, dhcp::LeaseTimes};
 
 use crate::{
     image::{ConfigImage, PoolImage, ReservationImage, ScopeImage},
-    lease::LeaseTable,
+    lease::{LeaseTable, LeaseView},
 };
 
 // WP8.4: the class and policy restrictions on which addresses a client may get.
@@ -167,7 +164,7 @@ impl<'a> Request<'a> {
         if self
             .leases
             .get(scope.vrf, addr)
-            .is_some_and(|lease| lease.blocks(self.now) && !is_client(lease, self.identity))
+            .is_some_and(|lease| lease.blocks(self.now) && !is_client(&lease, self.identity))
         {
             return false;
         }
@@ -197,15 +194,8 @@ impl<'a> Request<'a> {
     }
 }
 
-fn is_client(lease: &Lease, identity: &[u8]) -> bool {
-    let mut held = [0u8; tenko_core::dhcp::lease::MAX_IDENTITY];
-    let len = tenko_core::dhcp::write_identity(
-        lease.client.htype,
-        &lease.client.chaddr.0,
-        lease.client.client_id.as_ref().map(|id| id.0.as_slice()),
-        &mut held,
-    );
-    &held[..len] == identity
+fn is_client(lease: &LeaseView<'_>, identity: &[u8]) -> bool {
+    lease.client.is(identity)
 }
 
 /// Why the allocator chose an address.
