@@ -294,6 +294,9 @@ test.describe("with a release source", () => {
     await expect(page.getByTestId("updates-running-version")).toHaveText(running);
     await expect(page.getByTestId("updates-check-state")).toHaveAttribute("data-key", "on");
     await expect(page.getByTestId("updates-source")).toHaveText(source.manifestUrl);
+    // A loopback test source is no code host: there is no release page to link to. The status bar links the version.
+    await expect(page.getByTestId("release-notes-link")).toHaveCount(0);
+    await expect(page.getByTestId("status-version")).toHaveAttribute("href", "/updates");
     await expect(page.getByTestId("updates-uptodate")).toBeVisible();
     await expect(page.getByTestId("status-update")).toHaveCount(0);
 

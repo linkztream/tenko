@@ -8,7 +8,24 @@ import { Markdown } from "./markdown";
 import { Marks } from "./Marks";
 import { releaseDate } from "./words";
 
-export function ReleaseCard(props: { release: Release; newest?: boolean }) {
+/** A link to the public release notes of a version, in a new tab. */
+export function ReleaseNotesLink(props: { version: string; href: string }) {
+  return (
+    <a
+      class="upd-notes-link"
+      href={props.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t("updates.release.notes_link_label", { version: props.version })}
+      data-testid="release-notes-link"
+      data-key={props.version}
+    >
+      {t("updates.release.notes_link")}
+    </a>
+  );
+}
+
+export function ReleaseCard(props: { release: Release; newest?: boolean; notesUrl?: string | null }) {
   const titleId = createUniqueId();
   const r = () => props.release;
   return (
@@ -22,6 +39,7 @@ export function ReleaseCard(props: { release: Release; newest?: boolean }) {
         <Show when={r().format != null}>
           <span class="muted">{t("updates.release.format", { format: r().format ?? 0 })}</span>
         </Show>
+        <Show when={props.notesUrl}>{(href) => <ReleaseNotesLink version={r().version} href={href()} />}</Show>
         <Marks
           security={r().security}
           action={r().requires_action}

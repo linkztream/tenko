@@ -1582,6 +1582,14 @@ and the newest, newest first. A release with security fixes is marked, and a rel
 requires an action is marked and shows the text of that action. Pre-releases appear only
 when `updates.prereleases` is true.
 
+The version in the status bar is a link to the page `/updates` for an administrator. The page
+shows a "Release notes" link beside the running version and beside each release. The manifest
+has no address for the notes, so the UI builds the address of the public release page,
+`<repository>/releases/tag/v<version>`, from the configured `source_url` when that has the
+form `https://<host>/<repository>/releases/latest/download/releases.json`; it opens in a new
+tab. A source of another form (a mirror, a test server) shows no link, and neither does an
+installation whose check is off and which has no manifest.
+
 After an upgrade, a user's first sign-in shows "what's new": the notes of the versions
 between the one the user saw last and the one that runs. The notes come from the changelog
 compiled into the binary, and from the stored manifest for versions the changelog lacks. The

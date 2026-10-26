@@ -10,6 +10,7 @@
 .upd-release { display: grid; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); }
 .upd-release-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); }
 .upd-release-head h3 { font-size: var(--fs-16); }
+.upd-notes-link { font-size: var(--fs-12); }
 .upd-action { margin: 0; }
 .upd-action .md > :first-child, .upd-confirm-action .md > :first-child { margin-top: 0; }
 

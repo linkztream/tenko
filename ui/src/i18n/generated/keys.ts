@@ -6789,6 +6789,7 @@ export type MessageKey =
   | "shell.status.update_security"
   | "shell.status.update_title"
   | "shell.status.version"
+  | "shell.status.version_link"
   | "shell.status.waiting"
   | "shell.theme.change"
   | "shell.theme.dark"
@@ -7037,6 +7038,8 @@ export type MessageKey =
   | "updates.release.format"
   | "updates.release.newest"
   | "updates.release.no_notes"
+  | "updates.release.notes_link"
+  | "updates.release.notes_link_label"
   | "updates.release.title"
   | "updates.releases.count"
   | "updates.releases.heading"
@@ -8469,6 +8472,7 @@ export interface MessageArgs {
   "shell.status.selection": { selected: number; total: number };
   "shell.status.update": { version: string | number };
   "shell.status.version": { version: string | number };
+  "shell.status.version_link": { version: string | number };
   "shell.status.waiting": { count: number };
   "shell.theme.change": { current: string | number };
   "shell.theme.system": { mode: string | number };
@@ -8520,6 +8524,7 @@ export interface MessageArgs {
   "updates.progress.failed": { version: string | number };
   "updates.progress.heading": { version: string | number };
   "updates.release.format": { format: string | number };
+  "updates.release.notes_link_label": { version: string | number };
   "updates.release.title": { version: string | number };
   "updates.releases.count": { count: number };
   "updates.restart.body": { version: string | number };
@@ -15332,6 +15337,7 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.status.update_security",
   "shell.status.update_title",
   "shell.status.version",
+  "shell.status.version_link",
   "shell.status.waiting",
   "shell.theme.change",
   "shell.theme.dark",
@@ -15580,6 +15586,8 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.release.format",
   "updates.release.newest",
   "updates.release.no_notes",
+  "updates.release.notes_link",
+  "updates.release.notes_link_label",
   "updates.release.title",
   "updates.releases.count",
   "updates.releases.heading",

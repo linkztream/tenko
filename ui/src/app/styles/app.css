@@ -42,6 +42,8 @@
 .statusbar a.status-alarms { display: flex; align-items: center; gap: 6px; color: var(--warn-ink); text-decoration: none; }
 .statusbar a.status-alarms.crit { color: var(--danger-ink); }
 .statusbar a.status-alarms:hover { background: var(--surface-3); }
+.statusbar a.status-version { color: inherit; text-decoration: none; }
+.statusbar a.status-version:hover { background: var(--surface-3); color: var(--ink); }
 
 /* Account menu additions. */
 .acct .row.items { padding: var(--sp-2) 0; }

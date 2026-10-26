@@ -99,7 +99,7 @@ describe("the updates page", () => {
     const card = release("0.1.1");
     expect(card.querySelector("script")).toBeNull();
     expect(card.textContent).toContain("<script>window.hacked = true</script>");
-    const links = card.querySelectorAll("a");
+    const links = card.querySelectorAll("a:not(.upd-notes-link)");
     expect(links).toHaveLength(1);
     expect(links[0]?.getAttribute("rel")).toBe("noopener noreferrer");
     expect(links[0]?.getAttribute("target")).toBe("_blank");
@@ -139,12 +139,56 @@ describe("the updates page", () => {
   });
 });
 
+describe("the links to the release notes", () => {
+  const BASE = "https://github.example.org/example/tenko/releases/tag";
+
+  it("builds the address of the release page from the release source, for the running version and each release", async () => {
+    await signInAdmin();
+    await openPage();
+    const links = screen.getAllByTestId("release-notes-link");
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([`${BASE}/v0.1.0-dev`, `${BASE}/v0.2.0`, `${BASE}/v0.1.1`]);
+    for (const link of links) {
+      expect(link.textContent).toBe("Release notes");
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+    expect(within(release("0.2.0")).getByTestId("release-notes-link").getAttribute("aria-label")).toBe(
+      "Release notes for version 0.2.0 (opens in a new tab)",
+    );
+    expect(document.querySelector(".page-head")?.contains(links[0] ?? null)).toBe(true);
+  });
+
+  it("shows nothing for a source the address of a release page cannot be built from", async () => {
+    await signInAdmin();
+    mockUpdates.source = "https://releases.example.org/tenko/releases.json";
+    await openPage();
+    expect(screen.queryByTestId("release-notes-link")).toBeNull();
+  });
+
+  it("shows nothing while the check is off and no manifest is loaded", async () => {
+    await signInAdmin();
+    mockUpdates.airGapped = true;
+    mockUpdates.manifest = null;
+    mockUpdates.releases = [];
+    await openPage();
+    expect(screen.queryByTestId("release-notes-link")).toBeNull();
+  });
+
+  it("keeps the links of a manifest that was uploaded while the check is off", async () => {
+    await signInAdmin();
+    mockUpdates.airGapped = true;
+    mockUpdates.manifest = { origin: "uploaded", at: iso(Date.now() - 3_600_000), releases: 3 };
+    await openPage();
+    expect(screen.getAllByTestId("release-notes-link").length).toBe(3);
+  });
+});
+
 describe("the update check", () => {
   it("shows the source, the interval and when it last ran, and checks on request", async () => {
     await signInAdmin();
     mockUpdates.lastChecked = iso(Date.now() - 86_400_000 * 3);
     await openPage();
-    expect(screen.getByTestId("updates-source").textContent).toBe("https://releases.example.org/tenko/releases.json");
+    expect(screen.getByTestId("updates-source").textContent).toBe("https://github.example.org/example/tenko/releases/latest/download/releases.json");
     expect(screen.getByTestId("updates-check-state").textContent).toBe("On, every 24 hours");
     const before = screen.getByTestId("updates-last-checked").textContent;
 

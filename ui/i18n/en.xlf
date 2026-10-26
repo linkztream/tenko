@@ -567,6 +567,9 @@
       <unit id="shell.status.version">
         <segment><source>Tenko DDI {version}</source></segment>
       </unit>
+      <unit id="shell.status.version_link">
+        <segment><source>Tenko DDI {version}. Open the updates page.</source></segment>
+      </unit>
       <unit id="shell.palette.label">
         <segment><source>Command palette</source></segment>
       </unit>
@@ -7211,6 +7214,12 @@
       </unit>
       <unit id="updates.release.action_unspecified">
         <segment><source>This release needs an action from you. It does not say which; read the release notes.</source></segment>
+      </unit>
+      <unit id="updates.release.notes_link">
+        <segment><source>Release notes</source></segment>
+      </unit>
+      <unit id="updates.release.notes_link_label">
+        <segment><source>Release notes for version {version} (opens in a new tab)</source></segment>
       </unit>
       <unit id="updates.release.no_notes">
         <segment><source>This release has no notes.</source></segment>

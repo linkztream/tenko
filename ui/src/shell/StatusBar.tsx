@@ -7,6 +7,7 @@ import { partition } from "../cluster/partition";
 import { Icon } from "../components/Icon";
 import { formatRelative, t, type MessageKey } from "../i18n";
 import { moduleRestart, moduleRunning } from "../updates/modules";
+import { UPDATES_PATH } from "../updates/paths";
 import { PartitionStatus } from "./ClusterBanner";
 import { now, selection, type JobCounts } from "./status";
 
@@ -83,7 +84,16 @@ export function StatusBar(props: { jobs: JobCounts | null; version: string | und
       </Show>
       <span class="grow" />
       <Show when={props.version}>
-        <span>{t("shell.status.version", { version: props.version ?? "" })}</span>
+        <Show when={isAdmin()} fallback={<span>{t("shell.status.version", { version: props.version ?? "" })}</span>}>
+          <A
+            class="status-version"
+            href={UPDATES_PATH}
+            aria-label={t("shell.status.version_link", { version: props.version ?? "" })}
+            data-testid="status-version"
+          >
+            {t("shell.status.version", { version: props.version ?? "" })}
+          </A>
+        </Show>
       </Show>
     </footer>
   );

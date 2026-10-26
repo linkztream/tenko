@@ -151,6 +151,8 @@ export interface MockUpdates {
   lastError: string | null;
   /** The release source cannot be reached (the next check fails with `update.fetch_failed`). */
   fetchFails: boolean;
+  /** The address of the release manifest (`check.source`). */
+  source: string;
   /** `tenko.toml` says `air_gapped`: no check, no download. */
   airGapped: boolean;
   /** Why this installation cannot install by itself (a container, a cluster, ...), or null. */
@@ -184,6 +186,7 @@ function fresh(): MockUpdates {
     manifest: { origin: "fetched", at: iso(Date.now() - 3_600_000), releases: 3 },
     lastChecked: iso(Date.now() - 3_600_000),
     lastError: null,
+    source: "https://github.example.org/example/tenko/releases/latest/download/releases.json",
     fetchFails: false,
     airGapped: false,
     blocked: null,
@@ -367,7 +370,7 @@ export function updateStatus(): UpdateStatus {
     check: {
       enabled: reason === null,
       interval_hours: 24,
-      source: "https://releases.example.org/tenko/releases.json",
+      source: mockUpdates.source,
     },
     install: {
       policy: policy.install,

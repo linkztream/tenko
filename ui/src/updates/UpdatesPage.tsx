@@ -14,7 +14,8 @@ import { readUpdates, type InstallStarted, type UpdateStatus } from "./api";
 import { CheckPanel } from "./CheckPanel";
 import { InstallPanel } from "./InstallPanel";
 import { InstallProgress } from "./InstallProgress";
-import { ReleaseCard } from "./ReleaseCard";
+import { releaseNotesUrl } from "./notes";
+import { ReleaseCard, ReleaseNotesLink } from "./ReleaseCard";
 import { refreshUpdateStatus } from "./status";
 import { codeText, whenText } from "./words";
 import "./marks.css";
@@ -84,7 +85,19 @@ export default function UpdatesPage() {
 
   return (
     <div class="page" data-testid="page-updates">
-      <PageHead title={t("updates.title")} sub={status() ? t("updates.sub", { version: status()?.running ?? "" }) : undefined} />
+      <PageHead
+        title={t("updates.title")}
+        sub={status() ? t("updates.sub", { version: status()?.running ?? "" }) : undefined}
+        actions={
+          <Show when={state() === "ready" ? status() : null}>
+            {(s) => (
+              <Show when={releaseNotesUrl(s(), s().running)}>
+                {(href) => <ReleaseNotesLink version={s().running} href={href()} />}
+              </Show>
+            )}
+          </Show>
+        }
+      />
       <SettingsNav />
       <div class="page-body">
         <Show when={state() === "loading"}>
@@ -204,7 +217,7 @@ function Releases(props: { status: UpdateStatus }) {
         <span class="aside">{t("updates.releases.count", { count: props.status.releases.length })}</span>
       </h2>
       <Show when={props.status.releases.length > 0} fallback={<p class="muted">{t("updates.releases.none")}</p>}>
-        <For each={props.status.releases}>{(release, i) => <ReleaseCard release={release} newest={i() === 0} />}</For>
+        <For each={props.status.releases}>{(release, i) => <ReleaseCard release={release} newest={i() === 0} notesUrl={releaseNotesUrl(props.status, release.version)} />}</For>
       </Show>
     </section>
   );
