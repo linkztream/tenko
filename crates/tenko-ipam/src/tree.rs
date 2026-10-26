@@ -60,37 +60,53 @@ use crate::{
     tables::{ADDRESSES, PREFIXES, RANGES},
 };
 
-/// Utilization of one prefix, in addresses.
+/// Utilization of one prefix, in addresses (IPAM-10).
 ///
-/// For a network: `used` counts address objects inside it, `reserved` the addresses held
-/// by its ranges that are not address objects, `capacity` the assignable addresses (IPv4
-/// without network and broadcast, IPv6 without the subnet-router anycast address), and
-/// `free` what remains. For a supernet: `used` is the space covered by child prefixes plus
-/// addresses directly inside it, and `capacity` its whole size.
+/// One definition for every prefix: the meter ([`Utilization::permille`]) is the addresses
+/// in use, `used + reserved`, of the usable addresses, `capacity`.
+///
+/// - `used`: the live address objects inside the prefix, each address once.
+/// - `reserved`: the addresses held by ranges (DHCP pools, reserved and infrastructure
+///   ranges) that are not address objects.
+/// - `capacity`: the usable addresses. A network loses its network and broadcast address
+///   (IPv4 up to /30) or its subnet-router anycast address (IPv6 up to /126); a supernet is
+///   its whole size less those addresses of every network in its tree, since an address may
+///   also lie directly in a supernet.
+///
+/// For a supernet `used` and `reserved` are the sums over its tree. How much of its space is
+/// allocated to child prefixes is a separate figure, `covered` of `size`, and never part of
+/// the meter, so an alarm on a supernet does not fire on allocation alone.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Utilization {
-    /// Addresses that can be used.
+    /// Usable addresses.
     pub capacity: u128,
-    /// Addresses in use.
+    /// Address objects inside the prefix.
     pub used: u128,
-    /// Addresses held by ranges.
+    /// Addresses held by ranges that are not address objects.
     pub reserved: u128,
-    /// Addresses left.
+    /// Usable addresses not in use.
     pub free: u128,
-    /// Addresses covered by child prefixes.
+    /// Addresses allocated to child prefixes.
     pub covered: u128,
+    /// Every address of the prefix.
+    pub size: u128,
     /// Per range role: (size, address objects inside).
     pub by_role: BTreeMap<RangeRole, (u128, u128)>,
 }
 
 impl Utilization {
+    /// Addresses in use: address objects plus the addresses ranges hold without one.
+    pub fn in_use(&self) -> u128 {
+        self.used.saturating_add(self.reserved)
+    }
+
     /// `used + reserved` in tenths of a percent of the capacity, at most 1000.
     pub fn permille(&self) -> u16 {
         if self.capacity == 0 {
             return 0;
         }
         #[allow(clippy::cast_precision_loss)]
-        let ratio = (self.used.saturating_add(self.reserved)) as f64 / self.capacity as f64;
+        let ratio = self.in_use() as f64 / self.capacity as f64;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let permille = (ratio * 1000.0).round().clamp(0.0, 1000.0) as u16;
         permille
@@ -115,10 +131,12 @@ impl Utilization {
     pub fn view(&self) -> UtilizationView {
         UtilizationView {
             capacity: self.capacity.to_string(),
+            in_use: self.in_use().to_string(),
             used: self.used.to_string(),
             reserved: self.reserved.to_string(),
             free: self.free.to_string(),
             covered: self.covered.to_string(),
+            size: self.size.to_string(),
             percent: f64::from(self.permille()) / 10.0,
             by_role: self
                 .by_role
@@ -133,29 +151,41 @@ impl Utilization {
     }
 }
 
-/// Utilization as the API shows it. Counts are decimal strings because IPv6 sizes exceed
-/// JSON's exact integers.
+/// Utilization as the API shows it (see [`Utilization`]). Counts are decimal strings because
+/// IPv6 sizes exceed JSON's exact integers. `percent` is `in_use` of `capacity` for every
+/// prefix; for a supernet `in_use`, `used` and `reserved` are sums over its tree, and
+/// `covered` of `size` is the space allocated to its child prefixes, a separate figure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct UtilizationView {
-    /// Addresses that can be used.
+    /// Usable addresses: without the network and broadcast address of a network (IPv4 up to
+    /// /30) or its subnet-router anycast address (IPv6 up to /126), and for a supernet
+    /// without those of every network in its tree.
     #[schema(example = "254")]
     pub capacity: String,
-    /// Addresses in use (for a supernet: covered by children or used directly).
+    /// Addresses in use: `used + reserved`.
+    #[schema(example = "112")]
+    pub in_use: String,
+    /// Address objects inside the prefix, each address once (for a supernet: in its whole
+    /// tree).
     #[schema(example = "12")]
     pub used: String,
-    /// Addresses held by ranges.
+    /// Addresses held by ranges that are not address objects (for a supernet: the ranges
+    /// of every network in its tree).
     #[schema(example = "100")]
     pub reserved: String,
-    /// Addresses left.
+    /// Usable addresses not in use.
     #[schema(example = "142")]
     pub free: String,
-    /// Addresses covered by child prefixes.
+    /// Addresses allocated to child prefixes (the union of the direct children).
     #[schema(example = "0")]
     pub covered: String,
-    /// `used + reserved` as a percentage of the capacity, one decimal.
+    /// Every address of the prefix, usable or not.
+    #[schema(example = "256")]
+    pub size: String,
+    /// `in_use` as a percentage of `capacity`, one decimal: the meter and the alarm level.
     #[schema(example = 44.1)]
     pub percent: f64,
-    /// Ranges per role.
+    /// Ranges per role (for a supernet: of every network in its tree).
     pub by_role: Vec<RoleUsage>,
 }
 
@@ -434,6 +464,8 @@ impl TreeImage {
             let family = &mut tree.families[old.family.index()];
             if let Some(node) = family.ranges.remove(&(old.first, id)) {
                 dirty.push(node.prefix);
+                // The supernets above count the range's addresses too.
+                dirty.extend(family.alarmed_containing(old.family, old.first));
             }
         }
         if let (Some(range), Some(vrf)) = (range.filter(|r| !r.meta.is_deleted()), vrf) {
@@ -441,7 +473,8 @@ impl TreeImage {
             let first = ip_to_u128(range.first);
             let tree = self.vrf_or_new(vrf);
             let mut tree = tree.write().unwrap_or_else(PoisonError::into_inner);
-            tree.families[family.index()].ranges.insert(
+            let family_tree = &mut tree.families[family.index()];
+            family_tree.ranges.insert(
                 (first, id),
                 RangeNode {
                     last: ip_to_u128(range.last),
@@ -450,6 +483,7 @@ impl TreeImage {
                 },
             );
             dirty.push(range.prefix);
+            dirty.extend(family_tree.alarmed_containing(family, first));
             locations.ranges.insert(id, RangeLoc { vrf, family, first });
         }
         dirty
@@ -549,52 +583,72 @@ impl FamilyTree {
             .collect()
     }
 
+    /// The addresses held by the ranges of a network that are not address objects, and the
+    /// ranges per role as (size, address objects inside).
+    fn range_usage(&self, node: &PrefixNode) -> (u128, BTreeMap<RangeRole, (u128, u128)>) {
+        let (first, last) = bounds(&node.cidr);
+        let mut reserved = 0u128;
+        let mut by_role: BTreeMap<RangeRole, (u128, u128)> = BTreeMap::new();
+        for (range_first, range_last, role) in self.ranges_of(node.id, first, last) {
+            let size = span(range_first, range_last);
+            let inside = self.count_addresses(range_first, range_last);
+            reserved = reserved.saturating_add(size.saturating_sub(inside));
+            let entry = by_role.entry(role).or_default();
+            entry.0 = entry.0.saturating_add(size);
+            entry.1 = entry.1.saturating_add(inside);
+        }
+        (reserved, by_role)
+    }
+
     fn utilization(&self, family: Family, node: &PrefixNode) -> Utilization {
         let (first, last) = bounds(&node.cidr);
         let len = node.cidr.prefix_len();
-        let children = self.child_intervals(family, first, len);
-        let total = self.count_addresses(first, last);
-        let in_children: u128 = children
-            .iter()
-            .map(|(a, b)| self.count_addresses(*a, *b))
-            .sum();
-        let covered = children
+        let size = span(first, last);
+        let covered = self
+            .child_intervals(family, first, len)
             .iter()
             .fold(0u128, |sum, (a, b)| sum.saturating_add(span(*a, *b)));
-        match node.role {
+        // Addresses are keyed by address, so a count over the span counts each one once,
+        // however deep below the prefix it lies.
+        let used = self.count_addresses(first, last);
+        let (capacity, reserved, by_role) = match node.role {
             PrefixRole::Network => {
-                let capacity = host_capacity(&node.cidr);
-                let mut reserved = 0u128;
-                let mut by_role: BTreeMap<RangeRole, (u128, u128)> = BTreeMap::new();
-                for (range_first, range_last, role) in self.ranges_of(node.id, first, last) {
-                    let size = span(range_first, range_last);
-                    let inside = self.count_addresses(range_first, range_last);
-                    reserved = reserved.saturating_add(size.saturating_sub(inside));
-                    let entry = by_role.entry(role).or_default();
-                    entry.0 = entry.0.saturating_add(size);
-                    entry.1 = entry.1.saturating_add(inside);
-                }
-                Utilization {
-                    capacity,
-                    used: total,
-                    reserved,
-                    free: capacity.saturating_sub(total.saturating_add(reserved)),
-                    covered,
-                    by_role,
-                }
+                let (reserved, by_role) = self.range_usage(node);
+                (host_capacity(&node.cidr), reserved, by_role)
             }
             PrefixRole::Supernet => {
-                let capacity = span(first, last);
-                let used = covered.saturating_add(total - in_children);
-                Utilization {
-                    capacity,
-                    used,
-                    reserved: 0,
-                    free: capacity.saturating_sub(used),
-                    covered,
-                    by_role: BTreeMap::new(),
+                // Networks never contain prefixes, so the networks of the tree are disjoint
+                // and the ranges of each one are counted once.
+                let mut capacity = size;
+                let mut reserved = 0u128;
+                let mut by_role: BTreeMap<RangeRole, (u128, u128)> = BTreeMap::new();
+                for (_, child) in self
+                    .descendants(family, first, len)
+                    .filter(|(_, child)| child.role == PrefixRole::Network)
+                {
+                    let (child_first, child_last) = bounds(&child.cidr);
+                    let unusable =
+                        span(child_first, child_last).saturating_sub(host_capacity(&child.cidr));
+                    capacity = capacity.saturating_sub(unusable);
+                    let (held, roles) = self.range_usage(child);
+                    reserved = reserved.saturating_add(held);
+                    for (role, (role_size, inside)) in roles {
+                        let entry = by_role.entry(role).or_default();
+                        entry.0 = entry.0.saturating_add(role_size);
+                        entry.1 = entry.1.saturating_add(inside);
+                    }
                 }
+                (capacity, reserved, by_role)
             }
+        };
+        Utilization {
+            capacity,
+            used,
+            reserved,
+            free: capacity.saturating_sub(used.saturating_add(reserved)),
+            covered,
+            size,
+            by_role,
         }
     }
 }

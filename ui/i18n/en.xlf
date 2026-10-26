@@ -3649,7 +3649,15 @@
       </unit>
       <unit id="ipam.meter.title">
         <notes><note category="description">Tooltip of the utilization meter. Both arguments are compact counts such as 1.2K.</note></notes>
-        <segment><source>{used} of {capacity} addresses in use</source></segment>
+        <segment><source>{used} of {capacity} usable addresses in use</source></segment>
+      </unit>
+      <unit id="ipam.allocation.text">
+        <notes><note category="description">A supernet's space allocated to its child prefixes, shown apart from the utilization meter. covered and size are compact counts such as 3.3K; count is the number of child prefixes.</note></notes>
+        <segment><source>{covered} of {size} allocated to {count, plural, one {# prefix} other {# prefixes}}</source></segment>
+      </unit>
+      <unit id="ipam.allocation.hint">
+        <notes><note category="description">Tooltip of the allocation line of a supernet.</note></notes>
+        <segment><source>The space of the supernet that its child prefixes take, network and broadcast addresses included. It says how much is left to allocate, not how full the networks are; the meter and the alarms count the addresses in use.</source></segment>
       </unit>
       <unit id="ipam.nav.label">
         <segment><source>IPAM sections</source></segment>
@@ -3734,7 +3742,19 @@
         <segment><source>Where this prefix lies</source></segment>
       </unit>
       <unit id="ipam.prefix.usage">
-        <segment><source>{used} of {capacity} addresses in use</source></segment>
+        <segment><source>{used} of {capacity} usable addresses in use</source></segment>
+      </unit>
+      <unit id="ipam.prefix.usage_hint">
+        <notes><note category="description">Tooltip of the utilization line of a prefix: what "in use" counts.</note></notes>
+        <segment><source>In use: the addresses recorded in IPAM plus the addresses that DHCP pools, reserved and infrastructure ranges hold without a record, of the usable addresses. Network and broadcast addresses are not usable. A supernet counts its whole tree, each address once.</source></segment>
+      </unit>
+      <unit id="ipam.prefix.usage_parts">
+        <notes><note category="description">The two parts of the addresses in use of a prefix. Both arguments are compact counts.</note></notes>
+        <segment><source>Recorded {recorded} · held by ranges {held}</source></segment>
+      </unit>
+      <unit id="ipam.prefix.usage_parts_hint">
+        <notes><note category="description">Tooltip of the parts of the addresses in use.</note></notes>
+        <segment><source>Recorded: the addresses the Addresses tab lists. Held by ranges: the addresses of the ranges that have no record. A host can have several recorded addresses, and a reserved address without an interface has no host, so the Hosts page counts something else.</source></segment>
       </unit>
       <unit id="ipam.prefix.alloc">
         <segment><source>Allocation</source></segment>
@@ -3827,6 +3847,10 @@
       <unit id="ipam.col.utilization">
         <segment><source>Utilization</source></segment>
       </unit>
+      <unit id="ipam.col.allocated">
+        <notes><note category="description">Column of the space of a supernet allocated to its child prefixes.</note></notes>
+        <segment><source>Allocated to prefixes</source></segment>
+      </unit>
       <unit id="ipam.col.range">
         <segment><source>Range</source></segment>
       </unit>
@@ -3896,6 +3920,14 @@
       <unit id="ipam.addresses.free">
         <notes><note category="description">Follows the size of a free gap, for example 4 free.</note></notes>
         <segment><source>{count, plural, one {free} other {free}}</source></segment>
+      </unit>
+      <unit id="ipam.addresses.count">
+        <notes><note category="description">Follows the number of addresses in the footer of a prefix's address list, for example 148 addresses.</note></notes>
+        <segment><source>{count, plural, one {address} other {addresses}}</source></segment>
+      </unit>
+      <unit id="ipam.addresses.count_hint">
+        <notes><note category="description">Tooltip of the address count in the footer of a prefix's address list.</note></notes>
+        <segment><source>Recorded addresses in the list, the free ranges not counted. The same number as Recorded in the prefix's summary when the list is complete and not filtered.</source></segment>
       </unit>
       <unit id="ipam.addresses.claim">
         <segment><source>Claim {ip}</source></segment>
@@ -6648,6 +6680,14 @@
       </unit>
       <unit id="hosts.empty">
         <segment><source>No hosts yet. Create one or import a spreadsheet.</source></segment>
+      </unit>
+      <unit id="hosts.count">
+        <notes><note category="description">Follows the number of hosts in the footer of the hosts list, for example 132 hosts.</note></notes>
+        <segment><source>{count, plural, one {host} other {hosts}}</source></segment>
+      </unit>
+      <unit id="hosts.count_hint">
+        <notes><note category="description">Tooltip of the host count in the footer of the hosts list.</note></notes>
+        <segment><source>Hosts, not addresses: a host can have several addresses, and an address without an interface, such as a reserved one, has no host. A network's recorded addresses are on its Addresses tab.</source></segment>
       </unit>
       <unit id="hosts.filter.label">
         <segment><source>Filter hosts</source></segment>

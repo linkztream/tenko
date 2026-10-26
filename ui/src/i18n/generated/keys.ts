@@ -3895,6 +3895,8 @@ export type MessageKey =
   | "hosts.connect.web_ip"
   | "hosts.connect.web_more"
   | "hosts.connect.web_open"
+  | "hosts.count"
+  | "hosts.count_hint"
   | "hosts.credentials.audit_hint"
   | "hosts.credentials.bind"
   | "hosts.credentials.bind_title"
@@ -4249,6 +4251,8 @@ export type MessageKey =
   | "ipam.address.renamed"
   | "ipam.address.unassigned"
   | "ipam.addresses.claim"
+  | "ipam.addresses.count"
+  | "ipam.addresses.count_hint"
   | "ipam.addresses.dns_hint"
   | "ipam.addresses.empty"
   | "ipam.addresses.filter_label"
@@ -4296,6 +4300,8 @@ export type MessageKey =
   | "ipam.alarm.critical"
   | "ipam.alarm.normal"
   | "ipam.alarm.warning"
+  | "ipam.allocation.hint"
+  | "ipam.allocation.text"
   | "ipam.cfdef.applies_required"
   | "ipam.cfdef.applies_to"
   | "ipam.cfdef.create"
@@ -4316,6 +4322,7 @@ export type MessageKey =
   | "ipam.cfdef.type"
   | "ipam.cfdef.yes"
   | "ipam.col.address"
+  | "ipam.col.allocated"
   | "ipam.col.created"
   | "ipam.col.delegation"
   | "ipam.col.description"
@@ -4548,6 +4555,9 @@ export type MessageKey =
   | "ipam.prefix.tab.ranges"
   | "ipam.prefix.tabs"
   | "ipam.prefix.usage"
+  | "ipam.prefix.usage_hint"
+  | "ipam.prefix.usage_parts"
+  | "ipam.prefix.usage_parts_hint"
   | "ipam.prefix_role.network"
   | "ipam.prefix_role.supernet"
   | "ipam.range.add"
@@ -7839,6 +7849,7 @@ export interface MessageArgs {
   "hosts.connect.ports": { time: string | number };
   "hosts.connect.ports_none": { time: string | number };
   "hosts.connect.web_open": { url: string | number };
+  "hosts.count": { count: number };
   "hosts.credentials.bind_title": { host: string | number };
   "hosts.credentials.option": { name: string | number; user: string | number };
   "hosts.credentials.revealed_by": { user: string | number; when: string | number };
@@ -7907,6 +7918,7 @@ export interface MessageArgs {
   "ipam.address.not_found": { ip: string | number };
   "ipam.address.renamed": { ip: string | number; name: string | number };
   "ipam.addresses.claim": { ip: string | number };
+  "ipam.addresses.count": { count: number };
   "ipam.addresses.free": { count: number };
   "ipam.addresses.grid": { cidr: string | number };
   "ipam.adoption.cleared": { prefix: string | number };
@@ -7916,6 +7928,7 @@ export interface MessageArgs {
   "ipam.adoption.saved": { prefix: string | number };
   "ipam.adoption.sightings_on": { count: string | number };
   "ipam.adoption.vendors_on": { vendors: string | number };
+  "ipam.allocation.text": { count: number; covered: string | number; size: string | number };
   "ipam.cfdef.delete_title": { key: string | number };
   "ipam.cfdef.deleted": { key: string | number };
   "ipam.cfdef.edit_title": { key: string | number };
@@ -7988,6 +8001,7 @@ export interface MessageArgs {
   "ipam.prefix.not_found": { cidr: string | number };
   "ipam.prefix.ranges_grid": { cidr: string | number };
   "ipam.prefix.usage": { capacity: string | number; used: string | number };
+  "ipam.prefix.usage_parts": { held: string | number; recorded: string | number };
   "ipam.range.delegation": { count: number; len: string | number };
   "ipam.reconcile.count": { count: number; more: string };
   "ipam.reconcile.filter.host_chip": { host: string | number };
@@ -12374,6 +12388,8 @@ export const messageKeys: readonly MessageKey[] = [
   "hosts.connect.web_ip",
   "hosts.connect.web_more",
   "hosts.connect.web_open",
+  "hosts.count",
+  "hosts.count_hint",
   "hosts.credentials.audit_hint",
   "hosts.credentials.bind",
   "hosts.credentials.bind_title",
@@ -12728,6 +12744,8 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.address.renamed",
   "ipam.address.unassigned",
   "ipam.addresses.claim",
+  "ipam.addresses.count",
+  "ipam.addresses.count_hint",
   "ipam.addresses.dns_hint",
   "ipam.addresses.empty",
   "ipam.addresses.filter_label",
@@ -12775,6 +12793,8 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.alarm.critical",
   "ipam.alarm.normal",
   "ipam.alarm.warning",
+  "ipam.allocation.hint",
+  "ipam.allocation.text",
   "ipam.cfdef.applies_required",
   "ipam.cfdef.applies_to",
   "ipam.cfdef.create",
@@ -12795,6 +12815,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.cfdef.type",
   "ipam.cfdef.yes",
   "ipam.col.address",
+  "ipam.col.allocated",
   "ipam.col.created",
   "ipam.col.delegation",
   "ipam.col.description",
@@ -13027,6 +13048,9 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix.tab.ranges",
   "ipam.prefix.tabs",
   "ipam.prefix.usage",
+  "ipam.prefix.usage_hint",
+  "ipam.prefix.usage_parts",
+  "ipam.prefix.usage_parts_hint",
   "ipam.prefix_role.network",
   "ipam.prefix_role.supernet",
   "ipam.range.add",

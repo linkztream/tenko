@@ -123,6 +123,12 @@ export interface DataGridProps<T> {
   statusBar?: boolean;
   /** Extra content of the footer line, after the row count. */
   footer?: JSX.Element;
+  /**
+   * What the footer counts instead of the rows, for a list whose rows are not all objects
+   * (an address list with its free gaps): the number, the noun after it, and a tooltip that
+   * says what is counted.
+   */
+  count?: { value: number; noun: string; title?: string | undefined } | undefined;
   /** Called with the table element, for views that move the focus into the grid (the `]` key). */
   ref?: (el: HTMLTableElement) => void;
 }
@@ -707,8 +713,14 @@ export function DataGrid<T>(props: DataGridProps<T>) {
         </Show>
       </div>
       <div class="grid-foot" data-testid="grid-foot">
-        <span>
-          <Si value={props.rows.length} /> {t("grid.rows", { count: props.rows.length })}
+        <span title={props.count?.title} data-testid="grid-count">
+          <Show when={props.count} fallback={<><Si value={props.rows.length} /> {t("grid.rows", { count: props.rows.length })}</>}>
+            {(count) => (
+              <>
+                <Si value={count().value} /> {count().noun}
+              </>
+            )}
+          </Show>
           <Show when={props.hasMore}>
             <span class="muted"> {t("grid.more")}</span>
           </Show>

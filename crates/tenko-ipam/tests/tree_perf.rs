@@ -259,11 +259,13 @@ async fn the_tree_of_a_sixteen_equivalent_space_is_fast() {
     assert_eq!((root.depth, root.parent, root.children), (0, None, 256));
     assert_eq!(root.role, PrefixRole::Supernet);
     // The children cover the whole supernet.
-    assert_eq!(root.utilization.capacity, "65536");
+    assert_eq!(root.utilization.capacity, "65280");
     assert_eq!(root.utilization.covered, "65536");
-    assert_eq!(root.utilization.used, "65536");
-    assert_eq!(root.utilization.free, "0");
-    assert!((root.utilization.percent - 100.0).abs() < f64::EPSILON);
+    assert_eq!(root.utilization.size, "65536");
+    assert_eq!(root.utilization.used, "61440");
+    assert_eq!(root.utilization.in_use, "64000");
+    assert_eq!(root.utilization.free, "1280");
+    assert!((root.utilization.percent - 98.0).abs() < f64::EPSILON);
     let depths: Vec<u32> = nodes.iter().map(|n| n.depth).collect();
     assert!(depths[1..].iter().all(|d| *d == 1));
     assert_eq!(nodes.iter().map(|n| n.children).sum::<u32>(), 256);
@@ -308,10 +310,19 @@ async fn the_tree_of_a_sixteen_equivalent_space_is_fast() {
     let (util_time, utilization) = best_of(5, || service.tree().utilization(space.root));
     eprintln!("tree_perf: utilization(root) {} (best of 5)", ms(util_time));
     let utilization = utilization.expect("utilization");
+    // The meter of the supernet sums its tree: 61,440 addresses and 2,560 held by the
+    // pools of 65,280 usable (each /120 loses its subnet-router anycast address); all of
+    // its space is allocated to the networks, which is a figure of its own.
     assert_eq!(
-        (utilization.capacity, utilization.used, utilization.free),
-        (65_536, 65_536, 0)
+        (
+            utilization.capacity,
+            utilization.used,
+            utilization.reserved,
+            utilization.free
+        ),
+        (65_280, 61_440, 2_560, 1_280)
     );
+    assert_eq!((utilization.covered, utilization.size), (65_536, 65_536));
     assert_eq!(service.tree().children(space.root).len(), 256);
     assert_eq!(
         service
@@ -375,7 +386,7 @@ async fn the_tree_of_a_sixteen_equivalent_space_is_fast() {
         "other networks stay as they were"
     );
     let root_after = service.tree().utilization(space.root).expect("utilization");
-    assert_eq!((root_after.used, root_after.free), (65_536, 0));
+    assert_eq!((root_after.used, root_after.free), (61_441, 1_279));
     assert_eq!(
         service
             .tree()

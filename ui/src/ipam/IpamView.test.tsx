@@ -171,7 +171,14 @@ describe("the networks page", () => {
     expect(value("192.0.2.0/24")).toBe("50.4%");
     expect(value("198.51.100.0/24")).toBe("40.2%");
     expect(value("203.0.113.0/25")).toBe("0%");
-    expect(treeNode("192.0.2.0/24").querySelector(".meter")?.getAttribute("title")).toBe("20 of 254 addresses in use");
+    // The tooltip counts what the bar shows: 20 recorded plus 108 held by ranges is 50.4 %.
+    expect(treeNode("192.0.2.0/24").querySelector(".meter")?.getAttribute("title")).toBe("128 of 254 usable addresses in use");
+    // A supernet's meter sums its tree (the 13 camera addresses of 250 usable ones); its
+    // allocation to the three networks is a second line of the tooltip, never the bar.
+    expect(value("203.0.113.0/24")).toBe("5.2%");
+    expect(treeNode("203.0.113.0/24").querySelector(".meter")?.getAttribute("title")).toBe(
+      "13 of 250 usable addresses in use\n208 of 256 allocated to 3 prefixes",
+    );
     // The depth follows the nesting; a critical network is flagged with a word.
     expect(treeNode("203.0.113.0/25").getAttribute("aria-level")).toBe("2");
     const cameras = treeNode("203.0.113.192/28");
@@ -197,6 +204,15 @@ describe("the networks page", () => {
     const cameras = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.192/28") as HTMLElement;
     expect(within(cameras).getAllByText("Critical").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("prefix-pane")).toBeNull();
+    // The supernet's meter and its allocation are two figures, labelled apart: 5.2 % in use,
+    // while 208 of its 256 addresses are allocated to networks. A network has no allocation.
+    const documentation = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.0/24") as HTMLElement;
+    expect(documentation.querySelector(".meter .val")?.textContent).toBe("5.2%");
+    expect(documentation.querySelector(".meter")?.getAttribute("data-level")).toBe("normal");
+    expect(within(documentation).getByTestId("allocation").textContent).toBe("208 of 256 allocated to 3 prefixes");
+    expect(within(lan).queryByTestId("allocation")).toBeNull();
+    const header = within(grid).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(header).toContain("Allocated to prefixes");
   });
 
   it("opens a prefix from the overview", async () => {
@@ -339,7 +355,11 @@ describe("the prefix pane", () => {
     expect(crumbs.textContent).toBe("default");
     const summary = within(pane).getByTestId("prefix-summary");
     expect(summary.querySelector(".pct")?.textContent).toBe("50.4%");
-    expect(summary.querySelector(".of")?.textContent).toBe("20 of 254 addresses in use");
+    expect(summary.querySelector(".of")?.textContent).toBe("128 of 254 usable addresses in use");
+    expect(within(summary).getByTestId("prefix-usage").getAttribute("title")).toContain("Network and broadcast addresses are not usable");
+    // What "in use" is made of: the recorded addresses (the Addresses tab) and those the ranges hold.
+    expect(within(summary).getByTestId("prefix-usage-parts").textContent).toBe("Recorded 20 · held by ranges 108");
+    expect(within(summary).queryByTestId("prefix-allocation")).toBeNull();
     expect(summary.querySelector(".meter")?.getAttribute("data-level")).toBe("normal");
     expect([...summary.querySelectorAll(".legend > span")].map((s) => s.textContent)).toEqual(["DHCP pool 100", "Infrastructure 19"]);
     const facts = [...summary.querySelectorAll("dt")].map((dt) => dt.textContent);
@@ -355,6 +375,37 @@ describe("the prefix pane", () => {
     await waitFor(() => expect(summary.querySelector(".meter")?.getAttribute("data-level")).toBe("critical"));
     expect(within(summary).getAllByText("Critical").length).toBeGreaterThan(0);
     expect(summary.querySelector(".pct")?.textContent).toBe("92.9%");
+  });
+
+  it("sums a supernet's addresses in use over its tree and labels its allocation apart (IPAM-10)", async () => {
+    renderIpam(paths.prefix("203.0.113.0/24"));
+    const pane = await paneOf("203.0.113.0/24");
+    const summary = within(pane).getByTestId("prefix-summary");
+    await waitFor(() => expect(summary.querySelector(".pct")?.textContent).toBe("5.2%"));
+    expect(summary.querySelector(".of")?.textContent).toBe("13 of 250 usable addresses in use");
+    expect(within(summary).getByTestId("prefix-usage-parts").textContent).toBe("Recorded 13 · held by ranges 0");
+    const allocation = within(summary).getByTestId("prefix-allocation");
+    expect(allocation.textContent).toBe("208 of 256 allocated to 3 prefixes");
+    expect(allocation.getAttribute("title")).toContain("not how full the networks are");
+    // The child prefixes: each with its own meter, and no allocation for a network.
+    const children = within(pane).getByTestId("grid-prefix-children");
+    const lab = within(children).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.0/25") as HTMLElement;
+    expect(lab.querySelector(".meter .val")?.textContent).toBe("0%");
+    expect(within(children).getAllByRole("columnheader").map((h) => h.textContent)).toContain("Allocated to prefixes");
+    // The Addresses tab counts the recorded addresses, the same 13, and not the free gaps.
+    fireEvent.click(tab("Addresses"));
+    await waitFor(() => expect(addressRows()).toHaveLength(13));
+    expect(freeRows().length).toBeGreaterThan(0);
+    const count = within(addressGrid()).getByTestId("grid-count");
+    expect(count.textContent).toBe("13 addresses");
+    expect(count.getAttribute("title")).toContain("the free ranges not counted");
+  });
+
+  it("counts the addresses of a network's list without its free gaps", async () => {
+    await openNetwork("192.0.2.0/24");
+    await waitFor(() => expect(freeRows().length).toBeGreaterThan(0));
+    expect(within(addressGrid()).getByTestId("grid-count").textContent).toBe(`${addressRows().length} addresses`);
+    expect(addressRows()).toHaveLength(20);
   });
 
   it("shows the address tab first for a network and the prefixes tab first for a supernet", async () => {

@@ -22,6 +22,7 @@ import { logicalArrow } from "../../grid/focus";
 import { t } from "../../i18n";
 import { VlanChip } from "../vlan/VlanChip";
 import type { VlanStyle } from "../vlan/palette";
+import { allocationWords } from "../words";
 import "./tree.css";
 
 export interface PrefixTreeProps {
@@ -296,8 +297,9 @@ export function PrefixTree(props: PrefixTreeProps) {
                 <UtilizationMeter
                   percent={n.utilization.percent}
                   level={n.level}
-                  used={n.utilization.used}
+                  used={n.utilization.in_use}
                   capacity={n.utilization.capacity}
+                  note={allocationWords(n)}
                   compact
                 />
               </div>

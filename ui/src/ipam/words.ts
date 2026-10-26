@@ -12,6 +12,7 @@ import type {
   PrefixRole,
   RangeRole,
   Status,
+  TreeNode,
 } from "../api/types";
 import { locale, t, tDynamic } from "../i18n";
 import { si } from "../app/format/si";
@@ -134,4 +135,17 @@ export function countTitle(value: string | number | bigint, loc: string = locale
   if ("text" in count) return count.text;
   const format = formatter(exactFormats, loc);
   return "num" in count ? format.format(count.num) : format.format(count.big);
+}
+
+/**
+ * The space of a supernet allocated to its child prefixes, a figure apart from the meter
+ * (IPAM-10): "3.3K of 66K allocated to 13 prefixes". Undefined for a network.
+ */
+export function allocationWords(node: Pick<TreeNode, "role" | "children" | "utilization">): string | undefined {
+  if (node.role !== "supernet") return undefined;
+  return t("ipam.allocation.text", {
+    covered: siCount(node.utilization.covered),
+    size: siCount(node.utilization.size),
+    count: node.children,
+  });
 }

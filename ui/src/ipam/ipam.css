@@ -24,6 +24,9 @@
 .summary .use .of { color: var(--ink-3); font-size: var(--fs-12); }
 .summary .use .meter .bar { width: 300px; height: 6px; }
 .summary .legend { display: flex; gap: var(--sp-5); font-size: var(--fs-11); color: var(--ink-3); }
+/* The parts of "in use" and a supernet's allocation: labelled figures apart from the meter. */
+.summary .use .parts,
+.summary .use .allocation { font-size: var(--fs-11); color: var(--ink-3); }
 .facts { display: grid; grid-template-columns: repeat(4, auto); gap: 2px var(--sp-8); font-size: var(--fs-12); margin: 0; }
 .facts dt { color: var(--ink-3); }
 .facts dd { margin: 0; color: var(--ink); }

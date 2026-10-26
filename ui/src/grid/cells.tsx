@@ -82,12 +82,21 @@ function barPercent(percent: number): number {
  * Utilization of a prefix: a thin bar and the percentage with at most one decimal. Neutral
  * until the alarm level is warning or critical; then the bar changes color, an alert icon
  * appears and the level is also spoken as text, so color is never the only cue.
+ *
+ * The meter means one thing on every row (IPAM-10): the addresses in use of the usable
+ * addresses, so `used` is the `in_use` figure of the utilization (address objects plus the
+ * addresses ranges hold without one), never the space allocated to child prefixes. A
+ * supernet's allocation goes into `note`, a second line of the tooltip.
  */
 export function UtilizationMeter(props: {
   percent: number;
   level?: AlarmLevel | undefined;
+  /** Addresses in use (`utilization.in_use`). */
   used?: string | undefined;
+  /** Usable addresses (`utilization.capacity`). */
   capacity?: string | undefined;
+  /** A further line for the tooltip, such as a supernet's allocation. */
+  note?: string | undefined;
   compact?: boolean | undefined;
 }) {
   const level = () => props.level ?? "normal";
@@ -98,10 +107,15 @@ export function UtilizationMeter(props: {
     if (props.compact) out += " compact";
     return out;
   };
-  const title = () =>
-    props.used !== undefined && props.capacity !== undefined
-      ? t("ipam.meter.title", { used: siCount(props.used), capacity: siCount(props.capacity) })
-      : undefined;
+  const title = () => {
+    const lines = [
+      props.used !== undefined && props.capacity !== undefined
+        ? t("ipam.meter.title", { used: siCount(props.used), capacity: siCount(props.capacity) })
+        : undefined,
+      props.note,
+    ].filter((line): line is string => !!line);
+    return lines.length > 0 ? lines.join("\n") : undefined;
+  };
   return (
     <span class={cls()} style={{ "--v": `${barPercent(props.percent)}%` }} title={title()} data-level={level()}>
       <span class="bar">

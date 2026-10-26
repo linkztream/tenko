@@ -107,6 +107,16 @@ describe("the hosts list", () => {
     expect(rows().filter((r) => r.querySelector(".flag.locked")).map((r) => r.dataset.key)).toEqual(["nas"]);
   });
 
+  it("counts hosts in its footer and says why the number is not the number of addresses", async () => {
+    renderList();
+    await listed();
+    const grid = screen.getByRole("grid", { name: "Hosts" });
+    const shown = Number(grid.getAttribute("aria-rowcount")) - 1;
+    const count = screen.getByTestId("grid-count");
+    expect(count.textContent).toBe(`${shown} hosts`);
+    expect(count.getAttribute("title")).toContain("Hosts, not addresses: a host can have several addresses");
+  });
+
   it("narrows the list when a name is typed and brings it back when the filter is cleared", async () => {
     const view = renderList();
     await listed();

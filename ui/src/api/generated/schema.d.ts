@@ -3617,8 +3617,11 @@ export interface paths {
         /**
          * Get the prefix tree with utilization and alarms
          * @description Every node carries its parent, depth, number of child prefixes, the utilization
-         *     (`capacity`, `used`, `reserved`, `free`, `covered` as decimal strings, and `percent`)
-         *     and the alarm `level`. `children` counts all direct child prefixes, also those that
+         *     (`capacity`, `in_use`, `used`, `reserved`, `free`, `covered`, `size` as decimal strings,
+         *     and `percent`) and the alarm `level`. `percent` and the level are the addresses in use
+         *     (`in_use`: address objects plus the addresses ranges hold without one) of the usable
+         *     addresses (`capacity`) for every prefix; for a supernet they are summed over its tree,
+         *     and the space allocated to its child prefixes is `covered` of `size`, never the meter. `children` counts all direct child prefixes, also those that
          *     `depth` leaves out, so that the UI knows which nodes can be opened. Without `vrf` the tree
          *     of the VRF `default` is shown.
          */
@@ -20956,40 +20959,56 @@ export interface components {
             warn_pct: number;
         };
         /**
-         * @description Utilization as the API shows it. Counts are decimal strings because IPv6 sizes exceed
-         *     JSON's exact integers.
+         * @description Utilization as the API shows it (see [`Utilization`]). Counts are decimal strings because
+         *     IPv6 sizes exceed JSON's exact integers. `percent` is `in_use` of `capacity` for every
+         *     prefix; for a supernet `in_use`, `used` and `reserved` are sums over its tree, and
+         *     `covered` of `size` is the space allocated to its child prefixes, a separate figure.
          */
         UtilizationView: {
-            /** @description Ranges per role. */
+            /** @description Ranges per role (for a supernet: of every network in its tree). */
             by_role: components["schemas"]["RoleUsage"][];
             /**
-             * @description Addresses that can be used.
+             * @description Usable addresses: without the network and broadcast address of a network (IPv4 up to
+             *     /30) or its subnet-router anycast address (IPv6 up to /126), and for a supernet
+             *     without those of every network in its tree.
              * @example 254
              */
             capacity: string;
             /**
-             * @description Addresses covered by child prefixes.
+             * @description Addresses allocated to child prefixes (the union of the direct children).
              * @example 0
              */
             covered: string;
             /**
-             * @description Addresses left.
+             * @description Usable addresses not in use.
              * @example 142
              */
             free: string;
             /**
+             * @description Addresses in use: `used + reserved`.
+             * @example 112
+             */
+            in_use: string;
+            /**
              * Format: double
-             * @description `used + reserved` as a percentage of the capacity, one decimal.
+             * @description `in_use` as a percentage of `capacity`, one decimal: the meter and the alarm level.
              * @example 44.1
              */
             percent: number;
             /**
-             * @description Addresses held by ranges.
+             * @description Addresses held by ranges that are not address objects (for a supernet: the ranges
+             *     of every network in its tree).
              * @example 100
              */
             reserved: string;
             /**
-             * @description Addresses in use (for a supernet: covered by children or used directly).
+             * @description Every address of the prefix, usable or not.
+             * @example 256
+             */
+            size: string;
+            /**
+             * @description Address objects inside the prefix, each address once (for a supernet: in its whole
+             *     tree).
              * @example 12
              */
             used: string;

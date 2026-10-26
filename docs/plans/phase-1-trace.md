@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --check`
 
-86 Phase 1 requirements; 69 named by at least one test, 17 not; 0 named by no test, measurement or document.
+86 Phase 1 requirements; 70 named by at least one test, 16 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -49,17 +49,17 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 | IAM-18 | Must | `crates/tenko/tests/acceptance_audit_export.rs`<br>`crates/tenko/tests/acceptance_audit_export.rs::iam_18_a_file_sink_and_an_export_verify_offline_and_tampering_is_detected`<br>`crates/tenko/tests/acceptance_audit_export.rs::iam_18_a_syslog_tcp_sink_delivers_every_record_with_its_sequence_number_and_chain_hash`<br>`crates/tenko/tests/acceptance_audit_export.rs::iam_18_a_syslog_udp_sink_sends_cef_with_the_sequence_number_and_hash`<br>`crates/tenko/tests/acceptance_audit_export.rs::iam_18_tgl_21_the_export_cannot_be_left_without_an_enabled_sink_while_it_is_required`<br>and 2 more | - | `crates/tenko-api/src/dto/audit.rs`<br>`crates/tenko-api/src/routes/audit.rs`<br>`crates/tenko-api/src/routes/audit_export.rs`<br>`crates/tenko-auth/src/audit_export/mod.rs`<br>`crates/tenko-auth/src/audit_export/verify.rs`<br>and 22 more |
 | IAM-19 | Must | `crates/tenko-auth/tests/service_admin.rs` | - | `crates/tenko-api/src/routes/users.rs`<br>`crates/tenko-auth/src/lib.rs`<br>`crates/tenko-core/src/principal.rs`<br>`docs/SECURITY-PROFILES.md`<br>`docs/plans/identity-plan.md`<br>and 1 more |
 | IPAM-01 | Must | - | - | `crates/tenko-api/src/routes/tenancy.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/plan/planner/space.rs`<br>and 3 more |
-| IPAM-02 | Must | `ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/plan/planner/space.rs`<br>and 2 more |
+| IPAM-02 | Must | `ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/plan/planner/space.rs`<br>and 3 more |
 | IPAM-03 | Must | `crates/tenko-ipam/tests/vlan_provision.rs` | - | `crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-api/src/routes/tenancy.rs`<br>`crates/tenko-api/src/routes/vlans.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>and 11 more |
 | IPAM-04 | Must | - | - | `crates/tenko-api/src/routes/tenancy.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/plan/planner/tenancy.rs`<br>and 1 more |
 | IPAM-05 | Must | `crates/tenko-ipam/tests/rules.rs`<br>`ui/src/api/mock/ipam/ipam.test.ts`<br>`ui/src/dhcp/reservations/ReserveDialog.test.tsx` | - | `crates/tenko-api/src/routes/addresses.rs`<br>`crates/tenko-api/src/routes/host_lifecycle.rs`<br>`crates/tenko-api/src/routes/hosts.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-api/src/routes/tenancy.rs`<br>and 6 more |
 | IPAM-06 | Must | `ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/error.rs`<br>`crates/tenko-ipam/src/import/mapping.rs`<br>and 3 more |
-| IPAM-07 | Must | `crates/tenko-ipam/tests/allocation.rs`<br>`ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/addresses.rs`<br>`crates/tenko-api/src/routes/hosts.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/alloc.rs`<br>and 4 more |
+| IPAM-07 | Must | `crates/tenko-ipam/tests/allocation.rs`<br>`ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/addresses.rs`<br>`crates/tenko-api/src/routes/hosts.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/alloc.rs`<br>and 5 more |
 | IPAM-08 | Must | `ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/common.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/custom.rs`<br>and 5 more |
 | IPAM-09 | Must | `ui/e2e/ipam.spec.ts` | - | `crates/tenko-api/src/routes/common.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-api/src/routes/tenancy.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>and 7 more |
-| IPAM-10 | Must | - | - | `crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-dhcp/src/config/scopes.rs`<br>`crates/tenko-ipam/src/alarm.rs`<br>and 5 more |
+| IPAM-10 | Must | `crates/tenko-ipam/tests/rules.rs::ipam_10_supernet_alarms_follow_the_addresses_in_use_and_never_the_allocation`<br>`crates/tenko-ipam/tests/rules.rs::ipam_10_supernet_utilization_sums_its_tree_and_counts_an_address_once`<br>`ui/src/ipam/IpamView.test.tsx` | - | `crates/tenko-api/src/routes/dhcp/model.rs`<br>`crates/tenko-api/src/routes/prefixes.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-dhcp/src/config/scopes.rs`<br>`crates/tenko-ipam/src/alarm.rs`<br>and 6 more |
 | IPAM-11 | Must | `crates/tenko-ipam/tests/import_perf.rs`<br>`crates/tenko/tests/acceptance_import.rs`<br>`ui/e2e/import.spec.ts` | - | `crates/tenko-api/src/routes/export.rs`<br>`crates/tenko-api/src/routes/import.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/export/mod.rs`<br>and 7 more |
-| IPAM-12 | Must | `ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/host_lifecycle.rs`<br>`crates/tenko-api/src/routes/observations.rs`<br>`crates/tenko-api/src/routes/proposals.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>and 10 more |
+| IPAM-12 | Must | `ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/host_lifecycle.rs`<br>`crates/tenko-api/src/routes/observations.rs`<br>`crates/tenko-api/src/routes/proposals.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/ipam.rs`<br>and 11 more |
 | IPAM-13 | Must | `crates/tenko-ipam/tests/reconcile_names.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/observations.rs`<br>`crates/tenko-api/src/routes/proposals.rs`<br>`crates/tenko-api/src/routes/reconciler.rs`<br>`crates/tenko-ipam/src/command.rs`<br>`crates/tenko-ipam/src/dns/mod.rs`<br>and 10 more |
 | IPAM-14 | Must | `ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/hosts.rs`<br>`crates/tenko-api/src/routes/proposals.rs`<br>`crates/tenko-api/src/routes/reserve.rs`<br>`crates/tenko-core/src/ipam.rs`<br>`crates/tenko-ipam/src/command.rs`<br>and 6 more |
 | IPAM-15 | Must | `crates/tenko-ipam/tests/reconcile_batches.rs`<br>`crates/tenko-ipam/tests/reconcile_names.rs`<br>`ui/e2e/discovery.spec.ts` | - | `crates/tenko-api/src/routes/proposal_keep.rs`<br>`crates/tenko-api/src/routes/proposals.rs`<br>`crates/tenko-core/src/id.rs`<br>`crates/tenko-core/src/observe.rs`<br>`crates/tenko-ipam/src/command.rs`<br>and 10 more |
@@ -132,7 +132,6 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - CONN-18 (Must (write: Should))
 - IPAM-01 (Must)
 - IPAM-04 (Must)
-- IPAM-10 (Must)
 - OPS-19 (Must)
 - SCAN-01 (Must)
 - SCAN-06 (Must)

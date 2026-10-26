@@ -3295,7 +3295,8 @@ async fn a_locked_host_refuses_automation_but_not_people() {
 }
 
 #[tokio::test]
-async fn supernet_alarms_follow_the_coverage_of_children_and_clear_when_they_go() {
+#[allow(clippy::too_many_lines)] // One scenario from setup to the last check.
+async fn ipam_10_supernet_alarms_follow_the_addresses_in_use_and_never_the_allocation() {
     let (service, _) = service();
     let mut outer = supernet(None, "192.0.2.0/24");
     outer.alarm = Some(UtilizationAlarm::new(25, 50).expect("alarm"));
@@ -3306,64 +3307,134 @@ async fn supernet_alarms_follow_the_coverage_of_children_and_clear_when_they_go(
     let second_id = second.id.expect("id");
     run(&service, vec![IpamCommand::CreatePrefix(outer)]).await;
     let vrf = fetch::<Prefix>(&service, outer_id).await.vrf;
+
+    // Half of the space allocated to two empty networks: 0 % in use, no alarm.
+    run(
+        &service,
+        vec![
+            IpamCommand::CreatePrefix(first),
+            IpamCommand::CreatePrefix(second),
+        ],
+    )
+    .await;
     assert!(
         alarm_of(&service, outer_id).await.is_none(),
-        "nothing to report at 0 %"
+        "allocation alone raises no alarm"
     );
+    let node = |nodes: &[tenko_ipam::TreeNode]| {
+        nodes
+            .iter()
+            .find(|n| n.id == outer_id)
+            .expect("node")
+            .clone()
+    };
+    let empty = node(&service.tree().tree(vrf, None, None));
+    assert_eq!(empty.level, AlarmLevel::Normal);
+    assert_eq!(empty.children, 2);
+    assert_eq!(
+        (
+            empty.utilization.covered.as_str(),
+            empty.utilization.size.as_str()
+        ),
+        ("128", "256"),
+        "the allocation is a figure of its own"
+    );
+    // The two networks lose their network and broadcast addresses.
+    assert_eq!(empty.utilization.capacity, "252");
+    assert_eq!(empty.utilization.in_use, "0");
+    assert!(empty.utilization.percent.abs() < f64::EPSILON);
 
-    // 64 of 256 addresses are covered: 25 %, the warning threshold.
-    run(&service, vec![IpamCommand::CreatePrefix(first)]).await;
+    // A reserved range of 62 addresses in the first network: 62 of 252, below 25 %.
+    run(
+        &service,
+        vec![IpamCommand::CreateRange(range(
+            first_id,
+            "192.0.2.1",
+            "192.0.2.62",
+            RangeRole::Reserved,
+        ))],
+    )
+    .await;
+    assert!(alarm_of(&service, outer_id).await.is_none());
+    // One address in the second network: 63 of 252 is 25 %, the warning threshold.
+    run(
+        &service,
+        vec![IpamCommand::CreateAddress(address(None, "192.0.2.65"))],
+    )
+    .await;
     let event = alarm_of(&service, outer_id).await.expect("warning");
     assert_eq!(
         (event.level, event.previous),
         (AlarmLevel::Warning, AlarmLevel::Normal)
     );
-    assert_eq!((event.permille, event.used, event.capacity), (250, 64, 256));
+    assert_eq!(
+        (event.permille, event.used, event.reserved, event.capacity),
+        (250, 1, 62, 252)
+    );
     assert_eq!((event.warn_pct, event.crit_pct), (Some(25), Some(50)));
 
-    // 128 of 256: the critical threshold.
-    run(&service, vec![IpamCommand::CreatePrefix(second)]).await;
-    let event = alarm_of(&service, outer_id).await.expect("critical");
-    assert_eq!(
-        (event.level, event.previous),
-        (AlarmLevel::Critical, AlarmLevel::Warning)
-    );
-    assert_eq!(event.permille, 500);
-    let nodes = service.tree().tree(vrf, None, None);
-    let node = nodes.iter().find(|n| n.id == outer_id).expect("node");
-    assert_eq!(node.level, AlarmLevel::Critical);
-    assert_eq!(node.utilization.covered, "128");
-    assert!((node.utilization.percent - 50.0).abs() < f64::EPSILON);
-    assert_eq!(node.children, 2);
-
-    // Addresses inside a child do not count twice.
+    // An address inside the reserved range is counted once: the range holds one fewer.
     run(
         &service,
         vec![IpamCommand::CreateAddress(address(None, "192.0.2.10"))],
     )
     .await;
-    let event = alarm_of(&service, outer_id).await.expect("still critical");
-    assert_eq!((event.level, event.permille), (AlarmLevel::Critical, 500));
+    let busy = node(&service.tree().tree(vrf, None, None));
+    assert_eq!(
+        (
+            busy.utilization.used.as_str(),
+            busy.utilization.reserved.as_str(),
+            busy.utilization.in_use.as_str()
+        ),
+        ("2", "61", "63")
+    );
+    assert_eq!(busy.utilization.by_role[0].role, RangeRole::Reserved);
+    assert_eq!(busy.utilization.by_role[0].size, "62");
 
-    // Deleting a child lowers the level; the level is stored with the previous one.
-    run(&service, vec![delete(second_id, false)]).await;
+    // A range in the second network and two addresses directly in the supernet: 126 of
+    // 252, the critical threshold.
+    run(
+        &service,
+        vec![
+            IpamCommand::CreateRange(range(
+                second_id,
+                "192.0.2.66",
+                "192.0.2.126",
+                RangeRole::DhcpPool,
+            )),
+            IpamCommand::CreateAddress(address(None, "192.0.2.200")),
+            IpamCommand::CreateAddress(address(None, "192.0.2.201")),
+        ],
+    )
+    .await;
+    let event = alarm_of(&service, outer_id).await.expect("critical");
+    assert_eq!(
+        (event.level, event.previous, event.permille),
+        (AlarmLevel::Critical, AlarmLevel::Warning, 500)
+    );
+    let full = node(&service.tree().tree(vrf, None, None));
+    assert_eq!(full.level, AlarmLevel::Critical);
+    assert_eq!(full.utilization.covered, "128", "the allocation did not change");
+
+    // Deleting the second network with its range and address: 64 of 254 (its network and
+    // broadcast addresses are usable again), back to a warning.
+    run(&service, vec![delete(second_id, true)]).await;
     let event = alarm_of(&service, outer_id).await.expect("warning");
     assert_eq!(
-        (event.level, event.previous),
-        (AlarmLevel::Warning, AlarmLevel::Critical)
+        (event.level, event.previous, event.capacity, event.permille),
+        (AlarmLevel::Warning, AlarmLevel::Critical, 254, 252)
     );
-    // The other child's address moves up to the supernet: 1 of 256, below the threshold.
-    run(&service, vec![delete(first_id, false)]).await;
+    // Deleting the first takes its range and address: 2 of 256, below the threshold.
+    run(&service, vec![delete(first_id, true)]).await;
     let event = alarm_of(&service, outer_id).await.expect("normal");
     assert_eq!(
-        (event.level, event.previous),
-        (AlarmLevel::Normal, AlarmLevel::Warning)
+        (event.level, event.previous, event.permille),
+        (AlarmLevel::Normal, AlarmLevel::Warning, 8)
     );
-    assert_eq!(event.permille, 4);
-    // Restoring it covers 64 addresses again, and the address goes back down.
+    // Restoring the first brings its range back.
     run(&service, vec![restore(first_id)]).await;
     let event = alarm_of(&service, outer_id).await.expect("warning again");
-    assert_eq!((event.level, event.permille), (AlarmLevel::Warning, 250));
+    assert_eq!(event.level, AlarmLevel::Warning);
     // Deleting the alarmed prefix itself clears its alarm.
     run(&service, vec![delete(outer_id, true)]).await;
     let event = alarm_of(&service, outer_id).await.expect("cleared");
@@ -3377,6 +3448,80 @@ async fn supernet_alarms_follow_the_coverage_of_children_and_clear_when_they_go(
         alarm_of(&service, outer_id).await.expect("event").level,
         AlarmLevel::Warning
     );
+}
+
+#[tokio::test]
+async fn ipam_10_supernet_utilization_sums_its_tree_and_counts_an_address_once() {
+    let (service, _) = service();
+    // 198.51.100.0/23 holds a nested supernet /24 with two networks and one network of its
+    // own; an address lies directly in the nested supernet.
+    let outer = supernet(None, "198.51.100.0/23");
+    let outer_id = outer.id.expect("id");
+    let inner = supernet(None, "198.51.100.0/24");
+    let inner_id = inner.id.expect("id");
+    let a = prefix(None, "198.51.100.0/26");
+    let a_id = a.id.expect("id");
+    let b = prefix(None, "198.51.100.64/26");
+    let c = prefix(None, "198.51.101.0/25");
+    let c_id = c.id.expect("id");
+    run(
+        &service,
+        vec![
+            IpamCommand::CreatePrefix(outer),
+            IpamCommand::CreatePrefix(inner),
+            IpamCommand::CreatePrefix(a),
+            IpamCommand::CreatePrefix(b),
+            IpamCommand::CreatePrefix(c),
+        ],
+    )
+    .await;
+    let vrf = fetch::<Prefix>(&service, outer_id).await.vrf;
+    let empty = service.tree().utilization(outer_id).expect("utilization");
+    assert_eq!(
+        (empty.used, empty.reserved, empty.covered, empty.size),
+        (0, 0, 384, 512),
+        "a tree without addresses is at 0 % with its allocation apart"
+    );
+    // Three networks lose two addresses each.
+    assert_eq!(empty.capacity, 506);
+    assert_eq!(empty.permille(), 0);
+
+    run(
+        &service,
+        vec![
+            IpamCommand::CreateAddress(address(None, "198.51.100.10")),
+            IpamCommand::CreateAddress(address(None, "198.51.100.11")),
+            IpamCommand::CreateAddress(address(None, "198.51.100.200")),
+            IpamCommand::CreateAddress(address(None, "198.51.101.5")),
+            IpamCommand::CreateRange(range(
+                c_id,
+                "198.51.101.20",
+                "198.51.101.29",
+                RangeRole::Infrastructure,
+            )),
+        ],
+    )
+    .await;
+    let outer = service.tree().utilization(outer_id).expect("utilization");
+    // Each address once, though the first two lie two levels down.
+    assert_eq!((outer.used, outer.reserved, outer.in_use()), (4, 10, 14));
+    assert_eq!(outer.free, 506 - 14);
+    let inner = service.tree().utilization(inner_id).expect("utilization");
+    assert_eq!((inner.used, inner.reserved, inner.capacity), (3, 0, 252));
+    assert_eq!((inner.covered, inner.size), (128, 256));
+    let network = service.tree().utilization(a_id).expect("utilization");
+    assert_eq!((network.used, network.capacity, network.size), (2, 62, 64));
+    // The sum of the parts equals the whole: the networks plus what lies directly inside.
+    let view = service
+        .tree()
+        .tree(vrf, None, None)
+        .into_iter()
+        .find(|n| n.id == outer_id)
+        .expect("node");
+    assert_eq!(view.utilization.in_use, "14");
+    assert_eq!(view.utilization.used, "4");
+    assert_eq!(view.utilization.by_role[0].role, RangeRole::Infrastructure);
+    assert_eq!(view.children, 2);
 }
 
 // ----- lookups and state errors ---------------------------------------------------------------

@@ -31,7 +31,7 @@ import { addressesCsv } from "../address/csv";
 import { DeleteDialog } from "../DeleteDialog";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { MoveDialog } from "../move/MoveDialog";
-import { alarmWord, prefixRoleWord, rangeRoleWord } from "../words";
+import { alarmWord, allocationWords, prefixRoleWord, rangeRoleWord } from "../words";
 import { NextFreeAddressDialog, NextFreePrefixDialog } from "./NextFreeDialogs";
 import { PrefixForm } from "./PrefixForm";
 import { delegationWords } from "./delegation";
@@ -128,6 +128,8 @@ export function PrefixPane(props: PrefixPaneProps) {
       return a.ip.includes(q) || (a.dns_name ?? "").toLowerCase().includes(q) || (a.meta.description ?? "").toLowerCase().includes(q);
     });
   });
+  /** The address rows shown, without the free gaps: the "recorded" figure of the summary. */
+  const recordedShown = () => (scopes.settled() ? rows() : []).filter((r) => r.type === "address").length;
   const selectable = (r: PrefixRow) => r.type === "address" && !r.data.meta.deleted;
   const selection = createGridSelection(rows, addressRowId, selectable);
   const columns = addressColumns<PrefixRow>(rowAddress, { prefixLength: untrack(length), mayWrite: mayWriteAddress });
@@ -317,16 +319,31 @@ export function PrefixPane(props: PrefixPaneProps) {
             <div class="use">
               <div class="top">
                 <span class="pct">{t("ipam.meter.value", { value: use().percent })}</span>
-                <span class="of">
-                  {tx("ipam.prefix.usage", { used: <Count value={use().used} />, capacity: <Count value={use().capacity} /> })}
+                <span class="of" title={t("ipam.prefix.usage_hint")} data-testid="prefix-usage">
+                  {tx("ipam.prefix.usage", { used: <Count value={use().in_use} />, capacity: <Count value={use().capacity} /> })}
                 </span>
               </div>
               <UtilizationMeter
                 percent={use().percent}
                 level={props.node?.level ?? "normal"}
-                used={use().used}
+                used={use().in_use}
                 capacity={use().capacity}
               />
+              {/* What "in use" is made of: the Addresses tab lists the recorded addresses. */}
+              <div class="parts muted" data-testid="prefix-usage-parts" title={t("ipam.prefix.usage_parts_hint")}>
+                {tx("ipam.prefix.usage_parts", {
+                  recorded: <Count value={use().used} />,
+                  held: <Count value={use().reserved} />,
+                })}
+              </div>
+              {/* A supernet's allocation to child prefixes, labelled apart from the meter. */}
+              <Show when={props.node && allocationWords(props.node)}>
+                {(words) => (
+                  <div class="allocation muted" data-testid="prefix-allocation" title={t("ipam.allocation.hint")}>
+                    {words()}
+                  </div>
+                )}
+              </Show>
               <Show when={use().by_role.length > 0}>
                 <div class="legend">
                   <For each={use().by_role}>
@@ -407,6 +424,11 @@ export function PrefixPane(props: PrefixPaneProps) {
               columns={columns}
               columnState={columnState}
               rows={scopes.settled() ? rows() : []}
+              count={{
+                value: recordedShown(),
+                noun: t("ipam.addresses.count", { count: recordedShown() }),
+                title: t("ipam.addresses.count_hint"),
+              }}
               rowId={addressRowId}
               rowKey={addressRowKey}
               rowLabel={(r) => addressRowKey(r)}
@@ -502,7 +524,14 @@ export function PrefixPane(props: PrefixPaneProps) {
                   id: "use",
                   header: () => t("ipam.col.utilization"),
                   width: 150,
-                  render: (n) => <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.used} capacity={n.utilization.capacity} />,
+                  render: (n) => <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.in_use} capacity={n.utilization.capacity} />,
+                },
+                {
+                  id: "allocated",
+                  header: () => t("ipam.col.allocated"),
+                  width: 220,
+                  text: (n: TreeNode) => allocationWords(n) ?? "",
+                  render: (n) => <span class="muted">{allocationWords(n) ?? ""}</span>,
                 },
               ]}
               rows={children()}

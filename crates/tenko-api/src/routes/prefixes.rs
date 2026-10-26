@@ -462,8 +462,11 @@ async fn create_prefix(
 /// Shows the prefix tree of one VRF with utilization and alarms (IPAM-10).
 ///
 /// Every node carries its parent, depth, number of child prefixes, the utilization
-/// (`capacity`, `used`, `reserved`, `free`, `covered` as decimal strings, and `percent`)
-/// and the alarm `level`. `children` counts all direct child prefixes, also those that
+/// (`capacity`, `in_use`, `used`, `reserved`, `free`, `covered`, `size` as decimal strings,
+/// and `percent`) and the alarm `level`. `percent` and the level are the addresses in use
+/// (`in_use`: address objects plus the addresses ranges hold without one) of the usable
+/// addresses (`capacity`) for every prefix; for a supernet they are summed over its tree,
+/// and the space allocated to its child prefixes is `covered` of `size`, never the meter. `children` counts all direct child prefixes, also those that
 /// `depth` leaves out, so that the UI knows which nodes can be opened. Without `vrf` the tree
 /// of the VRF `default` is shown.
 #[utoipa::path(
@@ -2502,6 +2505,8 @@ mod tests {
         let utilization = |reply: &Reply, index: usize| reply.nodes()[index]["utilization"].clone();
         let empty = utilization(&api.get("/prefixes/tree").await, 3);
         assert_eq!(empty["capacity"], "254");
+        assert_eq!(empty["size"], "256");
+        assert_eq!(empty["in_use"], "0");
         assert_eq!(empty["used"], "0");
         assert_eq!(empty["reserved"], "0");
         assert_eq!(empty["free"], "254");
@@ -2514,15 +2519,20 @@ mod tests {
         let busy = utilization(&api.get("/prefixes/tree").await, 3);
         assert_eq!(busy["used"], "3");
         assert_eq!(busy["reserved"], "10");
+        assert_eq!(busy["in_use"], "13");
         assert_eq!(busy["free"], "241");
         assert_eq!(busy["by_role"][0]["role"], "reserved");
         assert_eq!(busy["by_role"][0]["size"], "10");
         let percent = busy["percent"].as_f64().expect("percent");
         assert!((percent - 5.1).abs() < f64::EPSILON, "{percent}");
-        // The supernet covers its two children.
+        // The supernet's space is allocated to its two empty children: 0 % in use of the
+        // 252 usable addresses (each /25 loses two), the allocation a figure of its own.
         let supernet = utilization(&api.get("/prefixes/tree").await, 0);
-        assert_eq!(supernet["capacity"], "256");
+        assert_eq!(supernet["capacity"], "252");
+        assert_eq!(supernet["in_use"], "0");
         assert_eq!(supernet["covered"], "256");
+        assert_eq!(supernet["size"], "256");
+        assert_eq!(supernet["percent"], 0.0);
         let child = utilization(&api.get("/prefixes/tree").await, 1);
         assert_eq!(child["capacity"], "126");
     }

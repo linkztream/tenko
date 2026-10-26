@@ -1,7 +1,9 @@
 //! Utilization alarms (IPAM-10).
 //!
 //! A prefix with alarm thresholds is `warning` from `warn_pct` and `critical` from
-//! `crit_pct` of its capacity in use (see [`Utilization`](crate::tree::Utilization)).
+//! `crit_pct` of its usable addresses in use, the same figure as the meter, for a supernet
+//! summed over its tree and never the space allocated to its children (see
+//! [`Utilization`](crate::tree::Utilization)).
 //! The prefix tree marks prefixes whose utilization may have changed; [`flush`] computes
 //! their level from the tree and, when it differs from the stored level, writes an
 //! [`AlarmEvent`] into `ipam.alarms` as principal `system:ipam` with an audit record. A
@@ -77,7 +79,8 @@ pub struct AlarmEvent {
     pub previous: AlarmLevel,
     /// Utilization in tenths of a percent (0 to 1000).
     pub permille: u16,
-    /// Addresses (or, for a supernet, covered addresses) in use, saturated at `u64::MAX`.
+    /// Address objects inside the prefix (for a supernet: in its tree), saturated at
+    /// `u64::MAX`.
     pub used: u64,
     /// Addresses held by ranges, saturated.
     pub reserved: u64,

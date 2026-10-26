@@ -135,30 +135,56 @@ export class VrfView {
     return this.rangesOf.get(prefix) ?? [];
   }
 
-  utilization(node: PrefixNode): Utilization {
-    const version = node.cidr.version;
-    const total = this.countIn(version, node.first, node.last);
-    const covered = node.children.reduce((sum, child) => sum + span(child.first, child.last), 0n);
-    if (node.prefix.role === "network") {
-      const capacity = hostCapacity(node.cidr);
-      let reserved = 0n;
-      const byRole = new Map<RangeRole, [bigint, bigint]>();
-      for (const range of this.ranges(node.prefix.id)) {
-        const first = ipOf(range.first).value;
-        const last = ipOf(range.last).value;
-        const size = span(first, last);
-        const inside = this.countIn(version, first, last);
-        reserved += size - inside;
-        const entry = byRole.get(range.role) ?? [0n, 0n];
-        byRole.set(range.role, [entry[0] + size, entry[1] + inside]);
-      }
-      const taken = total + reserved;
-      return { capacity, used: total, reserved, free: capacity > taken ? capacity - taken : 0n, covered, byRole };
+  /** The addresses the ranges of a network hold without an address object, and the ranges per role. */
+  private rangeUsage(node: PrefixNode): { reserved: bigint; byRole: Map<RangeRole, [bigint, bigint]> } {
+    let reserved = 0n;
+    const byRole = new Map<RangeRole, [bigint, bigint]>();
+    for (const range of this.ranges(node.prefix.id)) {
+      const first = ipOf(range.first).value;
+      const last = ipOf(range.last).value;
+      const size = span(first, last);
+      const inside = this.countIn(node.cidr.version, first, last);
+      reserved += size - inside;
+      const entry = byRole.get(range.role) ?? [0n, 0n];
+      byRole.set(range.role, [entry[0] + size, entry[1] + inside]);
     }
-    const capacity = span(node.first, node.last);
-    const inChildren = node.children.reduce((sum, child) => sum + this.countIn(version, child.first, child.last), 0n);
-    const used = covered + (total - inChildren);
-    return { capacity, used, reserved: 0n, free: capacity > used ? capacity - used : 0n, covered, byRole: new Map() };
+    return { reserved, byRole };
+  }
+
+  /** The networks of a supernet's tree (networks hold no prefixes, so they are disjoint). */
+  private networksUnder(node: PrefixNode): PrefixNode[] {
+    return node.children.flatMap((child) => (child.prefix.role === "network" ? [child] : this.networksUnder(child)));
+  }
+
+  /**
+   * One definition for every prefix (IPAM-10): the address objects (each once) plus the
+   * addresses ranges hold without one, of the usable addresses; for a supernet summed over
+   * its tree. The space allocated to child prefixes (`covered` of `size`) is apart.
+   */
+  utilization(node: PrefixNode): Utilization {
+    const size = span(node.first, node.last);
+    const used = this.countIn(node.cidr.version, node.first, node.last);
+    const covered = node.children.reduce((sum, child) => sum + span(child.first, child.last), 0n);
+    let capacity: bigint;
+    let reserved = 0n;
+    let byRole = new Map<RangeRole, [bigint, bigint]>();
+    if (node.prefix.role === "network") {
+      capacity = hostCapacity(node.cidr);
+      ({ reserved, byRole } = this.rangeUsage(node));
+    } else {
+      capacity = size;
+      for (const network of this.networksUnder(node)) {
+        capacity -= span(network.first, network.last) - hostCapacity(network.cidr);
+        const usage = this.rangeUsage(network);
+        reserved += usage.reserved;
+        for (const [role, [roleSize, inside]] of usage.byRole) {
+          const entry = byRole.get(role) ?? [0n, 0n];
+          byRole.set(role, [entry[0] + roleSize, entry[1] + inside]);
+        }
+      }
+    }
+    const taken = used + reserved;
+    return { capacity, used, reserved, free: capacity > taken ? capacity - taken : 0n, covered, size, byRole };
   }
 }
 
@@ -171,6 +197,7 @@ export interface Utilization {
   reserved: bigint;
   free: bigint;
   covered: bigint;
+  size: bigint;
   /** Per range role: the size of the ranges and the address objects inside them. */
   byRole: Map<RangeRole, [bigint, bigint]>;
 }
@@ -198,10 +225,12 @@ export function utilizationView(util: Utilization): UtilizationView {
   });
   return {
     capacity: util.capacity.toString(),
+    in_use: (util.used + util.reserved).toString(),
     used: util.used.toString(),
     reserved: util.reserved.toString(),
     free: util.free.toString(),
     covered: util.covered.toString(),
+    size: util.size.toString(),
     percent: permilleOf(util) / 10,
     by_role,
   };

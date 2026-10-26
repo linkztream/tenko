@@ -22,6 +22,7 @@ import { Si } from "../components/Si";
 import { AlarmFlag, Count, TimeAgo, UtilizationMeter } from "../grid/cells";
 import { formatDuration, t, withPacks, type MessageKey } from "../i18n";
 import { isAlarmEvent } from "../ipam/alarms";
+import { allocationWords } from "../ipam/words";
 import { MoveDialog } from "../ipam/move/MoveDialog";
 import { NextFreeAddressDialog } from "../ipam/prefix/NextFreeDialogs";
 import { PrefixForm } from "../ipam/prefix/PrefixForm";
@@ -84,9 +85,13 @@ function useUtilization() {
         vrfs.items.map((vrf) => api.get("/api/v1/prefixes/tree", { query: { vrf: vrf.id }, signal })),
       );
       const value = vrfs.items.map((vrf, i) => {
-        const networks = (trees[i]?.nodes ?? []).filter((n) => n.role === "network");
-        const used = networks.reduce((sum, n) => sum + big(n.utilization.used) + big(n.utilization.reserved), 0n);
-        const capacity = networks.reduce((sum, n) => sum + big(n.utilization.capacity), 0n);
+        const nodes = trees[i]?.nodes ?? [];
+        const networks = nodes.filter((n) => n.role === "network");
+        // The meter's definition (IPAM-10) over the top-level prefixes: a supernet already sums
+        // its tree, so every address is counted once, also one directly in a supernet.
+        const top = nodes.filter((n) => n.depth === 0);
+        const used = top.reduce((sum, n) => sum + big(n.utilization.in_use), 0n);
+        const capacity = top.reduce((sum, n) => sum + big(n.utilization.capacity), 0n);
         return {
           vrf,
           tenant: tenants.items.find((tn) => tn.id === vrf.tenant),
@@ -237,8 +242,9 @@ export default function Dashboard() {
                       <UtilizationMeter
                         percent={a.node.utilization.percent}
                         level={a.node.level}
-                        used={a.node.utilization.used}
+                        used={a.node.utilization.in_use}
                         capacity={a.node.utilization.capacity}
+                        note={allocationWords(a.node)}
                       />
                     </li>
                   )}
@@ -322,7 +328,7 @@ export default function Dashboard() {
                               </td>
                               <td class="muted">{n.description ?? ""}</td>
                               <td class="r">
-                                <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.used} capacity={n.utilization.capacity} />
+                                <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.in_use} capacity={n.utilization.capacity} />
                               </td>
                             </tr>
                           )}

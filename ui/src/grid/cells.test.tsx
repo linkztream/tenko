@@ -1,8 +1,9 @@
 import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AlarmLevel, AssignmentMode, Status } from "../api/types";
+import type { AlarmLevel, AssignmentMode, Status, TreeNode } from "../api/types";
 import { formatDateTime, setLocale } from "../i18n";
+import { allocationWords } from "../ipam/words";
 import {
   AlarmFlag,
   Count,
@@ -242,9 +243,22 @@ describe("UtilizationMeter", () => {
 
   it("explains the numbers in the title with compact counts", () => {
     const { container } = render(() => <UtilizationMeter percent={44.1} used="112" capacity="254" />);
-    expect(first(container, ".meter").title).toBe("112 of 254 addresses in use");
+    expect(first(container, ".meter").title).toBe("112 of 254 usable addresses in use");
     const big = render(() => <UtilizationMeter percent={29} used="1234" capacity="18446744073709551616" />);
-    expect(first(big.container, ".meter").title).toBe("1.2K of 2^64 addresses in use");
+    expect(first(big.container, ".meter").title).toBe("1.2K of 2^64 usable addresses in use");
+  });
+
+  it("puts a supernet's allocation on a line of its own in the title, never in the bar", () => {
+    const node = { role: "supernet" as const, children: 13, utilization: { covered: "3328", size: "65536" } as TreeNode["utilization"] };
+    const note = allocationWords(node);
+    expect(note).toBe("3.3K of 66K allocated to 13 prefixes");
+    const { container } = render(() => <UtilizationMeter percent={0.2} used="150" capacity="65510" note={note} />);
+    const meter = first(container, ".meter");
+    expect(meter.title).toBe("150 of 66K usable addresses in use\n3.3K of 66K allocated to 13 prefixes");
+    expect(first(container, ".val").textContent).toBe("0.2%");
+    expect(meter.style.getPropertyValue("--v")).toBe("0.2%");
+    expect(allocationWords({ ...node, role: "network" })).toBeUndefined();
+    expect(allocationWords({ ...node, children: 1 })).toBe("3.3K of 66K allocated to 1 prefix");
   });
 
   it("has no title without both counts", () => {
@@ -301,7 +315,7 @@ describe("UtilizationMeter", () => {
     const { container } = render(() => <UtilizationMeter percent={44.1} level="warning" used="112" capacity="254" />);
     expect(first(container, ".val").textContent).toBe("44,1 %");
     expect(first(container, ".sr-only").textContent).toBe("Varning");
-    expect(first(container, ".meter").title).toBe("112 av 254 adresser används");
+    expect(first(container, ".meter").title).toBe("112 av 254 användbara adresser används");
   });
 });
 

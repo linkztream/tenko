@@ -253,9 +253,11 @@ describe("the prefix tree", () => {
     // 20 addresses, 8 held by the infrastructure range and 100 by the DHCP pool, 254 usable.
     expect(lan.utilization).toEqual({
       capacity: "254",
+      in_use: "128",
       used: "20",
       reserved: "108",
       covered: "0",
+      size: "256",
       free: "126",
       percent: 50.4,
       by_role: [
@@ -265,7 +267,20 @@ describe("the prefix tree", () => {
     });
     const documentation = tree.body.nodes[2]!;
     expect(documentation).toMatchObject({ role: "supernet", children: 3 });
-    expect(documentation.utilization).toMatchObject({ capacity: "256", used: "208", covered: "208", reserved: "0", free: "48" });
+    // The meter sums the tree: the 13 camera addresses of the 250 usable ones (each of the
+    // three networks loses its network and broadcast address). That 208 of the 256 addresses
+    // are allocated to the networks is a figure of its own and not the meter.
+    expect(documentation.utilization).toMatchObject({
+      capacity: "250",
+      in_use: "13",
+      used: "13",
+      reserved: "0",
+      free: "237",
+      covered: "208",
+      size: "256",
+      percent: 5.2,
+    });
+    expect(documentation.level).toBe("normal");
     const child = tree.body.nodes[3]!;
     expect(child).toMatchObject({ parent: P.documentation, vlan: IPAM_IDS.vlan.v20, site: IPAM_IDS.site.lab });
   });
@@ -283,7 +298,9 @@ describe("the prefix tree", () => {
     const tree = await get<TreeResponse>(`${V}/prefixes/tree`);
     const v6 = tree.body.nodes.find((n) => n.cidr === "2001:db8::/32")!;
     expect(v6.children).toBe(3);
-    expect(v6.utilization.capacity).toBe((2n ** 96n).toString());
+    // Each of the three networks loses its subnet-router anycast address.
+    expect(v6.utilization.capacity).toBe((2n ** 96n - 3n).toString());
+    expect(v6.utilization.size).toBe((2n ** 96n).toString());
     // Two /64 networks and the /48 of the delegation network (WP9.2).
     expect(v6.utilization.covered).toBe((2n * 2n ** 64n + 2n ** 80n).toString());
     expect(v6.utilization.percent).toBe(0);

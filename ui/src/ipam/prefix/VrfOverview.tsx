@@ -9,7 +9,7 @@ import { t } from "../../i18n";
 import type { Scope } from "../scope";
 import { VlanRef } from "../vlan/VlanRef";
 import type { VlanStyle } from "../vlan/palette";
-import { prefixRoleWord } from "../words";
+import { allocationWords, prefixRoleWord } from "../words";
 
 export function VrfOverview(props: {
   scope: Scope;
@@ -69,12 +69,28 @@ export function VrfOverview(props: {
             width: 190,
             render: (n) => (
               <>
-                <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.used} capacity={n.utilization.capacity} />
+                <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.in_use} capacity={n.utilization.capacity} />
                 <Show when={n.level !== "normal"}>
                   {" "}
                   <AlarmFlag level={n.level} />
                 </Show>
               </>
+            ),
+          },
+          // A supernet's allocation to child prefixes: a figure of its own, never the meter.
+          {
+            id: "allocated",
+            header: () => t("ipam.col.allocated"),
+            width: 220,
+            text: (n: TreeNode) => allocationWords(n) ?? "",
+            render: (n) => (
+              <Show when={allocationWords(n)}>
+                {(words) => (
+                  <span class="muted" data-testid="allocation">
+                    {words()}
+                  </span>
+                )}
+              </Show>
             ),
           },
         ]}

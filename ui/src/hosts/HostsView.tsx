@@ -337,6 +337,11 @@ export default function HostsView() {
           columns={columns()}
           columnState={columnState}
           rows={source.rows()}
+          count={{
+            value: source.rows().length,
+            noun: t("hosts.count", { count: source.rows().length }),
+            title: t("hosts.count_hint"),
+          }}
           rowId={(h) => h.id}
           rowKey={(h) => h.name}
           rowLabel={(h) => h.name}
