@@ -294,7 +294,7 @@ Profiles change defaults and guard rails, never the layout: every profile has th
 | Banner | Hatched, cannot be dismissed | None | None | None |
 | Default density | Compact | Compact | Compact | Compact |
 | Dashboard | Home set + controller metrics | Attention, health, DNS, DHCP, prefixes, changes | Home set + connectors, jobs, cluster when more than one node | Standard set + security events and audit summary |
-| Changes | Small edits inline with undo, the rest as a job with preview | Small edits inline with undo, the rest as a job with preview | Every change as a job with preview | Job with preview and a second person's approval (new, TGL-38) |
+| Changes | Small edits inline with undo, the rest as a job with preview | Small edits inline with undo, the rest as a job with preview | Small edits inline with undo, the rest as a job with preview | Small edits inline with undo, the rest as a job with preview, and a second person's approval (new, TGL-38) |
 | Recent changes | All activity | All activity | People only by default | People only, with who approved |
 | Topology | Editable | Editable | Editable | Read-only by default |
 | Act-now findings | Conflicts, alarms | Conflicts, alarms | + jobs waiting for a person | + any setting weaker than the profile |
@@ -303,7 +303,7 @@ Every default can be changed per user except the guard rails (approval, the Lab 
 
 - **TGL-38** is the second person's approval under Hardened: on by default in Hardened, off elsewhere (`docs/SECURITY-PROFILES.md`). It is built in Slice 13 with the directory identity, because a second person needs a second identity (UI-Q9). Until then a Hardened change is a job with preview and no approval step.
 - **Read-only topology in Hardened** is the UI face of TGL-20 (UniFi write access is off in Hardened); U7 checks that the map offers no write action while TGL-20 is off and adds no toggle of its own.
-- **"Every change as a job with preview"** in Standard and Hardened is the proposal's text. It is not an existing toggle and the owner did not decide one on 2026-10-26, so until it is decided every profile keeps the small inline edit with undo of `design/README.md` (interaction rules). The lead may ask for a TGL row; U3 and U5 do not depend on it.
+- **"Every change as a job with preview"** in Standard and Hardened stood in the proposal's text and was struck by the owner on 2026-10-26: every change already runs as an audited job, and a preview is required where it adds something (moves, L2 changes), so every profile keeps the small inline edit with undo of `design/README.md` (interaction rules). It is not planned; it may become a feature if someone asks for it.
 - **Dashboard sets and recent-changes defaults** are per-user preference defaults chosen by the profile, not security toggles.
 - **Weakened settings** are findings (kind "A setting is weaker than the profile allows", section 2.2), Review in Home and Standard, Act now in Hardened. In Lab the banner already says so and the finding is not raised. The Settings rail dot is the count of these findings.
 
@@ -487,4 +487,4 @@ No new requirement IDs; one new toggle.
 | UI-R6 | The `-on` tokens are chosen once and a later theme change breaks 4.5:1 | A test computes the ratio of every `-on` token against its fill in both themes; it fails the build |
 | UI-R7 | Hiding what is healthy hides a problem that has no finding | Nothing is removed: groups collapse, the Hidden line names every omitted metric with its reason, and the full detail is one click away; U3 and U4 acceptance check reachability of every old column |
 | UI-R8 | The WLAN rules misclassify a device and flood Review | The "Keep on this WLAN" exception per host and per SSID, the per-SSID ignore policy, and the classification read from the host's class and the network's role only; U7 runs the rules against the sample network first |
-| UI-R9 | The profile table promises behaviour that has no toggle (every change as a job with preview, section 6) | Recorded as undecided; packages keep the inline edit with undo in all profiles until the owner decides |
+| UI-R9 | The profile table promised behaviour that has no toggle (every change as a job with preview, section 6) | Closed on 2026-10-26: struck by the owner; every profile keeps the inline edit with undo |
