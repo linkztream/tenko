@@ -525,20 +525,33 @@ jobs:
             /etc/tenko /var/lib/tenko /usr/local/bin/tenko
           sudo systemctl daemon-reload
 
-  # Weekly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints.
-  # WP3.13 and the packages that add parsers of network input add targets under
-  # fuzz/fuzz_targets/ and fuzz/Cargo.toml; no edit of this file is needed. A directory
-  # fuzz/seeds/<target>/ is used as an extra corpus when it exists. All targets run even
-  # after one crashes, then the job fails and keeps fuzz/artifacts/.
+  # Weekly fuzz smoke (API-14): 60 seconds for every target that `cargo fuzz list` prints,
+  # spread over 4 parallel jobs (shards). One job that ran all 41 targets in turn needed more
+  # than its 60 minutes (the run of 2026-10-25: the build of each target plus 60 seconds
+  # each). The sorted list is dealt out round-robin (target number i goes to shard i mod 4),
+  # so the split is the same on every run and every target runs in exactly one shard. A new
+  # target needs no edit of this file: WP3.13 and the packages that add parsers of network
+  # input add targets under fuzz/fuzz_targets/ and fuzz/Cargo.toml. Keep a shard at about 11
+  # targets or fewer: add a shard to the matrix and raise FUZZ_SHARDS when the list passes 44. A directory fuzz/seeds/<target>/ is used as an extra corpus when it
+  # exists. All targets of a shard run even after one crashes, then the shard fails and keeps
+  # fuzz/artifacts/. Each shard writes its own table (target, result, seconds, crash files)
+  # to the job summary.
   fuzz-smoke:
-    name: Fuzz smoke (Linux, weekly schedule)
+    name: Fuzz smoke (Linux, weekly schedule, shard ${{ matrix.shard }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      # A crash in one shard must not stop the others: the point is every target run.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     env:
       # Targets that link tenko-api embed the web UI. cargo-fuzz builds with debug
       # assertions, which is what lets the placeholder page through the release check.
       TENKO_UI_STUB: "1"
+      FUZZ_SHARDS: "4"
+      FUZZ_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
@@ -549,13 +562,31 @@ jobs:
         with:
           # The fuzz crate is its own workspace with its own target directory.
           workspaces: fuzz
-      - name: Run every target for 60 seconds
+          # One cache for the shards: they build the same dependencies.
+          shared-key: fuzz-smoke
+      - name: Run this shard's targets for 60 seconds each
         run: |
           set -euo pipefail
-          targets="$(cargo +nightly fuzz list)"
-          if [ -z "$targets" ]; then
+          all="$(cargo +nightly fuzz list | LC_ALL=C sort)"
+          if [ -z "$all" ]; then
             echo "::error::cargo fuzz list printed no targets."
             exit 1
+          fi
+          total="$(printf '%s\n' "$all" | wc -l)"
+          targets="$(printf '%s\n' "$all" | awk -v n="$FUZZ_SHARDS" -v s="$FUZZ_SHARD" '(NR - 1) % n == s')"
+          mine="$(printf '%s' "$targets" | grep -c . || true)"
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          {
+            echo "### Fuzz smoke, shard $FUZZ_SHARD (of $FUZZ_SHARDS, counted from 0)"
+            echo
+            echo "$total targets in all, $mine in this shard."
+            echo
+            echo "| Target | Result | Seconds | Crash files |"
+            echo "|---|---|---|---|"
+          } >> "$summary"
+          if [ "$mine" -eq 0 ]; then
+            echo "::warning::No target falls in shard $FUZZ_SHARD."
+            exit 0
           fi
           failed=()
           while IFS= read -r target; do
@@ -568,21 +599,29 @@ jobs:
             fi
             # The prebuilt cargo-fuzz is a static musl binary and would pick the musl target by
             # default, which has no sanitizer runtime; the host target is named explicitly.
-            if ! cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- -max_total_time=60; then
+            started="$(date +%s)"
+            if cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- -max_total_time=60; then
+              result="ok"
+            else
+              result="FAILED"
               failed+=("$target")
               echo "::error::Fuzz target $target failed."
             fi
+            elapsed=$(( $(date +%s) - started ))
+            crashes="$(find "fuzz/artifacts/$target" -type f 2> /dev/null | wc -l || true)"
+            echo "| \`$target\` | $result | $elapsed | $crashes |" >> "$summary"
             echo "::endgroup::"
           done <<< "$targets"
           if [ "${#failed[@]}" -gt 0 ]; then
             echo "::error::Failed fuzz targets: ${failed[*]}"
+            printf '\nFailed: %s\n' "${failed[*]}" >> "$summary"
             exit 1
           fi
       - name: Keep the crash artifacts
         if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: fuzz-artifacts
+          name: fuzz-artifacts-shard-${{ matrix.shard }}
           path: fuzz/artifacts/
           if-no-files-found: ignore
           retention-days: 14

@@ -20,6 +20,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 - A script that installs updates through `POST /api/v1/system/updates/install` or `.../upload` sends `backup: "run"` or `"skip"` from now on, or takes a backup within the hour before; otherwise it gets 409 `update.backup_required`.
 
+### Fixed
+
+- CI: the weekly fuzz smoke finishes inside its time limit with every target still run for its 60 seconds (API-14, API-15): the job is a matrix of 4 shards over the sorted target list, dealt out round-robin so that the split is the same on every run and a new target needs no edit of the workflow, each shard keeps going after a crash, writes its own table of targets, results, seconds and crash files to the job summary and uploads its own `fuzz-artifacts-shard-<n>`. The conformance matrix reads RFC 3527 (link selection) and RFC 5107 (server identifier override) as Implemented and the RFC 3046 note says what the code does.
+
 ## [0.0.7] - 2026-10-25
 
 ### Added

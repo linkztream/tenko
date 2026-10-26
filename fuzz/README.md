@@ -81,3 +81,17 @@ is built, also for `cargo check --bins`.
 - Small, meaningful seed corpora may be committed under `fuzz/seeds/<target>/`.
   Pass the directory as an extra corpus argument:
   `cargo +nightly fuzz run <target> fuzz/corpus/<target> fuzz/seeds/<target>`.
+
+## Weekly smoke
+
+The `Fuzz smoke (Linux, weekly schedule)` job of `.github/workflows/ci.yml` (Sunday, or by hand with
+`workflow_dispatch`) runs every target that `cargo fuzz list` prints for 60 seconds, with the
+committed seed corpus when there is one. Since 41 targets in one job did not fit its 60 minutes
+(each target is built first, then fuzzed), the job is a matrix of 4 shards: the sorted target list is
+dealt out round-robin, target number *i* (counted from 0) to shard *i* mod 4, so the split is the same
+on every run, every target runs exactly once, and a new target needs no edit of the workflow. A shard
+holds 10 or 11 targets today; add a shard to the matrix and raise `FUZZ_SHARDS` in the job when the
+list passes 44. A target that crashes does not stop the others of its shard or the other shards: the
+shard fails at its end and uploads `fuzz/artifacts/` as `fuzz-artifacts-shard-<n>`. Each shard writes
+a table to its job summary (target, result, seconds, number of crash files). To reproduce one target
+run `cargo +nightly fuzz run <target>` as above; the workflow has no single-target input.
