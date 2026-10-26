@@ -3414,7 +3414,10 @@ async fn ipam_10_supernet_alarms_follow_the_addresses_in_use_and_never_the_alloc
     );
     let full = node(&service.tree().tree(vrf, None, None));
     assert_eq!(full.level, AlarmLevel::Critical);
-    assert_eq!(full.utilization.covered, "128", "the allocation did not change");
+    assert_eq!(
+        full.utilization.covered, "128",
+        "the allocation did not change"
+    );
 
     // Deleting the second network with its range and address: 64 of 254 (its network and
     // broadcast addresses are usable again), back to a warning.
