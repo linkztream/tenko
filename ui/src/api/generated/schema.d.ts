@@ -6005,6 +6005,7 @@ export interface components {
         };
         /** @description A request to write a backup now. */
         BackupCreateRequest: {
+            before_update?: components["schemas"]["ReleaseVersion"] | null;
             /**
              * Format: password
              * @description A passphrase of at least 12 characters that opens this backup, in addition to the
@@ -6028,9 +6029,10 @@ export interface components {
          * @description Why a backup was written.
          * @enum {string}
          */
-        BackupReason: "manual" | "scheduled";
+        BackupReason: "manual" | "scheduled" | "before_update";
         /** @description One backup a controller wrote, or tried to. */
         BackupRunView: {
+            before_update?: components["schemas"]["ReleaseVersion"] | null;
             /** @description Who asked: a principal subject such as `user:<id>`, or `system`. */
             by: string;
             /**
@@ -9649,6 +9651,11 @@ export interface components {
         };
         /** @description How this installation can install a new version. */
         InstallAbility: {
+            /**
+             * @description The backup before an install: how old the newest good backup is and what an install
+             *     request must say about a backup.
+             */
+            backup: components["schemas"]["PreUpdateBackupStatus"];
             /** @description `POST /system/updates/install` would start now. */
             from_source: boolean;
             from_source_blocked?: components["schemas"]["InstallBlock"] | null;
@@ -9679,6 +9686,7 @@ export interface components {
         InstallPolicy: "ui" | "ui_step_up" | "upload_only";
         /** @description `POST /system/updates/install`. */
         InstallRequest: {
+            backup?: components["schemas"]["PreUpdateBackup"] | null;
             /** @description The version to install; it must be in the manifest and newer than the running one. */
             version: components["schemas"]["ReleaseVersion"];
         };
@@ -15643,6 +15651,37 @@ export interface components {
          * @enum {string}
          */
         PowerState: "running" | "stopped";
+        /**
+         * @description The answer of an install or upload request to "take a backup first?" (ADR 0023).
+         * @enum {string}
+         */
+        PreUpdateBackup: "run" | "skip";
+        /**
+         * @description The backup before an install, as `GET /system/updates` reports it.
+         *
+         *     A request without `backup` installs only while a good backup is younger than
+         *     `max_age_seconds`; otherwise it is refused with 409 `update.backup_required`.
+         */
+        PreUpdateBackupStatus: {
+            /**
+             * Format: int64
+             * @description Seconds since the newest good backup of any controller; absent when there is none.
+             */
+            age_seconds?: number | null;
+            /**
+             * Format: int64
+             * @description The age up to which a good backup counts as recent (one hour).
+             */
+            max_age_seconds: number;
+            /**
+             * @description Whether a backup recipient is configured. Without one a backup needs a passphrase:
+             *     `backup: "run"` is refused with 422 `backup.key.missing`, and the UI asks for a
+             *     passphrase for `POST /system/backups`.
+             */
+            recipient: boolean;
+            /** @description Whether `backup: "skip"` is accepted; not under the Hardened profile (TGL-37). */
+            skip_allowed: boolean;
+        };
         /** @description A prefix: a supernet (container) or a network (IPAM-02). */
         Prefix: {
             alarm?: components["schemas"]["UtilizationAlarm"] | null;
@@ -45436,8 +45475,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`) */
+            /** @description This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: "skip"`) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `backup: "run"` without a configured backup recipient (`backup.key.missing`): take the backup with a passphrase through `POST /system/backups` first */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -45525,6 +45573,8 @@ export interface operations {
                  *     platform, whose SHA-256 the upload must match.
                  */
                 version: components["schemas"]["ReleaseVersion"];
+                /** @description Take a backup first (`run`) or not (`skip`), as in `POST /system/updates/install`. */
+                backup?: components["schemas"]["PreUpdateBackup"];
             };
             header?: never;
             path?: never;
@@ -45573,7 +45623,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description This installation cannot install now (`update.install_blocked`, parameter `reason`) */
+            /** @description This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -45584,6 +45634,15 @@ export interface operations {
             };
             /** @description The file is larger than the manifest says (`update.size_mismatch`) */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description `backup=run` without a configured backup recipient (`backup.key.missing`) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

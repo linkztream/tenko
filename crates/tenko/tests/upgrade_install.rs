@@ -233,12 +233,26 @@ fn install(api: &Api) -> String {
     );
     let notes = status["releases"][0]["notes"].as_str().unwrap_or_default();
     assert!(notes.contains("install test"), "{notes}");
-    let started = api
+    // A fresh node has no backup: an install that does not answer is refused.
+    assert_eq!(status["install"]["backup"]["max_age_seconds"], 3_600);
+    let refused = api
         .post(
             "/system/updates/install",
             &json!({ "version": NEW.as_str() }),
         )
+        .expect(409);
+    assert_eq!(refused["code"], "update.backup_required", "{refused}");
+    let started = api
+        .post(
+            "/system/updates/install",
+            &json!({ "version": NEW.as_str(), "backup": "skip" }),
+        )
         .expect(202);
+    let audit = wait_for_audit(api, "sys.update.install");
+    assert_eq!(
+        audit["draft"]["details"]["context"]["backup"], "skipped",
+        "{audit}"
+    );
     assert_eq!(started["version"], *NEW);
     started["job_id"].as_str().expect("a job id").to_owned()
 }

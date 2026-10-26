@@ -21,9 +21,11 @@ use serde::{Deserialize, Serialize};
 use tenko_api::{
     dto::{
         backup::{
-            BackupFailure, BackupOutcome, BackupReason, BackupRunView, BackupSettingsUpdate,
-            BackupSettingsView, BackupStatusView, BackupSummaryView, RestoreNoticeView,
+            BackupCreateRequest, BackupFailure, BackupOutcome, BackupReason, BackupRunView,
+            BackupSettingsUpdate, BackupSettingsView, BackupStatusView, BackupSummaryView,
+            RestoreNoticeView,
         },
+        release::ReleaseVersion,
         system::StatusWarning,
     },
     routes::backup::BackupService as BackupApi,
@@ -49,14 +51,16 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+use crate::upgrade::updates::BackupReadiness;
+
 use super::{
     BackupError,
     archive::{KdfParams, OriginRecord},
     create::{self, Extras, KeyLock, Target},
     keys::{Recipient, check_passphrase},
     model::{
-        BackupRun, BackupSettings, MAX_INTERVAL_HOURS, MAX_KEEP, RestoreRecord, RunError,
-        RunReason, actions, system_object, tables,
+        BEFORE_UPDATE, BackupRun, BackupSettings, MAX_INTERVAL_HOURS, MAX_KEEP, RestoreRecord,
+        RunError, RunReason, actions, system_object, tables,
     },
     restore,
 };
@@ -193,11 +197,13 @@ impl BackupService {
             .map_or_else(|| self.config.host_target.clone(), PathBuf::from)
     }
 
-    /// Writes and records one backup; `epoch` fences the record of a scheduled one.
+    /// Writes and records one backup; `epoch` fences the record of a scheduled one, and
+    /// `before_update` names the version an update is about to install.
     async fn run(
         &self,
         ctx: &RequestCtx,
         reason: RunReason,
+        before_update: Option<String>,
         passphrase: Option<Zeroizing<String>>,
         epoch: Option<u64>,
     ) -> Result<BackupRunView, Failure> {
@@ -234,11 +240,16 @@ impl BackupService {
         let target_dir = self.target_dir(&settings);
         let started_at = Timestamp::now();
         let by = ctx.principal.subject();
+        let origin = if before_update.is_some() {
+            BEFORE_UPDATE
+        } else {
+            reason.as_str()
+        };
         let request = create::Request {
             locks,
             kdf: self.config.kdf,
             origin: OriginRecord {
-                reason: reason.as_str().to_owned(),
+                reason: origin.to_owned(),
                 by: by.clone(),
             },
             extras: Extras {
@@ -256,6 +267,7 @@ impl BackupService {
         drop(ring);
         let run = BackupRun {
             reason,
+            before_update,
             node: self.config.node.0,
             target_dir: target_dir.display().to_string(),
             file: None,
@@ -578,7 +590,7 @@ impl BackupService {
         }
         let ctx = RequestCtx::system(SystemComponent::Backup);
         match self
-            .run(&ctx, RunReason::Scheduled, None, Some(epoch))
+            .run(&ctx, RunReason::Scheduled, None, None, Some(epoch))
             .await
         {
             Ok(run) => {
@@ -613,11 +625,12 @@ impl BackupApi for BackupService {
     fn create<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        passphrase: Option<String>,
+        request: BackupCreateRequest,
     ) -> BoxFuture<'a, Result<BackupRunView, CodedError>> {
         Box::pin(async move {
-            let passphrase = passphrase.map(Zeroizing::new);
-            self.run(ctx, RunReason::Manual, passphrase, None)
+            let passphrase = request.passphrase.map(Zeroizing::new);
+            let before_update = request.before_update.map(|version| version.to_string());
+            self.run(ctx, RunReason::Manual, before_update, passphrase, None)
                 .await
                 .map_err(|error| *error)
         })
@@ -638,6 +651,47 @@ impl BackupApi for BackupService {
 
     fn summary(&self) -> BoxFuture<'_, (Option<BackupSummaryView>, Vec<StatusWarning>)> {
         Box::pin(self.summary_view())
+    }
+}
+
+/// The backup before an update (ADR 0023), for the update service.
+impl crate::upgrade::updates::Backups for BackupService {
+    fn readiness(&self) -> BoxFuture<'_, Result<BackupReadiness, CodedError>> {
+        Box::pin(async move {
+            let view = self.view().await.map_err(|error| error.to_coded_error())?;
+            let settings = read_settings(view.as_ref())
+                .map_err(|error| error.to_coded_error())?
+                .map(|(settings, _)| settings)
+                .unwrap_or_default();
+            let recent = recent_runs(view.as_ref()).map_err(|error| error.to_coded_error())?;
+            drop(view);
+            let now = Timestamp::now();
+            Ok(BackupReadiness {
+                age_seconds: recent
+                    .iter()
+                    .find(|(_, run)| run.is_good())
+                    .map(|(_, run)| seconds_between(run.finished_at, now)),
+                recipient: settings.recipient.is_some(),
+            })
+        })
+    }
+
+    fn run_before_update<'a>(
+        &'a self,
+        ctx: &'a RequestCtx,
+        version: &'a ReleaseVersion,
+    ) -> BoxFuture<'a, Result<BackupRunView, CodedError>> {
+        Box::pin(async move {
+            self.run(
+                ctx,
+                RunReason::Manual,
+                Some(version.to_string()),
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| *error)
+        })
     }
 }
 
@@ -842,10 +896,15 @@ fn run_view(id: Uuid, run: &BackupRun) -> BackupRunView {
         } else {
             BackupOutcome::Failed
         },
-        reason: match run.reason {
-            RunReason::Manual => BackupReason::Manual,
-            RunReason::Scheduled => BackupReason::Scheduled,
+        reason: match (run.reason, &run.before_update) {
+            (_, Some(_)) => BackupReason::BeforeUpdate,
+            (RunReason::Manual, None) => BackupReason::Manual,
+            (RunReason::Scheduled, None) => BackupReason::Scheduled,
         },
+        before_update: run
+            .before_update
+            .as_deref()
+            .and_then(|version| version.parse().ok()),
         node: run.node,
         target_dir: run.target_dir.clone(),
         file: run.file.clone(),
@@ -904,11 +963,14 @@ fn record_batch(
         None => AuditDraft::success(actions::CREATE, objects),
     };
     let mut context = BTreeMap::from([
-        ("reason".to_owned(), run.reason.as_str().to_owned()),
+        ("reason".to_owned(), run.reason_name().to_owned()),
         ("node".to_owned(), run.node.to_string()),
         ("target_dir".to_owned(), run.target_dir.clone()),
         ("slots".to_owned(), run.slots.join(",")),
     ]);
+    if let Some(version) = &run.before_update {
+        context.insert("before_update".to_owned(), version.clone());
+    }
     if let Some(file) = &run.file {
         context.insert("file".to_owned(), file.clone());
     }

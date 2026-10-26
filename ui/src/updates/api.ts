@@ -41,17 +41,34 @@ export function uploadManifest(manifest: unknown): Promise<UpdateStatus> {
   return api.put("/api/v1/system/updates/manifest", { body: manifest as never });
 }
 
+/**
+ * The answer to "take a backup first?" that an install carries: `skip` when the administrator
+ * declined, nothing when a backup is recent (or was just taken through `backupBeforeUpdate`).
+ */
+export type BackupAnswer = S["PreUpdateBackup"] | undefined;
+
 /** Installs a version from the release source; `key` identifies the one logical install. */
-export function installVersion(version: string, key: string): Promise<InstallStarted> {
-  return api.post("/api/v1/system/updates/install", { body: { version }, idempotencyKey: key });
+export function installVersion(version: string, key: string, backup?: BackupAnswer): Promise<InstallStarted> {
+  return api.post("/api/v1/system/updates/install", { body: backup ? { version, backup } : { version }, idempotencyKey: key });
+}
+
+/**
+ * The backup before an update ("Backup now"): written and recorded before the call returns,
+ * with the reason `before_update` and the version. Without a configured recipient it needs a
+ * passphrase. Needs a sign-in within the last five minutes, like every backup.
+ */
+export function backupBeforeUpdate(version: string, passphrase?: string): Promise<S["BackupRunView"]> {
+  return api.post("/api/v1/system/backups", { body: passphrase ? { before_update: version, passphrase } : { before_update: version } });
 }
 
 /**
  * Installs a release file the administrator chose. No `Idempotency-Key`: the server
  * buffers keyed requests under a smaller size limit than an upload.
  */
-export async function uploadRelease(file: Blob, version: string, signal?: AbortSignal): Promise<InstallStarted> {
-  const url = `/api/v1/system/updates/upload?version=${encodeURIComponent(version)}`;
+export async function uploadRelease(file: Blob, version: string, backup?: BackupAnswer, signal?: AbortSignal): Promise<InstallStarted> {
+  const query = new URLSearchParams({ version });
+  if (backup) query.set("backup", backup);
+  const url = `/api/v1/system/updates/upload?${query.toString()}`;
   let res: Response;
   try {
     // eslint-disable-next-line no-restricted-syntax -- a raw file body, which the typed client cannot send

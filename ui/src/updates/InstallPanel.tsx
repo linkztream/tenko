@@ -1,10 +1,11 @@
 // How to install the newest release on this installation. By what the server reports:
 // "Install <version>" when it can fetch and switch by itself (after a confirmation that names
-// the version and repeats any action the release asks for), the reason when it cannot, the
+// the version, repeats any action the release asks for and asks about a backup first; the
+// newest backup's age stands next to the button), the reason when it cannot, the
 // pull command for a container, and the upload from files when that is possible. A step-up
 // answer explains the fresh sign-in; the rest of the failures are shown as they are.
 import { A } from "@solidjs/router";
-import { createSignal, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 import { isApiError } from "../api/problem";
 import { newIdempotencyKey } from "../api/client";
 import { paths } from "../app/paths";
@@ -12,7 +13,8 @@ import { Icon } from "../components/Icon";
 import { ErrorNotice, Notice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
-import { installVersion, type InstallStarted, type UpdateStatus } from "./api";
+import { installVersion, type BackupAnswer, type InstallStarted, type UpdateStatus } from "./api";
+import { BackupAge } from "./BackupAge";
 import { InstallConfirm } from "./InstallConfirm";
 import { StepUpNotice } from "./StepUpNotice";
 import { UploadPanel } from "./UploadPanel";
@@ -46,17 +48,23 @@ export function InstallPanel(props: {
     }
     setStepUp(false);
     setError(err);
-    // The server knows better than the status on screen why it is blocked now.
-    if (isApiError(err, "update.install_blocked")) props.onReload();
+    // The server knows better than the status on screen why it is blocked now, or how old
+    // the newest backup is (the next try asks the backup question).
+    if (isApiError(err, "update.install_blocked") || isApiError(err, "update.backup_required")) props.onReload();
   };
+  // When the status on screen arrived, to age the backup it reports.
+  const receivedAt = createMemo(() => {
+    void props.status;
+    return Date.now();
+  });
 
-  const start = async () => {
+  const start = async (backup: BackupAnswer) => {
     if (busy()) return;
     setBusy(true);
     setError(null);
     setStepUp(false);
     try {
-      const started = await installVersion(newest(), key);
+      const started = await installVersion(newest(), key, backup);
       setConfirming(false);
       key = newIdempotencyKey();
       props.onStarted(started);
@@ -110,6 +118,7 @@ export function InstallPanel(props: {
                   <Icon name="download" size="sm" />
                   {t("updates.install.button", { version: newest() })}
                 </button>
+                <BackupAge status={props.status} receivedAt={receivedAt()} />
               </div>
             </Show>
             <Show when={!install().from_source && blocked()}>
@@ -152,6 +161,7 @@ export function InstallPanel(props: {
       <Show when={showUpload()}>
         <UploadPanel
           status={props.status}
+          receivedAt={receivedAt()}
           canInstall={install().upload}
           onStatus={props.onStatus}
           onStarted={props.onStarted}
@@ -165,7 +175,12 @@ export function InstallPanel(props: {
           version={newest()}
           kind="download"
           busy={busy()}
-          onConfirm={() => void start()}
+          receivedAt={receivedAt()}
+          onConfirm={(backup) => void start(backup)}
+          onFailure={(err) => {
+            setConfirming(false);
+            fail(err);
+          }}
           onClose={() => setConfirming(false)}
         />
       </Show>

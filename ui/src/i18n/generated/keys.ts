@@ -581,6 +581,7 @@ export type MessageKey =
   | "backup.restored.body"
   | "backup.restored.nodes"
   | "backup.restored.title"
+  | "backup.run.before_update"
   | "backup.run.failed"
   | "backup.run.manual"
   | "backup.run.scheduled"
@@ -3431,6 +3432,7 @@ export type MessageKey =
   | "errors.auth.webauthn.origin_mismatch"
   | "errors.auth.webauthn.rp_id_mismatch"
   | "errors.auth.webauthn.user_verification"
+  | "errors.backup.key.missing"
   | "errors.client.aborted"
   | "errors.client.bad_response"
   | "errors.client.network"
@@ -3713,6 +3715,8 @@ export type MessageKey =
   | "errors.sys.shutting_down"
   | "errors.sys.store.no_quorum"
   | "errors.sys.store.precondition_failed"
+  | "errors.update.backup_required"
+  | "errors.update.backup_unavailable"
   | "errors.update.check_failed"
   | "errors.update.check_off"
   | "errors.update.check_refused"
@@ -4915,6 +4919,7 @@ export type MessageKey =
   | "jobs.step.ipam_intent"
   | "jobs.step.l2_move"
   | "jobs.step.observe"
+  | "jobs.step.sys_update_backup"
   | "jobs.step.sys_update_check"
   | "jobs.step.sys_update_fetch"
   | "jobs.step.sys_update_switch"
@@ -4952,6 +4957,7 @@ export type MessageKey =
   | "jobs.stepname.ipam_vlan_manual"
   | "jobs.stepname.l2_move"
   | "jobs.stepname.observe"
+  | "jobs.stepname.sys_update_backup"
   | "jobs.stepname.sys_update_check"
   | "jobs.stepname.sys_update_fetch"
   | "jobs.stepname.sys_update_switch"
@@ -6910,6 +6916,19 @@ export type MessageKey =
   | "topology.zoom.out"
   | "updates.attempt.failed"
   | "updates.attempt.rolled_back"
+  | "updates.backup.age"
+  | "updates.backup.failed"
+  | "updates.backup.link"
+  | "updates.backup.never"
+  | "updates.backup.none"
+  | "updates.backup.now"
+  | "updates.backup.passphrase_lead"
+  | "updates.backup.question"
+  | "updates.backup.recent"
+  | "updates.backup.required"
+  | "updates.backup.running"
+  | "updates.backup.skip"
+  | "updates.backup.stale"
   | "updates.blocked.air_gapped"
   | "updates.blocked.cluster"
   | "updates.blocked.container"
@@ -7174,6 +7193,7 @@ export interface MessageArgs {
   "backup.restore.title": { file: string | number };
   "backup.restored.body": { at: string | number; created: string | number; file: string | number };
   "backup.restored.nodes": { node: string | number; revision: number; source: string | number };
+  "backup.run.before_update": { version: string | number };
   "backup.schedule.error.interval": { max: number; min: number };
   "backup.schedule.error.keep": { max: number; min: number };
   "backup.schedule.every": { interval: string | number };
@@ -8416,6 +8436,9 @@ export interface MessageArgs {
   "topology.summary": { edges: number; nodes: number; total_edges: number; total_nodes: number };
   "updates.attempt.failed": { to: string | number };
   "updates.attempt.rolled_back": { from: string | number; to: string | number };
+  "updates.backup.age": { age: string | number };
+  "updates.backup.recent": { age: string | number };
+  "updates.backup.stale": { age: string | number };
   "updates.blocked.other": { reason: string | number };
   "updates.blocked.unsupported_platform": { platform: string | number };
   "updates.check.on": { hours: number };
@@ -9037,6 +9060,7 @@ export const messageKeys: readonly MessageKey[] = [
   "backup.restored.body",
   "backup.restored.nodes",
   "backup.restored.title",
+  "backup.run.before_update",
   "backup.run.failed",
   "backup.run.manual",
   "backup.run.scheduled",
@@ -11887,6 +11911,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.auth.webauthn.origin_mismatch",
   "errors.auth.webauthn.rp_id_mismatch",
   "errors.auth.webauthn.user_verification",
+  "errors.backup.key.missing",
   "errors.client.aborted",
   "errors.client.bad_response",
   "errors.client.network",
@@ -12169,6 +12194,8 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.sys.shutting_down",
   "errors.sys.store.no_quorum",
   "errors.sys.store.precondition_failed",
+  "errors.update.backup_required",
+  "errors.update.backup_unavailable",
   "errors.update.check_failed",
   "errors.update.check_off",
   "errors.update.check_refused",
@@ -13371,6 +13398,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.step.ipam_intent",
   "jobs.step.l2_move",
   "jobs.step.observe",
+  "jobs.step.sys_update_backup",
   "jobs.step.sys_update_check",
   "jobs.step.sys_update_fetch",
   "jobs.step.sys_update_switch",
@@ -13408,6 +13436,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.ipam_vlan_manual",
   "jobs.stepname.l2_move",
   "jobs.stepname.observe",
+  "jobs.stepname.sys_update_backup",
   "jobs.stepname.sys_update_check",
   "jobs.stepname.sys_update_fetch",
   "jobs.stepname.sys_update_switch",
@@ -15366,6 +15395,19 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.zoom.out",
   "updates.attempt.failed",
   "updates.attempt.rolled_back",
+  "updates.backup.age",
+  "updates.backup.failed",
+  "updates.backup.link",
+  "updates.backup.never",
+  "updates.backup.none",
+  "updates.backup.now",
+  "updates.backup.passphrase_lead",
+  "updates.backup.question",
+  "updates.backup.recent",
+  "updates.backup.required",
+  "updates.backup.running",
+  "updates.backup.skip",
+  "updates.backup.stale",
   "updates.blocked.air_gapped",
   "updates.blocked.cluster",
   "updates.blocked.container",

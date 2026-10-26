@@ -63,6 +63,7 @@ A passphrase is never stored. A wrong passphrase or key fails at the slot, befor
 |---|---|---|---|
 | Online, by hand | `POST /api/v1/system/backups`, or `tenko backup create --url …` | Administrators, with a sign-in within the last five minutes | The target directory of the controller that answers |
 | Online, scheduled | The leader service `backup.schedule` | The system | The target directory of the leader |
+| Online, before an update | "Backup now" in the install dialog (`POST /api/v1/system/backups` with `before_update`), or the first step `sys.update.backup` of an install asked to take one ([upgrades.md](upgrades.md) section 8.12) | The administrator who installs; the dialog needs a sign-in within the last five minutes | The target directory of the controller that answers |
 | Offline | `tenko backup create --config tenko.toml` (or `--data-dir`) with the server stopped | Whoever can read the data directory and the KEK | `--out`, else the target directory |
 
 The **target directory** is the `target_dir` of the backup settings when set, else `[backup] target_dir` of the controller's `tenko.toml`, else `backups/` in its data directory. Prefer another disk: a backup next to the data it protects does not survive the loss of that disk.
@@ -88,6 +89,8 @@ tenko backup create --config /etc/tenko/tenko.toml --out /srv/backup/
 ```
 
 The command refuses a store that a running server holds open (`backup.in_use`). The UI offers no download of a backup in Phase 1 (owner decision S3-Q11): copy the files off the controller with the tools of the host.
+
+A **backup before an update** is the restore point of that update (ADR 0023). It is an ordinary online backup with the reason `before_update` and the version the update is about to install, listed as "Before update 0.2.0" on the Backup page and in `GET /api/v1/system/backups` (`reason: before_update`, `before_update: "0.2.0"`); the archive's origin says `before_update`. The record is stored as a manual backup with the version beside it, so a previous release still reads it after a switch back. It does not count as a scheduled backup for the schedule. The step of an install job can take one only with a recipient, since a job never carries a passphrase; the install dialog asks for a passphrase when there is no recipient and writes the backup itself.
 
 ## 4. Scheduled backups
 
@@ -162,7 +165,7 @@ The scheduled backups of a cluster are written by the leader, into its target di
 | Endpoint | Operation | Who | Answer |
 |---|---|---|---|
 | `GET /api/v1/system/backups` | `get_backups` | `Read` on the system (viewers and up) | 200 `BackupStatusView` with `ETag` of the settings |
-| `POST /api/v1/system/backups` | `create_backup` | Administrators, fresh sign-in | 201 `BackupRunView`; body `{"passphrase": "…"}`, optional |
+| `POST /api/v1/system/backups` | `create_backup` | Administrators, fresh sign-in | 201 `BackupRunView`; body `{"passphrase": "…", "before_update": "0.2.0"}`, both optional (`before_update` must be a version) |
 | `PUT /api/v1/system/backups/settings` | `update_backup_settings` | Administrators, fresh sign-in | 200 `BackupSettingsView` with the new `ETag`; `If-Match` optional |
 
 A personal API token never administers the system and is refused with `403 auth.forbidden`; an older session gets `403 auth.step_up_required` with `required: fresh`. `POST` returns when the file is complete; a backup of a home installation takes seconds, a store of a million records about the time M14 reports (`bench/phase1-backup`). The settings live in the table `backup.settings`, the records in `backup.runs` (the newest 100 are kept) and the restore in `backup.restore`; the event stream reports changes on the topic `system`.
@@ -171,7 +174,7 @@ A personal API token never administers the system and is refused with `403 auth.
 
 | Action | When | Details |
 |---|---|---|
-| `sys.backup.create` | Every backup written through the API or the schedule, also a failed one (outcome failed with its error) | `reason`, `node`, `target_dir`, `file`, `revision`, `slots` |
+| `sys.backup.create` | Every backup written through the API or the schedule, also a failed one (outcome failed with its error) | `reason` (`manual`, `scheduled` or `before_update`), `before_update` (the version), `node`, `target_dir`, `file`, `revision`, `slots` |
 | `sys.backup.settings` | The settings changed | every setting, the recipient included (it is public) |
 | `sys.backup.restore` | The first start after a restore | `file`, `revision`, `source_node`, `backup_created_at` |
 

@@ -65,6 +65,15 @@ describe("the backup page", () => {
     expect(rows[0]?.textContent).toContain("4.6 MiB");
   });
 
+  it("names the version of a backup taken before an update", async () => {
+    backupState.runs = [{ ...backupState.runs[0]!, id: "0190d1c2-0000-7000-8000-0000000000b1", reason: "before_update", before_update: "0.2.0" }];
+    await openPage();
+    const rows = screen.getAllByTestId("backup-run");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("Before update 0.2.0");
+    expect(rows[0]?.textContent).not.toContain("By hand");
+  });
+
   it("warns when the last good backup is older than 7 days", async () => {
     backupState.runs = backupState.runs.map((r) => ({ ...r, finished_at: age(9) }));
     await openPage();

@@ -30,7 +30,9 @@
 //! recipient and, when the body carries one, to a passphrase as well; without either it is
 //! refused with 422 `backup.key.missing`. It is recorded as the inline job `backup.create`
 //! and audited as `sys.backup.create`. Phase 1 offers no download (owner decision S3-Q11):
-//! the file stays on the controller.
+//! the file stays on the controller. A body with `before_update` (the version an update is
+//! about to install) records the backup with the reason `before_update`: the UI takes it
+//! when the administrator answers "Backup now" before an install (ADR 0023).
 
 use std::sync::Arc;
 
@@ -71,12 +73,13 @@ pub trait BackupService: Send + Sync + 'static {
         ctx: &'a RequestCtx,
     ) -> BoxFuture<'a, Result<BackupStatusView, CodedError>>;
 
-    /// Writes a backup now, wrapped to the configured recipient and to `passphrase` when
-    /// given; records and audits it.
+    /// Writes a backup now, wrapped to the configured recipient and to the request's
+    /// passphrase when given; records it (with the reason `before_update` when the request
+    /// names the version an update is about to install) and audits it.
     fn create<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        passphrase: Option<String>,
+        request: BackupCreateRequest,
     ) -> BoxFuture<'a, Result<BackupRunView, CodedError>>;
 
     /// Replaces the settings (audited), if they are still at `expect`.
@@ -204,7 +207,7 @@ async fn create_backup(
     let svc = service(svc, "POST", "/system/backups")?;
     require_fresh(auth, &ctx, "POST", "/system/backups").await?;
     let run = svc
-        .create(&ctx, request.passphrase)
+        .create(&ctx, request)
         .await
         .map_err(ApiError::from_coded_error)?;
     Ok((StatusCode::CREATED, Json(run)))

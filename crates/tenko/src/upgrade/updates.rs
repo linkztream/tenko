@@ -11,9 +11,18 @@
 //! the UI. The check runs only when TGL-23 has it on and `updates.air_gapped` is off; it
 //! sends nothing but the running version.
 //!
-//! An install is a job of kind `sys.update` with the steps of [`super::steps`]: fetch (not
-//! for uploads), verify, check and switch. When it succeeds the server restarts through its
-//! service manager into the new version, which is on probation ([`super::probation`]).
+//! An install is a job of kind `sys.update` with the steps of [`super::steps`]: the backup
+//! (when the request asked for one), fetch (not for uploads), verify, check and switch. When
+//! it succeeds the server restarts through its service manager into the new version, which
+//! is on probation ([`super::probation`]).
+//!
+//! # The backup before an update (ADR 0023)
+//!
+//! Every install request answers whether to take a backup first. `run` makes the backup the
+//! job's first step; `skip` installs without one and the install's audit record
+//! `sys.update.install` says so; without an answer the install starts only while the newest
+//! good backup is younger than [`BACKUP_MAX_AGE_SECS`], and is refused with 409
+//! `update.backup_required` otherwise. The Hardened profile refuses `skip` (TGL-37).
 
 #![allow(
     clippy::result_large_err,
@@ -22,7 +31,7 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
     time::Duration,
 };
 
@@ -30,18 +39,20 @@ use futures::{StreamExt as _, future::BoxFuture};
 use serde::{Deserialize, Serialize};
 use tenko_api::{
     dto::{
+        backup::BackupRunView,
         release::{
             Release, ReleaseAsset, ReleaseManifest, ReleaseVersion, current_platform,
             parse_changelog,
         },
         updates::{
-            AttemptState, CheckOff, InstallAbility, InstallBlock, InstallPolicy, InstallStarted,
-            ManifestInfo, ManifestOrigin, UpdateCheck, UpdateStatus, WhatsNew,
+            AttemptState, CheckOff, InstallAbility, InstallBlock, InstallPolicy, InstallRequest,
+            InstallStarted, ManifestInfo, ManifestOrigin, PreUpdateBackup, PreUpdateBackupStatus,
+            UpdateCheck, UpdateStatus, UploadQuery, WhatsNew,
         },
     },
     routes::system::updates::{UpdateService, UploadBody},
 };
-use tenko_auth::settings::{UpdateInstall, UpdatePolicy};
+use tenko_auth::settings::{Profile, UpdateInstall, UpdatePolicy};
 use tenko_core::{
     CodedError, JobId, NodeId, Principal, RequestCtx, SystemComponent, Timestamp, UserId,
     audit::{AuditAction, AuditDetails, AuditDraft},
@@ -78,6 +89,68 @@ const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
 /// reaches the UI.
 const RESTART_DELAY: Duration = Duration::from_secs(2);
 
+/// The age up to which the newest good backup counts as the restore point of an install
+/// that does not answer whether to take a backup first: one hour. The one place of the
+/// limit; the UI and the client read it from the status (`install.backup.max_age_seconds`).
+pub const BACKUP_MAX_AGE_SECS: u64 = 3_600;
+
+/// The audit action of a started install: the version, the source of the file and what was
+/// decided about the backup before it.
+pub const INSTALL_AUDIT: &str = "sys.update.install";
+
+/// What the backup service tells the update service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BackupReadiness {
+    /// Seconds since the newest good backup of any controller.
+    pub age_seconds: Option<u64>,
+    /// Whether a recipient is configured, so that a backup needs no passphrase.
+    pub recipient: bool,
+}
+
+/// The backups an install takes before it (the backup service, or a fake in tests).
+pub trait Backups: Send + Sync + 'static {
+    /// The age of the newest good backup and whether a recipient is configured.
+    fn readiness(&self) -> BoxFuture<'_, Result<BackupReadiness, CodedError>>;
+
+    /// Writes and records a backup before the update to `version`, wrapped to the
+    /// configured recipient; recorded with the reason `before_update`.
+    fn run_before_update<'a>(
+        &'a self,
+        ctx: &'a RequestCtx,
+        version: &'a ReleaseVersion,
+    ) -> BoxFuture<'a, Result<BackupRunView, CodedError>>;
+}
+
+/// What an install does about the backup before it, once the request is checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackupPlan {
+    /// A good backup is younger than the limit; nothing more is taken.
+    Recent {
+        /// Its age.
+        age_seconds: u64,
+    },
+    /// The job's first step takes one.
+    Run,
+    /// The administrator declined one.
+    Skipped,
+}
+
+impl BackupPlan {
+    /// The value of the audit context `backup`.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Recent { .. } => "recent",
+            Self::Run => "run",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Whether `backup: "skip"` is accepted under `profile`: not under Hardened (TGL-37).
+pub const fn skip_allowed(profile: Profile) -> bool {
+    !matches!(profile, Profile::Hardened)
+}
+
 /// The stored manifest and its origin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredManifest {
@@ -104,6 +177,9 @@ pub trait Policy: Send + Sync + 'static {
     /// The effective TGL-23 value.
     fn policy(&self) -> UpdatePolicy;
 
+    /// The selected security profile (TGL-37 follows it).
+    fn profile(&self) -> Profile;
+
     /// Checks that the session of `ctx` authenticated recently enough for an install.
     fn require_fresh<'a>(&'a self, ctx: &'a RequestCtx) -> BoxFuture<'a, Result<(), CodedError>>;
 }
@@ -111,6 +187,10 @@ pub trait Policy: Send + Sync + 'static {
 impl Policy for tenko_auth::AuthService {
     fn policy(&self) -> UpdatePolicy {
         self.settings().updates()
+    }
+
+    fn profile(&self) -> Profile {
+        self.settings().profile
     }
 
     fn require_fresh<'a>(&'a self, ctx: &'a RequestCtx) -> BoxFuture<'a, Result<(), CodedError>> {
@@ -174,6 +254,9 @@ pub(crate) struct Inner {
     pub(crate) engine: JobEngine,
     pub(crate) restart: Restart,
     pub(crate) source: Source,
+    /// The backup service, set once it exists (it starts after the job steps are
+    /// registered); without it no backup is known and `run` is refused.
+    pub(crate) backups: OnceLock<Arc<dyn Backups>>,
     check: Mutex<CheckState>,
     job: Mutex<Option<JobId>>,
     changelog: Vec<Release>,
@@ -263,6 +346,7 @@ impl Updates {
                 engine: parts.engine,
                 restart: parts.restart,
                 source,
+                backups: OnceLock::new(),
                 check: Mutex::new(CheckState::default()),
                 job: Mutex::new(None),
                 changelog,
@@ -274,6 +358,102 @@ impl Updates {
     /// Registers the steps of the install job.
     pub fn register_steps(&self, engine: &mut JobEngine) {
         steps::register(engine, &self.inner);
+    }
+
+    /// Hands the service the backups it takes before an install; the first call wins.
+    pub fn set_backups(&self, backups: Arc<dyn Backups>) {
+        if self.inner.backups.set(backups).is_err() {
+            tracing::debug!("the backup service of the updates was already set");
+        }
+    }
+
+    /// The age of the newest good backup and whether a recipient is configured; nothing
+    /// without a backup service.
+    async fn backup_readiness(&self) -> Result<BackupReadiness, CodedError> {
+        match self.inner.backups.get() {
+            Some(backups) => backups.readiness().await,
+            None => Ok(BackupReadiness::default()),
+        }
+    }
+
+    /// The backup part of the status.
+    async fn backup_status(&self) -> PreUpdateBackupStatus {
+        let readiness = self.backup_readiness().await.unwrap_or_else(|error| {
+            tracing::debug!(code = %error.code, "the backup status could not be read");
+            BackupReadiness::default()
+        });
+        PreUpdateBackupStatus {
+            age_seconds: readiness.age_seconds,
+            max_age_seconds: BACKUP_MAX_AGE_SECS,
+            skip_allowed: skip_allowed(self.inner.policy.profile()),
+            recipient: readiness.recipient,
+        }
+    }
+
+    /// Checks the request's answer about the backup before an install (ADR 0023).
+    ///
+    /// # Errors
+    ///
+    /// 409 `update.backup_required` without an answer while no good backup is younger than
+    /// the limit, and for `skip` under the Hardened profile; 422 `backup.key.missing` for
+    /// `run` without a configured recipient; the store's error.
+    async fn backup_plan(&self, answer: Option<PreUpdateBackup>) -> Result<BackupPlan, CodedError> {
+        let readiness = self.backup_readiness().await?;
+        let required = |skip_refused: bool| {
+            let mut error = CodedError::new(
+                "update.backup_required",
+                409,
+                if skip_refused {
+                    "this security profile requires a backup before every update: answer with backup \"run\""
+                        .to_owned()
+                } else {
+                    format!(
+                        "no good backup is younger than {} minutes: answer with backup \"run\" or \"skip\"",
+                        BACKUP_MAX_AGE_SECS / 60
+                    )
+                },
+            )
+            .with_param("max_age_seconds", BACKUP_MAX_AGE_SECS.to_string());
+            if let Some(age) = readiness.age_seconds {
+                error = error.with_param("age_seconds", age.to_string());
+            }
+            if skip_refused {
+                error = error.with_param("skip_allowed", "false");
+            }
+            error
+        };
+        match answer {
+            Some(PreUpdateBackup::Run) => {
+                if self.inner.backups.get().is_none() {
+                    return Err(CodedError::new(
+                        "update.backup_unavailable",
+                        503,
+                        "this server has no backup service",
+                    ));
+                }
+                if !readiness.recipient {
+                    return Err(CodedError::new(
+                        "backup.key.missing",
+                        422,
+                        "an install cannot take a backup without a recipient in the backup settings; take one with a passphrase on the Backup page first",
+                    ));
+                }
+                Ok(BackupPlan::Run)
+            }
+            Some(PreUpdateBackup::Skip) => {
+                if skip_allowed(self.inner.policy.profile()) {
+                    Ok(BackupPlan::Skipped)
+                } else {
+                    Err(required(true))
+                }
+            }
+            None => match readiness.age_seconds {
+                Some(age_seconds) if age_seconds < BACKUP_MAX_AGE_SECS => {
+                    Ok(BackupPlan::Recent { age_seconds })
+                }
+                _ => Err(required(false)),
+            },
+        }
     }
 
     /// Whether the scheduled check runs, and why not.
@@ -494,6 +674,7 @@ impl Updates {
         let inner = &self.inner;
         let env = &inner.env;
         let stored = self.stored_manifest().await?.map(|(stored, _)| stored);
+        let backup = self.backup_status().await;
         let manifest = stored.as_ref().map(|stored| &stored.manifest);
         let prereleases = inner.section.prereleases;
         let releases: Vec<Release> = manifest
@@ -577,6 +758,7 @@ impl Updates {
                 upload_blocked: structural,
                 pull_command,
                 ready_timeout_secs: inner.section.ready_timeout_secs,
+                backup,
             },
             attempt: self.attempt().map(|attempt| attempt.to_dto()),
         })
@@ -632,14 +814,17 @@ impl Updates {
         version: ReleaseVersion,
         asset: ReleaseAsset,
         fetch: bool,
+        plan: BackupPlan,
     ) -> Result<InstallStarted, CodedError> {
         let mut spec = steps::job_spec(
             &version,
             &asset,
             fetch,
+            plan == BackupPlan::Run,
             self.inner.section.ready_timeout_secs,
         )?;
         spec.node = Some(self.inner.env.node);
+        self.audit_install(ctx, &version, fetch, plan).await?;
         let job_id = self
             .inner
             .engine
@@ -668,6 +853,44 @@ impl Updates {
         tokio::spawn(async move { service.follow(job_id, target).await });
         tracing::info!(%version, job = %job_id, "the install job started");
         Ok(InstallStarted { job_id, version })
+    }
+
+    /// Writes `sys.update.install` before the job is submitted: who started which install,
+    /// from where, and what was decided about the backup before it (`recent` with its age,
+    /// `run`, or `skipped`). An install whose record cannot be written does not start.
+    async fn audit_install(
+        &self,
+        ctx: &RequestCtx,
+        version: &ReleaseVersion,
+        fetch: bool,
+        plan: BackupPlan,
+    ) -> Result<(), CodedError> {
+        let mut details = AuditDetails::default();
+        let context = &mut details.context;
+        context.insert("version".to_owned(), version.to_string());
+        context.insert(
+            "from".to_owned(),
+            if fetch { "source" } else { "upload" }.to_owned(),
+        );
+        context.insert("backup".to_owned(), plan.as_str().to_owned());
+        if let BackupPlan::Recent { age_seconds } = plan {
+            context.insert("backup_age_seconds".to_owned(), age_seconds.to_string());
+        }
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.audit(AuditDraft {
+            details,
+            source_ip: ctx.source_ip,
+            ..AuditDraft::success(AuditAction::from_static(INSTALL_AUDIT), Vec::new())
+        });
+        self.inner
+            .store
+            .propose(batch)
+            .await
+            .map_err(|error| store_error(&error))?;
+        if plan == BackupPlan::Skipped {
+            tracing::warn!(%version, by = %ctx.principal.subject(), "an install starts without a backup first");
+        }
+        Ok(())
     }
 
     /// Waits for the install job; restarts into the new version when it succeeded.
@@ -778,14 +1001,17 @@ impl Updates {
     async fn upload_now(
         &self,
         ctx: &RequestCtx,
-        version: ReleaseVersion,
+        query: UploadQuery,
         mut body: UploadBody,
     ) -> Result<InstallStarted, CodedError> {
+        let version = query.version;
         self.require_admin_policy(ctx).await?;
         if let Some(block) = self.structural_block() {
             return Err(blocked(block));
         }
         let (_, asset) = self.release_for(&version).await?;
+        // Answered before a byte of the file is read.
+        let plan = self.backup_plan(query.backup).await?;
         let part = steps::staged_path(&self.inner.layout, &version);
         let mut writer = StagedWriter::create(&part, asset.size)?;
         while let Some(chunk) = body.next().await {
@@ -822,7 +1048,7 @@ impl Updates {
             .propose(batch)
             .await
             .map_err(|error| store_error(&error))?;
-        self.start_job(ctx, version, asset, false).await
+        self.start_job(ctx, version, asset, false, plan).await
     }
 }
 
@@ -871,9 +1097,10 @@ impl UpdateService for Updates {
     fn install<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        version: ReleaseVersion,
+        request: InstallRequest,
     ) -> BoxFuture<'a, Result<InstallStarted, CodedError>> {
         Box::pin(async move {
+            let version = request.version;
             let policy = self.require_admin_policy(ctx).await?;
             if let Some(block) = self.structural_block() {
                 return Err(blocked(block));
@@ -885,17 +1112,18 @@ impl UpdateService for Updates {
                 return Err(blocked(InstallBlock::AirGapped));
             }
             let (_, asset) = self.release_for(&version).await?;
-            self.start_job(ctx, version, asset, true).await
+            let plan = self.backup_plan(request.backup).await?;
+            self.start_job(ctx, version, asset, true, plan).await
         })
     }
 
     fn upload<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        version: ReleaseVersion,
+        query: UploadQuery,
         body: UploadBody,
     ) -> BoxFuture<'a, Result<InstallStarted, CodedError>> {
-        Box::pin(self.upload_now(ctx, version, body))
+        Box::pin(self.upload_now(ctx, query, body))
     }
 
     fn whats_new<'a>(&'a self, ctx: &'a RequestCtx) -> BoxFuture<'a, Result<WhatsNew, CodedError>> {
@@ -966,7 +1194,10 @@ impl UpdateService for Updates {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicU64, Ordering},
+    };
 
     use tenko_api::dto::release::{ReleaseAsset, ReleaseManifest};
     use tenko_core::{AuthStrength, SessionId};
@@ -983,6 +1214,15 @@ mod tests {
     impl Policy for FixedPolicy {
         fn policy(&self) -> UpdatePolicy {
             self.policy
+        }
+
+        /// The profile whose TGL-23 value the install mode is.
+        fn profile(&self) -> Profile {
+            match self.policy.install {
+                UpdateInstall::Ui => Profile::Home,
+                UpdateInstall::UiStepUp => Profile::Standard,
+                UpdateInstall::UploadOnly => Profile::Hardened,
+            }
         }
 
         fn require_fresh<'a>(
@@ -1103,6 +1343,106 @@ mod tests {
             session: SessionId::generate(),
             strength: AuthStrength::Password,
         })
+    }
+
+    /// The backups of a test: an age, a recipient, and whether a backup fails.
+    #[derive(Default)]
+    struct FakeBackups {
+        age: Mutex<Option<u64>>,
+        recipient: bool,
+        fail: bool,
+        /// The versions backed up before, with whether the request carried an
+        /// idempotency key.
+        runs: Mutex<Vec<(String, bool)>>,
+    }
+
+    impl Backups for FakeBackups {
+        fn readiness(&self) -> BoxFuture<'_, Result<BackupReadiness, CodedError>> {
+            Box::pin(async move {
+                Ok(BackupReadiness {
+                    age_seconds: *self.age.lock().expect("lock"),
+                    recipient: self.recipient,
+                })
+            })
+        }
+
+        fn run_before_update<'a>(
+            &'a self,
+            ctx: &'a RequestCtx,
+            version: &'a ReleaseVersion,
+        ) -> BoxFuture<'a, Result<BackupRunView, CodedError>> {
+            Box::pin(async move {
+                self.runs
+                    .lock()
+                    .expect("lock")
+                    .push((version.to_string(), ctx.idempotency.is_some()));
+                if self.fail {
+                    return Err(CodedError::new("backup.io", 500, "the disk is full"));
+                }
+                *self.age.lock().expect("lock") = Some(0);
+                Ok(BackupRunView {
+                    id: uuid::Uuid::nil(),
+                    outcome: tenko_api::dto::backup::BackupOutcome::Succeeded,
+                    reason: tenko_api::dto::backup::BackupReason::BeforeUpdate,
+                    before_update: Some(version.clone()),
+                    node: 1,
+                    target_dir: "/var/lib/tenko/backups".to_owned(),
+                    file: Some("tenko-backup-20261026T080000Z-n1.tkbk".to_owned()),
+                    bytes: Some(1),
+                    revision: None,
+                    slots: vec!["recipient".to_owned()],
+                    started_at: Timestamp::now(),
+                    finished_at: Timestamp::now(),
+                    by: ctx.principal.subject(),
+                    job: None,
+                    error: None,
+                })
+            })
+        }
+    }
+
+    fn with_backups(updates: &Updates, backups: FakeBackups) -> Arc<FakeBackups> {
+        let backups = Arc::new(backups);
+        updates.set_backups(Arc::clone(&backups) as Arc<dyn Backups>);
+        backups
+    }
+
+    fn aged(age: Option<u64>) -> FakeBackups {
+        FakeBackups {
+            age: Mutex::new(age),
+            recipient: true,
+            ..FakeBackups::default()
+        }
+    }
+
+    fn request(text: &str, backup: Option<PreUpdateBackup>) -> InstallRequest {
+        InstallRequest {
+            version: version(text),
+            backup,
+        }
+    }
+
+    /// The context of the newest `sys.update.install` record and its actor.
+    async fn install_audit(store: &Arc<MemStore>) -> Option<(BTreeMap<String, String>, String)> {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            100,
+            true,
+        )
+        .expect("audit")
+        .into_iter()
+        .find(|(_, record, _)| record.draft.action.as_str() == INSTALL_AUDIT)
+        .map(|(_, record, _)| (record.draft.details.context, record.principal.subject()))
+    }
+
+    fn job_steps(job: &tenko_jobs::Job) -> Vec<String> {
+        job.spec
+            .steps
+            .iter()
+            .map(|step| step.kind.as_str().to_owned())
+            .collect()
     }
 
     #[test]
@@ -1231,7 +1571,7 @@ mod tests {
             Some(InstallBlock::Cluster)
         );
         let error = updates
-            .install(&ctx, version("0.2.0"))
+            .install(&ctx, request("0.2.0", None))
             .await
             .expect_err("a cluster");
         assert_eq!(error.code, "update.install_blocked");
@@ -1258,7 +1598,7 @@ mod tests {
         assert!(status.install.upload);
         assert!(status.install.step_up);
         let error = upload_only
-            .install(&ctx, version("0.2.0"))
+            .install(&ctx, request("0.2.0", None))
             .await
             .expect_err("upload only");
         assert_eq!(error.code, "update.install_blocked");
@@ -1269,7 +1609,7 @@ mod tests {
 
         let stale = service(&store, UpdateInstall::UiStepUp, false);
         let error = stale
-            .install(&ctx, version("0.2.0"))
+            .install(&ctx, request("0.2.0", None))
             .await
             .expect_err("step-up");
         assert_eq!(error.code, "auth.step_up_required");
@@ -1349,35 +1689,30 @@ mod tests {
         let updates = service(&store, UpdateInstall::Ui, true);
         let mut engine = updates.inner.engine.clone();
         updates.register_steps(&mut engine);
+        with_backups(&updates, aged(Some(60)));
         let ctx = admin();
         updates
             .put_manifest(&ctx, manifest())
             .await
             .expect("upload");
         let unknown = updates
-            .install(&ctx, version("9.9.9"))
+            .install(&ctx, request("9.9.9", None))
             .await
             .expect_err("unknown");
         assert_eq!(unknown.code, "update.version_unknown");
         let older = updates
-            .install(&ctx, version("0.1.0"))
+            .install(&ctx, request("0.1.0", None))
             .await
             .expect_err("not newer");
         assert_eq!(older.code, "update.not_newer");
         let started = updates
-            .install(&ctx, version("0.2.0"))
+            .install(&ctx, request("0.2.0", None))
             .await
             .expect("started");
         assert_eq!(started.version, version("0.2.0"));
         let job = updates.inner.engine.job(started.job_id).await.expect("job");
-        let kinds: Vec<String> = job
-            .spec
-            .steps
-            .iter()
-            .map(|step| step.kind.as_str().to_owned())
-            .collect();
         assert_eq!(
-            kinds,
+            job_steps(&job),
             [steps::FETCH, steps::VERIFY, steps::CHECK, steps::SWITCH]
         );
         assert_eq!(job.spec.node, Some(NodeId(1)), "pinned to this controller");
@@ -1387,10 +1722,244 @@ mod tests {
             Some(InstallBlock::InProgress)
         );
         let again = updates
-            .install(&ctx, version("0.2.0"))
+            .install(&ctx, request("0.2.0", None))
             .await
             .expect_err("one at a time");
         assert_eq!(again.code, "update.install_blocked");
+    }
+
+    /// A service on its own store with the manifest stored and `backups` set.
+    async fn ready(
+        install: UpdateInstall,
+        backups: FakeBackups,
+    ) -> (Arc<MemStore>, Updates, Arc<FakeBackups>) {
+        let store = Arc::new(MemStore::default());
+        let updates = service(&store, install, true);
+        let mut engine = updates.inner.engine.clone();
+        updates.register_steps(&mut engine);
+        let backups = with_backups(&updates, backups);
+        updates
+            .put_manifest(&admin(), manifest())
+            .await
+            .expect("manifest");
+        (store, updates, backups)
+    }
+
+    #[tokio::test]
+    async fn an_install_without_an_answer_needs_a_backup_younger_than_an_hour() {
+        for age in [None, Some(BACKUP_MAX_AGE_SECS), Some(4 * 3_600)] {
+            let (store, updates, _) = ready(UpdateInstall::Ui, aged(age)).await;
+            let status = updates.status_now().await.expect("status");
+            assert_eq!(status.install.backup.age_seconds, age);
+            assert_eq!(status.install.backup.max_age_seconds, 3_600);
+            assert!(status.install.backup.skip_allowed);
+            assert!(!status.install.backup.recent());
+            let error = updates
+                .install(&admin(), request("0.2.0", None))
+                .await
+                .expect_err("a backup is due");
+            assert_eq!(error.code, "update.backup_required");
+            assert_eq!(error.status, 409);
+            assert_eq!(
+                error.params.get("max_age_seconds").map(String::as_str),
+                Some("3600")
+            );
+            assert_eq!(
+                error.params.get("age_seconds").cloned(),
+                age.map(|age| age.to_string())
+            );
+            assert!(!error.params.contains_key("skip_allowed"));
+            assert!(install_audit(&store).await.is_none(), "nothing started");
+        }
+
+        let (store, updates, backups) = ready(UpdateInstall::Ui, aged(Some(720))).await;
+        let ctx = admin();
+        let started = updates
+            .install(&ctx, request("0.2.0", None))
+            .await
+            .expect("a backup of 12 minutes is recent");
+        let job = updates.inner.engine.job(started.job_id).await.expect("job");
+        assert_eq!(job_steps(&job)[0], steps::FETCH, "no backup step");
+        assert!(backups.runs.lock().expect("lock").is_empty());
+        let (context, by) = install_audit(&store).await.expect("audited");
+        assert_eq!(context.get("backup").map(String::as_str), Some("recent"));
+        assert_eq!(
+            context.get("backup_age_seconds").map(String::as_str),
+            Some("720")
+        );
+        assert_eq!(context.get("from").map(String::as_str), Some("source"));
+        assert_eq!(by, ctx.principal.subject());
+    }
+
+    #[tokio::test]
+    async fn run_makes_the_backup_the_first_step_of_the_job() {
+        let (_, updates, _) = ready(
+            UpdateInstall::Ui,
+            FakeBackups {
+                recipient: false,
+                ..FakeBackups::default()
+            },
+        )
+        .await;
+        let error = updates
+            .install(&admin(), request("0.2.0", Some(PreUpdateBackup::Run)))
+            .await
+            .expect_err("no recipient");
+        assert_eq!(error.code, "backup.key.missing");
+        assert_eq!(error.status, 422);
+        assert!(
+            !updates
+                .status_now()
+                .await
+                .expect("status")
+                .install
+                .backup
+                .recipient
+        );
+
+        let (store, updates, _) = ready(UpdateInstall::Ui, aged(None)).await;
+        let started = updates
+            .install(&admin(), request("0.2.0", Some(PreUpdateBackup::Run)))
+            .await
+            .expect("started");
+        let job = updates.inner.engine.job(started.job_id).await.expect("job");
+        assert_eq!(
+            job_steps(&job),
+            [
+                steps::BACKUP,
+                steps::FETCH,
+                steps::VERIFY,
+                steps::CHECK,
+                steps::SWITCH
+            ]
+        );
+        let (context, _) = install_audit(&store).await.expect("audited");
+        assert_eq!(context.get("backup").map(String::as_str), Some("run"));
+
+        // Without a backup service nothing can be backed up.
+        let store = Arc::new(MemStore::default());
+        let bare = service(&store, UpdateInstall::Ui, true);
+        bare.put_manifest(&admin(), manifest())
+            .await
+            .expect("manifest");
+        assert_eq!(
+            bare.status_now()
+                .await
+                .expect("status")
+                .install
+                .backup
+                .age_seconds,
+            None
+        );
+        let error = bare
+            .install(&admin(), request("0.2.0", Some(PreUpdateBackup::Run)))
+            .await
+            .expect_err("no backup service");
+        assert_eq!(error.code, "update.backup_unavailable");
+    }
+
+    #[tokio::test]
+    async fn skip_is_audited_with_its_actor_and_refused_under_hardened() {
+        let (store, updates, backups) = ready(UpdateInstall::Ui, aged(None)).await;
+        let ctx = admin();
+        let started = updates
+            .install(&ctx, request("0.2.0", Some(PreUpdateBackup::Skip)))
+            .await
+            .expect("started without a backup");
+        let job = updates.inner.engine.job(started.job_id).await.expect("job");
+        assert_eq!(job_steps(&job)[0], steps::FETCH);
+        assert!(backups.runs.lock().expect("lock").is_empty());
+        let (context, by) = install_audit(&store).await.expect("audited");
+        assert_eq!(context.get("backup").map(String::as_str), Some("skipped"));
+        assert_eq!(context.get("version").map(String::as_str), Some("0.2.0"));
+        assert_eq!(by, ctx.principal.subject());
+
+        // Hardened (upload only): the answer is checked before the body is read.
+        let (store, hardened, _) = ready(UpdateInstall::UploadOnly, aged(Some(60))).await;
+        assert!(
+            !hardened
+                .status_now()
+                .await
+                .expect("status")
+                .install
+                .backup
+                .skip_allowed
+        );
+        let body: UploadBody = futures::stream::once(async {
+            Err(std::io::Error::other("the body must not be read"))
+        })
+        .boxed();
+        let error = hardened
+            .upload(
+                &admin(),
+                UploadQuery {
+                    version: version("0.2.0"),
+                    backup: Some(PreUpdateBackup::Skip),
+                },
+                body,
+            )
+            .await
+            .expect_err("Hardened refuses skip");
+        assert_eq!(error.code, "update.backup_required");
+        assert_eq!(
+            error.params.get("skip_allowed").map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            error.params.get("age_seconds").map(String::as_str),
+            Some("60")
+        );
+        assert!(install_audit(&store).await.is_none());
+        assert!(skip_allowed(Profile::Home));
+        assert!(skip_allowed(Profile::Standard));
+        assert!(skip_allowed(Profile::Lab));
+        assert!(!skip_allowed(Profile::Hardened));
+    }
+
+    #[tokio::test]
+    async fn the_backup_step_passes_when_the_backup_is_recorded_and_fails_with_its_error() {
+        for fail in [false, true] {
+            let store = Arc::new(MemStore::default());
+            let updates = service(&store, UpdateInstall::Ui, true);
+            let backups = with_backups(&updates, FakeBackups { fail, ..aged(None) });
+            let handler = steps::handler(steps::BACKUP, &updates.inner);
+            let spec = steps::job_spec(
+                &version("0.2.0"),
+                &manifest().releases[0].assets[0],
+                true,
+                true,
+                180,
+            )
+            .expect("spec");
+            let mut request = admin();
+            request.idempotency =
+                Some(tenko_core::IdempotencyKey::new("install-0.2.0").expect("key"));
+            let cx = tenko_jobs::StepContext {
+                job: JobId::generate(),
+                step: 0,
+                attempt: 1,
+                request,
+                store: Arc::clone(&store) as Arc<dyn Store>,
+                deadline: None,
+            };
+            let outcome = handler.execute(&spec.steps[0].params.0, &cx).await;
+            assert_eq!(
+                *backups.runs.lock().expect("lock"),
+                [("0.2.0".to_owned(), false)],
+                "one backup for the version, without the install's idempotency key"
+            );
+            if fail {
+                match outcome {
+                    Err(tenko_jobs::StepError::Coded(error)) => {
+                        assert_eq!(error.code, "backup.io");
+                    }
+                    other => panic!("the step fails with the backup's error: {other:?}"),
+                }
+            } else {
+                assert!(outcome.is_ok(), "{outcome:?}");
+                assert_eq!(*backups.age.lock().expect("lock"), Some(0));
+            }
+        }
     }
 
     #[tokio::test]

@@ -9,10 +9,17 @@
 //! | `GET /system/updates` | read on the system | 200 [`UpdateStatus`] | |
 //! | `POST /system/updates/check` | administer the system | 200 [`UpdateStatus`] after asking the source | 409 `update.check_off`, 502 `update.fetch_failed` |
 //! | `PUT /system/updates/manifest` | administer the system | 200 [`UpdateStatus`] | 400 `update.manifest.*` |
-//! | `POST /system/updates/install` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 403 `auth.step_up_required`, 409 `update.install_blocked` |
-//! | `POST /system/updates/upload?version=` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 400 `update.checksum_mismatch`, 409 `update.install_blocked` |
+//! | `POST /system/updates/install` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 403 `auth.step_up_required`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
+//! | `POST /system/updates/upload?version=&backup=` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 400 `update.checksum_mismatch`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
 //! | `GET /system/updates/whats-new` | any signed-in user | 200 [`WhatsNew`] | |
 //! | `POST /system/updates/whats-new/seen` | any signed-in user | 204 | |
+//!
+//! Before an install the request answers whether to take a backup first (ADR 0023):
+//! `backup: "run"` makes the job's first step a backup, `"skip"` installs without one and
+//! is audited, and without the field the install starts only while a good backup is younger
+//! than an hour (`install.backup` of the status says how old the newest one is); otherwise
+//! it is refused with 409 `update.backup_required`. The Hardened profile refuses `"skip"`
+//! (TGL-37).
 //!
 //! An install is a background job: download (or the uploaded file), SHA-256 verification
 //! against the manifest, a dry run of `tenko upgrade check` by the new binary against a copy
@@ -37,7 +44,7 @@ use utoipa_axum::{
 
 use crate::{
     dto::{
-        release::{ReleaseManifest, ReleaseVersion},
+        release::ReleaseManifest,
         updates::{InstallRequest, InstallStarted, UpdateStatus, UploadQuery, WhatsNew},
     },
     extract::Ctx,
@@ -72,18 +79,21 @@ pub trait UpdateService: Send + Sync + 'static {
         manifest: ReleaseManifest,
     ) -> BoxFuture<'a, Result<UpdateStatus, CodedError>>;
 
-    /// Starts the install job of a version from the release source.
+    /// Starts the install job of a version from the release source, after the rule of the
+    /// backup before an update (`request.backup`).
     fn install<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        version: ReleaseVersion,
+        request: InstallRequest,
     ) -> BoxFuture<'a, Result<InstallStarted, CodedError>>;
 
-    /// Stores an uploaded release file of `version` and starts its install job.
+    /// Stores an uploaded release file of `query.version` and starts its install job, after
+    /// the rule of the backup before an update (`query.backup`), which is checked before the
+    /// body is read.
     fn upload<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        version: ReleaseVersion,
+        query: UploadQuery,
         body: UploadBody,
     ) -> BoxFuture<'a, Result<InstallStarted, CodedError>>;
 
@@ -221,7 +231,8 @@ async fn put_update_manifest(
         (status = 400, description = "The version is not in the manifest or not newer (`update.version_unknown`, `update.not_newer`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`backup: \"run\"` without a configured backup recipient (`backup.key.missing`): take the backup with a passphrase through `POST /system/backups` first", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
     security(("session" = []))
@@ -234,7 +245,7 @@ async fn install_update(
 ) -> Result<(StatusCode, Json<InstallStarted>), ApiError> {
     state.authorize(&ctx.principal, Action::Administer, &super::system_object())?;
     let svc = service(svc)?;
-    let started = svc.install(&ctx, request.version).await.map_err(coded)?;
+    let started = svc.install(&ctx, request).await.map_err(coded)?;
     Ok((StatusCode::ACCEPTED, Json(started)))
 }
 
@@ -255,7 +266,8 @@ async fn install_update(
         (status = 400, description = "The file does not match the manifest (`update.checksum_mismatch`, `update.size_mismatch`), or the version is unknown (`update.version_unknown`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "This installation cannot install now (`update.install_blocked`, parameter `reason`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "`backup=run` without a configured backup recipient (`backup.key.missing`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The file is larger than the manifest says (`update.size_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
@@ -274,10 +286,7 @@ async fn upload_update(
         .into_data_stream()
         .map_err(std::io::Error::other)
         .boxed();
-    let started = svc
-        .upload(&ctx, query.version, stream)
-        .await
-        .map_err(coded)?;
+    let started = svc.upload(&ctx, query, stream).await.map_err(coded)?;
     Ok((StatusCode::ACCEPTED, Json(started)))
 }
 

@@ -31825,7 +31825,17 @@
             }
           },
           "409": {
-            "description": "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`)",
+            "description": "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`backup: \"run\"` without a configured backup recipient (`backup.key.missing`): take the backup with a passphrase through `POST /system/backups` first",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31945,6 +31955,15 @@
             "schema": {
               "$ref": "#/components/schemas/ReleaseVersion"
             }
+          },
+          {
+            "name": "backup",
+            "in": "query",
+            "description": "Take a backup first (`run`) or not (`skip`), as in `POST /system/updates/install`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreUpdateBackup"
+            }
           }
         ],
         "requestBody": {
@@ -32005,7 +32024,7 @@
             }
           },
           "409": {
-            "description": "This installation cannot install now (`update.install_blocked`, parameter `reason`)",
+            "description": "This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32016,6 +32035,16 @@
           },
           "413": {
             "description": "The file is larger than the manifest says (`update.size_mismatch`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`backup=run` without a configured backup recipient (`backup.key.missing`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37978,6 +38007,17 @@
         "type": "object",
         "description": "A request to write a backup now.",
         "properties": {
+          "before_update": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseVersion",
+                "description": "The version an update is about to install: the backup is recorded with the reason\n`before_update` and this version, as the restore point before that update."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "passphrase": {
             "type": [
               "string",
@@ -38019,7 +38059,8 @@
         "description": "Why a backup was written.",
         "enum": [
           "manual",
-          "scheduled"
+          "scheduled",
+          "before_update"
         ]
       },
       "BackupRunView": {
@@ -38037,6 +38078,17 @@
           "by"
         ],
         "properties": {
+          "before_update": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseVersion",
+                "description": "For the reason `before_update`: the version the update was about to install."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "by": {
             "type": "string",
             "description": "Who asked: a principal subject such as `user:<id>`, or `system`."
@@ -47064,9 +47116,14 @@
           "step_up",
           "from_source",
           "upload",
-          "ready_timeout_secs"
+          "ready_timeout_secs",
+          "backup"
         ],
         "properties": {
+          "backup": {
+            "$ref": "#/components/schemas/PreUpdateBackupStatus",
+            "description": "The backup before an install: how old the newest good backup is and what an install\nrequest must say about a backup."
+          },
           "from_source": {
             "type": "boolean",
             "description": "`POST /system/updates/install` would start now."
@@ -47152,6 +47209,17 @@
           "version"
         ],
         "properties": {
+          "backup": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PreUpdateBackup",
+                "description": "Take a backup first (`run`) or not (`skip`). Without it the install starts only\nwhile a good backup is younger than `install.backup.max_age_seconds` of the status."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "version": {
             "$ref": "#/components/schemas/ReleaseVersion",
             "description": "The version to install; it must be in the manifest and newer than the running one."
@@ -62644,6 +62712,48 @@
           "running",
           "stopped"
         ]
+      },
+      "PreUpdateBackup": {
+        "type": "string",
+        "description": "The answer of an install or upload request to \"take a backup first?\" (ADR 0023).",
+        "enum": [
+          "run",
+          "skip"
+        ]
+      },
+      "PreUpdateBackupStatus": {
+        "type": "object",
+        "description": "The backup before an install, as `GET /system/updates` reports it.\n\nA request without `backup` installs only while a good backup is younger than\n`max_age_seconds`; otherwise it is refused with 409 `update.backup_required`.",
+        "required": [
+          "max_age_seconds",
+          "skip_allowed",
+          "recipient"
+        ],
+        "properties": {
+          "age_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds since the newest good backup of any controller; absent when there is none.",
+            "minimum": 0
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The age up to which a good backup counts as recent (one hour).",
+            "minimum": 0
+          },
+          "recipient": {
+            "type": "boolean",
+            "description": "Whether a backup recipient is configured. Without one a backup needs a passphrase:\n`backup: \"run\"` is refused with 422 `backup.key.missing`, and the UI asks for a\npassphrase for `POST /system/backups`."
+          },
+          "skip_allowed": {
+            "type": "boolean",
+            "description": "Whether `backup: \"skip\"` is accepted; not under the Hardened profile (TGL-37)."
+          }
+        }
       },
       "Prefix": {
         "type": "object",

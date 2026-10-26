@@ -18,6 +18,11 @@
 //   card renders the Markdown notes as elements (never as markup) with the marks and the
 //   action the release asks for; a server that is not run from the layout shows why it
 //   cannot install (docs 8.4).
+// - The backup before an install (ADR 0023, docs 8.12): the install test answers "Backup now"
+//   with a passphrase (the backup is recorded `before_update` and the install goes without an
+//   answer), the refused dry run answers "No, don't back up" (audited `skipped`), and after it
+//   the one-hour rule: an install with no answer is refused with 409 `update.backup_required`
+//   until a backup is taken, then the dialog says it is recent and asks nothing.
 // - Install: confirmation that repeats the action, the four steps (fetch, verify, the dry run
 //   `sys.update.check`, switch), exit with status 12, restart, the UI reloads into the new
 //   version, "what is new" for the administrator, the confirmed attempt, the job page and the
@@ -133,14 +138,55 @@ async function offerBuild(source: ReleaseSource, version: string): Promise<Manif
   return [asset];
 }
 
-/** Confirms the open install dialog and returns what the server answered: the job and the version. */
-async function confirmInstall(page: Page): Promise<Schemas["InstallStarted"]> {
+/** A passphrase of the backup before an update; the e2e server has no backup recipient. */
+const BACKUP_PASSPHRASE = "a long backup passphrase for the update test";
+
+/**
+ * Answers the open install dialog and returns what the server answered: the job and the
+ * version, with the body the install was sent with. `recent`: the dialog says a backup is
+ * recent and is confirmed; `skip`: "No, don't back up"; `backup`: "Backup now" with a
+ * passphrase, which writes the backup first.
+ */
+async function confirmInstall(
+  page: Page,
+  answer: "recent" | "skip" | "backup",
+): Promise<{ started: Schemas["InstallStarted"]; body: Record<string, unknown> }> {
+  const dialog = page.getByTestId("dialog-update-install");
+  if (answer === "recent") {
+    await expect(dialog.getByTestId("update-backup-recent")).toBeVisible();
+  } else {
+    await expect(dialog.getByTestId("update-backup-question")).toBeVisible();
+    await expect(dialog.getByTestId("update-backup-now")).toBeFocused();
+  }
+  if (answer === "backup") {
+    await dialog.getByTestId("update-backup-passphrase").fill(BACKUP_PASSPHRASE);
+    await dialog.getByTestId("update-backup-passphrase-again").fill(BACKUP_PASSPHRASE);
+  }
+  const button = { recent: "confirm-ok", skip: "update-backup-skip", backup: "update-backup-now" }[answer];
   const [response] = await Promise.all([
-    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/system/updates/install" && r.request().method() === "POST"),
-    page.getByTestId("dialog-update-install").getByTestId("confirm-ok").click(),
+    page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/system/updates/install" && r.request().method() === "POST", {
+      timeout: 60_000,
+    }),
+    dialog.getByTestId(button).click(),
   ]);
   expect(response.status()).toBe(202);
-  return (await response.json()) as Schemas["InstallStarted"];
+  return {
+    started: (await response.json()) as Schemas["InstallStarted"],
+    body: response.request().postDataJSON() as Record<string, unknown>,
+  };
+}
+
+/** The newest `sys.update.install` record: what was decided about the backup. */
+async function installAudit(api: Api): Promise<Record<string, string>> {
+  let context: Record<string, string> | undefined;
+  await expect
+    .poll(async () => {
+      const audit = await api.get<Audit>("/audit", { action: "sys.update.install" });
+      context = audit.items[0]?.draft.details?.context ?? undefined;
+      return context !== undefined;
+    }, { message: "the audit record of the install" })
+    .toBe(true);
+  return context!;
 }
 
 /** The job as the API has it, once it is final. */
@@ -411,9 +457,21 @@ test.describe("from the version layout", () => {
     // The health probe names the version the server runs as, which the page waits for after
     // the restart: still the old one.
     expect((await api.get<Schemas["Health"]>("/health")).version).toBe(running);
-    const accepted = await confirmInstall(page);
+    // No backup yet: the dialog asks for one first; "Backup now" asks for a passphrase (no
+    // recipient is set up), writes the backup and then installs with no answer, as the backup
+    // is now recent (ADR 0023, docs 8.12).
+    await expect(dialog.getByTestId("update-backup-age")).toContainText("There is no backup yet");
+    const { started: accepted, body } = await confirmInstall(page, "backup");
     expect(accepted.version).toBe(next);
+    expect(body.backup).toBeUndefined();
     const job = accepted.job_id;
+    const backups = await api.get<Schemas["BackupStatusView"]>("/system/backups");
+    expect(backups.last_good?.reason).toBe("before_update");
+    expect(backups.last_good?.before_update).toBe(next);
+    expect(backups.last_good?.slots).toEqual(["passphrase"]);
+    const decided = await installAudit(api);
+    expect(decided.backup).toBe("recent");
+    expect(decided.version).toBe(next);
 
     // The progress lists the four steps, the dry run is `sys.update.check`, up to the switch.
     const progress = page.getByTestId("updates-progress");
@@ -518,8 +576,14 @@ test.describe("from the version layout, with a copy that reports the old version
     await page.getByTestId("updates-check").click();
     await expect(withKey(page.getByTestId("updates-releases"), "update-release", next)).toBeVisible();
     expect((await updateStatus(api)).install.from_source).toBe(true);
+    // The age of the newest backup stands next to the button; there is none yet.
+    await expect(page.getByTestId("updates-install-panel").getByTestId("updates-backup-age")).toContainText("No backup yet");
     await page.getByTestId("updates-install").click();
-    const job = (await confirmInstall(page)).job_id;
+    // "No, don't back up": the install says skip and the audit record says so.
+    const { started, body } = await confirmInstall(page, "skip");
+    expect(body.backup).toBe("skip");
+    const job = started.job_id;
+    expect((await installAudit(api)).backup).toBe("skipped");
 
     // The job fails at the dry run: the page shows it on that step and not as a restart.
     const progress = page.getByTestId("updates-progress");
@@ -577,5 +641,20 @@ test.describe("from the version layout, with a copy that reports the old version
     await expect(page.getByTestId("updates-running-version")).toHaveText(running);
     // The release is still on offer: the administrator can try again once the file is right.
     await expect(page.getByTestId("updates-install")).toBeVisible();
+
+    // The one-hour rule: an install without an answer is refused while no backup is recent;
+    // after a backup the dialog says how old it is and asks nothing.
+    const refused = await failure(api.post("/system/updates/install", { version: next }));
+    expect(refused.status).toBe(409);
+    expect(refused.code).toBe("update.backup_required");
+    await api.post("/system/backups", { passphrase: BACKUP_PASSPHRASE });
+    await page.goto("/updates");
+    await expect(page.getByTestId("updates-install-panel").getByTestId("updates-backup-age")).toContainText("Last backup");
+    await page.getByTestId("updates-install").click();
+    const again = page.getByTestId("dialog-update-install");
+    await expect(again.getByTestId("update-backup-recent")).toBeVisible();
+    await expect(again.getByTestId("update-backup-question")).toHaveCount(0);
+    await again.getByTestId("confirm-cancel").click();
+    await expect(again).toHaveCount(0);
   });
 });

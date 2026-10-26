@@ -6930,6 +6930,15 @@
       <unit id="errors.update.version_unknown">
         <segment><source>That version is not in the release list.</source></segment>
       </unit>
+      <unit id="errors.update.backup_required">
+        <segment><source>A backup is needed before this update. Answer whether to take one first, and install again.</source></segment>
+      </unit>
+      <unit id="errors.update.backup_unavailable">
+        <segment><source>This server cannot take a backup before the update.</source></segment>
+      </unit>
+      <unit id="errors.backup.key.missing">
+        <segment><source>No backup recipient is set up and no passphrase was given.</source></segment>
+      </unit>
       <unit id="errors.update.not_newer">
         <segment><source>That version is not newer than the running one.</source></segment>
       </unit>
@@ -6966,6 +6975,9 @@
       <unit id="jobs.step.sys_update_switch">
         <segment><source>Switch to the new version and restart</source></segment>
       </unit>
+      <unit id="jobs.step.sys_update_backup">
+        <segment><source>Back up before the update</source></segment>
+      </unit>
       <unit id="jobs.stepname.sys_update_fetch">
         <segment><source>Download</source></segment>
       </unit>
@@ -6977,6 +6989,9 @@
       </unit>
       <unit id="jobs.stepname.sys_update_switch">
         <segment><source>Switch and restart</source></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_backup">
+        <segment><source>Backup</source></segment>
       </unit>
       <unit id="updates.title">
         <segment><source>Updates</source></segment>
@@ -7133,6 +7148,45 @@
       </unit>
       <unit id="updates.install.confirm_ok">
         <segment><source>Install {version}</source></segment>
+      </unit>
+      <unit id="updates.backup.age">
+        <segment><source>Last backup {age} ago.</source></segment>
+      </unit>
+      <unit id="updates.backup.none">
+        <segment><source>No backup yet.</source></segment>
+      </unit>
+      <unit id="updates.backup.link">
+        <segment><source>Backups</source></segment>
+      </unit>
+      <unit id="updates.backup.recent">
+        <segment><source>Backed up {age} ago.</source></segment>
+      </unit>
+      <unit id="updates.backup.question">
+        <segment><source>Are you sure you do not want a backup first?</source></segment>
+      </unit>
+      <unit id="updates.backup.stale">
+        <segment><source>The newest backup is {age} old. A backup taken now is the way back if the update changes the data and something goes wrong.</source></segment>
+      </unit>
+      <unit id="updates.backup.never">
+        <segment><source>There is no backup yet. A backup taken now is the way back if the update changes the data and something goes wrong.</source></segment>
+      </unit>
+      <unit id="updates.backup.required">
+        <segment><source>This security profile requires a backup before every update.</source></segment>
+      </unit>
+      <unit id="updates.backup.now">
+        <segment><source>Backup now</source></segment>
+      </unit>
+      <unit id="updates.backup.skip">
+        <segment><source>No, don't back up</source></segment>
+      </unit>
+      <unit id="updates.backup.running">
+        <segment><source>Backing up… The update starts when the backup is written.</source></segment>
+      </unit>
+      <unit id="updates.backup.failed">
+        <segment><source>The backup failed, so the update did not start.</source></segment>
+      </unit>
+      <unit id="updates.backup.passphrase_lead">
+        <segment><source>No backup recipient is set up, so this backup is opened with a passphrase. Keep it safe: it is the only way to open the backup.</source></segment>
       </unit>
       <unit id="updates.stepup.title">
         <segment><source>Sign in again to continue</source></segment>

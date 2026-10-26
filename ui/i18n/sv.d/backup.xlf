@@ -187,6 +187,9 @@
       <unit id="backup.run.manual">
         <segment><source>By hand</source><target>För hand</target></segment>
       </unit>
+      <unit id="backup.run.before_update">
+        <segment><source>Before update {version}</source><target>Före uppdatering {version}</target></segment>
+      </unit>
       <unit id="backup.slot.passphrase">
         <segment><source>a passphrase</source><target>en lösenfras</target></segment>
       </unit>

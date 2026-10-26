@@ -1626,13 +1626,15 @@ for an upload, whether it would start and why not. A refused install answers 409
 
 ### 8.5 The install job
 
-An install is a job of kind `sys.update`, one at a time, with a limit of 60 minutes. It is
-submitted by `POST /api/v1/system/updates/install` with the version, after the TGL-23
-checks (an administrator, step-up where required). The job engine records every transition
-in the audit log (section 8.7). The steps:
+An install is a job of kind `sys.update`, one at a time, with a limit of 60 minutes (90 with
+the backup step). It is submitted by `POST /api/v1/system/updates/install` with the version,
+after the TGL-23 checks (an administrator, step-up where required) and the rule of the
+backup before an install (section 8.12). The job engine records every transition in the
+audit log (section 8.7). The steps:
 
 | Step | What it does | Time limit |
 |---|---|---|
+| `sys.update.backup` | Only when the request answered `backup: "run"`: writes a backup into the target directory, wrapped to the configured recipient, and records it with the reason `before_update` (section 8.12). A failed backup fails the step, and with it the job, before anything else ran. | 30 minutes |
 | `sys.update.fetch` | Downloads the release file for this platform into `<data_dir>/updates/<version>/tenko.part`. The address must have the scheme, host and port of the source (section 8.11), and no more bytes are accepted than the manifest gives. Skipped for an uploaded file. | 30 minutes |
 | `sys.update.verify` | Compares the size and the SHA-256 of the file with the manifest (and the signature when the feature `release-signatures` is on), marks it executable, renames it to `tenko` (`tenko.exe`) and writes the manifest entry beside it as `release.json`. A mismatch removes the file. | 5 minutes |
 | `sys.update.check` | Runs the new binary and requires `tenko upgrade version` to print the version of the manifest. Then the running server copies its state from one read transaction to `<data_dir>/updates/check-<version>`, and the new binary runs `tenko upgrade check --disposable --json` on the copy. The verdicts `current` and `migration_needed` pass; anything else fails the step with `update.check_refused` and the code and message of the report. The copy is removed. | 12 minutes |
@@ -1708,13 +1710,16 @@ Every action of an update is attributable and recorded in the audit log, which i
 |---|---|---|
 | `sys.update.manifest` | When an administrator uploads a manifest that is stored | The newest version in it |
 | `sys.update.upload` | When an uploaded release file matched the manifest | `version`, `sha256`, the source address |
+| `sys.update.install` | When an install is accepted, before its job is submitted; an install whose record cannot be written does not start | `version`, `from` (`source` or `upload`), `backup` (`recent` with `backup_age_seconds`, `run`, or `skipped`), the source address; the actor is the administrator who decided |
 | `sys.upgrade.migrate` | At start, for each migration step; in a controller cluster by the leader, once every voter knows the format (section 3.7) | `from`, `to`, `summary`, `binary` |
 | `cluster.member.announce` | After a start of a cluster member, when its member record changed | The version, protocol majors, Raft wire version and data formats of its binary (section 3.7) |
 | `sys.update.confirm` | Once, by the new version, when the attempt is confirmed | `from`, `to`, `job` |
 | `sys.update.rollback` | Once, by the previous version, after a switch back | `from`, `to`, `reason`, `job` |
 
 The install job itself is a job of kind `sys.update` whose transitions are audited with the
-principal that started it; its step kinds are the four of section 8.5. A manifest that the
+principal that started it; its step kinds are those of section 8.5. A backup taken before an
+install is also audited as `sys.backup.create` with the reason `before_update`
+([backup.md](backup.md) section 10). A manifest that the
 scheduled check fetched is stored without an audit record, because no person acted.
 
 ### 8.8 Air-gapped installations
@@ -1799,6 +1804,52 @@ The price is that the service account can write the binaries it runs: the instal
 by the server, so the server must be able to put a new executable in place. Hardened
 profiles and administrators who do not want this keep the old layout, where the account
 cannot write its own binary, and update by hand as in section 7.
+
+### 8.12 The backup before an install
+
+A backup is the restore point of an update ([ADR 0023](adr/0023-no-root-after-installation.md)):
+if the new version changes the data and something goes wrong, the way back is that backup.
+So every install, from the source or from an uploaded file, answers whether to take one
+first. The limit below is one constant of the server (`BACKUP_MAX_AGE_SECS`, one hour); the
+UI reads it from the update status and never keeps its own.
+
+| The request says | What happens |
+|---|---|
+| Nothing | The install starts when the newest good backup of any controller is younger than one hour. Otherwise it is refused with 409 `update.backup_required`, parameters `max_age_seconds` (3600) and `age_seconds` (when there is a good backup). |
+| `backup: "run"` | The job's first step `sys.update.backup` takes a backup, wrapped to the configured recipient, and the install continues only once it is recorded good; a failed backup fails the job before anything changed. Without a recipient in the backup settings the request is refused with 422 `backup.key.missing`: the job cannot carry a passphrase, so take that backup with a passphrase through `POST /api/v1/system/backups` first. |
+| `backup: "skip"` | The install starts without a backup. The audit record `sys.update.install` says `backup: skipped`, and its actor is the administrator who decided. The Hardened profile refuses it with 409 `update.backup_required`, parameter `skip_allowed: false` (TGL-37 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md)). |
+
+`POST /api/v1/system/updates/install` takes the answer as the field `backup` of the body,
+`POST /api/v1/system/updates/upload` as the query parameter `backup`
+(`?version=0.2.0&backup=skip`); both are checked before anything is downloaded or a byte
+of an upload is read, and after the step-up of TGL-23, which stays as it was.
+`GET /api/v1/system/updates` reports `install.backup`: the newest good backup's
+`age_seconds`, `max_age_seconds`, whether `skip` is allowed (`skip_allowed`) and whether a
+recipient is configured (`recipient`).
+
+In the UI the confirmation before an install or an upload does the same:
+
+- When a good backup is younger than the limit, the dialog says how old it is ("Backed up
+  12 min ago.") and installs without asking.
+- Otherwise it asks "Are you sure you do not want a backup first?", says how old the newest
+  backup is (or that there is none), and offers **Backup now**, the default and focused
+  button, and **No, don't back up**. Under Hardened only Backup now is offered, with the
+  reason.
+- Backup now writes the backup through `POST /api/v1/system/backups` with
+  `before_update: <version>` and shows it running; without a recipient the dialog first asks
+  for a passphrase, typed twice. The install starts only when the backup is recorded good. A
+  failed backup shows its error and offers the two choices again. Like every backup it needs
+  a sign-in within the last five minutes ([backup.md](backup.md) section 9), so under Home
+  and Lab, where the install itself needs no step-up, an older session is asked to sign in
+  again first.
+- No, don't back up installs with `backup: "skip"`.
+- The Updates page shows the newest good backup's age next to the install and the upload
+  buttons ("No backup yet." when there is none), with a link to the Backup page.
+
+The backup lands in the backup target directory and is listed on the Backup page with the
+reason "Before update <version>". It is stored as a manual backup with the version beside
+it, so a previous release reads the record after a switch back; no new data format is
+needed. There is no client command that installs an update; the client installs nothing.
 
 ## 9 The layout and the service managers
 

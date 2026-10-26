@@ -187,6 +187,9 @@
       <unit id="backup.run.manual">
         <segment><source>By hand</source></segment>
       </unit>
+      <unit id="backup.run.before_update">
+        <segment><source>Before update {version}</source></segment>
+      </unit>
       <unit id="backup.slot.passphrase">
         <segment><source>a passphrase</source></segment>
       </unit>

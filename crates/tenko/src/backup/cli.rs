@@ -399,6 +399,7 @@ async fn online(args: &CreateArgs) -> Result<Output, Failure> {
     drop(password);
     let body = tenko_api::dto::backup::BackupCreateRequest {
         passphrase: passphrase.as_ref().map(|passphrase| passphrase.to_string()),
+        before_update: None,
     };
     let answer = raw.post_json("/system/backups", &body, Some(&cookie)).await;
     let _ = raw

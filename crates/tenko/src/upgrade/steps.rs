@@ -1,7 +1,9 @@
-//! The steps of the install job (kind `sys.update`, OPS-24): fetch, verify, check, switch.
+//! The steps of the install job (kind `sys.update`, OPS-24): backup, fetch, verify, check,
+//! switch.
 //!
 //! | Step | What it does | Undo |
 //! |---|---|---|
+//! | `sys.update.backup` | writes and records a backup before the update (ADR 0023), wrapped to the configured recipient, when the request answered `backup: "run"`; a failed backup fails the job before anything changed | nothing: the backup stays |
 //! | `sys.update.fetch` | downloads the release file for this platform from the pinned source into `<data_dir>/updates/<version>/tenko.part` (not for uploads) | removes the file |
 //! | `sys.update.verify` | compares size and SHA-256 with the manifest (and the signature with the feature `release-signatures`, off until API-19), then puts the file in place with its manifest entry | removes the version directory |
 //! | `sys.update.check` | asks the new binary for its version, copies the running state, and lets the new binary dry-run its migrations on the copy (`tenko upgrade check --disposable`) | nothing to undo |
@@ -46,6 +48,8 @@ use super::{
 pub const JOB_KIND: &str = "sys.update";
 /// The job title (a message key of the UI).
 pub const JOB_TITLE: &str = "jobs.title.update_install";
+/// The backup step, first when the request asked for a backup.
+pub const BACKUP: &str = "sys.update.backup";
 /// The fetch step.
 pub const FETCH: &str = "sys.update.fetch";
 /// The verify step.
@@ -69,6 +73,14 @@ struct SwitchParams {
     version: ReleaseVersion,
     deadline_secs: u64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BackupParams {
+    version: ReleaseVersion,
+}
+
+/// How long the backup before an update may take.
+const BACKUP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 fn failed(code: &'static str, status: u16, detail: impl Into<String>) -> StepError {
     StepError::Coded(Box::new(CodedError::new(code, status, detail)))
@@ -147,8 +159,8 @@ fn verify_signature(_asset: &ReleaseAsset) -> Result<(), StepError> {
     Ok(())
 }
 
-/// The install job of `version`: fetch (unless the file was uploaded), verify, check,
-/// switch.
+/// The install job of `version`: the backup (when asked for), fetch (unless the file was
+/// uploaded), verify, check, switch.
 ///
 /// # Errors
 ///
@@ -157,6 +169,7 @@ pub fn job_spec(
     version: &ReleaseVersion,
     asset: &ReleaseAsset,
     fetch: bool,
+    backup: bool,
     deadline_secs: u64,
 ) -> Result<JobSpec, CodedError> {
     let asset_params = encode(&AssetParams {
@@ -164,6 +177,15 @@ pub fn job_spec(
         asset: asset.clone(),
     })?;
     let mut steps = Vec::new();
+    if backup {
+        steps.push(StepSpec {
+            kind: StepKind::from_static(BACKUP),
+            params: encode(&BackupParams {
+                version: version.clone(),
+            })?,
+            timeout: Some(BACKUP_TIMEOUT),
+        });
+    }
     if fetch {
         steps.push(StepSpec {
             kind: StepKind::from_static(FETCH),
@@ -197,7 +219,12 @@ pub fn job_spec(
         title: MessageKey::from_static(JOB_TITLE),
         targets: vec![ObjectRef::singleton(ObjectKind::System)],
         steps,
-        timeout: Duration::from_secs(60 * 60),
+        timeout: Duration::from_secs(60 * 60)
+            + if backup {
+                BACKUP_TIMEOUT
+            } else {
+                Duration::ZERO
+            },
         group: GroupKey::new(JOB_KIND).ok(),
         group_limit: Some(1),
         idempotency: None,
@@ -205,14 +232,23 @@ pub fn job_spec(
     })
 }
 
-/// Registers the four handlers.
+/// Registers the five handlers.
 pub(crate) fn register(engine: &mut JobEngine, inner: &Arc<Inner>) {
-    for kind in [FETCH, VERIFY, CHECK, SWITCH] {
+    for kind in [BACKUP, FETCH, VERIFY, CHECK, SWITCH] {
         engine.register(Arc::new(UpdateStep {
             kind,
             inner: Arc::downgrade(inner),
         }));
     }
+}
+
+/// The handler of one step kind, for the tests of the service.
+#[cfg(test)]
+pub(crate) fn handler(kind: &'static str, inner: &Arc<Inner>) -> Arc<dyn StepHandler> {
+    Arc::new(UpdateStep {
+        kind,
+        inner: Arc::downgrade(inner),
+    })
 }
 
 struct UpdateStep {
@@ -243,12 +279,15 @@ impl StepHandler for UpdateStep {
     }
 
     async fn preview(&self, params: &[u8], _view: &dyn ReadView) -> Result<StepPreview, StepError> {
-        let version = if self.kind == FETCH || self.kind == VERIFY {
+        let version = if self.kind == BACKUP {
+            self::params::<BackupParams>(params)?.version
+        } else if self.kind == FETCH || self.kind == VERIFY {
             self::params::<AssetParams>(params)?.version
         } else {
             self::params::<SwitchParams>(params)?.version
         };
         let summary = match self.kind {
+            BACKUP => "jobs.step.sys_update_backup",
             FETCH => "jobs.step.sys_update_fetch",
             VERIFY => "jobs.step.sys_update_verify",
             CHECK => "jobs.step.sys_update_check",
@@ -266,6 +305,7 @@ impl StepHandler for UpdateStep {
     async fn execute(&self, params: &[u8], cx: &StepContext) -> Result<StepOutcome, StepError> {
         let inner = self.inner()?;
         match self.kind {
+            BACKUP => backup(&inner, &self::params(params)?, cx).await,
             FETCH => fetch(&inner, self::params(params)?).await,
             VERIFY => verify(&inner, &self::params(params)?),
             CHECK => check(&inner, &self::params(params)?).await,
@@ -307,6 +347,28 @@ impl StepHandler for UpdateStep {
         }
         Ok(())
     }
+}
+
+/// The backup before the update: written and recorded good by the backup service, or the
+/// step fails with the backup's error and the job ends before anything changed.
+async fn backup(inner: &Inner, params: &BackupParams, cx: &StepContext) -> Result<(), StepError> {
+    let backups = inner.backups.get().cloned().ok_or_else(|| {
+        failed(
+            "update.backup_unavailable",
+            503,
+            "this server has no backup service",
+        )
+    })?;
+    // The backup records itself with an inline job of its own, which must not be taken for
+    // a replay of the install request's idempotency key.
+    let mut ctx = cx.request.clone();
+    ctx.idempotency = None;
+    let run = backups
+        .run_before_update(&ctx, &params.version)
+        .await
+        .map_err(coded)?;
+    tracing::info!(version = %params.version, file = ?run.file, "the backup before the update is written");
+    Ok(())
 }
 
 async fn fetch(inner: &Inner, params: AssetParams) -> Result<(), StepError> {

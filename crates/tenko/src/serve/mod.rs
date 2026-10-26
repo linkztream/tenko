@@ -1836,6 +1836,12 @@ async fn start(
                 tracing::warn!(%error, "the restore could not be recorded; it is recorded at the next start");
             }
             leaders.register(backups.schedule());
+            // The backup before an update (ADR 0023) is written by this service.
+            if let Some(updates) = &updates {
+                updates.set_backups(
+                    Arc::clone(&backups) as Arc<dyn crate::upgrade::updates::Backups>
+                );
+            }
             let backup_status: Arc<dyn tenko_api::routes::backup::BackupService> = backups;
             server.extensions.insert(Arc::clone(&backup_status));
             server.extensions.insert(leader_view.source());

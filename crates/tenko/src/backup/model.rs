@@ -111,8 +111,13 @@ pub struct RunError {
 /// One backup a controller wrote, or tried to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupRun {
-    /// Why it was made.
+    /// Why it was made. A backup before an update is stored as `manual` with
+    /// [`BackupRun::before_update`] set, so that a previous release, which knows no other
+    /// reason, still reads the record after a switch back (no new data format).
     pub reason: RunReason,
+    /// The version an update was about to install when this backup was taken before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_update: Option<String>,
     /// The controller that wrote it.
     pub node: u64,
     /// The directory it went to, on that controller.
@@ -148,7 +153,20 @@ impl BackupRun {
     pub fn is_good(&self) -> bool {
         self.error.is_none() && self.file.is_some()
     }
+
+    /// The reason as the audit record and the archive's origin name it: `manual`,
+    /// `scheduled` or `before_update`.
+    pub fn reason_name(&self) -> &'static str {
+        if self.before_update.is_some() {
+            BEFORE_UPDATE
+        } else {
+            self.reason.as_str()
+        }
+    }
 }
+
+/// The reason name of a backup before an update.
+pub const BEFORE_UPDATE: &str = "before_update";
 
 /// The record of a restore, written at the first start after it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,5 +208,42 @@ mod tests {
         assert_eq!(settings.keep, 7);
         assert!(settings.include_config);
         let _: (TableDef<(), BackupSettings>, AuditAction) = (tables::SETTINGS, actions::CREATE);
+    }
+
+    #[test]
+    fn a_backup_before_an_update_reads_as_manual_for_a_previous_release() {
+        /// The fields a previous release reads; it knows no `before_update`.
+        #[derive(Deserialize)]
+        struct Previous {
+            reason: RunReason,
+            file: Option<String>,
+        }
+        let run = BackupRun {
+            reason: RunReason::Manual,
+            before_update: Some("0.8.0".to_owned()),
+            node: 1,
+            target_dir: "/var/lib/tenko/backups".to_owned(),
+            file: Some("tenko-backup-20261026T080000Z-n1.tkbk".to_owned()),
+            bytes: Some(1),
+            revision: Some(1),
+            slots: vec!["recipient".to_owned()],
+            started_at: Timestamp::now(),
+            finished_at: Timestamp::now(),
+            by: "user:test".to_owned(),
+            job: None,
+            error: None,
+        };
+        assert_eq!(run.reason_name(), BEFORE_UPDATE);
+        let bytes = tenko_core::codec::to_cbor(&run).expect("encode");
+        let previous: Previous = tenko_core::codec::from_cbor(&bytes).expect("decode");
+        assert_eq!(previous.reason, RunReason::Manual);
+        assert!(previous.file.is_some());
+        let again: BackupRun = tenko_core::codec::from_cbor(&bytes).expect("decode");
+        assert_eq!(again.before_update.as_deref(), Some("0.8.0"));
+        let manual = BackupRun {
+            before_update: None,
+            ..run
+        };
+        assert_eq!(manual.reason_name(), "manual");
     }
 }

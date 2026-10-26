@@ -6930,6 +6930,15 @@
       <unit id="errors.update.version_unknown">
         <segment><source>That version is not in the release list.</source><target>Den versionen finns inte i utgåvelistan.</target></segment>
       </unit>
+      <unit id="errors.update.backup_required">
+        <segment><source>A backup is needed before this update. Answer whether to take one first, and install again.</source><target>En säkerhetskopia behövs före den här uppdateringen. Svara på om en ska tas först och installera igen.</target></segment>
+      </unit>
+      <unit id="errors.update.backup_unavailable">
+        <segment><source>This server cannot take a backup before the update.</source><target>Den här servern kan inte ta en säkerhetskopia före uppdateringen.</target></segment>
+      </unit>
+      <unit id="errors.backup.key.missing">
+        <segment><source>No backup recipient is set up and no passphrase was given.</source><target>Ingen mottagare för säkerhetskopior är inställd och ingen lösenfras angavs.</target></segment>
+      </unit>
       <unit id="errors.update.not_newer">
         <segment><source>That version is not newer than the running one.</source><target>Den versionen är inte nyare än den som körs.</target></segment>
       </unit>
@@ -6966,6 +6975,9 @@
       <unit id="jobs.step.sys_update_switch">
         <segment><source>Switch to the new version and restart</source><target>Byt till den nya versionen och starta om</target></segment>
       </unit>
+      <unit id="jobs.step.sys_update_backup">
+        <segment><source>Back up before the update</source><target>Säkerhetskopiera före uppdateringen</target></segment>
+      </unit>
       <unit id="jobs.stepname.sys_update_fetch">
         <segment><source>Download</source><target>Hämta</target></segment>
       </unit>
@@ -6977,6 +6989,9 @@
       </unit>
       <unit id="jobs.stepname.sys_update_switch">
         <segment><source>Switch and restart</source><target>Byt och starta om</target></segment>
+      </unit>
+      <unit id="jobs.stepname.sys_update_backup">
+        <segment><source>Backup</source><target>Säkerhetskopia</target></segment>
       </unit>
       <unit id="updates.title">
         <segment><source>Updates</source><target>Uppdateringar</target></segment>
@@ -7133,6 +7148,45 @@
       </unit>
       <unit id="updates.install.confirm_ok">
         <segment><source>Install {version}</source><target>Installera {version}</target></segment>
+      </unit>
+      <unit id="updates.backup.age">
+        <segment><source>Last backup {age} ago.</source><target>Senaste säkerhetskopian för {age} sedan.</target></segment>
+      </unit>
+      <unit id="updates.backup.none">
+        <segment><source>No backup yet.</source><target>Ingen säkerhetskopia än.</target></segment>
+      </unit>
+      <unit id="updates.backup.link">
+        <segment><source>Backups</source><target>Säkerhetskopior</target></segment>
+      </unit>
+      <unit id="updates.backup.recent">
+        <segment><source>Backed up {age} ago.</source><target>Säkerhetskopierad för {age} sedan.</target></segment>
+      </unit>
+      <unit id="updates.backup.question">
+        <segment><source>Are you sure you do not want a backup first?</source><target>Är du säker på att du inte vill ta en säkerhetskopia först?</target></segment>
+      </unit>
+      <unit id="updates.backup.stale">
+        <segment><source>The newest backup is {age} old. A backup taken now is the way back if the update changes the data and something goes wrong.</source><target>Den senaste säkerhetskopian är {age} gammal. En säkerhetskopia tagen nu är vägen tillbaka om uppdateringen ändrar data och något går fel.</target></segment>
+      </unit>
+      <unit id="updates.backup.never">
+        <segment><source>There is no backup yet. A backup taken now is the way back if the update changes the data and something goes wrong.</source><target>Det finns ingen säkerhetskopia än. En säkerhetskopia tagen nu är vägen tillbaka om uppdateringen ändrar data och något går fel.</target></segment>
+      </unit>
+      <unit id="updates.backup.required">
+        <segment><source>This security profile requires a backup before every update.</source><target>Den här säkerhetsprofilen kräver en säkerhetskopia före varje uppdatering.</target></segment>
+      </unit>
+      <unit id="updates.backup.now">
+        <segment><source>Backup now</source><target>Säkerhetskopiera nu</target></segment>
+      </unit>
+      <unit id="updates.backup.skip">
+        <segment><source>No, don't back up</source><target>Nej, säkerhetskopiera inte</target></segment>
+      </unit>
+      <unit id="updates.backup.running">
+        <segment><source>Backing up… The update starts when the backup is written.</source><target>Säkerhetskopierar… Uppdateringen startar när säkerhetskopian är skriven.</target></segment>
+      </unit>
+      <unit id="updates.backup.failed">
+        <segment><source>The backup failed, so the update did not start.</source><target>Säkerhetskopieringen misslyckades, så uppdateringen startade inte.</target></segment>
+      </unit>
+      <unit id="updates.backup.passphrase_lead">
+        <segment><source>No backup recipient is set up, so this backup is opened with a passphrase. Keep it safe: it is the only way to open the backup.</source><target>Ingen mottagare för säkerhetskopior är inställd, så den här säkerhetskopian öppnas med en lösenfras. Förvara den säkert: den är det enda sättet att öppna säkerhetskopian.</target></segment>
       </unit>
       <unit id="updates.stepup.title">
         <segment><source>Sign in again to continue</source><target>Logga in igen för att fortsätta</target></segment>

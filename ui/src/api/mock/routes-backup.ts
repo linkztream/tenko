@@ -1,8 +1,9 @@
 // Mock routes of the `backup` API area (OpenAPI tag `backup`; docs/backup.md): the status of the
 // backups with the settings and their revision as `ETag`, "back up now" (an administrator with a
 // sign-in within the last five minutes; a passphrase of at least 12 characters, or the
-// configured recipient) and the interval schedule. A backup is written at once, as on the
-// server. The error codes are those of section 11 of the document.
+// configured recipient; `before_update` for the backup before an update) and the interval
+// schedule. A backup is written at once, as on the server; `backupState.failNext` makes the
+// next one fail. The error codes are those of section 11 of the document.
 import type { components } from "../generated/schema";
 import { requireAdmin } from "./auth";
 import { commit, db, onMockReset } from "./db";
@@ -30,6 +31,8 @@ interface BackupState {
   restored: S["RestoreNoticeView"] | null;
   running: boolean;
   counter: number;
+  /** The next backup fails with this code (`backup.io`), and is recorded as failed. */
+  failNext: string | null;
 }
 
 function fileName(at: number): string {
@@ -71,6 +74,7 @@ function fresh(): BackupState {
     restored: null,
     running: false,
     counter: 1,
+    failNext: null,
   };
 }
 
@@ -126,6 +130,48 @@ export function backupStatus(): S["BackupStatusView"] {
   };
 }
 
+/** Seconds since the newest good backup, or null without one (the update status shows it). */
+export function newestGoodAge(): number | null {
+  const good = newestFirst(backupState.runs).find((r) => r.outcome === "succeeded");
+  return good ? Math.max(0, Math.floor((Date.now() - Date.parse(good.finished_at)) / 1000)) : null;
+}
+
+/**
+ * Writes a backup as the server does: to the recipient and the passphrase, recorded good, or
+ * recorded failed when `failNext` is set. `beforeUpdate` names the version an update is about
+ * to install (reason `before_update`).
+ */
+export function writeBackup(by: string, passphrase: string | null, beforeUpdate: string | null): Run {
+  if (backupState.running) throw new Problem("backup.running", { status: 409, detail: "a backup is running on this controller" });
+  if (passphrase === null && !backupState.settings.recipient) {
+    throw new Problem("backup.key.missing", { status: 422, detail: "no recipient is configured and no passphrase was given" });
+  }
+  if (passphrase !== null && [...passphrase].length < MIN_PASSPHRASE) {
+    throw new Problem("backup.passphrase.weak", {
+      status: 422,
+      detail: "the passphrase needs at least 12 characters",
+      params: { min: String(MIN_PASSPHRASE) },
+    });
+  }
+  const slots = [...(backupState.settings.recipient ? ["recipient"] : []), ...(passphrase === null ? [] : ["passphrase"])];
+  backupState.counter += 1;
+  const written = run(Date.now(), beforeUpdate === null ? "manual" : "before_update", slots, backupState.counter);
+  written.by = by;
+  if (beforeUpdate !== null) written.before_update = beforeUpdate;
+  const failure = backupState.failNext;
+  if (failure !== null) {
+    backupState.failNext = null;
+    const detail = "the target directory is full";
+    const failed: Run = { ...written, outcome: "failed", file: null, bytes: null, error: { code: failure, detail } };
+    backupState.runs = newestFirst([failed, ...backupState.runs]).slice(0, KEPT_RECORDS);
+    commit("system", { tables: ["backup.runs"] });
+    throw new Problem(failure, { status: 500, detail });
+  }
+  backupState.runs = newestFirst([written, ...backupState.runs]).slice(0, KEPT_RECORDS);
+  commit("system", { tables: ["backup.runs"] });
+  return written;
+}
+
 /** Both writes need an administrator who signed in within the last five minutes. */
 function requireFresh() {
   const principal = requireAdmin();
@@ -175,24 +221,11 @@ export const backupRoutes = [
     const { user } = requireFresh();
     const body = await ctx.optionalBody();
     const passphrase = optText(body, "passphrase");
-    if (backupState.running) throw new Problem("backup.running", { status: 409, detail: "a backup is running on this controller" });
-    if (passphrase === null && !backupState.settings.recipient) {
-      throw new Problem("backup.key.missing", { status: 422, detail: "no recipient is configured and no passphrase was given" });
+    const beforeUpdate = optText(body, "before_update");
+    if (beforeUpdate !== null && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(beforeUpdate)) {
+      invalidRequest("before_update", "a version");
     }
-    if (passphrase !== null && [...passphrase].length < MIN_PASSPHRASE) {
-      throw new Problem("backup.passphrase.weak", {
-        status: 422,
-        detail: "the passphrase needs at least 12 characters",
-        params: { min: String(MIN_PASSPHRASE) },
-      });
-    }
-    const slots = [...(backupState.settings.recipient ? ["recipient"] : []), ...(passphrase === null ? [] : ["passphrase"])];
-    backupState.counter += 1;
-    const written = run(Date.now(), "manual", slots, backupState.counter);
-    written.by = `user:${user.id}`;
-    backupState.runs = newestFirst([written, ...backupState.runs]).slice(0, KEPT_RECORDS);
-    commit("system", { tables: ["backup.runs"] });
-    return new Reply(201, written);
+    return new Reply(201, writeBackup(`user:${user.id}`, passphrase, beforeUpdate));
   }),
 
   route("put", "/api/v1/system/backups/settings", async (ctx) => {

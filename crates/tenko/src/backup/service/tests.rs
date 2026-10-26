@@ -169,7 +169,7 @@ async fn a_backup_through_the_api_is_written_recorded_and_listed() {
     let fixture = fixture().await;
     let none = fixture
         .service
-        .run(&ctx(), RunReason::Manual, None, None)
+        .run(&ctx(), RunReason::Manual, None, None, None)
         .await
         .expect_err("no key");
     assert_eq!(none.code, "backup.key.missing");
@@ -178,6 +178,7 @@ async fn a_backup_through_the_api_is_written_recorded_and_listed() {
         .run(
             &ctx(),
             RunReason::Manual,
+            None,
             Some(Zeroizing::new("short".to_owned())),
             None,
         )
@@ -190,6 +191,7 @@ async fn a_backup_through_the_api_is_written_recorded_and_listed() {
         .run(
             &ctx(),
             RunReason::Manual,
+            None,
             Some(Zeroizing::new("a long backup passphrase".to_owned())),
             None,
         )
@@ -217,6 +219,71 @@ async fn a_backup_through_the_api_is_written_recorded_and_listed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_backup_before_an_update_is_recorded_with_its_version() {
+    use crate::upgrade::updates::Backups as _;
+
+    let fixture = fixture().await;
+    let before = fixture.service.readiness().await.expect("readiness");
+    assert_eq!(before.age_seconds, None);
+    assert!(!before.recipient);
+    let version: ReleaseVersion = "0.8.0".parse().expect("version");
+    let none = fixture
+        .service
+        .run_before_update(&ctx(), &version)
+        .await
+        .expect_err("no recipient");
+    assert_eq!(none.code, "backup.key.missing");
+
+    let key = BackupKey::generate().expect("key");
+    fixture
+        .service
+        .store_settings(
+            &ctx(),
+            update(false, Some(key.recipient().to_string())),
+            None,
+        )
+        .await
+        .expect("settings");
+    let run = fixture
+        .service
+        .run_before_update(&ctx(), &version)
+        .await
+        .expect("backup");
+    assert_eq!(run.reason, BackupReason::BeforeUpdate);
+    assert_eq!(run.before_update, Some(version));
+    assert_eq!(run.slots, ["recipient"]);
+    let after = fixture.service.readiness().await.expect("readiness");
+    assert!(after.recipient);
+    assert!(after.age_seconds.is_some_and(|age| age < 60));
+
+    let view = fixture
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let audited = view
+        .scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            100,
+            true,
+        )
+        .expect("audit")
+        .into_iter()
+        .find(|(_, record, _)| record.draft.action == actions::CREATE)
+        .expect("the backup's audit record");
+    let context = &audited.1.draft.details.context;
+    assert_eq!(
+        context.get("reason").map(String::as_str),
+        Some("before_update")
+    );
+    assert_eq!(
+        context.get("before_update").map(String::as_str),
+        Some("0.8.0")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_backup_is_recorded_and_warned_about() {
     let fixture = fixture().await;
     // The target directory is a file.
@@ -232,7 +299,7 @@ async fn a_failed_backup_is_recorded_and_warned_about() {
         .expect("settings");
     let error = fixture
         .service
-        .run(&ctx(), RunReason::Manual, None, None)
+        .run(&ctx(), RunReason::Manual, None, None, None)
         .await
         .expect_err("fails");
     assert_eq!(error.code, "backup.io");
@@ -296,7 +363,7 @@ async fn the_schedule_writes_when_due_and_keeps_the_newest_files() {
     std::thread::sleep(std::time::Duration::from_millis(1_100));
     let stale = fixture
         .service
-        .run(&ctx(), RunReason::Scheduled, None, Some(epoch + 1))
+        .run(&ctx(), RunReason::Scheduled, None, None, Some(epoch + 1))
         .await;
     assert!(stale.is_err());
     assert_eq!(
@@ -310,7 +377,7 @@ async fn the_schedule_writes_when_due_and_keeps_the_newest_files() {
     std::thread::sleep(std::time::Duration::from_millis(1_100));
     fixture
         .service
-        .run(&ctx(), RunReason::Manual, None, None)
+        .run(&ctx(), RunReason::Manual, None, None, None)
         .await
         .expect("manual");
     let dir = fixture.data_dir.join("backups");
@@ -370,6 +437,7 @@ async fn a_restore_is_recorded_once_and_shown_until_the_next_backup() {
         .run(
             &ctx(),
             RunReason::Manual,
+            None,
             Some(Zeroizing::new("a long backup passphrase".to_owned())),
             None,
         )
@@ -386,6 +454,7 @@ fn standard_and_hardened_warn_after_seven_days() {
     let recent = Timestamp(now.0 - time::Duration::days(2));
     let run = |at: Timestamp| BackupRun {
         reason: RunReason::Scheduled,
+        before_update: None,
         node: 1,
         target_dir: "/srv/backup".to_owned(),
         file: Some("tenko-backup-x.tkbk".to_owned()),
@@ -425,6 +494,7 @@ fn a_failed_scheduled_backup_is_retried_after_an_hour() {
     let now = Timestamp::now();
     let mut failed = BackupRun {
         reason: RunReason::Scheduled,
+        before_update: None,
         node: 1,
         target_dir: "/srv/backup".to_owned(),
         file: None,

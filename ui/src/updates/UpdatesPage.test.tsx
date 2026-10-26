@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../api/mock/db";
+import { backupState } from "../api/mock/routes-backup";
 import { mockReleaseFile, mockUpdates } from "../api/mock/routes-updates";
 import { iso } from "../api/mock/util";
 import { axeViolations } from "../app/testing/axe";
@@ -30,6 +31,11 @@ async function openPage() {
   });
   await screen.findByTestId("updates-running");
   return view;
+}
+
+/** The newest good backup finished 12 minutes ago: an install goes ahead without the backup question. */
+function backedUpRecently() {
+  backupState.runs = backupState.runs.map((r) => ({ ...r, finished_at: iso(Date.now() - 12 * 60_000) }));
 }
 
 function release(version: string): HTMLElement {
@@ -200,6 +206,7 @@ describe("the update check", () => {
 describe("installing from the release source", () => {
   it("asks for a confirmation that names the version and repeats the action of the release", async () => {
     await signInAdmin();
+    backedUpRecently();
     await openPage();
     fireEvent.click(screen.getByTestId("updates-install"));
     const dialog = await screen.findByTestId("dialog-update-install");
@@ -210,6 +217,8 @@ describe("installing from the release source", () => {
     expect(action.textContent).toContain("This upgrade needs an action from you:");
     expect(action.textContent).toContain("Make a backup of the data directory.");
     expect(within(dialog).getByTestId("confirm-ok").textContent).toBe("Install 0.2.0");
+    expect(within(dialog).getByTestId("update-backup-recent").textContent).toBe("Backed up 12 min ago.");
+    expect(within(dialog).queryByTestId("update-backup-question")).toBeNull();
 
     // Cancel changes nothing.
     fireEvent.click(within(dialog).getByTestId("confirm-cancel"));
@@ -229,6 +238,7 @@ describe("installing from the release source", () => {
 
   it("follows the job, then waits for the new version to answer and reloads the page", async () => {
     await signInAdmin();
+    backedUpRecently();
     await openPage();
     fireEvent.click(screen.getByTestId("updates-install"));
     fireEvent.click(within(await screen.findByTestId("dialog-update-install")).getByTestId("confirm-ok"));
@@ -264,6 +274,7 @@ describe("installing from the release source", () => {
 
   it("polls the health probe every two seconds and reloads when it names the new version", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.restartMs = 5000;
     const progress = await installUnderFakeTimers();
 
@@ -283,6 +294,7 @@ describe("installing from the release source", () => {
 
   it("keeps asking while the old version answers", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.restartMs = 100;
     mockUpdates.rollBackNext = true;
     await installUnderFakeTimers();
@@ -292,6 +304,7 @@ describe("installing from the release source", () => {
 
   it("gives up after the ready time plus a minute, and shows that the old version runs again (rolled back)", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.rollBackNext = true;
     const progress = await installUnderFakeTimers();
 
@@ -309,6 +322,7 @@ describe("installing from the release source", () => {
 
   it("says what to check when the server does not come back and the attempt says nothing", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.restartMs = 10_000_000;
     const progress = await installUnderFakeTimers();
     // The attempt stays "restarting" in the mock: the server never answered.
@@ -322,6 +336,7 @@ describe("installing from the release source", () => {
 
   it("explains a step-up answer and signs in again with the updates page as the way back", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.stepUpSession = db.currentSessionId;
     const view = await openPage();
     fireEvent.click(screen.getByTestId("updates-install"));
@@ -348,6 +363,7 @@ describe("installing from the release source", () => {
 
   it("shows the refusal of the server when the install is blocked since the page was read", async () => {
     await signInAdmin();
+    backedUpRecently();
     await openPage();
     mockUpdates.blocked = "cluster";
     fireEvent.click(screen.getByTestId("updates-install"));
@@ -414,6 +430,7 @@ describe("when an install is not possible from here", () => {
 describe("installing from files", () => {
   it("offers the upload when the installation is air-gapped and installs the file the server accepts", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.airGapped = true;
     await openPage();
     const panel = screen.getByTestId("updates-upload-panel");
@@ -439,6 +456,7 @@ describe("installing from files", () => {
 
   it("uploads the version that is chosen", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.airGapped = true;
     await openPage();
     const panel = screen.getByTestId("updates-upload-panel");
@@ -453,6 +471,7 @@ describe("installing from files", () => {
 
   it("shows the refusal of a file that does not match the release list", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.airGapped = true;
     await openPage();
     const panel = screen.getByTestId("updates-upload-panel");
@@ -467,6 +486,7 @@ describe("installing from files", () => {
 
   it("explains a step-up answer to an upload as well", async () => {
     await signInAdmin();
+    backedUpRecently();
     mockUpdates.airGapped = true;
     mockUpdates.stepUpSession = db.currentSessionId;
     await openPage();

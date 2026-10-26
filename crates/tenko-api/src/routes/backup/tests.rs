@@ -15,8 +15,8 @@ use tenko_core::{CodedError, RequestCtx, Revision, Timestamp};
 use uuid::Uuid;
 
 use super::{
-    BackupOutcome, BackupReason, BackupRunView, BackupService, BackupSettingsUpdate,
-    BackupSettingsView, BackupStatusView, BackupSummaryView,
+    BackupCreateRequest, BackupOutcome, BackupReason, BackupRunView, BackupService,
+    BackupSettingsUpdate, BackupSettingsView, BackupStatusView, BackupSummaryView,
 };
 use crate::{
     dto::system::StatusWarning,
@@ -69,8 +69,9 @@ impl BackupService for Fake {
     fn create<'a>(
         &'a self,
         ctx: &'a RequestCtx,
-        passphrase: Option<String>,
+        request: BackupCreateRequest,
     ) -> BoxFuture<'a, Result<BackupRunView, CodedError>> {
+        let passphrase = request.passphrase;
         self.passphrases
             .lock()
             .expect("lock")
@@ -79,7 +80,12 @@ impl BackupService for Fake {
             Ok(BackupRunView {
                 id: Uuid::nil(),
                 outcome: BackupOutcome::Succeeded,
-                reason: BackupReason::Manual,
+                reason: if request.before_update.is_some() {
+                    BackupReason::BeforeUpdate
+                } else {
+                    BackupReason::Manual
+                },
+                before_update: request.before_update,
                 node: 1,
                 target_dir: "/srv/tenko/backups".to_owned(),
                 file: Some("tenko-backup-20261011T080000Z-n1.tkbk".to_owned()),
@@ -199,6 +205,31 @@ async fn a_fresh_administrator_writes_a_backup_with_a_passphrase() {
         *fake.passphrases.lock().expect("lock"),
         [Some("a long backup passphrase".to_owned()), None]
     );
+}
+
+#[tokio::test]
+async fn a_backup_before_an_update_names_the_version() {
+    let (h, _) = harness().await;
+    let reply = h
+        .call(
+            "POST",
+            "/system/backups",
+            Credential::Cookie(&h.admin),
+            Some(&json!({"before_update": "0.8.0"})),
+        )
+        .await;
+    reply.assert_status(201);
+    assert_eq!(reply.body["reason"], "before_update");
+    assert_eq!(reply.body["before_update"], "0.8.0");
+    // A label that is not a version never reaches the service.
+    h.call(
+        "POST",
+        "/system/backups",
+        Credential::Cookie(&h.admin),
+        Some(&json!({"before_update": "not a version"})),
+    )
+    .await
+    .assert_status(422);
 }
 
 #[tokio::test]

@@ -6,6 +6,11 @@
 // The state lives in `mockUpdates`; tests (and a developer in the browser) change it to play
 // other situations: a container, an air-gapped installation, a step-up answer, a failing check.
 //
+// The backup before an install follows the server's rule (ADR 0023) over the backups of
+// `routes-backup.ts`: without `backup` an install needs a good backup younger than an hour
+// (409 `update.backup_required`), `run` writes one as the job's first step, and `skip` is
+// refused under the Hardened profile.
+//
 // What the mock simplifies: the install job has four automatic steps and is done the moment it
 // starts (the mock job engine finishes automatic steps at once), and the "restart" is a delay
 // after which `GET /health` answers with the new version.
@@ -19,6 +24,7 @@ import { createJob } from "./job-store";
 import { Problem, Reply, noContent, ok } from "./reply";
 import { route } from "./route";
 import { adminRoutes } from "./routes-admin";
+import { backupState, newestGoodAge, writeBackup } from "./routes-backup";
 import { iso } from "./util";
 import { isRecord } from "./validate";
 
@@ -167,6 +173,8 @@ export interface MockUpdates {
   modules: { running: ModuleName[]; configured: ModuleName[]; pinned: boolean; unavailable: boolean };
   /** How many times `PUT /system/modules` was called. */
   modulesPuts: number;
+  /** What the last started install did about the backup before it: `recent`, `run` or `skipped`. */
+  lastBackupPlan: "recent" | "run" | "skipped" | null;
 }
 
 function fresh(): MockUpdates {
@@ -189,6 +197,7 @@ function fresh(): MockUpdates {
     seenPosts: 0,
     modules: { running: [...MODULE_ORDER], configured: [...MODULE_ORDER], pinned: false, unavailable: false },
     modulesPuts: 0,
+    lastBackupPlan: null,
   };
 }
 
@@ -366,6 +375,7 @@ export function updateStatus(): UpdateStatus {
       from_source: source === null,
       upload: upload === null,
       ready_timeout_secs: 120,
+      backup: backupGate(),
     },
   };
   if (latest) status.latest = latest;
@@ -453,6 +463,49 @@ const putManifest = http.put("/api/v1/system/updates/manifest", async ({ request
 
 const STEPS = ["sys.update.fetch", "sys.update.verify", "sys.update.check", "sys.update.switch"] as const;
 
+/** The server's limit: a good backup younger than this is the restore point of an install. */
+export const BACKUP_MAX_AGE_SECONDS = 3_600;
+
+/** The backup part of the status: the newest good backup's age and what a request must say. */
+function backupGate(): S["PreUpdateBackupStatus"] {
+  const age = newestGoodAge();
+  return {
+    ...(age === null ? {} : { age_seconds: age }),
+    max_age_seconds: BACKUP_MAX_AGE_SECONDS,
+    skip_allowed: db.settings.profile !== "hardened",
+    recipient: backupState.settings.recipient !== null && backupState.settings.recipient !== undefined,
+  };
+}
+
+type BackupAnswer = "run" | "skip" | null;
+
+function backupAnswer(value: unknown): BackupAnswer {
+  if (value === undefined || value === null) return null;
+  if (value === "run" || value === "skip") return value;
+  throw new Problem("sys.invalid_value", { status: 400, params: { name: "backup" } });
+}
+
+/** The server's rule of the backup before an install (ADR 0023). */
+function backupPlan(answer: BackupAnswer): "recent" | "run" | "skipped" {
+  const gate = backupGate();
+  const required = (skipRefused: boolean) => {
+    const params: Record<string, string> = { max_age_seconds: String(gate.max_age_seconds) };
+    if (gate.age_seconds !== undefined && gate.age_seconds !== null) params.age_seconds = String(gate.age_seconds);
+    if (skipRefused) params.skip_allowed = "false";
+    return new Problem("update.backup_required", { status: 409, params, detail: "a backup is needed before this install" });
+  };
+  if (answer === "run") {
+    if (!gate.recipient) throw new Problem("backup.key.missing", { status: 422, detail: "no recipient is configured" });
+    return "run";
+  }
+  if (answer === "skip") {
+    if (!gate.skip_allowed) throw required(true);
+    return "skipped";
+  }
+  if (gate.age_seconds !== undefined && gate.age_seconds !== null && gate.age_seconds < gate.max_age_seconds) return "recent";
+  throw required(false);
+}
+
 /** The step-up rule of TGL-23: a session that has to sign in again is refused until it does. */
 function requireFreshSignIn(): void {
   const session = currentPrincipal()?.session.id ?? null;
@@ -461,16 +514,21 @@ function requireFreshSignIn(): void {
   }
 }
 
-function startInstall(version: string, upload: boolean): Reply<{ job_id: string; version: string }> {
-  const blocked = blockOf(upload);
-  if (blocked) throw new Problem("update.install_blocked", { status: 409, params: { reason: blocked } });
-  requireFreshSignIn();
+function startInstall(version: string, plan: "recent" | "run" | "skipped"): Reply<{ job_id: string; version: string }> {
+  const steps: string[] = [...STEPS];
+  if (plan === "run") {
+    // The job's first step: the backup, recorded with the reason `before_update`. A failure
+    // fails the install before anything changed.
+    steps.unshift("sys.update.backup");
+    writeBackup(`user:${currentPrincipal()?.user.id ?? ""}`, null, version);
+  }
+  mockUpdates.lastBackupPlan = plan;
   const jobId = createJob({
     kind: "sys.update",
     title: "jobs.title.update_install",
     targets: [],
     timeoutSecs: 900,
-    steps: STEPS.map((kind) => ({ kind, automatic: true })),
+    steps: steps.map((kind) => ({ kind, automatic: true })),
     preview: false,
   });
   const now = Date.now();
@@ -496,7 +554,11 @@ const installUpdate = route("post", "/api/v1/system/updates/install", async (ctx
   const body = await ctx.body();
   const version = typeof body.version === "string" ? body.version : "";
   knownRelease(version);
-  return startInstall(version, false);
+  const blocked = blockOf(false);
+  if (blocked) throw new Problem("update.install_blocked", { status: 409, params: { reason: blocked } });
+  requireFreshSignIn();
+  const plan = backupPlan(backupAnswer(body.backup));
+  return startInstall(version, plan);
 });
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -514,11 +576,13 @@ const uploadUpdate = route("post", "/api/v1/system/updates/upload", async (ctx) 
   requireFreshSignIn();
   const expected = release.assets?.find((a) => a.platform === MOCK_PLATFORM);
   if (!expected) throw new Problem("update.install_blocked", { status: 409, params: { reason: "no_asset" } });
+  // Answered before the body is read, as on the server.
+  const plan = backupPlan(backupAnswer(ctx.query("backup")));
   const bytes = await ctx.request.arrayBuffer();
   if (bytes.byteLength > expected.size) throw new Problem("update.size_mismatch", { status: 413 });
   if (bytes.byteLength !== expected.size) throw new Problem("update.size_mismatch", { status: 400 });
   if ((await sha256Hex(bytes)) !== expected.sha256) throw new Problem("update.checksum_mismatch", { status: 400 });
-  return startInstall(version, true);
+  return startInstall(version, plan);
 });
 
 // ---------------------------------------------------------------------------------

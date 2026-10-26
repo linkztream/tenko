@@ -140,8 +140,16 @@ export function outcomeText(outcome: BackupOutcome): string {
   return outcome === "succeeded" ? t("backup.run.succeeded") : t("backup.run.failed");
 }
 
-export function reasonText(reason: BackupReason): string {
-  return reason === "scheduled" ? t("backup.run.scheduled") : t("backup.run.manual");
+/** Why a backup was made: "Scheduled", "By hand", "Before update 0.8.0". */
+export function reasonText(run: { reason: BackupReason; before_update?: string | null }): string {
+  switch (run.reason) {
+    case "scheduled":
+      return t("backup.run.scheduled");
+    case "before_update":
+      return t("backup.run.before_update", { version: run.before_update ?? "" });
+    default:
+      return t("backup.run.manual");
+  }
 }
 
 /** What opens a backup: `passphrase`, `recipient`. */

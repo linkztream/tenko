@@ -157,7 +157,7 @@ export default function BackupPage() {
                                   )}
                                 </Show>
                               </td>
-                              <td>{reasonText(run.reason)}</td>
+                              <td>{reasonText(run)}</td>
                               <td class="mono bk-break" data-testid="backup-run-file">{run.file ?? ""}</td>
                               <td class="num">{run.bytes == null ? "" : sizeText(run.bytes)}</td>
                               <td class="num">{run.node}</td>

@@ -6,7 +6,7 @@ use tenko_core::{JobId, Revision, Timestamp};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::system::StatusWarning;
+use super::{release::ReleaseVersion, system::StatusWarning};
 
 /// The backup settings of the installation, the same on every controller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -64,6 +64,10 @@ pub struct BackupCreateRequest {
     #[serde(default)]
     #[schema(format = Password)]
     pub passphrase: Option<String>,
+    /// The version an update is about to install: the backup is recorded with the reason
+    /// `before_update` and this version, as the restore point before that update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_update: Option<ReleaseVersion>,
 }
 
 impl std::fmt::Debug for BackupCreateRequest {
@@ -73,6 +77,7 @@ impl std::fmt::Debug for BackupCreateRequest {
                 "passphrase",
                 &self.passphrase.as_ref().map(|_| "<redacted>"),
             )
+            .field("before_update", &self.before_update)
             .finish()
     }
 }
@@ -85,6 +90,8 @@ pub enum BackupReason {
     Manual,
     /// By the schedule.
     Scheduled,
+    /// Before an update, as its restore point; `before_update` names the version.
+    BeforeUpdate,
 }
 
 /// Whether a backup was written.
@@ -115,6 +122,9 @@ pub struct BackupRunView {
     pub outcome: BackupOutcome,
     /// Why it was made.
     pub reason: BackupReason,
+    /// For the reason `before_update`: the version the update was about to install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_update: Option<ReleaseVersion>,
     /// The controller that wrote it.
     pub node: u64,
     /// The directory on that controller.

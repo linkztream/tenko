@@ -797,7 +797,7 @@ pub struct PartEntry {
 /// Who made a backup and why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OriginRecord {
-    /// `manual`, `scheduled` or `offline`.
+    /// `manual`, `scheduled`, `before_update` or `offline`.
     pub reason: String,
     /// The principal subject, or `system`.
     pub by: String,

@@ -8,7 +8,8 @@ import { ApiError } from "../api/problem";
 import { ErrorNotice } from "../components/Notice";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
-import { uploadManifest, uploadRelease, type InstallStarted, type UpdateStatus } from "./api";
+import { uploadManifest, uploadRelease, type BackupAnswer, type InstallStarted, type UpdateStatus } from "./api";
+import { BackupAge } from "./BackupAge";
 import { InstallConfirm } from "./InstallConfirm";
 import { formatFileSize } from "./words";
 
@@ -27,6 +28,8 @@ function readText(file: Blob): Promise<string> {
 
 export function UploadPanel(props: {
   status: UpdateStatus;
+  /** When the status arrived, to age the backup it reports. */
+  receivedAt: number;
   /** Whether a release file can be installed now (`install.upload`). */
   canInstall: boolean;
   onStatus: (status: UpdateStatus) => void;
@@ -77,12 +80,12 @@ export function UploadPanel(props: {
     }
   };
 
-  const sendRelease = async () => {
+  const sendRelease = async (backup: BackupAnswer) => {
     const chosenFile = file();
     if (!chosenFile || busy()) return;
     setBusy(true);
     try {
-      const started = await uploadRelease(chosenFile, chosen());
+      const started = await uploadRelease(chosenFile, chosen(), backup);
       setConfirming(false);
       props.onStarted(started);
     } catch (err) {
@@ -174,6 +177,7 @@ export function UploadPanel(props: {
             >
               {busy() ? t("updates.upload.uploading") : t("updates.upload.button", { version: chosen() })}
             </button>
+            <BackupAge status={props.status} receivedAt={props.receivedAt} />
           </div>
         </Show>
       </div>
@@ -184,7 +188,12 @@ export function UploadPanel(props: {
           version={chosen()}
           kind="upload"
           busy={busy()}
-          onConfirm={() => void sendRelease()}
+          receivedAt={props.receivedAt}
+          onConfirm={(backup) => void sendRelease(backup)}
+          onFailure={(err) => {
+            setConfirming(false);
+            props.onFailure(err);
+          }}
           onClose={() => setConfirming(false)}
         />
       </Show>

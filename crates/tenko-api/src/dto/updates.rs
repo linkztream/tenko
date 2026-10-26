@@ -118,6 +118,48 @@ pub struct InstallAbility {
     pub pull_command: Option<String>,
     /// Seconds a new version has to become ready before it is switched back.
     pub ready_timeout_secs: u64,
+    /// The backup before an install: how old the newest good backup is and what an install
+    /// request must say about a backup.
+    pub backup: PreUpdateBackupStatus,
+}
+
+/// The answer of an install or upload request to "take a backup first?" (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PreUpdateBackup {
+    /// The install job takes a backup as its first step, wrapped to the configured
+    /// recipient, and fails before anything changed when the backup fails.
+    Run,
+    /// No backup; the install's audit record says so and who decided it. Refused under the
+    /// Hardened profile (TGL-37).
+    Skip,
+}
+
+/// The backup before an install, as `GET /system/updates` reports it.
+///
+/// A request without `backup` installs only while a good backup is younger than
+/// `max_age_seconds`; otherwise it is refused with 409 `update.backup_required`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PreUpdateBackupStatus {
+    /// Seconds since the newest good backup of any controller; absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_seconds: Option<u64>,
+    /// The age up to which a good backup counts as recent (one hour).
+    pub max_age_seconds: u64,
+    /// Whether `backup: "skip"` is accepted; not under the Hardened profile (TGL-37).
+    pub skip_allowed: bool,
+    /// Whether a backup recipient is configured. Without one a backup needs a passphrase:
+    /// `backup: "run"` is refused with 422 `backup.key.missing`, and the UI asks for a
+    /// passphrase for `POST /system/backups`.
+    pub recipient: bool,
+}
+
+impl PreUpdateBackupStatus {
+    /// Whether a good backup is younger than the limit.
+    pub fn recent(&self) -> bool {
+        self.age_seconds
+            .is_some_and(|age| age < self.max_age_seconds)
+    }
 }
 
 /// The state of an install attempt.
@@ -187,6 +229,10 @@ pub struct UpdateStatus {
 pub struct InstallRequest {
     /// The version to install; it must be in the manifest and newer than the running one.
     pub version: ReleaseVersion,
+    /// Take a backup first (`run`) or not (`skip`). Without it the install starts only
+    /// while a good backup is younger than `install.backup.max_age_seconds` of the status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<PreUpdateBackup>,
 }
 
 /// The answer of `POST /system/updates/install` and `POST /system/updates/upload`.
@@ -206,6 +252,9 @@ pub struct UploadQuery {
     /// The version of the uploaded file; the manifest must list it with a file for this
     /// platform, whose SHA-256 the upload must match.
     pub version: ReleaseVersion,
+    /// Take a backup first (`run`) or not (`skip`), as in `POST /system/updates/install`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<PreUpdateBackup>,
 }
 
 /// `GET /system/updates/whats-new`: the notes to show a user once after an upgrade.
@@ -243,5 +292,28 @@ mod tests {
             serde_json::to_value(CheckOff::AirGapped).expect("json"),
             "air_gapped"
         );
+        assert_eq!(
+            serde_json::to_value(PreUpdateBackup::Skip).expect("json"),
+            "skip"
+        );
+    }
+
+    #[test]
+    fn the_backup_field_is_optional_and_a_backup_is_recent_below_the_limit() {
+        let request: InstallRequest =
+            serde_json::from_str(r#"{"version":"0.2.0"}"#).expect("without backup");
+        assert_eq!(request.backup, None);
+        let request: InstallRequest =
+            serde_json::from_str(r#"{"version":"0.2.0","backup":"run"}"#).expect("run");
+        assert_eq!(request.backup, Some(PreUpdateBackup::Run));
+        let status = |age_seconds| PreUpdateBackupStatus {
+            age_seconds,
+            max_age_seconds: 3_600,
+            skip_allowed: true,
+            recipient: true,
+        };
+        assert!(status(Some(3_599)).recent());
+        assert!(!status(Some(3_600)).recent());
+        assert!(!status(None).recent());
     }
 }
