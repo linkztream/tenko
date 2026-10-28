@@ -4,18 +4,18 @@
 // mismatches), each read page by page. The filters live in the URL: `prefix` and `host` take
 // ids, `kind` narrows the page to one list.
 import { useSearchParams } from "@solidjs/router";
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, on, Show } from "solid-js";
 import { api } from "../../api/client";
 import { fetchAll } from "../../api/paginate";
 import { errorMessage } from "../../api/problem";
 import type { Host, Prefix } from "../../api/types";
 import { Icon } from "../../components/Icon";
-import { PageHead } from "../../components/PageHead";
+import { PageHeader } from "../../components/PageHeader";
 import { toast } from "../../components/toast";
-import { ToggleChip } from "../../grid/FilterBar";
+import { FilterBar, ToggleChip } from "../../grid/FilterBar";
 import { t } from "../../i18n";
 import { IpamNav } from "../IpamNav";
-import { isKind, KIND_TITLE, KINDS } from "./model";
+import { isKind, KIND_TITLE, KINDS, type ReconcileKind } from "./model";
 import { ReconcileList } from "./ReconcileList";
 import "./reconcile.css";
 
@@ -58,6 +58,11 @@ export default function ReconcileView() {
     }
   });
 
+  // The rows each list has read, for the count on its kind's chip: known for the lists on the
+  // page, kept from before for a kind the page no longer shows, dropped when the filters change.
+  const [counts, setCounts] = createSignal<Partial<Record<ReconcileKind, { count: number; more: boolean }>>>({});
+  createEffect(on([prefix, host], () => setCounts({}), { defer: true }));
+
   const [hostText, setHostText] = createSignal("");
   const [unknown, setUnknown] = createSignal<string | null>(null);
   const applyHost = async (e: SubmitEvent) => {
@@ -82,8 +87,8 @@ export default function ReconcileView() {
   return (
     <div class="page reconcile-page" data-testid="page-ipam-reconcile">
       <IpamNav />
-      <PageHead title={t("ipam.reconcile.title")} sub={t("ipam.reconcile.sub")} />
-      <div class="filterbar" role="toolbar" aria-label={t("ipam.reconcile.filter.label")} data-testid="reconcile-filters">
+      <PageHeader title={t("ipam.reconcile.title")} sub={t("ipam.reconcile.sub")} info={<p>{t("ipam.reconcile.info")}</p>} />
+      <FilterBar label={t("ipam.reconcile.filter.label")} testid="reconcile-filters" density={false}>
         <select
           class="select"
           aria-label={t("ipam.reconcile.filter.prefix")}
@@ -139,13 +144,20 @@ export default function ReconcileView() {
           </ToggleChip>
           <For each={KINDS}>
             {(k) => (
-              <ToggleChip pressed={kind() === k} onToggle={() => setSearch({ kind: kind() === k ? undefined : k })} testid={`filter-kind-${k}`}>
+              <ToggleChip
+                pressed={kind() === k}
+                onToggle={() => setSearch({ kind: kind() === k ? undefined : k })}
+                testid={`filter-kind-${k}`}
+                count={counts()[k]?.count}
+                more={counts()[k]?.more}
+                tone={k === "conflict" && (counts()[k]?.count ?? 0) > 0 ? "conflict" : undefined}
+              >
                 {t(KIND_TITLE[k])}
               </ToggleChip>
             )}
           </For>
         </div>
-      </div>
+      </FilterBar>
       <Show when={unknown()}>
         {(name) => (
           <p class="muted reconcile-note" role="status" data-testid="filter-host-unknown">
@@ -154,7 +166,9 @@ export default function ReconcileView() {
         )}
       </Show>
       <div class="reconcile-body">
-        <For each={shown()}>{(k) => <ReconcileList kind={k} prefix={prefix()} host={host()} />}</For>
+        <For each={shown()}>
+          {(k) => <ReconcileList kind={k} prefix={prefix()} host={host()} onCount={(n, more) => setCounts((c) => ({ ...c, [k]: { count: n, more } }))} />}
+        </For>
       </div>
     </div>
   );

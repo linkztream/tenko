@@ -114,7 +114,7 @@ describe("the proposal list", () => {
 
     // The proposals that are decided already are not in the open list.
     for (const id of [P.guestPhone, P.speaker, P.oldTest]) expect(rowIds()).not.toContain(id);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("7 open proposals");
+    expect(screen.getByTestId("page-sub").textContent).toContain("7 open proposals");
     // Nothing is docked until a proposal is chosen.
     expect(screen.queryByTestId("proposal-panel")).toBeNull();
   });
@@ -182,7 +182,7 @@ describe("the proposal list", () => {
     choose("accepted");
     await waitFor(() => expect(rowIds()).toEqual([P.speaker]));
     expect(cell(rowOf(P.speaker), "state")).toBe("Accepted");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("1 proposal");
+    expect(screen.getByTestId("page-sub").textContent).toContain("1 proposal");
 
     choose("rejected");
     await waitFor(() => expect(rowIds()).toEqual([P.guestPhone]));
@@ -251,7 +251,7 @@ describe("the proposal list", () => {
     fireEvent.click(chip("filter-kind-address_mismatch"));
     fireEvent.click(chip("filter-severity-info"));
     await waitFor(() => expect(rowIds()).toEqual([P.printerTaken, P.thermostat]));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("2 proposals");
+    expect(screen.getByTestId("page-sub").textContent).toContain("2 proposals");
   });
 
   it("takes severity and kind from the URL and ignores values it does not know", async () => {
@@ -311,7 +311,7 @@ describe("the proposal list", () => {
     const empty = await screen.findByTestId("discovery-empty");
     expect(empty.textContent).toContain("Nothing to decide");
     expect(empty.textContent).toContain("The reconciler compares what connectors and probes see with IPAM.");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Nothing to decide");
+    expect(screen.getByTestId("page-sub").textContent).toContain("Nothing to decide");
   });
 
   it("sorts on the server when a sortable header is chosen", async () => {

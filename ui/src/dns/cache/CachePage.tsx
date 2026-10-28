@@ -20,8 +20,9 @@ import { ApiError, errorMessage } from "../../api/problem";
 import { ConfirmDialog } from "../../components/Dialog";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
-import { PageHead } from "../../components/PageHead";
+import { PageHeader } from "../../components/PageHeader";
 import { toast } from "../../components/toast";
+import { FilterBar } from "../../grid/FilterBar";
 import { logicalArrow } from "../../grid/focus";
 import { formatDateTime, formatNumber, t } from "../../i18n";
 import { DnsNav } from "../DnsNav";
@@ -518,8 +519,7 @@ function CacheView(props: { node: number }) {
   });
 
   const read = (suffix: string) => setRequest({ suffix, tick: (request()?.tick ?? 0) + 1 });
-  const show = (event: Event) => {
-    event.preventDefault();
+  const show = () => {
     const suffix = cacheSuffix(typed());
     setInvalid(suffix === null);
     if (suffix !== null) read(suffix);
@@ -544,40 +544,28 @@ function CacheView(props: { node: number }) {
 
   return (
     <section class="dns-cache" data-testid="dns-cache">
-      <p class="muted dns-cache-lede" data-testid="dns-cache-audit-note">
-        {t("dns.cache.lede")}
-      </p>
-      <form class="dns-cache-form" data-testid="dns-cache-form" onSubmit={show} novalidate>
-        <div class="field">
-          <label for="dns-cache-suffix">{t("dns.cache.suffix")}</label>
-          <input
-            id="dns-cache-suffix"
-            class="input mono"
-            value={typed()}
-            placeholder={t("dns.cache.suffix_placeholder")}
-            spellcheck={false}
-            autocomplete="off"
-            aria-invalid={invalid() ? "true" : undefined}
-            data-testid="field-cache-suffix"
-            onInput={(event) => setTyped(event.currentTarget.value)}
-          />
-          <Show when={invalid()}>
-            <span class="help bad" data-testid="field-error" data-field="suffix">
-              {t("dns.cache.suffix_invalid")}
-            </span>
-          </Show>
-        </div>
-        <div class="dns-cache-actions">
-          <button type="submit" class="btn primary" data-testid="dns-cache-show">
-            {request() ? t("dns.cache.reload") : t("dns.cache.show")}
+      <FilterBar
+        class="dns-cache-form"
+        testid="dns-cache-form"
+        label={t("dns.cache.suffix")}
+        placeholder={t("dns.cache.suffix_placeholder")}
+        queryTestid="field-cache-suffix"
+        value={typed()}
+        onInput={setTyped}
+        onSubmit={show}
+        invalid={invalid() ? t("dns.cache.suffix_invalid") : undefined}
+        invalidField="suffix"
+        density={false}
+      >
+        <button type="submit" class="btn primary" data-testid="dns-cache-show">
+          {request() ? t("dns.cache.reload") : t("dns.cache.show")}
+        </button>
+        <Show when={suffix()}>
+          <button type="button" class="btn" data-testid="dns-cache-flush" disabled={busy()} onClick={() => setConfirming(true)}>
+            {t("dns.cache.flush", { suffix: suffix() })}
           </button>
-          <Show when={suffix()}>
-            <button type="button" class="btn" data-testid="dns-cache-flush" disabled={busy()} onClick={() => setConfirming(true)}>
-              {t("dns.cache.flush", { suffix: suffix() })}
-            </button>
-          </Show>
-        </div>
-      </form>
+        </Show>
+      </FilterBar>
       <Show when={listing.error}>
         <ErrorNotice error={listing.error} />
       </Show>
@@ -624,7 +612,15 @@ export default function CachePage() {
   return (
     <div class="page dns-page" data-testid="page-dns-cache">
       <DnsNav />
-      <PageHead title={t("dns.cache.title")} sub={t("dns.cache.sub")} />
+      <PageHeader
+        title={t("dns.cache.title")}
+        sub={t("dns.cache.sub")}
+        info={
+          <p class="dns-cache-lede" data-testid="dns-cache-audit-note">
+            {t("dns.cache.lede")}
+          </p>
+        }
+      />
       <div class="page-body dns-cache-body">
         <Show when={nodes.error}>
           <ErrorNotice error={nodes.error} />

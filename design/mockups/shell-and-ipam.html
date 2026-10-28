@@ -122,27 +122,39 @@
     </button>
     <span class="spacer"></span>
     <div class="top-group">
-      <a class="pill" href="dashboard.html" title="Cluster health: 3 of 3 controllers reachable, replication lag 4 ms">
-        <span class="dot live"></span><span>Cluster <strong>3/3</strong></span>
-        <span style="width:1px;height:14px;background:var(--line)"></span>
-        <span>tenko1 <strong>leader</strong></span>
-      </a>
-      <a class="pill" href="wizard.html" title="Security profile: Home. No settings weaker than the profile.">
+      <!-- U2: the node chip names this controller's role and the cluster ("Follower · 3 nodes,
+           1 behind" when one lags) and opens a short cluster card; the profile chip opens what
+           the profile sets. -->
+      <button type="button" class="pill" aria-haspopup="dialog" aria-expanded="false" title="Store revision 18,204, in step with the leader">
+        <span class="dot live"></span><span><strong>Leader</strong> · 3 nodes</span>
+      </button>
+      <button type="button" class="pill" aria-haspopup="dialog" aria-expanded="false" title="Security profile: Home. Open what the profile sets.">
         <svg class="i sm" aria-hidden="true"><use href="#i-shield"/></svg><span>Home profile</span>
-      </a>
+      </button>
       <button class="icon-btn" data-action="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button>
       <button class="icon-btn" data-action="theme" aria-label="Theme"></button>
       <button class="avatar" title="Signed in as alex (administrator)" aria-label="Account menu for alex">AK</button>
     </div>
   </header>
 
+  <!-- Decision 17 (U2): twelve areas in three groups (Operate, Work, System) with Settings at the
+       bottom. A badge counts the act and review findings of its area in the fill of the worst
+       severity; Connectors and Nodes show a dot for an unhealthy one; Settings a dot for a
+       setting weaker than the profile. The counts are the mockup's. -->
   <nav class="rail" aria-label="Main">
     <a href="dashboard.html" title="Dashboard (G then B)"><svg class="i" aria-hidden="true"><use href="#i-dashboard"/></svg>Dashboard</a>
-    <a href="shell-and-ipam.html" aria-current="page" title="IPAM (G then I)"><svg class="i" aria-hidden="true"><use href="#i-ipam"/></svg>IPAM</a>
+    <a href="shell-and-ipam.html" aria-current="page" title="IPAM (G then I)" aria-label="IPAM: 1 finding, 1 to act on now"><svg class="i" aria-hidden="true"><use href="#i-ipam"/></svg>IPAM<span class="badge-count act">1</span></a>
     <a href="#" data-soon="DNS" title="DNS (G then D)"><svg class="i" aria-hidden="true"><use href="#i-dns"/></svg>DNS</a>
     <a href="#" data-soon="DHCP" title="DHCP (G then H)"><svg class="i" aria-hidden="true"><use href="#i-dhcp"/></svg>DHCP</a>
+    <a href="#" data-soon="Discovery" title="Discovery (G then O)" aria-label="Discovery: 5 findings to review"><svg class="i" aria-hidden="true"><use href="#i-proposal"/></svg>Discovery<span class="badge-count review">5</span></a>
     <a href="topology.html" title="Topology (G then T)"><svg class="i" aria-hidden="true"><use href="#i-topology"/></svg>Topology</a>
-    <a href="move-job.html" title="Jobs (G then J)"><svg class="i" aria-hidden="true"><use href="#i-jobs"/></svg>Jobs<span class="badge-count">2</span></a>
+    <span class="sep" aria-hidden="true"></span>
+    <a href="move-job.html" title="Jobs (G then J)" aria-label="Jobs: 1 job waits for a person"><svg class="i" aria-hidden="true"><use href="#i-jobs"/></svg>Jobs<span class="badge-count act">1</span></a>
+    <a href="#" data-soon="Audit" title="Audit (G then A)"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>Audit</a>
+    <span class="sep" aria-hidden="true"></span>
+    <a href="#" data-soon="Connectors" title="Connectors (G then C)" aria-label="Connectors: 1 finding to act on now"><svg class="i" aria-hidden="true"><use href="#i-cable"/></svg>Connectors<span class="badge-dot"></span></a>
+    <a href="#" data-soon="Nodes" title="Nodes (G then N)"><svg class="i" aria-hidden="true"><use href="#i-server"/></svg>Nodes</a>
+    <a href="#" data-soon="Cluster" title="Cluster (G then K)"><svg class="i" aria-hidden="true"><use href="#i-layers"/></svg>Cluster</a>
     <a href="#" data-soon="Settings" class="bottom" title="Settings (G then S)"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</a>
   </nav>
 
@@ -346,6 +358,8 @@
     <span title="Live updates over SSE"><span class="dot live"></span>Live</span>
     <span>Last event <strong class="num" id="last-event">0.4 s</strong> ago</span>
     <a href="move-job.html" style="display:flex;align-items:center;gap:6px;color:inherit;text-decoration:none;padding:0 var(--sp-5);border-right:1px solid var(--line)"><span class="jstate running" style="--p:60%">1 running</span><span class="jstate waiting">1 waiting</span></a>
+    <!-- U2: the open findings, one count per severity; act and review link to the filtered list, info is plain. -->
+    <span style="gap:var(--sp-5)"><a href="#" style="display:inline-flex;align-items:center;gap:5px;color:var(--severity-act);text-decoration:none"><svg class="i sm" aria-hidden="true"><use href="#i-conflict"/></svg>1 act now</a><a href="#" style="display:inline-flex;align-items:center;gap:5px;color:var(--severity-review);text-decoration:none"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>5 to review</a><span>23 info</span></span>
     <span id="sel-status">3 of 24 rows selected</span>
     <span class="grow"></span>
     <span>Phase 1 build</span>

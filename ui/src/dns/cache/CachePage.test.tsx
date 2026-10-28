@@ -118,8 +118,16 @@ async function shown() {
 describe("the cache page", () => {
   it("reads nothing until asked, then shows the tree with the root expanded to the top-level domains", async () => {
     open();
-    const cache = await section();
-    expect(cache.textContent).toContain("recorded in the audit log");
+    await section();
+    // The explanation sits behind the info button beside the title, not above the data.
+    expect(screen.queryByTestId("dns-cache-audit-note")).toBeNull();
+    const info = screen.getByTestId("page-info");
+    expect(info.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(info);
+    expect(info.getAttribute("aria-expanded")).toBe("true");
+    expect((await screen.findByTestId("dns-cache-audit-note")).textContent).toContain("recorded in the audit log");
+    fireEvent.keyDown(screen.getByTestId("page-info-popover"), { key: "Escape" });
+    expect(screen.queryByTestId("dns-cache-audit-note")).toBeNull();
     expect(screen.getByTestId("dns-cache-show").textContent).toBe("Show the entries");
     expect(screen.queryByTestId("dns-cache-tree")).toBeNull();
     expect(reads()).toHaveLength(0);

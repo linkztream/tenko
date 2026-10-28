@@ -12,7 +12,7 @@ import { fetchAll } from "../api/paginate";
 import type { AuditRecord, UserInfo } from "../api/types";
 import { paths } from "../app/paths";
 import { Icon } from "../components/Icon";
-import { PageHead } from "../components/PageHead";
+import { PageHeader } from "../components/PageHeader";
 import { DataGrid } from "../grid/DataGrid";
 import { createListSource } from "../grid/source";
 import { t } from "../i18n";
@@ -192,7 +192,16 @@ export default function AuditPage() {
 
   return (
     <div class="page audit-page" data-testid="page-audit">
-      <PageHead title={t("audit.title")} sub={t("audit.sub")} />
+      <PageHeader
+        title={t("audit.title")}
+        sub={list.initial() ? undefined : t("audit.sub_count", { count: list.rows().length, more: list.hasMore() ? "yes" : "no" })}
+        info={
+          <>
+            <p>{t("audit.sub")}</p>
+            <p>{t("audit.info")}</p>
+          </>
+        }
+      />
       <ChainStatus chain={chain} />
       <AuditFilters values={values()} state={state()} users={userList()} onChange={change} />
       <div class="audit-grid" ref={watchClicks}>

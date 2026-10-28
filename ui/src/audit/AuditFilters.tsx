@@ -5,9 +5,9 @@
 // sent to the server.
 import { createEffect, createSignal, createUniqueId, For, on, onCleanup, Show, untrack } from "solid-js";
 import type { UserInfo } from "../api/types";
-import { DENSITIES, density, setDensity, type Density } from "../app/prefs";
 import { Segmented } from "../components/Segmented";
-import { t, type MessageKey } from "../i18n";
+import { FilterBar } from "../grid/FilterBar";
+import { t } from "../i18n";
 import { outcomeWord } from "./cells";
 import {
   checkAction,
@@ -25,12 +25,6 @@ import {
 import { kindWord, OBJECT_KINDS, SYSTEM_COMPONENTS } from "./model";
 
 export type FilterPatch = Partial<Record<FilterName, string | undefined>>;
-
-const DENSITY_LABEL: Record<Density, MessageKey> = {
-  dense: "grid.density.dense",
-  compact: "grid.density.compact",
-  comfortable: "grid.density.comfortable",
-};
 
 const APPLY_DELAY_MS = 350;
 
@@ -195,7 +189,34 @@ export function AuditFilters(props: {
   const problemText = (name: FilterName): FilterProblem | undefined => props.state.problems[name];
 
   return (
-    <div class="filterbar audit-filters" role="group" aria-label={t("audit.filters.label")} data-testid="audit-filters">
+    <FilterBar
+      class="audit-filters"
+      role="group"
+      label={t("audit.filters.label")}
+      testid="audit-filters"
+      actions={
+        <Show when={any()}>
+          <button
+            type="button"
+            class="btn sm"
+            data-testid="audit-filter-clear"
+            onClick={() =>
+              props.onChange({
+                from: undefined,
+                to: undefined,
+                principal: undefined,
+                action: undefined,
+                object: undefined,
+                outcome: undefined,
+                order: undefined,
+              })
+            }
+          >
+            {t("audit.filter.clear")}
+          </button>
+        </Show>
+      }
+    >
       <TimeFilter
         name="from"
         label={t("audit.filter.from")}
@@ -279,34 +300,6 @@ export function AuditFilters(props: {
           />
         </span>
       </div>
-      <div class="right">
-        <Show when={any()}>
-          <button
-            type="button"
-            class="btn sm"
-            data-testid="audit-filter-clear"
-            onClick={() =>
-              props.onChange({
-                from: undefined,
-                to: undefined,
-                principal: undefined,
-                action: undefined,
-                object: undefined,
-                outcome: undefined,
-                order: undefined,
-              })
-            }
-          >
-            {t("audit.filter.clear")}
-          </button>
-        </Show>
-        <Segmented
-          label={t("grid.density.label")}
-          value={density()}
-          options={DENSITIES.map((d) => ({ value: d, label: t(DENSITY_LABEL[d]) }))}
-          onChange={(v) => setDensity(v)}
-        />
-      </div>
-    </div>
+    </FilterBar>
   );
 }

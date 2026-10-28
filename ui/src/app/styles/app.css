@@ -39,11 +39,21 @@
 /* Status bar link to the jobs. */
 .statusbar a.status-jobs { display: flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; }
 .statusbar a.status-jobs:hover { background: var(--surface-3); color: var(--ink); }
-.statusbar a.status-alarms { display: flex; align-items: center; gap: 6px; color: var(--warn-ink); text-decoration: none; }
-.statusbar a.status-alarms.crit { color: var(--danger-ink); }
-.statusbar a.status-alarms:hover { background: var(--surface-3); }
 .statusbar a.status-version { color: inherit; text-decoration: none; }
 .statusbar a.status-version:hover { background: var(--surface-3); color: var(--ink); }
+
+/* Rail badges (decision 17): a count in the fill of the worst severity, or a dot. */
+.rail .badge-count.act { background: var(--severity-act); color: var(--severity-act-on); }
+.rail .badge-count.review { background: var(--severity-review); color: var(--severity-review-on); }
+.rail .badge-dot {
+  position: absolute; top: 5px; inset-inline-end: 14px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--severity-act); box-shadow: 0 0 0 2px var(--surface-2);
+}
+.rail .sep { margin: 5px 10px; flex: none; }
+
+/* A query field whose value cannot be used. */
+.filterbar .query.bad { border-color: var(--danger); }
 
 /* Account menu additions. */
 .acct .row.items { padding: var(--sp-2) 0; }

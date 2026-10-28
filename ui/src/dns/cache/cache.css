@@ -1,9 +1,10 @@
 /* The cache view (/dns/cache): the suffix form, the tree of names beside the records of the folder. */
 .dns-cache-body { display: flex; flex-direction: column; gap: var(--sp-5); }
 .dns-cache { display: grid; gap: var(--sp-4); }
-.dns-cache-lede { margin: 0; font-size: var(--fs-12); max-inline-size: 80ch; }
-.dns-cache-form { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
-.dns-cache-actions, .dns-cache-paging, .dns-cache-more { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.dns-cache-lede { margin: 0; }
+/* The suffix bar sits inside the page body, not under the header: no edge of its own. */
+.filterbar.dns-cache-form { padding: 0; background: transparent; border-bottom: 0; }
+.dns-cache-paging, .dns-cache-more { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
 .dns-cache-data { overflow-wrap: anywhere; max-inline-size: 48ch; min-inline-size: 0; }
 /* Three lines at most; the button after the text opens the one cell. */
 .dns-cache-text {

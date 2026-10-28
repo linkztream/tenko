@@ -39,6 +39,8 @@ import { dhcpRoutes } from "./routes-dhcp";
 import { dhcpLeaseRoutes } from "./routes-dhcp-leases";
 // Reserving an address in DHCP: the IPAM rows of a reservation in one plan.
 import { reserveRoutes } from "./routes-reserve";
+// U1: the counts of the findings model and its live topic.
+import { findingsRoutes } from "./routes-findings";
 
 export { route, mswPath, paginate, wholePage, type MockContext, type OperationPath } from "./route";
 export { ok, created, noContent, fail, Problem, Reply } from "./reply";
@@ -92,6 +94,8 @@ export const happyPaths: HttpHandler[] = [
   // WP7.5: the leases and the history, ahead of the 501 stubs.
   ...dhcpLeaseRoutes,
   ...reserveRoutes,
+  // The findings counts (docs/reconciliation.md section 12), ahead of the 501 stubs.
+  ...findingsRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

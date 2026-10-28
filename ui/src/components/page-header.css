@@ -1,0 +1,8 @@
+/* The page header: title with its info button, the subtitle line of facts, actions. */
+.page-header .titles { display: grid; gap: 1px; min-width: 0; }
+.page-header .title-row { display: flex; align-items: center; gap: var(--sp-2); }
+.page-header h1 { font-weight: var(--fw-semibold); }
+.page-header .info-btn { width: 24px; height: 24px; color: var(--ink-3); }
+.page-header .info-btn[aria-expanded="true"] { background: var(--accent-wash); color: var(--accent); }
+.page-sub { margin: 0; color: var(--ink-3); font-size: var(--fs-12); }
+

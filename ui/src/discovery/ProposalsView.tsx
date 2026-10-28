@@ -16,7 +16,7 @@ import { createEffect, createMemo, createResource, createSignal, For, on, onClea
 import { errorMessage } from "../api/problem";
 import { paths } from "../app/paths";
 import { Icon } from "../components/Icon";
-import { PageHead } from "../components/PageHead";
+import { PageHeader } from "../components/PageHeader";
 import { toast } from "../components/toast";
 import { ActionBar, ActionButton } from "../grid/ActionBar";
 import { createGridSelection, DataGrid } from "../grid/DataGrid";
@@ -39,6 +39,16 @@ import "./discovery.css";
 
 type StateFilter = ProposalState | "all";
 const STATE_FILTERS: readonly StateFilter[] = [...PROPOSAL_STATES, "all"];
+
+/** The severities of the findings model a link may filter the inbox by. */
+type ProposalLevel = "act" | "review";
+const LEVELS: readonly ProposalLevel[] = ["act", "review"];
+const LEVEL_LABEL = { act: "discovery.filter.level_act", review: "discovery.filter.level_review" } as const;
+
+/** The finding severity of an open proposal of this kind: a conflict is to act on, the rest to review. */
+function levelOfKind(kind: ProposalKind): ProposalLevel {
+  return kind === "conflict" ? "act" : "review";
+}
 
 /** A single value of a query parameter; a repeated parameter counts as absent. */
 function one(value: string | string[] | undefined): string | undefined {
@@ -66,6 +76,16 @@ export default function ProposalsView() {
   };
   const kinds = () => listOf<ProposalKind>(search.kind, PROPOSAL_KINDS);
   const severities = () => listOf<ProposalSeverity>(search.severity, SEVERITIES);
+  // The severity of the findings model (`?severity=act`, the links of the status bar): an open
+  // conflict is to act on, every other open proposal to review (docs/reconciliation.md 12.2).
+  const levels = () => listOf<ProposalLevel>(search.severity, LEVELS);
+  const levelKinds = (): ProposalKind[] => {
+    const wanted = levels();
+    if (wanted.length === 0) return kinds();
+    const byLevel = PROPOSAL_KINDS.filter((k) => wanted.includes(levelOfKind(k)));
+    const chosen = kinds();
+    return chosen.length === 0 ? byLevel : chosen.filter((k) => byLevel.includes(k));
+  };
   const prefix = () => one(search.prefix);
 
   // The subject filter: typed here, sent to the server after a pause, kept in the URL.
@@ -88,7 +108,7 @@ export default function ProposalsView() {
     path: "/api/v1/proposals",
     query: () => ({
       state: state() === "all" ? undefined : state(),
-      kind: kinds(),
+      kind: levelKinds(),
       severity: severities(),
       prefix: prefix(),
       subject: subject() || undefined,
@@ -164,8 +184,16 @@ export default function ProposalsView() {
   // Only an administrator or operator decides, and only open proposals can be decided: the grid
   // offers its checkbox column to them. The selection covers the loaded rows.
   const selectable = (p: Proposal) => isDecider() && isOpen(p);
-  const selection = createGridSelection(source.rows, (p) => p.id, selectable);
-  const selected = () => source.rows().filter((p) => selection.has(p.id));
+  // A severity of the findings model narrows on the client as well: the kinds it stands for may
+  // not meet the kinds of the URL, and then nothing is shown.
+  const rows = createMemo(() => {
+    const wanted = levels();
+    if (wanted.length === 0) return source.rows();
+    const chosen = kinds();
+    return source.rows().filter((p) => wanted.includes(levelOfKind(p.kind)) && (chosen.length === 0 || chosen.includes(p.kind)));
+  });
+  const selection = createGridSelection(rows, (p) => p.id, selectable);
+  const selected = () => rows().filter((p) => selection.has(p.id));
 
   /** The toast of a batch, the selection cleared, and the panel of what was skipped. */
   const batchDone = (verb: "approved" | "rejected", result: BatchDecision, proposals: Proposal[]) => {
@@ -197,9 +225,9 @@ export default function ProposalsView() {
     },
   ];
 
-  const filtered = () => state() !== "open" || kinds().length > 0 || severities().length > 0 || !!prefix() || subject() !== "";
+  const filtered = () => state() !== "open" || kinds().length > 0 || severities().length > 0 || levels().length > 0 || !!prefix() || subject() !== "";
   const countText = createMemo(() => {
-    const n = source.rows().length;
+    const n = rows().length;
     if (source.initial()) return undefined;
     const more = source.hasMore();
     return state() === "open" && !filtered()
@@ -212,15 +240,16 @@ export default function ProposalsView() {
     const el = e.target as HTMLElement;
     if (el.closest("a, button, input, select, textarea, td.check")) return;
     const id = el.closest<HTMLElement>("tr[data-id]")?.dataset.id;
-    const row = id ? source.rows().find((p) => p.id === id) : undefined;
+    const row = id ? rows().find((p) => p.id === id) : undefined;
     if (row) open(row);
   };
 
   return (
     <div class="page discovery-page" data-testid="page-discovery">
-      <PageHead
+      <PageHeader
         title={t("shell.nav.discovery")}
         sub={countText()}
+        info={<p>{t("discovery.info")}</p>}
         actions={
           <Show when={isDecider()}>
             <button type="button" class="btn" data-testid="discovery-reconcile" disabled={running()} onClick={() => void runReconcile()}>
@@ -229,8 +258,8 @@ export default function ProposalsView() {
             </button>
           </Show>
         }
+        tabs={<DiscoveryNav />}
       />
-      <DiscoveryNav />
       <FilterBar
         label={t("discovery.filter.label")}
         placeholder={t("discovery.filter.placeholder")}
@@ -271,6 +300,21 @@ export default function ProposalsView() {
             </ToggleChip>
           )}
         </For>
+        <For each={levels()}>
+          {(level) => (
+            <span class="chip applied" data-testid="filter-level" data-level={level}>
+              {t(LEVEL_LABEL[level])}
+              <button
+                type="button"
+                class="chip-x"
+                aria-label={t("discovery.filter.remove_level", { level: t(LEVEL_LABEL[level]) })}
+                onClick={() => toggleIn("severity", levels(), level)}
+              >
+                <Icon name="x" size="xs" />
+              </button>
+            </span>
+          )}
+        </For>
         <Show when={prefix()}>
           {(id) => (
             <>
@@ -298,7 +342,7 @@ export default function ProposalsView() {
             label={t("discovery.grid.label")}
             columns={columns}
             columnState={columnState}
-            rows={source.rows()}
+            rows={rows()}
             rowId={(p) => p.id}
             rowKey={(p) => subjectLabel(p)}
             rowLabel={(p) => ruleText(p)}

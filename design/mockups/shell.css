@@ -204,7 +204,14 @@ svg.i.xs { width: 12px; height: 12px; }
   background: var(--accent); color: var(--accent-ink);
   font-size: 10px; font-weight: var(--fw-bold); line-height: 16px; text-align: center;
 }
-.rail .sep { height: 1px; background: var(--line); margin: var(--sp-3) var(--sp-3); }
+/* Decision 17: the badge's fill is the worst severity of the area's findings, with its -on text. */
+.rail .badge-count.act { background: var(--severity-act); color: var(--severity-act-on); }
+.rail .badge-count.review { background: var(--severity-review); color: var(--severity-review-on); }
+.rail .badge-dot {
+  position: absolute; top: 5px; right: 14px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--severity-act); box-shadow: 0 0 0 2px var(--surface-2);
+}
+.rail .sep { height: 1px; background: var(--line); margin: 5px 10px; flex: none; }
 .rail .bottom { margin-top: auto; }
 
 /* Main area */

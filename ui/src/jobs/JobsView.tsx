@@ -11,13 +11,14 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import type { JobSummary } from "../api/types";
 import { paths } from "../app/paths";
 import { Icon } from "../components/Icon";
-import { PageHead } from "../components/PageHead";
+import { PageHeader } from "../components/PageHeader";
 import { shortId } from "../components/Principal";
 import { DataGrid } from "../grid/DataGrid";
 import { FilterBar, ToggleChip } from "../grid/FilterBar";
 import { createColumnState } from "../grid/prefs";
 import { createListSource } from "../grid/source";
 import { t } from "../i18n";
+import { areaCounts, useFindingCounts } from "../shell/findings";
 import { jobColumns } from "./columns";
 import { GroupPanel } from "./GroupPanel";
 import { groupLabel, matchesView, parseView, VIEWS, viewStates, type JobView } from "./model";
@@ -74,6 +75,10 @@ export default function JobsView() {
   const [params, setParams] = useSearchParams();
   const [text, setText] = createSignal("");
 
+  // The jobs waiting for a person, from the one findings store: the same number as the rail badge.
+  const findings = useFindingCounts();
+  const waiting = () => areaCounts(findings(), "jobs").act;
+
   const view = () => parseView(params.view);
   const kind = () => one(params.kind);
   const target = () => one(params.target);
@@ -117,7 +122,16 @@ export default function JobsView() {
 
   return (
     <div class="page jobs-page" data-testid="page-jobs">
-      <PageHead title={t("jobs.title")} sub={t("jobs.sub")} />
+      <PageHeader
+        title={t("jobs.title")}
+        sub={findings() ? t("jobs.sub_waiting", { count: waiting() }) : undefined}
+        info={
+          <>
+            <p>{t("jobs.sub")}</p>
+            <p>{t("jobs.info")}</p>
+          </>
+        }
+      />
       <Show when={group()} keyed>
         {(g) => (
           <GroupPanel
@@ -138,7 +152,13 @@ export default function JobsView() {
         <span class="divider" />
         <For each={VIEWS}>
           {(v) => (
-            <ToggleChip pressed={view() === v} onToggle={() => setParams({ view: v === "all" ? undefined : v })} testid={`view-${v}`}>
+            <ToggleChip
+              pressed={view() === v}
+              onToggle={() => setParams({ view: v === "all" ? undefined : v })}
+              testid={`view-${v}`}
+              count={v === "needs" && waiting() > 0 ? waiting() : undefined}
+              tone={v === "needs" && waiting() > 0 ? "conflict" : undefined}
+            >
               <Show when={v === "needs"}>
                 <Icon name="alert" />
               </Show>

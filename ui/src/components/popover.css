@@ -1,0 +1,21 @@
+/* A small layer under the control that opened it: an explanation, a card. */
+.popover {
+  position: fixed; z-index: var(--z-overlay);
+  width: min(380px, calc(100vw - 16px)); max-height: 70vh; overflow: auto;
+  display: grid; gap: var(--sp-4); padding: var(--sp-5);
+  border: 1px solid var(--line-strong); border-radius: var(--r-3);
+  background: var(--surface); box-shadow: var(--shadow-float);
+  font-size: var(--fs-13); color: var(--ink-2);
+}
+.popover:focus { outline: none; }
+.popover-title { font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--ink); }
+.popover-body p { margin: 0 0 var(--sp-3); }
+.popover .btn { justify-self: start; }
+.card-facts { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2) var(--sp-5); margin: 0; }
+.card-facts dt { color: var(--ink-3); }
+.card-facts dd { margin: 0; color: var(--ink); }
+.card-members { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.card-members li { display: flex; gap: var(--sp-4); }
+.profile-card { width: min(440px, calc(100vw - 16px)); }
+.card-toggles th[scope="row"] { font-weight: var(--fw-regular); color: var(--ink-2); }
+

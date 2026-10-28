@@ -1,0 +1,8 @@
+/* Finding chips: a severity glyph, a count and a word; only Act now and Review are colored. */
+.finding-chip { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); text-decoration: none; }
+.finding-chip.act { color: var(--severity-act); }
+.finding-chip.review { color: var(--severity-review); }
+.finding-chip:hover { color: var(--ink); text-decoration: none; }
+.statusbar .status-findings { gap: var(--sp-5); }
+.statusbar .status-findings a:hover { background: var(--surface-3); }
+

@@ -28,7 +28,14 @@ test("lists what the cache holds and flushes a suffix", async ({ page, signedIn 
   await openCache(page);
   const section = page.getByTestId("dns-cache");
   await expect(section).toBeVisible();
-  await expect(section.getByTestId("dns-cache-audit-note")).toContainText("audit log");
+  // The explanation sits behind the info button beside the title (U2), and Esc puts it away.
+  await expect(page.getByTestId("dns-cache-audit-note")).toHaveCount(0);
+  await page.getByTestId("page-info").click();
+  await expect(page.getByTestId("page-info")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("dns-cache-audit-note")).toContainText("audit log");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("dns-cache-audit-note")).toHaveCount(0);
+  await expect(page.getByTestId("page-info")).toBeFocused();
   expect(cache.requests).toEqual([]);
 
   await section.getByTestId("dns-cache-show").click();

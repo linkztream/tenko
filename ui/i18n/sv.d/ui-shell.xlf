@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="ui-shell">
+      <unit id="shell.nav.badge.act">
+        <notes><note category="description">Accessible name of a rail item whose badge counts findings, at least one to act on now. {area} is the name of the rail item.</note></notes>
+        <segment><source>{area}: {count, plural, one {# finding} other {# findings}}, {act} to act on now</source><target>{area}: {count, plural, one {# fynd} other {# fynd}}, {act} att åtgärda nu</target></segment>
+      </unit>
+      <unit id="shell.nav.badge.review">
+        <notes><note category="description">Accessible name of a rail item whose badge counts findings to review, none to act on now.</note></notes>
+        <segment><source>{area}: {count, plural, one {# finding} other {# findings}} to review</source><target>{area}: {count, plural, one {# fynd} other {# fynd}} att granska</target></segment>
+      </unit>
+      <unit id="shell.nav.badge.jobs">
+        <notes><note category="description">Accessible name of the Jobs rail item while jobs wait for a person.</note></notes>
+        <segment><source>{area}: {count, plural, one {# job waits} other {# jobs wait}} for a person</source><target>{area}: {count, plural, one {# jobb väntar} other {# jobb väntar}} på en person</target></segment>
+      </unit>
+      <unit id="shell.nav.badge.unhealthy">
+        <notes><note category="description">Accessible name of a rail item with a dot: the area has findings to act on now, such as an unhealthy connector or node.</note></notes>
+        <segment><source>{area}: {count, plural, one {# finding} other {# findings}} to act on now</source><target>{area}: {count, plural, one {# fynd} other {# fynd}} att åtgärda nu</target></segment>
+      </unit>
+      <unit id="shell.nav.badge.weakened">
+        <notes><note category="description">Accessible name of the Settings rail item with a dot: a security setting is weaker than the Home profile.</note></notes>
+        <segment><source>{area}: a security setting is weaker than the Home profile</source><target>{area}: en säkerhetsinställning är svagare än profilen Hem</target></segment>
+      </unit>
+      <unit id="shell.nav.badge.many">
+        <notes><note category="description">A rail badge for more than 99 findings.</note></notes>
+        <segment><source>99+</source><target>99+</target></segment>
+      </unit>
+      <unit id="shell.status.findings.act">
+        <notes><note category="description">Status bar link: the number of findings to act on now.</note></notes>
+        <segment><source>{count} act now</source><target>{count} att åtgärda nu</target></segment>
+      </unit>
+      <unit id="shell.status.findings.act_title">
+        <segment><source>Findings to act on now. Open them in Discovery.</source><target>Fynd att åtgärda nu. Öppna dem i Upptäckt.</target></segment>
+      </unit>
+      <unit id="shell.status.findings.review">
+        <notes><note category="description">Status bar link: the number of findings to review.</note></notes>
+        <segment><source>{count} to review</source><target>{count} att granska</target></segment>
+      </unit>
+      <unit id="shell.status.findings.review_title">
+        <segment><source>Findings to review. Open them in Discovery.</source><target>Fynd att granska. Öppna dem i Upptäckt.</target></segment>
+      </unit>
+      <unit id="shell.status.findings.info">
+        <notes><note category="description">Status bar item: the number of findings for information, never counted as problems.</note></notes>
+        <segment><source>{count} info</source><target>{count} info</target></segment>
+      </unit>
+      <unit id="shell.status.findings.info_title">
+        <segment><source>Findings for information, listed where they live and not counted as problems.</source><target>Fynd för kännedom, listade där de hör hemma och inte räknade som problem.</target></segment>
+      </unit>
+      <unit id="shell.page.info">
+        <notes><note category="description">Accessible name and tooltip of the info button beside a page title, which opens the page's explanation.</note></notes>
+        <segment><source>About {title}</source><target>Om {title}</target></segment>
+      </unit>
+      <unit id="shell.top.cluster">
+        <notes><note category="description">Node chip of the top bar after the role of this controller ("Leader · 1 node", "Follower · 3 nodes, 1 behind"): the controllers of the cluster and how many lag behind.</note></notes>
+        <segment><source>{nodes, plural, one {# node} other {# nodes}}{behind, plural, =0 {} other {, # behind}}</source><target>{nodes, plural, one {# nod} other {# noder}}{behind, plural, =0 {} other {, # efter}}</target></segment>
+      </unit>
+      <unit id="grid.filter.count_more">
+        <notes><note category="description">The count of a filter chip when the list holds more rows than were read.</note></notes>
+        <segment><source>{count}+</source><target>{count}+</target></segment>
+      </unit>
+      <unit id="cluster.card.title">
+        <notes><note category="description">Title of the short cluster card behind the node chip of the top bar.</note></notes>
+        <segment><source>Cluster</source><target>Kluster</target></segment>
+      </unit>
+      <unit id="cluster.card.this_node">
+        <segment><source>This controller</source><target>Den här kontrollern</target></segment>
+      </unit>
+      <unit id="cluster.card.quorum">
+        <segment><source>Quorum</source><target>Kvorum</target></segment>
+      </unit>
+      <unit id="cluster.card.revision">
+        <segment><source>Store revision</source><target>Lagringsrevision</target></segment>
+      </unit>
+      <unit id="cluster.card.members">
+        <segment><source>Controllers</source><target>Kontrollrar</target></segment>
+      </unit>
+      <unit id="cluster.card.open">
+        <segment><source>Open the cluster page</source><target>Öppna klustersidan</target></segment>
+      </unit>
+      <unit id="settings.profile_card.title">
+        <notes><note category="description">Title of the card behind the profile chip of the top bar. {profile} is the name of the security profile.</note></notes>
+        <segment><source>{profile} profile</source><target>Profilen {profile}</target></segment>
+      </unit>
+      <unit id="settings.profile_card.table">
+        <segment><source>What the {profile} profile sets</source><target>Vad profilen {profile} ställer in</target></segment>
+      </unit>
+      <unit id="settings.profile_card.col.setting">
+        <segment><source>Setting</source><target>Inställning</target></segment>
+      </unit>
+      <unit id="settings.profile_card.col.value">
+        <segment><source>{profile} sets</source><target>{profile} ställer in</target></segment>
+      </unit>
+      <unit id="settings.profile_card.changed">
+        <notes><note category="description">Marker of a setting this installation changed from the profile's value.</note></notes>
+        <segment><source>Changed here</source><target>Ändrad här</target></segment>
+      </unit>
+      <unit id="settings.profile_card.summary">
+        <segment><source>{count, plural, =0 {Every setting follows the profile.} one {# setting is changed from the profile.} other {# settings are changed from the profile.}}</source><target>{count, plural, =0 {Alla inställningar följer profilen.} one {# inställning är ändrad från profilen.} other {# inställningar är ändrade från profilen.}}</target></segment>
+      </unit>
+      <unit id="settings.profile_card.open">
+        <segment><source>Open the security settings</source><target>Öppna säkerhetsinställningarna</target></segment>
+      </unit>
+      <unit id="jobs.sub_waiting">
+        <notes><note category="description">Subtitle of the jobs page: the jobs waiting for a person, the same number as the rail badge.</note></notes>
+        <segment><source>{count, plural, =0 {Nothing waits for you} one {# job waits for you} other {# jobs wait for you}}</source><target>{count, plural, =0 {Inget väntar på dig} one {# jobb väntar på dig} other {# jobb väntar på dig}}</target></segment>
+      </unit>
+      <unit id="jobs.info">
+        <notes><note category="description">The explanation of the jobs page behind its info button.</note></notes>
+        <segment><source>Every change runs as a job with visible steps, a state and a way back. A job that needs a person, such as a manual step of a move, waits under Needs you until someone completes it.</source><target>Varje ändring körs som ett jobb med synliga steg, ett tillstånd och en väg tillbaka. Ett jobb som behöver en person, till exempel ett manuellt steg i en flytt, väntar under Behöver dig tills någon slutför det.</target></segment>
+      </unit>
+      <unit id="audit.sub_count">
+        <notes><note category="description">Subtitle of the audit log: the records read so far.</note></notes>
+        <segment><source>{count, plural, one {# record} other {# records}}{more, select, yes { and more} other {}}</source><target>{count, plural, one {# post} other {# poster}}{more, select, yes { och fler} other {}}</target></segment>
+      </unit>
+      <unit id="audit.info">
+        <notes><note category="description">The explanation of the audit log behind its info button.</note></notes>
+        <segment><source>Each record carries the hash of the one before it, so the chain status above the list shows whether any record was changed or removed. The filters live in the address of the page, so a filtered view can be shared as a link.</source><target>Varje post bär kontrollsumman för posten före den, så kedjans status ovanför listan visar om någon post har ändrats eller tagits bort. Filtren ligger i sidans adress, så en filtrerad vy kan delas som en länk.</target></segment>
+      </unit>
+      <unit id="discovery.info">
+        <notes><note category="description">The explanation of the Discovery page behind its info button.</note></notes>
+        <segment><source>The reconciler compares what the connectors, the probes, DHCP and DNS observe with what intent says, and proposes what a person should decide: devices it does not know, records without an owner, intent that differs from what is seen, and conflicts. Nothing changes until a person approves, and a rejection is remembered for its subject.</source><target>Avstämningen jämför det som kopplingarna, sonderna, DHCP och DNS observerar med det som avsikten säger, och föreslår det som en person bör avgöra: enheter den inte känner till, poster utan ägare, avsikt som skiljer sig från det som syns, och konflikter. Inget ändras förrän en person godkänner, och ett avslag kommer ihåg sitt objekt.</target></segment>
+      </unit>
+      <unit id="discovery.filter.level_act">
+        <notes><note category="description">Applied filter of the proposal inbox from a status bar link: the proposals to act on now (conflicts).</note></notes>
+        <segment><source>Act now</source><target>Åtgärda nu</target></segment>
+      </unit>
+      <unit id="discovery.filter.level_review">
+        <notes><note category="description">Applied filter of the proposal inbox from a status bar link: the proposals to review (every open one that is not a conflict).</note></notes>
+        <segment><source>To review</source><target>Att granska</target></segment>
+      </unit>
+      <unit id="discovery.filter.remove_level">
+        <segment><source>Remove the filter {level}</source><target>Ta bort filtret {level}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.info">
+        <notes><note category="description">The explanation of the reconciliation view behind its info button.</note></notes>
+        <segment><source>Each row puts what intent, the DHCP leases, the DNS zones and the scans say about one address side by side. The rule of the row decides which of them wins; a conflict has no winner and waits for a person. The rows of one kind form one list, and the filters narrow every list to a network, a host or a kind.</source><target>Varje rad visar sida vid sida vad avsikten, DHCP-lånen, DNS-zonerna och skanningarna säger om en adress. Radens regel avgör vem av dem som vinner; en konflikt har ingen vinnare och väntar på en person. Raderna av ett slag bildar en lista, och filtren begränsar varje lista till ett nätverk, en värd eller ett slag.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

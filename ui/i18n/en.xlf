@@ -369,9 +369,6 @@
         <notes><note category="description">Tooltip of a rail item: the area and its keyboard chord.</note></notes>
         <segment><source>{area} (G then {key})</source></segment>
       </unit>
-      <unit id="shell.nav.jobs_badge">
-        <segment><source>{count, plural, one {# active job} other {# active jobs}}</source></segment>
-      </unit>
       <unit id="shell.skip_to_content">
         <segment><source>Skip to content</source></segment>
       </unit>
@@ -383,9 +380,6 @@
       </unit>
       <unit id="shell.top.command_open">
         <segment><source>Open command palette</source></segment>
-      </unit>
-      <unit id="shell.top.node">
-        <segment><source>This node</source></segment>
       </unit>
       <unit id="shell.top.role.leader">
         <notes><note category="description">Role of this node in the replicated store.</note></notes>
@@ -807,16 +801,6 @@
       <unit id="shell.nav.audit">
         <notes><note category="description">Rail entry of the audit log.</note></notes>
         <segment><source>Audit</source></segment>
-      </unit>
-      <unit id="shell.status.alarms">
-        <notes><note category="description">Status bar item: prefixes above their utilization threshold.</note></notes>
-        <segment><source>{count, plural, one {# alarm} other {# alarms}}</source></segment>
-      </unit>
-      <unit id="shell.status.alarms_title">
-        <segment><source>Prefixes above their utilization threshold. Open the dashboard.</source></segment>
-      </unit>
-      <unit id="shell.status.critical">
-        <segment><source>{count, plural, one {# critical} other {# critical}}</source></segment>
       </unit>
       <unit id="shell.command.import">
         <segment><source>Import a spreadsheet</source></segment>

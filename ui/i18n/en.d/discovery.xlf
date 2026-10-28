@@ -6,10 +6,6 @@
         <notes><note category="description">The discovery method word for DHCP snooping.</note></notes>
         <segment><source>DHCP snoop</source></segment>
       </unit>
-      <unit id="shell.status.proposals">
-        <notes><note category="description">Status bar item that links to the proposal inbox: the number of open proposals.</note></notes>
-        <segment><source>{count, plural, one {# open proposal} other {# open proposals}}</source></segment>
-      </unit>
       <unit id="discovery.batch.approve">
         <notes><note category="description">The action bar button that approves the selected proposals; the number is how many are selected.</note></notes>
         <segment><source>Approve {count, number}</source></segment>

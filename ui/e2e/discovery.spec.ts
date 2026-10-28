@@ -21,9 +21,13 @@
 //   discovered-host proposals with ones that include the IPv6 address.
 // - The inbox, an open proposal with its approve and reject dialogs and the report of a run,
 //   the observations and the picture of a subject in Swedish.
-// - The status bar item `status-proposals` shows the number of open proposals on any page,
-//   follows a rejection made elsewhere without a reload, disappears at zero and links to the
-//   inbox.
+// - The findings in the status bar (U2): the open proposals are findings to review, so
+//   `status-findings-review` and the Discovery badge of the rail count them on any page, from
+//   `GET /findings/counts` and the `findings` topic of the real server; both follow a rejection
+//   made elsewhere without a reload, disappear at zero, and the count links to the inbox filtered
+//   by the severity. The sample run raises no conflict, so the act-now count stays away (no spec
+//   seeds a conflict against the real server; the act-now badge is covered by
+//   ui/src/shell/findings.test.tsx).
 //
 // Documentation values only: 192.0.2.0/24, 2001:db8::/32, MAC 00:00:5e:00:53:xx, names under
 // example.test; the rejection reason is invented. What stays manual: an adoption that the
@@ -651,7 +655,12 @@ test.describe("a Swedish browser", () => {
   });
 });
 
-test("the status bar item counts the open proposals, follows a rejection without a reload and links to the inbox", async ({
+/** The counts every surface reads, from the real server. */
+async function findingCounts(api: Api): Promise<Schemas["FindingCounts"]> {
+  return api.get<Schemas["FindingCounts"]>("/findings/counts");
+}
+
+test("the rail badge and the status bar count the open proposals as findings to review and follow a rejection without a reload", async ({
   page,
   api,
   signedIn,
@@ -660,36 +669,47 @@ test("the status bar item counts the open proposals, follows a rejection without
   const { hosts, outside } = await arrange(api);
   const open = [...hosts, outside];
   expect(open).toHaveLength(4);
+  // The Discovery area holds exactly the open proposals (docs/reconciliation.md 12.2), none a conflict.
+  await expect.poll(async () => (await findingCounts(api)).areas.discovery).toEqual({ act: 0, review: 4, info: 0 });
 
-  // Nothing but the dashboard is open, and the item already counts what the sample produced.
+  // Nothing but the dashboard is open, and both already count what the sample produced.
   await page.goto("/");
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
-  const item = page.getByTestId("status-proposals");
-  await expect(item).toHaveText(/^\s*4\s+open proposals\s*$/);
+  const badge = page.locator('.rail a[data-area="discovery"] [data-testid="rail-badge"]');
+  await expect(badge).toHaveText("4");
+  await expect(badge).toHaveAttribute("data-level", "review");
+  await expect(page.locator('.rail a[data-area="discovery"]')).toHaveAttribute("aria-label", "Discovery: 4 findings to review");
+  const review = page.getByTestId("status-findings-review");
+  // The status bar counts every area's findings to review, as the API does: one number on every surface.
+  const reviewText = async () => `${(await findingCounts(api)).total.review} to review`;
+  await expect(review).toHaveText(await reviewText());
 
-  // A rejection by someone else (here: the API) changes the number on the open page.
+  // A rejection by someone else (here: the API) changes both numbers on the open page.
   await api.post(`/proposals/${hosts[0]!.id}/reject`, { reason: "A lab host, not part of the plan" });
-  await expect(item).toHaveText(/^\s*3\s+open proposals\s*$/);
+  await expect(badge).toHaveText("3");
+  await expect(review).toHaveText(await reviewText());
   expect((await proposals(api, { state: "open" })).length).toBe(3);
 
-  // Down to one, which the item words in the singular, then to none, when it goes away.
-  for (const proposal of open.slice(1, 3)) {
+  // Down to none, when the badge goes away.
+  for (const proposal of open.slice(1)) {
     await api.post(`/proposals/${proposal.id}/reject`, { reason: "A lab host, not part of the plan" });
   }
-  await expect(item).toHaveText(/^\s*1\s+open proposal\s*$/);
-  await api.post(`/proposals/${open[3]!.id}/reject`, { reason: "A lab network, not part of the plan" });
-  await expect(item).toHaveCount(0);
+  await expect(badge).toHaveCount(0);
   expect(await proposals(api, { state: "open" })).toHaveLength(0);
+  const after = await findingCounts(api);
+  if (after.total.review === 0) await expect(review).toHaveCount(0);
+  else await expect(review).toHaveText(`${after.total.review} to review`);
 });
 
-test("the status bar item on another page links to the proposal inbox", async ({ page, api, signedIn }) => {
+test("the findings to review in the status bar open the inbox filtered by the severity", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
   await arrange(api);
   await page.goto("/ipam");
   await expect(page.getByTestId("page-ipam")).toBeVisible();
-  await page.getByTestId("status-proposals").click();
+  await page.getByTestId("status-findings-review").click();
   await expect(page.getByTestId("page-discovery")).toBeVisible();
-  await expect(page).toHaveURL(/\/discovery$/);
+  await expect(page).toHaveURL(/\/discovery\?severity=review$/);
+  await expect(page.getByTestId("filter-level")).toHaveText(/To review/);
   await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(4);
 });
 

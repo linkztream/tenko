@@ -119,7 +119,8 @@ describe("the jobs list", () => {
   it("filters by the state chips", async () => {
     renderList();
     await listed(6);
-    const chip = (name: string) => screen.getByRole("button", { name });
+    // A chip may carry its count after the word ("Needs you 1").
+    const chip = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
     expect(chip("All").getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(chip("Needs you"));
@@ -150,7 +151,7 @@ describe("the jobs list", () => {
   it("takes the chip from the URL", async () => {
     renderList("/jobs?view=needs");
     await listed(1);
-    expect(screen.getByRole("button", { name: "Needs you" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^Needs you/ }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("filters by text over the title, kind and id", async () => {
@@ -225,7 +226,7 @@ describe("one group of jobs", () => {
   it("applies the state chips to the grid but not to the group's summary", async () => {
     renderList(url);
     await listed(3);
-    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Needs you/ }));
     await listed(1);
     expect(screen.getByTestId("job-group-summary").textContent).toContain("3 jobs in this group");
   });

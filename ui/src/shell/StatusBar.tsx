@@ -1,12 +1,12 @@
 import { A } from "@solidjs/router";
-import { lazy, Show } from "solid-js";
+import { lazy, Show, type JSX } from "solid-js";
 import { events, type ConnectionState } from "../api/events";
 import { paths } from "../app/paths";
 import { isAdmin } from "../auth/session";
 import { partition } from "../cluster/partition";
 import { Icon } from "../components/Icon";
 import { formatRelative, t, type MessageKey } from "../i18n";
-import { moduleRestart, moduleRunning } from "../updates/modules";
+import { moduleRestart } from "../updates/modules";
 import { UPDATES_PATH } from "../updates/paths";
 import { PartitionStatus } from "./ClusterBanner";
 import { now, selection, type JobCounts } from "./status";
@@ -19,18 +19,19 @@ const STATE: Record<ConnectionState, { key: MessageKey; dot: string }> = {
   idle: { key: "shell.status.idle", dot: "dot idle" },
 };
 
-// The utilization alarms come from the IPAM area; loaded after the shell is up.
-const AlarmStatus = lazy(() => import("../ipam/AlarmStatus"));
 // The notice of a newer release comes from the updates area, for administrators only.
 const UpdateStatusItem = lazy(() => import("../updates/UpdateStatusItem"));
-// The open proposals come from the discovery area; loaded after the shell is up.
-const ProposalsStatusItem = lazy(() => import("../discovery/ProposalsStatusItem"));
 
 /**
  * The status bar (decision 14): live connection, last event, the age of a stale local copy, jobs,
- * alarms, open proposals, selection, version.
+ * the open findings per severity, selection, version.
  */
-export function StatusBar(props: { jobs: JobCounts | null; version: string | undefined }) {
+export function StatusBar(props: {
+  jobs: JobCounts | null;
+  version: string | undefined;
+  /** The open findings per severity (FindingsStatus.tsx), which the shell renders once it has loaded. */
+  findingsItem?: JSX.Element;
+}) {
   const state = () => STATE[events.state()];
   const lastEvent = () => {
     const at = events.lastEventAt();
@@ -57,12 +58,7 @@ export function StatusBar(props: { jobs: JobCounts | null; version: string | und
           </A>
         )}
       </Show>
-      <Show when={moduleRunning("ipam")}>
-        <AlarmStatus />
-      </Show>
-      <Show when={moduleRunning("discovery")}>
-        <ProposalsStatusItem />
-      </Show>
+      {props.findingsItem}
       <Show when={isAdmin()}>
         <UpdateStatusItem />
         <Show when={moduleRestart() !== "none"}>

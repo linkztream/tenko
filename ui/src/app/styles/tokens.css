@@ -175,6 +175,21 @@
   --locked: #464D5C;          /* lock glyph; automation stopped */
   --locked-wash: #EEF0F3;
 
+  /* Text on a colored fill: the paired -on token of the fill, at least 4.5:1 against it
+     (design/tokens.css has the rule and every pair; the product carries the pairs it draws,
+     the others arrive with their components). */
+  --proposal-on: #FDF5FA;          /* 5.17:1 on --proposal */
+  --conflict-on: #FFF6F5;          /* 5.00:1 on --conflict */
+
+  /* Severity roles (the findings model): a component asks for a severity, not for a
+     domain color. They point at the existing colors and follow them in both themes.
+     --ok-wash and --job-done-wash are for chips only; no row or column is filled with them. */
+  --severity-act: var(--conflict);
+  --severity-act-on: var(--conflict-on);
+  --severity-review: var(--proposal);
+  --severity-review-on: var(--proposal-on);
+  --severity-info: var(--ink-3);
+
   /* Job states (IPAM-17). Running and waiting share the accent hue:
      running is filled, waiting is a hollow ring with a countdown. */
   --job-queued: #7C8496;
@@ -285,6 +300,8 @@
     --discrepancy-wash: #362A12;
     --locked: #B0B7C4;
     --locked-wash: #232832;
+    --proposal-on: #4F1239;          /* 5.74:1 */
+    --conflict-on: #4D1411;          /* 5.81:1 */
     --job-queued: #8D96A6;
     --job-running: #9C97FF;
     --job-waiting: #9C97FF;
@@ -369,6 +386,8 @@
   --discrepancy-wash: #362A12;
   --locked: #B0B7C4;
   --locked-wash: #232832;
+  --proposal-on: #4F1239;          /* 5.74:1 */
+  --conflict-on: #4D1411;          /* 5.81:1 */
   --job-queued: #8D96A6;
   --job-running: #9C97FF;
   --job-waiting: #9C97FF;

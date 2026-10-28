@@ -8,6 +8,7 @@
 import type { components } from "../api/generated/schema";
 import type { WriteResponse } from "../api/types";
 import { formatDuration, formatNumber, t } from "../i18n";
+import { memberHealth, type MemberHealth } from "./health";
 
 // ---------------------------------------------------------------------------------
 // Wire shapes: the cluster (WP3.1a, generated from the OpenAPI document)
@@ -79,21 +80,9 @@ export function needsDecision(change: Pick<QueuedChangeView, "state">): boolean 
 // ---------------------------------------------------------------------------------
 // Rules
 
-/** A learner within this many entries of the leader counts as caught up (`promote_lag_entries`). */
-export const PROMOTE_LAG_ENTRIES = 100;
-/** A member the leader has not heard from for this long is out of contact. */
-export const CONTACT_LOST_MS = 10_000;
-
-/** How a member is doing, in one word; `data-state` of its row. */
-export type MemberHealth = "leader" | "caught_up" | "catching_up" | "out_of_contact" | "unknown";
-
-export function memberHealth(member: MemberView): MemberHealth {
-  if (member.leader) return "leader";
-  if (member.last_contact_ms == null && member.lag_entries == null) return "unknown";
-  if (member.last_contact_ms != null && member.last_contact_ms > CONTACT_LOST_MS) return "out_of_contact";
-  if ((member.lag_entries ?? 0) > PROMOTE_LAG_ENTRIES) return "catching_up";
-  return "caught_up";
-}
+// How a member is doing lives in health.ts, which the top bar's node chip reads without the rest
+// of this module.
+export { CONTACT_LOST_MS, memberHealth, PROMOTE_LAG_ENTRIES, type MemberHealth } from "./health";
 
 export function voters(view: Pick<ClusterView, "members">): MemberView[] {
   return view.members.filter((m) => m.role === "voter");

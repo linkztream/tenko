@@ -98,6 +98,9 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   // The DHCP area (Phase 3): the page of WP7.0, then the views of the later packages. WP7.4: the
   // error texts of the DHCP codes come with the pack, so the first load does not carry them.
   dhcp: ["dhcp.", "errors.dhcp."],
+  // U2: the words of the rail badges and of the findings in the status bar, loaded with the
+  // findings part of the shell after the first page (src/shell/findingsShell.ts).
+  findings: ["shell.nav.badge.", "shell.status.findings."],
 };
 
 export default defineConfig(({ command, mode }) => {

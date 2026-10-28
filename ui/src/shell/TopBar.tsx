@@ -1,5 +1,5 @@
 import { A } from "@solidjs/router";
-import { Show } from "solid-js";
+import { createEffect, createSignal, createUniqueId, getOwner, lazy, runWithOwner, Show, type Accessor } from "solid-js";
 import type { SystemStatus } from "../api/types";
 import { paths } from "../app/paths";
 import { cycleTheme, effectiveTheme, theme } from "../app/prefs";
@@ -7,7 +7,11 @@ import { session } from "../auth/session";
 import { Icon } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
 import { Mark, Wordmark } from "../components/Mark";
-import { formatNumber, t, type MessageKey } from "../i18n";
+import { formatNumber, t, withPacks, type MessageKey } from "../i18n";
+import type { ClusterSummary } from "./cluster";
+
+// The cards behind the node and profile chips load with their area's texts when first opened.
+const TopCards = lazy(withPacks(["cluster", "settings"], () => import("./TopCards")));
 
 const STORE_ROLE: Record<string, MessageKey> = {
   leader: "shell.top.role.leader",
@@ -57,6 +61,32 @@ export function TopBar(props: {
       : t("shell.top.node_unreachable");
   const profile = () => session()?.profile;
   const icon = () => (theme() === "system" ? "system" : theme() === "light" ? "sun" : "moon");
+  // A single controller is one node and needs nothing else; the summary of a cluster (a read of
+  // its members) loads only when the status says there is one.
+  const owner = getOwner();
+  let loading = false;
+  const [summary, setSummary] = createSignal<Accessor<ClusterSummary> | null>(null);
+  const multi = () => {
+    const state = props.system?.store.quorum?.state;
+    return state !== undefined && state !== "single";
+  };
+  createEffect(() => {
+    if (!multi() || loading) return;
+    loading = true;
+    void import("./cluster").then((module) => runWithOwner(owner, () => setSummary(() => module.createClusterSummary(() => props.system))));
+  });
+  const cluster = (): ClusterSummary => {
+    if (!props.system) return { nodes: null, behind: 0, view: null };
+    if (!multi()) return { nodes: 1, behind: 0, view: null };
+    return summary()?.() ?? { nodes: null, behind: 0, view: null };
+  };
+
+  // The cluster card of the node chip and the profile card of the profile chip: one at a time.
+  const cardId = createUniqueId();
+  const [card, setCard] = createSignal<{ kind: "cluster" | "profile"; anchor: HTMLElement } | null>(null);
+  const open = () => card()?.kind;
+  const toggle = (kind: "cluster" | "profile", anchor: HTMLElement) => setCard((cur) => (cur?.kind === kind ? null : { kind, anchor }));
+  const close = () => setCard(null);
 
   return (
     <header class="topbar">
@@ -73,22 +103,39 @@ export function TopBar(props: {
       </button>
       <span class="spacer" />
       <div class="top-group">
-        <A class="pill" href={paths.dashboard()} title={nodeTitle()}>
+        <button
+          type="button"
+          class="pill"
+          title={nodeTitle()}
+          aria-haspopup="dialog"
+          aria-expanded={open() === "cluster"}
+          aria-controls={open() === "cluster" ? cardId : undefined}
+          data-testid="node-chip"
+          onClick={(e) => toggle("cluster", e.currentTarget)}
+        >
           <span class={nodeDot()} />
           <span>
-            {t("shell.top.node")} <strong>{props.system ? storeRoleLabel(props.system.store.role) : "–"}</strong>
+            <strong>{props.system ? storeRoleLabel(props.system.store.role) : "–"}</strong>
+            <Show when={cluster().nodes}>
+              {(nodes) => <> · {t("shell.top.cluster", { nodes: nodes(), behind: cluster().behind })}</>}
+            </Show>
           </span>
-        </A>
+        </button>
         <Show when={profile()}>
           {(p) => (
-            <A
+            <button
+              type="button"
               class={p() === "lab" ? "pill danger" : "pill"}
-              href={paths.settings("security")}
               title={t("shell.top.profile_title", { profile: t(`profile.${p()}.name`) })}
+              aria-haspopup="dialog"
+              aria-expanded={open() === "profile"}
+              aria-controls={open() === "profile" ? cardId : undefined}
+              data-testid="profile-chip"
+              onClick={(e) => toggle("profile", e.currentTarget)}
             >
               <Icon name="shield" size="sm" />
               <span>{t("shell.top.profile", { profile: t(`profile.${p()}.name`) })}</span>
-            </A>
+            </button>
           )}
         </Show>
         <button
@@ -122,6 +169,19 @@ export function TopBar(props: {
           {initials(session()?.user.display_name || session()?.user.name || "?")}
         </button>
       </div>
+      <Show when={card()}>
+        {(c) => (
+          <TopCards
+            kind={c().kind}
+            id={cardId}
+            anchor={c().anchor}
+            system={props.system}
+            summary={cluster()}
+            profile={profile() ?? "standard"}
+            onClose={close}
+          />
+        )}
+      </Show>
     </header>
   );
 }

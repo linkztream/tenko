@@ -624,6 +624,7 @@ export type MessageKey =
   | "audit.hashes.note"
   | "audit.hashes.prev"
   | "audit.hashes.title"
+  | "audit.info"
   | "audit.kind.address"
   | "audit.kind.api_token"
   | "audit.kind.connector"
@@ -698,6 +699,7 @@ export type MessageKey =
   | "audit.strength.password_totp"
   | "audit.strength.pin"
   | "audit.sub"
+  | "audit.sub_count"
   | "audit.title"
   | "audit_export.add"
   | "audit_export.add_title"
@@ -991,6 +993,12 @@ export type MessageKey =
   | "cluster.blocker.not_learner"
   | "cluster.blocker.not_voter"
   | "cluster.blocker.single"
+  | "cluster.card.members"
+  | "cluster.card.open"
+  | "cluster.card.quorum"
+  | "cluster.card.revision"
+  | "cluster.card.this_node"
+  | "cluster.card.title"
   | "cluster.caveat.even_after"
   | "cluster.caveat.forced"
   | "cluster.caveat.no_tolerance"
@@ -2350,12 +2358,16 @@ export type MessageKey =
   | "discovery.fact_type.vendor"
   | "discovery.filter.all"
   | "discovery.filter.label"
+  | "discovery.filter.level_act"
+  | "discovery.filter.level_review"
   | "discovery.filter.placeholder"
   | "discovery.filter.prefix"
   | "discovery.filter.remove"
+  | "discovery.filter.remove_level"
   | "discovery.filter.remove_prefix"
   | "discovery.filter.state"
   | "discovery.grid.label"
+  | "discovery.info"
   | "discovery.kind.address_mismatch"
   | "discovery.kind.conflict"
   | "discovery.kind.discovered_host"
@@ -4074,6 +4086,7 @@ export type MessageKey =
   | "grid.density.label"
   | "grid.empty.filtered"
   | "grid.empty.title"
+  | "grid.filter.count_more"
   | "grid.filter.invalid"
   | "grid.loading"
   | "grid.loading_more"
@@ -4873,6 +4886,7 @@ export type MessageKey =
   | "ipam.reconcile.filter.remove_host"
   | "ipam.reconcile.host_open"
   | "ipam.reconcile.host_unavailable"
+  | "ipam.reconcile.info"
   | "ipam.reconcile.kind.conflict"
   | "ipam.reconcile.kind.ghost"
   | "ipam.reconcile.kind.orphan"
@@ -5142,6 +5156,7 @@ export type MessageKey =
   | "jobs.group.not_moved.hint"
   | "jobs.group.not_moved.no_reason"
   | "jobs.group.summary"
+  | "jobs.info"
   | "jobs.kind.address"
   | "jobs.kind.custom_field"
   | "jobs.kind.host"
@@ -5272,6 +5287,7 @@ export type MessageKey =
   | "jobs.steps.heading"
   | "jobs.steps.label"
   | "jobs.sub"
+  | "jobs.sub_waiting"
   | "jobs.tag.undo"
   | "jobs.targets"
   | "jobs.task.dhcp_release"
@@ -6312,6 +6328,13 @@ export type MessageKey =
   | "settings.nav.updates"
   | "settings.nav.users"
   | "settings.nav.vault"
+  | "settings.profile_card.changed"
+  | "settings.profile_card.col.setting"
+  | "settings.profile_card.col.value"
+  | "settings.profile_card.open"
+  | "settings.profile_card.summary"
+  | "settings.profile_card.table"
+  | "settings.profile_card.title"
   | "settings.reloaded"
   | "settings.security.audit_export.local"
   | "settings.security.audit_export.local_help"
@@ -7033,6 +7056,12 @@ export type MessageKey =
   | "shell.keys.title"
   | "shell.keys.undo"
   | "shell.nav.audit"
+  | "shell.nav.badge.act"
+  | "shell.nav.badge.jobs"
+  | "shell.nav.badge.many"
+  | "shell.nav.badge.review"
+  | "shell.nav.badge.unhealthy"
+  | "shell.nav.badge.weakened"
   | "shell.nav.cluster"
   | "shell.nav.connectors"
   | "shell.nav.dashboard"
@@ -7041,7 +7070,6 @@ export type MessageKey =
   | "shell.nav.dns"
   | "shell.nav.ipam"
   | "shell.nav.jobs"
-  | "shell.nav.jobs_badge"
   | "shell.nav.label"
   | "shell.nav.nodes"
   | "shell.nav.settings"
@@ -7050,6 +7078,7 @@ export type MessageKey =
   | "shell.notfound.body"
   | "shell.notfound.home"
   | "shell.notfound.title"
+  | "shell.page.info"
   | "shell.palette.foot.commands"
   | "shell.palette.foot.move"
   | "shell.palette.foot.open"
@@ -7087,10 +7116,13 @@ export type MessageKey =
   | "shell.search.title"
   | "shell.skip_to_content"
   | "shell.splash"
-  | "shell.status.alarms"
-  | "shell.status.alarms_title"
   | "shell.status.connecting"
-  | "shell.status.critical"
+  | "shell.status.findings.act"
+  | "shell.status.findings.act_title"
+  | "shell.status.findings.info"
+  | "shell.status.findings.info_title"
+  | "shell.status.findings.review"
+  | "shell.status.findings.review_title"
   | "shell.status.idle"
   | "shell.status.jobs_title"
   | "shell.status.last_event"
@@ -7100,7 +7132,6 @@ export type MessageKey =
   | "shell.status.modules_restart_title"
   | "shell.status.no_events"
   | "shell.status.offline"
-  | "shell.status.proposals"
   | "shell.status.reconnecting"
   | "shell.status.running"
   | "shell.status.selection"
@@ -7116,9 +7147,9 @@ export type MessageKey =
   | "shell.theme.mode.dark"
   | "shell.theme.mode.light"
   | "shell.theme.system"
+  | "shell.top.cluster"
   | "shell.top.command_hint"
   | "shell.top.command_open"
-  | "shell.top.node"
   | "shell.top.node_title"
   | "shell.top.node_unreachable"
   | "shell.top.profile"
@@ -7539,6 +7570,7 @@ export interface MessageArgs {
   "audit.record.open_newest": { seq: string | number };
   "audit.record.title": { seq: string | number };
   "audit.row": { seq: string | number };
+  "audit.sub_count": { count: number; more: string };
   "audit_export.checkpoint": { seq: string | number; when: string | number };
   "audit_export.delivered": { when: string | number };
   "audit_export.failing_since": { when: string | number };
@@ -7889,6 +7921,7 @@ export interface MessageArgs {
   "discovery.fact.vendor": { mac: string | number; vendor: string | number };
   "discovery.filter.prefix": { prefix: string | number };
   "discovery.filter.remove": { filter: string | number };
+  "discovery.filter.remove_level": { level: string | number };
   "discovery.names.seen": { at: string | number };
   "discovery.panel.adoption_failed": { error: string | number };
   "discovery.panel.change_count": { count: number };
@@ -8183,6 +8216,7 @@ export interface MessageArgs {
   "grid.actionbar.selected": { count: number };
   "grid.columns.move_down": { column: string | number };
   "grid.columns.move_up": { column: string | number };
+  "grid.filter.count_more": { count: string | number };
   "grid.filter.invalid": { field: string | number; value: string | number };
   "grid.resize.handle": { column: string | number };
   "grid.row_actions": { row: string | number };
@@ -8453,6 +8487,7 @@ export interface MessageArgs {
   "jobs.stepmeta.attempts": { count: number };
   "jobs.stepmeta.finished": { when: string | number };
   "jobs.stepmeta.started": { when: string | number };
+  "jobs.sub_waiting": { count: number };
   "jobs.targets": { count: number };
   "jobs.task.dhcp_release": { host: string | number; ip: string | number };
   "jobs.task.dhcp_reserve": { host: string | number; ip: string | number; mac: string | number; prefix: string | number };
@@ -8687,6 +8722,10 @@ export interface MessageArgs {
   "secrets.reveal.title": { name: string | number };
   "secrets.revealed_by": { user: string | number; when: string | number };
   "secrets.saved": { name: string | number };
+  "settings.profile_card.col.value": { profile: string | number };
+  "settings.profile_card.summary": { count: number };
+  "settings.profile_card.table": { profile: string | number };
+  "settings.profile_card.title": { profile: string | number };
   "settings.security.consequence.differs": { profile: string | number };
   "settings.security.consequence.matches": { profile: string | number };
   "settings.security.edit_row": { name: string | number };
@@ -8789,18 +8828,23 @@ export interface MessageArgs {
   "shell.account.open": { name: string | number };
   "shell.account.who": { method: string | number; role: string | number };
   "shell.keys.goto": { area: string | number };
-  "shell.nav.jobs_badge": { count: number };
+  "shell.nav.badge.act": { act: string | number; area: string | number; count: number };
+  "shell.nav.badge.jobs": { area: string | number; count: number };
+  "shell.nav.badge.review": { area: string | number; count: number };
+  "shell.nav.badge.unhealthy": { area: string | number; count: number };
+  "shell.nav.badge.weakened": { area: string | number };
   "shell.nav.tooltip": { area: string | number; key: string | number };
   "shell.notfound.body": { path: string | number };
+  "shell.page.info": { title: string | number };
   "shell.palette.no_match": { query: string | number };
   "shell.palette.search_all": { query: string | number };
   "shell.placeholder.title": { area: string | number };
   "shell.report.failed": { detail: string | number };
   "shell.search.results": { count: number; query: string | number };
-  "shell.status.alarms": { count: number };
-  "shell.status.critical": { count: number };
+  "shell.status.findings.act": { count: string | number };
+  "shell.status.findings.info": { count: string | number };
+  "shell.status.findings.review": { count: string | number };
   "shell.status.last_event": { ago: string | number };
-  "shell.status.proposals": { count: number };
   "shell.status.running": { count: number };
   "shell.status.selection": { selected: number; total: number };
   "shell.status.update": { version: string | number };
@@ -8809,6 +8853,7 @@ export interface MessageArgs {
   "shell.status.waiting": { count: number };
   "shell.theme.change": { current: string | number };
   "shell.theme.system": { mode: string | number };
+  "shell.top.cluster": { behind: number; nodes: number };
   "shell.top.node_title": { lag: number; revision: string | number };
   "shell.top.profile": { profile: string | number };
   "shell.top.profile_title": { profile: string | number };
@@ -9505,6 +9550,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.hashes.note",
   "audit.hashes.prev",
   "audit.hashes.title",
+  "audit.info",
   "audit.kind.address",
   "audit.kind.api_token",
   "audit.kind.connector",
@@ -9579,6 +9625,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.strength.password_totp",
   "audit.strength.pin",
   "audit.sub",
+  "audit.sub_count",
   "audit.title",
   "audit_export.add",
   "audit_export.add_title",
@@ -9872,6 +9919,12 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.blocker.not_learner",
   "cluster.blocker.not_voter",
   "cluster.blocker.single",
+  "cluster.card.members",
+  "cluster.card.open",
+  "cluster.card.quorum",
+  "cluster.card.revision",
+  "cluster.card.this_node",
+  "cluster.card.title",
   "cluster.caveat.even_after",
   "cluster.caveat.forced",
   "cluster.caveat.no_tolerance",
@@ -11231,12 +11284,16 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.fact_type.vendor",
   "discovery.filter.all",
   "discovery.filter.label",
+  "discovery.filter.level_act",
+  "discovery.filter.level_review",
   "discovery.filter.placeholder",
   "discovery.filter.prefix",
   "discovery.filter.remove",
+  "discovery.filter.remove_level",
   "discovery.filter.remove_prefix",
   "discovery.filter.state",
   "discovery.grid.label",
+  "discovery.info",
   "discovery.kind.address_mismatch",
   "discovery.kind.conflict",
   "discovery.kind.discovered_host",
@@ -12955,6 +13012,7 @@ export const messageKeys: readonly MessageKey[] = [
   "grid.density.label",
   "grid.empty.filtered",
   "grid.empty.title",
+  "grid.filter.count_more",
   "grid.filter.invalid",
   "grid.loading",
   "grid.loading_more",
@@ -13754,6 +13812,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.reconcile.filter.remove_host",
   "ipam.reconcile.host_open",
   "ipam.reconcile.host_unavailable",
+  "ipam.reconcile.info",
   "ipam.reconcile.kind.conflict",
   "ipam.reconcile.kind.ghost",
   "ipam.reconcile.kind.orphan",
@@ -14023,6 +14082,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.group.not_moved.hint",
   "jobs.group.not_moved.no_reason",
   "jobs.group.summary",
+  "jobs.info",
   "jobs.kind.address",
   "jobs.kind.custom_field",
   "jobs.kind.host",
@@ -14153,6 +14213,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.steps.heading",
   "jobs.steps.label",
   "jobs.sub",
+  "jobs.sub_waiting",
   "jobs.tag.undo",
   "jobs.targets",
   "jobs.task.dhcp_release",
@@ -15193,6 +15254,13 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.nav.updates",
   "settings.nav.users",
   "settings.nav.vault",
+  "settings.profile_card.changed",
+  "settings.profile_card.col.setting",
+  "settings.profile_card.col.value",
+  "settings.profile_card.open",
+  "settings.profile_card.summary",
+  "settings.profile_card.table",
+  "settings.profile_card.title",
   "settings.reloaded",
   "settings.security.audit_export.local",
   "settings.security.audit_export.local_help",
@@ -15914,6 +15982,12 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.keys.title",
   "shell.keys.undo",
   "shell.nav.audit",
+  "shell.nav.badge.act",
+  "shell.nav.badge.jobs",
+  "shell.nav.badge.many",
+  "shell.nav.badge.review",
+  "shell.nav.badge.unhealthy",
+  "shell.nav.badge.weakened",
   "shell.nav.cluster",
   "shell.nav.connectors",
   "shell.nav.dashboard",
@@ -15922,7 +15996,6 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.nav.dns",
   "shell.nav.ipam",
   "shell.nav.jobs",
-  "shell.nav.jobs_badge",
   "shell.nav.label",
   "shell.nav.nodes",
   "shell.nav.settings",
@@ -15931,6 +16004,7 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.notfound.body",
   "shell.notfound.home",
   "shell.notfound.title",
+  "shell.page.info",
   "shell.palette.foot.commands",
   "shell.palette.foot.move",
   "shell.palette.foot.open",
@@ -15968,10 +16042,13 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.search.title",
   "shell.skip_to_content",
   "shell.splash",
-  "shell.status.alarms",
-  "shell.status.alarms_title",
   "shell.status.connecting",
-  "shell.status.critical",
+  "shell.status.findings.act",
+  "shell.status.findings.act_title",
+  "shell.status.findings.info",
+  "shell.status.findings.info_title",
+  "shell.status.findings.review",
+  "shell.status.findings.review_title",
   "shell.status.idle",
   "shell.status.jobs_title",
   "shell.status.last_event",
@@ -15981,7 +16058,6 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.status.modules_restart_title",
   "shell.status.no_events",
   "shell.status.offline",
-  "shell.status.proposals",
   "shell.status.reconnecting",
   "shell.status.running",
   "shell.status.selection",
@@ -15997,9 +16073,9 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.theme.mode.dark",
   "shell.theme.mode.light",
   "shell.theme.system",
+  "shell.top.cluster",
   "shell.top.command_hint",
   "shell.top.command_open",
-  "shell.top.node",
   "shell.top.node_title",
   "shell.top.node_unreachable",
   "shell.top.profile",

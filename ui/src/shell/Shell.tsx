@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, lazy, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, getOwner, lazy, on, onCleanup, onMount, runWithOwner, Show, type Accessor, type JSX } from "solid-js";
 import { DENSITIES, setDensity, setEmphasizeHost, setTheme, cycleTheme, emphasizeHost, THEMES } from "../app/prefs";
 import { paths } from "../app/paths";
 import { hasRole, isAdmin, signOut } from "../auth/session";
@@ -16,8 +16,11 @@ import { CommandPalette } from "./CommandPalette";
 import { useCommands } from "./commands";
 import { useGlobalKeys } from "./keyboard";
 import { KeySheet } from "./KeySheet";
+import { trackLazyPart } from "./lazyParts";
 import { Rail } from "./Rail";
 import { SecurityBanner } from "./SecurityBanner";
+import type { FindingCounts } from "./findings";
+import type * as FindingsUi from "./findingsShell";
 import { createShellStatus, setSelectionStatus } from "./status";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
@@ -39,6 +42,19 @@ export function Shell(props: { children?: JSX.Element }) {
   const [account, setAccount] = createSignal<HTMLElement | null>(null);
   const [notes, setNotes] = createSignal(false);
   const status = createShellStatus();
+  // The one store of the findings counts: the rail badges and the status bar read the same numbers.
+  // It loads after the shell is up, so the first page load stays small; its counts come from a
+  // read anyway.
+  const owner = getOwner();
+  let gone = false;
+  onCleanup(() => (gone = true));
+  const [store, setStore] = createSignal<{ counts: Accessor<FindingCounts | null>; ui: typeof FindingsUi } | null>(null);
+  onMount(() => {
+    void trackLazyPart(withPacks(["findings"], () => import("./findingsShell"))()).then((ui) => {
+      if (!gone) runWithOwner(owner, () => setStore({ counts: ui.useFindingCounts(), ui }));
+    });
+  });
+  const findings = () => store()?.counts() ?? null;
 
   // Which modules this installation runs decides which areas show (OPS-25).
   onMount(() => void loadModules());
@@ -188,11 +204,6 @@ export function Shell(props: { children?: JSX.Element }) {
     },
   ]);
 
-  const activeJobs = () => {
-    const j = status.jobs();
-    return j ? j.running + j.waiting : 0;
-  };
-
   return (
     <div class="app">
       <a class="skip-link" href="#main">
@@ -211,11 +222,22 @@ export function Shell(props: { children?: JSX.Element }) {
         <SecurityBanner />
         <ClusterBanner system={status.system()} />
       </div>
-      <Rail activeJobs={activeJobs()} />
+      <Rail counts={findings()} badges={store()?.ui} />
       <main class="main" id="main" tabIndex={-1}>
         <ModuleGate>{props.children}</ModuleGate>
       </main>
-      <StatusBar jobs={status.jobs()} version={status.system()?.version} />
+      <StatusBar
+        jobs={status.jobs()}
+        version={status.system()?.version}
+        findingsItem={
+          <Show when={store()}>
+            {(s) => {
+              const Item = s().ui.FindingsStatus;
+              return <Item counts={findings()} />;
+            }}
+          </Show>
+        }
+      />
       <Show when={palette() !== null}>
         <CommandPalette initial={palette() ?? ""} onClose={() => setPalette(null)} />
       </Show>

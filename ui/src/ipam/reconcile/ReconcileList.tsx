@@ -3,7 +3,7 @@
 // proposal. Read page by page over GET /api/v1/ipam/reconcile with the kind, the prefix and the
 // host the page filters by; live on the ipam and discovery topics.
 import { A } from "@solidjs/router";
-import { For, Show, type JSX } from "solid-js";
+import { createEffect, For, Show, type JSX } from "solid-js";
 import { paths } from "../../app/paths";
 import { Addr, Mac } from "../../components/Addr";
 import { ErrorNotice } from "../../components/Notice";
@@ -155,13 +155,22 @@ function Row(props: { row: ReconcileRow }) {
   );
 }
 
-export function ReconcileList(props: { kind: ReconcileKind; prefix?: string | undefined; host?: string | undefined }): JSX.Element {
+export function ReconcileList(props: {
+  kind: ReconcileKind;
+  prefix?: string | undefined;
+  host?: string | undefined;
+  /** Told the rows read so far and whether there are more, for the count on the kind's chip. */
+  onCount?: (count: number, more: boolean) => void;
+}): JSX.Element {
   const source = createListSource<ReconcileRow>({
     path: "/api/v1/ipam/reconcile",
     query: () => ({ kind: props.kind, prefix: props.prefix, host: props.host }),
     rowId: (r) => r.key,
     pageSize: PAGE_SIZE,
     topics: ["ipam", "discovery"],
+  });
+  createEffect(() => {
+    if (!source.initial() && !source.error()) props.onCount?.(source.rows().length, source.hasMore());
   });
   const count = () => t("ipam.reconcile.count", { count: source.rows().length, more: source.hasMore() ? "yes" : "no" });
   const title = () => t(KIND_TITLE[props.kind]);

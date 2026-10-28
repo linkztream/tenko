@@ -11,7 +11,6 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { bridgeMockEvents } from "../audit/testkit";
 import { signInAlex } from "../auth/account/testkit";
-import AlarmStatus from "../ipam/AlarmStatus";
 import { writeQuery } from "../ipam/plan/describe";
 import Dashboard from "./Dashboard";
 
@@ -115,21 +114,6 @@ describe("live metrics", () => {
     await screen.findByTestId("dashboard-waiting");
     await waitFor(() => expect(screen.getByTestId("dashboard-audit").querySelectorAll("li").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("metrics-tiles")).toBeNull();
-  });
-});
-
-describe("alarm status", () => {
-  it("shows the number of alarms and the critical ones, links to the dashboard and follows alarm events", async () => {
-    stopBridge = bridgeMockEvents();
-    const before = await seededAlarms();
-    renderRoute(AlarmStatus, { url: "/" });
-    if (before.length === 0) expect(screen.queryByTestId("status-alarms")).toBeNull();
-    await fillCameras();
-    const link = await screen.findByTestId("status-alarms", undefined, { timeout: 3000 });
-    expect(link.getAttribute("href")).toBe(`${paths.dashboard()}#alarms`);
-    await waitFor(() => expect(link.classList.contains("crit")).toBe(true), { timeout: 3000 });
-    expect(link.textContent).toMatch(/critical/i);
-    expect(await axeViolations(link.parentElement as HTMLElement)).toEqual([]);
   });
 });
 

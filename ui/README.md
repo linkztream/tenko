@@ -233,6 +233,7 @@ other key stays in the core table that the first load carries.
 | `languages` | `languages.` |
 | `metrics` | `metrics.` (the live metrics of the start page, loaded with their lazy part for administrators) |
 | `dhcp` | `dhcp.`, `errors.dhcp.` (the DHCP area, Phase 3; WP7.4: the error texts of the DHCP codes) |
+| `findings` | `shell.nav.badge.`, `shell.status.findings.` (U2: the words of the rail badges and of the findings in the status bar, loaded with `src/shell/findingsShell.ts` after the first page) |
 | `dns` | `dns.`, `errors.dns.` (the DNS area, Phase 2; the DNS block of the host and address pages uses `hosts.dns.` in `ipam`, the import job `jobs.title.dns_import` and `jobs.step.dns_import_*` in `jobs`) |
 
 The `jobs` pack also holds `connect.job.` and `cluster.job.`, the job titles the server sends
@@ -305,7 +306,8 @@ names are kebab case and stable; text and layout may change without breaking the
 | Form submit | `form-submit` | |
 | Plan dialog | `plan-summary`, `plan-blocking`, `plan-ack`, `plan-confirm` | |
 | Repeated item | one generic id, e.g. `move-item`, `tree-node` | `data-id`, `data-key` or `data-index` |
-| Status bar items | `status-<name>`, e.g. `status-alarms` | |
+| Status bar items | `status-<name>`, e.g. `status-findings-act`, `status-findings-review`, `status-findings-info` | |
+| Shell (U2) | `rail` with `rail-sep`, `rail-badge` (`data-level` `act` or `review`) and `rail-dot` inside the links (`data-area`, `data-group`); `node-chip` and `cluster-card` (`cluster-card-member` with `data-state`, `cluster-card-open`); `profile-chip` and `profile-card` (`profile-card-toggle` with `data-toggle` and `data-changed`, `profile-card-open`); the page header `page-header` with `page-info`, `page-info-popover` and `page-sub`; a filter chip's count `chip-count`; an applied severity of the inbox `filter-level` (`data-level`) | |
 | Docked panel | `<object>-panel`, e.g. `proposal-panel`, `node-panel` | `data-id` |
 | Filter of a view | `filter-<name>`, e.g. `filter-state`, `filter-kind-<kind>`, `filter-prefix` | |
 | Repeated item by position | the generic id, e.g. `toast-action` | `data-index` |
@@ -365,7 +367,7 @@ The hooks of the WP2.9 views beyond the generic ones:
 | Nodes | `grid-nodes`, `nodes-enrol`, `nodes-version-mismatch`, `nodes-cluster`, `nodes-empty`, `node-link` (`data-state`), `nodes-tokens`, `enrolment` (`data-id`, `data-state`), `enrolment-node` (the link to the node a used token enrolled; `data-id` the node id), `enrolment-delete` |
 | Node panel | `node-panel` (`data-id`), `node-mismatch`, `node-connection`, `node-buffer`, `node-certificate`, `node-revoke` |
 | Enrolment | `dialog-enrol` with `field-role-<role>`, `field-name`, `field-lifetime` and `field-vrf`; then `dialog-enrol-token` with `enrol-once`, `enrol-command`, `enrol-token`, `enrol-fingerprint`, `nodes-copy-command`, `nodes-copy-token` and `enrol-done` |
-| Partition (every page; WP3.11a) | `cluster-banner` (`data-state` `isolated`, `electing` or `conflicts`), `status-stale`, `status-proposals`; `dialog-no-quorum` with `no-quorum-hint`, `no-quorum-queue`, `no-quorum-queued` and `no-quorum-close` |
+| Partition (every page; WP3.11a) | `cluster-banner` (`data-state` `isolated`, `electing` or `conflicts`), `status-stale`; `dialog-no-quorum` with `no-quorum-hint`, `no-quorum-queue`, `no-quorum-queued` and `no-quorum-close` |
 | Cluster | `cluster-summary` with `cluster-quorum` (`data-state`), `cluster-term`, `cluster-leader` (`data-node`), `cluster-voters` (`data-count`), `cluster-node` (`data-node`), `cluster-changing`; `cluster-step-down`, `cluster-add-controller` (opens `dialog-enrol` with the role fixed), `cluster-queue-link`; `cluster-members` with `member-row-<node>` (`data-id`, `data-state` the health, `data-role`), `member-health` (`data-state`), `member-leader`, `member-lag`, `member-contact`, `member-promote-<node>`, `member-remove-<node>` |
 | Membership dialogs | `dialog-promote`, `dialog-remove`, `dialog-step-down` with `preview`, `preview-voters` and `preview-tolerated` (`data-before`, `data-after`), `preview-blockers` and `preview-forceable` (items with `data-blocker`), `preview-caveats` (items with `data-caveat`), `field-force`, `field-replace`, `step-down-successor` (`data-node`), `promote-confirm`, `remove-confirm`, `step-down-confirm` |
 | Digest check | `cluster-digests`, `cluster-check-digests`, `digests-result`, `digests-overall` (`data-state` `agree` or `differ`), `digest-row-<node>` (`data-state` `agrees`, `differs` or `missing`), `digest-state`, `digest-value` |
