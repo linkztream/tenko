@@ -13,6 +13,7 @@ use std::{
 use support::{
     a,
     answer::{Answer, decode, query},
+    ports::{loopback, start_on_free_port},
     rrset, soa, zone,
 };
 use tenko_core::{
@@ -105,19 +106,13 @@ fn closed(stream: &mut TcpStream) -> bool {
 async fn udp_and_tcp_answer_and_the_server_stops() {
     let (image, _) = image();
     let handle = CatalogHandle::new(tenko_dns::catalog::Catalog::build(&image));
-    let mut listen = vec!["127.0.0.1:0".parse().expect("address")];
     let ipv6 = UdpSocket::bind("[::1]:0").is_ok();
-    if ipv6 {
-        listen.push("[::1]:0".parse().expect("address"));
-    }
     let settings = TcpSettings {
         max_connections: 100,
         per_client: 2,
         idle: Duration::from_millis(400),
     };
-    let server = Server::start_authoritative(config(listen, settings), handle, Hooks::default())
-        .await
-        .expect("start");
+    let server = start_on_free_port(|port| config(loopback(port, ipv6), settings), &handle).await;
     let udp = server.udp_addresses().to_vec();
     let tcp = server.tcp_addresses().to_vec();
     assert_eq!(udp.len(), tcp.len());
@@ -232,16 +227,11 @@ async fn a_delta_from_the_feed_is_answered_by_the_running_server() {
     let (image, parent) = image();
     let (mut feed, writer) = MemFeed::new(image);
     let handle = catalog::initial(&mut feed).await.expect("image");
-    let server = Server::start_authoritative(
-        config(
-            vec!["127.0.0.1:0".parse().expect("address")],
-            TcpSettings::default(),
-        ),
-        handle.clone(),
-        Hooks::default(),
+    let server = start_on_free_port(
+        |port| config(loopback(port, false), TcpSettings::default()),
+        &handle,
     )
-    .await
-    .expect("start");
+    .await;
     let stop = CancellationToken::new();
     let follower = tokio::spawn(catalog::follow(feed, handle.clone(), stop.clone()));
     let address = server.udp_addresses()[0];

@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "each test binary uses a part of the helpers")]
 
 pub mod answer;
+pub mod ports;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
