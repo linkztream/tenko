@@ -61,8 +61,8 @@ describe("the dashboard and the modules", () => {
   it("shows the IPAM cards while IPAM runs", async () => {
     await signInAdmin();
     await openDashboard();
-    expect(await screen.findByTestId("dashboard-alarms")).toBeTruthy();
-    expect(screen.getByTestId("dashboard-utilization")).toBeTruthy();
+    expect(await screen.findByTestId("dashboard-health-alarms")).toBeTruthy();
+    expect(await screen.findByTestId("dashboard-utilization")).toBeTruthy();
     expect(screen.getByTestId("dashboard-claim")).toBeTruthy();
     expect(screen.getByTestId("dashboard-import")).toBeTruthy();
   });
@@ -71,14 +71,15 @@ describe("the dashboard and the modules", () => {
     await signInAdmin();
     setModulesForTest(["dns", "dhcp", "discovery"]);
     await openDashboard();
-    await screen.findByTestId("dashboard-waiting");
+    await screen.findByTestId("dashboard-attention");
     expect(screen.getByTestId("dashboard-audit")).toBeTruthy();
-    expect(screen.queryByTestId("dashboard-alarms")).toBeNull();
+    expect(screen.queryByTestId("dashboard-health-alarms")).toBeNull();
+    expect(screen.queryByTestId("dashboard-health-v4")).toBeNull();
     expect(screen.queryByTestId("dashboard-utilization")).toBeNull();
     expect(screen.queryByTestId("dashboard-claim")).toBeNull();
     expect(screen.queryByTestId("dashboard-new-prefix")).toBeNull();
     expect(screen.queryByTestId("dashboard-import")).toBeNull();
-    expect(screen.queryByText("Addresses")).toBeNull();
+    expect(screen.queryByText("IPv4 addresses")).toBeNull();
     expect(await axeViolations(screen.getByTestId("page-dashboard"))).toEqual([]);
   });
 });
@@ -97,7 +98,7 @@ describe("the restart notice of the dashboard", () => {
   it("shows nothing while no change waits", async () => {
     await signInAdmin();
     await openDashboard();
-    await waitFor(() => expect(screen.getByTestId("dashboard-waiting")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("dashboard-attention")).toBeTruthy());
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(screen.queryByTestId("dashboard-modules-restart")).toBeNull();
   });

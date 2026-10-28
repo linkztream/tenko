@@ -1,6 +1,8 @@
-// The live metrics of the start page (WP3.5, OPS-20), for administrators: a stream of its own
-// on the `metrics` topic while the page is open (the server samples only while someone
-// listens), the last minute of samples per controller and for the cluster, and one tile per
+// The live metrics (WP3.5, OPS-20), for administrators. U3: the start page draws them behind
+// "Show all metrics" on its own stream (the `live` prop), the cluster page draws the controller's
+// tiles alone (`only="controller"`) on a stream the tiles open themselves. The tiles keep their
+// shape: a stream on the `metrics` topic while the page is open (the server samples only while
+// someone listens), the last minute of samples per controller and for the cluster, and one tile per
 // figure: a number with an SI suffix and a sparkline of the minute, never a dial. A cluster
 // shows the cluster's sum on every tile and one row per controller on the Raft tile; a single
 // controller shows itself.
@@ -42,8 +44,8 @@
 // `metrics-dhcp-pool` with `data-scope` and `data-value` and a bar each), `-dhcp-naks` (NAKs and
 // DECLINEs per second, `metrics-dhcp-nak` and `metrics-dhcp-decline`), `-dhcp-ddns` (names written
 // per second, `metrics-dhcp-ddns` per outcome with `data-outcome`, the queue in the hint).
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { EventStream, type EventStreamOptions } from "../api/events";
+import { createMemo, For, Show, type JSX } from "solid-js";
+import type { EventStreamOptions } from "../api/events";
 import { si } from "../app/format/si";
 import { Si } from "../components/Si";
 import { Bars } from "../components/Bars";
@@ -56,16 +58,14 @@ import {
   // WP8.7: the outcomes of the DDNS tile.
   DDNS_OUTCOMES,
   droppedBatches,
-  emptyHistory,
   // OPS-20: the host tiles' figures.
   GIB,
+  HISTORY,
   lagOf,
   memoryUsed,
-  pushSnapshot,
   ratioBuckets,
   RCODES,
   sampleState,
-  snapshotOf,
   tileValue,
   windowRate,
   windowRatio,
@@ -73,11 +73,11 @@ import {
   // WP10.4
   VALIDATION_STATES,
   type MetricsDns,
-  type MetricsHistory,
   type RatioTile,
   type MetricsSample,
   type TileName,
 } from "./metrics";
+import { createLiveMetrics, type LiveMetrics } from "./liveMetrics";
 import "./metrics.css";
 
 /** A quantile or rate in milliseconds or per second, with one decimal below ten. */
@@ -170,28 +170,23 @@ function gib(bytes: number | null | undefined): string {
   return formatNumber((bytes ?? 0) / GIB, { maximumFractionDigits: 1 });
 }
 
-/** `diskLow` is the status warning `node.disk.low` of this node: the disk tile turns to the warning style. */
-export default function MetricsTiles(props: { streamOptions?: EventStreamOptions; diskLow?: boolean }) {
-  const [history, setHistory] = createSignal<MetricsHistory>(emptyHistory());
-  const [stream, setStream] = createSignal<EventStream>();
-
-  onMount(() => {
-    const own = new EventStream({ baseTopics: [], ...props.streamOptions });
-    const off = own.subscribe("metrics", (event) => {
-      const snapshot = snapshotOf(event.data);
-      if (snapshot) setHistory((h) => pushSnapshot(h, snapshot));
-    });
-    own.start();
-    setStream(own);
-    onCleanup(() => {
-      off();
-      own.stop();
-    });
-  });
+/**
+ * `diskLow` is the status warning `node.disk.low` of this node: the disk tile turns to the warning
+ * style. U3: `live` is the stream of the page that shows the tiles (the start page shares its own);
+ * without it the tiles open one of their own. `only="controller"` draws the controller's tiles
+ * alone (the cluster page).
+ */
+export default function MetricsTiles(props: { streamOptions?: EventStreamOptions; diskLow?: boolean; live?: LiveMetrics; only?: "controller" }) {
+  // The stream is chosen once, when the tiles mount.
+  // eslint-disable-next-line solid/reactivity
+  const live = props.live ?? createLiveMetrics(props.streamOptions);
+  const history = live.history;
+  const all = () => props.only !== "controller";
 
   const latest = () => history().latest;
   const cluster = (): MetricsSample | undefined => latest()?.cluster;
-  const series = (name: TileName) => history().cluster.map((sample) => tileValue(name, sample));
+  // The newest minute: the start page keeps five minutes for its queries chart.
+  const series = (name: TileName) => history().cluster.slice(-HISTORY).map((sample) => tileValue(name, sample));
   const ratioValue = (name: RatioTile) => (cluster()?.dns ? windowRatio(history(), name) : null);
   const ratioBars = (name: RatioTile) => ratioBuckets(history(), BUCKET_SECONDS, BUCKETS, name);
   // The rates beside the ratio tiles are means over the window of the headline (the completed buckets
@@ -210,7 +205,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
   const rows = createMemo(() => latest()?.nodes ?? []);
 
   return (
-    <section class="dash-metrics" aria-labelledby="dash-metrics" data-testid="metrics-tiles" data-state={stream()?.state() ?? "idle"} data-controllers={latest() ? rows().length : undefined}>
+    <section class="dash-metrics" aria-labelledby="dash-metrics" data-testid="metrics-tiles" data-state={live.state()} data-controllers={latest() ? rows().length : undefined}>
       <h2 id="dash-metrics">
         {t("metrics.title")}
         <span class="aside">{t("metrics.sub")}</span>
@@ -323,7 +318,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           })()}
         />
         {/* OPS-20: the host's CPU, memory and disk, while a controller reports them. */}
-        <Show when={host()}>
+        <Show when={all() && host()}>
           {(h) => (
             <>
               <h3 class="metrics-group" data-testid="metrics-group-host">
@@ -368,7 +363,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
             </>
           )}
         </Show>
-        <Show when={dns()}>
+        <Show when={all() && dns()}>
           {(d) => (
             <>
               {/* WP10.4: with the resolver's two tiles the group has eight, laid out four to a row. */}
@@ -497,7 +492,7 @@ export default function MetricsTiles(props: { streamOptions?: EventStreamOptions
           )}
         </Show>
         {/* WP8.7: the DHCP tiles, while a controller runs the `dhcp` role. */}
-        <Show when={dhcp()}>
+        <Show when={all() && dhcp()}>
           {(d) => (
             <>
               <h3 class="metrics-group" data-testid="metrics-group-dhcp">

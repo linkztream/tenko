@@ -23,6 +23,7 @@ async function expectLanguage(page: Page, language: string): Promise<void> {
 /** A screenshot of the dashboard once its data has loaded, kept and attached. */
 async function dashboardShot(page: Page, testInfo: TestInfo, language: string): Promise<void> {
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
+  await expect(page.getByTestId("dashboard-attention")).toBeVisible();
   await expect(page.getByTestId("dashboard-utilization")).toBeVisible();
   await expect(page.getByTestId("dashboard-audit")).toBeVisible();
   const path = resolve(ARTIFACTS, `dashboard-${language}.png`);

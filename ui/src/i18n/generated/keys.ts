@@ -1380,11 +1380,124 @@ export type MessageKey =
   | "dashboard.action.claim_where"
   | "dashboard.action.import"
   | "dashboard.action.prefix"
-  | "dashboard.alarms.none"
-  | "dashboard.alarms.title"
-  | "dashboard.audit.all"
-  | "dashboard.audit.none"
-  | "dashboard.audit.title"
+  | "dashboard.attention.clear"
+  | "dashboard.attention.clear_text"
+  | "dashboard.attention.label"
+  | "dashboard.attention.more"
+  | "dashboard.attention.review"
+  | "dashboard.attention.review_in"
+  | "dashboard.attention.review_link"
+  | "dashboard.changes.all"
+  | "dashboard.changes.count"
+  | "dashboard.changes.none"
+  | "dashboard.changes.none_people"
+  | "dashboard.changes.system"
+  | "dashboard.changes.title"
+  | "dashboard.dhcp.abandoned"
+  | "dashboard.dhcp.ack"
+  | "dashboard.dhcp.ack_none"
+  | "dashboard.dhcp.active"
+  | "dashboard.dhcp.create_scope"
+  | "dashboard.dhcp.ddns"
+  | "dashboard.dhcp.ddns_note"
+  | "dashboard.dhcp.empty"
+  | "dashboard.dhcp.leases"
+  | "dashboard.dhcp.naks"
+  | "dashboard.dhcp.open"
+  | "dashboard.dhcp.scopes"
+  | "dashboard.dhcp.title"
+  | "dashboard.dns.blocked"
+  | "dashboard.dns.blocked_none"
+  | "dashboard.dns.blocked_top"
+  | "dashboard.dns.cache"
+  | "dashboard.dns.cache_note"
+  | "dashboard.dns.chart_label"
+  | "dashboard.dns.dnssec"
+  | "dashboard.dns.encrypted"
+  | "dashboard.dns.encrypted_value"
+  | "dashboard.dns.idle"
+  | "dashboard.dns.indeterminate"
+  | "dashboard.dns.latency"
+  | "dashboard.dns.not_served"
+  | "dashboard.dns.open"
+  | "dashboard.dns.pair"
+  | "dashboard.dns.percent"
+  | "dashboard.dns.qps"
+  | "dashboard.dns.rate"
+  | "dashboard.dns.rcodes"
+  | "dashboard.dns.scale_top"
+  | "dashboard.dns.title"
+  | "dashboard.dns.triple"
+  | "dashboard.dns.upstreams"
+  | "dashboard.dns.upstreams_p99"
+  | "dashboard.dns.upstreams_subqueries"
+  | "dashboard.dns.window_end"
+  | "dashboard.dns.window_start"
+  | "dashboard.duration.days"
+  | "dashboard.duration.hours"
+  | "dashboard.duration.minutes"
+  | "dashboard.duration.seconds"
+  | "dashboard.finding.action.decommission"
+  | "dashboard.finding.action.open_connectors"
+  | "dashboard.finding.action.open_dhcp"
+  | "dashboard.finding.action.open_dns"
+  | "dashboard.finding.action.open_host"
+  | "dashboard.finding.action.open_ipam"
+  | "dashboard.finding.action.open_job"
+  | "dashboard.finding.action.open_nodes"
+  | "dashboard.finding.action.open_prefix"
+  | "dashboard.finding.action.open_settings"
+  | "dashboard.finding.action.resolve"
+  | "dashboard.finding.action.review"
+  | "dashboard.finding.evidence.disk_low"
+  | "dashboard.finding.evidence.job_step"
+  | "dashboard.finding.evidence.utilization"
+  | "dashboard.finding.evidence.utilization_bare"
+  | "dashboard.finding.kind.conflict"
+  | "dashboard.finding.kind.dns"
+  | "dashboard.finding.kind.ghost"
+  | "dashboard.finding.kind.health"
+  | "dashboard.finding.kind.host_name"
+  | "dashboard.finding.kind.intent_differs"
+  | "dashboard.finding.kind.job_waiting"
+  | "dashboard.finding.kind.orphaned_address"
+  | "dashboard.finding.kind.orphaned_record"
+  | "dashboard.finding.kind.outside_prefixes"
+  | "dashboard.finding.kind.ptr_mismatch"
+  | "dashboard.finding.kind.scan_artifact"
+  | "dashboard.finding.kind.unknown_device"
+  | "dashboard.finding.kind.utilization"
+  | "dashboard.finding.kind.vlan"
+  | "dashboard.health.alarms"
+  | "dashboard.health.alarms_critical"
+  | "dashboard.health.alarms_none"
+  | "dashboard.health.connectors"
+  | "dashboard.health.connectors_more"
+  | "dashboard.health.connectors_none"
+  | "dashboard.health.findings"
+  | "dashboard.health.findings_context"
+  | "dashboard.health.healthy"
+  | "dashboard.health.in_use"
+  | "dashboard.health.jobs"
+  | "dashboard.health.jobs_context"
+  | "dashboard.health.label"
+  | "dashboard.health.running"
+  | "dashboard.health.to_act_on"
+  | "dashboard.health.v4"
+  | "dashboard.health.v4_context"
+  | "dashboard.health.v6"
+  | "dashboard.health.v6_context"
+  | "dashboard.hidden.admin"
+  | "dashboard.hidden.controller"
+  | "dashboard.hidden.dhcp"
+  | "dashboard.hidden.dns"
+  | "dashboard.hidden.hide"
+  | "dashboard.hidden.host"
+  | "dashboard.hidden.host_cpu"
+  | "dashboard.hidden.host_memory"
+  | "dashboard.hidden.label"
+  | "dashboard.hidden.operations"
+  | "dashboard.hidden.show"
   | "dashboard.modules.name.dhcp"
   | "dashboard.modules.name.discovery"
   | "dashboard.modules.name.dns"
@@ -1392,37 +1505,58 @@ export type MessageKey =
   | "dashboard.modules.none"
   | "dashboard.modules.restart_body"
   | "dashboard.modules.restart_title"
-  | "dashboard.palette_hint"
-  | "dashboard.tile.addresses"
-  | "dashboard.tile.addresses_of"
-  | "dashboard.tile.alarms"
-  | "dashboard.tile.alarms_hint"
-  | "dashboard.tile.connectors"
-  | "dashboard.tile.connectors_hint"
-  | "dashboard.tile.connectors_link"
-  | "dashboard.tile.nodes"
-  | "dashboard.tile.nodes_hint"
-  | "dashboard.tile.nodes_link"
-  | "dashboard.tile.nodes_none"
-  | "dashboard.tile.proposals"
-  | "dashboard.tile.proposals_hint"
-  | "dashboard.tile.proposals_link"
-  | "dashboard.tile.waiting_for_you"
+  | "dashboard.panel.attention"
+  | "dashboard.panel.healthy"
+  | "dashboard.prefixes.alarm_at"
+  | "dashboard.prefixes.all"
+  | "dashboard.prefixes.all_vrfs"
+  | "dashboard.prefixes.choose"
+  | "dashboard.prefixes.critical"
+  | "dashboard.prefixes.empty"
+  | "dashboard.prefixes.meter_title"
+  | "dashboard.prefixes.no_tenant"
+  | "dashboard.prefixes.percent"
+  | "dashboard.prefixes.title"
+  | "dashboard.prefixes.totals"
+  | "dashboard.prefixes.vrf"
+  | "dashboard.prefixes.warning"
+  | "dashboard.security.events"
+  | "dashboard.security.events_context"
+  | "dashboard.security.more"
+  | "dashboard.security.none"
+  | "dashboard.security.records"
+  | "dashboard.security.records_context"
+  | "dashboard.security.title"
+  | "dashboard.security.window"
+  | "dashboard.sub.disk"
+  | "dashboard.sub.store"
+  | "dashboard.sub.uptime"
+  | "dashboard.system.batches"
+  | "dashboard.system.buffers"
+  | "dashboard.system.buffers_context"
+  | "dashboard.system.clients"
+  | "dashboard.system.clients_context"
+  | "dashboard.system.commit"
+  | "dashboard.system.commit_context"
+  | "dashboard.system.connected"
+  | "dashboard.system.cpu"
+  | "dashboard.system.cpu_context"
+  | "dashboard.system.entries"
+  | "dashboard.system.memory"
+  | "dashboard.system.memory_context"
+  | "dashboard.system.ms"
+  | "dashboard.system.nodes"
+  | "dashboard.system.nodes_context"
+  | "dashboard.system.nodes_none"
+  | "dashboard.system.open_cluster"
+  | "dashboard.system.replication"
+  | "dashboard.system.replication_context"
+  | "dashboard.system.title"
   | "dashboard.update.action"
   | "dashboard.update.body"
   | "dashboard.update.open"
   | "dashboard.update.security"
   | "dashboard.update.title"
-  | "dashboard.use.empty"
-  | "dashboard.use.more"
-  | "dashboard.use.networks"
-  | "dashboard.use.of"
-  | "dashboard.use.title"
-  | "dashboard.use.vrf"
-  | "dashboard.waiting.all"
-  | "dashboard.waiting.none"
-  | "dashboard.waiting.step"
-  | "dashboard.waiting.title"
   | "dhcp.action.ddns_off"
   | "dhcp.action.ddns_on"
   | "dhcp.action.ddns_on_zone"
@@ -7018,11 +7152,6 @@ export type MessageKey =
   | "shell.command.updates"
   | "shell.command.vlans"
   | "shell.command.whats_new"
-  | "shell.dashboard.jobs"
-  | "shell.dashboard.no_roles"
-  | "shell.dashboard.node"
-  | "shell.dashboard.sub"
-  | "shell.dashboard.uptime"
   | "shell.forbidden.body"
   | "shell.forbidden.title"
   | "shell.keys.cancel"
@@ -7696,16 +7825,60 @@ export interface MessageArgs {
   "connectors.toast.enabled": { name: string | number };
   "connectors.toast.run": { name: string | number };
   "connectors.toast.run_failed": { name: string | number };
+  "dashboard.attention.more": { count: number };
+  "dashboard.attention.review": { count: number };
+  "dashboard.attention.review_in": { area: string | number; count: string | number };
+  "dashboard.changes.count": { count: string | number };
+  "dashboard.dhcp.abandoned": { count: string | number };
+  "dashboard.dhcp.ack": { p99: string | number };
+  "dashboard.dhcp.ddns_note": { failed: string | number; queue: string | number; refused: string | number };
+  "dashboard.dhcp.scopes": { count: number };
+  "dashboard.dns.blocked_top": { list: string | number };
+  "dashboard.dns.cache_note": { entries: string | number; stale: string | number };
+  "dashboard.dns.chart_label": { max: string | number };
+  "dashboard.dns.encrypted_value": { doh: string | number; dot: string | number };
+  "dashboard.dns.indeterminate": { rate: string | number };
+  "dashboard.dns.latency": { p50: string | number; p99: string | number };
+  "dashboard.dns.pair": { first: string | number; second: string | number };
+  "dashboard.dns.percent": { value: string | number };
+  "dashboard.dns.rate": { rate: string | number };
+  "dashboard.dns.scale_top": { value: string | number };
+  "dashboard.dns.triple": { bogus: string | number; insecure: string | number; secure: string | number };
+  "dashboard.dns.upstreams_p99": { p99: string | number };
+  "dashboard.duration.days": { days: string | number; hours: string | number };
+  "dashboard.duration.hours": { hours: string | number; minutes: string | number };
+  "dashboard.duration.minutes": { minutes: string | number };
+  "dashboard.duration.seconds": { seconds: string | number };
+  "dashboard.finding.evidence.disk_low": { free: string | number; total: string | number };
+  "dashboard.finding.evidence.job_step": { step: string | number };
+  "dashboard.finding.evidence.utilization": { percent: string | number; threshold: string | number };
+  "dashboard.finding.evidence.utilization_bare": { percent: string | number };
+  "dashboard.health.alarms_critical": { count: string | number };
+  "dashboard.health.connectors_more": { count: string | number; names: string | number };
+  "dashboard.health.findings_context": { info: string | number; review: string | number };
+  "dashboard.health.jobs_context": { count: string | number };
+  "dashboard.health.v4_context": { count: number; fullest: string | number };
+  "dashboard.health.v6_context": { count: number };
+  "dashboard.hidden.operations": { profile: string | number };
   "dashboard.modules.restart_body": { configured: string | number; running: string | number };
-  "dashboard.tile.alarms_hint": { critical: number };
-  "dashboard.tile.connectors_hint": { failing: number; total: string | number };
-  "dashboard.tile.nodes_hint": { mismatched: number; total: string | number };
-  "dashboard.tile.proposals_hint": { conflicts: number };
-  "dashboard.tile.waiting_for_you": { count: number };
+  "dashboard.panel.attention": { count: number };
+  "dashboard.prefixes.alarm_at": { percent: string | number };
+  "dashboard.prefixes.all": { count: number };
+  "dashboard.prefixes.all_vrfs": { count: string | number };
+  "dashboard.prefixes.meter_title": { capacity: string | number; used: string | number };
+  "dashboard.prefixes.percent": { percent: string | number };
+  "dashboard.prefixes.totals": { v4: string | number; v4_count: number; v6: string | number; v6_count: number };
+  "dashboard.prefixes.vrf": { tenant: string | number; vrf: string | number };
+  "dashboard.security.more": { count: string | number };
+  "dashboard.security.records_context": { people: string | number; system: string | number };
+  "dashboard.sub.disk": { free: string | number; total: string | number };
+  "dashboard.sub.store": { size: string | number };
+  "dashboard.sub.uptime": { duration: string | number };
+  "dashboard.system.buffers_context": { count: number };
+  "dashboard.system.memory_context": { share: string | number };
+  "dashboard.system.nodes_context": { mismatched: number };
+  "dashboard.system.replication_context": { term: string | number };
   "dashboard.update.body": { running: string | number; version: string | number };
-  "dashboard.use.more": { count: number };
-  "dashboard.use.vrf": { tenant: string | number; vrf: string | number };
-  "dashboard.waiting.step": { step: number; total: number };
   "dhcp.action.ddns_on_zone": { zone: string | number };
   "dhcp.action.lease": { lease: string | number };
   "dhcp.action.range": { first: string | number; last: string | number };
@@ -10306,11 +10479,124 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.action.claim_where",
   "dashboard.action.import",
   "dashboard.action.prefix",
-  "dashboard.alarms.none",
-  "dashboard.alarms.title",
-  "dashboard.audit.all",
-  "dashboard.audit.none",
-  "dashboard.audit.title",
+  "dashboard.attention.clear",
+  "dashboard.attention.clear_text",
+  "dashboard.attention.label",
+  "dashboard.attention.more",
+  "dashboard.attention.review",
+  "dashboard.attention.review_in",
+  "dashboard.attention.review_link",
+  "dashboard.changes.all",
+  "dashboard.changes.count",
+  "dashboard.changes.none",
+  "dashboard.changes.none_people",
+  "dashboard.changes.system",
+  "dashboard.changes.title",
+  "dashboard.dhcp.abandoned",
+  "dashboard.dhcp.ack",
+  "dashboard.dhcp.ack_none",
+  "dashboard.dhcp.active",
+  "dashboard.dhcp.create_scope",
+  "dashboard.dhcp.ddns",
+  "dashboard.dhcp.ddns_note",
+  "dashboard.dhcp.empty",
+  "dashboard.dhcp.leases",
+  "dashboard.dhcp.naks",
+  "dashboard.dhcp.open",
+  "dashboard.dhcp.scopes",
+  "dashboard.dhcp.title",
+  "dashboard.dns.blocked",
+  "dashboard.dns.blocked_none",
+  "dashboard.dns.blocked_top",
+  "dashboard.dns.cache",
+  "dashboard.dns.cache_note",
+  "dashboard.dns.chart_label",
+  "dashboard.dns.dnssec",
+  "dashboard.dns.encrypted",
+  "dashboard.dns.encrypted_value",
+  "dashboard.dns.idle",
+  "dashboard.dns.indeterminate",
+  "dashboard.dns.latency",
+  "dashboard.dns.not_served",
+  "dashboard.dns.open",
+  "dashboard.dns.pair",
+  "dashboard.dns.percent",
+  "dashboard.dns.qps",
+  "dashboard.dns.rate",
+  "dashboard.dns.rcodes",
+  "dashboard.dns.scale_top",
+  "dashboard.dns.title",
+  "dashboard.dns.triple",
+  "dashboard.dns.upstreams",
+  "dashboard.dns.upstreams_p99",
+  "dashboard.dns.upstreams_subqueries",
+  "dashboard.dns.window_end",
+  "dashboard.dns.window_start",
+  "dashboard.duration.days",
+  "dashboard.duration.hours",
+  "dashboard.duration.minutes",
+  "dashboard.duration.seconds",
+  "dashboard.finding.action.decommission",
+  "dashboard.finding.action.open_connectors",
+  "dashboard.finding.action.open_dhcp",
+  "dashboard.finding.action.open_dns",
+  "dashboard.finding.action.open_host",
+  "dashboard.finding.action.open_ipam",
+  "dashboard.finding.action.open_job",
+  "dashboard.finding.action.open_nodes",
+  "dashboard.finding.action.open_prefix",
+  "dashboard.finding.action.open_settings",
+  "dashboard.finding.action.resolve",
+  "dashboard.finding.action.review",
+  "dashboard.finding.evidence.disk_low",
+  "dashboard.finding.evidence.job_step",
+  "dashboard.finding.evidence.utilization",
+  "dashboard.finding.evidence.utilization_bare",
+  "dashboard.finding.kind.conflict",
+  "dashboard.finding.kind.dns",
+  "dashboard.finding.kind.ghost",
+  "dashboard.finding.kind.health",
+  "dashboard.finding.kind.host_name",
+  "dashboard.finding.kind.intent_differs",
+  "dashboard.finding.kind.job_waiting",
+  "dashboard.finding.kind.orphaned_address",
+  "dashboard.finding.kind.orphaned_record",
+  "dashboard.finding.kind.outside_prefixes",
+  "dashboard.finding.kind.ptr_mismatch",
+  "dashboard.finding.kind.scan_artifact",
+  "dashboard.finding.kind.unknown_device",
+  "dashboard.finding.kind.utilization",
+  "dashboard.finding.kind.vlan",
+  "dashboard.health.alarms",
+  "dashboard.health.alarms_critical",
+  "dashboard.health.alarms_none",
+  "dashboard.health.connectors",
+  "dashboard.health.connectors_more",
+  "dashboard.health.connectors_none",
+  "dashboard.health.findings",
+  "dashboard.health.findings_context",
+  "dashboard.health.healthy",
+  "dashboard.health.in_use",
+  "dashboard.health.jobs",
+  "dashboard.health.jobs_context",
+  "dashboard.health.label",
+  "dashboard.health.running",
+  "dashboard.health.to_act_on",
+  "dashboard.health.v4",
+  "dashboard.health.v4_context",
+  "dashboard.health.v6",
+  "dashboard.health.v6_context",
+  "dashboard.hidden.admin",
+  "dashboard.hidden.controller",
+  "dashboard.hidden.dhcp",
+  "dashboard.hidden.dns",
+  "dashboard.hidden.hide",
+  "dashboard.hidden.host",
+  "dashboard.hidden.host_cpu",
+  "dashboard.hidden.host_memory",
+  "dashboard.hidden.label",
+  "dashboard.hidden.operations",
+  "dashboard.hidden.show",
   "dashboard.modules.name.dhcp",
   "dashboard.modules.name.discovery",
   "dashboard.modules.name.dns",
@@ -10318,37 +10604,58 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.modules.none",
   "dashboard.modules.restart_body",
   "dashboard.modules.restart_title",
-  "dashboard.palette_hint",
-  "dashboard.tile.addresses",
-  "dashboard.tile.addresses_of",
-  "dashboard.tile.alarms",
-  "dashboard.tile.alarms_hint",
-  "dashboard.tile.connectors",
-  "dashboard.tile.connectors_hint",
-  "dashboard.tile.connectors_link",
-  "dashboard.tile.nodes",
-  "dashboard.tile.nodes_hint",
-  "dashboard.tile.nodes_link",
-  "dashboard.tile.nodes_none",
-  "dashboard.tile.proposals",
-  "dashboard.tile.proposals_hint",
-  "dashboard.tile.proposals_link",
-  "dashboard.tile.waiting_for_you",
+  "dashboard.panel.attention",
+  "dashboard.panel.healthy",
+  "dashboard.prefixes.alarm_at",
+  "dashboard.prefixes.all",
+  "dashboard.prefixes.all_vrfs",
+  "dashboard.prefixes.choose",
+  "dashboard.prefixes.critical",
+  "dashboard.prefixes.empty",
+  "dashboard.prefixes.meter_title",
+  "dashboard.prefixes.no_tenant",
+  "dashboard.prefixes.percent",
+  "dashboard.prefixes.title",
+  "dashboard.prefixes.totals",
+  "dashboard.prefixes.vrf",
+  "dashboard.prefixes.warning",
+  "dashboard.security.events",
+  "dashboard.security.events_context",
+  "dashboard.security.more",
+  "dashboard.security.none",
+  "dashboard.security.records",
+  "dashboard.security.records_context",
+  "dashboard.security.title",
+  "dashboard.security.window",
+  "dashboard.sub.disk",
+  "dashboard.sub.store",
+  "dashboard.sub.uptime",
+  "dashboard.system.batches",
+  "dashboard.system.buffers",
+  "dashboard.system.buffers_context",
+  "dashboard.system.clients",
+  "dashboard.system.clients_context",
+  "dashboard.system.commit",
+  "dashboard.system.commit_context",
+  "dashboard.system.connected",
+  "dashboard.system.cpu",
+  "dashboard.system.cpu_context",
+  "dashboard.system.entries",
+  "dashboard.system.memory",
+  "dashboard.system.memory_context",
+  "dashboard.system.ms",
+  "dashboard.system.nodes",
+  "dashboard.system.nodes_context",
+  "dashboard.system.nodes_none",
+  "dashboard.system.open_cluster",
+  "dashboard.system.replication",
+  "dashboard.system.replication_context",
+  "dashboard.system.title",
   "dashboard.update.action",
   "dashboard.update.body",
   "dashboard.update.open",
   "dashboard.update.security",
   "dashboard.update.title",
-  "dashboard.use.empty",
-  "dashboard.use.more",
-  "dashboard.use.networks",
-  "dashboard.use.of",
-  "dashboard.use.title",
-  "dashboard.use.vrf",
-  "dashboard.waiting.all",
-  "dashboard.waiting.none",
-  "dashboard.waiting.step",
-  "dashboard.waiting.title",
   "dhcp.action.ddns_off",
   "dhcp.action.ddns_on",
   "dhcp.action.ddns_on_zone",
@@ -15944,11 +16251,6 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.command.updates",
   "shell.command.vlans",
   "shell.command.whats_new",
-  "shell.dashboard.jobs",
-  "shell.dashboard.no_roles",
-  "shell.dashboard.node",
-  "shell.dashboard.sub",
-  "shell.dashboard.uptime",
   "shell.forbidden.body",
   "shell.forbidden.title",
   "shell.keys.cancel",

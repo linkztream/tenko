@@ -218,6 +218,11 @@ pub struct ClusterStatus {
 pub struct NodeStatus {
     /// Raft node id, once enrolled.
     pub id: Option<NodeId>,
+    /// U3: the host name of the machine as the node read it at start (`COMPUTERNAME`,
+    /// `HOSTNAME` or `/etc/hostname`, lower case, as a node registry name), which the start
+    /// page shows in its subtitle; absent when it could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Roles this node runs: `controller`, `dns`, `dhcp`, `probe`.
     pub roles: Vec<String>,
     /// What the installer prepared this machine for, per role, with what the server found

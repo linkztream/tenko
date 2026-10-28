@@ -774,21 +774,6 @@
       <unit id="shell.splash">
         <segment><source>Loading Tenko DDI…</source><target>Läser in Tenko DDI…</target></segment>
       </unit>
-      <unit id="shell.dashboard.sub">
-        <segment><source>This node at a glance</source><target>Den här noden i korthet</target></segment>
-      </unit>
-      <unit id="shell.dashboard.node">
-        <segment><source>This node</source><target>Den här noden</target></segment>
-      </unit>
-      <unit id="shell.dashboard.no_roles">
-        <segment><source>No roles reported</source><target>Inga roller rapporterade</target></segment>
-      </unit>
-      <unit id="shell.dashboard.jobs">
-        <segment><source>Active jobs</source><target>Aktiva jobb</target></segment>
-      </unit>
-      <unit id="shell.dashboard.uptime">
-        <segment><source>Running for</source><target>Har körts i</target></segment>
-      </unit>
       <unit id="shell.banner.mfa_required">
         <segment><source>Your security profile requires a second factor. Add a passkey or an authenticator app.</source><target>Din säkerhetsprofil kräver en andra faktor. Lägg till en nyckel eller en autentiseringsapp.</target></segment>
       </unit>
@@ -6716,69 +6701,6 @@
       <unit id="dashboard.action.import">
         <segment><source>Import</source><target>Importera</target></segment>
       </unit>
-      <unit id="dashboard.tile.addresses">
-        <segment><source>Addresses in use</source><target>Adresser som används</target></segment>
-      </unit>
-      <unit id="dashboard.tile.addresses_of">
-        <segment><source>of</source><target>av</target></segment>
-      </unit>
-      <unit id="dashboard.tile.alarms">
-        <segment><source>Utilization alarms</source><target>Larm om användning</target></segment>
-      </unit>
-      <unit id="dashboard.tile.alarms_hint">
-        <segment><source>{critical, plural, =0 {none critical} one {# critical} other {# critical}}</source><target>{critical, plural, =0 {inga kritiska} one {# kritiskt} other {# kritiska}}</target></segment>
-      </unit>
-      <unit id="dashboard.tile.waiting_for_you">
-        <segment><source>{count, plural, =0 {none waiting for you} one {# waiting for you} other {# waiting for you}}</source><target>{count, plural, =0 {inga väntar på dig} one {# väntar på dig} other {# väntar på dig}}</target></segment>
-      </unit>
-      <unit id="dashboard.alarms.title">
-        <segment><source>Active alarms</source><target>Aktiva larm</target></segment>
-      </unit>
-      <unit id="dashboard.alarms.none">
-        <segment><source>Every network is below its thresholds.</source><target>Alla nät ligger under sina trösklar.</target></segment>
-      </unit>
-      <unit id="dashboard.waiting.title">
-        <segment><source>Waiting for a person</source><target>Väntar på en person</target></segment>
-      </unit>
-      <unit id="dashboard.waiting.all">
-        <segment><source>All jobs</source><target>Alla jobb</target></segment>
-      </unit>
-      <unit id="dashboard.waiting.none">
-        <segment><source>No job waits for a manual step.</source><target>Inget jobb väntar på ett manuellt steg.</target></segment>
-      </unit>
-      <unit id="dashboard.waiting.step">
-        <segment><source>step {step, number} of {total, number}</source><target>steg {step, number} av {total, number}</target></segment>
-      </unit>
-      <unit id="dashboard.audit.title">
-        <segment><source>Recent changes</source><target>Senaste ändringar</target></segment>
-      </unit>
-      <unit id="dashboard.audit.all">
-        <segment><source>Audit log</source><target>Granskningslogg</target></segment>
-      </unit>
-      <unit id="dashboard.audit.none">
-        <segment><source>Nothing recorded yet.</source><target>Inget registrerat ännu.</target></segment>
-      </unit>
-      <unit id="dashboard.use.title">
-        <segment><source>Utilization by tenant and VRF</source><target>Användning per organisation och VRF</target></segment>
-      </unit>
-      <unit id="dashboard.use.vrf">
-        <segment><source>{tenant} / {vrf}</source><target>{tenant} / {vrf}</target></segment>
-      </unit>
-      <unit id="dashboard.use.of">
-        <segment><source>of</source><target>av</target></segment>
-      </unit>
-      <unit id="dashboard.use.networks">
-        <segment><source>Busiest networks</source><target>Mest använda nät</target></segment>
-      </unit>
-      <unit id="dashboard.use.empty">
-        <segment><source>No networks yet.</source><target>Inga nät ännu.</target></segment>
-      </unit>
-      <unit id="dashboard.use.more">
-        <segment><source>{count, plural, one {and # more network} other {and # more networks}}</source><target>{count, plural, one {och # nät till} other {och # nät till}}</target></segment>
-      </unit>
-      <unit id="dashboard.palette_hint">
-        <segment><source>finds any address, host, MAC or prefix, and every command.</source><target>hittar adresser, värdar, MAC-adresser, prefix och alla kommandon.</target></segment>
-      </unit>
     </group>
     <group id="hosts">
       <unit id="hosts.crumbs">
@@ -10036,36 +9958,6 @@
       </unit>
     </group>
     <group id="dashboard-wp29">
-      <unit id="dashboard.tile.proposals">
-        <segment><source>Open proposals</source><target>Öppna förslag</target></segment>
-      </unit>
-      <unit id="dashboard.tile.proposals_hint">
-        <segment><source>{conflicts, plural, =0 {no conflict} one {# conflict} other {# conflicts}}</source><target>{conflicts, plural, =0 {ingen konflikt} one {# konflikt} other {# konflikter}}</target></segment>
-      </unit>
-      <unit id="dashboard.tile.connectors">
-        <segment><source>Healthy connectors</source><target>Friska kopplingar</target></segment>
-      </unit>
-      <unit id="dashboard.tile.connectors_hint">
-        <segment><source>of {total} enabled{failing, plural, =0 {} one {, # needs a look} other {, # need a look}}</source><target>av {total} aktiverade{failing, plural, =0 {} one {, # behöver ses över} other {, # behöver ses över}}</target></segment>
-      </unit>
-      <unit id="dashboard.tile.nodes">
-        <segment><source>Nodes connected</source><target>Anslutna noder</target></segment>
-      </unit>
-      <unit id="dashboard.tile.nodes_hint">
-        <segment><source>of {total} enrolled{mismatched, plural, =0 {} one {, # refused} other {, # refused}}</source><target>av {total} registrerade{mismatched, plural, =0 {} one {, # nekad} other {, # nekade}}</target></segment>
-      </unit>
-      <unit id="dashboard.tile.nodes_none">
-        <segment><source>No cluster port</source><target>Ingen klusterport</target></segment>
-      </unit>
-      <unit id="dashboard.tile.proposals_link">
-        <segment><source>Open the proposal inbox</source><target>Öppna förslagslistan</target></segment>
-      </unit>
-      <unit id="dashboard.tile.connectors_link">
-        <segment><source>Open the connectors</source><target>Öppna kopplingarna</target></segment>
-      </unit>
-      <unit id="dashboard.tile.nodes_link">
-        <segment><source>Open the nodes</source><target>Öppna noderna</target></segment>
-      </unit>
     </group>
     <group id="topology">
       <unit id="topology.filter.label">

@@ -268,9 +268,10 @@ test("a token is shown once, enrols a probe that connects, and the node shows in
         .toEqual([1, 1]);
       await page.goto("/");
       await expect(page.getByTestId("page-dashboard")).toBeVisible();
+      // U3: the nodes block of the start page's system panel, drawn once the cluster has a node.
       await expect(page.getByTestId("dashboard-nodes")).toBeVisible();
-      await expect(page.getByTestId("dashboard-nodes-link")).toHaveText("1");
-      await page.getByTestId("dashboard-nodes-link").click();
+      await expect(page.getByTestId("dashboard-nodes")).toHaveAttribute("data-value", "1");
+      await page.getByTestId("dashboard-nodes").click();
       await expect(page.getByTestId("page-nodes")).toBeVisible();
       await expect(page).toHaveURL(/\/nodes$/);
     });
@@ -537,7 +538,8 @@ test.describe("a Swedish browser", () => {
   });
 });
 
-// The cluster summary that the dashboard tile (`dashboard-nodes`) and the nodes page
+// The cluster summary that the dashboard's nodes block (`dashboard-nodes`, U3: drawn while the
+// cluster has more than one node) and the nodes page
 // (`nodes-cluster`) show comes from `GET /system/status`, which they read again after an event
 // of the `cluster` topic. The controller refreshes that summary when a node's record changes
 // (enrolment, connection, revocation) and then announces it with a `cluster` event of its own,
@@ -553,10 +555,12 @@ test("the dashboard tile and the cluster summary follow a node that enrols, conn
   const created = await createToken(api, NODE_NAME);
   // The dashboard stays open in `page`; the node list is open in a second page of the browser.
   await page.goto("/");
-  const link = page.getByTestId("dashboard-nodes-link");
+  const link = page.getByTestId("dashboard-nodes");
   const hint = page.getByTestId("dashboard-nodes-hint");
-  await expect(link).toHaveText("0");
-  await expect(hint).toHaveAttribute("data-total", "0");
+  // One node, the controller: the block is not drawn and the Hidden line names the cluster's metrics.
+  await expect(page.getByTestId("dashboard-attention")).toBeVisible();
+  await expect(link).toHaveCount(0);
+  await expect(page.getByTestId("hidden-line-item").and(page.locator("[data-item='controller']"))).toBeVisible();
   const nodes = await page.context().newPage();
   await nodes.goto("/nodes");
   await expect(nodes.getByTestId("nodes-empty")).toBeVisible();
@@ -567,20 +571,19 @@ test("the dashboard tile and the cluster summary follow a node that enrols, conn
     const enrolled = await probe.enrol(server, created.token, { name: NODE_NAME, address: NODE_ADDRESS });
     expect(enrolled.code, enrolled.stderr).toBe(0);
     await expect(hint).toHaveAttribute("data-total", "1");
-    await expect(link).toHaveText("0");
+    await expect(link).toHaveAttribute("data-value", "0");
 
     // Connected: the tile counts it and the nodes page names its version.
     await probe.serve();
     const view = await waitForConnected(api);
     await expect(gridRow(nodes, "nodes", NODE_NAME).getByTestId("node-link")).toHaveAttribute("data-state", "connected");
-    await expect(link).toHaveText("1");
+    await expect(link).toHaveAttribute("data-value", "1");
     await expect(hint).toHaveAttribute("data-total", "1");
     await expect(nodes.getByTestId("nodes-cluster")).toContainText(view.version!);
 
-    // Revoked: gone from both numbers.
+    // Revoked: one node again, so the block goes.
     await api.delete(`/nodes/${NODE}`);
-    await expect(link).toHaveText("0");
-    await expect(hint).toHaveAttribute("data-total", "0");
+    await expect(link).toHaveCount(0);
     await expect(nodes.getByTestId("nodes-empty")).toBeVisible();
   } finally {
     await probe.stop();

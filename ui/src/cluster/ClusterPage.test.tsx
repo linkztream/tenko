@@ -98,6 +98,23 @@ function pressWithKeyboard(element: HTMLElement) {
   fireEvent.click(element);
 }
 
+// U3: the controller's live metrics moved here from the start page while the cluster is one node.
+describe("the controller's live metrics", () => {
+  it("are on the page for an administrator, the controller's tiles alone", async () => {
+    await openLoaded();
+    // A lazy part with its message pack: under a full parallel run it can take a while.
+    const tiles = await screen.findByTestId("metrics-tiles", undefined, { timeout: 5000 });
+    expect(within(tiles).getByTestId("metrics-group-controller")).toBeTruthy();
+    expect(within(tiles).queryByTestId("metrics-group-dns")).toBeNull();
+  });
+
+  it("are not shown to a viewer", async () => {
+    await signInWithRole("viewer");
+    await openLoaded();
+    expect(screen.queryByTestId("metrics-tiles")).toBeNull();
+  });
+});
+
 describe("the cluster page", () => {
   it("shows the summary of the seeded cluster", async () => {
     await openLoaded();

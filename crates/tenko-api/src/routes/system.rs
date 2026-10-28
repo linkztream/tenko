@@ -932,6 +932,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         uptime_seconds: platform.started.elapsed().as_secs(),
         node: NodeStatus {
             id: platform.node.id,
+            name: platform.node.name.clone(),
             roles: platform.node.roles.clone(),
             prepared: platform.node.prepared.clone(),
         },
@@ -1130,6 +1131,42 @@ mod tests {
             ),
             "the pretty-printed file"
         );
+    }
+
+    /// U3: the status names the machine when the node read its name, and leaves the member
+    /// out when it did not.
+    #[tokio::test]
+    async fn the_status_names_the_node_when_its_name_was_read() {
+        for name in [Some("tenko-01"), None] {
+            let state = crate::state::AppState::with_options(
+                Arc::new(tenko_store::MemStore::default()),
+                crate::state::StateOptions {
+                    node: NodeStatus {
+                        name: name.map(str::to_owned),
+                        roles: vec!["controller".to_owned()],
+                        ..NodeStatus::default()
+                    },
+                    ..crate::state::StateOptions::default()
+                },
+            );
+            let request = Request::get("/api/v1/system/status")
+                .body(Body::empty())
+                .expect("request");
+            let response = crate::api(state)
+                .0
+                .oneshot(request)
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = to_bytes(response.into_body(), 256 * 1024)
+                .await
+                .expect("body");
+            let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+            match name {
+                Some(name) => assert_eq!(json["node"]["name"], name),
+                None => assert!(json["node"].get("name").is_none(), "{json}"),
+            }
+        }
     }
 
     #[tokio::test]

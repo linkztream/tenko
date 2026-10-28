@@ -1,0 +1,14 @@
+/* The metric block (Metric.tsx): label 12 px in --ink-3, value 24 px, unit, one line of context.
+   A row of blocks shares the hairlines of its container: each block draws its own right and
+   bottom line and the container clips the outer ones. Token colors only. */
+.metric { display: flex; flex-direction: column; gap: var(--sp-1); min-inline-size: 0; padding: var(--sp-5) var(--sp-6); color: var(--ink); text-decoration: none; }
+a.metric:hover { background: var(--surface-2); text-decoration: none; }
+a.metric:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.metric-label { font-size: var(--fs-12); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric-value { font-size: var(--fs-24); font-weight: var(--fw-semibold); line-height: var(--lh-tight); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.metric-unit { font-size: var(--fs-12); font-weight: var(--fw-regular); color: var(--ink-3); }
+.metric-context { font-size: var(--fs-12); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric-context.act { color: var(--severity-act); font-weight: var(--fw-semibold); }
+/* A row of metric blocks (the health row): as many columns as fit, hairlines between them. */
+.metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); overflow: hidden; }
+.metric-row > .metric { margin-block: 0 -1px; margin-inline: 0 -1px; border-inline-end: 1px solid var(--line); border-block-end: 1px solid var(--line); }

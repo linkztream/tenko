@@ -2,7 +2,8 @@ import { render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { setLocale } from "../i18n";
-import { GIB, type MetricsDhcp, type MetricsDns, type MetricsHost, type MetricsSample, type MetricsSnapshot } from "./metrics";
+import { mockMetricsSnapshot } from "../api/mock/metrics-model";
+import { emptyHistory, GIB, HISTORY, LONG_HISTORY, pushSnapshot, type MetricsDhcp, type MetricsDns, type MetricsHost, type MetricsSample, type MetricsSnapshot } from "./metrics";
 import MetricsTiles from "./MetricsTiles";
 
 /** A stand-in for EventSource that the tests feed. */
@@ -797,5 +798,32 @@ describe("host tiles", () => {
     expect(tile("host-cpu").textContent).toContain("Värdens CPU");
     expect(tile("host-memory").textContent).toContain("12 av 16 GiB används");
     expect(tile("host-disk").textContent).toContain("Ledigt diskutrymme");
+  });
+});
+
+// U3: the start page shares its one stream with the tiles; the cluster page draws the controller's alone.
+describe("the tiles' stream and groups", () => {
+  it("draw a stream they are given without opening one of their own, and the newest minute of a longer history", async () => {
+    let history = emptyHistory();
+    const start = Date.parse("2026-10-14T12:00:00Z");
+    for (let i = 0; i < LONG_HISTORY; i++) {
+      history = pushSnapshot(history, mockMetricsSnapshot(i, { dns: true }, new Date(start + i * 1000)), LONG_HISTORY);
+    }
+    const shared = history;
+    render(() => <MetricsTiles live={{ history: () => shared, state: () => "live" }} />);
+    await screen.findByTestId("metrics-tile-dns-queries");
+    expect(FakeSource.all).toHaveLength(0);
+    expect(screen.getByTestId("metrics-tiles").dataset.state).toBe("live");
+    expect(Number(screen.getByTestId("metrics-sparkline-requests").getAttribute("data-points"))).toBe(HISTORY);
+  });
+
+  it("draw the controller's tiles alone with only=controller, whatever roles the sample has", async () => {
+    const shared = pushSnapshot(emptyHistory(), mockMetricsSnapshot(1, { dns: true, dhcp: true, host: true }));
+    render(() => <MetricsTiles only="controller" live={{ history: () => shared, state: () => "live" }} />);
+    await screen.findByTestId("metrics-group-controller");
+    expect(screen.getAllByTestId(/^metrics-tile-/)).toHaveLength(8);
+    expect(screen.queryByTestId("metrics-group-dns")).toBeNull();
+    expect(screen.queryByTestId("metrics-group-dhcp")).toBeNull();
+    expect(screen.queryByTestId("metrics-group-host")).toBeNull();
   });
 });

@@ -12932,6 +12932,12 @@ export interface components {
         /** @description Identity and roles of the node. */
         NodeStatus: {
             id?: components["schemas"]["NodeId"] | null;
+            /**
+             * @description U3: the host name of the machine as the node read it at start (`COMPUTERNAME`,
+             *     `HOSTNAME` or `/etc/hostname`, lower case, as a node registry name), which the start
+             *     page shows in its subtitle; absent when it could not be read.
+             */
+            name?: string | null;
             prepared?: components["schemas"]["PreparedRoles"] | null;
             /** @description Roles this node runs: `controller`, `dns`, `dhcp`, `probe`. */
             roles: string[];

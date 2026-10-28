@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { components } from "../generated/schema";
 import { recordAlarm, resetMockDb, subscribeEvents, type MockEvent } from "./db";
-import { FINDING_AREAS, mockFindingCounts, setMockFindingsExtra } from "./findings-store";
+import { FINDING_AREAS, mockFindingCounts, setMockFindingsExtra, setMockHealthFindings } from "./findings-store";
 import { ipamState } from "./ipam/api";
 import { jobStore } from "./job-store";
 import { RECONCILE_IDS, reconcileState } from "./reconcile-store";
@@ -119,6 +119,46 @@ describe("GET /findings/counts", () => {
     const res = await fetch(`${V}/findings/counts`);
     expect(res.status).toBe(401);
     expect(((await res.json()) as { code: string }).code).toBe("auth.unauthenticated");
+  });
+});
+
+// U3: the list the start page's strip reads, counted by the counts.
+describe("GET /findings", () => {
+  async function list(query = ""): Promise<S["Finding"][]> {
+    const res = await fetch(`${V}/findings${query}`, { headers: { accept: "application/json" } });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: S["Finding"][] }).items;
+  }
+
+  it("lists what the counts count, the findings to act on first, each with its default action", async () => {
+    const all = await list("?limit=1000");
+    const body = await counts();
+    expect(all.length).toBe(body.total.act + body.total.review + body.total.info);
+    const order = { act: 0, review: 1, info: 2 } as const;
+    expect(all.map((f) => order[f.severity])).toEqual([...all.map((f) => order[f.severity])].sort((a, b) => a - b));
+    const conflict = all.find((f) => f.kind === "conflict")!;
+    expect(conflict.severity).toBe("act");
+    expect(conflict.action).toBe("resolve");
+    expect(conflict.source).toBe("proposal");
+    const job = all.find((f) => f.kind === "job_waiting")!;
+    expect(job.action).toBe("open_manual_step");
+    expect(job.evidence.path).toBe(`/jobs/${job.evidence.id}`);
+  });
+
+  it("filters by severity, kind and source, comma separated or repeated, and caps the page", async () => {
+    const acts = await list("?severity=act");
+    expect(acts.length).toBe((await counts()).total.act);
+    expect(acts.every((f) => f.severity === "act")).toBe(true);
+    expect((await list("?kind=conflict,job_waiting")).every((f) => f.kind === "conflict" || f.kind === "job_waiting")).toBe(true);
+    expect((await list("?source=job&source=alarm")).every((f) => f.source === "job" || f.source === "alarm")).toBe(true);
+    expect(await list("?limit=1")).toHaveLength(1);
+  });
+
+  it("lists a health finding a test adds, and counts it", async () => {
+    setMockHealthFindings([{ code: "node.disk.low", severity: "act", area: "nodes", summary: "low", params: { available: "1", total: "2" } }]);
+    const health = await list("?source=health");
+    expect(health.map((f) => [f.code, f.severity, f.area, f.action])).toEqual([["node.disk.low", "act", "nodes", "open_status"]]);
+    expect((await counts()).areas.nodes.act).toBe(1);
   });
 });
 

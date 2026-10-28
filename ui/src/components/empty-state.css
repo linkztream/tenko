@@ -1,0 +1,3 @@
+/* The empty state (EmptyState.tsx): one sentence and one action on a quiet fill, never dashed. */
+.empty-state { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-5); border-radius: var(--r-2); background: var(--surface-2); color: var(--ink-2); }
+.empty-state > p { margin: 0; }

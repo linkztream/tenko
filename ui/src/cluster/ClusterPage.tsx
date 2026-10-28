@@ -3,8 +3,9 @@
 // promote a learner, remove a member, hand leadership over and add a controller (a join token,
 // shown once); everyone can check that the members hold the same data. Each change shows its
 // preview first (MemberDialogs.tsx) and the answer of the server replaces the table.
+// U3: administrators also see the controller's live metrics (MetricsTiles.tsx, controller tiles only).
 import { A, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, For, on, Show } from "solid-js";
+import { createEffect, createSignal, For, lazy, on, Show } from "solid-js";
 import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
 import { isAdmin } from "../auth/session";
@@ -13,14 +14,18 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
-import { formatDateTime, formatNumber, t } from "../i18n";
+import { formatDateTime, formatNumber, t, withPacks } from "../i18n";
 import { EnrolDialog } from "../nodes/EnrolDialog";
+import { trackLazyPart } from "../shell/lazyParts";
 import { listMembers, systemStatus } from "./api";
 import { DigestPanel } from "./DigestPanel";
 import { FormatPanel } from "./FormatPanel";
 import { PromoteDialog, RemoveDialog, StepDownDialog } from "./MemberDialogs";
 import { compatParts, contactText, healthWord, memberHealth, memberName, quorumWord, roleWord, sortMembers, toleranceText, voters, type ClusterView, type MemberHealth, type MemberView, type StepDown, CLUSTER_QUEUE_PATH } from "./model";
 import "./cluster.css";
+
+// U3: the controller's live metrics, a lazy part with its own chunk and message pack.
+const MetricsTiles = lazy(withPacks(["metrics"], () => trackLazyPart(import("../dashboard/MetricsTiles"))));
 
 const HEALTH_ICON: Record<MemberHealth, IconName> = {
   leader: "check",
@@ -267,6 +272,12 @@ export default function ClusterPage() {
               </section>
 
               <DigestPanel members={() => v().members} />
+
+              {/* U3: the controller's live metrics live here while the cluster is one node (the start
+                  page draws them again once it has more); administrators only, as the topic. */}
+              <Show when={admin()}>
+                <MetricsTiles only="controller" />
+              </Show>
 
               <Show when={promoting()} keyed>
                 {(member) => <PromoteDialog view={() => v()} member={member} onDone={(next) => promoted(member, next)} onClose={() => setPromoting(null)} />}

@@ -155,7 +155,8 @@ describe("shell", () => {
   it("has no accessibility violations on the dashboard and in the palette", async () => {
     const app = await renderApp("/", "signed-in");
     await screen.findByRole("navigation", { name: "Main" });
-    await screen.findByRole("heading", { name: /Dashboard/ });
+    // The start page is a lazy chunk with its packs; under a full parallel run it can take a while.
+    await screen.findByRole("heading", { name: /Dashboard/ }, { timeout: 5000 });
     expect(await axeViolations(app.container)).toEqual([]);
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
     const dialog = await screen.findByRole("dialog", { name: "Command palette" });

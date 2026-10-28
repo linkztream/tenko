@@ -152,8 +152,11 @@ test("IAM-01: a scoped operator gets no metrics, no connector, node or controlle
   await arrange(api);
 
   // The administrator's pages carry the actions the scoped operator loses.
+  // U3: the start page's metrics are for administrators; under Lab it draws the controller's
+  // metrics in its system panel, and its Hidden line never says "for administrators".
   await page.goto("/");
-  await expect(page.getByTestId("metrics-tiles")).toBeVisible();
+  await expect(page.getByTestId("dashboard-commit")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByTestId("hidden-line-item").and(page.locator("[data-item='admin']"))).toHaveCount(0);
   await page.goto("/connectors");
   await expect(page.getByTestId("connectors-create")).toBeVisible();
   await page.goto("/nodes");
@@ -168,7 +171,8 @@ test("IAM-01: a scoped operator gets no metrics, no connector, node or controlle
 
   await page.goto("/");
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
-  await expect(page.getByTestId("dashboard-waiting")).toBeVisible();
+  await expect(page.getByTestId("dashboard-attention")).toBeVisible();
+  await expect(page.getByTestId("hidden-line-item").and(page.locator("[data-item='admin']"))).toBeVisible();
   await expect(page.getByTestId("metrics-tiles")).toHaveCount(0);
 
   await page.goto("/connectors");

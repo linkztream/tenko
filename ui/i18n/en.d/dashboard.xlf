@@ -1,0 +1,532 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="dashboard-u3">
+      <unit id="dashboard.sub.uptime">
+        <notes><note category="description">Subtitle fact of the start page: how long the server has run, as people say it (17 h 17 min).</note></notes>
+        <segment><source>up {duration}</source></segment>
+      </unit>
+      <unit id="dashboard.sub.disk">
+        <notes><note category="description">Subtitle fact: free space on the data directory's file system of its total, in GiB.</note></notes>
+        <segment><source>{free} of {total} GiB free</source></segment>
+      </unit>
+      <unit id="dashboard.sub.store">
+        <notes><note category="description">Subtitle fact: the size of the store, with its unit (240 MB).</note></notes>
+        <segment><source>store {size}</source></segment>
+      </unit>
+      <unit id="dashboard.duration.days">
+        <segment><source>{days} d {hours} h</source></segment>
+      </unit>
+      <unit id="dashboard.duration.hours">
+        <segment><source>{hours} h {minutes} min</source></segment>
+      </unit>
+      <unit id="dashboard.duration.minutes">
+        <segment><source>{minutes} min</source></segment>
+      </unit>
+      <unit id="dashboard.duration.seconds">
+        <segment><source>{seconds} s</source></segment>
+      </unit>
+      <unit id="dashboard.attention.label">
+        <notes><note category="description">Accessible name of the needs-attention strip.</note></notes>
+        <segment><source>Needs attention</source></segment>
+      </unit>
+      <unit id="dashboard.attention.clear">
+        <segment><source>All clear</source></segment>
+      </unit>
+      <unit id="dashboard.attention.clear_text">
+        <segment><source>Every network is below its thresholds and no job waits for a person.</source></segment>
+      </unit>
+      <unit id="dashboard.attention.more">
+        <segment><source>{count, plural, one {# more to act on} other {# more to act on}}</source></segment>
+      </unit>
+      <unit id="dashboard.attention.review">
+        <notes><note category="description">The line of the findings to review under the strip.</note></notes>
+        <segment><source>{count, plural, one {# finding to review} other {# findings to review}}</source></segment>
+      </unit>
+      <unit id="dashboard.attention.review_in">
+        <notes><note category="description">Where findings to review are: a count and the area's name from the rail (3 in Discovery).</note></notes>
+        <segment><source>{count} in {area}</source></segment>
+      </unit>
+      <unit id="dashboard.attention.review_link">
+        <segment><source>Review findings</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.conflict">
+        <segment><source>Conflict</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.job_waiting">
+        <segment><source>Job waits for you</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.utilization">
+        <segment><source>Over the alarm</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.unknown_device">
+        <segment><source>Unknown device</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.orphaned_record">
+        <segment><source>Orphaned record</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.orphaned_address">
+        <segment><source>Orphaned address</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.ptr_mismatch">
+        <segment><source>PTR mismatch</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.intent_differs">
+        <segment><source>Intent and observation differ</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.outside_prefixes">
+        <segment><source>Outside every prefix</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.vlan">
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.host_name">
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.dns">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.ghost">
+        <segment><source>Ghost address</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.scan_artifact">
+        <segment><source>Scan artifact</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.health">
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="dashboard.finding.evidence.utilization">
+        <notes><note category="description">Evidence of a network over its alarm: the share in use and the warning threshold, both in percent.</note></notes>
+        <segment><source>{percent} % in use, alarm at {threshold} %</source></segment>
+      </unit>
+      <unit id="dashboard.finding.evidence.utilization_bare">
+        <segment><source>{percent} % in use</source></segment>
+      </unit>
+      <unit id="dashboard.finding.evidence.job_step">
+        <segment><source>Step {step} waits for a person</source></segment>
+      </unit>
+      <unit id="dashboard.finding.evidence.disk_low">
+        <notes><note category="description">Evidence of a low disk: the free space of the data directory's file system and its size, with units.</note></notes>
+        <segment><source>The data directory has {free} of {total} free</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.resolve">
+        <segment><source>Resolve conflict</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_job">
+        <segment><source>Open the job</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_prefix">
+        <segment><source>Open the prefix</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.review">
+        <segment><source>Review</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_host">
+        <segment><source>Open the host</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.decommission">
+        <segment><source>Decommission</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_nodes">
+        <segment><source>Open Nodes</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_connectors">
+        <segment><source>Open Connectors</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_dns">
+        <segment><source>Open DNS</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_dhcp">
+        <segment><source>Open DHCP</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_ipam">
+        <segment><source>Open IPAM</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_settings">
+        <segment><source>Open Settings</source></segment>
+      </unit>
+      <unit id="dashboard.health.label">
+        <notes><note category="description">Accessible name of the health row of metric blocks.</note></notes>
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="dashboard.health.v4">
+        <segment><source>IPv4 addresses</source></segment>
+      </unit>
+      <unit id="dashboard.health.v6">
+        <segment><source>IPv6 addresses</source></segment>
+      </unit>
+      <unit id="dashboard.health.in_use">
+        <notes><note category="description">Unit after a count of addresses (154 in use).</note></notes>
+        <segment><source>in use</source></segment>
+      </unit>
+      <unit id="dashboard.health.v4_context">
+        <notes><note category="description">Context of the IPv4 block: the networks and the share of the fullest in percent.</note></notes>
+        <segment><source>{count, plural, one {# prefix} other {# prefixes}} · fullest {fullest} %</source></segment>
+      </unit>
+      <unit id="dashboard.health.v6_context">
+        <segment><source>{count, plural, one {# prefix} other {# prefixes}}</source></segment>
+      </unit>
+      <unit id="dashboard.health.findings">
+        <segment><source>Findings</source></segment>
+      </unit>
+      <unit id="dashboard.health.to_act_on">
+        <notes><note category="description">Unit after the count of findings (1 to act on).</note></notes>
+        <segment><source>to act on</source></segment>
+      </unit>
+      <unit id="dashboard.health.findings_context">
+        <segment><source>{review} to review · {info} info</source></segment>
+      </unit>
+      <unit id="dashboard.health.jobs">
+        <segment><source>Jobs</source></segment>
+      </unit>
+      <unit id="dashboard.health.running">
+        <notes><note category="description">Unit after the count of jobs (0 running).</note></notes>
+        <segment><source>running</source></segment>
+      </unit>
+      <unit id="dashboard.health.jobs_context">
+        <segment><source>{count} waiting for you</source></segment>
+      </unit>
+      <unit id="dashboard.health.connectors">
+        <segment><source>Connectors</source></segment>
+      </unit>
+      <unit id="dashboard.health.healthy">
+        <notes><note category="description">Unit after "healthy of enabled" connectors (2/2 healthy).</note></notes>
+        <segment><source>healthy</source></segment>
+      </unit>
+      <unit id="dashboard.health.connectors_none">
+        <segment><source>None enabled</source></segment>
+      </unit>
+      <unit id="dashboard.health.connectors_more">
+        <notes><note category="description">The first connector names, then how many more.</note></notes>
+        <segment><source>{names} and {count} more</source></segment>
+      </unit>
+      <unit id="dashboard.health.alarms">
+        <segment><source>Utilization alarms</source></segment>
+      </unit>
+      <unit id="dashboard.health.alarms_none">
+        <segment><source>No prefix over its threshold</source></segment>
+      </unit>
+      <unit id="dashboard.health.alarms_critical">
+        <segment><source>{count} critical</source></segment>
+      </unit>
+      <unit id="dashboard.panel.healthy">
+        <notes><note category="description">The status of a service panel beside its check mark.</note></notes>
+        <segment><source>Healthy</source></segment>
+      </unit>
+      <unit id="dashboard.panel.attention">
+        <segment><source>{count, plural, one {# to act on} other {# to act on}}</source></segment>
+      </unit>
+      <unit id="dashboard.dns.title">
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="dashboard.dns.open">
+        <segment><source>Open DNS</source></segment>
+      </unit>
+      <unit id="dashboard.dns.qps">
+        <segment><source>queries/s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.latency">
+        <notes><note category="description">The median and 99th percentile answer times in milliseconds.</note></notes>
+        <segment><source>p50 {p50} ms · p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="dashboard.dns.idle">
+        <segment><source>No queries in the last second</source></segment>
+      </unit>
+      <unit id="dashboard.dns.chart_label">
+        <notes><note category="description">Accessible name of the queries chart: its window and its scale.</note></notes>
+        <segment><source>DNS queries per second over the last 5 minutes in 5-second bars, from 0 to {max}</source></segment>
+      </unit>
+      <unit id="dashboard.dns.scale_top">
+        <notes><note category="description">The top of the chart's axis, with its unit (5/s).</note></notes>
+        <segment><source>{value}/s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.window_start">
+        <notes><note category="description">The start of the chart's window, five minutes ago.</note></notes>
+        <segment><source>−5 min</source></segment>
+      </unit>
+      <unit id="dashboard.dns.window_end">
+        <segment><source>now</source></segment>
+      </unit>
+      <unit id="dashboard.dns.rcodes">
+        <segment><source>Response codes, last 30 s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.rate">
+        <segment><source>{rate}/s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.pair">
+        <notes><note category="description">Two rates per second side by side (upstream and sub-queries, NAKs and DECLINEs).</note></notes>
+        <segment><source>{first} · {second}/s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.triple">
+        <segment><source>{secure} · {insecure} · {bogus}/s</source></segment>
+      </unit>
+      <unit id="dashboard.dns.percent">
+        <segment><source>{value} %</source></segment>
+      </unit>
+      <unit id="dashboard.dns.cache">
+        <segment><source>Cache hit ratio</source></segment>
+      </unit>
+      <unit id="dashboard.dns.cache_note">
+        <segment><source>{entries} entries · {stale}/s stale</source></segment>
+      </unit>
+      <unit id="dashboard.dns.blocked">
+        <segment><source>Blocked</source></segment>
+      </unit>
+      <unit id="dashboard.dns.blocked_none">
+        <segment><source>No block list matched</source></segment>
+      </unit>
+      <unit id="dashboard.dns.blocked_top">
+        <notes><note category="description">The block list that blocked most, by its name.</note></notes>
+        <segment><source>Most by {list}</source></segment>
+      </unit>
+      <unit id="dashboard.dns.upstreams">
+        <segment><source>Upstream</source></segment>
+      </unit>
+      <unit id="dashboard.dns.upstreams_subqueries">
+        <segment><source>Upstream · sub-queries</source></segment>
+      </unit>
+      <unit id="dashboard.dns.upstreams_p99">
+        <segment><source>p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="dashboard.dns.dnssec">
+        <segment><source>DNSSEC secure · insecure · bogus</source></segment>
+      </unit>
+      <unit id="dashboard.dns.indeterminate">
+        <segment><source>{rate}/s indeterminate</source></segment>
+      </unit>
+      <unit id="dashboard.dns.encrypted">
+        <segment><source>Encrypted (DoT, DoH)</source></segment>
+      </unit>
+      <unit id="dashboard.dns.encrypted_value">
+        <notes><note category="description">Open DoT and DoH connections.</note></notes>
+        <segment><source>{dot} · {doh}</source></segment>
+      </unit>
+      <unit id="dashboard.dns.not_served">
+        <segment><source>Not served</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.title">
+        <segment><source>DHCP</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.open">
+        <segment><source>Open DHCP</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.empty">
+        <segment><source>No scope has a pool yet, so Tenko answers no DHCP requests.</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.create_scope">
+        <segment><source>Create a scope</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.active">
+        <segment><source>active leases</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.scopes">
+        <segment><source>{count, plural, one {# scope with a pool} other {# scopes with a pool}}</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.leases">
+        <segment><source>Leases granted</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.ack">
+        <segment><source>REQUEST to ACK p99 {p99} ms</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.ack_none">
+        <segment><source>No ACK in the last second</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.naks">
+        <segment><source>NAKs · DECLINEs</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.abandoned">
+        <segment><source>{count} held back after a conflict</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.ddns">
+        <segment><source>DDNS written · removed</source></segment>
+      </unit>
+      <unit id="dashboard.dhcp.ddns_note">
+        <segment><source>{refused}/s refused · {failed}/s failed · {queue} waiting</source></segment>
+      </unit>
+      <unit id="dashboard.system.title">
+        <segment><source>System</source></segment>
+      </unit>
+      <unit id="dashboard.system.open_cluster">
+        <segment><source>Open Cluster</source></segment>
+      </unit>
+      <unit id="dashboard.system.cpu">
+        <segment><source>Host CPU</source></segment>
+      </unit>
+      <unit id="dashboard.system.cpu_context">
+        <segment><source>busy since the last reading</source></segment>
+      </unit>
+      <unit id="dashboard.system.memory">
+        <segment><source>Host memory</source></segment>
+      </unit>
+      <unit id="dashboard.system.memory_context">
+        <segment><source>{share} % in use</source></segment>
+      </unit>
+      <unit id="dashboard.system.commit">
+        <segment><source>Commit p99</source></segment>
+      </unit>
+      <unit id="dashboard.system.ms">
+        <segment><source>ms</source></segment>
+      </unit>
+      <unit id="dashboard.system.commit_context">
+        <segment><source>of the store's writes</source></segment>
+      </unit>
+      <unit id="dashboard.system.replication">
+        <segment><source>Replication lag</source></segment>
+      </unit>
+      <unit id="dashboard.system.entries">
+        <segment><source>entries</source></segment>
+      </unit>
+      <unit id="dashboard.system.replication_context">
+        <segment><source>the highest, term {term}</source></segment>
+      </unit>
+      <unit id="dashboard.system.buffers">
+        <segment><source>Node buffers</source></segment>
+      </unit>
+      <unit id="dashboard.system.batches">
+        <segment><source>batches</source></segment>
+      </unit>
+      <unit id="dashboard.system.buffers_context">
+        <segment><source>{count, plural, =0 {no node connected} one {# node connected} other {# nodes connected}}</source></segment>
+      </unit>
+      <unit id="dashboard.system.clients">
+        <segment><source>Live clients</source></segment>
+      </unit>
+      <unit id="dashboard.system.clients_context">
+        <segment><source>on the event stream</source></segment>
+      </unit>
+      <unit id="dashboard.system.nodes">
+        <segment><source>Nodes</source></segment>
+      </unit>
+      <unit id="dashboard.system.connected">
+        <notes><note category="description">Unit after "connected of enrolled" nodes (1/2 connected).</note></notes>
+        <segment><source>connected</source></segment>
+      </unit>
+      <unit id="dashboard.system.nodes_context">
+        <segment><source>{mismatched, plural, =0 {every node shares a protocol} one {# refused for its protocol} other {# refused for their protocol}}</source></segment>
+      </unit>
+      <unit id="dashboard.system.nodes_none">
+        <segment><source>No cluster port</source></segment>
+      </unit>
+      <unit id="dashboard.security.title">
+        <segment><source>Security</source></segment>
+      </unit>
+      <unit id="dashboard.security.window">
+        <segment><source>last 24 h</source></segment>
+      </unit>
+      <unit id="dashboard.security.events">
+        <segment><source>Security events</source></segment>
+      </unit>
+      <unit id="dashboard.security.events_context">
+        <segment><source>sign-ins and access denied or failed</source></segment>
+      </unit>
+      <unit id="dashboard.security.records">
+        <segment><source>Audit records</source></segment>
+      </unit>
+      <unit id="dashboard.security.records_context">
+        <segment><source>{people} by people · {system} by Tenko</source></segment>
+      </unit>
+      <unit id="dashboard.security.more">
+        <notes><note category="description">A count that is at least this many (1000+).</note></notes>
+        <segment><source>{count}+</source></segment>
+      </unit>
+      <unit id="dashboard.security.none">
+        <segment><source>No sign-in or access was denied or failed in the last 24 hours.</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.title">
+        <segment><source>Fullest prefixes</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.alarm_at">
+        <segment><source>alarm at {percent} %</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.choose">
+        <segment><source>Tenant and VRF</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.all_vrfs">
+        <segment><source>All ({count})</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.all">
+        <segment><source>{count, plural, one {The # prefix} other {All # prefixes}}</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.vrf">
+        <notes><note category="description">A tenant and a VRF by name (default / default).</note></notes>
+        <segment><source>{tenant} / {vrf}</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.no_tenant">
+        <segment><source>No tenant</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.totals">
+        <notes><note category="description">The in-use totals and network counts of a VRF per family; the counts of addresses carry SI suffixes.</note></notes>
+        <segment><source>IPv4 {v4} in use · {v4_count, plural, one {# prefix} other {# prefixes}} · IPv6 {v6} in use · {v6_count, plural, one {# prefix} other {# prefixes}}</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.empty">
+        <segment><source>No network in this VRF yet.</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.percent">
+        <segment><source>{percent} %</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.meter_title">
+        <segment><source>{used} of {capacity} addresses in use</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.warning">
+        <segment><source>over its warning threshold</source></segment>
+      </unit>
+      <unit id="dashboard.prefixes.critical">
+        <segment><source>over its critical threshold</source></segment>
+      </unit>
+      <unit id="dashboard.changes.title">
+        <segment><source>Recent changes</source></segment>
+      </unit>
+      <unit id="dashboard.changes.system">
+        <notes><note category="description">The switch that shows or leaves out what Tenko changed itself.</note></notes>
+        <segment><source>System activity</source></segment>
+      </unit>
+      <unit id="dashboard.changes.all">
+        <segment><source>Audit log</source></segment>
+      </unit>
+      <unit id="dashboard.changes.count">
+        <notes><note category="description">How many times in a row the same change was made (×2).</note></notes>
+        <segment><source>×{count}</source></segment>
+      </unit>
+      <unit id="dashboard.changes.none">
+        <segment><source>No change recorded yet.</source></segment>
+      </unit>
+      <unit id="dashboard.changes.none_people">
+        <segment><source>No change by a person among the recent ones. Switch on System activity to see what Tenko did.</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.label">
+        <segment><source>Hidden:</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.show">
+        <segment><source>Show all metrics</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.hide">
+        <segment><source>Show fewer metrics</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.host">
+        <segment><source>host CPU and memory (not read on this host)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.host_cpu">
+        <segment><source>host CPU (not read on this host)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.host_memory">
+        <segment><source>host memory (not read on this host)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.controller">
+        <segment><source>commit time, replication, node buffers and live clients (1 node, see Cluster)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.operations">
+        <notes><note category="description">The Jobs and Connectors blocks are not in the profile's set; profile is its name (Home).</note></notes>
+        <segment><source>jobs and connectors (not in the {profile} set)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.dns">
+        <segment><source>DNS (no node runs the dns role)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.dhcp">
+        <segment><source>DHCP (no node runs the dhcp role)</source></segment>
+      </unit>
+      <unit id="dashboard.hidden.admin">
+        <segment><source>DNS, DHCP and system metrics (for administrators)</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -358,3 +358,42 @@ async fn without_the_service_the_routes_answer_unavailable() {
         .expect("response");
     assert_eq!(response.status().as_u16(), 503);
 }
+
+/// U3: low disk is a finding to act on (the plan's "Low disk ... Act now"), while another
+/// warning of the status stays one to review and the counts say so.
+#[tokio::test]
+async fn low_disk_is_a_health_finding_to_act_on() {
+    let lab = Lab::new().await;
+    let warning = |code: &str| crate::dto::system::StatusWarning {
+        code: code.to_owned(),
+        detail: format!("{code} for the test"),
+        params: std::collections::BTreeMap::new(),
+    };
+    lab.findings.set_health(
+        &[
+            warning(crate::routes::system::DISK_LOW),
+            warning("sys.tls.certificate_expiring"),
+        ],
+        Timestamp::now(),
+    );
+    let (status, page) = lab.get("/findings?source=health").await;
+    assert_eq!(status, 200);
+    let items = page["items"].as_array().expect("items");
+    let level = |code: &str| {
+        items
+            .iter()
+            .find(|item| item["code"] == code)
+            .map(|item| item["severity"].clone())
+    };
+    assert_eq!(level("node.disk.low"), Some(Value::from("act")));
+    assert_eq!(
+        level("sys.tls.certificate_expiring"),
+        Some(Value::from("review"))
+    );
+    assert_eq!(
+        crate::findings::health_level(crate::routes::system::DISK_LOW),
+        tenko_ipam::findings::FindingLevel::Act
+    );
+    let (_, counts) = lab.get("/findings/counts").await;
+    assert_eq!(counts["areas"]["nodes"]["act"], 1);
+}

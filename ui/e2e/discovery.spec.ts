@@ -132,14 +132,17 @@ test("the inbox lists the open proposals, a person approves one and rejects anot
   const [approved, rejected, left] = hosts as [Proposal, Proposal, Proposal];
   const first = sampleHost(0);
 
-  // The dashboard tile counts the open proposals and links to the inbox.
+  // The review line of the dashboard's needs-attention strip (U3) counts the findings to review,
+  // the open proposals among them, and links to the inbox filtered by that severity.
   await page.goto("/");
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
   const tile = page.getByTestId("dashboard-proposals");
-  await expect(tile.getByTestId("dashboard-proposals-link")).toHaveText(String((await proposals(api, { state: "open" })).length));
+  await expect(tile).toHaveAttribute("data-count", String((await findingCounts(api)).total.review));
+  expect((await findingCounts(api)).areas.discovery.review).toBe((await proposals(api, { state: "open" })).length);
   await tile.getByTestId("dashboard-proposals-link").click();
   await expect(page.getByTestId("page-discovery")).toBeVisible();
-  await expect(page).toHaveURL(/\/discovery$/);
+  await expect(page).toHaveURL(/\/discovery\?severity=review$/);
+  await page.goto("/discovery");
 
   // The inbox lists the open ones, newest first, with kind and severity.
   const grid = page.getByTestId("grid-proposals");
@@ -283,9 +286,10 @@ test("the inbox lists the open proposals, a person approves one and rejects anot
   await expect(grid.getByTestId("row")).toHaveCount(2);
   await expect(withId(grid, "row", rejected.id)).toHaveCount(0);
 
-  // The dashboard tile follows: two proposals are left.
+  // The dashboard's review line follows: two proposals are left.
   await page.goto("/");
-  await expect(page.getByTestId("dashboard-proposals-link")).toHaveText("2");
+  await expect(page.getByTestId("dashboard-proposals")).toHaveAttribute("data-count", String((await findingCounts(api)).total.review));
+  expect((await findingCounts(api)).areas.discovery.review).toBe(2);
 });
 
 test("the observations list the facts of two sources and open the picture of a subject and of the host made from it", async ({
@@ -678,6 +682,10 @@ test("the rail badge and the status bar count the open proposals as findings to 
   const badge = page.locator('.rail a[data-area="discovery"] [data-testid="rail-badge"]');
   await expect(badge).toHaveText("4");
   await expect(badge).toHaveAttribute("data-level", "review");
+  // U3: the strip of the start page counts the same findings to review, from the seeded proposals.
+  const strip = page.getByTestId("dashboard-proposals");
+  await expect(strip).toHaveAttribute("data-count", String((await findingCounts(api)).total.review));
+  await expect(strip).toContainText(`4 in Discovery`);
   await expect(page.locator('.rail a[data-area="discovery"]')).toHaveAttribute("aria-label", "Discovery: 4 findings to review");
   const review = page.getByTestId("status-findings-review");
   // The status bar counts every area's findings to review, as the API does: one number on every surface.
@@ -687,6 +695,7 @@ test("the rail badge and the status bar count the open proposals as findings to 
   // A rejection by someone else (here: the API) changes both numbers on the open page.
   await api.post(`/proposals/${hosts[0]!.id}/reject`, { reason: "A lab host, not part of the plan" });
   await expect(badge).toHaveText("3");
+  await expect(strip).toContainText(`3 in Discovery`);
   await expect(review).toHaveText(await reviewText());
   expect((await proposals(api, { state: "open" })).length).toBe(3);
 

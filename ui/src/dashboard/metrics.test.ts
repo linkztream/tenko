@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { mockMetricsSnapshot } from "../api/mock/metrics-model";
 import {
   emptyHistory,
   GIB,
+  HISTORY,
   HOST_TILES,
+  LONG_HISTORY,
   memoryPercent,
   memoryUsed,
+  niceCeiling,
   pushSnapshot,
+  RATE_BUCKETS,
+  rateBuckets,
   ratioBuckets,
   RCODES,
   RECURSION_TILES,
   tileValue,
   VALIDATION_STATES,
+  windowMean,
   windowRate,
   windowRatio,
   type MetricsDns,
@@ -302,5 +309,123 @@ describe("tileValue of the host tiles", () => {
   it("never reports a negative memory use or divides by a zero total", () => {
     expect(memoryUsed({ memory_total: 4, memory_available: 9 })).toBe(0);
     expect(memoryPercent({ memory_total: 0, memory_available: 0 })).toBeNull();
+  });
+});
+
+describe("U3: the long history of the cluster", () => {
+  const snapshot = (second: number) => mockMetricsSnapshot(second, { dns: true }, new Date(T0 + second * 1000));
+
+  it("keeps the samples asked for in the cluster series while each controller keeps a minute", () => {
+    let h = emptyHistory();
+    for (let s = 0; s < LONG_HISTORY + 20; s++) h = pushSnapshot(h, snapshot(s), LONG_HISTORY);
+    expect(h.cluster).toHaveLength(LONG_HISTORY);
+    expect(h.nodes.get(1)).toHaveLength(HISTORY);
+    // The oldest kept sample is the one LONG_HISTORY back from the newest.
+    expect(h.cluster[0]?.at).toBe(clock(20));
+    expect(h.nodes.get(1)?.[0]?.at).toBe(clock(LONG_HISTORY + 20 - HISTORY));
+  });
+
+  it("keeps a minute of the cluster by default", () => {
+    let h = emptyHistory();
+    for (let s = 0; s < HISTORY + 5; s++) h = pushSnapshot(h, snapshot(s));
+    expect(h.cluster).toHaveLength(HISTORY);
+  });
+});
+
+describe("U3: rateBuckets", () => {
+  const qps = (d: MetricsDns) => d.queries_per_second;
+  const at = (entries: readonly (readonly [number, MetricsDns | null])[]) => rateBuckets(historyAt(entries), qps);
+
+  it("is all empty without samples, one bucket per five seconds of five minutes", () => {
+    const out = rateBuckets(emptyHistory(), qps);
+    expect(RATE_BUCKETS).toBe(60);
+    expect(out).toHaveLength(RATE_BUCKETS);
+    expect(out.every((v) => v === null)).toBe(true);
+  });
+
+  it("gives the mean rate of the samples of each bucket, the newest bucket last", () => {
+    // Bucket 0 (seconds 0 to 4): 2 and 4 queries per second; bucket 2 (10 to 14): 10 per second.
+    const out = at([[0, dns(2, 0)], [1, dns(4, 0)], [11, dns(10, 0)]]);
+    expect(out[RATE_BUCKETS - 1]).toBe(10);
+    expect(out[RATE_BUCKETS - 2]).toBeNull();
+    expect(out[RATE_BUCKETS - 3]).toBe(3);
+    expect(out.slice(0, RATE_BUCKETS - 3).every((v) => v === null)).toBe(true);
+  });
+
+  it("weighs a sample by the seconds it spans", () => {
+    const slow = { ...sample(dns(2, 0), 0), interval_ms: 3000 };
+    const fast = { ...sample(dns(6, 0), 3), interval_ms: 1000 };
+    const h = [slow, fast].reduce((acc, s) => pushSnapshot(acc, { nodes: [], cluster: s }), emptyHistory());
+    // (2 * 3 + 6 * 1) over 4 seconds.
+    expect(rateBuckets(h, qps)[RATE_BUCKETS - 1]).toBe(3);
+  });
+
+  it("changes only the last value when a sample falls inside the newest bucket", () => {
+    const before = at([[0, dns(2, 0)], [6, dns(4, 0)]]);
+    const after = at([[0, dns(2, 0)], [6, dns(4, 0)], [8, dns(8, 0)]]);
+    expect(after.slice(0, RATE_BUCKETS - 1)).toEqual(before.slice(0, RATE_BUCKETS - 1));
+    expect(before[RATE_BUCKETS - 1]).toBe(4);
+    expect(after[RATE_BUCKETS - 1]).toBe(6);
+  });
+
+  it("shifts the values one step left when a sample of the next bucket arrives", () => {
+    const before = at([[0, dns(2, 0)], [6, dns(4, 0)]]);
+    const after = at([[0, dns(2, 0)], [6, dns(4, 0)], [11, dns(9, 0)]]);
+    expect(after.slice(0, RATE_BUCKETS - 1)).toEqual(before.slice(1));
+    expect(after[RATE_BUCKETS - 1]).toBe(9);
+    expect(after[RATE_BUCKETS - 2]).toBe(4);
+    expect(after[RATE_BUCKETS - 3]).toBe(2);
+  });
+
+  it("adds nothing for a sample without the dns part or without an interval", () => {
+    const none = { ...sample(dns(5, 0), 6), interval_ms: 0 };
+    const h = pushSnapshot(historyAt([[0, dns(2, 0)], [1, null]]), { nodes: [], cluster: none });
+    const out = rateBuckets(h, qps);
+    // The newest sample is in bucket 1 and adds nothing there; the bucket 0 has the one sample with dns.
+    expect(out[RATE_BUCKETS - 1]).toBeNull();
+    expect(out[RATE_BUCKETS - 2]).toBe(2);
+    expect(out.slice(0, RATE_BUCKETS - 2).every((v) => v === null)).toBe(true);
+  });
+
+  it("leaves samples older than the buckets it draws out", () => {
+    const out = rateBuckets(historyAt([[0, dns(2, 0)], [40, dns(4, 0)]]), qps, 5, 3);
+    expect(out).toEqual([null, null, 4]);
+  });
+});
+
+describe("U3: windowMean", () => {
+  const sparse = historyOf(Array.from({ length: 12 }, (_, s) => (s === 2 ? dns(0, 0, 1, 0) : s === 7 ? dns(0, 0, 0, 1) : dns(0, 0))));
+
+  it("agrees with windowRate for a DNS rate", () => {
+    expect(windowMean(sparse, (s) => s.dns?.rcodes.noerror)).toBe(windowRate(sparse, (d) => d.rcodes.noerror));
+    expect(windowMean(sparse, (s) => s.dns?.rcodes.nxdomain)).toBeCloseTo(0.1, 10);
+  });
+
+  it("is absent when no sample has the part", () => {
+    expect(windowMean(emptyHistory(), (s) => s.dns?.queries_per_second)).toBeNull();
+    expect(windowMean(historyOf([null, null]), (s) => s.dns?.queries_per_second)).toBeNull();
+    expect(windowMean(sparse, (s) => s.dhcp?.leases_per_second)).toBeNull();
+    expect(windowMean(sparse, () => null)).toBeNull();
+  });
+});
+
+describe("U3: niceCeiling", () => {
+  it("gives 1 for nothing, a negative number and a number that is not finite", () => {
+    for (const value of [0, -4, Number.NaN, Number.POSITIVE_INFINITY]) expect(niceCeiling(value)).toBe(1);
+  });
+
+  it("rounds up to the next of 1, 2, 2.5 and 5 times a power of ten", () => {
+    const cases: [number, number][] = [
+      [0.3, 0.5],
+      [1, 1],
+      [2.5, 2.5],
+      [3, 5],
+      [4, 5],
+      [7, 10],
+      [12, 20],
+      [22, 25],
+      [30000, 50000],
+    ];
+    for (const [max, top] of cases) expect(niceCeiling(max)).toBe(top);
   });
 });

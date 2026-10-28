@@ -632,7 +632,7 @@ A finding is anything Tenko noticed that a person may need to decide on (U1 of t
 | View row `ghost` (intent wins, or the lease for a dynamic host) | `ghost` | info; review once unseen for `ghost_review_after_secs` | none; `decommission` | ipam |
 | View row `rogue` whose discovered-host proposal was decided | `unknown_device` | info | none | ipam |
 | A sighting of a network's edge address (section 4.8) | `scan_artifact` | info | none | ipam |
-| Health condition: error / warning / informational (the severities of `GET /system/diagnostics`) | `health` | act / review / info | `open_status` | by its code: `dns.*` dns, `dhcp.*` dhcp, `ipam.*` ipam, `connect.*` connectors, `cluster.*` and the store nodes, the rest settings |
+| Health condition: error / warning / informational (the severities of `GET /system/diagnostics`); low disk (`node.disk.low`) is to act on although its diagnostics severity is a warning (U3) | `health` | act / review / info | `open_status` | by its code: `dns.*` dns, `dhcp.*` dhcp, `ipam.*` ipam, `connect.*` connectors, `cluster.*` and the store nodes, the rest settings |
 
 Rules that keep the counts honest:
 

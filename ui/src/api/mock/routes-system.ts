@@ -164,7 +164,10 @@ const systemStatus = route("get", "/api/v1/system/status", () => {
     version: MOCK_VERSION,
     started_at: iso(db.startedAt),
     uptime_seconds: Math.max(0, Math.floor((now - db.startedAt) / 1000)),
-    node: { id: 1, roles: [...db.installation.roles] },
+    // U3: the machine's name (the first label of the installation's host name) for the start
+    // page's subtitle, and the file system of the data directory (as the metrics' host part).
+    node: { id: 1, ...(db.installation.host_name ? { name: db.installation.host_name.split(".")[0] } : {}), roles: [...db.installation.roles] },
+    host: { disk_total: 512 * 1024 ** 3, disk_available: 180 * 1024 ** 3, sampled_at: iso(now) },
     store: {
       role: "leader",
       leader: 1,

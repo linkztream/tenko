@@ -55640,6 +55640,13 @@
               }
             ]
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "U3: the host name of the machine as the node read it at start (`COMPUTERNAME`,\n`HOSTNAME` or `/etc/hostname`, lower case, as a node registry name), which the start\npage shows in its subtitle; absent when it could not be read."
+          },
           "prepared": {
             "oneOf": [
               {

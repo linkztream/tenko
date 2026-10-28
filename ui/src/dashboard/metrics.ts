@@ -16,6 +16,11 @@ export type MetricsHost = S["MetricsHost"];
 export const SNAPSHOT_KIND = "metrics.snapshot";
 /** Samples kept per series: one minute. */
 export const HISTORY = 60;
+/**
+ * U3: samples of the cluster kept by the start page, five minutes, for the queries chart of the
+ * DNS panel (60 buckets of 5 seconds). The tiles still draw the newest minute of them.
+ */
+export const LONG_HISTORY = 300;
 
 /** The samples of the last minute, oldest first: the cluster's and each controller's. */
 export interface MetricsHistory {
@@ -28,19 +33,23 @@ export function emptyHistory(): MetricsHistory {
   return { cluster: [], nodes: new Map(), latest: null };
 }
 
-function keep<T>(list: readonly T[], item: T): T[] {
+function keep<T>(list: readonly T[], item: T, limit = HISTORY): T[] {
   const next = [...list, item];
-  return next.length > HISTORY ? next.slice(next.length - HISTORY) : next;
+  return next.length > limit ? next.slice(next.length - limit) : next;
 }
 
-/** The history with one more snapshot; a controller that left the snapshot is dropped. */
-export function pushSnapshot(history: MetricsHistory, snapshot: MetricsSnapshot): MetricsHistory {
+/**
+ * The history with one more snapshot; a controller that left the snapshot is dropped. The
+ * cluster's series keeps `clusterLimit` samples (a minute, or `LONG_HISTORY` on the start page),
+ * each controller's a minute.
+ */
+export function pushSnapshot(history: MetricsHistory, snapshot: MetricsSnapshot, clusterLimit = HISTORY): MetricsHistory {
   const nodes = new Map<number, readonly MetricsSample[]>();
   for (const sample of snapshot.nodes) {
     if (sample.node == null) continue;
     nodes.set(sample.node, keep(history.nodes.get(sample.node) ?? [], sample));
   }
-  return { cluster: keep(history.cluster, snapshot.cluster), nodes, latest: snapshot };
+  return { cluster: keep(history.cluster, snapshot.cluster, clusterLimit), nodes, latest: snapshot };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -351,12 +360,22 @@ export function windowRatio(history: MetricsHistory, tile: RatioTile): number | 
  * the mean over 30 seconds is the rate the bars and the headline are made of. Null without a `dns` sample.
  */
 export function windowRate(history: MetricsHistory, pick: (dns: MetricsDns) => number): number | null {
+  return windowMean(history, (sample) => (sample.dns ? pick(sample.dns) : null));
+}
+
+/**
+ * U3: the mean per second of any rate of a sample over the window of `windowRate` (the DHCP panel's
+ * leases, NAKs and DDNS); a sample whose `pick` is null (it lacks the part) adds nothing. Null
+ * without a sample that has it.
+ */
+export function windowMean(history: MetricsHistory, pick: (sample: MetricsSample) => number | null | undefined): number | null {
   let count = 0;
   let seconds = 0;
   for (const sample of windowSamples(history)) {
-    if (!sample.dns || !(sample.interval_ms > 0)) continue;
+    const value = pick(sample);
+    if (value == null || !(sample.interval_ms > 0)) continue;
     const dt = sample.interval_ms / 1000;
-    count += pick(sample.dns) * dt;
+    count += value * dt;
     seconds += dt;
   }
   return seconds > 0 ? count / seconds : null;
@@ -388,4 +407,54 @@ export function ratioBuckets(
   }
   for (const [bucket, samples] of groups) out[buckets - 1 - (newest - bucket)] = sharedRatio(tile, samples);
   return out;
+}
+
+// U3: the queries chart of the DNS panel: the mean rate per 5-second bucket over five minutes,
+// with the same fixed bucket edges as the ratio tiles, so a bar is born on the right and walks
+// left one step per bucket, and the scale of its axis.
+
+/** Bars of the queries chart: five minutes of 5-second buckets, the one in progress last. */
+export const RATE_BUCKETS = LONG_HISTORY / BUCKET_SECONDS;
+
+/**
+ * The mean per second of a DNS rate per bucket, oldest first, always `buckets` long: the counts
+ * (rate times the sample's interval) of the samples of a bucket over their seconds. The buckets
+ * have the fixed edges of `ratioBuckets`; the last is the bucket of the newest sample, still
+ * filling. A bucket without a `dns` sample is null.
+ */
+export function rateBuckets(
+  history: MetricsHistory,
+  pick: (dns: MetricsDns) => number,
+  bucketSeconds = BUCKET_SECONDS,
+  buckets = RATE_BUCKETS,
+): (number | null)[] {
+  const placed = placeSamples(history.cluster, bucketSeconds);
+  const newest = newestBucket(placed);
+  const out: (number | null)[] = Array.from({ length: buckets }, () => null);
+  if (newest === null) return out;
+  const count = new Map<number, number>();
+  const seconds = new Map<number, number>();
+  for (const { bucket, sample } of placed) {
+    if (bucket > newest || bucket <= newest - buckets) continue;
+    if (!sample.dns || !(sample.interval_ms > 0)) continue;
+    const dt = sample.interval_ms / 1000;
+    count.set(bucket, (count.get(bucket) ?? 0) + pick(sample.dns) * dt);
+    seconds.set(bucket, (seconds.get(bucket) ?? 0) + dt);
+  }
+  for (const [bucket, s] of seconds) out[buckets - 1 - (newest - bucket)] = (count.get(bucket) ?? 0) / s;
+  return out;
+}
+
+/**
+ * The top of a chart's axis for values up to `max`: the next of 1, 2, 2.5 and 5 times a power of
+ * ten at or above it, so the axis reads in round numbers; 1 for an empty or quiet chart.
+ */
+export function niceCeiling(max: number): number {
+  if (!(max > 0) || !Number.isFinite(max)) return 1;
+  const power = 10 ** Math.floor(Math.log10(max));
+  for (const step of [1, 2, 2.5, 5, 10]) {
+    const top = step * power;
+    if (top >= max * (1 - 1e-9)) return Number(top.toPrecision(12));
+  }
+  return 10 * power;
 }

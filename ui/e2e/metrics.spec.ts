@@ -2,7 +2,11 @@
 // "Dashboard") against the real server.
 //
 // Scenarios:
-// - An administrator sees the tiles below the start page's tiles; a sample of the `metrics`
+// U3: the start page draws the tiles of every metric behind "Show all metrics" of its Hidden
+// line, which holds for the session; every scenario here opens the page with it switched on
+// (`showAllMetrics`), so the tiles are drawn as before, below the page's blocks.
+//
+// - An administrator sees the tiles below the start page's blocks; a sample of the `metrics`
 //   topic arrives within three seconds and every tile carries a number; the Raft tile shows
 //   this controller as the leader of a single-member cluster; the next samples keep coming.
 // - A viewer does not see the tiles.
@@ -36,6 +40,21 @@ import { signInAsViewer } from "./support/accounts";
 import { expect, test } from "./support/fixtures";
 import { expectRendered } from "./support/i18n";
 import { dhcpPart, dnsPart, fakeMetricsStream, refuseMetricsStream, sample, type MetricsSnapshot } from "./support/metrics-mock";
+
+/** Switches "Show all metrics" on for the session before the page loads (U3). */
+async function showAllMetrics(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      sessionStorage.setItem("tenko.dashboard.show-all", "1");
+    } catch {
+      // A document without session storage (about:blank) has nothing to switch.
+    }
+  });
+}
+
+test.beforeEach(async ({ page }) => {
+  await showAllMetrics(page);
+});
 
 const TILES = ["requests", "commit", "store", "raft", "jobs", "ingest", "sse", "nodes"];
 const DNS_TILES = ["dns-queries", "dns-cache", "dns-answers", "dns-blocked", "dns-upstreams", "dns-encrypted"];
@@ -89,7 +108,8 @@ test("a viewer does not see the live metrics", async ({ page, api, signedIn }) =
   await signInAsViewer(api);
   await page.goto("/");
   await expect(page.getByTestId("page-dashboard")).toBeVisible();
-  await expect(page.getByTestId("dashboard-waiting")).toBeVisible();
+  await expect(page.getByTestId("dashboard-attention")).toBeVisible();
+  await expect(page.getByTestId("hidden-line-item").and(page.locator("[data-item='admin']"))).toBeVisible();
   await expect(page.getByTestId("metrics-tiles")).toHaveCount(0);
 });
 
@@ -110,16 +130,20 @@ test("the tiles hold nothing to focus and pass axe", async ({ page, signedIn }) 
   await openWithSample(page);
   expect(await axeViolations(page, "[data-testid='metrics-tiles']")).toEqual([]);
   expect(await page.getByTestId("metrics-tiles").locator("svg[aria-hidden='true']").count()).toBe(TILES.length + HOST_TILES.length);
-  // Tab through the page: the focus never lands inside the tiles, and it reaches the links of
-  // the cards below them.
-  await page.getByTestId("page-dashboard").click({ position: { x: 1, y: 1 } });
+  // Tab on from the Hidden line's toggle, the last control before the tiles (U3): the focus never
+  // lands inside the tiles, and it reaches what comes after them.
+  await page.getByTestId("hidden-line-toggle").focus();
   let reachedBelow = false;
   for (let i = 0; i < 60 && !reachedBelow; i += 1) {
     await page.keyboard.press("Tab");
-    const where = await page.evaluate(() => ({
-      inTiles: !!document.activeElement?.closest("[data-testid='metrics-tiles']"),
-      below: !!document.activeElement?.closest("[data-testid='dashboard-waiting'], [data-testid='dashboard-audit']"),
-    }));
+    const where = await page.evaluate(() => {
+      const tiles = document.querySelector("[data-testid='metrics-tiles']");
+      const active = document.activeElement;
+      return {
+        inTiles: !!active?.closest("[data-testid='metrics-tiles']"),
+        below: !!tiles && !!active && active !== document.body && (tiles.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      };
+    });
     expect(where.inTiles).toBe(false);
     reachedBelow = where.below;
   }
@@ -288,7 +312,7 @@ test("OPS-20: while no sample arrives the tiles say they are waiting and show no
   for (const name of TILES) await expect(page.getByTestId(`metrics-tile-${name}`)).not.toHaveAttribute("data-value", /.+/);
   await expect(page.getByTestId("metrics-raft-node")).toHaveCount(0);
   // The rest of the start page does not wait for them.
-  await expect(page.getByTestId("dashboard-waiting")).toBeVisible();
+  await expect(page.getByTestId("dashboard-attention")).toBeVisible();
 });
 
 test.describe("in Swedish", () => {

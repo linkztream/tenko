@@ -1,356 +1,257 @@
-// The start page (decision 13): the node at a glance, the utilization of the networks per
-// tenant and VRF, the active utilization alarms, the jobs that wait for a person, the open
-// proposals, the connector health and the connected nodes (WP2.9), the live metrics for
-// administrators (WP3.5b), the most recent audit records, and the quick actions (claim the next
-// free address, a new prefix, an import).
-// Every number that can grow is an SI number with the exact value as tooltip; utilization is a
-// bar, never a gauge.
+// The start page (decision 13; U3, docs/plans/ui-plan.md section 5.1). It answers "Is anything
+// wrong, and what?" in five seconds: five blocks in reading order inside the page header.
+//
+// 1. The header: the title, one subtitle line of facts (the node, its uptime as people say it,
+//    the free disk of its total, the store's size, the version) and the primary actions (an import,
+//    a new prefix, "Claim next free address" with its N key).
+// 2. The needs-attention strip (Attention.tsx): the findings to act on with their default action,
+//    one line for those to review, or one "All clear" line.
+// 3. The health row (HealthRow.tsx): metric blocks for the addresses in use, the findings, the jobs
+//    and connectors (Standard and Hardened) and the utilization alarms, each a link.
+// 4. The service panels for DNS and DHCP (Services.tsx, for administrators, from the page's one
+//    `metrics` stream), the system panel (SystemPanel.tsx: the host's CPU and memory when read, the
+//    controller's metrics under Lab or with more than one node, the nodes connected), and under
+//    Hardened the security panel (SecurityPanel.tsx).
+// 5. The fullest prefixes per tenant and VRF (Prefixes.tsx) beside the recent changes (Changes.tsx).
+//
+// At the foot, the Hidden line names the metrics the page does not draw and why; "Show all
+// metrics" draws every block and the live tiles of every metric (MetricsTiles.tsx, a lazy part)
+// for the session. The profile chooses the set (ui-plan section 6, model.ts).
 import { A, useNavigate } from "@solidjs/router";
-import { createMemo, createSignal, For, lazy, Show } from "solid-js";
+import { createMemo, createSignal, lazy, onCleanup, onMount, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
 import { fetchAll } from "../api/paginate";
-import type { AuditRecord, JobSummary, Range, Tenant, TreeNode, TreeResponse, Vrf } from "../api/types";
+import type { Range, TreeNode, TreeResponse } from "../api/types";
 import { paths } from "../app/paths";
-import { isAdmin } from "../auth/session";
-import { Addr } from "../components/Addr";
+import { isAdmin, session } from "../auth/session";
+import { HiddenLine, type HiddenItem } from "../components/HiddenLine";
 import { Icon } from "../components/Icon";
 import { Kbd } from "../components/Kbd";
-import { PageHead } from "../components/PageHead";
-import { AuditAction } from "../audit/actionLabel";
-import { PrincipalLabel } from "../components/Principal";
-import { Si } from "../components/Si";
-import { AlarmFlag, Count, TimeAgo, UtilizationMeter } from "../grid/cells";
-import { formatDuration, t, withPacks, type MessageKey } from "../i18n";
-import { isAlarmEvent } from "../ipam/alarms";
-import { allocationWords } from "../ipam/words";
+import { PageHeader } from "../components/PageHeader";
+import { formatNumber, t, withPacks } from "../i18n";
 import { MoveDialog } from "../ipam/move/MoveDialog";
 import { NextFreeAddressDialog } from "../ipam/prefix/NextFreeDialogs";
 import { PrefixForm } from "../ipam/prefix/PrefixForm";
 import { useScope } from "../ipam/scope";
-import { JobStateChip } from "../jobs/StateChip";
-import { jobTitle } from "../jobs/words";
+import { formatBytes } from "../nodes/format";
+import { isCluster } from "../shell/cluster";
+import { useFindingCounts } from "../shell/findings";
+import { isTyping } from "../shell/keyboard";
+import { trackLazyPart } from "../shell/lazyParts";
 import { createShellStatus } from "../shell/status";
-import { storeRoleLabel } from "../shell/TopBar";
 import { moduleRunning } from "../updates/modules";
-import { DISK_LOW_WARNING } from "./metrics";
-import { OperationsTiles } from "./OperationsTiles";
+import { Attention } from "./Attention";
+import { Changes } from "./Changes";
+import { HealthRow } from "./HealthRow";
+import { createLiveMetrics, type LiveMetrics } from "./liveMetrics";
+import { DISK_LOW_WARNING, GIB, LONG_HISTORY } from "./metrics";
+import { dashboardSet, hiddenKeys, profileOf, type HiddenKey } from "./model";
+import { Prefixes } from "./Prefixes";
+import { SecurityPanel } from "./SecurityPanel";
+import { DhcpPanel, DnsPanel } from "./Services";
+import { SystemPanel, useClusterSummary } from "./SystemPanel";
+import { useUtilization } from "./utilization";
 import "./dashboard.css";
 
 // The notices of the updates area: a newer release, and a module change that waits for a restart.
-const UpdateCard = lazy(() => import("../updates/UpdateCard"));
-const ModulesNotice = lazy(() => import("../updates/ModulesNotice"));
-// The live metrics, with their own chunk and message pack; only administrators read the topic.
-const MetricsTiles = lazy(withPacks(["metrics"], () => import("./MetricsTiles")));
+const UpdateCard = lazy(() => trackLazyPart(import("../updates/UpdateCard")));
+const ModulesNotice = lazy(() => trackLazyPart(import("../updates/ModulesNotice")));
+// Every metric as a tile, behind "Show all metrics", with its own chunk and message pack.
+const MetricsTiles = lazy(withPacks(["metrics"], () => trackLazyPart(import("./MetricsTiles"))));
 
-const ROLE: Record<string, MessageKey> = {
-  controller: "node.role.controller",
-  dns: "node.role.dns",
-  dhcp: "node.role.dhcp",
-  probe: "node.role.probe",
-};
+/** "Show all metrics" holds for the session, per tab. */
+const SHOW_ALL_KEY = "tenko.dashboard.show-all";
 
-/** Networks shown per VRF; the busiest first. */
-const NETWORKS_SHOWN = 8;
-
-interface VrfUse {
-  vrf: Vrf;
-  tenant: Tenant | undefined;
-  networks: TreeNode[];
-  used: bigint;
-  capacity: bigint;
-}
-
-function big(text: string): bigint {
+function readShowAll(): boolean {
   try {
-    return BigInt(text);
+    return sessionStorage.getItem(SHOW_ALL_KEY) === "1";
   } catch {
-    return 0n;
+    return false;
   }
 }
 
-/** Utilization of every VRF from its prefix tree (the networks only, so nothing counts twice). */
-function useUtilization() {
-  return createLiveQuery<VrfUse[]>({
-    topics: ["ipam", "system"],
-    relevant: (e) => isAlarmEvent(e) || e.objects.some((o) => o.kind === "prefix" || o.kind === "address" || o.kind === "range"),
-    debounceMs: 500,
-    fetch: async (signal) => {
-      // Without the IPAM module there are no networks to count.
-      if (!moduleRunning("ipam")) return { value: [] as VrfUse[] };
-      const [tenants, vrfs] = await Promise.all([
-        fetchAll<Tenant>("/api/v1/tenants", { signal }),
-        fetchAll<Vrf>("/api/v1/vrfs", { signal }),
-      ]);
-      const trees: TreeResponse[] = await Promise.all(
-        vrfs.items.map((vrf) => api.get("/api/v1/prefixes/tree", { query: { vrf: vrf.id }, signal })),
-      );
-      const value = vrfs.items.map((vrf, i) => {
-        const nodes = trees[i]?.nodes ?? [];
-        const networks = nodes.filter((n) => n.role === "network");
-        // The meter's definition (IPAM-10) over the top-level prefixes: a supernet already sums
-        // its tree, so every address is counted once, also one directly in a supernet.
-        const top = nodes.filter((n) => n.depth === 0);
-        const used = top.reduce((sum, n) => sum + big(n.utilization.in_use), 0n);
-        const capacity = top.reduce((sum, n) => sum + big(n.utilization.capacity), 0n);
-        return {
-          vrf,
-          tenant: tenants.items.find((tn) => tn.id === vrf.tenant),
-          networks: [...networks].sort((a, b) => b.utilization.percent - a.utilization.percent),
-          used,
-          capacity,
-        };
-      });
-      return { value, revision: vrfs.revision as number };
-    },
-  });
+function writeShowAll(value: boolean): void {
+  try {
+    if (value) sessionStorage.setItem(SHOW_ALL_KEY, "1");
+    else sessionStorage.removeItem(SHOW_ALL_KEY);
+  } catch {
+    // Without session storage the choice holds for the page only.
+  }
 }
 
-/** One decimal percent of two big counts. */
-function percentOf(used: bigint, capacity: bigint): number {
-  if (capacity === 0n) return 0;
-  return Number((used * 1000n) / capacity) / 10;
+/** A duration as people say it: "17 h 17 min", "3 d 4 h", "5 min", "40 s". */
+export function humanDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return t("dashboard.duration.days", { days: d, hours: h });
+  if (h > 0) return t("dashboard.duration.hours", { hours: h, minutes: m });
+  if (m > 0) return t("dashboard.duration.minutes", { minutes: m });
+  return t("dashboard.duration.seconds", { seconds: s });
+}
+
+/** GiB with no decimal from ten up, one below. */
+function gib(bytes: number): string {
+  const value = bytes / GIB;
+  return formatNumber(value, { maximumFractionDigits: value < 10 ? 1 : 0 });
+}
+
+/** Opens the page's `metrics` stream while it is mounted and hands it to the page. */
+function MetricsSource(props: { onLive: (live: LiveMetrics | undefined) => void }) {
+  const live = createLiveMetrics(undefined, LONG_HISTORY);
+  onMount(() => props.onLive(live));
+  onCleanup(() => props.onLive(undefined));
+  return null;
 }
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const status = createShellStatus();
   const scope = useScope();
+  const counts = useFindingCounts();
   const s = () => status.system();
   const use = useUtilization();
-  const vrfs = () => use.value.latest ?? [];
-  const alarms = createMemo(() =>
-    vrfs()
-      .flatMap((v) => v.networks.filter((n) => n.level !== "normal").map((node) => ({ vrf: v.vrf, node })))
-      .sort((a, b) => (a.node.level === b.node.level ? b.node.utilization.percent - a.node.utilization.percent : a.node.level === "critical" ? -1 : 1)),
-  );
+  const vrfs = () => use.latest();
+  const admin = () => isAdmin();
+  const profile = () => profileOf(session()?.profile);
 
-  const waiting = createLiveQuery<JobSummary[]>({
-    topics: ["jobs"],
-    fetch: async (signal) => {
-      const page = await api.get("/api/v1/jobs", { query: { state: ["waiting", "rolling_back"], limit: 100 }, signal });
-      return { value: page.items.filter((j) => (j.manual_steps ?? []).length > 0), revision: page.revision };
-    },
-  });
-  const audit = createLiveQuery<AuditRecord[]>({
-    topics: ["audit"],
-    fetch: async (signal) => {
-      const page = await api.get("/api/v1/audit", { query: { order: "desc", limit: 8 }, signal });
-      return { value: page.items, revision: page.revision };
-    },
-  });
+  const [live, setLive] = createSignal<LiveMetrics>();
+  const [showAll, setShowAll] = createSignal(readShowAll());
+  // More than one node: a second controller, or an enrolled node (followed on the `cluster` topic).
+  const clusterNodes = useClusterSummary(s);
+  const multiNode = () => isCluster(s()) || (clusterNodes()?.nodes ?? 0) > 0;
+  const set = createMemo(() => dashboardSet(profile(), multiNode(), showAll()));
+  const sample = () => live()?.history().latest?.cluster ?? null;
+
+  const hiddenText = (key: HiddenKey): string => {
+    switch (key) {
+      case "host":
+        return t("dashboard.hidden.host");
+      case "host-cpu":
+        return t("dashboard.hidden.host_cpu");
+      case "host-memory":
+        return t("dashboard.hidden.host_memory");
+      case "controller":
+        return t("dashboard.hidden.controller");
+      case "operations":
+        return t("dashboard.hidden.operations", { profile: t(`profile.${profile()}.name`) });
+      case "dns":
+        return t("dashboard.hidden.dns");
+      case "dhcp":
+        return t("dashboard.hidden.dhcp");
+      case "admin":
+        return t("dashboard.hidden.admin");
+    }
+  };
+  const hidden = createMemo((): HiddenItem[] => hiddenKeys({ set: set(), admin: admin(), sample: sample() }).map((key) => ({ key, text: hiddenText(key) })));
+
+  const facts = () => {
+    const status = s();
+    if (!status) return "";
+    const parts: string[] = [];
+    if (status.node.name) parts.push(status.node.name);
+    parts.push(t("dashboard.sub.uptime", { duration: humanDuration(status.uptime_seconds) }));
+    const host = status.host;
+    if (host?.disk_available != null && host.disk_total != null) {
+      parts.push(t("dashboard.sub.disk", { free: gib(host.disk_available), total: gib(host.disk_total) }));
+    }
+    parts.push(t("dashboard.sub.store", { size: formatBytes(status.store.disk_bytes ?? status.store.data_bytes) }));
+    parts.push(status.version);
+    return parts.join(" · ");
+  };
+  const diskLow = () => s()?.warnings.some((w) => w.code === DISK_LOW_WARNING) ?? false;
 
   const [action, setAction] = createSignal<"claim" | "claim_in" | "prefix" | null>(null);
   const [claimIn, setClaimIn] = createSignal<TreeNode | null>(null);
   const defaultTree = (): TreeResponse | undefined => {
-    const v = vrfs().find((x) => x.vrf.id === scope.vrf()?.id);
+    const v = (vrfs() ?? []).find((x) => x.vrf.id === scope.vrf()?.id);
     return v ? { nodes: v.networks, revision: 0, vrf: v.vrf.id } : undefined;
   };
+  const mayClaim = () => moduleRunning("ipam") && !!scope.vrf();
+
+  // N claims the next free address, as on a network's page (the keyboard sheet lists it).
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isTyping(e) || e.ctrlKey || e.metaKey || e.altKey || action()) return;
+      if (document.querySelector("[aria-modal='true']")) return;
+      if (e.key === "n" && mayClaim()) {
+        e.preventDefault();
+        setAction("claim");
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
 
   return (
     <div class="page dashboard" data-testid="page-dashboard">
-      <PageHead
+      <PageHeader
         title={t("shell.nav.dashboard")}
-        sub={t("shell.dashboard.sub")}
+        sub={<span data-testid="dashboard-facts" data-disk-low={diskLow() ? "true" : undefined}>{facts()}</span>}
         actions={
           <Show when={moduleRunning("ipam")}>
-            <button type="button" class="btn" data-testid="dashboard-claim" onClick={() => setAction("claim")} disabled={!scope.vrf()}>
-              <Icon name="plus" />
-              {t("dashboard.action.claim")}
-            </button>
-            <button type="button" class="btn" data-testid="dashboard-new-prefix" onClick={() => setAction("prefix")} disabled={!scope.vrf()}>
-              <Icon name="layers" />
-              {t("dashboard.action.prefix")}
-            </button>
             <A class="btn" href={paths.imports()} data-testid="dashboard-import">
-              <Icon name="export" />
               {t("dashboard.action.import")}
             </A>
+            <button type="button" class="btn" data-testid="dashboard-new-prefix" onClick={() => setAction("prefix")} disabled={!scope.vrf()}>
+              {t("dashboard.action.prefix")}
+            </button>
+            <button type="button" class="btn primary" data-testid="dashboard-claim" onClick={() => setAction("claim")} disabled={!scope.vrf()}>
+              <Icon name="plus" />
+              {t("dashboard.action.claim")}
+              <Kbd keys={["N"]} />
+            </button>
           </Show>
         }
       />
       <div class="page-body wide dash-body">
         <ModulesNotice warnings={s()?.warnings} />
-        <div class="tiles">
-          <section class="card tile">
-            <h2>{t("shell.dashboard.node")}</h2>
-            <div class="tile-value">{s() ? storeRoleLabel(s()?.store.role) : "–"}</div>
-            <p class="muted">
-              <For each={s()?.node.roles ?? []} fallback={t("shell.dashboard.no_roles")}>
-                {(r, i) => (
-                  <>
-                    {i() > 0 ? ", " : ""}
-                    {ROLE[r] ? t(ROLE[r]!) : r}
-                  </>
-                )}
-              </For>
-            </p>
-          </section>
-          <Show when={moduleRunning("ipam")}>
-          <section class="card tile">
-            <h2>{t("dashboard.tile.addresses")}</h2>
-            <div class="tile-value">
-              <Count value={vrfs().reduce((n, v) => n + v.used, 0n)} />
-            </div>
-            <p class="muted">
-              {t("dashboard.tile.addresses_of")} <Count value={vrfs().reduce((n, v) => n + v.capacity, 0n)} />
-            </p>
-          </section>
-          </Show>
-          <Show when={moduleRunning("ipam")}>
-          <section class="card tile">
-            <h2>{t("dashboard.tile.alarms")}</h2>
-            <div class="tile-value">
-              <Si value={alarms().length} />
-            </div>
-            <p class="muted">{t("dashboard.tile.alarms_hint", { critical: alarms().filter((a) => a.node.level === "critical").length })}</p>
-          </section>
-          </Show>
-          <section class="card tile">
-            <h2>{t("shell.dashboard.jobs")}</h2>
-            <div class="tile-value">
-              <Si value={status.jobs() ? status.jobs()!.running + status.jobs()!.waiting : null} />
-            </div>
-            <p class="muted">{t("dashboard.tile.waiting_for_you", { count: waiting.value.latest?.length ?? 0 })}</p>
-          </section>
-          <OperationsTiles status={s()} />
-          <section class="card tile">
-            <h2>{t("shell.dashboard.uptime")}</h2>
-            <div class="tile-value">{s() ? formatDuration(Math.floor((s()?.uptime_seconds ?? 0) / 60) * 60) : "–"}</div>
-            <p class="muted">{s() ? t("shell.status.version", { version: s()!.version }) : ""}</p>
-          </section>
-        </div>
-
-        <Show when={isAdmin()}>
-          <MetricsTiles diskLow={s()?.warnings.some((w) => w.code === DISK_LOW_WARNING) ?? false} />
+        <UpdateCard />
+        <Show when={admin()}>
+          <MetricsSource onLive={setLive} />
         </Show>
 
-        <div class="dash-grid">
-          <UpdateCard />
-          <Show when={moduleRunning("ipam")}>
-          <section class="card dash-card" id="alarms" aria-labelledby="dash-alarms" data-testid="dashboard-alarms">
-            <h2 id="dash-alarms">{t("dashboard.alarms.title")}</h2>
-            <Show when={alarms().length > 0} fallback={<p class="muted">{t("dashboard.alarms.none")}</p>}>
-              <ul class="dash-list">
-                <For each={alarms()}>
-                  {(a) => (
-                    <li data-key={a.node.cidr} data-level={a.node.level}>
-                      <AlarmFlag level={a.node.level} />
-                      <A href={paths.prefix(a.node.cidr, a.vrf.id)}>
-                        <Addr value={a.node.cidr} />
-                      </A>
-                      <span class="muted">{a.node.description ?? a.vrf.name}</span>
-                      <UtilizationMeter
-                        percent={a.node.utilization.percent}
-                        level={a.node.level}
-                        used={a.node.utilization.in_use}
-                        capacity={a.node.utilization.capacity}
-                        note={allocationWords(a.node)}
-                      />
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
-          </section>
-          </Show>
+        <Attention counts={counts()} />
 
-          <section class="card dash-card" aria-labelledby="dash-waiting" data-testid="dashboard-waiting">
-            <h2 id="dash-waiting">
-              {t("dashboard.waiting.title")}
-              <A class="aside" href={paths.jobs({ state: "waiting" })}>
-                {t("dashboard.waiting.all")}
-              </A>
-            </h2>
-            <Show when={(waiting.value.latest?.length ?? 0) > 0} fallback={<p class="muted">{t("dashboard.waiting.none")}</p>}>
-              <ul class="dash-list">
-                <For each={waiting.value.latest ?? []}>
-                  {(job) => (
-                    <li data-id={job.id}>
-                      <JobStateChip state={job.state} done={job.steps_done} total={job.step_count} />
-                      <A href={paths.job(job.id)}>{jobTitle(job)}</A>
-                      <span class="muted">{t("dashboard.waiting.step", { step: (job.current_step ?? 0) + 1, total: job.step_count })}</span>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
-          </section>
+        <HealthRow vrfs={vrfs()} counts={counts()} running={status.jobs()?.running ?? null} operations={set().operations} />
 
-          <section class="card dash-card" aria-labelledby="dash-audit" data-testid="dashboard-audit">
-            <h2 id="dash-audit">
-              {t("dashboard.audit.title")}
-              <A class="aside" href={paths.audit()}>
-                {t("dashboard.audit.all")}
-              </A>
-            </h2>
-            <Show when={(audit.value.latest?.length ?? 0) > 0} fallback={<p class="muted">{t("dashboard.audit.none")}</p>}>
-              <ul class="dash-list">
-                <For each={audit.value.latest ?? []}>
-                  {(r) => (
-                    <li data-seq={r.seq}>
-                      <A href={paths.auditRecord(r.seq)}>
-                        <AuditAction draft={r.draft} />
-                      </A>
-                      <PrincipalLabel principal={r.principal} />
-                      <TimeAgo at={r.at} />
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
-          </section>
+        <Show when={live()}>
+          {(l) => (
+            <div class="dash-row">
+              <DnsPanel live={l()} counts={counts()} />
+              <DhcpPanel live={l()} counts={counts()} />
+            </div>
+          )}
+        </Show>
+
+        <SystemPanel live={live()} nodes={clusterNodes()} controller={set().controller} cluster={set().cluster} />
+
+        <Show when={set().security}>
+          <SecurityPanel />
+        </Show>
+
+        <div class="dash-row">
+          <Show when={moduleRunning("ipam") && vrfs()}>{(list) => <Prefixes vrfs={list()} />}</Show>
+          <Changes systemDefault={set().systemActivity} />
         </div>
 
-        <Show when={moduleRunning("ipam")}>
-        <section class="dash-use" aria-labelledby="dash-use" data-testid="dashboard-utilization">
-          <h2 id="dash-use">{t("dashboard.use.title")}</h2>
-          <div class="dash-vrfs">
-            <For each={vrfs()}>
-              {(v) => (
-                <section class="card dash-card" aria-label={t("dashboard.use.vrf", { tenant: v.tenant?.name ?? "", vrf: v.vrf.name })} data-vrf={v.vrf.id}>
-                  <h3>
-                    <span>{t("dashboard.use.vrf", { tenant: v.tenant?.name ?? "", vrf: v.vrf.name })}</span>
-                    <span class="aside">
-                      <Count value={v.used} /> {t("dashboard.use.of")} <Count value={v.capacity} />
-                    </span>
-                  </h3>
-                  <UtilizationMeter percent={percentOf(v.used, v.capacity)} used={String(v.used)} capacity={String(v.capacity)} />
-                  <Show when={v.networks.length > 0} fallback={<p class="muted">{t("dashboard.use.empty")}</p>}>
-                    <table class="plain dash-nets" aria-label={t("dashboard.use.networks")}>
-                      <tbody>
-                        <For each={v.networks.slice(0, NETWORKS_SHOWN)}>
-                          {(n) => (
-                            <tr data-key={n.cidr}>
-                              <td>
-                                <A href={paths.prefix(n.cidr, v.vrf.id)}>
-                                  <Addr value={n.cidr} />
-                                </A>
-                              </td>
-                              <td class="muted">{n.description ?? ""}</td>
-                              <td class="r">
-                                <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.in_use} capacity={n.utilization.capacity} />
-                              </td>
-                            </tr>
-                          )}
-                        </For>
-                      </tbody>
-                    </table>
-                    <Show when={v.networks.length > NETWORKS_SHOWN}>
-                      <A href={paths.ipam()} class="muted">
-                        {t("dashboard.use.more", { count: v.networks.length - NETWORKS_SHOWN })}
-                      </A>
-                    </Show>
-                  </Show>
-                </section>
-              )}
-            </For>
-          </div>
-        </section>
+        <HiddenLine
+          label={t("dashboard.hidden.label")}
+          items={hidden()}
+          show={t("dashboard.hidden.show")}
+          hide={t("dashboard.hidden.hide")}
+          shown={showAll()}
+          onToggle={(value) => {
+            setShowAll(value);
+            writeShowAll(value);
+          }}
+        />
+
+        <Show when={showAll() && live()}>
+          {(l) => <MetricsTiles live={l()} diskLow={diskLow()} />}
         </Show>
-        <p class="muted">
-          <Kbd keys={["Ctrl", "K"]} /> {t("dashboard.palette_hint")}
-        </p>
       </div>
 
       <Show when={action() === "claim"}>

@@ -8,6 +8,9 @@
 // controller with the role (`mockHistory` of support/metrics-mock.ts), so every DNS tile has its
 // chart and its lists. What it proves is the shape of the tiles and the grid; the figures come
 // from the server's registry and are covered by metrics.spec.ts and the Rust tests.
+//
+// U3: the tiles are drawn behind "Show all metrics" of the start page's Hidden line, which holds
+// for the session; the scenarios switch it on before the page loads.
 
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
@@ -77,6 +80,13 @@ async function checkLayout(page: Page, testInfo: TestInfo, width: number): Promi
   await page.setViewportSize({ width, height: 1600 });
   // WP8.7: a controller with the `dhcp` role too, so the DHCP group is checked as well, and the host part.
   await fakeMetricsStream(page, mockHistory(30, true, true, true));
+  await page.addInitScript(() => {
+    try {
+      sessionStorage.setItem("tenko.dashboard.show-all", "1");
+    } catch {
+      // A document without session storage (about:blank) has nothing to switch.
+    }
+  });
   await page.goto("/");
   const root = page.getByTestId("metrics-tiles");
   await expect(root).toHaveAttribute("data-controllers", "1");

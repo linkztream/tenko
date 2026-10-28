@@ -220,7 +220,10 @@ async fn fetch_root(controller: &str) -> Result<Option<String>, Failure> {
     Ok(Some(body))
 }
 
-fn host_name() -> Option<String> {
+/// The machine's host name as a node registry name: lower case, every character other than a
+/// letter, a digit or a hyphen replaced by a hyphen; `None` when it cannot be read or is not a
+/// valid name. The enrolment proposes it, and the start page shows it (U3).
+pub(crate) fn host_name() -> Option<String> {
     let name = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
         .ok()

@@ -119,13 +119,26 @@ async function expectGone(api: Api, id: string): Promise<void> {
   expect((error as ApiError).code).toBe("connect.instance.not_found");
 }
 
+// U3: the Connectors block of the start page belongs to the Standard set; the e2e server runs the
+// Lab profile, so the dashboards of these scenarios open with "Show all metrics" switched on for the
+// session, which draws every block whatever the profile.
+test.beforeEach(async ({ page }) => {
+  await page.context().addInitScript(() => {
+    try {
+      sessionStorage.setItem("tenko.dashboard.show-all", "1");
+    } catch {
+      // A document without session storage (about:blank) has nothing to switch.
+    }
+  });
+});
+
 /**
- * The tile of the dashboard shows `healthy` in its number, and its hint counts `enabled`
- * instances of which `enabled - healthy` need a look (the words around the numbers are
- * translated; the hint carries the numbers as attributes).
+ * The connectors block of the dashboard's health row (U3) shows `healthy/enabled`, with `healthy`
+ * as its value, and its hint counts `enabled` instances of which `enabled - healthy` need a look
+ * (the words are translated; the block and the hint carry the numbers as attributes).
  */
 async function expectTile(tile: Locator, healthy: number, enabled: number): Promise<void> {
-  await expect(tile.getByTestId("dashboard-connectors-link")).toHaveText(String(healthy));
+  await expect(tile).toHaveAttribute("data-value", String(healthy));
   const hint = tile.getByTestId("dashboard-connectors-hint");
   await expect(hint).toHaveAttribute("data-total", String(enabled));
   await expect(hint).toHaveAttribute("data-failing", String(enabled - healthy));
