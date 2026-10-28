@@ -35,7 +35,7 @@ export type LanguageList = S["LanguageList"];
 export type PackPrincipal = S["Principal"];
 
 /** The largest pack the server accepts (2 MiB). */
-export const MAX_PACK_BYTES = 2 * 1024 * 1024;
+export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 /** The longest display name of a pack, in characters. */
 const MAX_NAME_CHARS = 64;
 

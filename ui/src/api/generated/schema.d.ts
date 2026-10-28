@@ -13780,7 +13780,7 @@ export interface components {
         PackUploadForm: {
             /**
              * Format: binary
-             * @description The XLIFF 2.0 document, at most 2 MiB; its `trgLang` names the language.
+             * @description The XLIFF 2.0 document, at most 8 MiB; its `trgLang` names the language.
              */
             file: string;
         };
@@ -35567,7 +35567,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Over 2 MiB (`i18n.pack.too_large`) */
+            /** @description Over 8 MiB (`i18n.pack.too_large`) */
             413: {
                 headers: {
                     [name: string]: unknown;

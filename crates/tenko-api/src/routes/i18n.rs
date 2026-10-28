@@ -259,7 +259,7 @@ fn malformed(detail: impl Into<String>) -> ApiError {
         (status = 400, description = "No file, several files or a malformed multipart body (`i18n.upload.empty`, `i18n.upload.malformed`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed (`auth.forbidden`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 413, description = "Over 2 MiB (`i18n.pack.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Over 8 MiB (`i18n.pack.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Not a usable pack (`i18n.pack.invalid`, the problems in `errors`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No embedded UI to check against (`i18n.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     ),

@@ -29,5 +29,5 @@ pub mod template;
 pub mod validate;
 pub mod xliff;
 
-/// The largest pack, in bytes (2 MiB).
-pub const MAX_PACK_BYTES: usize = 2 * 1024 * 1024;
+/// The largest pack, in bytes (8 MiB; the product's own catalogue passed 2 MiB in 0.0.9).
+pub const MAX_PACK_BYTES: usize = 8 * 1024 * 1024;

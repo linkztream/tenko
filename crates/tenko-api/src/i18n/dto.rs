@@ -144,7 +144,7 @@ pub struct PackUpload {
 /// The multipart form of `POST /i18n/packs`.
 #[derive(ToSchema)]
 pub struct PackUploadForm {
-    /// The XLIFF 2.0 document, at most 2 MiB; its `trgLang` names the language.
+    /// The XLIFF 2.0 document, at most 8 MiB; its `trgLang` names the language.
     #[schema(value_type = String, format = Binary)]
     pub file: Vec<u8>,
 }

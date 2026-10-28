@@ -17773,7 +17773,7 @@
             }
           },
           "413": {
-            "description": "Over 2 MiB (`i18n.pack.too_large`)",
+            "description": "Over 8 MiB (`i18n.pack.too_large`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -58031,7 +58031,7 @@
           "file": {
             "type": "string",
             "format": "binary",
-            "description": "The XLIFF 2.0 document, at most 2 MiB; its `trgLang` names the language."
+            "description": "The XLIFF 2.0 document, at most 8 MiB; its `trgLang` names the language."
           }
         }
       },

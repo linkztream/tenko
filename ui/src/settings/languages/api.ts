@@ -56,5 +56,5 @@ export function templateUrl(tag?: string): string {
   return tag ? `${base}?language=${encodeURIComponent(tag)}` : base;
 }
 
-/** The largest pack the server accepts (2 MiB). */
-export const MAX_PACK_BYTES = 2 * 1024 * 1024;
+/** The largest pack the server accepts (8 MiB). */
+export const MAX_PACK_BYTES = 8 * 1024 * 1024;

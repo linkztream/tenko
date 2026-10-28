@@ -156,7 +156,7 @@ Problems of the document refuse the pack. Problems of a unit are errors in the r
 
 | Code | Severity | Where | Meaning |
 |---|---|---|---|
-| `i18n.pack.too_large` | refusal | Document | More than 2 MiB |
+| `i18n.pack.too_large` | refusal | Document | More than 8 MiB |
 | `i18n.pack.xml` | refusal | Document | Not UTF-8, not well formed, a DOCTYPE, a forbidden reference or character, nesting over 32 |
 | `i18n.pack.root` | refusal | Document | The root is not `<xliff>` in the XLIFF 2.0 namespace |
 | `i18n.pack.version` | refusal | Document | `version` is missing or not `2.0` |
@@ -180,7 +180,7 @@ A target may leave out an argument that the English text has; it may not add one
 
 ### 3.3 What makes an upload refused
 
-A refusal answers 422 `i18n.pack.invalid` with one entry in `errors` per problem. Each entry has `field` (the unit key, or `file` for a problem of the document), `code`, and the params `detail` and `line` (when known). The params of the problem itself carry `reason` (the code of the first problem) and `tag` (when the document names one). All problems of the document-level checks (`srcLang`, `trgLang`, tag, metadata) are reported together; a malformed XML document reports its first problem. A pack over 2 MiB answers 413 `i18n.pack.too_large` with the param `limit`.
+A refusal answers 422 `i18n.pack.invalid` with one entry in `errors` per problem. Each entry has `field` (the unit key, or `file` for a problem of the document), `code`, and the params `detail` and `line` (when known). The params of the problem itself carry `reason` (the code of the first problem) and `tag` (when the document names one). All problems of the document-level checks (`srcLang`, `trgLang`, tag, metadata) are reported together; a malformed XML document reports its first problem. A pack over 8 MiB answers 413 `i18n.pack.too_large` with the param `limit`.
 
 A refusal after validation (422) is written to the audit log as a failed `i18n.pack.upload` with the tag and the reason (section 10). The 413 from the API is not audited. A refused upload changes no language.
 
@@ -236,7 +236,7 @@ At start, `tenko serve` runs the `languages` step (step 7 of the start sequence)
 
 * Only regular files with the extension `.xlf` (any case) directly in that directory are read, in the order of their paths. The file name does not matter; the tag is the `trgLang` in the file.
 * A missing directory is no error. A directory that cannot be listed is logged and the start goes on. A start never fails because of a pack.
-* A file over 2 MiB, or one that cannot be read, is logged and not imported. It is not audited.
+* A file over 8 MiB, or one that cannot be read, is logged and not imported. It is not audited.
 * A file that was imported before, or whose bytes equal the active version or the candidate of its language, is skipped. Each language remembers the ids of the last 32 imported files, so a file that was superseded in the meantime does not come back at the next start.
 * Any other file is validated like an upload and, if accepted, becomes the candidate of its language, uploaded by the system principal (the `languages` component) with the origin `data_dir`. It is audited as `i18n.pack.import`. A refused file is logged and audited as a failed `i18n.pack.upload`.
 * An import never activates a pack. An administrator previews and activates it as in section 4. The step summary at start shows the number of keys and the files imported, skipped and refused.
@@ -278,7 +278,7 @@ The UI takes the hash of each language from `GET /i18n/languages` and passes it 
 
 | Limit | Value |
 |---|---|
-| Size of a pack | 2 MiB (2,097,152 bytes); the multipart body may add 64 KiB of framing |
+| Size of a pack | 8 MiB (8,388,608 bytes); the multipart body may add 64 KiB of framing |
 | Units in a document | 20,000 |
 | Element nesting in the XML | 32 |
 | Length of a tag | 2 to 64 characters; each subtag 1 to 8; primary language 2 to 3 letters |
@@ -330,7 +330,7 @@ Each entry has the tag in its context, and the object is the settings of the ins
 | Code | Status | Meaning |
 |---|---|---|
 | `i18n.pack.invalid` | 422 | The upload is not a usable pack; `errors` lists the problems (section 3.3) |
-| `i18n.pack.too_large` | 413 | The pack is over 2 MiB |
+| `i18n.pack.too_large` | 413 | The pack is over 8 MiB |
 | `i18n.upload.empty` | 400 | The upload has no file |
 | `i18n.upload.malformed` | 400 | Not `multipart/form-data` with a boundary, a malformed body, or more than one file |
 | `i18n.pack.not_found` | 404 | No active pack, or nothing uploaded, for the tag; also a tag that is not shaped like one |
