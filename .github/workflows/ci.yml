@@ -734,7 +734,13 @@ jobs:
               continue
             fi
             expected="${author_name} <${author_email}>"
-            if ! grep -qxF "$expected" <<< "$trailers"; then
+            # A GitHub app such as Dependabot signs off as "<name> <support@github.com>"
+            # while its author address is the noreply one; the name is what identifies it.
+            case "$author_name" in
+              *"[bot]") expected_bot="${author_name} <support@github.com>" ;;
+              *) expected_bot="$expected" ;;
+            esac
+            if ! grep -qxF "$expected" <<< "$trailers" && ! grep -qxF "$expected_bot" <<< "$trailers"; then
               echo "::error::Commit $sha is signed off by '$(head -n 1 <<< "$trailers")' but its author is '${expected}'. The trailer must carry the author's own name and email."
               missing=$((missing + 1))
             fi
