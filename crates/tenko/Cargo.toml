@@ -110,6 +110,8 @@ opentelemetry-proto = { workspace = true, features = ["gen-tonic", "trace"] }
 # The imported-certificate transport of `tests/serve_support` (a test CA and a leaf for
 # `localhost`).
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }
+# The zero linger of the cluster lab relay (`tests/cluster_support/relay.rs`).
+socket2 = { workspace = true }
 tempfile = { workspace = true }
 # The software authenticator of the passkey acceptance tests.
 tenko-auth = { workspace = true, features = ["online", "testing"] }

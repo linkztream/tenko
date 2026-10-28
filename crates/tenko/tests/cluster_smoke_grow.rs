@@ -10,6 +10,10 @@ mod serve_support;
 use std::{
     io::{Read, Write},
     net::{Shutdown, TcpStream},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -119,23 +123,32 @@ fn a_cut_relay_closes_a_streaming_connection_and_refuses_new_ones() {
     let stream = TcpStream::connect(relay.addr()).expect("connect through the relay");
     let reader = stream.try_clone().expect("clone");
     // Drain the echoes so the echo server never blocks.
-    let drain = thread::spawn(move || {
-        let mut reader = reader;
-        let mut buffer = vec![0_u8; 65536];
-        let mut read = 0;
-        while let Ok(count) = reader.read(&mut buffer) {
-            if count == 0 {
-                break;
+    let echoed_so_far = Arc::new(AtomicUsize::new(0));
+    let drain = {
+        let echoed_so_far = Arc::clone(&echoed_so_far);
+        thread::spawn(move || {
+            let mut reader = reader;
+            let mut buffer = vec![0_u8; 65536];
+            let mut read = 0;
+            while let Ok(count) = reader.read(&mut buffer) {
+                if count == 0 {
+                    break;
+                }
+                read += count;
+                echoed_so_far.store(read, Ordering::SeqCst);
             }
-            read += count;
-        }
-        read
-    });
+            read
+        })
+    };
     let writer = {
         let stream = stream.try_clone().expect("clone");
         thread::spawn(move || write_until_failure(stream, Duration::from_secs(20)))
     };
-    thread::sleep(Duration::from_millis(300));
+    // Cut only once echoes have come back, however loaded the machine is.
+    let flowing = Instant::now() + Duration::from_secs(15);
+    while echoed_so_far.load(Ordering::SeqCst) == 0 && Instant::now() < flowing {
+        thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(relay.open(), 1, "the streaming connection is open");
     let cut = Instant::now();
     relay.set(Fault::Cut);

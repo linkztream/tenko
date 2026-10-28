@@ -9,8 +9,9 @@
 //! The [`Fault`] of a relay applies at once:
 //!
 //! - [`Fault::Pass`] forwards.
-//! - [`Fault::Cut`] closes the connections it carries and closes every new one right after
-//!   the accept, so the dialler sees a reset or an end of stream at once.
+//! - [`Fault::Cut`] resets the connections it carries (zero linger, so the dialler's next
+//!   write fails whatever its buffer sizes) and closes every new one right after the
+//!   accept, so the dialler sees a reset or an end of stream at once.
 //! - [`Fault::Delay`] holds every chunk for that long before it forwards it, in both byte
 //!   directions of the link's connections: a call over the link takes twice the delay
 //!   longer. The order of the bytes is kept and the throughput is not limited.
@@ -89,7 +90,14 @@ impl Shared {
 
     fn close_all(&self) {
         for (_, accepted, outbound) in lock(&self.open).drain(..) {
-            let _ = accepted.shutdown(Shutdown::Both);
+            // The dialler's side must see a reset, not an end of stream: after a FIN alone
+            // a Linux sender keeps filling its send buffer (several MB) and, with the peer
+            // gone, can sit in retransmission back-off for minutes before a write fails.
+            // A zero linger turns the final close of the accepted socket into a RST, and
+            // closing the read side wakes the copy threads, which then drop the last
+            // descriptors; the outcome does not depend on any buffer size.
+            let _ = socket2::SockRef::from(&accepted).set_linger(Some(Duration::ZERO));
+            let _ = accepted.shutdown(Shutdown::Read);
             let _ = outbound.shutdown(Shutdown::Both);
         }
     }
