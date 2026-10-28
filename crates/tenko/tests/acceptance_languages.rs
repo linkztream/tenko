@@ -751,11 +751,11 @@ fn api_21_a_malformed_pack_is_refused_with_the_documented_code() {
     );
 
     // Over 2 MiB: 413 with the limit as a parameter.
-    let huge = vec![b' '; 2 * 1024 * 1024 + 1];
+    let huge = vec![b' '; 8 * 1024 * 1024 + 1];
     let large = world.api.upload("/i18n/packs", &[("huge.xlf", &huge)]);
     assert_eq!(large.status, 413, "{}", large.text);
     assert_eq!(large.code().as_deref(), Some("i18n.pack.too_large"));
-    assert!(large.text.contains("2097152"), "the limit: {}", large.text);
+    assert!(large.text.contains("8388608"), "the limit: {}", large.text);
 
     // No refusal changed a language.
     assert_eq!(world.offered(), ["en", "sv"]);
