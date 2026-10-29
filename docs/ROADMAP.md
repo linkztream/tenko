@@ -20,6 +20,7 @@ Per-requirement phase assignments live in [REQUIREMENTS.md](REQUIREMENTS.md). It
 | High availability of the data plane (Slice 12, after Phase 3) | Planned: the plan is accepted and ADR 0025 is Accepted (2026-10-25); WP12.0 to WP12.8 are open | [ha-plan.md](plans/ha-plan.md), [ADR 0025](adr/0025-dhcp-failover-and-data-plane-ha.md) |
 | Kerberos and directory identity (Slice 13, in Phase 4) | Planned: the plan is accepted and ADR 0026 is Accepted (2026-10-25); WP13.0 to WP13.8 are open | [identity-plan.md](plans/identity-plan.md), [ADR 0026](adr/0026-kerberos-and-directory-identity.md) |
 | User interface overhaul (U1 to U8, beside Phase 3) | Planned: the plan is accepted (2026-10-26) with its decisions UI-Q1 to UI-Q11; U1 to U8 are open | [ui-plan.md](plans/ui-plan.md) |
+| An agent tool with guard rails (`tenko mcp`, after U5 and U6 of the UI plan) | Planned: ADR 0029 is Proposed (2026-10-29); a read-first first version of about ten tools, writes only as jobs a person approves | [ADR 0029](adr/0029-an-agent-tool-with-guard-rails.md) |
 | 4 AD integration and migration | Not started | [MIGRATION.md](MIGRATION.md) |
 | 5 Enterprise and ecosystem | Not started | this page, section "Phase 5" |
 

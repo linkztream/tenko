@@ -80,3 +80,4 @@ The date is the date the ADR was written or last changed status.
 | [0026](0026-kerberos-and-directory-identity.md) | Kerberos and directory identity | Accepted | 2026-10-25 |
 | [0027](0027-moving-clients-and-the-short-lease.md) | Moving clients and the short lease before a move | Proposed | 2026-10-26 |
 | [0028](0028-port-bounce-and-client-kick.md) | Bouncing a port and kicking a client after a move | Proposed | 2026-10-26 |
+| [0029](0029-an-agent-tool-with-guard-rails.md) | An agent tool with guard rails: `tenko mcp`, bounded reads, writes as proposals a person approves | Proposed | 2026-10-29 |
