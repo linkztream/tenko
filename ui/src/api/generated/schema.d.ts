@@ -449,6 +449,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the preferences of the signed-in person (saved table layouts) */
+        get: operations["list_preferences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/preferences/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save one preference of the signed-in person, such as the layout of a table */
+        put: operations["put_preference"];
+        post?: never;
+        /** Remove one preference of the signed-in person; the table returns to its default */
+        delete: operations["delete_preference"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/recovery-codes": {
         parameters: {
             query?: never;
@@ -10939,6 +10974,13 @@ export interface components {
             /** @description Values the host dropped or replaced (at most 20). */
             warnings?: string[];
         };
+        /** @description The sort of a table: one column, ascending or descending. */
+        LayoutSort: {
+            /** @description The column (or the server's sort field) the table sorts on. */
+            column: string;
+            /** @description Whether the sort is descending. */
+            desc?: boolean;
+        };
         /**
          * @description The state of a leader-only service.
          * @enum {string}
@@ -15206,6 +15248,29 @@ export interface components {
          *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
          *     bound to the query that produced it.
          */
+        Page_Preference: {
+            /** @description The items of this page, at most `limit` of them. */
+            items: {
+                /** @description The key, `table:<id>`. */
+                key: string;
+                /** @description When it was last written. */
+                updated_at: components["schemas"]["Timestamp"];
+                /** @description The document as it was stored. */
+                value: components["schemas"]["TableLayout"];
+            }[];
+            /** @description Cursor of the next page; `null` on the last page. */
+            next_cursor?: string | null;
+            /** @description Store revision the page was read at. */
+            revision: components["schemas"]["Revision"];
+        };
+        /**
+         * @description One page of a list (plan section 4): the items, the opaque cursor of the next page and
+         *     the store revision the page was read at.
+         *
+         *     A client that wants live updates subscribes to `GET /events` from `revision`; a client
+         *     that wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and
+         *     bound to the query that produced it.
+         */
         Page_Prefix: {
             /** @description The items of this page, at most `limit` of them. */
             items: {
@@ -16190,6 +16255,15 @@ export interface components {
             recipient: boolean;
             /** @description Whether `backup: "skip"` is accepted; not under the Hardened profile (TGL-37). */
             skip_allowed: boolean;
+        };
+        /** @description One stored preference in an answer. */
+        Preference: {
+            /** @description The key, `table:<id>`. */
+            key: string;
+            /** @description When it was last written. */
+            updated_at: components["schemas"]["Timestamp"];
+            /** @description The document as it was stored. */
+            value: components["schemas"]["TableLayout"];
         };
         /** @description A prefix: a supernet (container) or a network (IPAM-02). */
         Prefix: {
@@ -20487,6 +20561,47 @@ export interface components {
              *     expiry or plain HTTP in the Lab profile.
              */
             warnings: components["schemas"]["StatusWarning"][];
+        };
+        /**
+         * @description The saved layout of one table of the web UI (`table:<id>`), version 1.
+         *
+         *     Unknown fields are refused. An absent list means the table's default for it.
+         * @example {
+         *       "hidden": [
+         *         "mac"
+         *       ],
+         *       "order": [
+         *         "ip",
+         *         "dns_name",
+         *         "mode",
+         *         "mac"
+         *       ],
+         *       "sort": {
+         *         "column": "ip",
+         *         "desc": false
+         *       },
+         *       "version": 1,
+         *       "widths": {
+         *         "dns_name": 220,
+         *         "ip": 140
+         *       }
+         *     }
+         */
+        TableLayout: {
+            /** @description The column ids the person hid. */
+            hidden?: string[] | null;
+            /** @description The column ids in the person's order. */
+            order?: string[] | null;
+            sort?: components["schemas"]["LayoutSort"] | null;
+            /**
+             * Format: int32
+             * @description The version of the document; this server knows version 1.
+             */
+            version: number;
+            /** @description The widths the person set, in pixels, by column id. */
+            widths?: {
+                [key: string]: number;
+            } | null;
         };
         /**
          * @description A tag (IPAM-08): 1 to 64 characters, no control characters, surrounding whitespace
@@ -24799,6 +24914,173 @@ export interface operations {
             };
             /** @description Setup has completed and the request carries no valid session or token (`auth.unauthenticated`, `auth.session_expired`) */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every key of the person; not paginated: `next_cursor` is always `null` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Preference"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    put_preference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `table:<id>`: `table:` and 1 to 64 of a-z, 0-9, `.`, `_` and `-` */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TableLayout"];
+            };
+        };
+        responses: {
+            /** @description The preference as stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preference"];
+                };
+            };
+            /** @description The body does not match the schema or names an unknown field (`sys.invalid_request`), or the key, a column id, a width or the version is invalid (`auth.invalid_request` with `field`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The person has 64 keys already (`auth.preference.limit`), or another write of the person's keys came first (`auth.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The document exceeds 16 KiB (`auth.preference.too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    delete_preference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `table:<id>` */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preference was removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key is invalid (`auth.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The person has no such key (`auth.preference.not_found`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -7,7 +7,8 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { session } from "../auth/session";
-import { widthsKey } from "../grid/widths";
+import { mockPreferences } from "../api/mock/routes-preferences";
+import { tableLayout } from "../grid/layoutStore";
 import HostsView from "./HostsView";
 
 beforeEach(async () => {
@@ -26,7 +27,7 @@ async function renderList() {
 
 const grid = () => screen.getByRole("grid");
 const nameCol = () => grid().querySelectorAll("col")[1] as HTMLElement;
-const key = () => widthsKey("hosts", session()?.user.id);
+const stored = () => tableLayout(session()?.user.id, "hosts")();
 
 describe("the hosts list's column widths", () => {
   it("resizes a column on its header handle, keeps it for the user and resets it from the column menu", async () => {
@@ -37,8 +38,9 @@ describe("the hosts list's column widths", () => {
     fireEvent.pointerMove(handle, { clientX: 380, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(handle, { clientX: 380, pointerId: 1, pointerType: "mouse" });
     expect(nameCol().style.width).toBe("300px");
-    expect(key()).toContain(session()?.user.id ?? "missing");
-    expect(JSON.parse(localStorage.getItem(key()) ?? "{}")).toMatchObject({ name: 300 });
+    expect(stored()?.widths).toMatchObject({ name: 300 });
+    // Saved for the signed-in person on the server after the quiet second.
+    await waitFor(() => expect(mockPreferences()["table:hosts"]).toMatchObject({ widths: { name: 300 } }), { timeout: 3000 });
     expect(await axeViolations(screen.getByTestId("grid-hosts"), { disable: ["region"] })).toEqual([]);
 
     // The list comes back with the width.
@@ -50,6 +52,7 @@ describe("the hosts list's column widths", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose columns" }));
     fireEvent.click(screen.getByTestId("reset-column-widths"));
     expect(nameCol().style.width).toBe("220px");
-    expect(localStorage.getItem(key())).toBeNull();
+    expect(stored()).toBeNull();
+    await waitFor(() => expect(mockPreferences()["table:hosts"]).toBeUndefined(), { timeout: 3000 });
   });
 });

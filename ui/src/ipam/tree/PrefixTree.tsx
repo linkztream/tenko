@@ -1,6 +1,13 @@
 // The prefix tree of one VRF (GET /prefixes/tree): supernets and networks with their
 // utilization bars, VLAN and alarm level, kept current with the `ipam` and `system` topics.
 //
+// UI-Q7 of the UI plan: the supernets and top-level networks are always shown, each with its
+// number of child prefixes; children are collapsed and never unfolded by the tree itself, so a
+// supernet with 150 networks keeps the tree short. Only the person opens a node (its chevron,
+// Right, or holding a drag over it); a filter shows the matches with their ancestors. The open
+// nodes are kept per VRF for the session. When the selected prefix sits inside a closed node,
+// that node is marked as holding the selection and is the tree's active item.
+//
 // Keyboard (WAI-ARIA tree): Up and Down move, Right opens a node or goes to its first child,
 // Left closes it or goes to its parent, Home and End jump, Enter opens the prefix. The list
 // keeps the DOM focus and points at the active node with aria-activedescendant.
@@ -8,7 +15,7 @@
 // The tree is the only drop target of the move gesture (design decision 5): dragging hosts
 // or addresses over a network highlights it, a supernet refuses with a reason, and the drop
 // opens the move preview. Nothing changes until the preview is confirmed.
-import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { api } from "../../api/client";
 import { createLiveQuery } from "../../api/live";
 import type { TreeNode, TreeResponse } from "../../api/types";
@@ -58,6 +65,17 @@ export function filterTree(nodes: readonly TreeNode[], text: string): TreeNode[]
   return nodes.filter((n) => keep.has(n.id));
 }
 
+/** The open nodes of each VRF's tree, for the session. */
+const openByTree = new Map<string, ReadonlySet<string>>();
+
+/** How long a drag rests on a closed node before it opens, in milliseconds. */
+export const SPRING_OPEN_MS = 700;
+
+/** For tests: every tree closed again. */
+export function resetTreeStateForTest(): void {
+  openByTree.clear();
+}
+
 /** The tree of one VRF, kept current with the `ipam` and `system` topics (call inside a component). */
 export function useTree(vrfId: () => string | undefined) {
   const live = createLiveQuery<TreeResponse>({
@@ -83,7 +101,13 @@ export function useTree(vrfId: () => string | undefined) {
 export function PrefixTree(props: PrefixTreeProps) {
   let list!: HTMLUListElement;
   const nodes = () => props.tree?.nodes ?? [];
-  const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(new Set());
+  const treeKey = () => props.tree?.vrf ?? "";
+  const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set<string>());
+  createEffect(on(treeKey, (key) => setOpened(openByTree.get(key) ?? new Set<string>())));
+  const saveOpened = (next: ReadonlySet<string>) => {
+    setOpened(next);
+    openByTree.set(treeKey(), next);
+  };
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [dropId, setDropId] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<string | null>(null);
@@ -91,21 +115,7 @@ export function PrefixTree(props: PrefixTreeProps) {
   const filtered = createMemo(() => filterTree(nodes(), props.filter ?? ""));
   const filtering = () => (props.filter ?? "").trim() !== "";
 
-  // Open the path to the selected prefix.
-  createEffect(() => {
-    const sel = props.selectedId;
-    if (!sel) return;
-    const byId = new Map(nodes().map((n) => [n.id, n]));
-    let cur = byId.get(sel);
-    const open = new Set(collapsed());
-    let changed = false;
-    while (cur?.parent) {
-      if (open.delete(cur.parent)) changed = true;
-      cur = byId.get(cur.parent);
-    }
-    if (changed) setCollapsed(open);
-    if (activeId() === null) setActiveId(sel);
-  });
+  const byId = createMemo(() => new Map(nodes().map((n) => [n.id, n])));
 
   /** The nodes shown: every node whose ancestors are all open. */
   const visible = createMemo(() => {
@@ -117,20 +127,52 @@ export function PrefixTree(props: PrefixTreeProps) {
         continue;
       }
       out.push(n);
-      if (!filtering() && collapsed().has(n.id)) hiddenUnder.add(n.id);
+      if (!filtering() && !opened().has(n.id)) hiddenUnder.add(n.id);
     }
     return out;
   });
 
+  /** The visible node that shows the selection: the selected node, or its nearest shown ancestor. */
+  const selectionShownAt = createMemo(() => {
+    const sel = props.selectedId;
+    if (!sel) return null;
+    const shown = new Set(visible().map((n) => n.id));
+    let cur = byId().get(sel);
+    while (cur && !shown.has(cur.id)) cur = cur.parent ? byId().get(cur.parent) : undefined;
+    return cur?.id ?? null;
+  });
+  createEffect(() => {
+    const at = selectionShownAt();
+    if (at && activeId() === null) setActiveId(at);
+  });
+
   const hasChildren = (n: TreeNode) => n.children > 0;
-  const isOpen = (n: TreeNode) => hasChildren(n) && (filtering() || !collapsed().has(n.id));
+  const isOpen = (n: TreeNode) => hasChildren(n) && (filtering() || opened().has(n.id));
   const toggle = (n: TreeNode, open?: boolean) => {
-    const next = new Set(collapsed());
-    const shouldOpen = open ?? next.has(n.id);
-    if (shouldOpen) next.delete(n.id);
-    else next.add(n.id);
-    setCollapsed(next);
+    const next = new Set(opened());
+    const shouldOpen = open ?? !next.has(n.id);
+    if (shouldOpen) next.add(n.id);
+    else next.delete(n.id);
+    saveOpened(next);
   };
+
+  // A drag that rests on a closed node opens it, so a network inside a supernet can take a drop.
+  let spring: ReturnType<typeof setTimeout> | undefined;
+  let springId: string | null = null;
+  const armSpring = (n: TreeNode) => {
+    if (springId === n.id || !hasChildren(n) || isOpen(n)) return;
+    clearTimeout(spring);
+    springId = n.id;
+    spring = setTimeout(() => {
+      springId = null;
+      if (dragged()) toggle(n, true);
+    }, SPRING_OPEN_MS);
+  };
+  const disarmSpring = () => {
+    clearTimeout(spring);
+    springId = null;
+  };
+  onCleanup(disarmSpring);
 
   const nodeId = (id: string) => `tree-${id}`;
   const activeIndex = () => {
@@ -193,6 +235,7 @@ export function PrefixTree(props: PrefixTreeProps) {
   const accepts = (n: TreeNode) => n.role === "network" && may.prefix(n.id);
   const onDragOver = (e: DragEvent, n: TreeNode) => {
     if (!dragged()) return;
+    armSpring(n);
     if (!accepts(n)) {
       setRefused(n.id);
       return;
@@ -203,6 +246,7 @@ export function PrefixTree(props: PrefixTreeProps) {
   };
   const onDrop = (e: DragEvent, n: TreeNode) => {
     const items = dragged();
+    disarmSpring();
     setDropId(null);
     setRefused(null);
     if (!items || !accepts(n)) return;
@@ -242,7 +286,13 @@ export function PrefixTree(props: PrefixTreeProps) {
               aria-level={n.depth + 1}
               aria-expanded={hasChildren(n) ? isOpen(n) : undefined}
               aria-selected={n.id === props.selectedId}
-              aria-label={`${n.cidr}${n.description ? ` ${n.description}` : ""}`}
+              aria-label={
+                !hasChildren(n)
+                  ? `${n.cidr}${n.description ? ` ${n.description}` : ""}`
+                  : n.description
+                    ? t("ipam.tree.node_children", { cidr: n.cidr, description: n.description, count: n.children })
+                    : t("ipam.tree.node_children_plain", { cidr: n.cidr, count: n.children })
+              }
               data-testid="tree-node"
               data-id={n.id}
               data-key={n.cidr}
@@ -256,6 +306,7 @@ export function PrefixTree(props: PrefixTreeProps) {
                   active: n.id === visible()[activeIndex()]?.id,
                   supernet: n.role === "supernet",
                   selected: n.id === props.selectedId,
+                  "holds-selection": n.id !== props.selectedId && n.id === selectionShownAt(),
                 }}
                 title={refused() === n.id ? t("ipam.tree.drop_refused") : undefined}
                 style={{ "--depth": n.depth }}
@@ -267,6 +318,7 @@ export function PrefixTree(props: PrefixTreeProps) {
                 onDragOver={(e) => onDragOver(e, n)}
                 onDragEnter={(e) => onDragOver(e, n)}
                 onDragLeave={() => {
+                  if (springId === n.id) disarmSpring();
                   if (dropId() === n.id) setDropId(null);
                   if (refused() === n.id) setRefused(null);
                 }}
@@ -289,6 +341,11 @@ export function PrefixTree(props: PrefixTreeProps) {
                     {n.description ?? (n.role === "supernet" ? t("ipam.tree.supernet") : "")}
                   </span>
                 </span>
+                <Show when={hasChildren(n)}>
+                  <span class="child-count" title={t("ipam.tree.children_count", { count: n.children })} data-testid="tree-child-count">
+                    {n.children}
+                  </span>
+                </Show>
                 <Show when={vlan(n)}>{(v) => <VlanChip vid={v().vid} style={v().style} />}</Show>
                 <Show when={n.status !== "active"}>
                   <StatusBadge status={n.status} />

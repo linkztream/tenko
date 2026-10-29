@@ -443,8 +443,8 @@ describe("the row menu of a DHCPv6 lease", () => {
     open();
     await loaded();
     expect(await rowActions(row(GRID, V6[0]!))).toEqual(["history", "release"]);
-    // A DHCPv4 lease that is not reserved keeps its reserve action.
-    expect(await rowActions(row(GRID, "192.0.2.100"))).toContain("reserve");
+    // A DHCPv4 lease that is not reserved keeps its reserve action, once the scopes are read.
+    await waitFor(async () => expect(await rowActions(row(GRID, "192.0.2.100"))).toContain("reserve"));
   });
 
   it("releases a DHCPv6 lease with the address in the path, the VRF and the reason", async () => {

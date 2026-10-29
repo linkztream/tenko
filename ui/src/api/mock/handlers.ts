@@ -8,6 +8,7 @@ import { adminRoutes } from "./routes-admin";
 import { auditRoutes } from "./routes-audit";
 import { auditExportRoutes } from "./routes-audit-export";
 import { authRoutes } from "./routes-auth";
+import { preferencesRoutes } from "./routes-preferences";
 import { backupRoutes } from "./routes-backup";
 import { guardrailsRoutes } from "./routes-guardrails";
 import { tlsRoutes } from "./routes-tls";
@@ -56,6 +57,8 @@ export const happyPaths: HttpHandler[] = [
   ...jobRoutes,
   ...auditRoutes,
   ...authRoutes,
+  // U6: the saved table layouts.
+  ...preferencesRoutes,
   // Operator secrets (WP2.1), and TGL-24, which decorates the security settings that the
   // updates routes decorate with TGL-23, so it comes first.
   ...secretsRoutes,

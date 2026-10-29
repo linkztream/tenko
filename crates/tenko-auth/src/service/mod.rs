@@ -23,6 +23,8 @@ mod access;
 mod account;
 mod admin;
 mod login;
+// U6 of the UI plan: the person's saved table layouts.
+mod preferences;
 pub mod reveal;
 mod setup;
 pub mod types;

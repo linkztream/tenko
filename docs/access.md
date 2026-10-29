@@ -20,6 +20,7 @@ Contents:
 12. [API](#12-api)
 13. [Error codes](#13-error-codes)
 14. [Rollback](#14-rollback)
+15. [Personal preferences](#15-personal-preferences)
 
 ## 1. Overview
 
@@ -355,7 +356,31 @@ PUT /api/v1/access/role-policies/viewer
 | `users.name_taken` | 409 | The service account name is taken |
 | `users.not_found` | 404 | No such user or service account (on a grant) |
 | `auth.unauthenticated` | 401 | No valid session or token, or the account or token is disabled or gone |
+| `auth.preference.not_found` | 404 | The person has no preference under this key (section 15) |
+| `auth.preference.too_large` | 413 | The document exceeds 16 KiB; the problem carries `max_bytes` |
+| `auth.preference.limit` | 409 | A new key would exceed the 64 keys of a person; the problem carries `max_keys` |
 
 ## 14. Rollback
 
 Global roles stay in the user record with the meaning they always had. Grants (`auth.grants`), scoped tokens (`auth.scoped_tokens` and the owner index `auth.user_scoped_tokens`) and role policies (`auth.role_policies`) are tables that an older build does not read. After a rollback to such a build, a grant gives nothing and a scoped token is not found, so the person or the automation is refused; nothing is ever read as a global role. Restoring the newer build brings them back unchanged. The rollback rules of the installation are in [upgrades.md](upgrades.md).
+
+## 15. Personal preferences
+
+A person's saved table layouts live on the server, so they follow the person across sessions, browsers and devices (UI-Q4 of [the UI plan](plans/ui-plan.md), API-08). They are the person's own data: the routes take no user id and always act on the user of the request's session, so no role reaches another person's preferences, an administrator's included, and no grant or scope applies. They need an interactive session; a personal or scoped token is refused with `401 auth.unauthenticated`, as on the other routes that act on the person's own account, since the layouts belong to the web UI.
+
+| Method | Path | Operation id | Success | Notes |
+|---|---|---|---|---|
+| GET | `/auth/preferences` | `list_preferences` | 200 page of `Preference` | Every key of the person, ordered by key; not paginated |
+| PUT | `/auth/preferences/{key}` | `put_preference` | 200 `Preference` | The body is a `TableLayout`; creates or replaces the key |
+| DELETE | `/auth/preferences/{key}` | `delete_preference` | 204 | The table returns to its default layout ("Reset columns") |
+
+A key is `table:<id>`, the id of a table of the web UI (1 to 64 of `a-z`, `0-9`, `.`, `_` and `-`). The value is a small versioned document:
+
+```json
+PUT /api/v1/auth/preferences/table:addresses
+{"version": 1, "order": ["ip", "dns_name", "mode", "mac"], "hidden": ["mac"], "widths": {"ip": 140}, "sort": {"column": "ip", "desc": false}}
+```
+
+The server checks the shape and the size and nothing else: unknown fields are refused (`400 sys.invalid_request`), the version must be 1, a column id is 1 to 64 of `A-Z`, `a-z`, `0-9`, `.`, `_`, `-` and `:` and appears once per list, each list names at most 128 columns, a width is 16 to 1,200 pixels (`400 auth.invalid_request` naming the field), the document is at most 16 KiB as the canonical JSON the server stores (`413 auth.preference.too_large`), and a person has at most 64 keys (`409 auth.preference.limit`). Which column ids a table has is the web UI's knowledge: it checks a stored layout against the table's known columns and bounds before it applies it, so a crafted document can neither name a column that does not exist nor widen a table beyond its bounds. The document is opaque to the server beyond its schema and never reaches HTML, SQL or a log line.
+
+The rows are in `auth.preferences` by (user, key), replicated with the store and carried by snapshots and backups. Writing a layout is not a change of the installation: nothing is audited and no event reaches the live stream (`auth.preferences` is kept off it). Deleting an account deletes its preferences in the same write. The table is additive, so it needs no new data format ([upgrades.md](upgrades.md) section 4.1): a build before it ignores the table, and a backup taken before it restores with the table empty, which shows every table in its default layout until the person changes it again.

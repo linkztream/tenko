@@ -1,6 +1,7 @@
 import { cleanup } from "@solidjs/testing-library";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { resetMockDb } from "../../api/mock/db";
+import { resetLayoutStoreForTest } from "../../grid/layoutStore";
 import { server } from "../../api/mock/node";
 import { forgetHosts } from "../../ipam/resolve";
 import { lazyPartsSettled } from "../../shell/lazyParts";
@@ -19,6 +20,8 @@ afterEach(async () => {
   await lazyPartsSettled();
   server.resetHandlers();
   resetMockDb();
+  // Saved table layouts and their pending writes belong to the test that made them.
+  resetLayoutStoreForTest();
   // Cached hosts belong to the mock state of the test that read them.
   forgetHosts();
 });

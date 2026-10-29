@@ -1,39 +1,19 @@
-// Column visibility and order of each grid, remembered per browser under
-// `tenko-grid:<grid id>` in localStorage (like theme and density in app/prefs.ts). A column
-// the stored order does not know (a newer UI) keeps its default place. The column widths
-// live apart, per user (widths.ts), and come with the state so the column menu can reset them.
-import { createSignal, type Accessor } from "solid-js";
+// Column visibility and order of each grid, saved per user with the rest of the table's layout
+// (layoutStore.ts: on the server under `table:<grid id>`, with the browser's copy while the
+// server is out of reach). A column the stored order does not know (a newer UI) keeps its
+// default place, and ids the grid does not have are ignored, so a stored document never names a
+// column that does not exist. The column widths live in the same document (widths.ts) and come
+// with the state so the column menu can reset them; "Reset columns" returns the whole table to
+// its default.
+import { untrack, type Accessor } from "solid-js";
+import { session } from "../auth/session";
+import { patchLayout, resetLayout, tableLayout, type LayoutSort } from "./layoutStore";
 import type { Column } from "./types";
 import { createColumnWidths, type ColumnWidths } from "./widths";
 
 export interface ColumnPrefs {
   order: string[];
   hidden: string[];
-}
-
-const KEY = "tenko-grid:";
-
-function read(id: string): ColumnPrefs | null {
-  try {
-    const raw = localStorage.getItem(KEY + id);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as Partial<ColumnPrefs>;
-    return {
-      order: Array.isArray(v.order) ? v.order.filter((x): x is string => typeof x === "string") : [],
-      hidden: Array.isArray(v.hidden) ? v.hidden.filter((x): x is string => typeof x === "string") : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function write(id: string, prefs: ColumnPrefs | null): void {
-  try {
-    if (prefs === null) localStorage.removeItem(KEY + id);
-    else localStorage.setItem(KEY + id, JSON.stringify(prefs));
-  } catch {
-    // Storage unavailable: the choice lasts for this page only.
-  }
 }
 
 /** Orders `columns` by `order`; unknown columns keep their default position. */
@@ -60,23 +40,36 @@ export interface ColumnState<T> {
   setHidden: (id: string, hidden: boolean) => void;
   /** Moves a column one place earlier (-1) or later (+1). */
   move: (id: string, delta: -1 | 1) => void;
+  /** Returns the table to its default layout: order, visibility, widths and sort. */
   reset: () => void;
   /** The column widths the user set. */
   widths: ColumnWidths;
+  /** The sort the user chose, when the view keeps it with the layout (a known column only). */
+  sort: Accessor<LayoutSort | null>;
+  saveSort: (sort: LayoutSort | null) => void;
 }
 
 /** Column state for the grid `id` (call inside a component). */
 export function createColumnState<T>(id: string, columns: Accessor<readonly Column<T>[]>): ColumnState<T> {
-  const stored = read(id);
+  const user = untrack(() => session()?.user.id);
+  const layout = tableLayout(user, id);
+  const known = () => new Set(columns().map((c) => c.id));
   const defaultsHidden = () => columns().filter((c) => c.hidden).map((c) => c.id);
-  const [prefs, setPrefs] = createSignal<ColumnPrefs | null>(stored);
+  /** The stored order and visibility, reduced to the columns this grid has. */
+  const prefs = (): ColumnPrefs | null => {
+    const l = layout();
+    if (!l?.order && !l?.hidden) return null;
+    const ids = known();
+    const fixed = new Set(columns().filter((c) => c.fixed).map((c) => c.id));
+    return {
+      order: (l.order ?? []).filter((c) => ids.has(c)),
+      hidden: l.hidden ? l.hidden.filter((c) => ids.has(c) && !fixed.has(c)) : defaultsHidden(),
+    };
+  };
 
   const hidden = () => new Set(prefs()?.hidden ?? defaultsHidden());
   const all = () => orderColumns(columns(), prefs()?.order ?? []);
-  const update = (next: ColumnPrefs | null) => {
-    setPrefs(next);
-    write(id, next);
-  };
+  const update = (next: ColumnPrefs) => patchLayout(user, id, { order: next.order, hidden: next.hidden });
   const current = (): ColumnPrefs => ({ order: all().map((c) => c.id), hidden: [...hidden()] });
 
   return {
@@ -100,7 +93,12 @@ export function createColumnState<T>(id: string, columns: Accessor<readonly Colu
       [order[i], order[j]] = [order[j] as string, order[i] as string];
       update({ ...current(), order });
     },
-    reset: () => update(null),
-    widths: createColumnWidths(id),
+    reset: () => resetLayout(user, id),
+    widths: createColumnWidths(id, user, () => [...known()]),
+    sort: () => {
+      const s = layout()?.sort;
+      return s && known().has(s.column) ? s : null;
+    },
+    saveSort: (sort) => patchLayout(user, id, { sort: sort ?? undefined }),
   };
 }

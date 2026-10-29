@@ -4857,6 +4857,12 @@ export type MessageKey =
   | "ipam.cfdef.required_col"
   | "ipam.cfdef.type"
   | "ipam.cfdef.yes"
+  | "ipam.children.count"
+  | "ipam.children.empty_filtered"
+  | "ipam.children.filter_label"
+  | "ipam.children.filter_placeholder"
+  | "ipam.children.no_description"
+  | "ipam.children.no_vlan"
   | "ipam.col.address"
   | "ipam.col.allocated"
   | "ipam.col.created"
@@ -4985,6 +4991,29 @@ export type MessageKey =
   | "ipam.kind_title.tenant"
   | "ipam.kind_title.vlan"
   | "ipam.kind_title.vrf"
+  | "ipam.map.block_cell"
+  | "ipam.map.block_findings"
+  | "ipam.map.block_in_use"
+  | "ipam.map.cell"
+  | "ipam.map.cell_finding"
+  | "ipam.map.hint"
+  | "ipam.map.label"
+  | "ipam.map.label_blocks"
+  | "ipam.map.legend"
+  | "ipam.map.partial"
+  | "ipam.map.severity.act"
+  | "ipam.map.severity.info"
+  | "ipam.map.severity.review"
+  | "ipam.map.state.edge"
+  | "ipam.map.state.free"
+  | "ipam.map.state.held"
+  | "ipam.map.state.used"
+  | "ipam.map.title"
+  | "ipam.map.too_large"
+  | "ipam.meter.alarm_at"
+  | "ipam.meter.label"
+  | "ipam.meter.no_alarm"
+  | "ipam.meter.scale"
   | "ipam.meter.title"
   | "ipam.meter.value"
   | "ipam.mode.dynamic"
@@ -5053,6 +5082,21 @@ export type MessageKey =
   | "ipam.overview.grid"
   | "ipam.overview.label"
   | "ipam.overview.sub"
+  | "ipam.panel.changes.all"
+  | "ipam.panel.changes.none"
+  | "ipam.panel.changes.title"
+  | "ipam.panel.dhcp.disabled"
+  | "ipam.panel.dhcp.leases"
+  | "ipam.panel.dhcp.none"
+  | "ipam.panel.dhcp.open"
+  | "ipam.panel.dhcp.pools"
+  | "ipam.panel.dhcp.title"
+  | "ipam.panel.findings.act"
+  | "ipam.panel.findings.info"
+  | "ipam.panel.findings.none"
+  | "ipam.panel.findings.open"
+  | "ipam.panel.findings.review"
+  | "ipam.panel.findings.title"
   | "ipam.plan.ack"
   | "ipam.plan.ack_needed"
   | "ipam.plan.change.create"
@@ -5085,6 +5129,10 @@ export type MessageKey =
   | "ipam.prefix.dns_reverse_help"
   | "ipam.prefix.dns_reverse_managed"
   | "ipam.prefix.dns_reverse_off"
+  | "ipam.prefix.fact.in"
+  | "ipam.prefix.fact.no_site"
+  | "ipam.prefix.fact.no_vlan"
+  | "ipam.prefix.fact.scope"
   | "ipam.prefix.in_several"
   | "ipam.prefix.no_children"
   | "ipam.prefix.not_found"
@@ -5210,6 +5258,7 @@ export type MessageKey =
   | "ipam.tenant.filter_label"
   | "ipam.tenant.title"
   | "ipam.tree.add"
+  | "ipam.tree.children_count"
   | "ipam.tree.drag_hint"
   | "ipam.tree.drop_hint"
   | "ipam.tree.drop_refused"
@@ -5218,6 +5267,8 @@ export type MessageKey =
   | "ipam.tree.key_grid"
   | "ipam.tree.key_tree"
   | "ipam.tree.label"
+  | "ipam.tree.node_children"
+  | "ipam.tree.node_children_plain"
   | "ipam.tree.supernet"
   | "ipam.vlan.create"
   | "ipam.vlan.create_title"
@@ -8696,6 +8747,7 @@ export interface MessageArgs {
   "ipam.cfdef.delete_title": { key: string | number };
   "ipam.cfdef.deleted": { key: string | number };
   "ipam.cfdef.edit_title": { key: string | number };
+  "ipam.children.count": { count: number };
   "ipam.delete.done": { kind: string | number; label: string | number };
   "ipam.delete.title": { kind: string | number; label: string | number };
   "ipam.delete.undo_failed": { kind: string | number; label: string | number };
@@ -8725,6 +8777,15 @@ export interface MessageArgs {
   "ipam.kind.tenant": { count: number };
   "ipam.kind.vlan": { count: number };
   "ipam.kind.vrf": { count: number };
+  "ipam.map.block_cell": { cidr: string | number; findings: number; in_use: string | number; size: string | number };
+  "ipam.map.block_findings": { count: number };
+  "ipam.map.block_in_use": { in_use: string | number; size: string | number };
+  "ipam.map.cell": { ip: string | number; state: string | number };
+  "ipam.map.cell_finding": { ip: string | number; severity: string | number; state: string | number };
+  "ipam.map.label": { cidr: string | number; columns: string | number; count: string | number };
+  "ipam.map.label_blocks": { cidr: string | number; columns: string | number; count: string | number };
+  "ipam.map.partial": { count: string | number };
+  "ipam.meter.alarm_at": { crit: string | number; warn: string | number };
   "ipam.meter.title": { capacity: string | number; used: string | number };
   "ipam.meter.value": { value: string | number };
   "ipam.move.choose_title": { count: number };
@@ -8763,9 +8824,16 @@ export interface MessageArgs {
   "ipam.next_free.whole_network": { cidr: string | number };
   "ipam.overview.grid": { vrf: string | number };
   "ipam.overview.sub": { alarms: number; count: number; tenant: string | number };
+  "ipam.panel.dhcp.leases": { count: number };
+  "ipam.panel.dhcp.pools": { count: number };
+  "ipam.panel.findings.act": { count: string | number };
+  "ipam.panel.findings.info": { count: string | number };
+  "ipam.panel.findings.review": { count: string | number };
   "ipam.plan.summary_line": { action: string | number; kind: string | number };
   "ipam.prefix.alarm_value": { crit: string | number; warn: string | number };
   "ipam.prefix.children_grid": { cidr: string | number };
+  "ipam.prefix.fact.in": { cidr: string | number };
+  "ipam.prefix.fact.scope": { tenant: string | number; vrf: string | number };
   "ipam.prefix.in_several": { cidr: string | number };
   "ipam.prefix.not_found": { cidr: string | number };
   "ipam.prefix.ranges_grid": { cidr: string | number };
@@ -8788,7 +8856,10 @@ export interface MessageArgs {
   "ipam.tenancy.created": { name: string | number };
   "ipam.tenancy.saved": { name: string | number };
   "ipam.tenant.edit_title": { name: string | number };
+  "ipam.tree.children_count": { count: number };
   "ipam.tree.drop_hint": { cidr: string | number; count: number };
+  "ipam.tree.node_children": { cidr: string | number; count: number; description: string | number };
+  "ipam.tree.node_children_plain": { cidr: string | number; count: number };
   "ipam.vlan.edit_title": { vid: string | number };
   "ipam.vlan.prefixes.title": { name: string | number; vid: string | number };
   "ipam.vlan.provision.network_name_long": { max: number };
@@ -14176,6 +14247,12 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.cfdef.required_col",
   "ipam.cfdef.type",
   "ipam.cfdef.yes",
+  "ipam.children.count",
+  "ipam.children.empty_filtered",
+  "ipam.children.filter_label",
+  "ipam.children.filter_placeholder",
+  "ipam.children.no_description",
+  "ipam.children.no_vlan",
   "ipam.col.address",
   "ipam.col.allocated",
   "ipam.col.created",
@@ -14304,6 +14381,29 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.kind_title.tenant",
   "ipam.kind_title.vlan",
   "ipam.kind_title.vrf",
+  "ipam.map.block_cell",
+  "ipam.map.block_findings",
+  "ipam.map.block_in_use",
+  "ipam.map.cell",
+  "ipam.map.cell_finding",
+  "ipam.map.hint",
+  "ipam.map.label",
+  "ipam.map.label_blocks",
+  "ipam.map.legend",
+  "ipam.map.partial",
+  "ipam.map.severity.act",
+  "ipam.map.severity.info",
+  "ipam.map.severity.review",
+  "ipam.map.state.edge",
+  "ipam.map.state.free",
+  "ipam.map.state.held",
+  "ipam.map.state.used",
+  "ipam.map.title",
+  "ipam.map.too_large",
+  "ipam.meter.alarm_at",
+  "ipam.meter.label",
+  "ipam.meter.no_alarm",
+  "ipam.meter.scale",
   "ipam.meter.title",
   "ipam.meter.value",
   "ipam.mode.dynamic",
@@ -14372,6 +14472,21 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.overview.grid",
   "ipam.overview.label",
   "ipam.overview.sub",
+  "ipam.panel.changes.all",
+  "ipam.panel.changes.none",
+  "ipam.panel.changes.title",
+  "ipam.panel.dhcp.disabled",
+  "ipam.panel.dhcp.leases",
+  "ipam.panel.dhcp.none",
+  "ipam.panel.dhcp.open",
+  "ipam.panel.dhcp.pools",
+  "ipam.panel.dhcp.title",
+  "ipam.panel.findings.act",
+  "ipam.panel.findings.info",
+  "ipam.panel.findings.none",
+  "ipam.panel.findings.open",
+  "ipam.panel.findings.review",
+  "ipam.panel.findings.title",
   "ipam.plan.ack",
   "ipam.plan.ack_needed",
   "ipam.plan.change.create",
@@ -14404,6 +14519,10 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.prefix.dns_reverse_help",
   "ipam.prefix.dns_reverse_managed",
   "ipam.prefix.dns_reverse_off",
+  "ipam.prefix.fact.in",
+  "ipam.prefix.fact.no_site",
+  "ipam.prefix.fact.no_vlan",
+  "ipam.prefix.fact.scope",
   "ipam.prefix.in_several",
   "ipam.prefix.no_children",
   "ipam.prefix.not_found",
@@ -14529,6 +14648,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.tenant.filter_label",
   "ipam.tenant.title",
   "ipam.tree.add",
+  "ipam.tree.children_count",
   "ipam.tree.drag_hint",
   "ipam.tree.drop_hint",
   "ipam.tree.drop_refused",
@@ -14537,6 +14657,8 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.tree.key_grid",
   "ipam.tree.key_tree",
   "ipam.tree.label",
+  "ipam.tree.node_children",
+  "ipam.tree.node_children_plain",
   "ipam.tree.supernet",
   "ipam.vlan.create",
   "ipam.vlan.create_title",

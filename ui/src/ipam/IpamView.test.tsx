@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { cleanup, fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { ADDRESS_IDS, IPAM_IDS, ipamState } from "../api/mock/ipam/api";
@@ -12,6 +12,7 @@ import { signInAlex } from "../auth/account/testkit";
 import IpamView from "./IpamView";
 import { chooseVrf } from "./scope";
 import { recordWrites } from "./testkit";
+import { resetTreeStateForTest } from "./tree/PrefixTree";
 
 // ---------------------------------------------------------------------------------
 // Helpers
@@ -30,9 +31,14 @@ const DEFAULT_TREE = [
   "2001:db8:1::/48",
 ];
 
+/** The prefixes the tree shows before any node is opened: supernets and top-level networks. */
+const TOP_LEVEL = ["192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"];
+
 beforeEach(async () => {
   // The VRF in view is remembered per browser; every test starts from the default.
   chooseVrf(null);
+  // The open nodes of the tree are kept for the session; every test starts with them closed.
+  resetTreeStateForTest();
   await signInAlex();
 });
 
@@ -66,9 +72,14 @@ function treeNode(cidr: string): HTMLElement {
   return node;
 }
 
-/** The tree with every prefix of the VRF default. */
-async function treeLoaded(count = DEFAULT_TREE.length) {
+/** The tree with the top-level prefixes of the VRF default (children stay closed until opened). */
+async function treeLoaded(count = TOP_LEVEL.length) {
   await waitFor(() => expect(treeNodes()).toHaveLength(count));
+}
+
+/** Opens a node of the tree with its chevron. */
+function openNode(cidr: string) {
+  fireEvent.click(treeNode(cidr).querySelector(".tw") as HTMLElement);
 }
 
 /** The prefix pane of a prefix, once it shows that prefix. */
@@ -164,6 +175,15 @@ describe("the networks page", () => {
     renderIpam();
     await screen.findByTestId("page-ipam");
     await treeLoaded();
+    // Supernets and top-level networks are shown, their children closed with a count.
+    expect(treeKeys()).toEqual(TOP_LEVEL);
+    expect(treeNode("203.0.113.0/24").getAttribute("aria-expanded")).toBe("false");
+    expect(within(treeNode("203.0.113.0/24")).getByTestId("tree-child-count").textContent).toBe("3");
+    expect(within(treeNode("2001:db8::/32")).getByTestId("tree-child-count").textContent).toBe("3");
+    expect(within(treeNode("192.0.2.0/24")).queryByTestId("tree-child-count")).toBeNull();
+    openNode("203.0.113.0/24");
+    openNode("2001:db8::/32");
+    await treeLoaded(DEFAULT_TREE.length);
     expect(treeKeys()).toEqual(DEFAULT_TREE);
     // The soft-deleted 2001:db8:0:99::/64 and the VRF isolated are not in the tree.
     expect(treeKeys()).not.toContain("2001:db8:0:99::/64");
@@ -281,7 +301,8 @@ describe("the VRF in view", () => {
     renderIpam(paths.prefix("192.0.2.0/24", IPAM_IDS.vrf.isolated));
     await waitFor(() => expect(screen.getByTestId("prefix-pane").dataset.id).toBe(IPAM_IDS.prefix.workshop));
     const pane = screen.getByTestId("prefix-pane");
-    expect(within(pane).getByRole("heading", { level: 1 }).textContent).toContain("Workshop LAN");
+    expect(within(pane).getByRole("heading", { level: 1 }).textContent).toBe("192.0.2.0/24");
+    expect(within(pane).getByTestId("prefix-facts").textContent).toContain("Workshop LAN");
     await waitFor(() => expect((screen.getByTestId("ipam-scope") as HTMLSelectElement).value).toBe(IPAM_IDS.vrf.isolated));
   });
 
@@ -349,49 +370,62 @@ describe("the VRF in view", () => {
 describe("the prefix pane", () => {
   it("shows the summary of a network", async () => {
     const { pane } = await openNetwork("192.0.2.0/24");
-    const head = within(pane).getByRole("heading", { level: 1 });
-    expect(head.textContent).toBe("192.0.2.0/24LAN, Network");
+    // The header is the shared page header: the prefix is the title, the facts are its subtitle.
+    const header = within(pane).getByTestId("page-header");
+    expect(within(header).getByRole("heading", { level: 1 }).textContent).toBe("192.0.2.0/24");
     const crumbs = within(pane).getByRole("navigation", { name: "Where this prefix lies" });
     expect(crumbs.textContent).toBe("default");
+    // Description, role, VLAN, site and "tenant / VRF"; the status only when it is not active.
+    const prefixFacts = within(header).getByTestId("prefix-facts");
+    await waitFor(() => expect([...prefixFacts.querySelectorAll(".fact")].map((f) => f.textContent)).toEqual(["LAN", "Network", "10LAN", "Home", "default / default"]));
+    expect(prefixFacts.querySelector(".vlan")?.getAttribute("data-vid")).toBe("10");
     const summary = within(pane).getByTestId("prefix-summary");
-    expect(summary.querySelector(".pct")?.textContent).toBe("50.4%");
-    expect(summary.querySelector(".of")?.textContent).toBe("128 of 254 usable addresses in use");
+    const meter = within(summary).getByTestId("usage-meter");
+    expect(meter.getAttribute("data-level")).toBe("normal");
+    expect(within(meter).getByTestId("usage-value").textContent).toBe("50%");
+    expect(within(meter).getByRole("meter").getAttribute("aria-valuenow")).toBe("50.4");
+    expect(within(meter).getByTestId("prefix-usage").textContent).toBe("128 of 254 usable addresses in use");
     expect(within(summary).getByTestId("prefix-usage").getAttribute("title")).toContain("Network and broadcast addresses are not usable");
+    expect(within(meter).getByTestId("usage-scale").textContent).toBe("0 to 100 % of the usable addresses · Alarm line at 80 % (critical at 95 %)");
     // What "in use" is made of: the recorded addresses (the Addresses tab) and those the ranges hold.
     expect(within(summary).getByTestId("prefix-usage-parts").textContent).toBe("Recorded 20 · held by ranges 108");
     expect(within(summary).queryByTestId("prefix-allocation")).toBeNull();
-    expect(summary.querySelector(".meter")?.getAttribute("data-level")).toBe("normal");
     expect([...summary.querySelectorAll(".legend > span")].map((s) => s.textContent)).toEqual(["DHCP pool 100", "Infrastructure 19"]);
     const facts = [...summary.querySelectorAll("dt")].map((dt) => dt.textContent);
-    expect(facts).toEqual(["Status", "VLAN", "Allocation", "Alarm at"]);
+    expect(facts).toEqual(["Allocation", "Alarm at"]);
     const values = [...summary.querySelectorAll("dd")].map((dd) => dd.textContent);
-    expect(values).toEqual(["Active", "10LAN", "From the lowest address", "warning 80%, critical 95%"]);
+    expect(values).toEqual(["From the lowest address", "warning 80%, critical 95%"]);
     expect([...summary.querySelectorAll(".tags .tag")].map((t) => t.textContent)).toEqual(["home"]);
+    // The small panels beside the meter.
+    await waitFor(() => expect(within(summary).getByTestId("panel-dhcp").textContent).toContain("1 pool"));
+    await waitFor(() => expect(within(summary).getByTestId("panel-findings")).toBeTruthy());
+    await waitFor(() => expect(within(summary).getByTestId("panel-changes").querySelectorAll("li")).toHaveLength(2));
   });
 
   it("flags a critical network in the summary", async () => {
     const { pane } = await openNetwork("203.0.113.192/28");
     const summary = within(pane).getByTestId("prefix-summary");
-    await waitFor(() => expect(summary.querySelector(".meter")?.getAttribute("data-level")).toBe("critical"));
-    expect(within(summary).getAllByText("Critical").length).toBeGreaterThan(0);
-    expect(summary.querySelector(".pct")?.textContent).toBe("92.9%");
+    const meter = within(summary).getByTestId("usage-meter");
+    await waitFor(() => expect(meter.getAttribute("data-level")).toBe("critical"));
+    expect(within(meter).getAllByText("Critical").length).toBeGreaterThan(0);
+    expect(within(meter).getByTestId("usage-value").textContent).toContain("93%");
   });
 
   it("sums a supernet's addresses in use over its tree and labels its allocation apart (IPAM-10)", async () => {
     renderIpam(paths.prefix("203.0.113.0/24"));
     const pane = await paneOf("203.0.113.0/24");
     const summary = within(pane).getByTestId("prefix-summary");
-    await waitFor(() => expect(summary.querySelector(".pct")?.textContent).toBe("5.2%"));
-    expect(summary.querySelector(".of")?.textContent).toBe("13 of 250 usable addresses in use");
+    await waitFor(() => expect(within(summary).getByTestId("usage-value").textContent).toBe("5.2%"));
+    expect(within(summary).getByTestId("prefix-usage").textContent).toBe("13 of 250 usable addresses in use");
     expect(within(summary).getByTestId("prefix-usage-parts").textContent).toBe("Recorded 13 · held by ranges 0");
     const allocation = within(summary).getByTestId("prefix-allocation");
     expect(allocation.textContent).toBe("208 of 256 allocated to 3 prefixes");
     expect(allocation.getAttribute("title")).toContain("not how full the networks are");
-    // The child prefixes: each with its own meter, and no allocation for a network.
+    // The child prefixes: each with its own meter; the allocation column is hidden by default.
     const children = within(pane).getByTestId("grid-prefix-children");
     const lab = within(children).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.0/25") as HTMLElement;
     expect(lab.querySelector(".meter .val")?.textContent).toBe("0%");
-    expect(within(children).getAllByRole("columnheader").map((h) => h.textContent)).toContain("Allocated to prefixes");
+    expect(within(children).getAllByRole("columnheader").map((h) => h.textContent)).not.toContain("Allocated to prefixes");
     // The Addresses tab counts the recorded addresses, the same 13, and not the free gaps.
     fireEvent.click(tab("Addresses"));
     await waitFor(() => expect(addressRows()).toHaveLength(13));
@@ -476,12 +510,19 @@ describe("the prefix pane", () => {
       spy.mock.calls
         .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost"))
         .filter((u) => u.pathname === `/api/v1/prefixes/${IPAM_IDS.prefix.lan}/addresses`);
-    expect(lists().at(-1)?.searchParams.get("include_free")).toBe("true");
-    expect(lists().at(-1)?.searchParams.get("expand")).toBe("host");
+    // The address map above the grid reads the same path itself, without the gaps and the hosts.
+    const gridLists = () => lists().filter((u) => u.searchParams.has("expand"));
+    expect(gridLists().at(-1)?.searchParams.get("include_free")).toBe("true");
+    expect(gridLists().at(-1)?.searchParams.get("expand")).toBe("host");
+    await waitFor(() => expect(lists().some((u) => !u.searchParams.has("expand"))).toBe(true));
+    for (const u of lists().filter((l) => !l.searchParams.has("expand"))) {
+      expect(u.searchParams.has("include_free")).toBe(false);
+      expect(u.searchParams.get("limit")).toBe("1000");
+    }
     fireEvent.click(screen.getByTestId("toggle-free"));
     await waitFor(() => expect(freeRows()).toEqual([]));
-    expect(lists().at(-1)?.searchParams.has("include_free")).toBe(false);
-    expect(lists().at(-1)?.searchParams.get("expand")).toBe("host");
+    expect(gridLists().at(-1)?.searchParams.has("include_free")).toBe(false);
+    expect(gridLists().at(-1)?.searchParams.get("expand")).toBe("host");
     // No read of a host for any row.
     const perHost = spy.mock.calls.filter(([input]) => String(input).includes("/api/v1/hosts"));
     expect(perHost).toEqual([]);
@@ -565,13 +606,14 @@ describe("the prefix pane", () => {
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Prefixes", "Addresses", "Adoption", "History"]);
     expect(tab("Prefixes").getAttribute("aria-selected")).toBe("true");
     const grid = await screen.findByTestId("grid-prefix-children");
-    await waitFor(() =>
-      expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(["203.0.113.0/25", "203.0.113.128/26", "203.0.113.192/28"]),
-    );
-    const cameras = within(grid).getAllByTestId("row")[2] as HTMLElement;
+    await waitFor(() => expect(within(grid).getAllByTestId("row")).toHaveLength(3));
+    expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key).sort()).toEqual(["203.0.113.0/25", "203.0.113.128/26", "203.0.113.192/28"]);
+    const cameras = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.192/28") as HTMLElement;
     expect(cameras.textContent).toContain("Cameras");
     expect(cameras.textContent).toContain("92.9%");
-    expect(within(pane).getByRole("heading", { level: 1 }).textContent).toBe("203.0.113.0/24Documentation supernet, Supernet");
+    expect(within(pane).getByRole("heading", { level: 1 }).textContent).toBe("203.0.113.0/24");
+    const supernetFacts = [...within(pane).getByTestId("prefix-facts").querySelectorAll(".fact")].map((f) => f.textContent);
+    expect(supernetFacts.slice(0, 2)).toEqual(["Documentation supernet", "Supernet"]);
     // The addresses of the supernet are those of its networks.
     fireEvent.click(tab("Addresses"));
     await waitFor(() => expect(addressRows()).toHaveLength(13));
@@ -584,7 +626,8 @@ describe("the prefix pane", () => {
     const view = renderIpam(paths.prefix("203.0.113.0/24"));
     const grid = await screen.findByTestId("grid-prefix-children");
     await waitFor(() => expect(within(grid).getAllByTestId("row")).toHaveLength(3));
-    fireEvent.dblClick((within(grid).getAllByTestId("row")[1] as HTMLElement).querySelector('td[data-col="cidr"]') as HTMLElement);
+    const row = within(grid).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.128/26") as HTMLElement;
+    fireEvent.dblClick(row.querySelector('td[data-col="cidr"]') as HTMLElement);
     const pane = await paneOf("203.0.113.128/26");
     expect(view.location()).toBe(paths.prefix("203.0.113.128/26"));
     const crumbs = within(pane).getByRole("navigation", { name: "Where this prefix lies" });
@@ -599,7 +642,7 @@ describe("the prefix pane", () => {
     await paneOf("2001:db8::/32");
     const grid = await screen.findByTestId("grid-prefix-children");
     await waitFor(() => expect(within(grid).getAllByTestId("row")).toHaveLength(3));
-    expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key)).toEqual(["2001:db8:0:10::/64", "2001:db8:0:30::/64", "2001:db8:1::/48"]);
+    expect(within(grid).getAllByTestId("row").map((r) => r.dataset.key).sort()).toEqual(["2001:db8:0:10::/64", "2001:db8:0:30::/64", "2001:db8:1::/48"]);
   });
 
   it("shows the history of a prefix, the newest change first", async () => {
@@ -619,6 +662,229 @@ describe("the prefix pane", () => {
     await screen.findByTestId("history-panel");
     fireEvent.click(tab("Addresses"));
     await waitFor(() => expect(addressRows()).toHaveLength(20));
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The selection in the tree (UI-Q7)
+
+describe("the selected node of the tree", () => {
+  it("is kept in the URL: a link selects the node and a click on another node changes the URL", async () => {
+    const view = renderIpam(paths.prefix("198.51.100.0/24"));
+    await paneOf("198.51.100.0/24");
+    await treeLoaded();
+    expect(view.location()).toBe(paths.prefix("198.51.100.0/24"));
+    await waitFor(() => expect(treeNode("198.51.100.0/24").getAttribute("aria-selected")).toBe("true"));
+    expect(treeNode("198.51.100.0/24").querySelector(".tnode")?.classList.contains("selected")).toBe(true);
+    fireEvent.click(treeNode("192.0.2.0/24").querySelector(".tnode") as HTMLElement);
+    await paneOf("192.0.2.0/24");
+    expect(view.location()).toBe(paths.prefix("192.0.2.0/24"));
+    await waitFor(() => expect(treeNode("192.0.2.0/24").getAttribute("aria-selected")).toBe("true"));
+    expect(treeNode("198.51.100.0/24").getAttribute("aria-selected")).toBe("false");
+    // A supernet is selected the same way and stays closed.
+    fireEvent.click(treeNode("203.0.113.0/24").querySelector(".tnode") as HTMLElement);
+    await paneOf("203.0.113.0/24");
+    expect(view.location()).toBe(paths.prefix("203.0.113.0/24"));
+    expect(treeNode("203.0.113.0/24").getAttribute("aria-expanded")).toBe("false");
+    expect(treeKeys()).toEqual(TOP_LEVEL);
+  });
+
+  it("unfolds nothing for a prefix inside a closed supernet: the supernet holds the selection", async () => {
+    const view = renderIpam(paths.prefix("203.0.113.128/26"));
+    await paneOf("203.0.113.128/26");
+    await treeLoaded();
+    expect(view.location()).toBe(paths.prefix("203.0.113.128/26"));
+    expect(treeKeys()).toEqual(TOP_LEVEL);
+    const supernet = treeNode("203.0.113.0/24");
+    expect(supernet.getAttribute("aria-expanded")).toBe("false");
+    expect(supernet.querySelector(".tnode")?.classList.contains("holds-selection")).toBe(true);
+    // The closed ancestor is the active item of the tree; no visible item is selected.
+    expect(screen.getByRole("tree").getAttribute("aria-activedescendant")).toBe(`tree-${supernet.dataset.id}`);
+    expect(treeNodes().filter((n) => n.getAttribute("aria-selected") === "true")).toEqual([]);
+    // Opened by the person, the supernet shows the selected network.
+    openNode("203.0.113.0/24");
+    await waitFor(() => expect(treeNode("203.0.113.128/26").getAttribute("aria-selected")).toBe("true"));
+    expect(supernet.querySelector(".tnode")?.classList.contains("holds-selection")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The utilization meter (docs/ipam.md section 1)
+
+describe("the utilization meter of a prefix", () => {
+  it("shows the utilization of the tree node: in use of the usable addresses, not the space the networks cover", async () => {
+    renderIpam(paths.prefix("203.0.113.0/24"));
+    const pane = await paneOf("203.0.113.0/24");
+    // 13 addresses in use of 250 usable are 5.2 %; the three networks cover 208 of the 256
+    // addresses (81 %), which is an allocation, not a utilization.
+    await treeLoaded();
+    const meter = within(pane).getByTestId("usage-meter");
+    await waitFor(() => expect(within(meter).getByTestId("usage-value").textContent).toBe("5.2%"));
+    expect(treeNode("203.0.113.0/24").querySelector(".meter .val")?.textContent).toBe("5.2%");
+    expect(within(meter).getByRole("meter").getAttribute("aria-valuenow")).toBe("5.2");
+    expect(within(meter).getByTestId("prefix-usage").textContent).toBe("13 of 250 usable addresses in use");
+    expect(within(meter).getByTestId("usage-value").textContent).not.toContain("81");
+    expect(within(pane).getByTestId("prefix-allocation").textContent).toBe("208 of 256 allocated to 3 prefixes");
+    expect(meter.getAttribute("data-level")).toBe("normal");
+  });
+
+  it("writes one decimal under 10 % and whole numbers from 10 %", async () => {
+    await openNetwork("192.0.2.0/24");
+    expect(screen.getByTestId("usage-value").textContent).toBe("50%");
+    expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("50.4");
+    cleanup();
+    renderIpam(paths.prefix("203.0.113.0/24"));
+    await paneOf("203.0.113.0/24");
+    await waitFor(() => expect(screen.getByTestId("usage-value").textContent).toBe("5.2%"));
+  });
+
+  it("draws the alarm line at the warning threshold of a prefix that has thresholds", async () => {
+    await openNetwork("192.0.2.0/24");
+    const meter = screen.getByTestId("usage-meter");
+    const line = within(meter).getByTestId("alarm-line");
+    expect(line.style.insetInlineStart).toBe("80%");
+    expect(within(meter).getByTestId("usage-scale").textContent).toContain("Alarm line at 80 % (critical at 95 %)");
+  });
+
+  it("draws no alarm line for a prefix without thresholds and says so", async () => {
+    renderIpam(paths.prefix("203.0.113.0/24"));
+    const pane = await paneOf("203.0.113.0/24");
+    const meter = within(pane).getByTestId("usage-meter");
+    expect(within(meter).queryByTestId("alarm-line")).toBeNull();
+    expect(within(meter).getByTestId("usage-scale").textContent).toBe("0 to 100 % of the usable addresses · No alarm thresholds");
+  });
+
+  it("follows the level of the prefix", async () => {
+    const { pane } = await openNetwork("203.0.113.192/28");
+    const meter = within(pane).getByTestId("usage-meter");
+    await waitFor(() => expect(meter.getAttribute("data-level")).toBe("critical"));
+    expect(within(meter).getByTestId("alarm-line").style.insetInlineStart).toBe("70%");
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The table of a supernet's networks
+
+describe("the networks table of a supernet", () => {
+  async function openSupernet(cidr = "203.0.113.0/24") {
+    renderIpam(paths.prefix(cidr));
+    await paneOf(cidr);
+    const table = await screen.findByTestId("children-table");
+    await waitFor(() => expect(within(table).getAllByTestId("row").length).toBeGreaterThan(0));
+    return table;
+  }
+  const keysIn = (table: HTMLElement) => within(table).getAllByTestId("row").map((r) => r.dataset.key);
+
+  it("shows the columns of the table and sorts by utilization, fullest first", async () => {
+    const table = await openSupernet();
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent?.trim())).toEqual([
+      "Prefix",
+      "Description",
+      "Role",
+      "VLAN",
+      "Utilization",
+      "Status · Active",
+    ]);
+    // 92.9 % first; the two empty networks follow in address order.
+    expect(keysIn(table)).toEqual(["203.0.113.192/28", "203.0.113.0/25", "203.0.113.128/26"]);
+    const utilization = within(table).getByRole("columnheader", { name: /^Utilization/ });
+    expect(utilization.getAttribute("aria-sort")).toBe("descending");
+  });
+
+  it("sorts the other way round when the utilization header is clicked", async () => {
+    const table = await openSupernet();
+    fireEvent.click(within(within(table).getByRole("columnheader", { name: /^Utilization/ })).getByRole("button"));
+    await waitFor(() => expect(keysIn(table)).toEqual(["203.0.113.0/25", "203.0.113.128/26", "203.0.113.192/28"]));
+    expect(within(table).getByRole("columnheader", { name: /^Utilization/ }).getAttribute("aria-sort")).toBe("ascending");
+  });
+
+  it("filters the networks without a VLAN and those without a description with two chips", async () => {
+    // One network has an empty description.
+    const dmz = ipamState().data.prefix.get(IPAM_IDS.prefix.dmz) as { meta: { description?: string | null } };
+    dmz.meta.description = "";
+    const table = await openSupernet();
+    const noVlan = within(table).getByTestId("chip-no-vlan");
+    const noDescription = within(table).getByTestId("chip-no-description");
+    expect(noVlan.getAttribute("aria-pressed")).toBe("false");
+    expect(noVlan.textContent).toContain("No VLAN");
+    expect(noDescription.textContent).toContain("No description");
+    // The chips count the rows they would keep: cameras have no VLAN, the DMZ no description.
+    expect(noVlan.textContent).toContain("1");
+    expect(noDescription.textContent).toContain("1");
+    fireEvent.click(noVlan);
+    await waitFor(() => expect(keysIn(table)).toEqual(["203.0.113.192/28"]));
+    expect(noVlan.getAttribute("aria-pressed")).toBe("true");
+    // Both chips narrow together: no network lacks both.
+    fireEvent.click(noDescription);
+    expect(await within(table).findByText("No network matches the filter.")).toBeTruthy();
+    fireEvent.click(noVlan);
+    await waitFor(() => expect(keysIn(table)).toEqual(["203.0.113.128/26"]));
+    fireEvent.click(noDescription);
+    await waitFor(() => expect(keysIn(table)).toHaveLength(3));
+    // The text filter works on the prefix and the description.
+    fireEvent.input(within(table).getByTestId("filter-input"), { target: { value: "lab" } });
+    await waitFor(() => expect(keysIn(table)).toEqual(["203.0.113.0/25"]));
+  });
+
+  it("says the status once in its header when every row shares it and badges the row that differs", async () => {
+    const table = await openSupernet();
+    const header = within(table).getByRole("columnheader", { name: /^Status/ });
+    expect(within(header).getByTestId("th-majority").textContent?.trim()).toBe("· Active");
+    for (const row of within(table).getAllByTestId("row")) {
+      expect(row.querySelector('td[data-col="status"]')?.textContent).toBe("");
+    }
+  });
+
+  it("drops the status from the header and badges each row when the rows differ", async () => {
+    (ipamState().data.prefix.get(IPAM_IDS.prefix.dmz) as { status: string }).status = "deprecated";
+    const table = await openSupernet();
+    const header = within(table).getByRole("columnheader", { name: /^Status/ });
+    expect(within(header).queryByTestId("th-majority")).toBeNull();
+    const dmz = within(table).getAllByTestId("row").find((r) => r.dataset.key === "203.0.113.128/26") as HTMLElement;
+    expect(dmz.querySelector('td[data-col="status"]')?.textContent).toBe("Deprecated");
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The address map above the addresses of a network
+
+describe("the address map of a network", () => {
+  it("draws one cell for each of the 256 addresses of a /24 and colors only the cells with a finding", async () => {
+    await openNetwork("192.0.2.0/24");
+    const panel = await screen.findByTestId("address-map-panel");
+    await waitFor(() => expect(within(panel).queryAllByTestId("amap-cell")).toHaveLength(256));
+    const cells = within(panel).getAllByTestId("amap-cell");
+    // The findings the map is colored by are those the findings panel counts.
+    const res = await fetch(`/api/v1/findings?prefix=${IPAM_IDS.prefix.lan}&limit=1000`);
+    const body = (await res.json()) as { items: { source: string; subject: { ip?: string | null }; severity: string }[] };
+    const withIp = body.items.filter((f) => f.subject.ip);
+    // Whatever other sources the mock serves for the prefix (the topology adds one on a host), the
+    // map colors exactly the distinct addresses its findings sit on.
+    const colored = new Set(withIp.map((f) => f.subject.ip));
+    expect(colored.size).toBeGreaterThanOrEqual(4);
+    const ipOf = (c: HTMLElement) => c.getAttribute("aria-label")?.split(",")[0];
+    const severityByIp = () => Object.fromEntries(cells.filter((c) => c.dataset.severity).map((c) => [ipOf(c), c.dataset.severity]));
+    // The findings arrive in a request of their own, after the cells are drawn.
+    await waitFor(() => expect(Object.keys(severityByIp())).toHaveLength(colored.size));
+    expect(Object.fromEntries(withIp.map((f) => [f.subject.ip, f.severity]))).toEqual(severityByIp());
+    expect(Object.fromEntries(withIp.filter((f) => f.source === "proposal").map((f) => [f.subject.ip, f.severity]))).toEqual({
+      "192.0.2.16": "review",
+      "192.0.2.30": "act",
+      "192.0.2.49": "review",
+      "192.0.2.150": "review",
+    });
+    // The other cells are not colored, whatever their state; a finding colors a free cell too.
+    expect(cells.filter((c) => !c.dataset.severity)).toHaveLength(256 - colored.size);
+    expect(cells.find((c) => ipOf(c) === "192.0.2.49")?.dataset.state).toBe("free");
+    expect(new Set(cells.map((c) => c.dataset.state))).toEqual(new Set(["edge", "used", "held", "free"]));
+  });
+
+  it("draws the 16 cells of a /28 uncolored when no finding sits on an address, above the address grid", async () => {
+    await openNetwork("203.0.113.192/28");
+    const panel = await screen.findByTestId("address-map-panel");
+    await waitFor(() => expect(within(panel).queryAllByTestId("amap-cell")).toHaveLength(16));
+    expect(within(panel).getAllByTestId("amap-cell").filter((c) => c.dataset.severity)).toEqual([]);
+    expect(panel.compareDocumentPosition(addressGrid()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -938,7 +1204,7 @@ describe("accessibility of the networks page", () => {
   it("passes axe with a network selected", async () => {
     const { pane } = await openNetwork("192.0.2.0/24");
     await treeLoaded();
-    await waitFor(() => expect(within(pane).getByTestId("prefix-summary").querySelector(".meter")).toBeTruthy());
+    await waitFor(() => expect(within(pane).getByTestId("usage-meter")).toBeTruthy());
     expect(await axeViolations(screen.getByTestId("page-ipam"))).toEqual([]);
   });
 

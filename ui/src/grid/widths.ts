@@ -1,9 +1,11 @@
 // Column widths of a list: dragged, stepped with the keyboard or fitted to the content on the
-// handle at the trailing edge of a header cell (ColumnResize.tsx). They are remembered per
-// list and per signed-in user under `tenko-grid-widths:<user id>:<list id>` in localStorage,
-// apart from the column order and visibility of prefs.ts, so "Reset column widths" drops
-// only them. A narrow screen (the phone layout of the forms, 560 px) ignores stored widths
-// and offers no handles: the default layout of the list applies there.
+// handle at the trailing edge of a header cell (ColumnResize.tsx). They are saved per list and
+// per signed-in user in the table's layout (layoutStore.ts: on the server under `table:<list
+// id>`, with the browser's copy while the server is out of reach), beside the column order and
+// visibility of prefs.ts; "Reset column widths" drops only them. Stored widths are clamped to the
+// bounds and, when the list says which columns it has, limited to those. A narrow screen (the
+// phone layout of the forms, 560 px) ignores stored widths and offers no handles: the default
+// layout of the list applies there.
 //
 // Layout: the tables keep `table-layout: fixed`. Once a width is stored, every column but the
 // last has a width in pixels (the ones the user did not touch are frozen at the width they had
@@ -12,6 +14,7 @@
 // horizontally inside its wrapper instead of squeezing the last column away.
 import { createSignal, getOwner, onCleanup, untrack, type Accessor } from "solid-js";
 import { session } from "../auth/session";
+import { LEGACY_WIDTHS, patchLayout, tableLayout } from "./layoutStore";
 
 /** Narrowest a column can be made, in pixels. */
 export const MIN_WIDTH = 48;
@@ -25,7 +28,6 @@ export const DEFAULT_WIDTH = 160;
 /** The phone layout (forms.css, provision.css): stored widths do not apply there. */
 export const NARROW_QUERY = "(max-width: 560px)";
 
-const KEY = "tenko-grid-widths:";
 
 export type WidthMap = Readonly<Record<string, number>>;
 
@@ -60,9 +62,9 @@ export function fitWidth(naturals: readonly number[], min = MIN_WIDTH): number {
   return clampWidth(Math.ceil(widest) + 1, min);
 }
 
-/** The storage key of the widths of list `listId` for user `user`. */
+/** The key of the widths of list `listId` for user `user` in the browser store before U6 (imported once). */
 export function widthsKey(listId: string, user: string | null | undefined): string {
-  return `${KEY}${user ?? "-"}:${listId}`;
+  return `${LEGACY_WIDTHS}${user ?? "-"}:${listId}`;
 }
 
 /** The stored widths, or null; values that are not positive numbers are dropped. */
@@ -115,10 +117,30 @@ export interface ColumnWidths {
   attachMenu: () => () => void;
 }
 
-/** The widths of list `listId` for the signed-in user (call inside a component). */
-export function createColumnWidths(listId: string, user = untrack(() => session()?.user.id)): ColumnWidths {
-  const key = widthsKey(listId, user);
-  const [map, setMap] = createSignal<WidthMap>(readWidths(key) ?? {});
+/** The stored widths within the bounds, of the known columns only when `known` is given. */
+export function boundWidths(widths: Readonly<Record<string, number>> | undefined, known?: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  const ids = known ? new Set(known) : null;
+  for (const [id, w] of Object.entries(widths ?? {})) {
+    if (typeof w === "number" && Number.isFinite(w) && w > 0 && (!ids || ids.has(id))) out[id] = clampWidth(w);
+  }
+  return out;
+}
+
+/**
+ * The widths of list `listId` for the signed-in user (call inside a component). `known` names the
+ * columns of the list; a stored width of another column is ignored.
+ */
+export function createColumnWidths(
+  listId: string,
+  user = untrack(() => session()?.user.id),
+  known?: () => readonly string[],
+): ColumnWidths {
+  const layout = tableLayout(user, listId);
+  const stored = () => boundWidths(layout()?.widths, known?.());
+  // The widths of a drag in progress, until `commit` stores them.
+  const [draft, setDraft] = createSignal<WidthMap | null>(null);
+  const map = () => draft() ?? stored();
   const query = narrowQuery();
   const [narrow, setNarrow] = createSignal(query?.matches ?? false);
   if (query) {
@@ -135,12 +157,16 @@ export function createColumnWidths(listId: string, user = untrack(() => session(
     update(patch) {
       const next: Record<string, number> = { ...map() };
       for (const [id, w] of Object.entries(patch)) next[id] = clampWidth(w);
-      setMap(next);
+      setDraft(next);
     },
-    commit: () => writeWidths(key, map()),
+    commit() {
+      const next = draft();
+      setDraft(null);
+      if (next) patchLayout(user, listId, { widths: Object.keys(next).length > 0 ? { ...next } : undefined });
+    },
     reset() {
-      setMap({});
-      writeWidths(key, null);
+      setDraft(null);
+      patchLayout(user, listId, { widths: undefined });
     },
     menu: () => menus() > 0,
     attachMenu() {

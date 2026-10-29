@@ -1677,7 +1677,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 37, "every endpoint of the four areas");
+        assert_eq!(checked, 40, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -2734,6 +2734,9 @@ mod tests {
             "set_break_glass",
             "update_security_settings",
             "set_default_language",
+            "list_preferences",
+            "put_preference",
+            "delete_preference",
         ];
         let schemas = document["components"]["schemas"]
             .as_object()
@@ -2805,7 +2808,7 @@ mod tests {
                 schema_refs(operation, &mut refs);
             }
         }
-        assert_eq!(operations, 37);
+        assert_eq!(operations, 40);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

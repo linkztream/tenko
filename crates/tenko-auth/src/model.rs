@@ -22,10 +22,16 @@
 //! | `auth.role_policies` | role name | [`RolePolicy`] (MFA per role, IAM-06) |
 //! | `auth.scoped_tokens` | SHA-256 of the token | [`ScopedTokenRecord`] (IAM-10) |
 //! | `auth.user_scoped_tokens` | ([`UserId`], [`ApiTokenId`]) | SHA-256 of the token |
+//! | `auth.preferences` | ([`UserId`], key) | [`StoredPreference`] (the person's saved table layouts) |
 //!
 //! Scoped grants, role policies and scoped tokens live in tables that builds before
 //! WP3.2 do not read: after a rollback a scoped grant or token grants nothing instead of
 //! being read as a global one (plan section 2.1, R25).
+//!
+//! `auth.preferences` is additive in the same way: a build before it does not read the
+//! table, and a backup taken before it restores with the table empty, so every table shows
+//! its default layout until the person changes it again. Its changes are not routed to the
+//! event stream (`tenko_api::sse`): a person's layout is nobody else's event.
 
 use std::net::IpAddr;
 
@@ -36,6 +42,7 @@ use tenko_core::{
 };
 use utoipa::ToSchema;
 
+pub use crate::preferences::StoredPreference;
 use crate::{
     password::hash::PasswordHash, recovery::StoredRecoveryCode, roles::RoleName,
     settings::SecuritySettings, webauthn::AttestationKind,
@@ -77,6 +84,15 @@ pub const SCOPED_TOKENS: TableDef<Vec<u8>, ScopedTokenRecord> = TableDef::new("a
 /// Scoped token hashes by owner.
 pub const USER_SCOPED_TOKENS: TableDef<(UserId, ApiTokenId), Vec<u8>> =
     TableDef::new("auth.user_scoped_tokens");
+/// The personal preferences of each person by (user, key), such as `table:addresses`
+/// (`crate::preferences`).
+pub const PREFERENCES: TableDef<(UserId, String), StoredPreference> =
+    TableDef::new("auth.preferences");
+/// Counts the new preference keys of each person: a write that adds a key expects the value
+/// it read and bumps it, so two concurrent additions cannot pass the key limit together.
+pub fn preference_keys_counter(user: UserId) -> tenko_core::CounterKey {
+    tenko_core::CounterKey::with("auth.preferences", &user)
+}
 
 tenko_core::id_type! {
     /// Identifier of a scoped grant.

@@ -1,5 +1,6 @@
 import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { tableLayout } from "./layoutStore";
 import {
   BIG_STEP,
   clampWidth,
@@ -103,9 +104,9 @@ describe("stored widths", () => {
       expect(alex.get("mode")).toBe(MIN_WIDTH);
       expect(alex.custom()).toBe(true);
       // Nothing is stored before the commit (a drag stores once, at its end).
-      expect(localStorage.getItem("tenko-grid-widths:alex:hosts")).toBeNull();
+      expect(tableLayout("alex", "hosts")()).toBeNull();
       alex.commit();
-      expect(JSON.parse(localStorage.getItem("tenko-grid-widths:alex:hosts") ?? "{}")).toEqual({ name: 300, mode: MIN_WIDTH });
+      expect(tableLayout("alex", "hosts")()?.widths).toEqual({ name: 300, mode: MIN_WIDTH });
 
       // The same list for the same user starts with them; another user or list does not.
       expect(createColumnWidths("hosts", "alex").get("name")).toBe(300);
@@ -115,7 +116,7 @@ describe("stored widths", () => {
       alex.reset();
       expect(alex.custom()).toBe(false);
       expect(alex.get("name")).toBeUndefined();
-      expect(localStorage.getItem("tenko-grid-widths:alex:hosts")).toBeNull();
+      expect(tableLayout("alex", "hosts")()).toBeNull();
       dispose();
     });
   });

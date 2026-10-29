@@ -35,7 +35,10 @@ pub mod filter;
 mod hub;
 pub mod metrics;
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use tenko_core::{ObjectKind, ObjectRef, Principal, TableName};
 
@@ -99,6 +102,8 @@ pub struct Route {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventRoutes {
     tables: HashMap<TableName, Route>,
+    /// Tables that never send an event, whatever their namespace routes to.
+    silent: HashSet<TableName>,
     /// Table-name prefixes, longest first.
     prefixes: Vec<(String, Topic)>,
     namespaces: HashMap<String, Topic>,
@@ -109,6 +114,7 @@ impl EventRoutes {
     pub fn empty() -> Self {
         Self {
             tables: HashMap::new(),
+            silent: HashSet::new(),
             prefixes: Vec::new(),
             namespaces: HashMap::new(),
         }
@@ -117,6 +123,14 @@ impl EventRoutes {
     /// Routes one table. `kind` makes each changed key (a 16-byte id) an object reference.
     pub fn table(&mut self, table: TableName, topic: Topic, kind: Option<ObjectKind>) -> &mut Self {
         self.tables.insert(table, Route { topic, kind });
+        self
+    }
+
+    /// Keeps a table off the stream: its changes send no event, whatever its namespace or a
+    /// prefix routes to (a person's own preferences, `auth.preferences`).
+    pub fn silent(&mut self, table: TableName) -> &mut Self {
+        self.tables.remove(&table);
+        self.silent.insert(table);
         self
     }
 
@@ -141,6 +155,9 @@ impl EventRoutes {
     /// The route of a table, if it has one. The audit table (`sys.audit`) is handled by
     /// the hub itself.
     pub fn lookup(&self, table: &TableName) -> Option<Route> {
+        if self.silent.contains(table) {
+            return None;
+        }
         if let Some(route) = self.tables.get(table) {
             return Some(*route);
         }
@@ -162,6 +179,10 @@ impl EventRoutes {
 }
 
 impl Default for EventRoutes {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one list of every route of the product"
+    )]
     fn default() -> Self {
         let mut routes = Self::empty();
         for (table, kind) in [
@@ -262,7 +283,8 @@ impl Default for EventRoutes {
             .namespace("backup", Topic::System)
             .table_prefix("sys.audit_export", Topic::System)
             .namespace("auth", Topic::Admin)
-            .namespace("users", Topic::Admin);
+            .namespace("users", Topic::Admin)
+            .silent(TableName::from_static("auth.preferences"));
         routes
     }
 }
@@ -378,6 +400,7 @@ mod tests {
         assert_eq!(topic("sys.audit_export_sinks"), Some(Topic::System));
         assert_eq!(topic("auth.grants"), Some(Topic::Admin));
         assert_eq!(topic("auth.scoped_tokens"), Some(Topic::Admin));
+        assert_eq!(topic("auth.preferences"), None, "a person's own layouts");
         assert_eq!(topic("sys.journal"), None);
         assert_eq!(
             topic("sys.audit"),

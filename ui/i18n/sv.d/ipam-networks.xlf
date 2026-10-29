@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="ipam-networks">
+      <unit id="ipam.tree.node_children">
+        <notes><note category="description">Accessible name of a tree node with child prefixes; {cidr} is the prefix, {description} its description, {count} the number of direct child prefixes.</note></notes>
+        <segment><source>{cidr} {description}, {count, plural, one {# child prefix} other {# child prefixes}}</source><target>{cidr} {description}, {count, plural, one {# underliggande prefix} other {# underliggande prefix}}</target></segment>
+      </unit>
+      <unit id="ipam.tree.node_children_plain">
+        <notes><note category="description">Accessible name of a tree node without a description that has child prefixes.</note></notes>
+        <segment><source>{cidr}, {count, plural, one {# child prefix} other {# child prefixes}}</source><target>{cidr}, {count, plural, one {# underliggande prefix} other {# underliggande prefix}}</target></segment>
+      </unit>
+      <unit id="ipam.tree.children_count">
+        <notes><note category="description">Tooltip of the count beside a tree node: its direct child prefixes.</note></notes>
+        <segment><source>{count, plural, one {# child prefix} other {# child prefixes}}</source><target>{count, plural, one {# underliggande prefix} other {# underliggande prefix}}</target></segment>
+      </unit>
+      <unit id="ipam.map.title">
+        <notes><note category="description">Heading of the address map of a prefix.</note></notes>
+        <segment><source>Address map</source><target>Adresskarta</target></segment>
+      </unit>
+      <unit id="ipam.map.legend">
+        <notes><note category="description">Accessible name of the legend of the address map.</note></notes>
+        <segment><source>Legend</source><target>Teckenförklaring</target></segment>
+      </unit>
+      <unit id="ipam.map.state.used">
+        <notes><note category="description">State of an address in the address map: an address object exists.</note></notes>
+        <segment><source>In use</source><target>Används</target></segment>
+      </unit>
+      <unit id="ipam.map.state.held">
+        <notes><note category="description">State of an address in the address map: a range (such as a DHCP pool) holds it without an address object.</note></notes>
+        <segment><source>Held by a range</source><target>Hålls av ett intervall</target></segment>
+      </unit>
+      <unit id="ipam.map.state.free">
+        <notes><note category="description">State of an address in the address map: free.</note></notes>
+        <segment><source>Free</source><target>Ledig</target></segment>
+      </unit>
+      <unit id="ipam.map.state.edge">
+        <notes><note category="description">State of an address in the address map: the network or broadcast address, never assignable.</note></notes>
+        <segment><source>Not usable</source><target>Kan inte användas</target></segment>
+      </unit>
+      <unit id="ipam.map.severity.act">
+        <notes><note category="description">Severity of a finding on the address map: act now.</note></notes>
+        <segment><source>Act now</source><target>Åtgärda nu</target></segment>
+      </unit>
+      <unit id="ipam.map.severity.review">
+        <notes><note category="description">Severity of a finding on the address map: review.</note></notes>
+        <segment><source>Review</source><target>Granska</target></segment>
+      </unit>
+      <unit id="ipam.map.severity.info">
+        <notes><note category="description">Severity of a finding on the address map: information.</note></notes>
+        <segment><source>Info</source><target>Info</target></segment>
+      </unit>
+      <unit id="ipam.map.cell">
+        <notes><note category="description">Accessible name of one cell of the address map; {state} is a state word.</note></notes>
+        <segment><source>{ip}, {state}</source><target>{ip}, {state}</target></segment>
+      </unit>
+      <unit id="ipam.map.cell_finding">
+        <notes><note category="description">Accessible name of a cell with a finding; {severity} is the severity word.</note></notes>
+        <segment><source>{ip}, {state}, {severity}</source><target>{ip}, {state}, {severity}</target></segment>
+      </unit>
+      <unit id="ipam.map.block_cell">
+        <notes><note category="description">Accessible name of a block cell of the address map (one /24 of a larger prefix).</note></notes>
+        <segment><source>{cidr}, {in_use} of {size} in use, {findings, plural, one {# finding} other {# findings}}</source><target>{cidr}, {in_use} av {size} används, {findings, plural, one {# fynd} other {# fynd}}</target></segment>
+      </unit>
+      <unit id="ipam.map.block_in_use">
+        <notes><note category="description">Readout of a block cell: addresses in use of the block's size.</note></notes>
+        <segment><source>{in_use} of {size} in use</source><target>{in_use} av {size} används</target></segment>
+      </unit>
+      <unit id="ipam.map.block_findings">
+        <notes><note category="description">Readout of a block cell: its findings.</note></notes>
+        <segment><source>{count, plural, one {# finding} other {# findings}}</source><target>{count, plural, one {# fynd} other {# fynd}}</target></segment>
+      </unit>
+      <unit id="ipam.map.label">
+        <notes><note category="description">Accessible name of the address map with one cell per address.</note></notes>
+        <segment><source>Address map of {cidr}, {count} addresses, {columns} per row</source><target>Adresskarta för {cidr}, {count} adresser, {columns} per rad</target></segment>
+      </unit>
+      <unit id="ipam.map.label_blocks">
+        <notes><note category="description">Accessible name of the address map of a larger prefix, one cell per block of 256 addresses.</note></notes>
+        <segment><source>Address map of {cidr} in blocks of 256 addresses, {count} blocks, {columns} per row</source><target>Adresskarta för {cidr} i block om 256 adresser, {count} block, {columns} per rad</target></segment>
+      </unit>
+      <unit id="ipam.map.hint">
+        <notes><note category="description">Hint under the address map while no cell is hovered or focused.</note></notes>
+        <segment><source>Hover or focus a cell for its address; Enter opens it.</source><target>Hovra över eller fokusera en ruta för att se adressen; Enter öppnar den.</target></segment>
+      </unit>
+      <unit id="ipam.map.too_large">
+        <notes><note category="description">Shown instead of the address map for a prefix too large to draw.</note></notes>
+        <segment><source>The address map is drawn for prefixes of up to 1,024 blocks of 256 addresses.</source><target>Adresskartan ritas för prefix med upp till 1 024 block om 256 adresser.</target></segment>
+      </unit>
+      <unit id="ipam.map.partial">
+        <notes><note category="description">Note under the address map when not every address object could be read.</note></notes>
+        <segment><source>Only the first {count} recorded addresses are drawn.</source><target>Bara de första {count} registrerade adresserna ritas.</target></segment>
+      </unit>
+      <unit id="ipam.prefix.fact.no_vlan">
+        <notes><note category="description">Fact in a prefix's header: no VLAN is set.</note></notes>
+        <segment><source>No VLAN</source><target>Inget VLAN</target></segment>
+      </unit>
+      <unit id="ipam.prefix.fact.no_site">
+        <notes><note category="description">Fact in a prefix's header: no site is set.</note></notes>
+        <segment><source>No site</source><target>Ingen plats</target></segment>
+      </unit>
+      <unit id="ipam.prefix.fact.scope">
+        <notes><note category="description">Fact in a prefix's header: its tenant and VRF.</note></notes>
+        <segment><source>{tenant} / {vrf}</source><target>{tenant} / {vrf}</target></segment>
+      </unit>
+      <unit id="ipam.prefix.fact.in">
+        <notes><note category="description">Fact in a prefix's header: the supernet it lies in.</note></notes>
+        <segment><source>In {cidr}</source><target>I {cidr}</target></segment>
+      </unit>
+      <unit id="ipam.meter.label">
+        <notes><note category="description">Label of the utilization meter of a prefix.</note></notes>
+        <segment><source>Utilization</source><target>Användning</target></segment>
+      </unit>
+      <unit id="ipam.meter.scale">
+        <notes><note category="description">Under the utilization meter: what its scale is.</note></notes>
+        <segment><source>0 to 100 % of the usable addresses</source><target>0 till 100 % av de användbara adresserna</target></segment>
+      </unit>
+      <unit id="ipam.meter.alarm_at">
+        <notes><note category="description">Under the utilization meter: the threshold of the alarm line.</note></notes>
+        <segment><source>Alarm line at {warn} % (critical at {crit} %)</source><target>Larmlinje vid {warn} % (kritiskt vid {crit} %)</target></segment>
+      </unit>
+      <unit id="ipam.meter.no_alarm">
+        <notes><note category="description">Under the utilization meter when the prefix has no alarm thresholds.</note></notes>
+        <segment><source>No alarm thresholds</source><target>Inga larmgränser</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.title">
+        <notes><note category="description">Title of the panel of a network's DHCP scope.</note></notes>
+        <segment><source>DHCP scope</source><target>DHCP-scope</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.none">
+        <notes><note category="description">The panel of a network without a DHCP scope.</note></notes>
+        <segment><source>No DHCP scope serves this network.</source><target>Inget DHCP-scope betjänar det här nätet.</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.pools">
+        <notes><note category="description">Pools of a DHCP scope.</note></notes>
+        <segment><source>{count, plural, one {# pool} other {# pools}}</source><target>{count, plural, one {# pool} other {# pooler}}</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.leases">
+        <notes><note category="description">Active leases of a DHCP scope.</note></notes>
+        <segment><source>{count, plural, one {# active lease} other {# active leases}}</source><target>{count, plural, one {# aktiv lease} other {# aktiva leases}}</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.open">
+        <notes><note category="description">Link to the DHCP scope page.</note></notes>
+        <segment><source>Open the scope</source><target>Öppna scopet</target></segment>
+      </unit>
+      <unit id="ipam.panel.dhcp.disabled">
+        <notes><note category="description">The panel when the DHCP scope is switched off.</note></notes>
+        <segment><source>Switched off</source><target>Avstängt</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.title">
+        <notes><note category="description">Title of the panel of the findings inside a prefix.</note></notes>
+        <segment><source>Findings</source><target>Fynd</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.none">
+        <notes><note category="description">The findings panel when nothing in the prefix needs a person.</note></notes>
+        <segment><source>Nothing to look at in this prefix.</source><target>Inget att titta på i det här prefixet.</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.act">
+        <notes><note category="description">Count of findings to act on.</note></notes>
+        <segment><source>{count} to act on</source><target>{count} att åtgärda</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.review">
+        <notes><note category="description">Count of findings to review.</note></notes>
+        <segment><source>{count} to review</source><target>{count} att granska</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.info">
+        <notes><note category="description">Count of informational findings (never counted as a problem).</note></notes>
+        <segment><source>{count} info</source><target>{count} info</target></segment>
+      </unit>
+      <unit id="ipam.panel.findings.open">
+        <notes><note category="description">Link to Discovery filtered to the prefix.</note></notes>
+        <segment><source>Open in Discovery</source><target>Öppna i Upptäckt</target></segment>
+      </unit>
+      <unit id="ipam.panel.changes.title">
+        <notes><note category="description">Title of the panel of a prefix's recent changes.</note></notes>
+        <segment><source>Recent changes</source><target>Senaste ändringar</target></segment>
+      </unit>
+      <unit id="ipam.panel.changes.none">
+        <notes><note category="description">The recent changes panel when nothing was recorded.</note></notes>
+        <segment><source>No changes recorded.</source><target>Inga ändringar registrerade.</target></segment>
+      </unit>
+      <unit id="ipam.panel.changes.all">
+        <notes><note category="description">Button that opens the History tab.</note></notes>
+        <segment><source>All changes</source><target>Alla ändringar</target></segment>
+      </unit>
+      <unit id="ipam.children.filter_label">
+        <notes><note category="description">Accessible name of the filter of a supernet's networks.</note></notes>
+        <segment><source>Filter the networks</source><target>Filtrera näten</target></segment>
+      </unit>
+      <unit id="ipam.children.filter_placeholder">
+        <notes><note category="description">Placeholder of the filter of a supernet's networks.</note></notes>
+        <segment><source>Filter by prefix or description</source><target>Filtrera på prefix eller beskrivning</target></segment>
+      </unit>
+      <unit id="ipam.children.no_vlan">
+        <notes><note category="description">Filter chip: only the networks without a VLAN.</note></notes>
+        <segment><source>No VLAN</source><target>Inget VLAN</target></segment>
+      </unit>
+      <unit id="ipam.children.no_description">
+        <notes><note category="description">Filter chip: only the networks without a description.</note></notes>
+        <segment><source>No description</source><target>Ingen beskrivning</target></segment>
+      </unit>
+      <unit id="ipam.children.count">
+        <notes><note category="description">Follows the number of networks in the footer of a supernet's networks, for example 13 networks.</note></notes>
+        <segment><source>{count, plural, one {network} other {networks}}</source><target>{count, plural, one {nät} other {nät}}</target></segment>
+      </unit>
+      <unit id="ipam.children.empty_filtered">
+        <notes><note category="description">A supernet's networks when the filter matches none.</note></notes>
+        <segment><source>No network matches the filter.</source><target>Inget nät matchar filtret.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

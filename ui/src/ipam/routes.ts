@@ -4,7 +4,8 @@ import { withPacks } from "../i18n";
 
 // Every IPAM view loads the grid and IPAM message packs with its chunk.
 const PACKS = ["grid", "ipam"] as const;
-const view = () => withPacks(PACKS, () => import("./IpamView"));
+// The networks view also names the kinds of the findings inside a prefix (the discovery pack).
+const view = () => withPacks([...PACKS, "discovery"], () => import("./IpamView"));
 
 export const routes: AppRoute[] = [
   { path: "/ipam", component: lazy(view()), title: "shell.nav.ipam" },

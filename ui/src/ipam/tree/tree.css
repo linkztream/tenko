@@ -18,3 +18,10 @@
 }
 .tnode.selected { background: var(--accent-wash); }
 .tnode.selected .lbl .addr { color: var(--accent); font-weight: var(--fw-semibold); }
+/* UI-Q7: the number of child prefixes of a node, and a closed node that holds the selection. */
+.tnode .child-count {
+  flex: none; min-inline-size: 18px; padding: 0 5px; border-radius: var(--r-pill);
+  background: var(--surface-3); color: var(--ink-2);
+  font-size: var(--fs-11); line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.tnode.holds-selection { box-shadow: inset calc(2px * var(--inline-sign)) 0 0 var(--accent); }

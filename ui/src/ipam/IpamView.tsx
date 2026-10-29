@@ -247,6 +247,7 @@ export default function IpamView() {
                 node={node()}
                 tree={tree.tree()}
                 vrf={scope.vrf()}
+                tenant={scope.tenant()?.name}
                 vlanOf={vlans.vlanOf}
                 onChanged={() => {
                   void refetch();

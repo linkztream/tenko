@@ -39,6 +39,7 @@ pub mod hibp;
 pub mod lockout;
 pub mod model;
 pub mod password;
+pub mod preferences;
 pub mod random;
 pub mod recovery;
 pub mod roles;

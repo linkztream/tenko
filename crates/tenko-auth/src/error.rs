@@ -12,6 +12,10 @@
 //! (422), `auth.grant.invalid_role` (422), `auth.grant.exceeds_own` (403),
 //! `auth.grant.duplicate` (409), `auth.service_account.not_found` (404),
 //! `auth.service_account.no_login` (409) and `auth.scope.unavailable` (503).
+//!
+//! Codes of the personal preferences (`crate::preferences`): `auth.preference.not_found`
+//! (404), `auth.preference.too_large` (413, a document over 16 KiB) and
+//! `auth.preference.limit` (409, a new key beyond the 64 of a person).
 
 use std::{borrow::Cow, collections::BTreeMap};
 
@@ -148,6 +152,18 @@ pub enum AuthError {
     /// Scope checks need the anchors of IPAM, which this server does not provide.
     #[error("scoped authorization is not available")]
     ScopeUnavailable,
+    /// A preference document exceeds its size limit.
+    #[error("the preference exceeds {max_bytes} bytes")]
+    PreferenceTooLarge {
+        /// The limit in bytes.
+        max_bytes: usize,
+    },
+    /// A new preference key would exceed the number of keys a person may store.
+    #[error("a person stores at most {max_keys} preferences")]
+    PreferenceLimit {
+        /// The limit.
+        max_keys: usize,
+    },
     /// The service is not configured (no relying party, no host name yet).
     #[error("authentication is not available: {0}")]
     Unavailable(&'static str),
@@ -216,6 +232,7 @@ impl Coded for AuthError {
                 "credential" => "auth.webauthn.credential_not_found",
                 "grant" => "auth.grant.not_found",
                 "service_account" => "auth.service_account.not_found",
+                "preference" => "auth.preference.not_found",
                 _ => "auth.not_found",
             },
             Self::UserNameTaken => "users.name_taken",
@@ -235,6 +252,8 @@ impl Coded for AuthError {
             Self::GrantDuplicate => "auth.grant.duplicate",
             Self::ServiceAccountNoLogin => "auth.service_account.no_login",
             Self::ScopeUnavailable => "auth.scope.unavailable",
+            Self::PreferenceTooLarge { .. } => "auth.preference.too_large",
+            Self::PreferenceLimit { .. } => "auth.preference.limit",
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
             Self::Internal(_) => "auth.internal",
@@ -272,7 +291,9 @@ impl Coded for AuthError {
             | Self::PinCoupling
             | Self::AuditExportRequired
             | Self::GrantDuplicate
-            | Self::ServiceAccountNoLogin => 409,
+            | Self::ServiceAccountNoLogin
+            | Self::PreferenceLimit { .. } => 409,
+            Self::PreferenceTooLarge { .. } => 413,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
             Self::Internal(_) => 500,
@@ -299,6 +320,12 @@ impl Coded for AuthError {
                 BTreeMap::from([("reason", reason.clone().into_owned())])
             }
             Self::GrantInvalidRole { role } => BTreeMap::from([("role", (*role).to_owned())]),
+            Self::PreferenceTooLarge { max_bytes } => {
+                BTreeMap::from([("max_bytes", max_bytes.to_string())])
+            }
+            Self::PreferenceLimit { max_keys } => {
+                BTreeMap::from([("max_keys", max_keys.to_string())])
+            }
             Self::Invalid { field, reason } => BTreeMap::from([
                 ("field", (*field).to_owned()),
                 ("reason", reason.clone().into_owned()),
@@ -385,6 +412,9 @@ mod tests {
             },
             AuthError::ServiceAccountNoLogin,
             AuthError::ScopeUnavailable,
+            AuthError::NotFound { kind: "preference" },
+            AuthError::PreferenceTooLarge { max_bytes: 16_384 },
+            AuthError::PreferenceLimit { max_keys: 64 },
         ] {
             let code = error.code();
             assert!(

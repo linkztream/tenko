@@ -27,7 +27,7 @@
 /* The parts of "in use" and a supernet's allocation: labelled figures apart from the meter. */
 .summary .use .parts,
 .summary .use .allocation { font-size: var(--fs-11); color: var(--ink-3); }
-.facts { display: grid; grid-template-columns: repeat(4, auto); gap: 2px var(--sp-8); font-size: var(--fs-12); margin: 0; }
+.facts { display: grid; grid-template-columns: repeat(2, auto); gap: 2px var(--sp-8); font-size: var(--fs-12); margin: 0; }
 .facts dt { color: var(--ink-3); }
 .facts dd { margin: 0; color: var(--ink); }
 
@@ -66,3 +66,37 @@
 .kinds-choice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kinds-choice > legend { grid-column: 1 / -1; }
 .kinds-choice > .help { grid-column: 1 / -1; }
+
+/* U6: the header facts, the meter with its alarm line, the panels and the address map above the
+   address grid (section 5.2 of the UI plan). */
+.prefix-facts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.prefix-facts .fact + .fact::before { content: "\00B7"; margin-inline-end: var(--sp-4); color: var(--ink-4); }
+.prefix-facts .description { color: var(--ink-2); }
+.prefix-overview { align-items: flex-start; }
+.usage-meter { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px var(--sp-4); min-inline-size: 300px; }
+.usage-meter .label { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-12); }
+.usage-meter .value { grid-column: 1 / -1; display: inline-flex; align-items: baseline; gap: var(--sp-4); font-size: var(--fs-24); font-weight: var(--fw-semibold); line-height: var(--lh-tight); font-variant-numeric: tabular-nums; }
+.usage-meter .value .flag { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.usage-meter .track { grid-column: 1 / -1; position: relative; display: block; block-size: 6px; inline-size: 300px; margin-block: var(--sp-3) var(--sp-2); border-radius: 3px; background: var(--surface-3); }
+.usage-meter .track .fill { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 3px; background: var(--ink-3); }
+.usage-meter .track.warn .fill { background: var(--warn-ink); }
+.usage-meter .track.crit .fill { background: var(--danger); }
+.usage-meter .alarm-line { position: absolute; inset-block: -4px; inline-size: 2px; margin-inline-start: -1px; background: var(--ink-2); border-radius: 1px; }
+.usage-meter .of, .usage-meter .scale { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-12); }
+.prefix-overview .panels { display: flex; flex-wrap: wrap; gap: var(--sp-5); flex: 1 1 520px; min-inline-size: 0; }
+.side-panel { display: flex; flex-direction: column; gap: var(--sp-2); min-inline-size: 180px; max-inline-size: 280px; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); font-size: var(--fs-12); }
+.side-panel h2 { margin: 0; font-size: var(--fs-13); font-weight: var(--fw-semibold); }
+.side-panel p { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; }
+.side-panel ul { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.side-panel li { display: flex; flex-wrap: wrap; gap: var(--sp-3); color: var(--ink-2); }
+.side-panel .more { align-self: flex-start; font-size: var(--fs-12); }
+.side-panel .sev { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.side-panel .sev::before { content: ""; inline-size: 8px; block-size: 8px; border-radius: 2px; }
+.side-panel .sev-act::before { background: var(--severity-act); }
+.side-panel .sev-review::before { background: var(--severity-review); }
+.prefix-tabpanel:has(> .map-panel) { overflow: auto; }
+.map-panel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); border-block-end: 1px solid var(--line); }
+.map-panel h2 { margin: 0; font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+.prefix-tabpanel:has(> .map-panel) .grid-shell { min-block-size: 360px; }
+.children-table { display: flex; flex-direction: column; flex: 1; min-block-size: 0; }
+.prefix-pane .page-header h1 { font-family: var(--font-data); }

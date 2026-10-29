@@ -3000,6 +3000,217 @@
         ]
       }
     },
+    "/api/v1/auth/preferences": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List the preferences of the signed-in person (saved table layouts)",
+        "operationId": "list_preferences",
+        "responses": {
+          "200": {
+            "description": "Every key of the person; not paginated: `next_cursor` is always `null`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Preference"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/preferences/{key}": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Save one preference of the signed-in person, such as the layout of a table",
+        "operationId": "put_preference",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`table:<id>`: `table:` and 1 to 64 of a-z, 0-9, `.`, `_` and `-`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableLayout"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The preference as stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preference"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body does not match the schema or names an unknown field (`sys.invalid_request`), or the key, a column id, a width or the version is invalid (`auth.invalid_request` with `field`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The person has 64 keys already (`auth.preference.limit`), or another write of the person's keys came first (`auth.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The document exceeds 16 KiB (`auth.preference.too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Remove one preference of the signed-in person; the table returns to its default",
+        "operationId": "delete_preference",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "`table:<id>`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The preference was removed"
+          },
+          "400": {
+            "description": "The key is invalid (`auth.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The person has no such key (`auth.preference.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/recovery-codes": {
       "post": {
         "tags": [
@@ -51487,6 +51698,24 @@
           }
         }
       },
+      "LayoutSort": {
+        "type": "object",
+        "description": "The sort of a table: one column, ascending or descending.",
+        "required": [
+          "column"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "The column (or the server's sort field) the table sorts on."
+          },
+          "desc": {
+            "type": "boolean",
+            "description": "Whether the sort is descending."
+          }
+        },
+        "additionalProperties": false
+      },
       "LeaderServiceState": {
         "type": "string",
         "description": "The state of a leader-only service.",
@@ -62023,6 +62252,54 @@
           }
         }
       },
+      "Page_Preference": {
+        "type": "object",
+        "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
+        "required": [
+          "items",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One stored preference in an answer.",
+              "required": [
+                "key",
+                "value",
+                "updated_at"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "The key, `table:<id>`."
+                },
+                "updated_at": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When it was last written."
+                },
+                "value": {
+                  "$ref": "#/components/schemas/TableLayout",
+                  "description": "The document as it was stored."
+                }
+              }
+            },
+            "description": "The items of this page, at most `limit` of them."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor of the next page; `null` on the last page."
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision",
+            "description": "Store revision the page was read at."
+          }
+        }
+      },
       "Page_Prefix": {
         "type": "object",
         "description": "One page of a list (plan section 4): the items, the opaque cursor of the next page and\nthe store revision the page was read at.\n\nA client that wants live updates subscribes to `GET /events` from `revision`; a client\nthat wants the next page passes `next_cursor` back as `cursor`. The cursor is opaque and\nbound to the query that produced it.",
@@ -64510,6 +64787,29 @@
           "skip_allowed": {
             "type": "boolean",
             "description": "Whether `backup: \"skip\"` is accepted; not under the Hardened profile (TGL-37)."
+          }
+        }
+      },
+      "Preference": {
+        "type": "object",
+        "description": "One stored preference in an answer.",
+        "required": [
+          "key",
+          "value",
+          "updated_at"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The key, `table:<id>`."
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was last written."
+          },
+          "value": {
+            "$ref": "#/components/schemas/TableLayout",
+            "description": "The document as it was stored."
           }
         }
       },
@@ -74683,6 +74983,88 @@
               "$ref": "#/components/schemas/StatusWarning"
             },
             "description": "Conditions an administrator should look at, for example a certificate close to\nexpiry or plain HTTP in the Lab profile."
+          }
+        }
+      },
+      "TableLayout": {
+        "type": "object",
+        "description": "The saved layout of one table of the web UI (`table:<id>`), version 1.\n\nUnknown fields are refused. An absent list means the table's default for it.",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "hidden": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The column ids the person hid."
+          },
+          "order": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The column ids in the person's order."
+          },
+          "sort": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LayoutSort",
+                "description": "The sort the person chose."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The version of the document; this server knows version 1.",
+            "minimum": 0
+          },
+          "widths": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The widths the person set, in pixels, by column id.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false,
+        "example": {
+          "hidden": [
+            "mac"
+          ],
+          "order": [
+            "ip",
+            "dns_name",
+            "mode",
+            "mac"
+          ],
+          "sort": {
+            "column": "ip",
+            "desc": false
+          },
+          "version": 1,
+          "widths": {
+            "dns_name": 220,
+            "ip": 140
           }
         }
       },

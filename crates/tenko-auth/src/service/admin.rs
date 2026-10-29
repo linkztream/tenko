@@ -415,8 +415,8 @@ impl AuthService {
         Self::info(self.view().await?.as_ref(), id, ctx.now)
     }
 
-    /// `DELETE /users/{id}`: removes the account with its sessions, tokens, credentials
-    /// and TOTP seed. Audit records keep the id.
+    /// `DELETE /users/{id}`: removes the account with its sessions, tokens, credentials,
+    /// TOTP seed and preferences. Audit records keep the id.
     ///
     /// # Errors
     ///
@@ -448,6 +448,7 @@ impl AuthService {
         Self::stage_scoped_token_removal(view.as_ref(), &mut batch, id)?;
         let grants = Self::stage_grant_removal(view.as_ref(), &mut batch, id)?;
         batch.delete_typed(&LAST_LOGINS, &id);
+        Self::stage_preference_removal(view.as_ref(), &mut batch, id)?;
         for credential in Self::user_credentials(view.as_ref(), id)? {
             batch.delete_typed(&CREDENTIAL_IDS, &credential.credential_id);
             batch.delete_typed(&CREDENTIALS, &(id, credential.credential_id));

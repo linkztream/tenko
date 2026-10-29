@@ -8,7 +8,7 @@
 // straight from the IPAM view.
 // Moving objects and importing spreadsheets belong to other scenarios.
 
-import type { Schemas } from "./support/api";
+import { Api, type Schemas } from "./support/api";
 import { expect, test } from "./support/fixtures";
 import {
   actionsOf,
@@ -531,11 +531,10 @@ test("a column of the address list is widened by drag and keeps its width after 
   expect(after).toBeGreaterThan(before + 70);
   expect(after).toBeLessThan(before + 90);
 
-  // The width is stored for this user and list, and comes back after a reload.
-  const stored = await page.evaluate(() =>
-    Object.keys(localStorage).filter((k) => k.startsWith("tenko-grid-widths:") && k.endsWith(":addresses")),
-  );
-  expect(stored).toHaveLength(1);
+  // The width is saved for this person on the server, and comes back after a reload.
+  await expect
+    .poll(async () => (await preferences(api))["table:addresses"]?.widths?.[column ?? ""] ?? 0)
+    .toBeGreaterThan(0);
   await page.reload();
   await expect(gridRow(page, "addresses", "192.0.2.30")).toBeVisible();
   const kept = grid.locator(`thead th[data-col="${column}"]`);
@@ -545,4 +544,106 @@ test("a column of the address list is widened by drag and keeps its width after 
   await page.getByRole("button", { name: "Choose columns" }).click();
   await page.getByTestId("reset-column-widths").click();
   expect(Math.abs((await kept.boundingBox())!.width - before)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => (await preferences(api))["table:addresses"]?.widths).toBeUndefined();
+});
+
+/** The signed-in person's saved layouts by key (GET /auth/preferences). */
+async function preferences(api: Api): Promise<Record<string, Schemas["TableLayout"]>> {
+  const page = await api.get<{ items: { key: string; value: Schemas["TableLayout"] }[] }>("/auth/preferences");
+  return Object.fromEntries(page.items.map((item) => [item.key, item.value]));
+}
+
+test("a column layout set in one browser comes back in another after sign-in, and Reset columns returns the default", async ({
+  page,
+  api,
+  browser,
+  server,
+  signedIn,
+}) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  await api.post("/prefixes", { cidr: "192.0.2.0/24" });
+  await api.post("/addresses", { ip: "192.0.2.31", dns_name: "layout.example.com" });
+
+  // Hide a column of the address list in this browser.
+  await page.goto("/ipam/addresses");
+  const grid = page.getByTestId("grid-addresses");
+  await expect(gridRow(page, "addresses", "192.0.2.31")).toBeVisible();
+  await page.getByRole("button", { name: "Choose columns" }).click();
+  const chooser = page.getByTestId("column-chooser-panel");
+  // A column that is shown and may be hidden.
+  const choice = chooser.locator("li[data-col]").filter({ has: page.locator("input:checked:not([disabled])") }).last();
+  await expect(grid.locator(`thead th[data-col="${await choice.getAttribute("data-col")}"]`)).toHaveCount(1);
+  const column = (await choice.getAttribute("data-col"))!;
+  await choice.locator("input").uncheck();
+  await expect(grid.locator(`thead th[data-col="${column}"]`)).toHaveCount(0);
+  // Saved on the server after the quiet second.
+  await expect.poll(async () => (await preferences(api))["table:addresses"]?.hidden ?? []).toContain(column);
+
+  // Another browser (no shared storage) signs in as the same person and sees the layout.
+  const other = await browser.newContext({ baseURL: server.url });
+  try {
+    const otherPage = await other.newPage();
+    const otherApi = new Api(otherPage.request, server.url);
+    const login = await otherApi.loginPassword();
+    expect(login.status).toBe("authenticated");
+    await otherPage.goto("/ipam/addresses");
+    const otherGrid = otherPage.getByTestId("grid-addresses");
+    await expect(gridRow(otherPage, "addresses", "192.0.2.31")).toBeVisible();
+    await expect(otherGrid.locator(`thead th[data-col="${column}"]`)).toHaveCount(0);
+    expect(await otherPage.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tenko-grid:")))).toEqual([]);
+
+    // Reset columns there returns the default and deletes the layout on the server.
+    await otherPage.getByRole("button", { name: "Choose columns" }).click();
+    await otherPage.getByTestId("column-chooser-panel").getByRole("button", { name: "Reset columns" }).click();
+    await expect(otherGrid.locator(`thead th[data-col="${column}"]`)).toHaveCount(1);
+    await expect.poll(async () => (await preferences(otherApi))["table:addresses"]).toBeUndefined();
+  } finally {
+    await other.close();
+  }
+});
+
+test("the networks view keeps the tree short, draws a network's address map and lists a supernet's networks", async ({ page, api, signedIn }) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  await api.post("/prefixes", { cidr: "198.51.100.0/24", role: "supernet", description: "Documentation supernet" });
+  for (const [cidr, description] of [
+    ["198.51.100.0/26", "Lab"],
+    ["198.51.100.64/26", ""],
+    ["198.51.100.128/26", "Servers"],
+  ] as const) {
+    await api.post("/prefixes", description ? { cidr, description } : { cidr });
+  }
+  await api.post("/addresses", { ip: "198.51.100.10", dns_name: "map-01.example.com" });
+  await api.post("/addresses", { ip: "198.51.100.11", dns_name: "map-02.example.com" });
+
+  // The supernet is one line with its count; nothing unfolds by itself, not even for the selection.
+  await page.goto("/ipam/prefixes/198.51.100.0/26");
+  const tree = page.getByTestId("ipam-tree");
+  const supernet = withKey(tree, "tree-node", "198.51.100.0/24");
+  await expect(supernet).toHaveAttribute("aria-expanded", "false");
+  await expect(supernet.getByTestId("tree-child-count")).toHaveText("3");
+  await expect(withKey(tree, "tree-node", "198.51.100.0/26")).toHaveCount(0);
+
+  // One network: the meter and the address map of 64 cells, two of them in use.
+  await expect(withKey(page, "prefix-pane", "198.51.100.0/26")).toBeVisible();
+  await expect(page.getByTestId("usage-meter")).toBeVisible();
+  const cells = page.getByTestId("address-map").getByTestId("amap-cell");
+  await expect(cells).toHaveCount(64);
+  await expect(page.getByTestId("address-map").locator('[data-state="used"]')).toHaveCount(2);
+  await cells.nth(10).hover();
+  await expect(page.getByTestId("address-map-readout")).toContainText("198.51.100.10");
+  await cells.nth(10).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/ipam\/addresses\/198\.51\.100\.10/);
+
+  // A supernet: its networks in one table, the chips filter them.
+  await page.goto("/ipam/prefixes/198.51.100.0/24");
+  const table = page.getByTestId("children-table");
+  await expect(table.getByTestId("row")).toHaveCount(3);
+  await table.getByTestId("chip-no-description").click();
+  await expect(table.getByTestId("row")).toHaveCount(1);
+  await expect(gridRow(page, "prefix-children", "198.51.100.64/26")).toBeVisible();
+
+  // The person opens the supernet; its networks show in the tree.
+  await supernet.locator(".tw").click();
+  await expect(withKey(tree, "tree-node", "198.51.100.128/26")).toBeVisible();
 });

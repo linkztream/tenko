@@ -11,6 +11,7 @@
 //! |---|---|---|
 //! | [`setup`] | first-run setup (API-10) | WP1.2 |
 //! | [`auth`] | login, sessions, factors, recovery codes, tokens | WP1.2 |
+//! | [`preferences`] | the signed-in person's saved table layouts (beside `/auth/session`) | U6 |
 //! | [`users`] | users, roles, break-glass | WP1.2 |
 //! | [`settings`] | security settings | WP1.2 |
 //! | [`tenancy`] | tenants, VRFs, sites, VLANs | WP1.4 |
@@ -103,6 +104,8 @@ pub mod moves;
 pub mod node_roles;
 pub mod nodes;
 pub mod observations;
+// U6 of the UI plan: the person's saved table layouts.
+pub mod preferences;
 pub mod prefixes;
 // "Keep both" on an address conflict.
 pub mod proposal_keep;
@@ -228,6 +231,7 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
     let mut router = OpenApiRouter::with_openapi(api_doc())
         .merge(setup::routes())
         .merge(auth::routes())
+        .merge(preferences::routes())
         .merge(users::routes())
         .merge(settings::routes())
         .merge(jobs::routes())

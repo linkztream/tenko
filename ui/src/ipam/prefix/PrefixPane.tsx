@@ -1,13 +1,20 @@
-// One prefix (the right side of the IPAM view): its head with the actions, the utilization
-// summary, and tabs for its addresses (with the free gaps), its ranges or child prefixes,
-// its adoption policy (WP2.9) and its history. The address grid is where hosts are selected, edited in place, and
+// One prefix (the right side of the IPAM view, section 5.2 of the UI plan): the page header with
+// the prefix and its facts (description, VLAN, site, tenant and VRF) and the actions, one
+// utilization meter with the alarm line beside the small panels of a network (its DHCP scope,
+// the findings inside it, its recent changes), and tabs: a network's addresses (the address map
+// above the address grid with the free gaps), its ranges, a supernet's networks (one sortable,
+// filterable table), the adoption policy (WP2.9) and the history. The address grid is where hosts are selected, edited in place, and
 // dragged onto the tree to move them (or moved with M). In a network with a DHCP scope the row
 // menu reserves an address in DHCP.
 import { useNavigate } from "@solidjs/router";
-import { createEffect, createMemo, createSignal, For, lazy, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, lazy, Match, on, onCleanup, onMount, Show, Switch, untrack } from "solid-js";
 import { api } from "../../api/client";
+import type { components } from "../../api/generated/schema";
+import { createLiveQuery } from "../../api/live";
 import { fetchAll } from "../../api/paginate";
-import type { Address, AddressRow, Prefix, Range, TreeNode, TreeResponse, Vrf } from "../../api/types";
+import type { Address, AddressRow, Prefix, Range, Site, TreeNode, TreeResponse, Vrf } from "../../api/types";
+import type { MapFinding } from "../../components/addressMapCells";
+import { PageHeader } from "../../components/PageHeader";
 import { paths } from "../../app/paths";
 import { may } from "../../auth/gate";
 import { Addr } from "../../components/Addr";
@@ -15,7 +22,7 @@ import { Icon } from "../../components/Icon";
 import { Kbd } from "../../components/Kbd";
 import { toast } from "../../components/toast";
 import { ActionBar, ActionButton } from "../../grid/ActionBar";
-import { Count, DeletedTag, StatusBadge, Tags, UtilizationMeter } from "../../grid/cells";
+import { Count, DeletedTag, StatusBadge, Tags } from "../../grid/cells";
 import { createGridSelection, DataGrid } from "../../grid/DataGrid";
 import type { DragItem } from "../../grid/dnd";
 import { FilterBar, ToggleChip } from "../../grid/FilterBar";
@@ -24,7 +31,7 @@ import { createListSource } from "../../grid/source";
 import { TextEditor } from "../../grid/TextEditor";
 import type { RowAction } from "../../grid/types";
 import { createScopeIndex, mayReserve } from "../../dhcp/reservations/gate";
-import { formatDuration, t, tx, withPacks } from "../../i18n";
+import { formatDuration, t, tDynamic, tx, withPacks } from "../../i18n";
 import { isTyping } from "../../shell/keyboard";
 import { addressColumns, addressRowId, addressRowKey, rowAddress, type PrefixRow } from "../address/columns";
 import { addressesCsv } from "../address/csv";
@@ -32,12 +39,15 @@ import { DeleteDialog } from "../DeleteDialog";
 import { HistoryPanel } from "../history/HistoryPanel";
 import { MoveDialog } from "../move/MoveDialog";
 import { alarmWord, allocationWords, prefixRoleWord, rangeRoleWord } from "../words";
+import { AddressMapPanel } from "./AddressMapPanel";
+import { ChildrenTable } from "./ChildrenTable";
+import { ChangesPanel, DhcpPanel, FindingsPanel } from "./PrefixPanels";
+import { UsageMeter } from "./UsageMeter";
 import { NextFreeAddressDialog, NextFreePrefixDialog } from "./NextFreeDialogs";
 import { PrefixForm } from "./PrefixForm";
 import { delegationWords } from "./delegation";
 import { RangeForm } from "./RangeForm";
 import { VlanChip } from "../vlan/VlanChip";
-import { VlanRef } from "../vlan/VlanRef";
 import type { VlanStyle } from "../vlan/palette";
 import { saveTextFile } from "../../hosts/handoff";
 import { useWriteToast } from "../plan/PlanDialog";
@@ -53,8 +63,31 @@ export interface PrefixPaneProps {
   node: TreeNode | undefined;
   tree: TreeResponse | undefined;
   vrf: Vrf | undefined;
+  /** The tenant of the VRF, by name. */
+  tenant?: string | undefined;
   vlanOf: (id: string) => { vid: number; name: string; style?: VlanStyle | undefined } | undefined;
   onChanged: () => void;
+}
+
+type Finding = components["schemas"]["Finding"];
+
+/** The findings inside a prefix with an address, for the map and the findings panel; live. */
+function usePrefixFindings(prefixId: () => string) {
+  const live = createLiveQuery<MapFinding[]>({
+    topics: ["findings"],
+    relevant: () => true,
+    fetch: async (signal) => {
+      const all = await fetchAll<Finding>("/api/v1/findings", { query: { prefix: prefixId() }, limit: 1000, max: 5000, signal });
+      const items = all.items.map((f) => ({
+        ip: f.subject.ip ?? "",
+        severity: f.severity,
+        label: tDynamic(`discovery.findings.kind.${f.kind}`) ?? f.kind,
+      }));
+      return { value: items, revision: all.revision as number };
+    },
+  });
+  createEffect(on(prefixId, () => live.refetch(), { defer: true }));
+  return () => (live.value.state === "ready" || live.value.state === "refreshing" ? live.value() : undefined);
 }
 
 export function PrefixPane(props: PrefixPaneProps) {
@@ -239,6 +272,19 @@ export function PrefixPane(props: PrefixPaneProps) {
   const children = createMemo(() => (props.tree?.nodes ?? []).filter((n) => n.parent === props.prefix.id));
   const vlan = () => (props.prefix.vlan ? props.vlanOf(props.prefix.vlan) : undefined);
   const u = () => props.node?.utilization;
+  const findings = usePrefixFindings(() => props.prefix.id);
+  const mapFindings = () => (findings() ?? []).filter((f) => f.ip !== "");
+  const [sites] = createResource(
+    () => props.prefix.site ?? false,
+    async () => {
+      try {
+        return new Map((await fetchAll<Site>("/api/v1/sites")).items.map((s) => [s.id, s.name] as const));
+      } catch {
+        return new Map<string, string>();
+      }
+    },
+  );
+  const siteName = () => (props.prefix.site ? (sites.latest?.get(props.prefix.site) ?? null) : null);
 
   const tabs = (): { id: Tab; label: string }[] => [
     ...(isNetwork()
@@ -256,8 +302,9 @@ export function PrefixPane(props: PrefixPaneProps) {
 
   return (
     <div class="prefix-pane" data-testid="prefix-pane" data-id={props.prefix.id} data-key={props.prefix.cidr}>
-      <div class="page-head">
-        <div>
+      <PageHeader
+        title={props.prefix.cidr}
+        crumbs={
           <nav class="crumbs" aria-label={t("ipam.prefix.crumbs")}>
             <span>{props.vrf?.name}</span>
             <For each={ancestors()}>
@@ -271,15 +318,31 @@ export function PrefixPane(props: PrefixPaneProps) {
               )}
             </For>
           </nav>
-          <h1 tabIndex={-1}>
-            <Addr value={props.prefix.cidr} />
-            <span class="sub">
-              {[props.prefix.meta.description, prefixRoleWord(props.prefix.role)].filter(Boolean).join(", ")}
+        }
+        sub={
+          <span class="prefix-facts" data-testid="prefix-facts">
+            <Show when={props.prefix.meta.description}>
+              <span class="fact description">{props.prefix.meta.description}</span>
+            </Show>
+            <span class="fact">{prefixRoleWord(props.prefix.role)}</span>
+            <span class="fact">
+              <Show when={vlan()} fallback={<span class="muted">{t("ipam.prefix.fact.no_vlan")}</span>}>
+                {(v) => <VlanChip vid={v().vid} name={v().name} style={v().style} />}
+              </Show>
             </span>
+            <span class="fact">{siteName() ?? <span class="muted">{t("ipam.prefix.fact.no_site")}</span>}</span>
+            <Show when={props.vrf}>
+              {(v) => <span class="fact">{t("ipam.prefix.fact.scope", { tenant: props.tenant ?? "", vrf: v().name })}</span>}
+            </Show>
+            <Show when={props.prefix.status !== "active"}>
+              <span class="fact">
+                <StatusBadge status={props.prefix.status} />
+              </span>
+            </Show>
             <DeletedTag deleted={props.prefix.meta.deleted} />
-          </h1>
-        </div>
-        <div class="actions">
+          </span>
+        }
+        actions={
           <Show when={!deleted() && writable()}>
             <ScanNowLazy kind="prefix" value={props.prefix.id} label={props.prefix.cidr} />
             <button type="button" class="btn" data-testid="prefix-edit" onClick={() => setDialog({ kind: "edit" })}>
@@ -310,25 +373,14 @@ export function PrefixPane(props: PrefixPaneProps) {
               </Show>
             </Show>
           </Show>
-        </div>
-      </div>
+        }
+      />
 
-      <div class="summary" data-testid="prefix-summary">
+      <div class="summary prefix-overview" data-testid="prefix-summary">
         <Show when={u()}>
           {(use) => (
             <div class="use">
-              <div class="top">
-                <span class="pct">{t("ipam.meter.value", { value: use().percent })}</span>
-                <span class="of" title={t("ipam.prefix.usage_hint")} data-testid="prefix-usage">
-                  {tx("ipam.prefix.usage", { used: <Count value={use().in_use} />, capacity: <Count value={use().capacity} /> })}
-                </span>
-              </div>
-              <UtilizationMeter
-                percent={use().percent}
-                level={props.node?.level ?? "normal"}
-                used={use().in_use}
-                capacity={use().capacity}
-              />
+              <UsageMeter use={use()} level={props.node?.level ?? "normal"} alarm={props.prefix.alarm} />
               {/* What "in use" is made of: the Addresses tab lists the recorded addresses. */}
               <div class="parts muted" data-testid="prefix-usage-parts" title={t("ipam.prefix.usage_parts_hint")}>
                 {tx("ipam.prefix.usage_parts", {
@@ -358,19 +410,16 @@ export function PrefixPane(props: PrefixPaneProps) {
             </div>
           )}
         </Show>
+        <div class="panels">
+          <Show when={isNetwork()}>
+            <DhcpPanel prefixId={props.prefix.id} revision={props.prefix.meta.revision} />
+          </Show>
+          <FindingsPanel prefixId={props.prefix.id} findings={findings()} />
+          <ChangesPanel prefixId={props.prefix.id} revision={props.prefix.meta.revision} onAll={() => setTab("history")} />
+        </div>
         <dl class="facts">
-          <dt>{t("ipam.col.status")}</dt>
-          <dt>{t("ipam.col.vlan")}</dt>
           <dt>{t("ipam.prefix.alloc")}</dt>
           <dt>{t("ipam.prefix.alarm")}</dt>
-          <dd>
-            <StatusBadge status={props.prefix.status} />
-          </dd>
-          <dd>
-            <Show when={vlan()} fallback="–">
-              {(v) => <VlanChip vid={v().vid} name={v().name} style={v().style} />}
-            </Show>
-          </dd>
           <dd>{props.prefix.alloc === "highest" ? t("ipam.prefix.alloc_highest") : t("ipam.prefix.alloc_lowest")}</dd>
           <dd>
             <Show when={props.prefix.alarm} fallback="–">
@@ -406,6 +455,16 @@ export function PrefixPane(props: PrefixPaneProps) {
       <div class="prefix-tabpanel" id="prefix-tabpanel" role="tabpanel" aria-labelledby={`prefix-tab-${tab()}`}>
         <Switch>
           <Match when={tab() === "addresses"}>
+            <Show when={isNetwork()}>
+              <AddressMapPanel
+                prefixId={props.prefix.id}
+                cidr={props.prefix.cidr}
+                version={source.revision()}
+                network
+                ranges={ranges()}
+                findings={mapFindings()}
+              />
+            </Show>
             <FilterBar
               label={t("ipam.addresses.filter_label")}
               placeholder={t("ipam.addresses.filter_placeholder")}
@@ -506,44 +565,7 @@ export function PrefixPane(props: PrefixPaneProps) {
             </ActionBar>
           </Match>
           <Match when={tab() === "children"}>
-            <DataGrid
-              id="prefix-children"
-              label={t("ipam.prefix.children_grid", { cidr: props.prefix.cidr })}
-              noSelection
-              columns={[
-                { id: "cidr", header: () => t("ipam.col.prefix"), width: 190, fixed: true, render: (n: TreeNode) => <Addr value={n.cidr} />, text: (n) => n.cidr },
-                { id: "description", header: () => t("ipam.col.description"), render: (n) => n.description ?? "" },
-                {
-                  id: "vlan",
-                  header: () => t("ipam.col.vlan"),
-                  width: 120,
-                  render: (n) => <VlanRef id={n.vlan} vlanOf={props.vlanOf} />,
-                },
-                { id: "status", header: () => t("ipam.col.status"), width: 110, render: (n) => <StatusBadge status={n.status} /> },
-                {
-                  id: "use",
-                  header: () => t("ipam.col.utilization"),
-                  width: 150,
-                  render: (n) => <UtilizationMeter percent={n.utilization.percent} level={n.level} used={n.utilization.in_use} capacity={n.utilization.capacity} />,
-                },
-                {
-                  id: "allocated",
-                  header: () => t("ipam.col.allocated"),
-                  width: 220,
-                  text: (n: TreeNode) => allocationWords(n) ?? "",
-                  render: (n) => <span class="muted">{allocationWords(n) ?? ""}</span>,
-                },
-              ]}
-              rows={children()}
-              rowId={(n) => n.id}
-              rowKey={(n) => n.cidr}
-              onOpen={(n) => navigate(paths.prefix(n.cidr))}
-              empty={
-                <div class="empty">
-                  <h3>{t("ipam.prefix.no_children")}</h3>
-                </div>
-              }
-            />
+            <ChildrenTable supernet={props.prefix} rows={children()} vlanOf={props.vlanOf} />
           </Match>
           <Match when={tab() === "ranges"}>
             <Show when={writable() && may.create("range")}>

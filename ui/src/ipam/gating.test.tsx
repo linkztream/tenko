@@ -14,6 +14,7 @@ import AddressView from "./address/AddressView";
 import IpamView from "./IpamView";
 import MovePreview from "./move/MovePreview";
 import { chooseVrf } from "./scope";
+import { resetTreeStateForTest } from "./tree/PrefixTree";
 
 const LAB = "203.0.113.0/25"; // inside casey's operator grant
 const CAMERAS = "203.0.113.192/28"; // inside it too, with addresses
@@ -22,6 +23,7 @@ const LAN = "192.0.2.0/24"; // no grant at all
 
 beforeEach(() => {
   chooseVrf(null);
+  resetTreeStateForTest();
 });
 
 afterEach(() => {
@@ -60,6 +62,13 @@ const treeNode = (cidr: string) => {
   const node = screen.queryAllByTestId("tree-node").find((n) => n.dataset.key === cidr);
   if (!node) throw new Error(`no tree node ${cidr}`);
   return node.querySelector(".tnode") as HTMLElement;
+};
+
+/** Opens the closed node of a supernet with its chevron, so its networks are in the tree. */
+const openNode = (cidr: string) => {
+  const node = screen.queryAllByTestId("tree-node").find((n) => n.dataset.key === cidr);
+  if (!node) throw new Error(`no tree node ${cidr}`);
+  fireEvent.click(node.querySelector(".tw") as HTMLElement);
 };
 
 const HEAD_ACTIONS = ["prefix-edit", "prefix-delete", "prefix-next-free-address"];
@@ -111,7 +120,9 @@ describe("gating of the prefix tree and the prefix pane", () => {
     fireEvent.click(within(lab).getByTestId("prefix-tab-adoption"));
     await adoptionLoaded(lab);
     expect(within(lab).getByTestId("adoption-edit")).toBeTruthy();
-    // A network of the grant takes a drop, one outside it does not.
+    // A network of the grant takes a drop, one outside it does not. The network lies in a
+    // supernet, which the tree keeps closed until it is opened.
+    openNode("203.0.113.0/24");
     startDrag([{ kind: "address", id: "x", label: "x", ip: "192.0.2.41" }]);
     fireEvent.dragOver(treeNode(LAB));
     expect(treeNode(LAB).classList.contains("drop")).toBe(true);

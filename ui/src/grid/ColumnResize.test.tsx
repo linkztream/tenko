@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { DataGrid } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
+import { tableLayout } from "./layoutStore";
 import { createColumnState } from "./prefs";
 import type { Column } from "./types";
 import { BIG_STEP, DEFAULT_WIDTH, MIN_WIDTH, NARROW_QUERY, STEP, widthsKey, writeWidths } from "./widths";
@@ -43,7 +44,8 @@ const table = () => screen.getByRole("grid", { name: "Addresses" });
 const handle = (column: string) => screen.getByRole("separator", { name: `Resize column ${column}` });
 /** The `<col>` widths of the data columns (after the selection column). */
 const colWidths = () => Array.from(table().querySelectorAll("col")).slice(1).map((c) => (c as HTMLElement).style.width);
-const stored = (id: string) => JSON.parse(localStorage.getItem(widthsKey(id, undefined)) ?? "null") as Record<string, number> | null;
+/** The widths the layout store holds for the list (seeded through the older browser key, which it imports). */
+const stored = (id: string) => tableLayout(undefined, id)()?.widths ?? null;
 
 function drag(el: HTMLElement, from: number, to: number, pointerType = "mouse") {
   fireEvent.pointerDown(el, { clientX: from, pointerId: 1, pointerType, button: 0 });
