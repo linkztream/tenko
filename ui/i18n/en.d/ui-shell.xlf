@@ -101,10 +101,6 @@
       <unit id="settings.profile_card.open">
         <segment><source>Open the security settings</source></segment>
       </unit>
-      <unit id="jobs.sub_waiting">
-        <notes><note category="description">Subtitle of the jobs page: the jobs waiting for a person, the same number as the rail badge.</note></notes>
-        <segment><source>{count, plural, =0 {Nothing waits for you} one {# job waits for you} other {# jobs wait for you}}</source></segment>
-      </unit>
       <unit id="jobs.info">
         <notes><note category="description">The explanation of the jobs page behind its info button.</note></notes>
         <segment><source>Every change runs as a job with visible steps, a state and a way back. A job that needs a person, such as a manual step of a move, waits under Needs you until someone completes it.</source></segment>

@@ -660,6 +660,21 @@ export function recordInlineJob(input: InlineJobInput): string {
   return rec.job.id;
 }
 
+/**
+ * Records an inline job that finished in the past, without an event (a history for the list):
+ * submitted by `by` at `created`, done at `finished` (milliseconds); returns its id.
+ */
+export function recordPastJob(input: InlineJobInput, at: { created: number; finished: number; by: Principal }): string {
+  const rec = submit(
+    { kind: input.kind, title: input.title, targets: input.targets, timeoutSecs: 60, steps: [{ kind: input.kind, automatic: true }], preview: false },
+    { now: at.created, by: at.by },
+  );
+  startRecord(rec, { now: at.finished, by: SYSTEM_JOBS });
+  rec.job.revision = db.revision;
+  jobStore.jobs.push(rec);
+  return rec.job.id;
+}
+
 // ---------------------------------------------------------------------------------
 // Move jobs
 

@@ -49,38 +49,37 @@ export function progressPercent(done: number, total: number): number {
 // ---------------------------------------------------------------------------------
 // The state chips of the list
 
-export type JobView = "all" | "active" | "needs" | "failed" | "finished";
-export const VIEWS: readonly JobView[] = ["all", "active", "needs", "failed", "finished"];
-
-export function parseView(value: unknown): JobView {
-  return typeof value === "string" && (VIEWS as readonly string[]).includes(value) ? (value as JobView) : "all";
-}
-
 /**
- * The states the server is asked for. "Needs you" asks for the two states that can hold a
- * manual task and narrows down on the client (`needsPerson`), because the list has no filter
- * for it.
+ * The chips of the list (docs/plans/ui-plan.md section 5.4). "Active and needs you" is the
+ * default: the jobs that run or wait lead, the ones that wait for a person first, and the
+ * finished jobs follow by day. "Failed or rolled back" and "Finished" show finished jobs only,
+ * by day; "All" shows every job in the layout of the default.
  */
-export function viewStates(view: JobView): JobState[] | undefined {
-  switch (view) {
-    case "all":
-      return undefined;
-    case "active":
-      return [...ACTIVE_STATES];
-    case "needs":
-      return ["waiting", "rolling_back"];
-    case "failed":
-      return ["failed", "rolled_back"];
-    case "finished":
-      return [...FINAL_STATES];
-  }
+export type JobView = "active" | "failed" | "finished" | "all";
+export const VIEWS: readonly JobView[] = ["active", "failed", "finished", "all"];
+
+/** The view in the URL; `needs`, the chip the default took over, reads as the default. */
+export function parseView(value: unknown): JobView {
+  if (value === "needs") return "active";
+  return typeof value === "string" && (VIEWS as readonly string[]).includes(value) ? (value as JobView) : "active";
 }
 
-/** The full rule of a chip, applied to the rows already loaded. */
-export function matchesView(view: JobView, job: Pick<JobSummary, "state" | "manual_steps">): boolean {
-  const states = viewStates(view);
-  if (states && !states.includes(job.state)) return false;
-  return view !== "needs" || needsPerson(job);
+/** Whether a view leads with the jobs that run or wait. */
+export function leadsWithActive(view: JobView): boolean {
+  return view === "active" || view === "all";
+}
+
+/** Whether a job is listed under a chip. */
+export function matchesView(view: JobView, job: Pick<JobSummary, "state">): boolean {
+  switch (view) {
+    case "active":
+    case "all":
+      return true;
+    case "failed":
+      return job.state === "failed" || job.state === "rolled_back";
+    case "finished":
+      return isFinal(job.state);
+  }
 }
 
 // ---------------------------------------------------------------------------------

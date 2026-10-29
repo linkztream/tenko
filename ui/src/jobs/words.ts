@@ -8,7 +8,7 @@
 import { errorMessage, isApiError } from "../api/problem";
 import type { CodedError, JobState, JobSummary, ManualTask, StepPreview, StepRecord, StepStateKind } from "../api/types";
 import { t, tDynamic } from "../i18n";
-import { manualOf } from "./model";
+import { countdownParts, manualOf } from "./model";
 
 // ---------------------------------------------------------------------------------
 // States
@@ -110,6 +110,29 @@ export function jobTitle(job: Titled | { spec: Titled }): string {
   if (own !== undefined) return own;
   const label = spec.kind ? tDynamic(`jobs.title.${spec.kind}`, { count: spec.targets?.length ?? 0 }) : undefined;
   return label ?? spec.title;
+}
+
+/**
+ * Whether the title of a job already says how many objects it changes: its title key has no
+ * message and the label of its kind takes the count ("Edit 3 IPAM objects"). The list then
+ * leaves out the muted count beside the title, so the count is never said twice.
+ */
+export function titleSaysCount(job: Titled): boolean {
+  if (tDynamic(job.title) !== undefined || !job.kind) return false;
+  const key = `jobs.title.${job.kind}`;
+  const one = tDynamic(key, { count: 1 });
+  return one !== undefined && one !== tDynamic(key, { count: 2 });
+}
+
+// ---------------------------------------------------------------------------------
+// Durations
+
+/** A duration as people say it, in its two largest units: "4 s", "2 min 10 s", "17 h 17 min". */
+export function durationText(seconds: number): string {
+  if (seconds < 1) return t("jobs.duration.under_s");
+  return countdownParts(seconds)
+    .map((part) => t(`jobs.duration.${part.unit}`, { value: part.value }))
+    .join(" ");
 }
 
 /** A step kind as the tail of a message key: `dhcp.manual` is `dhcp_manual`. */

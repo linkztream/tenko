@@ -1,35 +1,48 @@
-// Columns of the jobs grid. State, title and progress come from the list itself; what the
-// current step does is only on the job's detail, which the cell reads once per revision of the
-// job and only for rows in view (the grid renders no others).
+// Columns of the jobs grid (docs/plans/ui-plan.md section 5.4): State in glyph and word, the Job
+// by its title from the label catalog with its object count in muted ink, the Kind code in the
+// data font, the Steps (for a job that is done, how long it took), the Current step while a job
+// runs or waits, Started by and Finished. State, title and progress come from the list itself;
+// what the current step does is only on the job's detail, which the cell reads once per revision
+// of the job and only for rows in view (the grid renders no others).
 import { A } from "@solidjs/router";
 import { createResource, Show } from "solid-js";
 import type { JobSummary, StepStateKind } from "../api/types";
 import { paths } from "../app/paths";
-import { Icon } from "../components/Icon";
 import { PrincipalLabel } from "../components/Principal";
 import { TimeAgo } from "../grid/cells";
 import type { Column } from "../grid/types";
 import { t } from "../i18n";
 import { readJobDetail } from "./data";
+import { durationSeconds } from "./layout";
 import { isFinal, needsPerson } from "./model";
 import { JobStateChip } from "./StateChip";
 import { firstHost, TargetLabel } from "./Target";
-import { cancelRolledBack, describeStep, jobStateText, jobTitle, stepStateWord } from "./words";
+import { cancelRolledBack, describeStep, durationText, jobStateText, jobTitle, stepStateWord, titleSaysCount } from "./words";
 
-/** The state in glyph and word, with a marker when the job waits for a person. */
+/** The state of a job in words; a job that waits for a person says so instead of "Waiting". */
+export function stateText(job: JobSummary): string {
+  if (needsPerson(job) && !isFinal(job.state)) return t("jobs.state.waiting_you");
+  return jobStateText(job.state, cancelRolledBack(job) ? "cancel" : undefined);
+}
+
+/** The state in glyph and word: "Waiting for you" for a job with a task open for a person. */
 function StateCell(props: { job: JobSummary }) {
+  const you = () => needsPerson(props.job) && !isFinal(props.job.state);
   return (
     <span class="job-state-cell">
-      <JobStateChip
-        state={props.job.state}
-        done={props.job.steps_done}
-        total={props.job.step_count}
-        rollback={cancelRolledBack(props.job) ? "cancel" : undefined}
-      />
-      <Show when={needsPerson(props.job)}>
-        <span class="flag discrepancy job-needs" data-testid="job-needs">
-          <Icon name="alert" size="xs" />
-          {t("jobs.needs_you")}
+      <Show
+        when={you()}
+        fallback={
+          <JobStateChip
+            state={props.job.state}
+            done={props.job.steps_done}
+            total={props.job.step_count}
+            rollback={cancelRolledBack(props.job) ? "cancel" : undefined}
+          />
+        }
+      >
+        <span class="jstate waiting you" data-state={props.job.state} data-testid="job-state" data-needs="true">
+          {t("jobs.state.waiting_you")}
         </span>
       </Show>
       <Show when={props.job.cancel_requested && !isFinal(props.job.state)}>
@@ -39,46 +52,58 @@ function StateCell(props: { job: JobSummary }) {
   );
 }
 
-/** The title, the host the job is about when it has one, and how many objects it changes. */
+/** The title, the host the job is about when it has one, and how many objects it changes, muted. */
 function TitleCell(props: { job: JobSummary }) {
   return (
-    <>
+    <span class="job-title-cell">
       <A class="job-link" href={paths.job(props.job.id)} tabIndex={-1}>
         {jobTitle(props.job)}
-      </A>{" "}
-      <Show when={firstHost(props.job.targets)}>
-        {(host) => (
-          <>
-            <TargetLabel target={host()} />{" "}
-          </>
-        )}
+      </A>
+      <Show when={firstHost(props.job.targets)}>{(host) => <TargetLabel target={host()} />}</Show>
+      <Show when={!titleSaysCount(props.job) && props.job.targets.length > 0}>
+        <span class="job-count" data-testid="job-count">
+          {t("jobs.targets", { count: props.job.targets.length })}
+        </span>
       </Show>
-      <span class="muted">{t("jobs.targets", { count: props.job.targets.length })}</span>
-    </>
+    </span>
+  );
+}
+
+/** "3 of 4" while a job runs or after it stopped; for a job that is done, how long it took. */
+export function stepsText(job: JobSummary): string {
+  const took = job.state === "succeeded" ? durationSeconds(job) : undefined;
+  return took === undefined ? t("jobs.steps_of", { done: job.steps_done, total: job.step_count }) : durationText(took);
+}
+
+function StepsCell(props: { job: JobSummary }) {
+  const took = () => (props.job.state === "succeeded" ? durationSeconds(props.job) : undefined);
+  return (
+    <Show when={took() !== undefined ? { seconds: took() ?? 0 } : undefined} fallback={<span class="num">{stepsText(props.job)}</span>}>
+      {(took) => (
+        <span class="num" data-testid="job-duration" title={t("jobs.duration.took", { duration: durationText(took().seconds) })}>
+          {durationText(took().seconds)}
+        </span>
+      )}
+    </Show>
   );
 }
 
 /**
- * What the current step does and its state. A job that is over has no current step: one that
- * failed points at the step that failed, any other shows a dash. The words arrive with the
- * job detail, read once per revision; until then a running job shows the position.
+ * What the current step does and its state, for a job that runs or waits only; a job that is over
+ * has no current step. The words arrive with the job detail, read once per revision; until then
+ * the cell shows the position.
  */
 function CurrentStepCell(props: { job: JobSummary }) {
-  const over = () => isFinal(props.job.state);
-  const wanted = () =>
-    over() ? props.job.state === "failed" || props.job.state === "rolled_back" : props.job.current_step != null;
+  const wanted = () => !isFinal(props.job.state) && props.job.current_step != null;
   const [detail] = createResource(
     () => (wanted() ? `${props.job.id}@${props.job.revision}:${props.job.state}:${props.job.steps_done}` : false),
     () => readJobDetail(props.job),
   );
   const shown = (): { text: string; state: StepStateKind | undefined } | null => {
-    const d = detail();
-    if (over()) {
-      const step = d?.job.steps.find((s) => s.state.state === "failed" || s.state.state === "compensation_failed");
-      return step ? { text: describeStep(step, d?.preview?.steps[step.index]), state: step.state.state } : null;
-    }
+    if (!wanted()) return null;
     const i = props.job.current_step;
     if (i === null || i === undefined) return null;
+    const d = detail();
     const step = d?.job.steps[i];
     return {
       text: step ? describeStep(step, d?.preview?.steps[i]) : t("jobs.step_position", { n: i + 1, total: props.job.step_count }),
@@ -86,7 +111,7 @@ function CurrentStepCell(props: { job: JobSummary }) {
     };
   };
   return (
-    <Show when={shown()} fallback={<span class="muted">–</span>}>
+    <Show when={shown()}>
       {(step) => (
         <span class="job-step-cell" title={step().text}>
           <span>{step().text}</span>
@@ -102,9 +127,9 @@ export function jobColumns(): Column<JobSummary>[] {
     {
       id: "state",
       header: () => t("jobs.col.state"),
-      width: 250,
+      width: 150,
       fixed: true,
-      text: (j) => jobStateText(j.state, cancelRolledBack(j) ? "cancel" : undefined),
+      text: stateText,
       render: (j) => <StateCell job={j} />,
     },
     {
@@ -117,16 +142,16 @@ export function jobColumns(): Column<JobSummary>[] {
     {
       id: "kind",
       header: () => t("jobs.col.kind"),
-      width: 130,
+      width: 150,
       text: (j) => j.kind,
-      render: (j) => <span class="mono">{j.kind}</span>,
+      render: (j) => <span class="mono job-kind">{j.kind}</span>,
     },
     {
-      id: "progress",
-      header: () => t("jobs.col.progress"),
-      width: 130,
-      text: (j) => t("jobs.progress", { done: j.steps_done, total: j.step_count }),
-      render: (j) => <span class="num">{t("jobs.progress", { done: j.steps_done, total: j.step_count })}</span>,
+      id: "steps",
+      header: () => t("jobs.col.steps"),
+      width: 100,
+      text: stepsText,
+      render: (j) => <StepsCell job={j} />,
     },
     {
       id: "step",
@@ -137,19 +162,21 @@ export function jobColumns(): Column<JobSummary>[] {
     {
       id: "by",
       header: () => t("jobs.col.by"),
-      width: 130,
+      width: 140,
       render: (j) => <PrincipalLabel principal={j.created.by} />,
     },
     {
       id: "created",
       header: () => t("jobs.col.created"),
       width: 120,
+      hidden: true,
       render: (j) => <TimeAgo at={j.created.at} />,
     },
     {
       id: "finished",
       header: () => t("jobs.col.finished"),
       width: 120,
+      align: "right",
       render: (j) => <TimeAgo at={j.finished} />,
     },
   ];

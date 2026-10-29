@@ -5325,6 +5325,9 @@ export type MessageKey =
   | "jobs.action.roll_back"
   | "jobs.action.start"
   | "jobs.action.wait"
+  | "jobs.by_all"
+  | "jobs.by_you"
+  | "jobs.calm"
   | "jobs.cancel.body_active"
   | "jobs.cancel.body_queued"
   | "jobs.cancel.button"
@@ -5346,12 +5349,20 @@ export type MessageKey =
   | "jobs.col.finished"
   | "jobs.col.job"
   | "jobs.col.kind"
-  | "jobs.col.progress"
   | "jobs.col.state"
   | "jobs.col.step"
+  | "jobs.col.steps"
   | "jobs.complete.button"
   | "jobs.complete.done"
   | "jobs.crumbs"
+  | "jobs.day.earlier"
+  | "jobs.day.note"
+  | "jobs.day.older"
+  | "jobs.day.rest.earlier"
+  | "jobs.day.rest.today"
+  | "jobs.day.rest.yesterday"
+  | "jobs.day.today"
+  | "jobs.day.yesterday"
   | "jobs.deadline.in"
   | "jobs.deadline.line"
   | "jobs.deadline.passed"
@@ -5359,6 +5370,8 @@ export type MessageKey =
   | "jobs.duration.h"
   | "jobs.duration.min"
   | "jobs.duration.s"
+  | "jobs.duration.took"
+  | "jobs.duration.under_s"
   | "jobs.empty.body"
   | "jobs.empty.filtered"
   | "jobs.empty.title"
@@ -5393,6 +5406,8 @@ export type MessageKey =
   | "jobs.fact.timeout"
   | "jobs.fact.timeout_hint"
   | "jobs.fact.when_by"
+  | "jobs.facts"
+  | "jobs.facts_open"
   | "jobs.filter.group"
   | "jobs.filter.kind"
   | "jobs.filter.label"
@@ -5433,6 +5448,8 @@ export type MessageKey =
   | "jobs.l2.undo_hint"
   | "jobs.l2.unknown_write"
   | "jobs.l2.warnings"
+  | "jobs.lead.active"
+  | "jobs.lead.needs"
   | "jobs.log.change"
   | "jobs.log.col.by"
   | "jobs.log.col.change"
@@ -5442,7 +5459,6 @@ export type MessageKey =
   | "jobs.log.col.time"
   | "jobs.log.heading"
   | "jobs.log.label"
-  | "jobs.needs_you"
   | "jobs.no_right"
   | "jobs.note.counter"
   | "jobs.note.help"
@@ -5473,6 +5489,7 @@ export type MessageKey =
   | "jobs.state.running"
   | "jobs.state.succeeded"
   | "jobs.state.waiting"
+  | "jobs.state.waiting_you"
   | "jobs.step.cleanup"
   | "jobs.step.device_manual"
   | "jobs.step.dhcp_manual"
@@ -5537,8 +5554,8 @@ export type MessageKey =
   | "jobs.stepname.sys_update_verify"
   | "jobs.steps.heading"
   | "jobs.steps.label"
+  | "jobs.steps_of"
   | "jobs.sub"
-  | "jobs.sub_waiting"
   | "jobs.tag.undo"
   | "jobs.targets"
   | "jobs.task.dhcp_release"
@@ -8793,21 +8810,29 @@ export interface MessageArgs {
   "ipam.vlan.step.intent": { name: string | number; vid: string | number };
   "ipam.vlan.task.network": { name: string | number; vid: string | number };
   "ipam.vrf.edit_title": { name: string | number };
+  "jobs.by_all": { who: string | number };
   "jobs.cancel.note": { when: string | number; who: string | number };
   "jobs.checklist.group": { count: number; name: string | number };
   "jobs.checklist.mark_done": { task: string | number };
   "jobs.checklist.open": { count: number };
   "jobs.complete.done": { n: number };
+  "jobs.day.note": { failed: number; outcome: string };
+  "jobs.day.rest.earlier": { count: number };
+  "jobs.day.rest.today": { count: number };
+  "jobs.day.rest.yesterday": { count: number };
   "jobs.deadline.in": { time: string | number };
   "jobs.deadline.line": { when: string | number };
   "jobs.duration.d": { value: number };
   "jobs.duration.h": { value: number };
   "jobs.duration.min": { value: number };
   "jobs.duration.s": { value: number };
+  "jobs.duration.took": { duration: string | number };
   "jobs.error.note_too_long": { max: number };
   "jobs.error.query_invalid": { param: string | number; value: string | number };
   "jobs.fact.group_limit": { limit: number };
   "jobs.fact.when_by": { when: string | number; who: string | number };
+  "jobs.facts": { finished: string | number; running: number; waiting: number };
+  "jobs.facts_open": { finished: string | number; running: number };
   "jobs.filter.group": { group: string | number };
   "jobs.filter.kind": { kind: string | number };
   "jobs.filter.remove": { filter: string | number };
@@ -8844,7 +8869,7 @@ export interface MessageArgs {
   "jobs.stepmeta.attempts": { count: number };
   "jobs.stepmeta.finished": { when: string | number };
   "jobs.stepmeta.started": { when: string | number };
-  "jobs.sub_waiting": { count: number };
+  "jobs.steps_of": { done: number; total: number };
   "jobs.targets": { count: number };
   "jobs.task.dhcp_release": { host: string | number; ip: string | number };
   "jobs.task.dhcp_reserve": { host: string | number; ip: string | number; mac: string | number; prefix: string | number };
@@ -14619,6 +14644,9 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.action.roll_back",
   "jobs.action.start",
   "jobs.action.wait",
+  "jobs.by_all",
+  "jobs.by_you",
+  "jobs.calm",
   "jobs.cancel.body_active",
   "jobs.cancel.body_queued",
   "jobs.cancel.button",
@@ -14640,12 +14668,20 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.col.finished",
   "jobs.col.job",
   "jobs.col.kind",
-  "jobs.col.progress",
   "jobs.col.state",
   "jobs.col.step",
+  "jobs.col.steps",
   "jobs.complete.button",
   "jobs.complete.done",
   "jobs.crumbs",
+  "jobs.day.earlier",
+  "jobs.day.note",
+  "jobs.day.older",
+  "jobs.day.rest.earlier",
+  "jobs.day.rest.today",
+  "jobs.day.rest.yesterday",
+  "jobs.day.today",
+  "jobs.day.yesterday",
   "jobs.deadline.in",
   "jobs.deadline.line",
   "jobs.deadline.passed",
@@ -14653,6 +14689,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.duration.h",
   "jobs.duration.min",
   "jobs.duration.s",
+  "jobs.duration.took",
+  "jobs.duration.under_s",
   "jobs.empty.body",
   "jobs.empty.filtered",
   "jobs.empty.title",
@@ -14687,6 +14725,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.fact.timeout",
   "jobs.fact.timeout_hint",
   "jobs.fact.when_by",
+  "jobs.facts",
+  "jobs.facts_open",
   "jobs.filter.group",
   "jobs.filter.kind",
   "jobs.filter.label",
@@ -14727,6 +14767,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.l2.undo_hint",
   "jobs.l2.unknown_write",
   "jobs.l2.warnings",
+  "jobs.lead.active",
+  "jobs.lead.needs",
   "jobs.log.change",
   "jobs.log.col.by",
   "jobs.log.col.change",
@@ -14736,7 +14778,6 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.log.col.time",
   "jobs.log.heading",
   "jobs.log.label",
-  "jobs.needs_you",
   "jobs.no_right",
   "jobs.note.counter",
   "jobs.note.help",
@@ -14767,6 +14808,7 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.state.running",
   "jobs.state.succeeded",
   "jobs.state.waiting",
+  "jobs.state.waiting_you",
   "jobs.step.cleanup",
   "jobs.step.device_manual",
   "jobs.step.dhcp_manual",
@@ -14831,8 +14873,8 @@ export const messageKeys: readonly MessageKey[] = [
   "jobs.stepname.sys_update_verify",
   "jobs.steps.heading",
   "jobs.steps.label",
+  "jobs.steps_of",
   "jobs.sub",
-  "jobs.sub_waiting",
   "jobs.tag.undo",
   "jobs.targets",
   "jobs.task.dhcp_release",

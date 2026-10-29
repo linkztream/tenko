@@ -54,7 +54,7 @@ export function GroupRowCell<T>(props: { group: RowGroup<T>; open: boolean; onTo
         onClick={() => props.onToggle()}
       >
         <Icon name={props.open ? "chev-d" : "chev-r"} size="xs" />
-        <span class="group-label">{props.group.label}</span>
+        <span class="group-label">{props.group.label}</span>{" "}
         <span class="group-count" data-testid="group-count">
           {count()}
         </span>

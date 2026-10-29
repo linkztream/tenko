@@ -25,6 +25,86 @@
         <notes><note category="description">Shown in the "Not moved" list when the job recorded no error.</note></notes>
         <segment><source>The job recorded no reason.</source><target>Jobbet registrerade ingen orsak.</target></segment>
       </unit>
+      <unit id="jobs.state.waiting_you">
+        <notes><note category="description">State of a job in the jobs list while a task of it waits for a person to do or confirm it.</note></notes>
+        <segment><source>Waiting for you</source><target>Väntar på dig</target></segment>
+      </unit>
+      <unit id="jobs.col.steps">
+        <notes><note category="description">Column header of the jobs list: how many steps of the job are done, or for a job that is done how long it took.</note></notes>
+        <segment><source>Steps</source><target>Steg</target></segment>
+      </unit>
+      <unit id="jobs.steps_of">
+        <notes><note category="description">The Steps cell of a job in the jobs list: done is the number of steps done, total the number of steps of the job.</note></notes>
+        <segment><source>{done, number} of {total, number}</source><target>{done, number} av {total, number}</target></segment>
+      </unit>
+      <unit id="jobs.duration.under_s">
+        <notes><note category="description">How long a job took when it took less than a second.</note></notes>
+        <segment><source>under 1 s</source><target>under 1 s</target></segment>
+      </unit>
+      <unit id="jobs.duration.took">
+        <notes><note category="description">Tooltip of the duration of a job that is done; duration reads like "2 min 10 s".</note></notes>
+        <segment><source>Took {duration} from submission to end</source><target>Tog {duration} från start till slut</target></segment>
+      </unit>
+      <unit id="jobs.lead.needs">
+        <notes><note category="description">Group row at the top of the jobs list: the jobs with a task that waits for a person.</note></notes>
+        <segment><source>Waiting for you</source><target>Väntar på dig</target></segment>
+      </unit>
+      <unit id="jobs.lead.active">
+        <notes><note category="description">Group row of the jobs list: the jobs that are queued, running, rolling back or waiting for the network.</note></notes>
+        <segment><source>In progress</source><target>Pågår</target></segment>
+      </unit>
+      <unit id="jobs.day.today">
+        <notes><note category="description">Group row of the jobs list: the jobs that finished today.</note></notes>
+        <segment><source>Today</source><target>I dag</target></segment>
+      </unit>
+      <unit id="jobs.day.yesterday">
+        <notes><note category="description">Group row of the jobs list: the jobs that finished yesterday.</note></notes>
+        <segment><source>Yesterday</source><target>I går</target></segment>
+      </unit>
+      <unit id="jobs.day.earlier">
+        <notes><note category="description">Group row of the jobs list: the jobs that finished before yesterday.</note></notes>
+        <segment><source>Earlier</source><target>Tidigare</target></segment>
+      </unit>
+      <unit id="jobs.day.note">
+        <notes><note category="description">After the count of a day group of the jobs list, as in "Today · 12 done". outcome is done when every job of the day succeeded, failed when every one failed or was rolled back, mixed when some did, other otherwise (some were cancelled); failed is the number that failed or were rolled back.</note></notes>
+        <segment><source>{outcome, select, done {done} failed {failed or rolled back} mixed {finished, {failed, number} failed or rolled back} other {finished}}</source><target>{outcome, select, done {klara} failed {misslyckade eller återställda} mixed {avslutade, {failed, number} misslyckade eller återställda} other {avslutade}}</target></segment>
+      </unit>
+      <unit id="jobs.day.rest.today">
+        <notes><note category="description">Last row of the Today group of the jobs list when it shows only its first ten jobs; count is how many more there are.</note></notes>
+        <segment><source>Show the rest of today ({count, number} more)</source><target>Visa resten av i dag ({count, number} till)</target></segment>
+      </unit>
+      <unit id="jobs.day.rest.yesterday">
+        <notes><note category="description">Last row of the Yesterday group of the jobs list when it shows only its first ten jobs; count is how many more there are.</note></notes>
+        <segment><source>Show the rest of yesterday ({count, number} more)</source><target>Visa resten av i går ({count, number} till)</target></segment>
+      </unit>
+      <unit id="jobs.day.rest.earlier">
+        <notes><note category="description">Last row of the Earlier group of the jobs list when it shows only its first ten jobs; count is how many more there are.</note></notes>
+        <segment><source>Show the rest of the earlier jobs ({count, number} more)</source><target>Visa resten av de tidigare jobben ({count, number} till)</target></segment>
+      </unit>
+      <unit id="jobs.day.older">
+        <notes><note category="description">Last row of the oldest day group of the jobs list when the server has older finished jobs than the ones read.</note></notes>
+        <segment><source>Show older jobs</source><target>Visa äldre jobb</target></segment>
+      </unit>
+      <unit id="jobs.facts">
+        <notes><note category="description">The line of facts under the title of the jobs list. running is the number of jobs that run, waiting the number that wait for a person (the number of the Jobs badge in the navigation), finished the number of finished jobs read, such as 200+.</note></notes>
+        <segment><source>{running, number} running · {waiting, number} waiting for you · {finished} finished</source><target>{running, number} körs · {waiting, number} väntar på dig · {finished} avslutade</target></segment>
+      </unit>
+      <unit id="jobs.facts_open">
+        <notes><note category="description">The line of facts under the title of the jobs list when the number of jobs that wait for a person is not known. finished is the number of finished jobs read, such as 200+.</note></notes>
+        <segment><source>{running, number} running · {finished} finished</source><target>{running, number} körs · {finished} avslutade</target></segment>
+      </unit>
+      <unit id="jobs.calm">
+        <notes><note category="description">The one line above the finished jobs when no job runs and none waits for a person.</note></notes>
+        <segment><source>Nothing is running and no job waits for you. Finished jobs are below.</source><target>Inget körs och inget jobb väntar på dig. Avslutade jobb finns nedan.</target></segment>
+      </unit>
+      <unit id="jobs.by_all">
+        <notes><note category="description">Said once in the filter bar of the jobs list when one person started every listed job, instead of a Started by column. who is that person, or the word for "you".</note></notes>
+        <segment><source>Started by · all {who}</source><target>Alla startade av {who}</target></segment>
+      </unit>
+      <unit id="jobs.by_you">
+        <notes><note category="description">The argument who of "Started by · all {who}" when the signed-in user started every listed job.</note></notes>
+        <segment><source>you</source><target>dig</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

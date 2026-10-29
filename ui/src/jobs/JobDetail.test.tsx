@@ -49,7 +49,7 @@ describe("a job that waits for a person", () => {
   it("shows the head: title, state in glyph and word, kind and the facts", async () => {
     await openJob(id);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Move");
-    const head = screen.getByRole("heading", { level: 1 });
+    const head = screen.getByTestId("page-sub");
     expect(within(head).getByText("Waiting")).toBeTruthy();
     expect(within(head).getByText("ipam.move")).toBeTruthy();
     const facts = screen.getByTestId("job-facts");
@@ -221,7 +221,7 @@ describe("a job that has not started", () => {
 
   it("shows the queued state and cancels after the confirm dialog", async () => {
     await openJob(id);
-    const head = screen.getByRole("heading", { level: 1 });
+    const head = screen.getByTestId("page-sub");
     expect(within(head).getByText("Queued")).toBeTruthy();
     expect(steps().every((s) => s.dataset.state === "pending")).toBe(true);
 
@@ -231,7 +231,7 @@ describe("a job that has not started", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel job" }));
 
     expect(await screen.findByText("Job cancelled")).toBeTruthy();
-    await waitFor(() => expect(within(screen.getByRole("heading", { level: 1 })).getByText("Cancelled")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId("page-sub")).getByText("Cancelled")).toBeTruthy());
     expect(screen.queryByTestId("job-cancel")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(findJob(id)?.job.state).toBe("cancelled");
@@ -258,7 +258,7 @@ describe("a job that was rolled back", () => {
 
   it("shows the compensated steps, the failed step and the reason in words", async () => {
     await openJob(id);
-    expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolled back")).toBeTruthy();
+    expect(within(screen.getByTestId("page-sub")).getByText("Rolled back")).toBeTruthy();
     expect(steps().map((s) => s.dataset.state)).toEqual([
       "compensated",
       "compensated",
@@ -324,7 +324,7 @@ describe("a job that rolls back and needs a person to undo a step", () => {
     const id = undoJob();
     await cancelJob(id);
     await openJob(id);
-    const head = screen.getByRole("heading", { level: 1 });
+    const head = screen.getByTestId("page-sub");
     expect(within(head).getByText("Rolling back")).toBeTruthy();
     expect(screen.queryByTestId("job-cancel")).toBeNull();
 
@@ -335,7 +335,7 @@ describe("a job that rolls back and needs a person to undo a step", () => {
 
     type(note(1), "Removed the reservation.");
     fireEvent.click(within(step(1)).getByTestId("job-step-complete"));
-    await waitFor(() => expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolled back (cancelled)")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId("page-sub")).getByText("Rolled back (cancelled)")).toBeTruthy());
     expect(step(1).dataset.state).toBe("compensated");
     expect(screen.getByText("Removed the reservation.")).toBeTruthy();
   });
@@ -347,7 +347,7 @@ describe("a job that rolls back and needs a person to undo a step", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel job" }));
     // Nothing to undo by hand: the job is cancelled for good in one go.
     expect(await screen.findByText("Job cancelled")).toBeTruthy();
-    await waitFor(() => expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolled back (cancelled)")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId("page-sub")).getByText("Rolled back (cancelled)")).toBeTruthy());
     expect(steps().map((s) => s.dataset.state).slice(0, 3)).toEqual(["compensated", "compensated", "pending"]);
     expect(screen.queryByTestId("job-step-complete")).toBeNull();
   });
@@ -535,9 +535,9 @@ describe("a move whose L2 step goes through the network controller", () => {
     const id = controllerJob();
     await cancelJob(id);
     await openJob(id);
-    expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolled back (cancelled)")).toBeTruthy();
+    expect(within(screen.getByTestId("page-sub")).getByText("Rolled back (cancelled)")).toBeTruthy();
     // Still the state cancelled, shown as rolled back by the cancellation (WP2.8).
-    const chip = within(screen.getByRole("heading", { level: 1 })).getByTestId("job-state");
+    const chip = within(screen.getByTestId("page-sub")).getByTestId("job-state");
     expect(chip.dataset.state).toBe("cancelled");
     expect(chip.dataset.rollback).toBe("cancel");
     expect(steps().map((s) => s.dataset.state)).toEqual(["compensated", "compensated", "compensated", "pending"]);
@@ -555,7 +555,7 @@ describe("a move whose L2 step goes through the network controller", () => {
     const id = controllerJob({ undoFails: true });
     await cancelJob(id);
     await openJob(id);
-    expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolling back")).toBeTruthy();
+    expect(within(screen.getByTestId("page-sub")).getByText("Rolling back")).toBeTruthy();
     expect(steps().map((s) => s.dataset.state)).toEqual(["compensated", "waiting_for_manual", "compensated", "pending"]);
 
     const controller = within(step(1));
@@ -571,7 +571,7 @@ describe("a move whose L2 step goes through the network controller", () => {
 
     type(note(1), "Set port 7 of sw-desk back to the profile LAN.");
     fireEvent.click(within(step(1)).getByTestId("job-step-complete"));
-    await waitFor(() => expect(within(screen.getByRole("heading", { level: 1 })).getByText("Rolled back (cancelled)")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId("page-sub")).getByText("Rolled back (cancelled)")).toBeTruthy());
     expect(step(1).dataset.state).toBe("compensated");
     expect(within(step(1)).getByTestId("job-l2-reverted")).toBeTruthy();
     expect(within(step(1)).queryByTestId("job-l2-undo-hint")).toBeNull();

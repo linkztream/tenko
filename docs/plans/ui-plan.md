@@ -352,6 +352,7 @@ Sizes are builder-days. A package owns the files it lists; contract requests com
 - **Owns:** `ui/src/jobs/` (default filter Active and Needs you, day groups, titles from the catalog, Started by hidden for one starter, current step only while running or waiting, duration on Done rows); the jobs mockup.
 - **Acceptance:** 200 finished jobs by one person read as day groups with no repeated starter; a title never prints a raw code when the catalog has the key; the waiting count equals the rail badge; the row height is 28 px.
 - **Size:** 4.
+- **Status:** Built, awaiting gate (branch `ui-jobs`). `/jobs` reads the jobs that are not over (every page) and the finished ones (page by page, the oldest day offering the next page) and draws one `GroupedGrid`: Waiting for you, In progress, then Today, Yesterday and Earlier with ten rows a day and a Show the rest tail. The waiting count of the header is the store's (act and review of the jobs area, the rail badge's number). The duration of a Done row runs from submission to end, because `JobSummary` carries no start time. The job page uses `PageHeader`. See `docs/jobs.md` and `design/mockups/jobs.html`.
 
 ### U6 IPAM networks, address map and saved layouts (10 builder-days)
 

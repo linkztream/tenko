@@ -14,7 +14,7 @@ import { decodeSegment, paths } from "../app/paths";
 import { Icon } from "../components/Icon";
 import { ConfirmDialog } from "../components/Dialog";
 import { Notice } from "../components/Notice";
-import { PageHead } from "../components/PageHead";
+import { PageHeader } from "../components/PageHeader";
 import { PrincipalLabel, shortId } from "../components/Principal";
 import { toast } from "../components/toast";
 import { TimeAgo } from "../grid/cells";
@@ -104,7 +104,7 @@ function JobBody(props: { detail: JobDetailData; onChanged: () => void }) {
 
   return (
     <>
-      <PageHead
+      <PageHeader
         crumbs={<Crumbs id={job().id} />}
         title={jobTitle(spec())}
         sub={

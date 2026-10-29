@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { JOB_STATES } from "../api/types";
 import type { JobSummary, ManualTask, StepRecord, StepStateKind } from "../api/types";
-import { setLocale, tDynamic } from "../i18n";
+import { setLocale, sourceMessages, tDynamic } from "../i18n";
 import {
   canCancel,
   countdownParts,
   groupLabel,
   kindRank,
+  leadsWithActive,
   matchesView,
   MAX_NOTE_BYTES,
   needsPerson,
@@ -14,13 +15,13 @@ import {
   parseView,
   progressPercent,
   STEP_ORDER,
-  viewStates,
   VIEWS,
 } from "./model";
 import {
   codedErrorDetail,
   codedErrorText,
   describeStep,
+  durationText,
   jobStateClass,
   jobStateWord,
   jobTitle,
@@ -33,6 +34,7 @@ import {
   cancelRolledBack,
   jobStateText,
   taskText,
+  titleSaysCount,
 } from "./words";
 
 beforeEach(async () => {
@@ -103,6 +105,44 @@ describe("titles, step summaries and tasks", () => {
   it("falls back to the title key for a kind without a label", () => {
     expect(jobTitle({ title: "vendor.job.title", kind: "vendor.unknown", targets: [] })).toBe("vendor.job.title");
     expect(jobTitle({ title: "vendor.job.title" })).toBe("vendor.job.title");
+  });
+
+  it("never prints a raw code when the catalog has the label of the kind", () => {
+    const kinds = Object.keys(sourceMessages())
+      .filter((key) => key.startsWith("jobs.title.") && key.split(".").length > 3)
+      .map((key) => key.slice("jobs.title.".length));
+    // The catalog of the server's job kinds (scripts/label-catalog.test.mjs keeps it complete).
+    expect(kinds).toEqual(expect.arrayContaining(["ipam.edit", "ipam.move", "dns.edit", "dhcp.edit", "scan.run", "sys.update"]));
+    for (const kind of kinds) {
+      // The server's title keys mostly have no message of their own ("scan.job.run").
+      for (const title of ["scan.job.run", "vendor.job.title"]) {
+        const text = jobTitle({ title, kind, targets: [{}, {}] });
+        expect(text, kind).not.toBe(title);
+        expect(text, kind).not.toContain(kind);
+        expect(text, kind).not.toMatch(/^[a-z0-9_]+(\.[a-z0-9_]+)+$/);
+      }
+    }
+  });
+
+  it("knows when the title already says the object count, so the list does not say it twice", () => {
+    expect(titleSaysCount({ title: "ipam.job.edit", kind: "ipam.edit" })).toBe(true);
+    expect(titleSaysCount({ title: "ipam.job.edit", kind: "dns.edit" })).toBe(false);
+    // A title key with a message of its own is the title, whatever the kind's label says.
+    expect(titleSaysCount({ title: "jobs.title.move", kind: "ipam.edit" })).toBe(false);
+    expect(titleSaysCount({ title: "vendor.job.title", kind: "vendor.unknown" })).toBe(false);
+    expect(titleSaysCount({ title: "vendor.job.title" })).toBe(false);
+  });
+
+  it("says a duration as people say it", () => {
+    expect(durationText(0)).toBe("under 1 s");
+    expect(durationText(0.4)).toBe("under 1 s");
+    expect(durationText(4)).toBe("4 s");
+    expect(durationText(59.9)).toBe("59 s");
+    expect(durationText(60)).toBe("1 min");
+    expect(durationText(130)).toBe("2 min 10 s");
+    expect(durationText(3600)).toBe("1 h");
+    expect(durationText(17 * 3600 + 17 * 60 + 40)).toBe("17 h 17 min");
+    expect(durationText(3 * 86400 + 4 * 3600)).toBe("3 d 4 h");
   });
 
   it("builds the summary key of a step kind", () => {
@@ -465,29 +505,31 @@ describe("rules of the views", () => {
     expect(noteBytes("é".repeat(2049))).toBe(MAX_NOTE_BYTES + 2);
   });
 
-  it("filters by the chip, and narrows 'needs you' down to jobs with a manual step", () => {
-    expect(VIEWS).toEqual(["all", "active", "needs", "failed", "finished"]);
-    expect(viewStates("all")).toBeUndefined();
-    expect(viewStates("active")).toEqual(["queued", "running", "waiting", "rolling_back"]);
+  it("filters by the chip: the default and All list every job, the others finished ones only", () => {
+    expect(VIEWS).toEqual(["active", "failed", "finished", "all"]);
+    expect(leadsWithActive("active")).toBe(true);
+    expect(leadsWithActive("all")).toBe(true);
+    expect(leadsWithActive("failed")).toBe(false);
+    expect(leadsWithActive("finished")).toBe(false);
     expect(matchesView("all", job("cancelled"))).toBe(true);
     expect(matchesView("active", job("running"))).toBe(true);
-    expect(matchesView("active", job("succeeded"))).toBe(false);
-    expect(matchesView("needs", job("waiting", [1]))).toBe(true);
-    expect(matchesView("needs", job("waiting"))).toBe(false);
-    expect(matchesView("needs", job("rolling_back", [2]))).toBe(true);
-    expect(matchesView("needs", job("running", [2]))).toBe(false);
+    expect(matchesView("active", job("succeeded"))).toBe(true);
     expect(matchesView("failed", job("rolled_back"))).toBe(true);
+    expect(matchesView("failed", job("failed"))).toBe(true);
     expect(matchesView("failed", job("cancelled"))).toBe(false);
+    expect(matchesView("failed", job("waiting", [1]))).toBe(false);
     expect(matchesView("finished", job("cancelled"))).toBe(true);
     expect(matchesView("finished", job("waiting"))).toBe(false);
     expect(needsPerson(job("waiting", []))).toBe(false);
+    expect(needsPerson(job("waiting", [1]))).toBe(true);
   });
 
-  it("reads the view from the URL and ignores unknown values", () => {
-    expect(parseView("needs")).toBe("needs");
-    expect(parseView("nonsense")).toBe("all");
-    expect(parseView(undefined)).toBe("all");
-    expect(parseView(["needs"])).toBe("all");
+  it("reads the view from the URL, the former Needs you chip as the default", () => {
+    expect(parseView("failed")).toBe("failed");
+    expect(parseView("needs")).toBe("active");
+    expect(parseView("nonsense")).toBe("active");
+    expect(parseView(undefined)).toBe("active");
+    expect(parseView(["failed"])).toBe("active");
   });
 
   it("offers Cancel only while it can work", () => {

@@ -5038,8 +5038,8 @@
         <segment><source>All</source></segment>
       </unit>
       <unit id="jobs.view.active">
-        <notes><note category="description">Jobs that are queued, running, waiting or rolling back.</note></notes>
-        <segment><source>Active</source></segment>
+        <notes><note category="description">The default chip of the jobs list: the jobs that are queued, running, waiting or rolling back lead, the ones waiting for a person first, and the finished jobs follow by day.</note></notes>
+        <segment><source>Active and needs you</source></segment>
       </unit>
       <unit id="jobs.view.failed">
         <segment><source>Failed or rolled back</source></segment>
@@ -5047,10 +5047,6 @@
       <unit id="jobs.view.finished">
         <notes><note category="description">Jobs in a final state: done, failed, rolled back or cancelled.</note></notes>
         <segment><source>Finished</source></segment>
-      </unit>
-      <unit id="jobs.needs_you">
-        <notes><note category="description">Filter chip and row marker for jobs that wait for a person to do or confirm a task.</note></notes>
-        <segment><source>Needs you</source></segment>
       </unit>
       <unit id="jobs.flag.cancel_requested">
         <segment><source>Cancel requested</source></segment>
@@ -5072,9 +5068,6 @@
       </unit>
       <unit id="jobs.col.kind">
         <segment><source>Kind</source></segment>
-      </unit>
-      <unit id="jobs.col.progress">
-        <segment><source>Progress</source></segment>
       </unit>
       <unit id="jobs.col.step">
         <segment><source>Current step</source></segment>

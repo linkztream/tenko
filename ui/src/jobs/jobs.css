@@ -11,12 +11,40 @@
 .jobs-page { overflow: auto; }
 .jobs-grid { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 320px; }
 .job-state-cell { display: inline-flex; align-items: center; gap: var(--sp-5); }
-.job-needs { font-size: var(--fs-12); }
 .job-cancel-flag { color: var(--ink-3); }
 .job-link { color: var(--ink); font-weight: var(--fw-medium); }
+.job-title-cell { display: inline-flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
+/* The object count beside the title, in muted ink after a middle dot. */
+.job-count { color: var(--ink-3); font-size: var(--fs-12); }
+.job-count::before { content: "·"; margin-inline-end: var(--sp-3); }
+.job-kind { color: var(--ink-3); font-size: var(--fs-12); }
 .job-step-cell { display: inline; }
-/* A job that waits for a person: an edge on the first cell, next to the marker with words. */
-.grid tr.needs td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--discrepancy-mark); }
+/*
+ * Color is for exceptions (principle 6): in the list the word of a state that needs nobody is in
+ * plain ink and only its glyph keeps the state color; Failed and Waiting for you keep theirs.
+ */
+.jobs-grid .jstate.done, .jobs-grid .jstate.waiting, .jobs-grid .jstate.rolledback { color: var(--ink-2); }
+.jobs-grid .jstate.waiting.you, .jstate.waiting.you { color: var(--severity-act); }
+.jstate.waiting.you::before { border-color: var(--severity-act); }
+/* A job that waits for a person: an edge on the first cell, next to its state in words. */
+.grid tr.needs td:first-child { box-shadow: inset calc(3px * var(--inline-sign, 1)) 0 0 var(--severity-act); }
+
+/* The last row of a day: the rest of the day, or older jobs. */
+.job-tail {
+  display: block; width: 100%; height: 100%; padding: 0;
+  border: 0; background: transparent;
+  color: var(--ink-2); font: inherit; font-size: var(--fs-12); text-align: start; cursor: pointer;
+}
+.job-tail:hover { color: var(--ink); text-decoration: underline; }
+
+/* The one calm line when nothing runs or waits. */
+.jobs-calm {
+  display: flex; align-items: center; gap: var(--sp-4);
+  margin: 0; padding: var(--sp-3) var(--sp-6);
+  color: var(--ink-2);
+}
+.jobs-calm svg.i { color: var(--ok-ink); flex: none; }
+.jobs-starter { color: var(--ink-3); font-size: var(--fs-12); white-space: nowrap; }
 
 /* A filter that comes from the URL, with its remove button. */
 .chip.applied { padding-inline-end: var(--sp-2); gap: var(--sp-3); }
@@ -60,7 +88,7 @@
 
 /* ---------- The job page ---------- */
 .job-crumbs { display: flex; align-items: center; gap: var(--sp-2); }
-.job-page .page-head h1 .sub { display: inline-flex; align-items: center; gap: var(--sp-5); }
+.job-page .page-sub { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); }
 .job-facts {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: var(--sp-5) var(--sp-8);
