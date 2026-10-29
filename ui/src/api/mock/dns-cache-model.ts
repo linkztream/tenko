@@ -58,6 +58,42 @@ export function seedDnsCache(): DnsCacheState {
     entry("missing.example.test", "A", 0, [], { rcode: 3, stale: true }),
     entry("intranet.example.test", "A", 60, [{ type: "A", address: "198.51.100.10" }], { view: CACHE_VIEW }),
     entry("example.net", "TXT", 12_000, [{ type: "TXT", strings: ["v=spf1 -all"] }]),
+    // Parameters in wire form: alpn h2 and h3, an IPv4 and an IPv6 hint; alpn h2 and port 8443.
+    entry(
+      "example.net",
+      "HTTPS",
+      300,
+      [
+        {
+          type: "HTTPS",
+          priority: 1,
+          target: ".",
+          params: [
+            { key: 1, value: "026832026833" },
+            { key: 4, value: "c000020a" },
+            { key: 6, value: "20010db8000000000000000000000010" },
+          ],
+        },
+      ],
+      { hits: 8, state: "insecure" },
+    ),
+    entry(
+      "example.net",
+      "SVCB",
+      300,
+      [
+        {
+          type: "SVCB",
+          priority: 1,
+          target: "svc.example.net",
+          params: [
+            { key: 1, value: "026832" },
+            { key: 3, value: "20fb" },
+          ],
+        },
+      ],
+      { hits: 2, state: "insecure" },
+    ),
     entry("ns1.example.org", "AAAA", 900, [], { hits: 1, state: "bogus", ede: 6 }),
   ];
   return { entries: entries.sort(compare) };

@@ -2852,6 +2852,11 @@ export type MessageKey =
   | "dns.cache.col.name"
   | "dns.cache.col.stale"
   | "dns.cache.col.state"
+  | "dns.cache.col.state_all.bogus"
+  | "dns.cache.col.state_all.indeterminate"
+  | "dns.cache.col.state_all.insecure"
+  | "dns.cache.col.state_all.secure"
+  | "dns.cache.col.state_all.unvalidated"
   | "dns.cache.col.ttl"
   | "dns.cache.col.type"
   | "dns.cache.col.view"
@@ -11951,6 +11956,11 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.cache.col.name",
   "dns.cache.col.stale",
   "dns.cache.col.state",
+  "dns.cache.col.state_all.bogus",
+  "dns.cache.col.state_all.indeterminate",
+  "dns.cache.col.state_all.insecure",
+  "dns.cache.col.state_all.secure",
+  "dns.cache.col.state_all.unvalidated",
   "dns.cache.col.ttl",
   "dns.cache.col.type",
   "dns.cache.col.view",

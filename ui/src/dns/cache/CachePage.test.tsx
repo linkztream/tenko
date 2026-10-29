@@ -69,6 +69,13 @@ function rows(): HTMLElement[] {
   return screen.queryAllByTestId("dns-cache-row");
 }
 
+/** The row of an entry (or of the signature covering `covered`), by name and type. */
+function row(key: string, type: string, covered?: string): HTMLElement {
+  const found = rows().find((r) => r.dataset.key === key && r.dataset.type === type && (!covered || r.dataset.covered === covered));
+  if (!found) throw new Error(`no row ${key} ${type}`);
+  return found;
+}
+
 function folderRow(name: string): HTMLElement {
   const el = screen.queryAllByTestId("dns-cache-folder-row").find((r) => r.dataset.key === name);
   if (!el) throw new Error(`no folder row ${name}`);
@@ -145,7 +152,7 @@ describe("the cache page", () => {
     expect(pane()).toEqual(["folder net", "folder org", "folder test"]);
     expect(requests.map((q) => q.get("limit"))).toEqual(["1000"]);
     expect(reads()).toHaveLength(1);
-    expect(reads()[0]?.draft.details?.context).toMatchObject({ from_cursor: "first", to_cursor: "end", entries: "7" });
+    expect(reads()[0]?.draft.details?.context).toMatchObject({ from_cursor: "first", to_cursor: "end", entries: "9" });
   });
 
   it("expands, collapses and selects folders without reading, and reads only on the button", async () => {
@@ -158,7 +165,7 @@ describe("the cache page", () => {
     expect(selected()).toBe("example.test");
     expect(screen.getByTestId("dns-cache-folder").textContent).toBe("example.test");
     selectFolder("net");
-    expect(pane()).toEqual(["example.net TXT"]);
+    expect(pane()).toEqual(["example.net HTTPS", "example.net SVCB", "example.net TXT"]);
     toggleFolder("org");
     toggleFolder("example.org");
     toggleFolder("test");
@@ -192,11 +199,6 @@ describe("the cache page", () => {
       "www.example.test RRSIG A",
       "www.example.test AAAA",
     ]);
-    const row = (key: string, type: string, covered?: string) => {
-      const found = rows().find((r) => r.dataset.key === key && r.dataset.type === type && (!covered || r.dataset.covered === covered));
-      if (!found) throw new Error(`no row ${key} ${type}`);
-      return found;
-    };
     expect(cells(row("example.test", "MX"))).toEqual(["(same as parent folder)", "MX", "56 min", "Default", "Unvalidated", "", "3", "10 mail.example.test"]);
     expect(row("example.test", "MX").querySelector(".dns-cache-same")?.classList.contains("muted")).toBe(true);
     expect(cells(row("www.example.test", "A"))).toEqual(["www", "A", "4 min", "Default", "Secure", "", "41", "CNAME cdn.example.test, 192.0.2.80"]);
@@ -208,6 +210,67 @@ describe("the cache page", () => {
     expect(cells(row("intranet.example.test", "A"))[3]).toBe(CACHE_VIEW);
     expect(cells(row("missing.example.test", "A"))).toEqual(["missing", "A", "–", "Default", "Unvalidated", "Stale", "0", "NXDOMAIN"]);
     expect(screen.getAllByTestId("dns-cache-stale")).toHaveLength(1);
+  });
+
+  it("shows HTTPS and SVCB data as SvcParams in the data font, not as JSON", async () => {
+    await shown();
+    selectFolder("net");
+    const https = within(row("example.net", "HTTPS")).getByTestId("dns-cache-data");
+    expect(https.textContent).toBe("1 . alpn=h2,h3 ipv4hint=192.0.2.10 ipv6hint=2001:db8::10");
+    expect(https.classList.contains("mono")).toBe(true);
+    expect(within(row("example.net", "SVCB")).getByTestId("dns-cache-data").textContent).toBe("1 svc.example.net alpn=h2 port=8443");
+  });
+
+  it("keeps the state badges and the plain header when the states differ", async () => {
+    await shown();
+    selectFolder("net");
+    // The HTTPS and SVCB rows are insecure, the TXT row is unvalidated.
+    expect(screen.getByTestId("dns-cache-state-head").textContent).toBe("State");
+    expect(screen.getByTestId("dns-cache-state-head").dataset.said).toBeUndefined();
+    const states = ["HTTPS", "SVCB", "TXT"].map((type) => within(row("example.net", type)).getByTestId("dns-cache-state").textContent);
+    expect(states).toEqual(["Insecure", "Insecure", "Unvalidated"]);
+  });
+
+  it("says the state once in the header and draws no badge when every row has it, keeping Stale on its row", async () => {
+    for (const e of dnsCacheState().entries) if (e.name === "example.net") e.state = "insecure";
+    const txt = dnsCacheState().entries.find((e) => e.name === "example.net" && e.type === "TXT")!;
+    txt.stale = true;
+    await shown();
+    selectFolder("net");
+    const head = screen.getByTestId("dns-cache-state-head");
+    expect(head.textContent).toBe("State · all insecure");
+    expect(head.dataset.said).toBe("insecure");
+    for (const type of ["HTTPS", "SVCB", "TXT"]) {
+      const cell = within(row("example.net", type)).getByTestId("dns-cache-state");
+      expect(cell.textContent).toBe("");
+      expect(cell.querySelector(".tag")).toBeNull();
+    }
+    expect(screen.getAllByTestId("dns-cache-stale")).toHaveLength(1);
+    expect(within(row("example.net", "TXT")).getByTestId("dns-cache-stale").textContent).toBe("Stale");
+    // Another folder is judged on its own rows: the header says "State" again where they differ.
+    selectFolder(".");
+    expect(screen.getByTestId("dns-cache-state-head").textContent).toBe("State");
+  });
+
+  it("keeps the signature expiry on the cell when the state is said once", async () => {
+    const [secure] = dnsCacheState().entries.filter((e) => e.name === "www.example.test" && e.type === "A");
+    for (const e of dnsCacheState().entries) if (e.name.endsWith("example.test")) e.state = "secure";
+    if (secure) secure.signature_expiry = "2026-11-01T00:00:00Z";
+    await shown();
+    toggleFolder("test");
+    selectFolder("example.test");
+    expect(screen.getByTestId("dns-cache-state-head").textContent).toBe("State · all secure");
+    const cell = within(row("www.example.test", "A")).getByTestId("dns-cache-state");
+    expect(cell.querySelector(".tag")).toBeNull();
+    expect(cell.getAttribute("title")).toContain("Signatures valid until");
+  });
+
+  it("says the state once in Swedish", async () => {
+    for (const e of dnsCacheState().entries) if (e.name === "example.net") e.state = "insecure";
+    await setLocale("sv");
+    await shown();
+    selectFolder("net");
+    expect(screen.getByTestId("dns-cache-state-head").textContent).toBe("Tillstånd · alla osäkra");
   });
 
   it("shows the validation state of each entry and the extended error code of a bogus one", async () => {
@@ -225,7 +288,7 @@ describe("the cache page", () => {
     expect(within(secure).getByTestId("dns-cache-state").querySelector(".tag")?.getAttribute("title")).toContain("Signatures valid until");
     expect(within(secure).queryByTestId("dns-cache-ede")).toBeNull();
     selectFolder("net");
-    expect(cells(rows()[0] as HTMLElement)[2]).toBe("3 h");
+    expect(cells(row("example.net", "TXT"))[2]).toBe("3 h");
   });
 
   it("moves through the tree with the keyboard, opening, closing and selecting folders", async () => {
@@ -364,11 +427,11 @@ describe("the cache page", () => {
     expect(dialog.textContent).toContain("Flush www.example.test from the cache?");
     fireEvent.click(within(dialog).getByTestId("confirm-cancel"));
     await waitFor(() => expect(screen.queryByTestId("dns-cache-flush-dialog")).toBeNull());
-    expect(dnsCacheState().entries).toHaveLength(7);
+    expect(dnsCacheState().entries).toHaveLength(9);
     fireEvent.click(screen.getByTestId("dns-cache-flush"));
     fireEvent.click(within(await screen.findByTestId("dns-cache-flush-dialog")).getByTestId("confirm-ok"));
     expect(await screen.findByTestId("dns-cache-empty")).toBeTruthy();
-    expect(dnsCacheState().entries).toHaveLength(5);
+    expect(dnsCacheState().entries).toHaveLength(7);
     expect(requests.map((q) => q.get("suffix"))).toEqual(["www.example.test", "www.example.test"]);
     const flushes = audit.records.filter((r) => r.draft.action === "dns.cache.flush");
     expect(flushes.at(-1)?.draft.details?.context).toMatchObject({ detail: "2 cache entr(ies) at or below www.example.test removed" });

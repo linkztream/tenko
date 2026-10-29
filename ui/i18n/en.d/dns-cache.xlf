@@ -166,6 +166,26 @@
         <notes><note category="description">Shown on the cache page when the node has no DNS role.</note></notes>
         <segment><source>The DNS role does not run on this node, so it keeps no cache.</source></segment>
       </unit>
+      <unit id="dns.cache.col.state_all.secure">
+        <notes><note category="description">Header of the State column of the cache table when every entry shown is secure: the state is said once and the rows carry no badge.</note></notes>
+        <segment><source>State · all secure</source></segment>
+      </unit>
+      <unit id="dns.cache.col.state_all.insecure">
+        <notes><note category="description">Header of the State column of the cache table when every entry shown is insecure: the state is said once and the rows carry no badge.</note></notes>
+        <segment><source>State · all insecure</source></segment>
+      </unit>
+      <unit id="dns.cache.col.state_all.bogus">
+        <notes><note category="description">Header of the State column of the cache table when every entry shown is bogus: the state is said once and the rows carry no badge.</note></notes>
+        <segment><source>State · all bogus</source></segment>
+      </unit>
+      <unit id="dns.cache.col.state_all.indeterminate">
+        <notes><note category="description">Header of the State column of the cache table when every entry shown is indeterminate: the state is said once and the rows carry no badge.</note></notes>
+        <segment><source>State · all indeterminate</source></segment>
+      </unit>
+      <unit id="dns.cache.col.state_all.unvalidated">
+        <notes><note category="description">Header of the State column of the cache table when every entry shown is unvalidated: the state is said once and the rows carry no badge.</note></notes>
+        <segment><source>State · all unvalidated</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

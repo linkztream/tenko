@@ -9,6 +9,7 @@ import type { components } from "../../api/generated/schema";
 export type DnsCacheEntry = components["schemas"]["DnsCacheEntry"];
 type RecordData = components["schemas"]["RecordData"];
 export type Rrsig = Extract<RecordData, { type: "RRSIG" }>;
+export type SvcRecord = Extract<RecordData, { type: "SVCB" | "HTTPS" }>;
 
 /** Entries per page, the most the server lists at once. */
 export const CACHE_PAGE = 1000;

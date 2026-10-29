@@ -38,6 +38,7 @@ import {
   paneRows,
   pathTo,
   rrsigTime,
+  sharedState,
   ttlLeft,
   utcMinute,
   visibleFolders,
@@ -69,19 +70,22 @@ function View(props: { entry: DnsCacheEntry }) {
   );
 }
 
-/** The validation state of an entry, the extended error code of a bogus one beside it, and
- * when the signatures expire as the hint of a secure one. */
-function State(props: { entry: DnsCacheEntry }) {
-  const expiry = () => props.entry.signature_expiry;
+/** When the signatures of an entry expire, as the hint of a secure one. */
+function expiryHint(entry: DnsCacheEntry): string | undefined {
+  return entry.signature_expiry ? t("dns.cache.signature_expiry", { time: formatDateTime(entry.signature_expiry) }) : undefined;
+}
+
+/** The validation state of an entry and the extended error code of a bogus one beside it. When
+ * the column header says the state once (`said`), the badge is not drawn; the code stays, since
+ * it differs from row to row. */
+function State(props: { entry: DnsCacheEntry; said: boolean }) {
   return (
     <>
-      <span
-        class="tag"
-        classList={{ discrepancy: props.entry.state === "bogus" }}
-        title={expiry() ? t("dns.cache.signature_expiry", { time: formatDateTime(expiry() ?? "") }) : undefined}
-      >
-        {t(`dns.sec.${props.entry.state}`)}
-      </span>
+      <Show when={!props.said}>
+        <span class="tag" classList={{ discrepancy: props.entry.state === "bogus" }} title={expiryHint(props.entry)}>
+          {t(`dns.sec.${props.entry.state}`)}
+        </span>
+      </Show>
       <Show when={props.entry.ede != null}>
         <span class="tag mono" data-testid="dns-cache-ede" title={t("dns.cache.ede_hint", { code: props.entry.ede ?? 0 })}>
           {t("dns.cache.ede", { code: props.entry.ede ?? 0 })}
@@ -145,7 +149,7 @@ function DataCell(props: { text: string; hint?: string }) {
   );
 }
 
-function EntryRow(props: { entry: DnsCacheEntry; label: string | null }) {
+function EntryRow(props: { entry: DnsCacheEntry; label: string | null; said: boolean }) {
   return (
     <tr
       data-testid="dns-cache-row"
@@ -164,8 +168,8 @@ function EntryRow(props: { entry: DnsCacheEntry; label: string | null }) {
       <td>
         <View entry={props.entry} />
       </td>
-      <td data-testid="dns-cache-state" data-state={props.entry.state}>
-        <State entry={props.entry} />
+      <td data-testid="dns-cache-state" data-state={props.entry.state} title={props.said ? expiryHint(props.entry) : undefined}>
+        <State entry={props.entry} said={props.said} />
       </td>
       <td>
         <Show when={props.entry.stale}>
@@ -255,6 +259,8 @@ function CacheBrowser(props: { listing: CacheListing }) {
 
   const items = createMemo(() => visibleFolders(tree, expanded(), shown()));
   const rows = createMemo(() => paneRows(tree, selected()));
+  // When every entry row of the folder has one state, the header says it and the rows do not.
+  const said = createMemo(() => sharedState(rows()));
   const key = (item: TreeItem) => (item.kind === "folder" ? `n${item.node.id}` : `m${item.parent.id}`);
   const [activeKey, setActiveKey] = createSignal(`n${start.id}`);
   const activeIndex = () => {
@@ -462,7 +468,11 @@ function CacheBrowser(props: { listing: CacheListing }) {
                 <th scope="col">{t("dns.cache.col.type")}</th>
                 <th scope="col">{t("dns.cache.col.ttl")}</th>
                 <th scope="col">{t("dns.cache.col.view")}</th>
-                <th scope="col">{t("dns.cache.col.state")}</th>
+                <th scope="col" data-testid="dns-cache-state-head" data-said={said() ?? undefined}>
+                  <Show when={said()} fallback={t("dns.cache.col.state")}>
+                    {(state) => t(`dns.cache.col.state_all.${state()}`)}
+                  </Show>
+                </th>
                 <th scope="col">{t("dns.cache.col.stale")}</th>
                 <th scope="col" class="r">
                   {t("dns.cache.col.hits")}
@@ -476,7 +486,7 @@ function CacheBrowser(props: { listing: CacheListing }) {
                   row.kind === "folder" ? (
                     <FolderRow node={row.node} onOpen={open} />
                   ) : row.kind === "entry" ? (
-                    <EntryRow entry={row.entry} label={row.label} />
+                    <EntryRow entry={row.entry} label={row.label} said={said() !== null} />
                   ) : (
                     <SignatureRow entry={row.entry} record={row.record} label={row.label} />
                   )

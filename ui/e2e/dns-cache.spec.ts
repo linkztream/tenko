@@ -60,6 +60,15 @@ test("lists what the cache holds and flushes a suffix", async ({ page, signedIn 
   await expect(folders.first()).toHaveAttribute("aria-selected", "true");
   expect(cache.requests).toHaveLength(1);
 
+  // HTTPS data reads as SvcParams (RFC 9460); the states of the folder differ, so the header
+  // stays "State" and the rows keep their badges.
+  await section.locator('[data-testid="dns-cache-folder-row"][data-key="net"]').dblclick();
+  await expect(section.locator('[data-testid="dns-cache-row"][data-type="HTTPS"]').getByTestId("dns-cache-data")).toHaveText(
+    "1 . alpn=h2,h3 ipv4hint=192.0.2.10 ipv6hint=2001:db8::10",
+  );
+  await expect(section.getByTestId("dns-cache-state-head")).toHaveText("State");
+  await expect(section.locator('[data-testid="dns-cache-row"][data-type="TXT"]').getByTestId("dns-cache-state")).toHaveText("Unvalidated");
+
   await section.getByTestId("field-cache-suffix").fill("www.example.test");
   await section.getByTestId("field-cache-suffix").press("Enter");
   await expect(rows).toHaveCount(4);
@@ -77,7 +86,7 @@ test("lists what the cache holds and flushes a suffix", async ({ page, signedIn 
   ]);
   expect(cache.requests.filter((r) => r.method === "GET").map((r) => r.query.suffix ?? "")).toEqual(["", "www.example.test", "www.example.test"]);
   expect(cache.requests.filter((r) => r.method === "GET").every((r) => r.query.limit === "1000")).toBe(true);
-  expect(cache.state.entries).toHaveLength(5);
+  expect(cache.state.entries).toHaveLength(7);
 });
 
 // cache-browse: the tree beside the table on a wide viewport, above it at 360 px, with no
