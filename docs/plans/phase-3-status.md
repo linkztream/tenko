@@ -14,6 +14,8 @@ The UI plan (`docs/plans/ui-plan.md`, 2026-10-26) turns the owner's design propo
 
 ADR 0029 (`docs/adr/0029-an-agent-tool-with-guard-rails.md`, Proposed, 2026-10-29) records the owner's decision that Tenko ships its own tool for language-model agents, `tenko mcp` in the CLI over stdio, so that the safe way to connect an agent is the easiest one ("it should be easy to do the right thing"): a curated set of bounded read tools with a fixed note that network text is data, no tool that executes a change (a write tool creates a job with a preview and a manual step a person approves in the interface), an anonymisation mode on by default, an agent token type, the audit principal `agent via <user>`, and TGL-39 (agent writes through jobs; Hardened off). Drafted by a Sonnet agent, proofread by the lead (six corrections: the ADR 0023 reference, the deletion rule, the token's renewal, a call budget for a looping agent, the fuzz target's scope, a threat-model goal), merged as `ef9ac9ba` after the docs gate. Built after U5 and U6.
 
+The UI plan's eight packages were all merged by 2026-10-29 (U1 `203ca03a`, U2 `255775a8`, U3 `71510c27`, U8 `2857e645`, U4 `ef3933e0`, U7 `d8b3b47e`, U5 `3b1947dd`, U6 `11aee047`; the rows are in `phase-2-status.md`). The first load ended at 77.9 KB gzip against the 76.9 KB it started from, within the +1 KB per merge rule, without the one-time raise the owner allowed. Left open from the packages: a class and a role field in place of U7's tags, a per-prefix SSID panel, a column chooser on the zones and leases pages, a Playwright spec for the topology and the SSID view.
+
 ## Slice 7 work packages
 
 | Package | State | Commit | Notes |
