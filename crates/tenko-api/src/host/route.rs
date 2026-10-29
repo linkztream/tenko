@@ -59,8 +59,12 @@ impl DefaultRoute for OsDefaultRoute {
 
 #[cfg(target_os = "linux")]
 async fn read() -> Vec<IpAddr> {
-    let v4 = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
-    let v6 = std::fs::read_to_string("/proc/net/ipv6_route").unwrap_or_default();
+    let v4 = tokio::fs::read_to_string("/proc/net/route")
+        .await
+        .unwrap_or_default();
+    let v6 = tokio::fs::read_to_string("/proc/net/ipv6_route")
+        .await
+        .unwrap_or_default();
     let mut hops = parse_proc_route(&v4);
     hops.extend(parse_proc_ipv6_route(&v6));
     hops
