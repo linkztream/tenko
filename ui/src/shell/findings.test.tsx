@@ -228,7 +228,7 @@ describe("the rail", () => {
 });
 
 describe("the findings in the status bar", () => {
-  it("shows one count per severity, act and review as links to the filtered Discovery list, info plain", async () => {
+  it("shows one count per severity, each as a link to the filtered Discovery list, info in plain ink", async () => {
     renderRoute(() => <FindingsStatus counts={countsOf(3, { ipam: { act: 1, review: 2, info: 20 }, discovery: { act: 0, review: 3, info: 3 } })} />, { url: "/", path: "/" });
     const act = screen.getByTestId("status-findings-act");
     expect(act.tagName).toBe("A");
@@ -238,7 +238,8 @@ describe("the findings in the status bar", () => {
     expect(review.textContent).toBe("5 to review");
     expect(review.getAttribute("href")).toBe("/discovery?severity=review");
     const info = screen.getByTestId("status-findings-info");
-    expect(info.tagName).toBe("SPAN");
+    expect(info.tagName).toBe("A");
+    expect(info.getAttribute("href")).toBe("/discovery?severity=info");
     expect(info.textContent).toBe("23 info");
     expect(info.classList.contains("info")).toBe(true);
     expect(await axeViolations(screen.getByTestId("status-findings"))).toEqual([]);

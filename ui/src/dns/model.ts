@@ -3,6 +3,7 @@
 // for the editors, and the local checks a form makes before the server decides. No DOM, no
 // i18n: errors are short codes that the views translate (`dns.check.<code>`).
 import { parseCidr, parseIp } from "../ipam/ip";
+import { svcbText } from "./svcb";
 import type { AclEntry, Origin, RecordData, RrSet, Zone, ZoneKind } from "./types";
 
 /** The largest TTL (RFC 2181: 2^31 - 1 seconds). */
@@ -146,7 +147,7 @@ export function recordText(r: RecordData): string {
       return `${r.usage} ${r.selector} ${r.matching_type} ${r.data}`;
     case "SVCB":
     case "HTTPS":
-      return [String(r.priority), r.target, ...r.params.map((p) => JSON.stringify(p))].join(" ");
+      return svcbText(r);
     case "NSEC":
       return `${r.next} ${r.types.join(" ")}`;
     case "NSEC3":

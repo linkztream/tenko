@@ -33,13 +33,14 @@ export default function FindingsStatus(props: { counts: FindingCounts | null }) 
               testid="status-findings-review"
             />
           </Show>
-          {/* Info is listed without a link for now: `severity=info` of the Discovery list is the
-              proposal severity, and no open proposal is information (U4 makes the list carry
-              every finding). */}
           <Show when={levels().info > 0}>
-            <span class="finding-chip info" title={t("shell.status.findings.info_title")} data-testid="status-findings-info">
-              {t("shell.status.findings.info", { count: levels().info })}
-            </span>
+            <FindingChip
+              level="info"
+              text={t("shell.status.findings.info", { count: levels().info })}
+              title={t("shell.status.findings.info_title")}
+              href={paths.discovery({ severity: "info" })}
+              testid="status-findings-info"
+            />
           </Show>
         </span>
       )}

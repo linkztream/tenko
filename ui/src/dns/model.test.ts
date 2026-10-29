@@ -191,6 +191,23 @@ describe("recordText", () => {
     };
     expect(recordText(soa)).toBe("ns1.example.test hostmaster.example.test 2026101701 3600 900 1209600 300");
   });
+  it("writes HTTPS and SVCB data as SvcParams in key order, not as JSON", () => {
+    // Given in the wrong order on purpose: alpn (1) h2, h3 and ipv4hint (4) 192.0.2.10.
+    const https: RecordData = {
+      type: "HTTPS",
+      priority: 1,
+      target: ".",
+      params: [
+        { key: 4, value: "c000020a" },
+        { key: 1, value: "026832026833" },
+      ],
+    };
+    expect(recordText(https)).toBe("1 . alpn=h2,h3 ipv4hint=192.0.2.10");
+  });
+  it("writes an alias record as its priority and target", () => {
+    expect(recordText({ type: "SVCB", priority: 0, target: "svc.example.test", params: [] })).toBe("0 svc.example.test");
+    expect(recordText({ type: "HTTPS", priority: 0, target: "www.example.test", params: [] })).toBe("0 www.example.test");
+  });
 });
 
 describe("parseRecord", () => {
