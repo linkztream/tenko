@@ -24,6 +24,14 @@ export interface Column<T> {
   fixed?: boolean;
   /** Whether Enter edits this cell of `row` (the grid calls `onEdit`). */
   editable?: (row: T) => boolean;
+  /**
+   * The majority in the header (design/README.md, principle 7): the value of the cell in words,
+   * such as one state or one source. When at least two rows are listed and every one of them has
+   * the same value, the header says it once ("State · all insecure") and the cells stay empty;
+   * as soon as one row differs (or has no value) every cell renders as usual. The rule reads the
+   * loaded rows, so a page that brings a different value back restores the cells.
+   */
+  majority?: (row: T) => string | undefined;
 }
 
 export interface SortState {

@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="findings-list">
+      <unit id="grid.majority">
+        <notes><note category="description">After a column header when every row of the column shares one value, which the cells then leave out; {value} is that value, for example State · all insecure.</note></notes>
+        <segment><source>· {value}</source><target>· {value}</target></segment>
+      </unit>
+      <unit id="grid.group.expand">
+        <notes><note category="description">Accessible name of the button of a closed group row in a list; {group} is the group, {count} how many rows it holds.</note></notes>
+        <segment><source>Open {group}: {count}</source><target>Öppna {group}: {count}</target></segment>
+      </unit>
+      <unit id="grid.group.collapse">
+        <notes><note category="description">Accessible name of the button of an open group row in a list; {group} is the group, {count} how many rows it holds.</note></notes>
+        <segment><source>Close {group}: {count}</source><target>Stäng {group}: {count}</target></segment>
+      </unit>
+      <unit id="discovery.findings.level.act">
+        <notes><note category="description">Severity of a finding: a person must decide now. Group row and panel of the findings list.</note></notes>
+        <segment><source>Act now</source><target>Åtgärda nu</target></segment>
+      </unit>
+      <unit id="discovery.findings.level.review">
+        <notes><note category="description">Severity of a finding: a person should look. Group row and panel of the findings list.</note></notes>
+        <segment><source>Review</source><target>Granska</target></segment>
+      </unit>
+      <unit id="discovery.findings.level.info">
+        <notes><note category="description">Severity of a finding: listed where it lives, never counted as a problem.</note></notes>
+        <segment><source>Info</source><target>Info</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.conflict">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Conflict</source><target>Konflikt</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.job_waiting">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Job waits</source><target>Jobb väntar</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.utilization">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Network filling up</source><target>Nätet fylls</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.unknown_device">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Unknown device</source><target>Okänd enhet</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.orphaned_record">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Orphaned record</source><target>Föräldralös post</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.orphaned_address">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Orphaned address</source><target>Föräldralös adress</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.ptr_mismatch">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>PTR mismatch</source><target>PTR stämmer inte</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.intent_differs">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Intent differs</source><target>Avsikt och observation skiljer sig</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.outside_prefixes">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Outside known networks</source><target>Utanför kända nät</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.vlan">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>VLAN</source><target>VLAN</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.host_name">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Host name</source><target>Värdnamn</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.dns">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>DNS</source><target>DNS</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.ghost">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Ghost address</source><target>Spökadress</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.scan_artifact">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Scan artifact</source><target>Skanningsartefakt</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.health">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Health</source><target>Hälsa</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.utilization">
+        <notes><note category="description">Evidence line of a network over its utilization alarm; {percent} is the share in use, {threshold} the alarm threshold in percent.</note></notes>
+        <segment><source>{percent} % in use, over the alarm at {threshold} %</source><target>{percent} % används, över larmet vid {threshold} %</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.utilization_bare">
+        <notes><note category="description">Evidence line of a network over its utilization alarm without a known threshold; {percent} is the share in use.</note></notes>
+        <segment><source>{percent} % in use, over its alarm</source><target>{percent} % används, över sitt larm</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.job_step">
+        <notes><note category="description">Evidence line of a job that waits for a person; {step} is the number of the step, counted from 1.</note></notes>
+        <segment><source>Waits for a person at step {step}</source><target>Väntar på en person vid steg {step}</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.ghost">
+        <notes><note category="description">Evidence line of a ghost address: an address of intent nothing has shown for longer than its lease; {since} is the date and time of its last sighting.</note></notes>
+        <segment><source>Not seen since {since}</source><target>Inte sedd sedan {since}</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.ptr">
+        <notes><note category="description">Evidence line of a PTR mismatch; {ptr} is the name the PTR record gives.</note></notes>
+        <segment><source>The PTR record names {ptr}</source><target>PTR-posten anger {ptr}</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.orphan">
+        <notes><note category="description">Evidence line of an orphaned DNS record written by hand; {names} are its names.</note></notes>
+        <segment><source>{names} written by hand, and no host holds the address</source><target>{names} skrivna för hand, och ingen värd har adressen</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.rogue_decided">
+        <notes><note category="description">Evidence line of an unknown device whose proposal was decided; {macs} are its MAC addresses or none.</note></notes>
+        <segment><source>{macs, select, none {A device without a MAC address} other {Seen with {macs}}}; its proposal was decided</source><target>{macs, select, none {En enhet utan MAC-adress} other {Sedd med {macs}}}; förslaget är avgjort</target></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.artifact">
+        <notes><note category="description">Evidence line of a scan artifact on an edge address of a network; {edge} names the edge address, {macs} the MAC addresses that answered or none.</note></notes>
+        <segment><source>{macs, select, none {A device} other {{macs}}} answered on {edge}</source><target>{macs, select, none {En enhet} other {{macs}}} svarade på {edge}</target></segment>
+      </unit>
+      <unit id="discovery.findings.edge.network">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on.</note></notes>
+        <segment><source>the network address</source><target>nätadressen</target></segment>
+      </unit>
+      <unit id="discovery.findings.edge.broadcast">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on.</note></notes>
+        <segment><source>the broadcast address</source><target>broadcastadressen</target></segment>
+      </unit>
+      <unit id="discovery.findings.edge.subnet_router_anycast">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on (IPv6).</note></notes>
+        <segment><source>the subnet-router anycast address</source><target>subnet-router-anycastadressen</target></segment>
+      </unit>
+      <unit id="discovery.findings.edge.other">
+        <notes><note category="description">An edge address of its network this version does not name.</note></notes>
+        <segment><source>an edge address of its network</source><target>en kantadress i sitt nät</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.resolve">
+        <notes><note category="description">Default action of a conflict: opens the side panel to pick the device that stays.</note></notes>
+        <segment><source>Resolve</source><target>Lös</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_job">
+        <notes><note category="description">Default action of a job that waits for a person: opens the job.</note></notes>
+        <segment><source>Open the job</source><target>Öppna jobbet</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_prefix">
+        <notes><note category="description">Default action of a network over its utilization alarm: opens the network.</note></notes>
+        <segment><source>Open the network</source><target>Öppna nätet</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.adopt">
+        <notes><note category="description">Default action of an unknown device: adopts it into intent through the plan dialog.</note></notes>
+        <segment><source>Adopt</source><target>Ta in</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.delete_record">
+        <notes><note category="description">Default action of an orphaned DNS record proposal: approves the proposal, which deletes the record.</note></notes>
+        <segment><source>Delete the record</source><target>Ta bort posten</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_record">
+        <notes><note category="description">Default action of an orphaned DNS record written by hand: searches for the name, whose zone holds the record.</note></notes>
+        <segment><source>Open the record</source><target>Öppna posten</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.fix_ptr">
+        <notes><note category="description">Default action of a PTR mismatch: opens the address, where its DNS names are corrected.</note></notes>
+        <segment><source>Fix PTR</source><target>Rätta PTR</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_host">
+        <notes><note category="description">Default action of a finding about a host: opens the host.</note></notes>
+        <segment><source>Open the host</source><target>Öppna värden</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.decide">
+        <notes><note category="description">Default action of a proposal with several choices: opens it in the side panel.</note></notes>
+        <segment><source>Decide</source><target>Avgör</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.decommission">
+        <notes><note category="description">Default action of a ghost address unseen for long: decommissions its host through the dialog.</note></notes>
+        <segment><source>Decommission</source><target>Avveckla</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open">
+        <notes><note category="description">Action of a finding for a person who may not decide it: opens it in the side panel.</note></notes>
+        <segment><source>Open</source><target>Öppna</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_nodes">
+        <notes><note category="description">Default action of a health condition of the nodes.</note></notes>
+        <segment><source>Open Nodes</source><target>Öppna Noder</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_connectors">
+        <notes><note category="description">Default action of a health condition of the connectors.</note></notes>
+        <segment><source>Open Connectors</source><target>Öppna Kopplingar</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_dns">
+        <notes><note category="description">Default action of a health condition of DNS.</note></notes>
+        <segment><source>Open DNS</source><target>Öppna DNS</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_dhcp">
+        <notes><note category="description">Default action of a health condition of DHCP.</note></notes>
+        <segment><source>Open DHCP</source><target>Öppna DHCP</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_ipam">
+        <notes><note category="description">Default action of a health condition of IPAM.</note></notes>
+        <segment><source>Open IPAM</source><target>Öppna IPAM</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_settings">
+        <notes><note category="description">Default action of a health condition of the settings.</note></notes>
+        <segment><source>Open Settings</source><target>Öppna Inställningar</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.failed">
+        <notes><note category="description">Title of the toast when the default action of a finding could not start (its proposal or host could not be read).</note></notes>
+        <segment><source>The action could not start</source><target>Åtgärden kunde inte starta</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.host_gone">
+        <notes><note category="description">Body of the toast when the host of a finding no longer exists.</note></notes>
+        <segment><source>The host no longer exists.</source><target>Värden finns inte längre.</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.devices">
+        <notes><note category="description">Heading of the lead of a conflict in the side panel: the devices (MAC addresses) on one address; {count} is how many.</note></notes>
+        <segment><source>{count, plural, one {One device on the address} other {# devices on one address}}</source><target>{count, plural, one {En enhet på adressen} other {# enheter på en adress}}</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.intended">
+        <notes><note category="description">Beside the MAC address of a conflict that intent assigns the address to.</note></notes>
+        <segment><source>intended</source><target>avsedd</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.os">
+        <notes><note category="description">The operating system of a conflict's address in the side panel; {guess} is the guess, {confidence} the confidence in percent, {source} the source key.</note></notes>
+        <segment><source>Operating system: {guess} ({confidence} %), from {source}</source><target>Operativsystem: {guess} ({confidence} %), från {source}</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.title">
+        <notes><note category="description">Title of the side panel of a finding; {kind} is the kind of finding, {subject} what it is about (an address, a host, a record).</note></notes>
+        <segment><source>{kind} on {subject}</source><target>{kind} på {subject}</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.since">
+        <notes><note category="description">Before the time since when a finding holds, in the side panel.</note></notes>
+        <segment><source>since</source><target>sedan</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.artifact">
+        <notes><note category="description">Notice in the side panel of a scan artifact; {ip} is the address, {edge} which edge address of its network it is.</note></notes>
+        <segment><source>{ip} is {edge} of its network. No device holds it, so a sighting there is a scan artifact and never a conflict.</source><target>{ip} är {edge} i sitt nät. Ingen enhet har den, så en observation där är en skanningsartefakt och aldrig en konflikt.</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.decide">
+        <notes><note category="description">Heading of the section with the choices of a finding in the side panel.</note></notes>
+        <segment><source>Decide</source><target>Avgör</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.open_reconcile">
+        <notes><note category="description">Link in the side panel of a finding of the reconciliation view: opens the view for the finding's network and kind.</note></notes>
+        <segment><source>Open in the reconciliation view</source><target>Öppna i avstämningsvyn</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.decide_hint">
+        <notes><note category="description">Hint in the side panel when the finding is decided where its subject lives.</note></notes>
+        <segment><source>Resolve the cause where it lives; the finding goes away at the next run of the reconciler.</source><target>Åtgärda orsaken där den finns; fyndet försvinner vid nästa körning av avstämningen.</target></segment>
+      </unit>
+      <unit id="discovery.findings.panel.info_hint">
+        <notes><note category="description">Hint in the side panel of a finding listed for information only.</note></notes>
+        <segment><source>Nothing to do: this is listed for information.</source><target>Inget att göra: detta visas som information.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.macs_count">
+        <notes><note category="description">A cell of the reconciliation view with several MAC addresses; the list is in the tooltip.</note></notes>
+        <segment><source>{count, plural, one {# MAC} other {# MACs}}</source><target>{count, plural, one {# MAC} other {# MAC-adresser}}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.ptr_line">
+        <notes><note category="description">The PTR record names of an address on one line in the reconciliation view; {names} are the names.</note></notes>
+        <segment><source>PTR {names}</source><target>PTR {names}</target></segment>
+      </unit>
+      <unit id="discovery.nav.findings">
+        <notes><note category="description">Tab of the Discovery area: the findings list, everything that may need a person.</note></notes>
+        <segment><source>Findings</source><target>Fynd</target></segment>
+      </unit>
+      <unit id="discovery.findings.facts">
+        <notes><note category="description">Facts line under the Discovery title, from the counts the rail and the status bar show; {act}, {review} and {info} are the counts per severity.</note></notes>
+        <segment><source>{act, number} to act on · {review, number} to review · {info, number} info</source><target>{act, number} att åtgärda · {review, number} att granska · {info, number} info</target></segment>
+      </unit>
+      <unit id="discovery.findings.info">
+        <notes><note category="description">Explanation of the findings list behind the info button beside the Discovery title.</note></notes>
+        <segment><source>Everything Tenko noticed that may need a person, from every source: conflicts, unknown devices, orphaned records, PTR mismatches, ghost addresses, networks over their alarm, jobs that wait for a person and health conditions. Rows are grouped by severity: act now, review, info. Info is listed but never counted as a problem. Each row carries its default action; select a row for its evidence and every choice. The Proposals tab lists every proposal with its state, the decided ones included.</source><target>Allt Tenko har märkt som kan behöva en person, från alla källor: konflikter, okända enheter, föräldralösa poster, PTR som inte stämmer, spökadresser, nät över sitt larm, jobb som väntar på en person och hälsotillstånd. Raderna grupperas efter allvarlighet: åtgärda nu, granska, info. Info visas men räknas aldrig som ett problem. Varje rad har sin standardåtgärd; välj en rad för underlaget och alla val. Fliken Förslag visar alla förslag med deras tillstånd, även de avgjorda.</target></segment>
+      </unit>
+      <unit id="discovery.findings.filter.label">
+        <notes><note category="description">Accessible name of the filter bar of the findings list.</note></notes>
+        <segment><source>Filter the findings</source><target>Filtrera fynden</target></segment>
+      </unit>
+      <unit id="discovery.findings.filter.placeholder">
+        <notes><note category="description">Placeholder of the query field of the findings list.</note></notes>
+        <segment><source>Filter by address, host, MAC or text</source><target>Filtrera på adress, värd, MAC eller text</target></segment>
+      </unit>
+      <unit id="discovery.findings.grid">
+        <notes><note category="description">Accessible name of the findings table.</note></notes>
+        <segment><source>Findings</source><target>Fynd</target></segment>
+      </unit>
+      <unit id="discovery.findings.row">
+        <notes><note category="description">Accessible name of a row of the findings table; {kind} is its kind, {subject} what it is about.</note></notes>
+        <segment><source>{kind} {subject}</source><target>{kind} {subject}</target></segment>
+      </unit>
+      <unit id="discovery.findings.empty">
+        <notes><note category="description">Heading of the findings list when nothing is found.</note></notes>
+        <segment><source>Nothing needs a decision</source><target>Inget behöver avgöras</target></segment>
+      </unit>
+      <unit id="discovery.findings.empty_body">
+        <notes><note category="description">Text of the findings list when nothing is found.</note></notes>
+        <segment><source>Tenko lists conflicts, unknown devices and everything else that may need a person here as soon as it notices them.</source><target>Tenko visar konflikter, okända enheter och allt annat som kan behöva en person här så snart det märks.</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.kind">
+        <notes><note category="description">Column of the findings list: the kind of finding.</note></notes>
+        <segment><source>Kind</source><target>Typ</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.subject">
+        <notes><note category="description">Column of the findings list: what the finding is about.</note></notes>
+        <segment><source>Subject</source><target>Gäller</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.evidence">
+        <notes><note category="description">Column of the findings list: one line of evidence.</note></notes>
+        <segment><source>Evidence</source><target>Underlag</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.source">
+        <notes><note category="description">Column of the findings list: where the finding comes from.</note></notes>
+        <segment><source>Source</source><target>Källa</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.since">
+        <notes><note category="description">Column of the findings list: since when the finding holds.</note></notes>
+        <segment><source>Since</source><target>Sedan</target></segment>
+      </unit>
+      <unit id="discovery.findings.col.action">
+        <notes><note category="description">Column of the findings list: the default action.</note></notes>
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.proposal">
+        <notes><note category="description">Source of a finding: an open proposal of the reconciler.</note></notes>
+        <segment><source>Proposal</source><target>Förslag</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.alarm">
+        <notes><note category="description">Source of a finding: the utilization alarm of a network.</note></notes>
+        <segment><source>Alarm</source><target>Larm</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.reconcile">
+        <notes><note category="description">Source of a finding: the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.job">
+        <notes><note category="description">Source of a finding: a job that waits for a person.</note></notes>
+        <segment><source>Job</source><target>Jobb</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.health">
+        <notes><note category="description">Source of a finding: a health condition of the installation.</note></notes>
+        <segment><source>Health</source><target>Hälsa</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.ignore">
+        <notes><note category="description">Row action of a proposal's finding: rejects the proposal (ignores the device, dismisses a conflict), with an optional reason.</note></notes>
+        <segment><source>Ignore or dismiss</source><target>Ignorera eller avfärda</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.conflict">
+        <notes><note category="description">Short line on the group row of conflicts in the reconciliation view: what the group means.</note></notes>
+        <segment><source>Two devices on one address.</source><target>Två enheter på en adress.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.ghost">
+        <notes><note category="description">Short line on the group row of ghost addresses in the reconciliation view.</note></notes>
+        <segment><source>Not seen for longer than the lease of the scope.</source><target>Inte sedd på längre tid än omfångets lånetid.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.rogue">
+        <notes><note category="description">Short line on the group row of unknown devices in the reconciliation view.</note></notes>
+        <segment><source>Seen on the network, not yet in intent. Adopt or ignore.</source><target>Sedd i nätet, ännu inte i avsikten. Ta in eller ignorera.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.orphan">
+        <notes><note category="description">Short line on the group row of orphaned records in the reconciliation view.</note></notes>
+        <segment><source>DNS records with no host behind them.</source><target>DNS-poster utan någon värd bakom.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.ptr_mismatch">
+        <notes><note category="description">Short line on the group row of PTR mismatches in the reconciliation view.</note></notes>
+        <segment><source>Forward and reverse records disagree.</source><target>Framåt- och bakåtposter stämmer inte överens.</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.facts">
+        <notes><note category="description">Facts line under the title of the reconciliation view; {scope} is the network, the host or all networks, then the rows per severity; {more} is yes while more rows are to come.</note></notes>
+        <segment><source>{scope} · {act, number} to act on · {review, number} to review · {info, number} info{more, select, yes { (more to come)} other {}}</source><target>{scope} · {act, number} att åtgärda · {review, number} att granska · {info, number} info{more, select, yes { (fler finns)} other {}}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.grid">
+        <notes><note category="description">Accessible name of the table of the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source><target>Avstämning</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.row">
+        <notes><note category="description">Accessible name of a row of the reconciliation view; {address} is the address, {kind} the kind of finding.</note></notes>
+        <segment><source>{address}, {kind}</source><target>{address}, {kind}</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.outcome">
+        <notes><note category="description">Column of the reconciliation view: which truth wins.</note></notes>
+        <segment><source>Outcome</source><target>Utfall</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.last_seen">
+        <notes><note category="description">Column of the reconciliation view: the last sighting.</note></notes>
+        <segment><source>Last seen</source><target>Senast sedd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.action">
+        <notes><note category="description">Column of the reconciliation view: the default action of the row's finding.</note></notes>
+        <segment><source>Action</source><target>Åtgärd</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.os">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the operating system.</note></notes>
+        <segment><source>Operating system</source><target>Operativsystem</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.vendors">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the vendors of the MAC addresses.</note></notes>
+        <segment><source>Vendors</source><target>Tillverkare</target></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.rule">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the rule that decides who wins.</note></notes>
+        <segment><source>Rule</source><target>Regel</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

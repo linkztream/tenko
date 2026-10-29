@@ -1,0 +1,27 @@
+/*
+ * The findings list of Discovery, the shared side panel and the reconciliation view's rows (U4).
+ * Token roles only. A glyph keeps the color of its domain (red conflict, magenta proposal, amber
+ * difference, warning triangle, muted ghost); no row or column is filled green.
+ */
+.fglyph { display: inline-flex; flex: none; color: var(--ink-3); }
+.fglyph.conflict { color: var(--conflict); }
+.fglyph.proposal { color: var(--proposal); }
+.fglyph.discrepancy { color: var(--discrepancy); }
+.fglyph.warning { color: var(--status-warning); }
+.fglyph.accent { color: var(--accent); }
+.fglyph.muted { color: var(--ink-3); }
+
+.finding-kind { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.finding-kind .word { overflow: hidden; text-overflow: ellipsis; }
+.finding-subject { overflow: hidden; text-overflow: ellipsis; }
+.finding-subject a { color: var(--ink); }
+.finding-subject a:hover, .finding-subject a:focus-visible { color: var(--accent); }
+.finding-evidence { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.grid td .btn.finding-action { height: 22px; }
+
+/* The panel. */
+.finding-panel .panel-head { align-items: flex-start; gap: var(--sp-4); }
+.finding-panel .panel-head .fglyph { margin-block-start: 2px; }
+.conflict-macs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.conflict-macs li { display: grid; gap: 2px; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); }
+.conflict-macs li .muted { font-size: var(--fs-12); }

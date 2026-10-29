@@ -1,0 +1,29 @@
+/*
+ * Group rows of the data grid (GroupedGrid.tsx) and the majority in a column header. A group row
+ * is a 28 px row like every other, on the quiet header fill; its severity colors the word of its
+ * label only, never the row. Token roles only.
+ */
+.grid tr.group-row td { background: var(--surface-2); color: var(--ink); cursor: pointer; }
+.grid tr.group-row:hover td { background: var(--surface-3); }
+.grid tr.group-tail td { color: var(--ink-3); }
+.group-cell { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.group-toggle {
+  display: inline-flex; align-items: center; gap: var(--sp-3); flex: none;
+  padding: 0; border: 0; background: transparent;
+  color: inherit; font: inherit; text-align: start; cursor: pointer;
+}
+.group-toggle .i { color: var(--ink-3); }
+.group-label { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.group-label b, .group-label strong { font-weight: var(--fw-semibold); }
+.group-count { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.group-label + .group-count::before { content: "·"; margin-inline-end: var(--sp-3); color: var(--ink-3); }
+.group-note, .group-sentence { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-12); }
+.group-note { flex: none; max-width: 50%; }
+.group-sentence { flex: 1; }
+
+/* The word of a severity on a group row: Act now and Review in their color, Info in plain ink. */
+.sev-word { font-weight: var(--fw-semibold); }
+.sev-word.act { color: var(--severity-act); }
+.sev-word.review { color: var(--severity-review); }
+.sev-word.info { color: var(--severity-info); }
+

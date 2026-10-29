@@ -3,6 +3,7 @@
 import { t } from "../../i18n";
 import type { OsField } from "./model";
 import { TRUTH_WORD } from "./model";
+import "./truths.css";
 
 export function OsGuess(props: { os: OsField }) {
   return (

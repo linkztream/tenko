@@ -7,11 +7,22 @@
 // reconciler writes them two seconds after the run (its debounce); the tests wait for them
 // through the API.
 //
-// - The inbox lists the open proposals with kind and severity, the filters narrow it, a
+// - Since U4 /discovery is the findings list of every kind and the old proposal inbox is the
+//   Proposals tab (/discovery/proposals, row URLs /discovery/proposals/<id>); the scenarios of
+//   the inbox run there with their steps unchanged. A deep link /discovery/<proposal id> still
+//   opens the proposal panel, now beside the findings list.
+// - The proposals list shows the open proposals with kind and severity, the filters narrow it, a
 //   proposal opens in the docked panel with its evidence and the suggested change, and a
 //   person decides it: approve (the plan dialog with its dry run, then the inline job of the
 //   decision on the job page) and reject with a reason. "Run now" then reports the rejected
 //   subject as suppressed and opens nothing new. The dashboard tile counts the open ones.
+// - The findings list against the real server (no fakes) from the same proposals: the three
+//   discovered hosts and the outside-prefixes proposal are four findings in the Review group
+//   (`group:review`, beside the server's own health findings, which the scenario counts from
+//   `GET /findings`), each with the default action the server names, the header's facts equal the
+//   status bar's counts, "Adopt" on a discovered host runs the approve plan dialog and the finding
+//   leaves the list, a click on a row docks the proposal panel at /discovery/<proposal id>, and
+//   the list in Swedish.
 // - The observations list the facts of two sources, filter by type, state and source, and
 //   open the picture of a subject (summary, facts per source, intent, proposals); the host
 //   page shows the same facts for the host that was created from the proposal.
@@ -19,15 +30,16 @@
 //   proposals by itself; clearing it makes the prefix inherit the default `manual` again.
 // - Approving the outside-prefixes proposal creates the network, which supersedes the open
 //   discovered-host proposals with ones that include the IPv6 address.
-// - The inbox, an open proposal with its approve and reject dialogs and the report of a run,
-//   the observations and the picture of a subject in Swedish.
+// - The findings list, the proposals list, an open proposal with its approve and reject dialogs
+//   and the report of a run, the observations and the picture of a subject in Swedish.
 // - The findings in the status bar (U2): the open proposals are findings to review, so
 //   `status-findings-review` and the Discovery badge of the rail count them on any page, from
 //   `GET /findings/counts` and the `findings` topic of the real server; both follow a rejection
-//   made elsewhere without a reload, disappear at zero, and the count links to the inbox filtered
-//   by the severity. The sample run raises no conflict, so the act-now count stays away (no spec
-//   seeds a conflict against the real server; the act-now badge is covered by
-//   ui/src/shell/findings.test.tsx).
+//   made elsewhere without a reload, disappear at zero, and the count links to the findings list
+//   with the Review chip pressed. The sample run raises no conflict, so the act-now count and the
+//   act-now group stay away: no spec seeds a conflict against the real server, so the act-now
+//   path (the group, the conflict kind chip, the conflict panel with its MAC addresses) is covered
+//   by the unit tests (ui/src/discovery/FindingsView.test.tsx, ui/src/shell/findings.test.tsx).
 //
 // Documentation values only: 192.0.2.0/24, 2001:db8::/32, MAC 00:00:5e:00:53:xx, names under
 // example.test; the rejection reason is invented. What stays manual: an adoption that the
@@ -107,21 +119,21 @@ function planChanges(scope: Page | Locator, kind: string, action: string): Locat
   return scope.locator(`[data-testid="plan-change"][data-kind="${kind}"][data-action="${action}"]`);
 }
 
-/** The ids of the rows of the inbox, in the order shown. */
+/** The ids of the rows of the proposals list, in the order shown. */
 async function rowIds(page: Page): Promise<string[]> {
   return page.getByTestId("grid-proposals").getByTestId("row").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-id") ?? ""));
 }
 
-/** Opens the proposal `id` in the inbox by clicking its row and waits for the docked panel. */
+/** Opens the proposal `id` in the proposals list by clicking its row and waits for the docked panel. */
 async function openProposal(page: Page, id: string): Promise<Locator> {
   await cell(withId(page.getByTestId("grid-proposals"), "row", id), "summary").click();
-  await expect(page).toHaveURL(new RegExp(`/discovery/${id}(\\?.*)?$`));
+  await expect(page).toHaveURL(new RegExp(`/discovery/proposals/${id}(\\?.*)?$`));
   const panel = withId(page, "proposal-panel", id);
   await expect(panel).toBeVisible();
   return panel;
 }
 
-test("the inbox lists the open proposals, a person approves one and rejects another, and the rejected subject stays closed", async ({
+test("the proposals list shows the open proposals, a person approves one and rejects another, and the rejected subject stays closed", async ({
   page,
   api,
   signedIn,
@@ -142,9 +154,11 @@ test("the inbox lists the open proposals, a person approves one and rejects anot
   await tile.getByTestId("dashboard-proposals-link").click();
   await expect(page.getByTestId("page-discovery")).toBeVisible();
   await expect(page).toHaveURL(/\/discovery\?severity=review$/);
-  await page.goto("/discovery");
+  await expect(page.getByTestId("filter-severity-review")).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/discovery/proposals");
+  await expect(page.getByTestId("discovery-nav").locator('[data-tab="proposals"]')).toHaveAttribute("aria-current", "page");
 
-  // The inbox lists the open ones, newest first, with kind and severity.
+  // The proposals list shows the open ones, newest first, with kind and severity.
   const grid = page.getByTestId("grid-proposals");
   await expect(grid.getByTestId("row")).toHaveCount(4);
   for (const proposal of hosts) {
@@ -159,7 +173,7 @@ test("the inbox lists the open proposals, a person approves one and rejects anot
   await expect(cell(outsideRow, "kind").locator('[data-kind="outside_prefixes"]')).toBeVisible();
   await expect(cell(outsideRow, "severity").locator('[data-severity="warning"]')).toBeVisible();
 
-  // The filters narrow the inbox, and they live in the URL.
+  // The filters narrow the list, and they live in the URL.
   await page.getByTestId("filter-kind-outside_prefixes").click();
   await expect(grid.getByTestId("row")).toHaveCount(1);
   await expect(outsideRow).toBeVisible();
@@ -498,10 +512,14 @@ test("an adoption policy on the prefix lets the reconciler adopt the open discov
     expect(host?.meta.tags ?? []).toContain("discovered");
   }
 
-  // The inbox of the prefix has nothing open any more; the adopted ones are decided.
+  // The findings of the prefix have nothing open any more; the adopted ones are decided, which
+  // the Proposals tab shows with the same prefix filter.
   await adoption.getByTestId("adoption-proposals").click();
   await expect(page.getByTestId("page-discovery")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/discovery\\?prefix=${prefix.id}$`));
+  await expect(page.getByTestId("filter-prefix")).toBeVisible();
+  await expect(page.getByTestId("discovery-empty")).toBeVisible();
+  await page.goto(`/discovery/proposals?prefix=${prefix.id}`);
   await expect(page.getByTestId("filter-prefix")).toBeVisible();
   await expect(page.getByTestId("discovery-empty")).toBeVisible();
   await page.getByTestId("filter-state").selectOption("accepted");
@@ -512,7 +530,7 @@ test("an adoption policy on the prefix lets the reconciler adopt the open discov
   }
   const panel = await openProposal(page, hosts[0]!.id);
   await expect(panel.getByTestId("proposal-decision")).toContainText(prefix.cidr);
-  await page.goto("/discovery");
+  await page.goto("/discovery/proposals");
   await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(1);
   await expect(withId(page.getByTestId("grid-proposals"), "row", outside.id)).toBeVisible();
 
@@ -543,6 +561,8 @@ test("approving the outside-prefixes proposal creates the network and supersedes
   await page.goto(`/discovery/${outside.id}`);
   const panel = withId(page, "proposal-panel", outside.id);
   await expect(panel).toBeVisible();
+  // The deep link opens the panel beside the findings list, which carries the finding of this proposal.
+  await expect(withId(page.getByTestId("grid-findings"), "row", `proposal:${outside.id}`)).toBeVisible();
   await expect(panel.locator('[data-kind="outside_prefixes"]').first()).toBeVisible();
   await expect(panel.locator('[data-severity="warning"]').first()).toBeVisible();
   await expect(planChanges(panel.getByTestId("proposal-change"), "prefix", "create")).toHaveCount(1);
@@ -588,7 +608,8 @@ test("approving the outside-prefixes proposal creates the network and supersedes
   const addresses = planChanges(nextPanel.getByTestId("proposal-change"), "address", "create");
   await expect(addresses).toHaveCount(2);
 
-  // The inbox lists the three new ones as open and the old ones as superseded.
+  // The proposals list has the three new ones as open and the old ones as superseded.
+  await page.goto("/discovery/proposals");
   await page.getByTestId("filter-state").selectOption("superseded");
   const grid = page.getByTestId("grid-proposals");
   await expect(grid.getByTestId("row")).toHaveCount(3);
@@ -616,9 +637,14 @@ test.describe("a Swedish browser", () => {
     const { hosts } = await arrange(api);
     const first = sampleHost(0);
 
-    // The inbox with its proposals.
+    // The findings list, then the proposals list.
     await page.goto("/discovery");
     const inbox = page.getByTestId("page-discovery");
+    await expect(page.getByTestId("grid-findings").getByTestId("row")).toHaveCount(linesOf(await allFindings(api)));
+    await expect(page.getByTestId("discovery-facts")).toHaveText(/^\d+ att åtgärda · \d+ att granska · \d+ info$/);
+    await expect(cell(withId(page.getByTestId("grid-findings"), "row", `proposal:${hosts[0]!.id}`), "action").getByTestId("finding-action")).toHaveText("Ta in");
+    await expectRendered(page, inbox, "sv", testInfo, "discovery-findings");
+    await page.goto("/discovery/proposals");
     await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(4);
     await expectRendered(page, inbox, "sv", testInfo, "discovery-inbox");
 
@@ -710,7 +736,7 @@ test("the rail badge and the status bar count the open proposals as findings to 
   else await expect(review).toHaveText(`${after.total.review} to review`);
 });
 
-test("the findings to review in the status bar open the inbox filtered by the severity", async ({ page, api, signedIn }) => {
+test("the findings to review in the status bar open the findings list with the Review chip pressed", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
   await arrange(api);
   await page.goto("/ipam");
@@ -718,15 +744,21 @@ test("the findings to review in the status bar open the inbox filtered by the se
   await page.getByTestId("status-findings-review").click();
   await expect(page.getByTestId("page-discovery")).toBeVisible();
   await expect(page).toHaveURL(/\/discovery\?severity=review$/);
-  await expect(page.getByTestId("filter-level")).toHaveText(/To review/);
-  await expect(page.getByTestId("grid-proposals").getByTestId("row")).toHaveCount(4);
+  await expect(page.getByTestId("filter-severity-review")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("filter-severity-act")).toHaveAttribute("aria-pressed", "false");
+  const grid = page.getByTestId("grid-findings");
+  await expect(grid.locator('[data-key="group:review"]')).toHaveCount(1);
+  await expect(grid.locator('[data-key^="group:"]')).toHaveCount(1);
+  // One group row and the findings to review: the four proposals and the server's own (see allFindings).
+  expect((await findingCounts(api)).total.review).toBeGreaterThanOrEqual(4);
+  await expect(grid.getByTestId("row")).toHaveCount(1 + (await findingCounts(api)).total.review);
 });
 
 test("an administrator selects three proposals and approves them at once, and they leave the open list", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
   const { hosts, outside } = await arrange(api);
 
-  await page.goto("/discovery");
+  await page.goto("/discovery/proposals");
   const grid = page.getByTestId("grid-proposals");
   await expect(grid.getByTestId("row")).toHaveCount(4);
   await expect(page.getByTestId("actionbar")).toHaveCount(0);
@@ -761,4 +793,127 @@ test("an administrator selects three proposals and approves them at once, and th
     expect(await hostByName(api, sampleHost(n).name)).toBeDefined();
   }
   expect((await proposals(api, { state: "open" })).map((p) => p.id)).toEqual([outside.id]);
+});
+
+/** The header's facts line of the findings list for these counts, as the English source words it. */
+function factsText(counts: Schemas["FindingCounts"]): string {
+  return `${counts.total.act} to act on · ${counts.total.review} to review · ${counts.total.info} info`;
+}
+
+/** Every finding of the server now. The e2e server's own health conditions (a data directory on a small disk, the Lab profile, a placeholder UI of a debug build) are findings of the list too, so the scenarios count from here. */
+async function allFindings(api: Api): Promise<Schemas["Finding"][]> {
+  return (await api.get<Schemas["Page_Finding"]>("/findings", { limit: 1000 })).items;
+}
+
+/** The lines of the unfiltered findings list: each finding and one group row per severity that has one. */
+function linesOf(findings: Schemas["Finding"][]): number {
+  return findings.length + new Set(findings.map((f) => f.severity)).size;
+}
+
+test("the findings list shows the open proposals in the Review group with their default actions, and Adopt runs the plan dialog and clears the finding", async ({
+  page,
+  api,
+  signedIn,
+}) => {
+  expect(signedIn.session.user.name).toBe("admin");
+  const { hosts, outside } = await arrange(api);
+  const open = [...hosts, outside];
+
+  // What the server says about them: one finding per open proposal, all to review.
+  // The server's health findings (see allFindings) share the list and the Review group.
+  const listed = await allFindings(api);
+  const reviewTotal = listed.filter((f) => f.severity === "review").length;
+  const findings = new Map(listed.filter((f) => f.source === "proposal").map((f) => [f.evidence.id, f]));
+  expect(findings.size).toBe(4);
+  for (const proposal of open) {
+    expect(findings.get(proposal.id)?.id).toBe(`proposal:${proposal.id}`);
+    expect(findings.get(proposal.id)?.severity).toBe("review");
+  }
+
+  await page.goto("/discovery");
+  await expect(page.getByTestId("discovery-nav").locator('[data-tab="findings"]')).toHaveAttribute("aria-current", "page");
+  const grid = page.getByTestId("grid-findings");
+
+  // One group, Review, open, with its count; the other severities have no group.
+  const group = grid.locator('[data-key="group:review"]');
+  await expect(group).toHaveAttribute("data-expanded", "true");
+  await expect(group.getByTestId("group-count")).toHaveText(String(reviewTotal));
+  await expect(grid.locator('[data-key^="group:"]')).toHaveCount(new Set(listed.map((f) => f.severity)).size);
+  await expect(grid.getByTestId("row")).toHaveCount(linesOf(listed));
+
+  // Each proposal is a row: its kind, its subject as the server labels it and the default action the server names.
+  for (const proposal of open) {
+    const finding = findings.get(proposal.id)!;
+    const row = withId(grid, "row", finding.id);
+    await expect(row).toHaveAttribute("data-key", finding.subject.label);
+    await expect(cell(row, "kind").locator(`[data-kind="${finding.kind}"][data-level="review"]`)).toBeVisible();
+    await expect(cell(row, "subject")).toContainText(finding.subject.label);
+    await expect(cell(row, "evidence")).not.toBeEmpty();
+    await expect(cell(row, "since")).not.toBeEmpty();
+    await expect(cell(row, "action").getByTestId("finding-action")).toHaveAttribute("data-action", finding.action);
+  }
+  for (const proposal of hosts) {
+    const action = cell(withId(grid, "row", `proposal:${proposal.id}`), "action").getByTestId("finding-action");
+    await expect(action).toHaveAttribute("data-action", "adopt");
+    await expect(action).toHaveText("Adopt");
+  }
+
+  // The header's facts and the status bar read the same counts; so do the chips.
+  const counts = await findingCounts(api);
+  expect(counts.areas.discovery).toEqual({ act: 0, review: 4, info: 0 });
+  await expect(page.getByTestId("discovery-facts")).toHaveText(factsText(counts));
+  await expect(page.getByTestId("status-findings-review")).toHaveText(`${counts.total.review} to review`);
+  await expect(page.getByTestId("filter-severity-act").getByTestId("chip-count")).toHaveText(String(counts.total.act));
+  await expect(page.getByTestId("filter-severity-review").getByTestId("chip-count")).toHaveText(String(counts.total.review));
+  await expect(page.getByTestId("filter-severity-info").getByTestId("chip-count")).toHaveText(String(counts.total.info));
+
+  // The kind chips count their rows and narrow the list; the filter lives in the URL.
+  await expect(page.getByTestId("filter-kind-unknown_device").getByTestId("chip-count")).toHaveText("3");
+  await expect(page.getByTestId("filter-kind-outside_prefixes").getByTestId("chip-count")).toHaveText("1");
+  await page.getByTestId("filter-kind-outside_prefixes").click();
+  await expect(page).toHaveURL(/kind=outside_prefixes/);
+  await expect(grid.getByTestId("row")).toHaveCount(2);
+  await expect(withId(grid, "row", `proposal:${outside.id}`)).toBeVisible();
+  await page.getByTestId("filter-kind-outside_prefixes").click();
+  await expect(grid.getByTestId("row")).toHaveCount(linesOf(listed));
+  // Only the Info chip pressed: the Review group is gone.
+  await page.getByTestId("filter-severity-info").click();
+  await expect(page).toHaveURL(/severity=info/);
+  await expect(grid.locator('[data-key="group:review"]')).toHaveCount(0);
+  await page.getByTestId("filter-severity-info").click();
+  await expect(group).toBeVisible();
+
+  // A click on a row docks the proposal's panel beside the list, at the proposal's own URL.
+  const first = sampleHost(0);
+  await cell(withId(grid, "row", `proposal:${hosts[0]!.id}`), "evidence").click();
+  await expect(page).toHaveURL(new RegExp(`/discovery/${hosts[0]!.id}$`));
+  const panel = withId(page, "proposal-panel", hosts[0]!.id);
+  await expect(panel.getByTestId("proposal-summary")).toContainText(first.name);
+  await expect(grid.getByTestId("row")).toHaveCount(linesOf(listed));
+  await page.goto("/discovery");
+  await expect(panel).toHaveCount(0);
+
+  // "Adopt" is the approval of the proposal: the plan dialog previews it, the confirmation writes it.
+  const adopt = cell(withId(grid, "row", `proposal:${hosts[1]!.id}`), "action").getByTestId("finding-action");
+  const second = sampleHost(1);
+  await adopt.click();
+  const dialog = page.getByTestId("dialog-approve");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("plan-summary")).toBeVisible();
+  await expect(planChanges(dialog, "host", "create")).toHaveCount(1);
+  expect(await hostByName(api, second.name)).toBeUndefined();
+  expect((await proposalOf(api, hosts[1]!.id)).state).toBe("open");
+  await dialog.getByTestId("plan-confirm").click();
+  await expect(dialog).toHaveCount(0);
+
+  // The host exists, the finding has left the list, and the facts and the status bar follow.
+  expect(((await hostByName(api, second.name)) as Host).mode).toBe("dynamic");
+  expect((await proposalOf(api, hosts[1]!.id)).state).toBe("accepted");
+  await expect(withId(grid, "row", `proposal:${hosts[1]!.id}`)).toHaveCount(0);
+  await expect(group.getByTestId("group-count")).toHaveText(String(reviewTotal - 1));
+  await expect(grid.getByTestId("row")).toHaveCount(linesOf(listed) - 1);
+  const after = await findingCounts(api);
+  expect(after.total.review).toBe(counts.total.review - 1);
+  await expect(page.getByTestId("discovery-facts")).toHaveText(factsText(after));
+  await expect(page.getByTestId("status-findings-review")).toHaveText(`${after.total.review} to review`);
 });

@@ -21,6 +21,10 @@
 //   drag, double-click to fit, or Tab from the grid to the handle of the focused column and
 //   the arrow keys. The widths are kept per list and user (widths.ts); the column menu of the
 //   filter bar resets them, or the footer when the list has no column menu.
+// - A row that opens and closes (a group row, see GroupedGrid.tsx) says so on its button with
+//   aria-expanded; Enter, Space and a click toggle it instead of opening or selecting.
+// - A column with a majority rule says the value every row shares once in its header and leaves
+//   its cells empty (majority.ts).
 import {
   createEffect,
   createMemo,
@@ -45,6 +49,7 @@ import { isTyping } from "../shell/keyboard";
 import { ColumnResize, createResizer } from "./ColumnResize";
 import { DRAG_MIME, endDrag, startDrag, type DragItem } from "./dnd";
 import { isMoveKey, logicalArrow, moveFocus, ROW_HEIGHT, scrollToShow, visibleWindow, type CellFocus } from "./focus";
+import { columnMajorities } from "./majority";
 import { Menu } from "./Menu";
 import { createColumnState, type ColumnState } from "./prefs";
 import { createSelection, type Selection } from "./selection";
@@ -88,6 +93,18 @@ export interface DataGridProps<T> {
   selectable?: (row: T) => boolean;
   /** A row drawn as one wide cell instead of columns (a free gap, a group row), or null. */
   fullRow?: (row: T) => JSX.Element | null;
+  /**
+   * Whether a row that opens and closes (a group row) is open; undefined for every other row.
+   * Such a row carries `data-expanded` (its button inside carries aria-expanded, which a row of a
+   * grid may not), and Enter, Space and a click call `onToggle` for it.
+   */
+  expanded?: (row: T) => boolean | undefined;
+  onToggle?: (row: T) => void;
+  /**
+   * The rows the majority rule of the columns reads (`Column.majority`); the listed rows by
+   * default. A grid with group rows or free gaps passes its data rows, the collapsed ones included.
+   */
+  majorityRows?: readonly T[];
   rowClass?: (row: T) => string | undefined;
   /** The selection (create it with createGridSelection to share it with an action bar). */
   selection?: Selection;
@@ -131,6 +148,20 @@ export interface DataGridProps<T> {
   count?: { value: number; noun: string; title?: string | undefined } | undefined;
   /** Called with the table element, for views that move the focus into the grid (the `]` key). */
   ref?: (el: HTMLTableElement) => void;
+}
+
+/** The value every row of a column shares, after its header text ("State · all insecure"). */
+function Majority(props: { value: string | undefined }) {
+  return (
+    <Show when={props.value}>
+      {(value) => (
+        <span class="th-majority" data-testid="th-majority">
+          {" "}
+          {t("grid.majority", { value: value() })}
+        </span>
+      )}
+    </Show>
+  );
 }
 
 /** A selection over the selectable rows of a list. */
@@ -178,6 +209,13 @@ export function DataGrid<T>(props: DataGridProps<T>) {
   const slowLoading = delayed(() => !!props.loading);
 
   const ids = createMemo(() => props.rows.map((r) => props.rowId(r)));
+  /** The value a column says once in its header, by column id (majority.ts). */
+  const majorities = createMemo(() => {
+    const columns = cols();
+    if (!columns.some((c) => c.majority)) return new Map<string, string>();
+    return columnMajorities(columns, props.majorityRows ?? props.rows);
+  });
+  const isToggle = (row: T | undefined): row is T => row !== undefined && props.expanded?.(row) !== undefined;
   const index = createMemo(() => new Map(ids().map((id, i) => [id, i])));
 
   const window = createMemo(() =>
@@ -329,6 +367,11 @@ export function DataGrid<T>(props: DataGridProps<T>) {
       }
       return;
     }
+    if ((e.key === " " || (e.key === "Enter" && !e.shiftKey)) && !ctrl && isToggle(row)) {
+      e.preventDefault();
+      props.onToggle?.(row);
+      return;
+    }
     if (e.key === " " && !ctrl) {
       e.preventDefault();
       if (row && selectableRow(row)) selection.toggle(props.rowId(row));
@@ -390,6 +433,10 @@ export function DataGrid<T>(props: DataGridProps<T>) {
     setFocusTo({ row: i, col });
     table.focus({ preventScroll: true });
     if (target.closest("a, button, input, select, textarea")) return;
+    if (isToggle(row)) {
+      props.onToggle?.(row);
+      return;
+    }
     const id = props.rowId(row);
     if (!selectableRow(row)) return;
     if (e.shiftKey) selection.extendTo(id);
@@ -541,9 +588,20 @@ export function DataGrid<T>(props: DataGridProps<T>) {
                       classList={{ r: c.align === "right", focus: isFocus(-1, at()) }}
                       data-col={c.id}
                     >
-                      <Show when={c.sort && props.onSort} fallback={<span id={labelId()}>{c.header()}</span>}>
+                      <Show
+                        when={c.sort && props.onSort}
+                        fallback={
+                          <span id={labelId()}>
+                            {c.header()}
+                            <Majority value={majorities().get(c.id)} />
+                          </span>
+                        }
+                      >
                         <button type="button" class="th-sort" tabIndex={-1} onClick={() => sortBy(c)}>
-                          <span id={labelId()}>{c.header()}</span>
+                          <span id={labelId()}>
+                            {c.header()}
+                            <Majority value={majorities().get(c.id)} />
+                          </span>
                           <Show when={props.sort?.field === c.sort}>
                             <Icon name={props.sort?.desc ? "chev-d" : "chev-u"} size="xs" />
                           </Show>
@@ -589,6 +647,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
                     data-key={props.rowKey?.(row)}
                     aria-rowindex={i + 2}
                     aria-selected={selectable ? selection.has(id) : undefined}
+                    data-expanded={props.expanded?.(row)}
                     class={props.rowClass?.(row)}
                     classList={{ flash: props.flashed?.(id) ?? false }}
                     draggable={!!props.dragItems && selectable && (props.draggable?.(row) ?? true)}
@@ -646,7 +705,7 @@ export function DataGrid<T>(props: DataGridProps<T>) {
                                   editing: isEditing(row, c),
                                 }}
                               >
-                                <Show when={isEditing(row, c)} fallback={c.render(row)}>
+                                <Show when={isEditing(row, c)} fallback={majorities().has(c.id) ? null : c.render(row)}>
                                   {props.editors?.[c.id]?.({ row, close: stopEdit })}
                                 </Show>
                               </td>

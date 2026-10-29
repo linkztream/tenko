@@ -1,5 +1,5 @@
-// The sub-navigation of the discovery area (tabs as links, like the IPAM area): the proposal
-// inbox and the observations.
+// The sub-navigation of the discovery area (tabs as links, like the IPAM area): the findings, the
+// proposals with their states, and the observations.
 import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
 import { paths } from "../app/paths";
@@ -13,7 +13,8 @@ interface Tab {
 }
 
 const TABS: readonly Tab[] = [
-  { id: "proposals", href: paths.discovery(), label: "discovery.nav.proposals", match: (p) => !p.startsWith("/discovery/observations") },
+  { id: "findings", href: paths.discovery(), label: "discovery.nav.findings", match: (p) => !p.startsWith("/discovery/observations") && !p.startsWith("/discovery/proposals") },
+  { id: "proposals", href: paths.proposals(), label: "discovery.nav.proposals", match: (p) => p.startsWith("/discovery/proposals") },
   { id: "observations", href: paths.observations(), label: "discovery.nav.observations", match: (p) => p.startsWith("/discovery/observations") },
 ];
 

@@ -1,0 +1,13 @@
+/*
+ * The four truths of a row of the reconciliation view (truths.tsx): one line in a cell of the grid,
+ * the full text in the side panel. The truth that wins carries a small check glyph beside its
+ * value, never a fill or a wash (design/README.md, principle 6). Token roles only.
+ */
+.wins-mark { display: inline-flex; flex: none; color: var(--ok-ink); }
+.truth-line { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; max-width: 100%; overflow: hidden; }
+.truth-line > a, .truth-line > span:not(.wins-mark) { overflow: hidden; text-overflow: ellipsis; }
+.truth-list dt { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.truth-body { display: grid; gap: var(--sp-2); justify-items: start; min-width: 0; }
+.truth-badges { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2); }
+.reconcile-macs { display: inline-flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); font-family: var(--font-data); }
+.reconcile-os { overflow-wrap: anywhere; }

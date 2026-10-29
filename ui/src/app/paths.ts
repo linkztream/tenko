@@ -72,6 +72,9 @@ export const paths = {
   // Discovery, connectors and nodes (WP2.9). A subject is a MAC address, an IP address or a name.
   discovery: (query?: Record<string, string | undefined>) => withQuery("/discovery", query),
   proposal: (id: string, query?: Record<string, string | undefined>) => withQuery(`/discovery/${seg(id)}`, query),
+  // The proposals with their states, the decided ones included (U4: /discovery lists the findings).
+  proposals: (query?: Record<string, string | undefined>) => withQuery("/discovery/proposals", query),
+  proposalInList: (id: string, query?: Record<string, string | undefined>) => withQuery(`/discovery/proposals/${seg(id)}`, query),
   observations: (query?: Record<string, string | undefined>) => withQuery("/discovery/observations", query),
   observation: (subject: string) => `/discovery/observations/${seg(subject)}`,
   connectors: () => "/connectors",

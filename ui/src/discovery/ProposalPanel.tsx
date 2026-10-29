@@ -2,8 +2,10 @@
 // why, the evidence (one line per observation behind it), the suggested change as the plan the
 // planner would run, and the decision. Approve opens the plan dialog (dry run, acknowledge,
 // apply); reject asks for an optional reason; a conflict cannot be approved and is dismissed
-// once its cause is resolved. The panel follows the `ipam` topic, so a decision made elsewhere
-// or a newer proposal that supersedes this one shows up at once.
+// once its cause is resolved. An open conflict leads with the MAC addresses on its address and
+// the OS field the reconciliation view knows for it (ConflictLead.tsx). The panel follows the
+// `ipam` topic, so a decision made elsewhere or a newer proposal that supersedes this one shows
+// up at once.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { createLiveQuery } from "../api/live";
@@ -19,6 +21,7 @@ import { PlanPreview } from "../ipam/plan/PlanPreview";
 import { isTyping } from "../shell/keyboard";
 import { isAdmin } from "../auth/session";
 import { AddressConflictActions } from "./AddressConflictActions";
+import { ProposalConflictLead } from "./ConflictLead";
 import { approveProposal, getProposal, type ApproveRequest, type Proposal, type Remember } from "./api";
 import { KindBadge, SeverityBadge, StateBadge } from "./columns";
 import { canApprove, choiceSource, choicesOf, isOpen, nameSourceWord, ruleText, sourceKeyText, sourceText, type SourceNames } from "./model";
@@ -131,6 +134,9 @@ export function ProposalPanel(props: ProposalPanelProps) {
               </div>
             </div>
             <div class="panel-body">
+              <Show when={p().kind === "conflict" && isOpen(p())}>
+                <ProposalConflictLead proposal={p()} names={props.names} />
+              </Show>
               <Show when={props.decider && isOpen(p())}>
                 <div class="section proposal-actions">
                   <Show

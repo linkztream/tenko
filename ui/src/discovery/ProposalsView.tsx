@@ -1,5 +1,5 @@
-// The proposal inbox (/discovery, /discovery/<id>): what the reconciler suggests, open ones
-// first (IPAM-15). A data grid over GET /proposals, filtered and sorted by the server (state,
+// The proposal list (the Proposals tab, /discovery/proposals and /discovery/proposals/<id>; before
+// U4 it was the inbox at /discovery): what the reconciler suggests, open ones first (IPAM-15). A data grid over GET /proposals, filtered and sorted by the server (state,
 // defaulting to open; kind; severity; prefix; subject), live on the `ipam` topic; the proposal
 // in the URL is docked beside the grid with its evidence, the suggested change and the
 // decision. "Reconcile now" runs the reconciler and shows what the run did.
@@ -62,7 +62,7 @@ function listOf<T extends string>(value: string | string[] | undefined, known: r
   return text.split(",").filter((v): v is T => (known as readonly string[]).includes(v));
 }
 
-export default function ProposalsView() {
+export default function ProposalsView(props: { list?: boolean; children?: unknown }) {
   const params = useParams<{ id?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -136,8 +136,10 @@ export default function ProposalsView() {
   const [running, setRunning] = createSignal(false);
 
   const withQuery = (path: string) => `${path}${location.search}`;
-  const open = (p: Proposal) => navigate(withQuery(paths.proposal(p.id)));
-  const close = () => navigate(withQuery(paths.discovery()));
+  // On the Proposals tab (`list`) the proposal docks under /discovery/proposals; mounted on its
+  // own (the tests of the flows), under /discovery as before.
+  const open = (p: Proposal) => navigate(withQuery(props.list ? paths.proposalInList(p.id) : paths.proposal(p.id)));
+  const close = () => navigate(withQuery(props.list ? paths.proposals() : paths.discovery()));
 
   const toggleIn = <T extends string>(name: string, list: T[], value: T) => {
     const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];

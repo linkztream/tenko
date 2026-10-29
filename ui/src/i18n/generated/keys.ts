@@ -2500,6 +2500,85 @@ export type MessageKey =
   | "discovery.filter.remove_level"
   | "discovery.filter.remove_prefix"
   | "discovery.filter.state"
+  | "discovery.findings.action.adopt"
+  | "discovery.findings.action.decide"
+  | "discovery.findings.action.decommission"
+  | "discovery.findings.action.delete_record"
+  | "discovery.findings.action.failed"
+  | "discovery.findings.action.fix_ptr"
+  | "discovery.findings.action.host_gone"
+  | "discovery.findings.action.ignore"
+  | "discovery.findings.action.open"
+  | "discovery.findings.action.open_connectors"
+  | "discovery.findings.action.open_dhcp"
+  | "discovery.findings.action.open_dns"
+  | "discovery.findings.action.open_host"
+  | "discovery.findings.action.open_ipam"
+  | "discovery.findings.action.open_job"
+  | "discovery.findings.action.open_nodes"
+  | "discovery.findings.action.open_prefix"
+  | "discovery.findings.action.open_record"
+  | "discovery.findings.action.open_settings"
+  | "discovery.findings.action.resolve"
+  | "discovery.findings.col.action"
+  | "discovery.findings.col.evidence"
+  | "discovery.findings.col.kind"
+  | "discovery.findings.col.since"
+  | "discovery.findings.col.source"
+  | "discovery.findings.col.subject"
+  | "discovery.findings.edge.broadcast"
+  | "discovery.findings.edge.network"
+  | "discovery.findings.edge.other"
+  | "discovery.findings.edge.subnet_router_anycast"
+  | "discovery.findings.empty"
+  | "discovery.findings.empty_body"
+  | "discovery.findings.evidence.artifact"
+  | "discovery.findings.evidence.ghost"
+  | "discovery.findings.evidence.job_step"
+  | "discovery.findings.evidence.orphan"
+  | "discovery.findings.evidence.ptr"
+  | "discovery.findings.evidence.rogue_decided"
+  | "discovery.findings.evidence.utilization"
+  | "discovery.findings.evidence.utilization_bare"
+  | "discovery.findings.facts"
+  | "discovery.findings.filter.label"
+  | "discovery.findings.filter.placeholder"
+  | "discovery.findings.grid"
+  | "discovery.findings.info"
+  | "discovery.findings.kind.conflict"
+  | "discovery.findings.kind.dns"
+  | "discovery.findings.kind.ghost"
+  | "discovery.findings.kind.health"
+  | "discovery.findings.kind.host_name"
+  | "discovery.findings.kind.intent_differs"
+  | "discovery.findings.kind.job_waiting"
+  | "discovery.findings.kind.orphaned_address"
+  | "discovery.findings.kind.orphaned_record"
+  | "discovery.findings.kind.outside_prefixes"
+  | "discovery.findings.kind.ptr_mismatch"
+  | "discovery.findings.kind.scan_artifact"
+  | "discovery.findings.kind.unknown_device"
+  | "discovery.findings.kind.utilization"
+  | "discovery.findings.kind.vlan"
+  | "discovery.findings.level.act"
+  | "discovery.findings.level.info"
+  | "discovery.findings.level.review"
+  | "discovery.findings.panel.artifact"
+  | "discovery.findings.panel.decide"
+  | "discovery.findings.panel.decide_hint"
+  | "discovery.findings.panel.devices"
+  | "discovery.findings.panel.info_hint"
+  | "discovery.findings.panel.intended"
+  | "discovery.findings.panel.open_reconcile"
+  | "discovery.findings.panel.os"
+  | "discovery.findings.panel.since"
+  | "discovery.findings.panel.title"
+  | "discovery.findings.row"
+  | "discovery.findings.source.alarm"
+  | "discovery.findings.source.health"
+  | "discovery.findings.source.job"
+  | "discovery.findings.source.proposal"
+  | "discovery.findings.source.reconcile"
   | "discovery.grid.label"
   | "discovery.info"
   | "discovery.kind.address_mismatch"
@@ -2541,6 +2620,7 @@ export type MessageKey =
   | "discovery.name_source.unifi"
   | "discovery.name_source.windows"
   | "discovery.names.seen"
+  | "discovery.nav.findings"
   | "discovery.nav.label"
   | "discovery.nav.observations"
   | "discovery.nav.proposals"
@@ -4227,8 +4307,11 @@ export type MessageKey =
   | "grid.empty.title"
   | "grid.filter.count_more"
   | "grid.filter.invalid"
+  | "grid.group.collapse"
+  | "grid.group.expand"
   | "grid.loading"
   | "grid.loading_more"
+  | "grid.majority"
   | "grid.more"
   | "grid.resize.handle"
   | "grid.resize.reset"
@@ -5005,13 +5088,15 @@ export type MessageKey =
   | "ipam.range_role.dhcp_pool"
   | "ipam.range_role.infrastructure"
   | "ipam.range_role.reserved"
+  | "ipam.reconcile.col.action"
   | "ipam.reconcile.col.address"
-  | "ipam.reconcile.col.details"
-  | "ipam.reconcile.col.winner"
-  | "ipam.reconcile.count"
-  | "ipam.reconcile.dns_forward"
-  | "ipam.reconcile.dns_ptr"
+  | "ipam.reconcile.col.last_seen"
+  | "ipam.reconcile.col.os"
+  | "ipam.reconcile.col.outcome"
+  | "ipam.reconcile.col.rule"
+  | "ipam.reconcile.col.vendors"
   | "ipam.reconcile.empty"
+  | "ipam.reconcile.facts"
   | "ipam.reconcile.filter.all_kinds"
   | "ipam.reconcile.filter.all_prefixes"
   | "ipam.reconcile.filter.host"
@@ -5023,6 +5108,7 @@ export type MessageKey =
   | "ipam.reconcile.filter.label"
   | "ipam.reconcile.filter.prefix"
   | "ipam.reconcile.filter.remove_host"
+  | "ipam.reconcile.grid"
   | "ipam.reconcile.host_open"
   | "ipam.reconcile.host_unavailable"
   | "ipam.reconcile.info"
@@ -5037,13 +5123,20 @@ export type MessageKey =
   | "ipam.reconcile.kind_help.ptr_mismatch"
   | "ipam.reconcile.kind_help.rogue"
   | "ipam.reconcile.last_seen"
+  | "ipam.reconcile.macs_count"
   | "ipam.reconcile.more"
   | "ipam.reconcile.no_winner"
+  | "ipam.reconcile.note.conflict"
+  | "ipam.reconcile.note.ghost"
+  | "ipam.reconcile.note.orphan"
+  | "ipam.reconcile.note.ptr_mismatch"
+  | "ipam.reconcile.note.rogue"
   | "ipam.reconcile.os"
   | "ipam.reconcile.os_guess"
   | "ipam.reconcile.os_source"
-  | "ipam.reconcile.proposal"
+  | "ipam.reconcile.ptr_line"
   | "ipam.reconcile.retry"
+  | "ipam.reconcile.row"
   | "ipam.reconcile.rule.forward_record"
   | "ipam.reconcile.rule.intent_managed"
   | "ipam.reconcile.rule.lease_dynamic"
@@ -5051,7 +5144,6 @@ export type MessageKey =
   | "ipam.reconcile.rule.never_automatic"
   | "ipam.reconcile.rule.newest_sighting"
   | "ipam.reconcile.rule.orphan_rule"
-  | "ipam.reconcile.sub"
   | "ipam.reconcile.title"
   | "ipam.reconcile.truth.dns"
   | "ipam.reconcile.truth.intent"
@@ -8100,6 +8192,20 @@ export interface MessageArgs {
   "discovery.filter.prefix": { prefix: string | number };
   "discovery.filter.remove": { filter: string | number };
   "discovery.filter.remove_level": { level: string | number };
+  "discovery.findings.evidence.artifact": { edge: string | number; macs: string };
+  "discovery.findings.evidence.ghost": { since: string | number };
+  "discovery.findings.evidence.job_step": { step: string | number };
+  "discovery.findings.evidence.orphan": { names: string | number };
+  "discovery.findings.evidence.ptr": { ptr: string | number };
+  "discovery.findings.evidence.rogue_decided": { macs: string };
+  "discovery.findings.evidence.utilization": { percent: string | number; threshold: string | number };
+  "discovery.findings.evidence.utilization_bare": { percent: string | number };
+  "discovery.findings.facts": { act: number; info: number; review: number };
+  "discovery.findings.panel.artifact": { edge: string | number; ip: string | number };
+  "discovery.findings.panel.devices": { count: number };
+  "discovery.findings.panel.os": { confidence: string | number; guess: string | number; source: string | number };
+  "discovery.findings.panel.title": { kind: string | number; subject: string | number };
+  "discovery.findings.row": { kind: string | number; subject: string | number };
   "discovery.names.seen": { at: string | number };
   "discovery.panel.adoption_failed": { error: string | number };
   "discovery.panel.change_count": { count: number };
@@ -8396,6 +8502,9 @@ export interface MessageArgs {
   "grid.columns.move_up": { column: string | number };
   "grid.filter.count_more": { count: string | number };
   "grid.filter.invalid": { field: string | number; value: string | number };
+  "grid.group.collapse": { count: string | number; group: string | number };
+  "grid.group.expand": { count: string | number; group: string | number };
+  "grid.majority": { value: string | number };
   "grid.resize.handle": { column: string | number };
   "grid.row_actions": { row: string | number };
   "grid.rows": { count: number };
@@ -8579,11 +8688,14 @@ export interface MessageArgs {
   "ipam.prefix.usage": { capacity: string | number; used: string | number };
   "ipam.prefix.usage_parts": { held: string | number; recorded: string | number };
   "ipam.range.delegation": { count: number; len: string | number };
-  "ipam.reconcile.count": { count: number; more: string };
+  "ipam.reconcile.facts": { act: number; info: number; more: string; review: number; scope: string | number };
   "ipam.reconcile.filter.host_chip": { host: string | number };
   "ipam.reconcile.filter.host_unknown": { name: string | number };
+  "ipam.reconcile.macs_count": { count: number };
   "ipam.reconcile.os_guess": { confidence: string | number; guess: string | number };
   "ipam.reconcile.os_source": { source: string | number; truth: string | number };
+  "ipam.reconcile.ptr_line": { names: string | number };
+  "ipam.reconcile.row": { address: string | number; kind: string | number };
   "ipam.reconcile.winner": { truth: string | number };
   "ipam.restore.done": { kind: string | number; label: string | number };
   "ipam.restore.title": { kind: string | number; label: string | number };
@@ -11604,6 +11716,85 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.filter.remove_level",
   "discovery.filter.remove_prefix",
   "discovery.filter.state",
+  "discovery.findings.action.adopt",
+  "discovery.findings.action.decide",
+  "discovery.findings.action.decommission",
+  "discovery.findings.action.delete_record",
+  "discovery.findings.action.failed",
+  "discovery.findings.action.fix_ptr",
+  "discovery.findings.action.host_gone",
+  "discovery.findings.action.ignore",
+  "discovery.findings.action.open",
+  "discovery.findings.action.open_connectors",
+  "discovery.findings.action.open_dhcp",
+  "discovery.findings.action.open_dns",
+  "discovery.findings.action.open_host",
+  "discovery.findings.action.open_ipam",
+  "discovery.findings.action.open_job",
+  "discovery.findings.action.open_nodes",
+  "discovery.findings.action.open_prefix",
+  "discovery.findings.action.open_record",
+  "discovery.findings.action.open_settings",
+  "discovery.findings.action.resolve",
+  "discovery.findings.col.action",
+  "discovery.findings.col.evidence",
+  "discovery.findings.col.kind",
+  "discovery.findings.col.since",
+  "discovery.findings.col.source",
+  "discovery.findings.col.subject",
+  "discovery.findings.edge.broadcast",
+  "discovery.findings.edge.network",
+  "discovery.findings.edge.other",
+  "discovery.findings.edge.subnet_router_anycast",
+  "discovery.findings.empty",
+  "discovery.findings.empty_body",
+  "discovery.findings.evidence.artifact",
+  "discovery.findings.evidence.ghost",
+  "discovery.findings.evidence.job_step",
+  "discovery.findings.evidence.orphan",
+  "discovery.findings.evidence.ptr",
+  "discovery.findings.evidence.rogue_decided",
+  "discovery.findings.evidence.utilization",
+  "discovery.findings.evidence.utilization_bare",
+  "discovery.findings.facts",
+  "discovery.findings.filter.label",
+  "discovery.findings.filter.placeholder",
+  "discovery.findings.grid",
+  "discovery.findings.info",
+  "discovery.findings.kind.conflict",
+  "discovery.findings.kind.dns",
+  "discovery.findings.kind.ghost",
+  "discovery.findings.kind.health",
+  "discovery.findings.kind.host_name",
+  "discovery.findings.kind.intent_differs",
+  "discovery.findings.kind.job_waiting",
+  "discovery.findings.kind.orphaned_address",
+  "discovery.findings.kind.orphaned_record",
+  "discovery.findings.kind.outside_prefixes",
+  "discovery.findings.kind.ptr_mismatch",
+  "discovery.findings.kind.scan_artifact",
+  "discovery.findings.kind.unknown_device",
+  "discovery.findings.kind.utilization",
+  "discovery.findings.kind.vlan",
+  "discovery.findings.level.act",
+  "discovery.findings.level.info",
+  "discovery.findings.level.review",
+  "discovery.findings.panel.artifact",
+  "discovery.findings.panel.decide",
+  "discovery.findings.panel.decide_hint",
+  "discovery.findings.panel.devices",
+  "discovery.findings.panel.info_hint",
+  "discovery.findings.panel.intended",
+  "discovery.findings.panel.open_reconcile",
+  "discovery.findings.panel.os",
+  "discovery.findings.panel.since",
+  "discovery.findings.panel.title",
+  "discovery.findings.row",
+  "discovery.findings.source.alarm",
+  "discovery.findings.source.health",
+  "discovery.findings.source.job",
+  "discovery.findings.source.proposal",
+  "discovery.findings.source.reconcile",
   "discovery.grid.label",
   "discovery.info",
   "discovery.kind.address_mismatch",
@@ -11645,6 +11836,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.name_source.unifi",
   "discovery.name_source.windows",
   "discovery.names.seen",
+  "discovery.nav.findings",
   "discovery.nav.label",
   "discovery.nav.observations",
   "discovery.nav.proposals",
@@ -13331,8 +13523,11 @@ export const messageKeys: readonly MessageKey[] = [
   "grid.empty.title",
   "grid.filter.count_more",
   "grid.filter.invalid",
+  "grid.group.collapse",
+  "grid.group.expand",
   "grid.loading",
   "grid.loading_more",
+  "grid.majority",
   "grid.more",
   "grid.resize.handle",
   "grid.resize.reset",
@@ -14109,13 +14304,15 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.range_role.dhcp_pool",
   "ipam.range_role.infrastructure",
   "ipam.range_role.reserved",
+  "ipam.reconcile.col.action",
   "ipam.reconcile.col.address",
-  "ipam.reconcile.col.details",
-  "ipam.reconcile.col.winner",
-  "ipam.reconcile.count",
-  "ipam.reconcile.dns_forward",
-  "ipam.reconcile.dns_ptr",
+  "ipam.reconcile.col.last_seen",
+  "ipam.reconcile.col.os",
+  "ipam.reconcile.col.outcome",
+  "ipam.reconcile.col.rule",
+  "ipam.reconcile.col.vendors",
   "ipam.reconcile.empty",
+  "ipam.reconcile.facts",
   "ipam.reconcile.filter.all_kinds",
   "ipam.reconcile.filter.all_prefixes",
   "ipam.reconcile.filter.host",
@@ -14127,6 +14324,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.reconcile.filter.label",
   "ipam.reconcile.filter.prefix",
   "ipam.reconcile.filter.remove_host",
+  "ipam.reconcile.grid",
   "ipam.reconcile.host_open",
   "ipam.reconcile.host_unavailable",
   "ipam.reconcile.info",
@@ -14141,13 +14339,20 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.reconcile.kind_help.ptr_mismatch",
   "ipam.reconcile.kind_help.rogue",
   "ipam.reconcile.last_seen",
+  "ipam.reconcile.macs_count",
   "ipam.reconcile.more",
   "ipam.reconcile.no_winner",
+  "ipam.reconcile.note.conflict",
+  "ipam.reconcile.note.ghost",
+  "ipam.reconcile.note.orphan",
+  "ipam.reconcile.note.ptr_mismatch",
+  "ipam.reconcile.note.rogue",
   "ipam.reconcile.os",
   "ipam.reconcile.os_guess",
   "ipam.reconcile.os_source",
-  "ipam.reconcile.proposal",
+  "ipam.reconcile.ptr_line",
   "ipam.reconcile.retry",
+  "ipam.reconcile.row",
   "ipam.reconcile.rule.forward_record",
   "ipam.reconcile.rule.intent_managed",
   "ipam.reconcile.rule.lease_dynamic",
@@ -14155,7 +14360,6 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.reconcile.rule.never_automatic",
   "ipam.reconcile.rule.newest_sighting",
   "ipam.reconcile.rule.orphan_rule",
-  "ipam.reconcile.sub",
   "ipam.reconcile.title",
   "ipam.reconcile.truth.dns",
   "ipam.reconcile.truth.intent",

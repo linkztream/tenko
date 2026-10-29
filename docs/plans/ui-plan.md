@@ -341,8 +341,9 @@ Sizes are builder-days. A package owns the files it lists; contract requests com
 - **Depends on:** U1, U2.
 - **Requirements:** IPAM-21, IPAM-15, IPAM-23.
 - **Owns:** `ui/src/discovery/` (the findings list for every kind with one action per row), `ui/src/ipam/reconcile/` (the per-network evidence view, groups in one 28 px table, the side panel with the evidence, the check glyph instead of the Wins column), the group row in `ui/src/grid/` and the "majority in the header" rule; the reconciliation mockup with documentation addresses (UI-Q6).
-- **Acceptance:** the 23 identical rows become one group with the sentence once; the conflict leads and its panel shows both MACs; every row is 28 px; no green fill or wash in the view; the count in the Discovery header equals the rail badge and the status bar; the existing proposal approval and rejection flows pass their tests unchanged.
+- **Acceptance:** the 23 identical rows become one group with the sentence once; the conflict leads and its panel shows both MACs; every row is 28 px; no green fill or wash in the view; the count in the Discovery header equals the status bar (the rail badge counts the Discovery area, as every area badge does, so a finding is never counted in two badges); the existing proposal approval and rejection flows pass their tests unchanged.
 - **Size:** 8.
+- **Status:** Built, awaiting gate (branch `ui-reconcile`). Discovery (`/discovery`) lists `GET /findings` grouped by severity with one action per row and the shared side panel; the proposal list with its states and the batch decisions moved unchanged to the Proposals tab (`/discovery/proposals`), so its tests pass unchanged. The reconciliation view is one grouped table per network with the check glyph and the side panel. `GroupedGrid` and the majority rule are in `ui/src/grid/`. The Discovery header shows the totals of the store, which equal the status bar; the rail's Discovery badge still counts the Discovery area (the proposals), so it equals the header only while every finding is a proposal.
 
 ### U5 Jobs (4 builder-days)
 

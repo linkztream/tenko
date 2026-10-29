@@ -10,16 +10,25 @@
 // (source `job`) to act on. Every prefix whose utilization alarm is at `critical` is to act on, at
 // `warning` to review: area `ipam`, source `alarm`.
 //
-// What is not: the status's health conditions, the rows of the reconciliation view and scan
-// artifacts. A test adds health findings with `setMockHealthFindings` (U3), or counts of any area
-// and severity with `setMockFindingsExtra`, each then one placeholder finding of the source
-// `health`. Simplification: a job that rolls back and waits for an undo task is not counted.
+// U4: the rows of the reconciliation view (reconcile-view.ts) are findings of the source
+// `reconcile` as the server maps them (docs/reconciliation.md section 12.2): a conflict row is to
+// act on unless an open conflict proposal is about its address; a rogue with a proposal and an
+// orphan with a proposal are left out (the proposal is the finding), a rogue without one is
+// information; an orphan and a PTR mismatch are to review (area `dns`); a ghost is information,
+// and to review with the action `decommission` once unseen for 30 days. They are on in the
+// browser's mock and in the tests that ask for them (reconcile-view.ts, `setMockViewFindings`).
+//
+// What is not: the status's health conditions and scan artifacts. A test adds health findings with
+// `setMockHealthFindings` (U3), or counts of any area and severity with `setMockFindingsExtra`,
+// each then one placeholder finding of the source `health`. Simplification: a job that rolls back
+// and waits for an undo task is not counted.
 import type { components } from "../generated/schema";
 import { db, onMockReset } from "./db";
 import { findPrefix, ipamState } from "./ipam/api";
 import { allLevels } from "./ipam/tree";
 import { jobStore } from "./job-store";
-import { reconcileState } from "./reconcile-store";
+import { digestOf, reconcileState } from "./reconcile-store";
+import { mockViewFindings, mockViewRows } from "./reconcile-view";
 
 type S = components["schemas"];
 export type FindingCounts = S["FindingCounts"];
@@ -120,11 +129,118 @@ function ofProposal(p: Proposal): MockFinding {
   };
 }
 
+/** The age after which a ghost is to review (`[ipam.findings] ghost_review_after_secs`, 30 days). */
+const GHOST_REVIEW_MS = 30 * 24 * 3600 * 1000;
+
+type ViewRow = S["ReconcileRow"];
+
+/** The finding of a row of the reconciliation view, or null where a proposal stands for it. */
+function ofViewRow(row: ViewRow, conflicts: ReadonlySet<string>, now: number): MockFinding | null {
+  const macs = (row.macs ?? []).join(", ");
+  const host = row.intent?.host_name ?? undefined;
+  const params: Record<string, string> = { ip: row.address, rule: row.rule_id };
+  if (macs) params.macs = macs;
+  if (host) params.host = host;
+  const subject: MockFinding["subject"] = {
+    kind: "address",
+    label: row.address,
+    ip: row.address,
+    vrf: row.vrf ?? null,
+    prefix: row.prefix ?? null,
+    host: row.host ?? null,
+    mac: row.macs?.length === 1 ? (row.macs[0] ?? null) : null,
+    objects: [...(row.prefix ? [{ kind: "prefix" as const, id: row.prefix }] : []), ...(row.host ? [{ kind: "host" as const, id: row.host }] : [])],
+  };
+  const since = row.last_seen ?? new Date(now).toISOString();
+  let kind: MockFinding["kind"];
+  let severity: MockFinding["severity"];
+  let action: MockFinding["action"];
+  let area: MockFinding["area"] = "ipam";
+  let summary: string;
+  switch (row.kind) {
+    case "conflict":
+      if (row.vrf && conflicts.has(`${row.vrf}|${row.address}`)) return null;
+      kind = "conflict";
+      severity = "act";
+      action = "resolve";
+      summary = `${row.address} is used by ${macs || "a device"}`;
+      break;
+    case "rogue":
+      if (row.proposal) return null;
+      subject.kind = subject.mac ? "device" : "address";
+      kind = "unknown_device";
+      severity = "info";
+      action = "none";
+      summary = `${row.address} is used by a device no intent knows (${macs || "no MAC address"}); its proposal was decided`;
+      break;
+    case "orphan": {
+      if (row.proposal) return null;
+      const names = [...(row.dns?.forward ?? []), ...(row.dns?.ptr ?? [])].filter((n, i, all) => all.indexOf(n) === i).join(", ");
+      subject.kind = "record";
+      if (names) {
+        subject.label = names;
+        params.names = names;
+      }
+      area = "dns";
+      kind = "orphaned_record";
+      severity = "review";
+      action = "delete_record";
+      summary = `the DNS records ${names} of ${row.address} were written by hand and no host holds the address`;
+      break;
+    }
+    case "ptr_mismatch": {
+      const ptr = (row.dns?.ptr ?? []).join(", ");
+      params.ptr = ptr;
+      area = "dns";
+      kind = "ptr_mismatch";
+      severity = "review";
+      action = "fix_ptr";
+      summary = `the PTR record of ${row.address} names ${ptr}, not the address's name`;
+      break;
+    }
+    case "ghost": {
+      params.unseen_since = since;
+      if (host) {
+        subject.kind = "host";
+        subject.label = host;
+      }
+      const aged = now - Date.parse(since) >= GHOST_REVIEW_MS;
+      kind = "ghost";
+      severity = aged ? "review" : "info";
+      action = aged ? (row.host ? "decommission" : "open_host") : "none";
+      summary = `${row.address}${host ? ` (${host})` : ""} has not been seen since ${since}; ${aged ? "decommission the host if it is gone" : row.rule}`;
+      break;
+    }
+  }
+  return {
+    id: `reconcile:${digestOf(row.key)}`,
+    kind,
+    severity,
+    area,
+    subject,
+    summary,
+    code: `ipam.reconcile.view.${row.kind}`,
+    params,
+    evidence: { id: row.key, path: `/ipam/reconcile?${row.prefix ? `prefix=${row.prefix}&` : ""}kind=${row.kind}` },
+    action,
+    since,
+    source: "reconcile",
+  };
+}
+
 /** Every finding the mock's state stands for, the most urgent first, then the newest. */
 export function mockFindings(): MockFinding[] {
   const out: MockFinding[] = [];
+  const conflicts = new Set<string>();
   for (const proposal of reconcileState().proposals.values()) {
-    if (proposal.state === "open") out.push(ofProposal(proposal));
+    if (proposal.state !== "open") continue;
+    out.push(ofProposal(proposal));
+    if (proposal.kind === "conflict" && proposal.subject.ip && proposal.subject.vrf) conflicts.add(`${proposal.subject.vrf}|${proposal.subject.ip}`);
+  }
+  const now = Date.now();
+  for (const row of mockViewFindings() ? mockViewRows(now) : []) {
+    const finding = ofViewRow(row, conflicts, now);
+    if (finding) out.push(finding);
   }
 
   for (const { job } of jobStore.jobs) {

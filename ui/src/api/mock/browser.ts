@@ -18,6 +18,7 @@ import type { Topic } from "../events";
 import { DEFAULT_SCENARIO, MOCK_SCENARIOS, isMockScenario, resetMockDb, type MockScenario } from "./db";
 import { FetchEventSource } from "./event-source";
 import { handlers } from "./handlers";
+import { setMockViewFindingsDefault } from "./reconcile-view";
 import { emitMockControl, emitMockEvent, setMockHostMetrics, startJobTicker, startMetricsSampler, type EmitData } from "./sse";
 
 const QUERY_KEY = "mock-scenario";
@@ -84,6 +85,8 @@ async function startInPage(): Promise<void> {
 }
 
 export async function startMockWorker(): Promise<void> {
+  // The rows of the reconciliation view are findings here, as on a server (reconcile-view.ts).
+  setMockViewFindingsDefault(true);
   resetMockDb(chosenScenario());
   const worker = setupWorker(latency, ...handlers);
   try {

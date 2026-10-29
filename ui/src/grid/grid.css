@@ -69,6 +69,9 @@ table.grid:focus { outline: none; }
 .colchooser li .icon-btn { width: 24px; height: 24px; }
 .colchooser .foot { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-3) var(--sp-5) 0; border-top: 1px solid var(--line); margin-top: var(--sp-3); }
 
+/* The value every row of a column shares, said once in its header (majority.ts). */
+.grid thead th .th-majority { color: var(--ink-2); font-weight: var(--fw-regular); }
+
 /* Filter bar additions. */
 .filterbar .invalid { color: var(--danger-ink); font-size: var(--fs-12); }
 .filterbar .seg button { height: 20px; }

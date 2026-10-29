@@ -35,6 +35,15 @@ export const KIND_HELP: Record<ReconcileKind, MessageKey> = {
   ptr_mismatch: "ipam.reconcile.kind_help.ptr_mismatch",
 };
 
+/** What a group of the kind means, in one short line on its group row. */
+export const KIND_NOTE: Record<ReconcileKind, MessageKey> = {
+  conflict: "ipam.reconcile.note.conflict",
+  ghost: "ipam.reconcile.note.ghost",
+  rogue: "ipam.reconcile.note.rogue",
+  orphan: "ipam.reconcile.note.orphan",
+  ptr_mismatch: "ipam.reconcile.note.ptr_mismatch",
+};
+
 export const TRUTH_WORD: Record<Truth, MessageKey> = {
   intent: "ipam.reconcile.truth.intent",
   lease: "ipam.reconcile.truth.lease",

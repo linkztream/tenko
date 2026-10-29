@@ -10,9 +10,6 @@
         <notes><note category="description">Title of the reconciliation view and its entry in the browser tab.</note></notes>
         <segment><source>Reconciliation</source><target>Avstämning</target></segment>
       </unit>
-      <unit id="ipam.reconcile.sub">
-        <segment><source>What intent, leases, DNS and scans say about each address</source><target>Vad avsikt, adresslån, DNS och skanningar säger om varje adress</target></segment>
-      </unit>
       <unit id="ipam.reconcile.filter.label">
         <segment><source>Filter the reconciliation view</source><target>Filtrera avstämningen</target></segment>
       </unit>
@@ -85,10 +82,6 @@
       <unit id="ipam.reconcile.kind_help.ptr_mismatch">
         <segment><source>A PTR record whose name disagrees with the DNS name of the address.</source><target>En PTR-post vars namn skiljer sig från adressens DNS-namn.</target></segment>
       </unit>
-      <unit id="ipam.reconcile.count">
-        <notes><note category="description">Number of rows of a list; a plus sign when more rows can be loaded.</note></notes>
-        <segment><source>{count, number}{more, select, yes {+} other {}}</source><target>{count, number}{more, select, yes {+} other {}}</target></segment>
-      </unit>
       <unit id="ipam.reconcile.empty">
         <segment><source>Nothing found.</source><target>Inget hittades.</target></segment>
       </unit>
@@ -100,13 +93,6 @@
       </unit>
       <unit id="ipam.reconcile.col.address">
         <segment><source>Address</source><target>Adress</target></segment>
-      </unit>
-      <unit id="ipam.reconcile.col.winner">
-        <notes><note category="description">Column: which truth wins and why.</note></notes>
-        <segment><source>Who wins</source><target>Vem gäller</target></segment>
-      </unit>
-      <unit id="ipam.reconcile.col.details">
-        <segment><source>Details</source><target>Detaljer</target></segment>
       </unit>
       <unit id="ipam.reconcile.truth.intent">
         <notes><note category="description">One of the four truths: what intent (the IPAM data) says.</note></notes>
@@ -156,17 +142,6 @@
       </unit>
       <unit id="ipam.reconcile.rule.forward_record">
         <segment><source>The forward record wins: the PTR record should follow it.</source><target>Den framåtriktade posten gäller: PTR-posten bör följa den.</target></segment>
-      </unit>
-      <unit id="ipam.reconcile.dns_forward">
-        <notes><note category="description">Label of the names in forward records (A and AAAA) of an address.</note></notes>
-        <segment><source>Forward</source><target>Framåt</target></segment>
-      </unit>
-      <unit id="ipam.reconcile.dns_ptr">
-        <notes><note category="description">Label of the names in PTR records of an address.</note></notes>
-        <segment><source>PTR</source><target>PTR</target></segment>
-      </unit>
-      <unit id="ipam.reconcile.proposal">
-        <segment><source>Open the proposal</source><target>Öppna förslaget</target></segment>
       </unit>
       <unit id="ipam.reconcile.os">
         <segment><source>Operating system</source><target>Operativsystem</target></segment>

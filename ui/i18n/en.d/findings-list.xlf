@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="findings-list">
+      <unit id="grid.majority">
+        <notes><note category="description">After a column header when every row of the column shares one value, which the cells then leave out; {value} is that value, for example State · all insecure.</note></notes>
+        <segment><source>· {value}</source></segment>
+      </unit>
+      <unit id="grid.group.expand">
+        <notes><note category="description">Accessible name of the button of a closed group row in a list; {group} is the group, {count} how many rows it holds.</note></notes>
+        <segment><source>Open {group}: {count}</source></segment>
+      </unit>
+      <unit id="grid.group.collapse">
+        <notes><note category="description">Accessible name of the button of an open group row in a list; {group} is the group, {count} how many rows it holds.</note></notes>
+        <segment><source>Close {group}: {count}</source></segment>
+      </unit>
+      <unit id="discovery.findings.level.act">
+        <notes><note category="description">Severity of a finding: a person must decide now. Group row and panel of the findings list.</note></notes>
+        <segment><source>Act now</source></segment>
+      </unit>
+      <unit id="discovery.findings.level.review">
+        <notes><note category="description">Severity of a finding: a person should look. Group row and panel of the findings list.</note></notes>
+        <segment><source>Review</source></segment>
+      </unit>
+      <unit id="discovery.findings.level.info">
+        <notes><note category="description">Severity of a finding: listed where it lives, never counted as a problem.</note></notes>
+        <segment><source>Info</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.conflict">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Conflict</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.job_waiting">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Job waits</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.utilization">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Network filling up</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.unknown_device">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Unknown device</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.orphaned_record">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Orphaned record</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.orphaned_address">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Orphaned address</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.ptr_mismatch">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>PTR mismatch</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.intent_differs">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Intent differs</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.outside_prefixes">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Outside known networks</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.vlan">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>VLAN</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.host_name">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Host name</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.dns">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>DNS</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.ghost">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Ghost address</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.scan_artifact">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Scan artifact</source></segment>
+      </unit>
+      <unit id="discovery.findings.kind.health">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.utilization">
+        <notes><note category="description">Evidence line of a network over its utilization alarm; {percent} is the share in use, {threshold} the alarm threshold in percent.</note></notes>
+        <segment><source>{percent} % in use, over the alarm at {threshold} %</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.utilization_bare">
+        <notes><note category="description">Evidence line of a network over its utilization alarm without a known threshold; {percent} is the share in use.</note></notes>
+        <segment><source>{percent} % in use, over its alarm</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.job_step">
+        <notes><note category="description">Evidence line of a job that waits for a person; {step} is the number of the step, counted from 1.</note></notes>
+        <segment><source>Waits for a person at step {step}</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.ghost">
+        <notes><note category="description">Evidence line of a ghost address: an address of intent nothing has shown for longer than its lease; {since} is the date and time of its last sighting.</note></notes>
+        <segment><source>Not seen since {since}</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.ptr">
+        <notes><note category="description">Evidence line of a PTR mismatch; {ptr} is the name the PTR record gives.</note></notes>
+        <segment><source>The PTR record names {ptr}</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.orphan">
+        <notes><note category="description">Evidence line of an orphaned DNS record written by hand; {names} are its names.</note></notes>
+        <segment><source>{names} written by hand, and no host holds the address</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.rogue_decided">
+        <notes><note category="description">Evidence line of an unknown device whose proposal was decided; {macs} are its MAC addresses or none.</note></notes>
+        <segment><source>{macs, select, none {A device without a MAC address} other {Seen with {macs}}}; its proposal was decided</source></segment>
+      </unit>
+      <unit id="discovery.findings.evidence.artifact">
+        <notes><note category="description">Evidence line of a scan artifact on an edge address of a network; {edge} names the edge address, {macs} the MAC addresses that answered or none.</note></notes>
+        <segment><source>{macs, select, none {A device} other {{macs}}} answered on {edge}</source></segment>
+      </unit>
+      <unit id="discovery.findings.edge.network">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on.</note></notes>
+        <segment><source>the network address</source></segment>
+      </unit>
+      <unit id="discovery.findings.edge.broadcast">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on.</note></notes>
+        <segment><source>the broadcast address</source></segment>
+      </unit>
+      <unit id="discovery.findings.edge.subnet_router_anycast">
+        <notes><note category="description">Which edge address of its network a scan artifact sits on (IPv6).</note></notes>
+        <segment><source>the subnet-router anycast address</source></segment>
+      </unit>
+      <unit id="discovery.findings.edge.other">
+        <notes><note category="description">An edge address of its network this version does not name.</note></notes>
+        <segment><source>an edge address of its network</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.resolve">
+        <notes><note category="description">Default action of a conflict: opens the side panel to pick the device that stays.</note></notes>
+        <segment><source>Resolve</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_job">
+        <notes><note category="description">Default action of a job that waits for a person: opens the job.</note></notes>
+        <segment><source>Open the job</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_prefix">
+        <notes><note category="description">Default action of a network over its utilization alarm: opens the network.</note></notes>
+        <segment><source>Open the network</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.adopt">
+        <notes><note category="description">Default action of an unknown device: adopts it into intent through the plan dialog.</note></notes>
+        <segment><source>Adopt</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.delete_record">
+        <notes><note category="description">Default action of an orphaned DNS record proposal: approves the proposal, which deletes the record.</note></notes>
+        <segment><source>Delete the record</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_record">
+        <notes><note category="description">Default action of an orphaned DNS record written by hand: searches for the name, whose zone holds the record.</note></notes>
+        <segment><source>Open the record</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.fix_ptr">
+        <notes><note category="description">Default action of a PTR mismatch: opens the address, where its DNS names are corrected.</note></notes>
+        <segment><source>Fix PTR</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_host">
+        <notes><note category="description">Default action of a finding about a host: opens the host.</note></notes>
+        <segment><source>Open the host</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.decide">
+        <notes><note category="description">Default action of a proposal with several choices: opens it in the side panel.</note></notes>
+        <segment><source>Decide</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.decommission">
+        <notes><note category="description">Default action of a ghost address unseen for long: decommissions its host through the dialog.</note></notes>
+        <segment><source>Decommission</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open">
+        <notes><note category="description">Action of a finding for a person who may not decide it: opens it in the side panel.</note></notes>
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_nodes">
+        <notes><note category="description">Default action of a health condition of the nodes.</note></notes>
+        <segment><source>Open Nodes</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_connectors">
+        <notes><note category="description">Default action of a health condition of the connectors.</note></notes>
+        <segment><source>Open Connectors</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_dns">
+        <notes><note category="description">Default action of a health condition of DNS.</note></notes>
+        <segment><source>Open DNS</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_dhcp">
+        <notes><note category="description">Default action of a health condition of DHCP.</note></notes>
+        <segment><source>Open DHCP</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_ipam">
+        <notes><note category="description">Default action of a health condition of IPAM.</note></notes>
+        <segment><source>Open IPAM</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_settings">
+        <notes><note category="description">Default action of a health condition of the settings.</note></notes>
+        <segment><source>Open Settings</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.failed">
+        <notes><note category="description">Title of the toast when the default action of a finding could not start (its proposal or host could not be read).</note></notes>
+        <segment><source>The action could not start</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.host_gone">
+        <notes><note category="description">Body of the toast when the host of a finding no longer exists.</note></notes>
+        <segment><source>The host no longer exists.</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.devices">
+        <notes><note category="description">Heading of the lead of a conflict in the side panel: the devices (MAC addresses) on one address; {count} is how many.</note></notes>
+        <segment><source>{count, plural, one {One device on the address} other {# devices on one address}}</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.intended">
+        <notes><note category="description">Beside the MAC address of a conflict that intent assigns the address to.</note></notes>
+        <segment><source>intended</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.os">
+        <notes><note category="description">The operating system of a conflict's address in the side panel; {guess} is the guess, {confidence} the confidence in percent, {source} the source key.</note></notes>
+        <segment><source>Operating system: {guess} ({confidence} %), from {source}</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.title">
+        <notes><note category="description">Title of the side panel of a finding; {kind} is the kind of finding, {subject} what it is about (an address, a host, a record).</note></notes>
+        <segment><source>{kind} on {subject}</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.since">
+        <notes><note category="description">Before the time since when a finding holds, in the side panel.</note></notes>
+        <segment><source>since</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.artifact">
+        <notes><note category="description">Notice in the side panel of a scan artifact; {ip} is the address, {edge} which edge address of its network it is.</note></notes>
+        <segment><source>{ip} is {edge} of its network. No device holds it, so a sighting there is a scan artifact and never a conflict.</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.decide">
+        <notes><note category="description">Heading of the section with the choices of a finding in the side panel.</note></notes>
+        <segment><source>Decide</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.open_reconcile">
+        <notes><note category="description">Link in the side panel of a finding of the reconciliation view: opens the view for the finding's network and kind.</note></notes>
+        <segment><source>Open in the reconciliation view</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.decide_hint">
+        <notes><note category="description">Hint in the side panel when the finding is decided where its subject lives.</note></notes>
+        <segment><source>Resolve the cause where it lives; the finding goes away at the next run of the reconciler.</source></segment>
+      </unit>
+      <unit id="discovery.findings.panel.info_hint">
+        <notes><note category="description">Hint in the side panel of a finding listed for information only.</note></notes>
+        <segment><source>Nothing to do: this is listed for information.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.macs_count">
+        <notes><note category="description">A cell of the reconciliation view with several MAC addresses; the list is in the tooltip.</note></notes>
+        <segment><source>{count, plural, one {# MAC} other {# MACs}}</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.ptr_line">
+        <notes><note category="description">The PTR record names of an address on one line in the reconciliation view; {names} are the names.</note></notes>
+        <segment><source>PTR {names}</source></segment>
+      </unit>
+      <unit id="discovery.nav.findings">
+        <notes><note category="description">Tab of the Discovery area: the findings list, everything that may need a person.</note></notes>
+        <segment><source>Findings</source></segment>
+      </unit>
+      <unit id="discovery.findings.facts">
+        <notes><note category="description">Facts line under the Discovery title, from the counts the rail and the status bar show; {act}, {review} and {info} are the counts per severity.</note></notes>
+        <segment><source>{act, number} to act on · {review, number} to review · {info, number} info</source></segment>
+      </unit>
+      <unit id="discovery.findings.info">
+        <notes><note category="description">Explanation of the findings list behind the info button beside the Discovery title.</note></notes>
+        <segment><source>Everything Tenko noticed that may need a person, from every source: conflicts, unknown devices, orphaned records, PTR mismatches, ghost addresses, networks over their alarm, jobs that wait for a person and health conditions. Rows are grouped by severity: act now, review, info. Info is listed but never counted as a problem. Each row carries its default action; select a row for its evidence and every choice. The Proposals tab lists every proposal with its state, the decided ones included.</source></segment>
+      </unit>
+      <unit id="discovery.findings.filter.label">
+        <notes><note category="description">Accessible name of the filter bar of the findings list.</note></notes>
+        <segment><source>Filter the findings</source></segment>
+      </unit>
+      <unit id="discovery.findings.filter.placeholder">
+        <notes><note category="description">Placeholder of the query field of the findings list.</note></notes>
+        <segment><source>Filter by address, host, MAC or text</source></segment>
+      </unit>
+      <unit id="discovery.findings.grid">
+        <notes><note category="description">Accessible name of the findings table.</note></notes>
+        <segment><source>Findings</source></segment>
+      </unit>
+      <unit id="discovery.findings.row">
+        <notes><note category="description">Accessible name of a row of the findings table; {kind} is its kind, {subject} what it is about.</note></notes>
+        <segment><source>{kind} {subject}</source></segment>
+      </unit>
+      <unit id="discovery.findings.empty">
+        <notes><note category="description">Heading of the findings list when nothing is found.</note></notes>
+        <segment><source>Nothing needs a decision</source></segment>
+      </unit>
+      <unit id="discovery.findings.empty_body">
+        <notes><note category="description">Text of the findings list when nothing is found.</note></notes>
+        <segment><source>Tenko lists conflicts, unknown devices and everything else that may need a person here as soon as it notices them.</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.kind">
+        <notes><note category="description">Column of the findings list: the kind of finding.</note></notes>
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.subject">
+        <notes><note category="description">Column of the findings list: what the finding is about.</note></notes>
+        <segment><source>Subject</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.evidence">
+        <notes><note category="description">Column of the findings list: one line of evidence.</note></notes>
+        <segment><source>Evidence</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.source">
+        <notes><note category="description">Column of the findings list: where the finding comes from.</note></notes>
+        <segment><source>Source</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.since">
+        <notes><note category="description">Column of the findings list: since when the finding holds.</note></notes>
+        <segment><source>Since</source></segment>
+      </unit>
+      <unit id="discovery.findings.col.action">
+        <notes><note category="description">Column of the findings list: the default action.</note></notes>
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="discovery.findings.source.proposal">
+        <notes><note category="description">Source of a finding: an open proposal of the reconciler.</note></notes>
+        <segment><source>Proposal</source></segment>
+      </unit>
+      <unit id="discovery.findings.source.alarm">
+        <notes><note category="description">Source of a finding: the utilization alarm of a network.</note></notes>
+        <segment><source>Alarm</source></segment>
+      </unit>
+      <unit id="discovery.findings.source.reconcile">
+        <notes><note category="description">Source of a finding: the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source></segment>
+      </unit>
+      <unit id="discovery.findings.source.job">
+        <notes><note category="description">Source of a finding: a job that waits for a person.</note></notes>
+        <segment><source>Job</source></segment>
+      </unit>
+      <unit id="discovery.findings.source.health">
+        <notes><note category="description">Source of a finding: a health condition of the installation.</note></notes>
+        <segment><source>Health</source></segment>
+      </unit>
+      <unit id="discovery.findings.action.ignore">
+        <notes><note category="description">Row action of a proposal's finding: rejects the proposal (ignores the device, dismisses a conflict), with an optional reason.</note></notes>
+        <segment><source>Ignore or dismiss</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.conflict">
+        <notes><note category="description">Short line on the group row of conflicts in the reconciliation view: what the group means.</note></notes>
+        <segment><source>Two devices on one address.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.ghost">
+        <notes><note category="description">Short line on the group row of ghost addresses in the reconciliation view.</note></notes>
+        <segment><source>Not seen for longer than the lease of the scope.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.rogue">
+        <notes><note category="description">Short line on the group row of unknown devices in the reconciliation view.</note></notes>
+        <segment><source>Seen on the network, not yet in intent. Adopt or ignore.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.orphan">
+        <notes><note category="description">Short line on the group row of orphaned records in the reconciliation view.</note></notes>
+        <segment><source>DNS records with no host behind them.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.note.ptr_mismatch">
+        <notes><note category="description">Short line on the group row of PTR mismatches in the reconciliation view.</note></notes>
+        <segment><source>Forward and reverse records disagree.</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.facts">
+        <notes><note category="description">Facts line under the title of the reconciliation view; {scope} is the network, the host or all networks, then the rows per severity; {more} is yes while more rows are to come.</note></notes>
+        <segment><source>{scope} · {act, number} to act on · {review, number} to review · {info, number} info{more, select, yes { (more to come)} other {}}</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.grid">
+        <notes><note category="description">Accessible name of the table of the reconciliation view.</note></notes>
+        <segment><source>Reconciliation</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.row">
+        <notes><note category="description">Accessible name of a row of the reconciliation view; {address} is the address, {kind} the kind of finding.</note></notes>
+        <segment><source>{address}, {kind}</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.outcome">
+        <notes><note category="description">Column of the reconciliation view: which truth wins.</note></notes>
+        <segment><source>Outcome</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.last_seen">
+        <notes><note category="description">Column of the reconciliation view: the last sighting.</note></notes>
+        <segment><source>Last seen</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.action">
+        <notes><note category="description">Column of the reconciliation view: the default action of the row's finding.</note></notes>
+        <segment><source>Action</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.os">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the operating system.</note></notes>
+        <segment><source>Operating system</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.vendors">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the vendors of the MAC addresses.</note></notes>
+        <segment><source>Vendors</source></segment>
+      </unit>
+      <unit id="ipam.reconcile.col.rule">
+        <notes><note category="description">Column of the reconciliation view, hidden by default: the rule that decides who wins.</note></notes>
+        <segment><source>Rule</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

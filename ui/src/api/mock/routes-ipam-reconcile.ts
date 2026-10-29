@@ -11,10 +11,10 @@
 import type { HttpHandler } from "msw";
 import { requireSession } from "./auth";
 import { db } from "./db";
-import { filterRows, hostTruths, KINDS, seedRows } from "./ipam-reconcile-model";
-import { HOST_IDS, IPAM_IDS, ipamState } from "./ipam/api";
+import { filterRows, hostTruths, KINDS } from "./ipam-reconcile-model";
+import { ipamState } from "./ipam/api";
 import { notFound } from "./ipam/problems";
-import { RECONCILE_IDS } from "./reconcile-store";
+import { mockViewRows } from "./reconcile-view";
 import { Problem, ok } from "./reply";
 import { paginate, route } from "./route";
 import { isUuid } from "./util";
@@ -39,12 +39,7 @@ const reconcileView = route("get", "/api/v1/ipam/reconcile", (ctx) => {
   if (host !== null && !isUuid(host)) throw invalidQuery("host", "is not a host identifier");
 
   const data = ipamState().data;
-  const rows = seedRows({
-    vrf: IPAM_IDS.vrf.default,
-    prefix: IPAM_IDS.prefix.lan,
-    host: (name) => HOST_IDS[name] ?? name,
-    proposal: RECONCILE_IDS.proposal.mediaPc,
-  });
+  const rows = mockViewRows();
   const page = paginate(filterRows(rows, { kind, prefix, host }), url, db.revision);
   const found = host === null ? undefined : data.host.get(host);
   if (host === null) return ok(page);
