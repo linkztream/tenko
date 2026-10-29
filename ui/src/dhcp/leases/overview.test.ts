@@ -33,6 +33,12 @@ describe("the counter of new leases", () => {
     expect(countOf({ items: items(1200), next_cursor: null })).toEqual({ count: 1000, capped: true });
   });
 
+  it("counts nothing from a read that answered no page (an empty body)", () => {
+    expect(countOf(undefined)).toBeUndefined();
+    expect(countOf(null)).toBeUndefined();
+    expect(countOf({} as never)).toBeUndefined();
+  });
+
   it("links to the history of the same grants, with the scope when one is chosen", () => {
     const href = newHref(SINCE, "");
     expect(href.startsWith("/dhcp/history?kind=granted&from=")).toBe(true);

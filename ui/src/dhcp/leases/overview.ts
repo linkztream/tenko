@@ -27,8 +27,12 @@ export interface NewCount {
   capped: boolean;
 }
 
-/** The count of a history page read with `newQuery`: a page with a successor holds only part of the grants. */
-export function countOf(page: { items: readonly unknown[]; next_cursor?: string | null | undefined }): NewCount {
+/**
+ * The count of a history page read with `newQuery`: a page with a successor holds only part of the
+ * grants. A read that answered no page (an empty body) is no count: undefined.
+ */
+export function countOf(page: { items: readonly unknown[]; next_cursor?: string | null | undefined } | null | undefined): NewCount | undefined {
+  if (!page || !Array.isArray(page.items)) return undefined;
   const capped = (page.next_cursor ?? null) !== null || page.items.length > NEW_LIMIT;
   return { count: Math.min(page.items.length, NEW_LIMIT), capped };
 }

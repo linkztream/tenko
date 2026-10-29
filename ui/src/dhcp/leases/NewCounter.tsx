@@ -43,10 +43,13 @@ export function NewCounter(props: {
       const mine = ++run;
       grantedSince(since, scope, control.signal).then(
         (page) => {
-          if (mine === run) setResult(countOf(page));
+          // A read that was aborted, replaced by a newer one or left behind by the page is not counted.
+          if (mine !== run || control.signal.aborted) return;
+          const found = countOf(page);
+          if (found !== undefined) setResult(found);
         },
         (err: unknown) => {
-          if (mine === run && hidesCounter(err)) setHidden(true);
+          if (mine === run && !control.signal.aborted && hidesCounter(err)) setHidden(true);
         },
       );
     }),

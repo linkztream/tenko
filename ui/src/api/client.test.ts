@@ -286,6 +286,24 @@ describe("pagination", () => {
     expect(all.truncated).toBe(true);
   });
 
+  it("rejects with an abort when the caller aborts while the body is read, instead of answering an empty body", async () => {
+    const control = new AbortController();
+    stubFetch(() => {
+      const body = new ReadableStream({
+        pull: () => new Promise((_, reject) => control.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))),
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const read = rawRequest("get", "/api/v1/users", { signal: control.signal });
+    const outcome = read.then(
+      () => "resolved",
+      (err: unknown) => (err instanceof DOMException ? err.name : String(err)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    control.abort();
+    expect(await outcome).toBe("AbortError");
+  });
+
   it("yields pages lazily", async () => {
     const calls = pagedServer();
     const it = pages<{ id: string }>("/api/v1/users", { limit: 2 });

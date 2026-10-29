@@ -250,7 +250,9 @@ export async function rawExchange<T>(
   let parsed: unknown;
   try {
     parsed = await readBody(res);
-  } catch {
+  } catch (err) {
+    // A read cut short by the caller's abort is an abort, not an empty answer.
+    if (options.signal?.aborted) throw err instanceof DOMException && err.name === "AbortError" ? err : new DOMException("The operation was aborted.", "AbortError");
     parsed = undefined;
   }
   if (!res.ok) {

@@ -653,6 +653,28 @@ describe("the leases", () => {
         expect(screen.getByTestId("leases-new")).toBeTruthy();
         expect(count()).toBe("0");
       });
+
+      it("keeps the count when a read answers no page at all, and raises nothing", async () => {
+        const rejected = vi.fn();
+        const host = (globalThis as unknown as { process: { on: (event: string, fn: () => void) => void; off: (event: string, fn: () => void) => void } }).process;
+        host.on("unhandledRejection", rejected);
+        try {
+          const { feed } = stream();
+          open();
+          await loaded();
+          await ready();
+          grantMockLease({ mac: docMac(0x59), hostname: "empty-1" });
+          feed(1);
+          await waitFor(() => expect(count()).toBe("1"));
+          server.use(http.get("/api/v1/dhcp/history", () => new HttpResponse(null, { status: 204 })));
+          feed(2);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          expect(count()).toBe("1");
+          expect(rejected).not.toHaveBeenCalled();
+        } finally {
+          host.off("unhandledRejection", rejected);
+        }
+      });
     });
 
     it("speaks Swedish", async () => {
