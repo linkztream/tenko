@@ -202,6 +202,73 @@
   .statusbar .scenes .seg { padding: 1px; }
   .statusbar .scenes .seg button { height: 18px; padding: 0 8px; font-size: var(--fs-11); }
 
+  /* ---------- Views: Map and SSIDs ---------- */
+  .view { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+  #view-tabs { background: var(--surface); }
+  .flag.review { color: var(--severity-review); }
+
+  /* Review notice above the map: the root finding (Review severity: glyph, word, a left edge; no fill). */
+  .review-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3) var(--sp-6); padding: var(--sp-3) var(--sp-5) var(--sp-3) var(--sp-6); background: var(--surface); border-bottom: 1px solid var(--line); box-shadow: inset 3px 0 0 var(--severity-review); font-size: var(--fs-13); }
+  .rn-title { display: inline-flex; align-items: center; gap: var(--sp-4); }
+  .rn-title b { font-weight: var(--fw-semibold); }
+  .rn-note { color: var(--ink-3); font-size: var(--fs-12); }
+  .rn-cands { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); }
+  .rn-cand { display: inline-flex; align-items: center; gap: var(--sp-4); }
+  .rn-cand .src { color: var(--ink-3); font-size: var(--fs-12); }
+  .rn-cand .inuse { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); font-size: var(--fs-12); font-weight: var(--fw-medium); }
+
+  /* Map extras: an inferred link, an endpoint count on a port, the Not placed group. Drawn for the Layered layout only. */
+  .extras { transition: opacity var(--dur-2) var(--ease-out); }
+  .map.radial .extras { display: none; }
+  .map.relayout .extras { opacity: 0; }
+  .edge.inferred { stroke-dasharray: 2.5 4.5; stroke-linecap: butt; }
+  .qmark circle { fill: var(--surface); stroke: var(--control-line); stroke-width: 1.25; }
+  .qmark text { font-size: 11px; font-weight: 700; fill: var(--ink-2); text-anchor: middle; }
+  .xport .pbg { fill: var(--surface); stroke: var(--control-line); stroke-width: 1; }
+  .xport .ptx { font-family: var(--font-data); font-size: 11px; font-weight: 700; fill: var(--ink-2); text-anchor: middle; font-variant-ligatures: none; }
+  .xnode { cursor: pointer; outline: none; }
+  .xnode .body { fill: var(--surface-2); stroke: var(--control-line); stroke-width: 1.5; }
+  .xnode:hover .body { stroke-width: 2.25; }
+  .xnode:focus-visible .body { stroke: var(--focus); stroke-width: 2.5; }
+  .xnode .nm { font-size: 12px; font-weight: 500; fill: var(--ink); }
+  .xlab { font-size: 11px; fill: var(--ink-3); }
+  .xgroup .gbg { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+  .xgroup .gline { stroke: var(--line); stroke-width: 1; }
+  .xgroup .gh { font-size: 12px; font-weight: 600; fill: var(--ink); }
+  .xgroup .gs { font-size: 11px; fill: var(--ink-3); text-anchor: end; }
+  .xgroup .nm { font-size: 12px; font-weight: 500; fill: var(--ink); }
+  .xgroup .ip { font-family: var(--font-data); font-size: 11px; fill: var(--ink-3); font-variant-ligatures: none; }
+  .xgroup .dup { font-size: 11px; font-weight: 600; fill: var(--severity-review); text-anchor: end; }
+  .xgroup .xic { fill: none; stroke: var(--severity-review); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .map[data-lod="mid"] .xsub { display: none; }
+  .map[data-lod="low"] .extras text, .map[data-lod="low"] .extras .xic { display: none; }
+
+  /* ---------- SSID view ---------- */
+  .ssid-view .filterbar .meta-note { margin-left: auto; font-size: var(--fs-12); color: var(--ink-3); }
+  .ssid-grid { min-width: 1060px; }
+  .ssid-grid tr.ssid-row td { background: var(--surface-2); border-bottom: 1px solid var(--line-strong); padding: 0 var(--cell-px) 0 var(--sp-3); overflow: visible; }
+  .ssid-grid tr.ssid-row:hover td { background: var(--surface-3); }
+  .srow { display: grid; grid-template-columns: 22px minmax(190px, 1.4fr) 112px 140px 80px 132px minmax(120px, 1fr); align-items: center; column-gap: var(--sp-4); white-space: nowrap; }
+  .twist { width: 22px; height: 22px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-3); display: inline-flex; align-items: center; justify-content: center; }
+  .twist:hover { background: var(--surface-3); color: var(--ink); }
+  .twist svg { transition: rotate var(--dur-2); }
+  .twist[aria-expanded="false"] svg { rotate: -90deg; }
+  .sname { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; font-weight: var(--fw-semibold); }
+  .sname svg { color: var(--ink-2); }
+  .sname span { overflow: hidden; text-overflow: ellipsis; }
+  .sfind { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: var(--fs-12); }
+  .spol { display: inline-flex; align-items: center; gap: var(--sp-3); }
+  .pol { height: 20px; padding: 0 var(--sp-4); border: 1px solid var(--line-strong); border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font-size: var(--fs-12); font-weight: var(--fw-medium); }
+  .pol:hover { background: var(--surface-3); color: var(--ink); }
+  .ssid-grid td.cl { padding-left: calc(var(--cell-px) + 34px); }
+  .cname { display: grid; line-height: 1.1; min-width: 0; }
+  .cname .l1 { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; }
+  .cname .l2 { font-size: var(--fs-11); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; }
+  .cfind { display: flex; align-items: center; gap: var(--sp-3); }
+  .cfind .flag { min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-right: var(--sp-2); }
+  .ssid-grid tbody.ignored .crow .cfind { display: none; }
+  .ssid-empty { padding: var(--sp-8) var(--sp-6); color: var(--ink-3); }
+
   @media (max-width: 1280px) {
     .stage { --panel-w: 340px; }
     .head-note { display: none; }
@@ -257,6 +324,12 @@
       </div>
     </div>
 
+    <div class="tabs" id="view-tabs" role="tablist" aria-label="Topology views">
+      <button role="tab" id="tab-map" aria-selected="true" aria-controls="view-map" tabindex="0">Map<span class="count num">25</span></button>
+      <button role="tab" id="tab-ssid" aria-selected="false" aria-controls="view-ssid" tabindex="-1">SSIDs<span class="count num">3</span></button>
+    </div>
+
+    <div class="view" id="view-map" role="tabpanel" aria-labelledby="tab-map">
     <div class="filterbar" role="toolbar" aria-label="Map filters and view">
       <label class="query"><svg class="i sm" aria-hidden="true"><use href="#i-search"/></svg><input id="q" placeholder="Find host, IP, MAC or port" aria-label="Find host, IP, MAC or port" autocomplete="off" spellcheck="false"><span class="count muted num" id="q-count" hidden></span><span class="kbd">/</span></label>
       <select class="select" id="site" aria-label="Site"><option>Site: Home</option></select>
@@ -293,6 +366,15 @@
         <span class="zoomval" id="z-val" aria-live="off">100%</span>
       </div>
     </div>
+
+    <section class="review-notice" id="root-notice" aria-label="Topology root: sources disagree">
+      <span class="rn-title"><span class="flag review"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>Review</span><b>Topology root: sources disagree</b></span>
+      <span class="rn-note">The controller and the default route name different roots. The choice is remembered.</span>
+      <div class="rn-cands">
+        <span class="rn-cand"><span><b>gateway-a</b> <span class="src">(controller)</span></span><button class="btn sm" data-root="gateway-a (controller)">Use this</button></span>
+        <span class="rn-cand"><span><span class="addr">192.0.2.1</span> <span class="src">(default route)</span></span><button class="btn sm" data-root="192.0.2.1 (default route)">Use this</button></span>
+      </div>
+    </section>
 
     <div class="stage" id="stage">
       <div class="canvas" id="canvas">
@@ -528,6 +610,22 @@
     <g class="port" data-sw="sw-desk" data-port="5" data-pl="41,381" transform="translate(41 381)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 5, printer-1"><title>sw-desk port 5, printer-1</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">5</text></g>
     <g class="port" data-sw="sw-desk" data-port="7" data-pl="41,427" transform="translate(41 427)" role="button" tabindex="0" aria-pressed="false" aria-label="sw-desk port 7, lab-ws01"><title>sw-desk port 7, lab-ws01</title><rect class="phit" x="-13" y="-11" width="26" height="22"/><rect class="pbg" x="-9" y="-7.5" width="18" height="15" rx="3"/><text class="ptx" y="3.9">7</text></g>
     </g>
+        <g class="extras">
+          <!-- Layered layout only. An endpoint count hangs on sw-desk port 4 behind a link inferred from the MAC table. -->
+          <path class="edge inferred" d="M26,421V473Q26,479 32,479H54"/>
+          <g class="qmark" transform="translate(26 450)" role="img" aria-label="Link inferred from the MAC table, not from LLDP or the controller"><title>Inferred from the MAC table, not confirmed by LLDP or the controller</title><circle r="7.5"/><text y="3.9">?</text></g>
+          <g class="xport" transform="translate(41 479)" role="img" aria-label="sw-desk port 4"><rect x="-9" y="-7.5" width="18" height="15" rx="3" class="pbg"/><text class="ptx" y="3.9">4</text></g>
+          <g class="xnode" transform="translate(54 465)" tabindex="0" role="button" aria-label="sw-desk port 4 &middot; 2 devices, link inferred from the MAC table"><title>2 devices behind sw-desk port 4. Select to list them.</title><rect class="body" width="128" height="28" rx="8"/><text class="nm" x="10" y="18">port 4 &middot; 2 devices</text></g>
+          <text class="xlab" x="14" y="512">inferred from the MAC table</text>
+          <g class="xgroup" transform="translate(790 340)" role="group" aria-label="Not placed: 2 devices without a known link, one is a duplicate">
+            <rect class="gbg" width="222" height="114" rx="8"/>
+            <text class="gh" x="12" y="19">Not placed &middot; 2</text>
+            <text class="gs xsub" x="210" y="19">no link found</text>
+            <path class="gline" d="M0,28H222"/>
+            <g><title>camera-b, 198.51.100.52</title><text class="nm" x="12" y="49">camera-b</text><text class="ip nsub" x="12" y="64">198.51.100.52</text></g>
+            <g><title>printer-c, 192.0.2.64. Another entry has the same MAC address.</title><text class="nm" x="12" y="87">printer-c</text><text class="ip nsub" x="12" y="102">192.0.2.64</text><use class="xic" href="#i-proposal" x="144" y="75" width="14" height="14"/><text class="dup" x="210" y="87">Duplicate</text></g>
+          </g>
+        </g>
         </svg>
 
         <details class="legend" open>
@@ -541,12 +639,14 @@
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><polygon class="lgs" points="4,2 21,2 21,9.5 18,12 1,12 1,5"/></svg>VM</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="2" width="20" height="10" rx="3.5"/></svg>Client</span>
               <span class="lg-item" title="Wireless network (SSID) broadcast by an access point, with the VLAN it carries"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="3" width="20" height="8" rx="4"/></svg>SSID</span>
+              <span class="lg-item" title="Endpoints collapse into a count on their switch port"><svg viewBox="0 0 22 14" aria-hidden="true"><rect class="lgs" x="1" y="3" width="20" height="8" rx="4" style="fill:var(--surface-2)"/></svg>Endpoint count</span>
             </div>
             <div class="lg-row"><span class="lg-h">Links</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge" d="M1 7H21"/></svg>Wired port</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge uplink" d="M1 7H21"/></svg>Uplink</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge wifi" d="M1 7H21"/></svg>Wireless</span>
               <span class="lg-item"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge vmlink" d="M1 7H21"/></svg>VM to host</span>
+              <span class="lg-item" title="A link read from a MAC table, not from LLDP or the controller"><svg viewBox="0 0 22 14" aria-hidden="true"><path class="edge inferred" d="M1 7H21"/></svg>Inferred ?</span>
             </div>
             <div class="lg-row" id="lg-vlan"></div>
           </div>
@@ -585,6 +685,36 @@
         <div class="panel-body" id="panel-body"></div>
       </aside>
     </div>
+    </div>
+
+    <div class="view ssid-view" id="view-ssid" role="tabpanel" aria-labelledby="tab-ssid" hidden>
+      <div class="filterbar" role="toolbar" aria-label="SSID filters">
+        <label class="query"><svg class="i sm" aria-hidden="true"><use href="#i-search"/></svg><input id="sq" placeholder="Find SSID, client, MAC or address" aria-label="Find SSID, client, MAC or address" autocomplete="off" spellcheck="false"></label>
+        <button class="chip proposal" id="sf-find" aria-pressed="false" title="Show only clients with a finding">Findings <span class="n" id="sf-n">2</span></button>
+        <span class="meta-note">3 wireless networks, 5 clients, read from UniFi 12 s ago</span>
+      </div>
+      <div class="grid-wrap">
+        <table class="grid ssid-grid" id="ssid-grid" aria-label="Wireless networks, the VLAN each carries and their clients">
+          <colgroup><col style="width:230px"><col style="width:150px"><col style="width:130px"><col style="width:96px"><col style="width:78px"><col></colgroup>
+          <thead><tr><th>Client</th><th>MAC</th><th>Address</th><th>Access point</th><th>Band</th><th>Finding</th></tr></thead>
+        <tbody class="ssid-tb" data-ssid="lab.example.test">
+          <tr class="ssid-row"><td colspan="6"><div class="srow"><button class="twist" aria-expanded="true" aria-label="Collapse lab.example.test"><svg class="i sm" aria-hidden="true"><use href="#i-chev-d"/></svg></button><span class="sname"><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg><span>lab.example.test</span></span><span class="vlan lab" title="VLAN 20 Lab"><span class="id">20</span> Lab</span><span class="mono" title="The network this VLAN maps to">192.0.2.0/24</span><span class="num">3 clients</span><span class="spol"><button class="pol" data-pol aria-label="Policy for lab.example.test: Track. Select to change.">Track</button></span><span class="sfind"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>2 findings</span></div></td></tr>
+          <tr class="crow" data-host="printer-a"><td class="cl"><div class="cname"><span class="l1">printer-a</span></div></td><td><span class="mac"><span class="oui">00-00-5E</span>-00-53-41</span></td><td><span class="addr"><span class="net">192.0.2.</span><span class="host">40</span></span></td><td>ap-a</td><td>5 GHz</td><td><div class="cfind"></div></td></tr>
+          <tr class="crow" data-finding="1" data-host="host-00005e005322"><td class="cl"><div class="cname"><span class="l1 mono">host-00005e005322</span><span class="l2">Example Devices &middot; 192.0.2.22</span></div></td><td><span class="mac"><span class="oui">00-00-5E</span>-00-53-22</span></td><td><span class="addr"><span class="net">192.0.2.</span><span class="host">22</span></span></td><td>ap-a</td><td>2.4 GHz</td><td><div class="cfind"><span class="flag review"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>IoT device on a non-IoT WLAN</span><a class="btn sm" href="move-job.html">Move&hellip;</a><button class="btn sm" data-keep>Keep on this WLAN</button></div></td></tr>
+          <tr class="crow" data-finding="1" data-host="laptop-b"><td class="cl"><div class="cname"><span class="l1">laptop-b</span></div></td><td><span class="mac"><span class="oui">00-00-5E</span>-00-53-23</span></td><td><span class="addr"><span class="net">198.51.100.</span><span class="host">23</span></span></td><td>ap-a</td><td>5 GHz</td><td><div class="cfind"><span class="flag review"><svg class="i sm" aria-hidden="true"><use href="#i-proposal"/></svg>Address outside 192.0.2.0/24</span><a class="btn sm" href="move-job.html">Move&hellip;</a><button class="btn sm" data-keep>Keep on this WLAN</button></div></td></tr>
+        </tbody>
+        <tbody class="ssid-tb" data-ssid="iot.example.test">
+          <tr class="ssid-row"><td colspan="6"><div class="srow"><button class="twist" aria-expanded="true" aria-label="Collapse iot.example.test"><svg class="i sm" aria-hidden="true"><use href="#i-chev-d"/></svg></button><span class="sname"><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg><span>iot.example.test</span></span><span class="vlan iot" title="VLAN 30 IoT"><span class="id">30</span> IoT</span><span class="mono" title="The network this VLAN maps to">198.51.100.0/24</span><span class="num">1 client</span><span class="spol"><button class="pol" data-pol aria-label="Policy for iot.example.test: Track. Select to change.">Track</button></span><span class="sfind">No findings</span></div></td></tr>
+          <tr class="crow" data-host="sensor-a"><td class="cl"><div class="cname"><span class="l1">sensor-a</span></div></td><td><span class="mac"><span class="oui">00-00-5E</span>-00-53-31</span></td><td><span class="addr"><span class="net">198.51.100.</span><span class="host">31</span></span></td><td>ap-b</td><td>2.4 GHz</td><td><div class="cfind"></div></td></tr>
+        </tbody>
+        <tbody class="ssid-tb ignored" data-ssid="guest.example.test">
+          <tr class="ssid-row"><td colspan="6"><div class="srow"><button class="twist" aria-expanded="true" aria-label="Collapse guest.example.test"><svg class="i sm" aria-hidden="true"><use href="#i-chev-d"/></svg></button><span class="sname"><svg class="i sm" aria-hidden="true"><use href="#i-wifi"/></svg><span>guest.example.test</span></span><span class="vlan dmz" title="VLAN 40 Guest"><span class="id">40</span> Guest</span><span class="mono" title="The network this VLAN maps to">203.0.113.0/24</span><span class="num">1 client</span><span class="spol"><button class="pol" data-pol aria-label="Policy for guest.example.test: Ignore. Select to change.">Ignore</button> <span class="tag">Guest</span></span><span class="sfind">No findings</span></div></td></tr>
+          <tr class="crow" data-host="phone-g"><td class="cl"><div class="cname"><span class="l1">phone-g</span></div></td><td><span class="mac"><span class="oui">00-00-5E</span>-00-53-71</span></td><td><span class="addr"><span class="net">203.0.113.</span><span class="host">50</span></span></td><td>ap-b</td><td>5 GHz</td><td><div class="cfind"></div></td></tr>
+        </tbody>
+        </table>
+        <p class="ssid-empty" id="ssid-empty" hidden>No client matches the filter.</p>
+      </div>
+    </div>
   </main>
 
   <footer class="statusbar">
@@ -608,10 +738,13 @@
 
 <aside class="notes" id="notes" aria-label="Mockup notes">
   <h2>Mockup notes: topology <button class="icon-btn" data-action="notes" aria-label="Close notes"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></h2>
-  <p class="sub">Try it: hover a node (ap-hall lists its wireless networks), click a port badge (14 or 1), click the Home-IoT label under an access point, click desk-01 and press <span class="kbd">P</span>, click a VLAN chip to show only that VLAN (Shift+click adds or removes one) and watch the colors change, set Color by to Selected VLANs or Site, turn Patterns on, type "port 14" in the search, switch the layout to Radial, zoom out below 75 % and click the lab-k8s node. The three scenes in the status bar jump to the interesting states.</p>
+  <p class="sub">Try it: hover a node (ap-hall lists its wireless networks), click a port badge (14 or 1), click the Home-IoT label under an access point, click desk-01 and press <span class="kbd">P</span>, click a VLAN chip to show only that VLAN (Shift+click adds or removes one) and watch the colors change, set Color by to Selected VLANs or Site, turn Patterns on, type "port 14" in the search, switch the layout to Radial, zoom out below 75 % and click the lab-k8s node. The three scenes in the status bar jump to the interesting states. New in U7: use the Map and SSIDs tabs (arrow keys move between them), choose a root in the review notice above the map, look at the dashed link with the question mark and the Not placed group at the lower right (Layered layout only), then open SSIDs, collapse an SSID, press Keep on this WLAN on a finding, or switch an SSID between Track and Ignore.</p>
   <ul>
     <li><strong>Decided:</strong> VLAN colors are generated for the VLANs in view, with no fixed cap. A label on every edge group, a legend with the contrast of each color and a Patterns toggle are the backup, so color is never the only carrier.</li>
     <li><strong>Decided:</strong> hosts are moved by dragging them onto the IPAM prefix tree. The map has no drop targets; it only selects, highlights and opens.</li>
+    <li><strong>Proposed (U7):</strong> the root is read from ranked sources (the controller&rsquo;s gateway, else the default route). When they disagree the map raises one Review finding with &ldquo;Use this&rdquo;, and the choice is remembered.</li>
+    <li><strong>Proposed (U7):</strong> endpoints collapse into a count on their switch port; a link inferred from a MAC table draws dashed with a question mark; devices without a link gather in a Not placed group that also surfaces duplicates.</li>
+    <li><strong>Proposed (U7):</strong> the SSID view is a tree of SSID, VLAN and clients. The access point and the band are columns of the client row, not levels. An SSID that carries one VLAN folds the VLAN level into its row; one with several VLANs shows a VLAN row each. Track or Ignore decides whether the two WLAN rules read an SSID; &ldquo;Keep on this WLAN&rdquo; is remembered per host and per SSID. Clients are read from the controller only and nothing here writes to it.</li>
     <li><strong>Owner&rsquo;s request:</strong> wireless networks (SSIDs) are IPAM objects, read from UniFi with their VLAN; access points are labeled with their SSIDs.</li>
   </ul>
   <ol>
@@ -1534,6 +1667,105 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { placeHover(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
+</script>
+
+<script>
+/* Mockup behavior for the Map and SSIDs views: tabs, the root choice, the SSID tree. */
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  function toast(o) { if (window.tenko && window.tenko.toast) window.tenko.toast(o); }
+  function icon(n, c) { return '<svg class="i ' + (c || '') + '" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+
+  /* Tabs: Map and SSIDs. Arrow keys, Home and End move between them; #ssids opens the second one. */
+  var tabs = $$('#view-tabs [role="tab"]');
+  function pick(tab, focus) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      $('#' + t.getAttribute('aria-controls')).hidden = !on;
+    });
+    if (focus) tab.focus();
+    try { history.replaceState(null, '', tab.id === 'tab-ssid' ? '#ssids' : location.pathname + location.search); } catch (e) {}
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { pick(t, false); });
+    t.addEventListener('keydown', function (e) {
+      var j = e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+      if (j < 0) return;
+      e.preventDefault(); pick(tabs[j], true);
+    });
+  });
+  if (location.hash === '#ssids') pick($('#tab-ssid'), false);
+
+  /* The root: choosing a candidate is remembered. */
+  $$('[data-root]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('[data-root]').forEach(function (o) {
+        if (o === b) { var s = document.createElement('span'); s.className = 'inuse'; s.innerHTML = icon('check', 'sm') + 'In use'; o.replaceWith(s); }
+        else o.hidden = false;
+      });
+      toast({ title: 'Topology root: ' + b.dataset.root, body: 'Remembered across restarts and recorded in the audit log. Mockup only: the map keeps drawing gw.', kind: 'ok' });
+    });
+  });
+
+  /* The SSID tree. */
+  var grid = $('#ssid-grid'), tbs = $$('.ssid-tb', grid), q = $('#sq'), only = $('#sf-find');
+  function findings(tb) { return tb.classList.contains('ignored') ? 0 : $$('.crow[data-finding]', tb).length; }
+  function recount() {
+    var total = 0;
+    tbs.forEach(function (tb) {
+      var n = findings(tb); total += n;
+      $('.sfind', tb).innerHTML = n ? icon('proposal', 'sm') + n + (n === 1 ? ' finding' : ' findings') : 'No findings';
+    });
+    $('#sf-n').textContent = total;
+  }
+  function apply() {
+    var term = q.value.trim().toLowerCase(), f = only.getAttribute('aria-pressed') === 'true', shown = 0;
+    tbs.forEach(function (tb) {
+      var head = $('.ssid-row', tb), collapsed = $('.twist', tb).getAttribute('aria-expanded') === 'false';
+      var headHit = !!term && head.textContent.toLowerCase().indexOf(term) >= 0, vis = 0;
+      $$('.crow', tb).forEach(function (r) {
+        var ok = (!term || headHit || r.textContent.toLowerCase().indexOf(term) >= 0) && (!f || (r.hasAttribute('data-finding') && !tb.classList.contains('ignored')));
+        if (ok) vis++;
+        r.hidden = !ok || collapsed;
+      });
+      head.hidden = (term || f) && !vis && !(headHit && !f);
+      if (!head.hidden) shown++;
+    });
+    $('#ssid-empty').hidden = shown > 0;
+  }
+  tbs.forEach(function (tb) {
+    var tw = $('.twist', tb), name = tb.dataset.ssid;
+    tw.addEventListener('click', function () {
+      var open = tw.getAttribute('aria-expanded') !== 'true';
+      tw.setAttribute('aria-expanded', String(open));
+      tw.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + name);
+      apply();
+    });
+    $('[data-pol]', tb).addEventListener('click', function (e) {
+      var b = e.currentTarget, ign = !tb.classList.contains('ignored');
+      tb.classList.toggle('ignored', ign);
+      b.textContent = ign ? 'Ignore' : 'Track';
+      b.setAttribute('aria-label', 'Policy for ' + name + ': ' + b.textContent + '. Select to change.');
+      toast({ title: name + ' is now ' + (ign ? 'ignored' : 'tracked'), body: ign ? 'The two WLAN rules skip this SSID, so it raises no findings.' : 'The two WLAN rules read this SSID again.', kind: 'ok' });
+      recount(); apply();
+    });
+  });
+  $$('[data-keep]', grid).forEach(function (b) {
+    b.addEventListener('click', function () {
+      var row = b.closest('tr'), tb = row.closest('tbody');
+      row.removeAttribute('data-finding');
+      $('.cfind', row).innerHTML = '<span class="muted">Kept on this WLAN</span>';
+      toast({ title: 'Kept ' + row.dataset.host + ' on ' + tb.dataset.ssid, body: 'The WLAN rules skip this host on this SSID from now on. Remembered per host and per SSID.', kind: 'ok' });
+      recount(); apply();
+    });
+  });
+  q.addEventListener('input', apply);
+  only.addEventListener('click', function () { only.setAttribute('aria-pressed', String(only.getAttribute('aria-pressed') !== 'true')); apply(); });
 })();
 </script>
 </body>

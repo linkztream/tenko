@@ -86,6 +86,18 @@
         <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
         <segment><source>Health</source><target>Hälsa</target></segment>
       </unit>
+      <unit id="discovery.findings.kind.topology_root">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Topology root</source><target>Topologins rot</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.wlan_class">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>IoT on a non-IoT WLAN</source><target>IoT på fel WLAN</target></segment>
+      </unit>
+      <unit id="discovery.findings.kind.wlan_prefix">
+        <notes><note category="description">Word of a finding's kind in the findings list (Discovery) and the side panel.</note></notes>
+        <segment><source>Address outside the WLAN's network</source><target>Adress utanför WLAN:ets nät</target></segment>
+      </unit>
       <unit id="discovery.findings.evidence.utilization">
         <notes><note category="description">Evidence line of a network over its utilization alarm; {percent} is the share in use, {threshold} the alarm threshold in percent.</note></notes>
         <segment><source>{percent} % in use, over the alarm at {threshold} %</source><target>{percent} % används, över larmet vid {threshold} %</target></segment>
@@ -201,6 +213,14 @@
       <unit id="discovery.findings.action.open_settings">
         <notes><note category="description">Default action of a health condition of the settings.</note></notes>
         <segment><source>Open Settings</source><target>Öppna Inställningar</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_topology">
+        <notes><note category="description">Default action of a topology root whose sources disagree: opens the topology.</note></notes>
+        <segment><source>Open the topology</source><target>Öppna topologin</target></segment>
+      </unit>
+      <unit id="discovery.findings.action.open_ssids">
+        <notes><note category="description">Default action of a WLAN finding: opens the SSID view, where the host is moved or kept.</note></notes>
+        <segment><source>Open the SSID view</source><target>Öppna SSID-vyn</target></segment>
       </unit>
       <unit id="discovery.findings.action.failed">
         <notes><note category="description">Title of the toast when the default action of a finding could not start (its proposal or host could not be read).</note></notes>
@@ -337,6 +357,10 @@
       <unit id="discovery.findings.source.health">
         <notes><note category="description">Source of a finding: a health condition of the installation.</note></notes>
         <segment><source>Health</source><target>Hälsa</target></segment>
+      </unit>
+      <unit id="discovery.findings.source.topology">
+        <notes><note category="description">Source of a finding: the topology (the root of the map, the WLANs).</note></notes>
+        <segment><source>Topology</source><target>Topologi</target></segment>
       </unit>
       <unit id="discovery.findings.action.ignore">
         <notes><note category="description">Row action of a proposal's finding: rejects the proposal (ignores the device, dismisses a conflict), with an optional reason.</note></notes>

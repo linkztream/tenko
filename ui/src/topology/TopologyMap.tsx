@@ -6,13 +6,17 @@
 // Keys: arrows move to the nearest device in that direction, Enter and Space select a device
 // or open a group, Escape clears the selection, "+", "-" and "0" zoom and fit. The wheel
 // zooms at the pointer and dragging the background pans.
+//
+// U7: a link only a MAC table names is dashed with a question mark; a device with a hashed
+// name (`host-00005e005301`) gets its vendor and address as a second line; a group of
+// endpoints on one port or SSID names that port or SSID beside its count.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Icon } from "../components/Icon";
 import { t } from "../i18n";
 import type { VlanStyle } from "../ipam/vlan/palette";
 import type { TopologyEdge, TopologyNode } from "./api";
 import type { Layout, PlacedEdge } from "./layout";
-import { edgeClass, groupParent, isGroupId, nodeAriaLabel, SHAPES, shortLabel } from "./model";
+import { edgeClass, groupBucket, isGroupId, nodeAriaLabel, nodeSecondLine, SHAPES, shortLabel } from "./model";
 import { centreOn, fit, nearestInDirection, pan, transformOf, zoomAt, type Direction, type View } from "./viewport";
 
 export interface TopologyMapProps {
@@ -35,8 +39,8 @@ export interface TopologyMapProps {
   fitKey: string;
   onSelect: (id: string) => void;
   onClear: () => void;
-  /** Opens the group of hidden devices under this parent. */
-  onOpenGroup: (parentId: string) => void;
+  /** Opens a group of hidden devices (its group id). */
+  onOpenGroup: (groupId: string) => void;
 }
 
 /** The size the drawing is fitted to when the element has none (tests, hidden panes). */
@@ -194,7 +198,7 @@ export function TopologyMap(props: TopologyMapProps) {
       return;
     }
     pendingFocus = placedById().get(id)?.members?.[0];
-    props.onOpenGroup(groupParent(id));
+    props.onOpenGroup(id);
   };
 
   // ----- keyboard and pointer
@@ -279,22 +283,34 @@ export function TopologyMap(props: TopologyMapProps) {
       const e = edge();
       const style = vlan();
       return {
-        class: `${e ? edgeClass(e.kind) : "topology-edge"}${style ? " has-vlan" : ""}`,
+        class: `${e ? edgeClass(e.kind) : "topology-edge"}${style ? " has-vlan" : ""}${e?.inferred ? " edge-inferred" : ""}`,
         "data-testid": "topology-edge",
         "data-id": p.id,
         "data-kind": e?.kind,
+        "data-inferred": e?.inferred ? "true" : undefined,
         "data-vlan": style?.vid,
         "data-path": e?.members.some((m) => props.pathEdges.has(m)) ? "true" : undefined,
         style: style ? { "--vlan": style.hex } : undefined,
       };
     };
+    const mid = () => {
+      const e = edge();
+      return e ? { x: (e.x1 + e.x2) / 2, y: (e.y1 + e.y2) / 2 } : { x: 0, y: 0 };
+    };
     return (
-      <Show
-        when={edge()?.tree}
-        fallback={<path {...attrs()} d={edge() ? curve(edge() as PlacedEdge) : ""} />}
-      >
-        <line {...attrs()} x1={edge()?.x1} y1={edge()?.y1} x2={edge()?.x2} y2={edge()?.y2} />
-      </Show>
+      <>
+        <Show
+          when={edge()?.tree}
+          fallback={<path {...attrs()} d={edge() ? curve(edge() as PlacedEdge) : ""} />}
+        >
+          <line {...attrs()} x1={edge()?.x1} y1={edge()?.y1} x2={edge()?.x2} y2={edge()?.y2} />
+        </Show>
+        <Show when={edge()?.inferred}>
+          <text class="edge-mark" data-testid="topology-edge-inferred" x={mid().x} y={mid().y} text-anchor="middle" dominant-baseline="central">
+            <title>{t("topology.edge.inferred")}</title>?
+          </text>
+        </Show>
+      </>
     );
   };
 
@@ -331,6 +347,13 @@ export function TopologyMap(props: TopologyMapProps) {
         <text class="label" y="30" text-anchor="middle">
           {shortLabel(label())}
         </text>
+        <Show when={info() && nodeSecondLine(info() as TopologyNode)}>
+          {(line) => (
+            <text class="label sub" data-testid="topology-node-second" y="42" text-anchor="middle">
+              {shortLabel(line(), 32)}
+            </text>
+          )}
+        </Show>
       </g>
     );
   };
@@ -338,6 +361,11 @@ export function TopologyMap(props: TopologyMapProps) {
   const GroupShape = (p: { id: string }) => {
     const placed = () => placedById().get(p.id);
     const count = () => placed()?.members?.length ?? 0;
+    const bucket = () => groupBucket(p.id);
+    const text = () => {
+      const b = bucket();
+      return b === undefined ? t("topology.group.label", { count: count() }) : t("topology.group.bucket", { count: count(), bucket: shortLabel(b, 16) });
+    };
     return (
       <g
         ref={(el) => {
@@ -351,7 +379,8 @@ export function TopologyMap(props: TopologyMapProps) {
         data-count={count()}
         data-path={props.pathNodes.has(p.id) ? "true" : undefined}
         role="button"
-        aria-label={t("topology.group.aria", { count: count() })}
+        data-bucket={bucket()}
+        aria-label={bucket() === undefined ? t("topology.group.aria", { count: count() }) : t("topology.group.bucket_aria", { count: count(), bucket: bucket() ?? "" })}
         aria-expanded="false"
         tabindex={tabbable() === p.id ? 0 : -1}
         transform={`translate(${placed()?.x ?? 0} ${placed()?.y ?? 0})`}
@@ -360,7 +389,7 @@ export function TopologyMap(props: TopologyMapProps) {
       >
         <path class="shape" d={SHAPES.group} />
         <text class="count" y="0" text-anchor="middle" dominant-baseline="central">
-          {t("topology.group.label", { count: count() })}
+          {text()}
         </text>
       </g>
     );

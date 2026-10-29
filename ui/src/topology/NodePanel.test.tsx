@@ -119,7 +119,7 @@ describe("what the panel says about a device", () => {
     expect(screen.getByTestId("node-observation-link").getAttribute("href")).toBe("/discovery/observations/00:00:5e:00:53:a6");
     expect(screen.getByTestId("node-intent").textContent).toContain("This device is not a host in IPAM.");
     expect(screen.queryAllByTestId("intent-address")).toHaveLength(0);
-    expect(screen.getByTestId("node-ssids").textContent).toBe("home.example.test");
+    expect(screen.getByTestId("node-ssids").textContent).toBe("guest.example.test, home.example.test");
     expect(screen.getByTestId("node-sources").textContent).toBe("Network controller");
   });
 
@@ -267,6 +267,18 @@ describe("neighbours", () => {
     expect(plug.textContent).toContain("Wireless");
     expect(plug.textContent).toContain("network iot.example.test");
     expect(plug.querySelector("[data-vid]")?.getAttribute("data-vid")).toBe("30");
+  });
+
+  it("says that a link only a MAC table names is inferred, and not for a link a controller reports", async () => {
+    renderPanel(T.swCore);
+    await loaded(T.swCore);
+    const neighbours = within(screen.getByTestId("node-neighbours")).getAllByTestId("neighbour");
+    const printer = neighbours.find((n) => n.dataset.id === T.printer) as HTMLElement;
+    expect(printer.textContent).toContain("port 5");
+    expect(printer.textContent).toContain("inferred from the MAC table");
+    const nas = neighbours.find((n) => n.dataset.id === T.nas) as HTMLElement;
+    expect(nas.textContent).not.toContain("inferred");
+    expect(neighbours.filter((n) => n.textContent?.includes("inferred from the MAC table"))).toEqual([printer]);
   });
 });
 

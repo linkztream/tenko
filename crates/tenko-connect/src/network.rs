@@ -17,7 +17,7 @@ use std::{fmt, net::IpAddr};
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use tenko_core::{MacAddr, Timestamp, observe::Endpoint, observe::LinkKind};
+use tenko_core::{MacAddr, Timestamp, observe::Endpoint, observe::LinkKind, observe::RadioBand};
 
 use crate::{
     CallContext, Capability, ConnectorError,
@@ -426,6 +426,9 @@ pub struct ClientAttachment {
     /// Whether the client is the controller or Tenko's host (always protected).
     #[serde(default)]
     pub management: bool,
+    /// The radio band of a wireless client, when the controller reports it.
+    #[serde(default)]
+    pub band: Option<RadioBand>,
 }
 
 /// A network on the controller.
@@ -482,6 +485,10 @@ pub struct WirelessNetwork {
     /// The access points that broadcast it.
     #[serde(default)]
     pub access_points: Vec<DeviceRef>,
+    /// Whether the controller marks it as a guest network (isolated clients, a captive
+    /// portal).
+    #[serde(default)]
+    pub guest: bool,
 }
 
 /// Paths a connector never touches (CONN-09).
@@ -790,6 +797,7 @@ mod tests {
             }],
             links: vec![],
             clients: vec![ClientAttachment {
+                band: None,
                 mac: "00:00:5e:00:53:0a".parse().expect("mac"),
                 ip: Some("192.0.2.3".parse().expect("ip")),
                 device: DeviceRef("switch-a".to_owned()),
@@ -812,6 +820,7 @@ mod tests {
             }],
             profiles: vec![],
             wlans: vec![WirelessNetwork {
+                guest: false,
                 id: "wlan-iot".to_owned(),
                 ssid: "iot.example.net".to_owned(),
                 network: Some(NetworkRef("iot".to_owned())),

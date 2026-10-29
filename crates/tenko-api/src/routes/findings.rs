@@ -154,7 +154,10 @@ impl Access {
             FindingSource::Proposal => by(&self.proposals),
             FindingSource::Alarm => by(&self.prefixes),
             FindingSource::Job => by(&self.jobs),
-            FindingSource::Reconcile => self.observations.as_ref().is_some_and(by),
+            // The topology is a read of observations, as its map is.
+            FindingSource::Reconcile | FindingSource::Topology => {
+                self.observations.as_ref().is_some_and(by)
+            }
             FindingSource::Health => self.health,
         }
     }
@@ -167,7 +170,9 @@ fn record_of(finding: &Finding) -> ObjectRef {
         FindingSource::Proposal => ObjectRef::new(ObjectKind::Proposal, id()),
         FindingSource::Alarm => ObjectRef::new(ObjectKind::Prefix, id()),
         FindingSource::Job => ObjectRef::new(ObjectKind::Job, id()),
-        FindingSource::Reconcile => ObjectRef::new(ObjectKind::Observation, Uuid::nil()),
+        FindingSource::Reconcile | FindingSource::Topology => {
+            ObjectRef::new(ObjectKind::Observation, Uuid::nil())
+        }
         FindingSource::Health => system_object(),
     }
 }
@@ -183,10 +188,10 @@ fn record_of(finding: &Finding) -> ObjectRef {
     params(
         crate::list::PageParams,
         ("severity" = Option<String>, Query, description = "Only findings of these severities: `act`, `review`, `info`. Repeat the parameter or separate the values with commas."),
-        ("kind" = Option<String>, Query, description = "Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`."),
+        ("kind" = Option<String>, Query, description = "Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`, `topology_root`, `wlan_class`, `wlan_prefix`."),
         ("subject" = Option<String>, Query, description = "Only findings whose subject is of these kinds: `address`, `host`, `prefix`, `record`, `job`, `node`, `device`."),
         ("area" = Option<String>, Query, description = "Only findings of these areas: `ipam`, `dns`, `dhcp`, `discovery`, `topology`, `jobs`, `connectors`, `nodes`, `settings`."),
-        ("source" = Option<String>, Query, description = "Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`."),
+        ("source" = Option<String>, Query, description = "Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`, `topology`."),
         ("prefix" = Option<String>, Query, description = "Only findings about this prefix (identifier): its own subject, an address or a network inside it."),
         ("site" = Option<String>, Query, description = "Only findings about the prefixes of this site (identifier)."),
         ("q" = Option<String>, Query, description = "Only findings whose summary, subject or code contains this text (without case).")

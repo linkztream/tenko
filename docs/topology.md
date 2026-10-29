@@ -1,7 +1,7 @@
 # Topology
 
 - Status: Slice 2 (WP2.7)
-- Requirements: IPAM-20, CONN-05, CONN-18; IPAM-03 for the VLAN provision job described in the last section
+- Requirements: IPAM-20, CONN-05, CONN-08, CONN-18; IPAM-03 for the VLAN provision job described in the last section; the root, the SSID view and the map defaults of sections 6.1 to 6.3 are U7 of the UI plan ([ui-plan.md](plans/ui-plan.md), UI-Q10)
 
 Tenko draws the network as a graph: routers, switches, access points, hypervisors, virtual machines, containers and hosts as nodes; wired ports, wireless associations, LLDP links, uplinks and the placement of virtual machines as edges. The graph is computed from what the sources observe and joined with the intended state, so the map shows both what is plugged in where and what IPAM knows about it. Nothing about the graph is stored: it is computed from the store when it is read.
 
@@ -57,9 +57,11 @@ A node carries its label (the host of intent, else the controller's name, the in
 
 A client reported by several sources (the controller and an SNMP probe) is one edge with every source listed, whatever each source calls the port. Links are one edge per pair of ports. An edge whose two ends turn out to be the same device is dropped.
 
+A `wired` or `wireless` edge that no network controller reports is **inferred** (`inferred: true`, also on the neighbours of the node view): only a bridge table of a probe names it, and a MAC address learned on a port says that the device is somewhere behind that port, not that it hangs on it. LLDP links, uplinks and placements of virtual machines are never inferred.
+
 ## 4 The API
 
-`GET /api/v1/topology` answers the nodes, the edges and a summary: counts per node and edge kind before and after filtering, the VLANs in view with the names of their VLAN objects, the sites, the controllers with their last read or error, and the networks the controllers report (`networks`: the connector, the controller's reference, name, VLAN id, subnet, `dhcp` as `disabled`, `relay` or `server` when the controller reports it, and the `management` flag). Filters, combined with AND:
+`GET /api/v1/topology` answers the nodes, the edges and a summary: counts per node and edge kind before and after filtering, the VLANs in view with the names of their VLAN objects, the sites, the controllers with their last read or error and whether they allow writes (`writes_enabled`, TGL-20), the networks the controllers report (`networks`: the connector, the controller's reference, name, VLAN id, subnet, `dhcp` as `disabled`, `relay` or `server` when the controller reports it, and the `management` flag), and the root the map is drawn from (`root`: the node, the source that names it and whether a person chose it, section 6.1). Filters, combined with AND:
 
 | Parameter | Keeps |
 |---|---|
@@ -80,11 +82,42 @@ The graph is computed from one read view of the store: every fact of the observa
 
 ## 6 The map in the web UI
 
-The topology area (`/topology`, the `T` chord of the `G` shortcuts) draws the graph as SVG and loads its code only when it is opened, so the first page load does not grow. Network devices form a forest from the routers outward; the clients of a switch or an access point sit in a grid under it, and more than twelve clients under one parent are drawn as one group that opens on demand. Edge kinds have their own line styles. Filters choose the site, the VLAN, the kinds and a search text; the map follows live changes of observations and intent.
+The topology area (`/topology`, the `T` chord of the `G` shortcuts) draws the graph as SVG and loads its code only when it is opened, so the first page load does not grow. Network devices form a forest from the root outward (section 6.1); the clients of a switch or an access point sit in a grid under it, collapsed into a count per port or SSID until opened (section 6.3), and with every endpoint drawn more than twelve clients under one parent are one group that opens on demand. Edge kinds have their own line styles. Filters choose the site, the VLAN, the kinds and a search text; the map follows live changes of observations and intent.
 
 Under the controller lines, a disclosure "N networks from the network controllers" lists every network the controllers report: name, VLAN chip (or "untagged"), subnet (or "no subnet"), the DHCP mode and a "Management" tag for the network Tenko or the controller is reached through, with the controller's name when there are several. The list is also there when the controller runs on a server of its own and no gateway of it is on the map.
 
 Selecting a node opens its panel with its ports and what hangs on each, its neighbours, and links to the host page and to the observations of the device. The panel of a router that a network controller reports also lists that controller's networks, as above. The panel highlights the path to the nearest router or between two chosen nodes. The map is keyboard reachable: one node is in the tab order at a time, the arrow keys move to the nearest node in that direction, Enter opens the panel, and `+`, `-` and `0` zoom and fit. VLAN colors follow the rules of IPAM-20 (design decision 11): hues spread around the circle for the VLANs in view with at least 3:1 contrast against the map, a swatch shape and the VLAN id as text as the redundant cues; with 150 or more VLANs in view only the selected VLAN keeps its color.
+
+### 6.1 The root of the map
+
+The map is drawn from one root, named by two sources in this order (UI-Q10):
+
+1. **The controller's gateway**, when a network controller manages the gateway: the node a controller reports as a gateway (only a controller makes a `router`).
+2. **The node's default route**: the next hop of the default route of the host Tenko runs on, read as the service account `tenko` can, with no privilege and no capability: `/proc/net/route` and `/proc/net/ipv6_route` on Linux (both world-readable), `Get-NetRoute -DestinationPrefix 0.0.0.0/0,::/0` through PowerShell on Windows (readable by every account); on other platforms nothing is read and the controller's gateway alone names the root. IPv4 comes before IPv6, the lowest metric first, and a read is kept for a minute. The candidate is the node that holds the next hop, else the address alone; an access point is never a candidate.
+
+When both sources name a root and they are different nodes, the sources **disagree**: the findings index lists one finding to review, kind `topology_root`, area topology, with the two candidates in its parameters (`controller_label`, `controller_node`, `controller_ip`, `default_route_label`, `default_route_node`, `default_route_ip`) and the action `use_root`. The map shows the note "Topology root: sources disagree" above the drawing with **Use this** per candidate. The choice is stored (`ipam.topology_root`, one row: the source, the keys of the candidates on offer, who and when), audited as `ipam.topology_root.choose`, and survives a restart; while the sources offer the same candidates the finding stays away. The map follows the chosen source whenever that source names a root; other candidates raise the finding again. Without a choice the ranked source decides.
+
+| Endpoint | Operation | Authorization |
+|---|---|---|
+| `GET /api/v1/topology/root` | `get_topology_root` | `read` on observations; the candidates, the root, `disagree`, `open` (the finding is raised), the stored choice and its `ETag` |
+| `PUT /api/v1/topology/root` | `choose_topology_root` | `update` on VLANs; body `{"source": "controller" \| "default_route"}`, optional `If-Match`; 409 `ipam.topology.no_candidate` when the source names no root now |
+| `DELETE /api/v1/topology/root` | `clear_topology_root` | `update` on VLANs; audited as `ipam.topology_root.clear`; 404 `ipam.topology.not_stored` without a choice |
+
+The layout starts its forest from the root, then from the routers, then from switches and other network devices, and only then from access points, so an access point is never on top while a router, switch or device reaches it. A server is never drawn as the uplink of a switch: a host, virtual machine, container or hypervisor becomes the parent of a network device only over an LLDP link or an uplink.
+
+### 6.2 The SSID view
+
+First look: which SSID carries which VLAN, and how many clients sit on each. The topology page has two tabs, **Map** and **SSIDs** (`/topology?view=ssids`, arrow keys move between them). The SSID view is a tree: SSID, then VLAN, then clients; the access point and the band (2.4, 5 or 6 GHz) are columns of the client row, never levels of the tree. Per SSID: the VLAN it carries, the networks of intent linked to that VLAN, the client count, the policy of the WLAN rules (Track or Ignore) and the count of findings. A client shows its host of intent (or the controller's name, else the MAC address), a hashed name with vendor and address as a second line, the MAC address, the address the controller reports, the access point and the band; a client with a finding shows it with **Move…** (the host page, where the move flow of [moves.md](moves.md) starts) and **Keep on this WLAN**.
+
+The clients come from the network controllers only (CONN-05): their topology read, with the access point, the SSID, the VLAN and the band; nothing is written to a controller (CONN-08, CONN-09). The two WLAN rules that read the view, the exception and the policy are in [reconciliation.md](reconciliation.md) section 4.12. `GET /api/v1/topology/ssids` (`list_topology_ssids`, `read` on observations) answers the view; a principal whose grants cover only some hosts sees the clients of those.
+
+### 6.3 Defaults of the map
+
+- **Infrastructure first.** Routers, switches, access points and hypervisors are drawn; the endpoints of one port or one SSID collapse into a count on it ("4 · 2 devices", "iot.example.test · 3 devices"), which opens on Enter or a click. The **Endpoints** switch of the filter bar draws every endpoint and is remembered by the browser. A kind filter shows exactly the kinds it names, as before.
+- **Inferred links** draw dashed with a question mark, and the panel says "inferred from the MAC table".
+- **Hashed names** (`host-00005e005301`, Tenko's own fallback) get the vendor and the address as a second line.
+- **Not placed.** Devices with no link at all (other than network devices and hypervisors) are not drawn in the forest but listed in a "Not placed" line under the map; a device with the same name or an address of another device is marked as a duplicate there.
+- **Read-only under Hardened.** While the Hardened profile is active and no network controller allows writes (TGL-20), the map and the SSID view offer no write action: no Use this, no Keep on this WLAN, no policy switch and no move (`docs/SECURITY-PROFILES.md`, "Read-only topology in Hardened"). The server still decides every request.
 
 ### Choice of the drawing library
 

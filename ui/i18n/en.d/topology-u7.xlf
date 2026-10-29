@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="topology-u7">
+      <unit id="topology.view.label">
+        <segment><source>Topology views</source></segment>
+      </unit>
+      <unit id="topology.view.map">
+        <segment><source>Map</source></segment>
+      </unit>
+      <unit id="topology.view.ssids">
+        <segment><source>SSIDs</source></segment>
+      </unit>
+      <unit id="topology.filter.endpoints">
+        <segment><source>Endpoints</source></segment>
+      </unit>
+      <unit id="topology.filter.endpoints_hint">
+        <segment><source>Show every endpoint instead of a count per port or SSID</source></segment>
+      </unit>
+      <unit id="topology.edge.inferred">
+        <segment><source>inferred from the MAC table</source></segment>
+      </unit>
+      <unit id="topology.edge.inferred_legend">
+        <segment><source>Inferred from the MAC table (?)</source></segment>
+      </unit>
+      <unit id="topology.group.bucket">
+        <segment><source>{bucket} · {count, plural, one {# device} other {# devices}}</source></segment>
+      </unit>
+      <unit id="topology.group.bucket_aria">
+        <segment><source>{count, plural, one {# device on {bucket}, open the group} other {# devices on {bucket}, open the group}}</source></segment>
+      </unit>
+      <unit id="topology.unplaced.label">
+        <segment><source>Devices not placed on the map</source></segment>
+      </unit>
+      <unit id="topology.unplaced.title">
+        <segment><source>Not placed · {count, number}</source></segment>
+      </unit>
+      <unit id="topology.unplaced.duplicate">
+        <segment><source>{count, plural, one {Duplicate} other {# duplicates}}</source></segment>
+      </unit>
+      <unit id="topology.read_only">
+        <segment><source>Read-only: no network controller allows writes under the Hardened profile</source></segment>
+      </unit>
+      <unit id="topology.root.disagree">
+        <segment><source>Topology root: sources disagree</source></segment>
+      </unit>
+      <unit id="topology.root.disagree_hint">
+        <segment><source>The map is drawn from the ranked source until you choose; the choice is remembered.</source></segment>
+      </unit>
+      <unit id="topology.root.from_controller">
+        <segment><source>{label} (controller)</source></segment>
+      </unit>
+      <unit id="topology.root.from_route">
+        <segment><source>{label} (default route)</source></segment>
+      </unit>
+      <unit id="topology.root.use">
+        <segment><source>Use this</source></segment>
+      </unit>
+      <unit id="topology.band.2g">
+        <segment><source>2.4 GHz</source></segment>
+      </unit>
+      <unit id="topology.band.5g">
+        <segment><source>5 GHz</source></segment>
+      </unit>
+      <unit id="topology.band.6g">
+        <segment><source>6 GHz</source></segment>
+      </unit>
+      <unit id="topology.ssid.label">
+        <segment><source>SSIDs with their VLANs and clients</source></segment>
+      </unit>
+      <unit id="topology.ssid.empty">
+        <segment><source>No network controller reports an SSID.</source></segment>
+      </unit>
+      <unit id="topology.ssid.untagged">
+        <segment><source>untagged</source></segment>
+      </unit>
+      <unit id="topology.ssid.vlan">
+        <segment><source>VLAN {vid, number, ::group-off} {name}</source></segment>
+      </unit>
+      <unit id="topology.ssid.guest">
+        <segment><source>Guest</source></segment>
+      </unit>
+      <unit id="topology.ssid.clients">
+        <segment><source>{count, plural, one {# client} other {# clients}}</source></segment>
+      </unit>
+      <unit id="topology.ssid.findings">
+        <segment><source>{count, plural, one {# to review} other {# to review}}</source></segment>
+      </unit>
+      <unit id="topology.ssid.collapse">
+        <segment><source>Collapse {ssid}</source></segment>
+      </unit>
+      <unit id="topology.ssid.expand">
+        <segment><source>Expand {ssid}</source></segment>
+      </unit>
+      <unit id="topology.ssid.policy.track">
+        <segment><source>Track</source></segment>
+      </unit>
+      <unit id="topology.ssid.policy.ignore">
+        <segment><source>Ignore</source></segment>
+      </unit>
+      <unit id="topology.ssid.policy.hint">
+        <segment><source>Whether the WLAN rules read this SSID; a guest SSID is ignored unless you change it</source></segment>
+      </unit>
+      <unit id="topology.ssid.iot_device">
+        <segment><source>IoT</source></segment>
+      </unit>
+      <unit id="topology.ssid.finding.wlan_class">
+        <segment><source>IoT device on a non-IoT WLAN</source></segment>
+      </unit>
+      <unit id="topology.ssid.finding.wlan_prefix">
+        <segment><source>Address outside the VLAN's network</source></segment>
+      </unit>
+      <unit id="topology.ssid.kept">
+        <segment><source>Kept on this WLAN</source></segment>
+      </unit>
+      <unit id="topology.ssid.move">
+        <segment><source>Move…</source></segment>
+      </unit>
+      <unit id="topology.ssid.keep">
+        <segment><source>Keep on this WLAN</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.client">
+        <segment><source>Client</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.mac">
+        <segment><source>MAC address</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.address">
+        <segment><source>Address</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.access_point">
+        <segment><source>Access point</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.band">
+        <segment><source>Band</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.findings">
+        <segment><source>Findings</source></segment>
+      </unit>
+      <unit id="topology.ssid.col.actions">
+        <segment><source>Actions</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.topology_root">
+        <segment><source>Topology root</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.wlan_class">
+        <segment><source>IoT on a non-IoT WLAN</source></segment>
+      </unit>
+      <unit id="dashboard.finding.kind.wlan_prefix">
+        <segment><source>Address outside the WLAN's network</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_topology">
+        <segment><source>Open the topology</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.open_ssids">
+        <segment><source>Open the SSID view</source></segment>
+      </unit>
+      <unit id="errors.ipam.topology.invalid">
+        <segment><source>The topology decision is not valid: {field} is out of bounds.</source></segment>
+      </unit>
+      <unit id="errors.ipam.topology.no_candidate">
+        <segment><source>That source names no root of the map now.</source></segment>
+      </unit>
+      <unit id="errors.ipam.topology.not_stored">
+        <segment><source>Nothing is stored to remove.</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.topology_root.choose">
+        <segment><source>Choose the root of the topology map</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.topology_root.clear">
+        <segment><source>Forget the chosen root of the topology map</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.wlan_policy.set">
+        <segment><source>Set the WLAN policy of an SSID</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.wlan_policy.clear">
+        <segment><source>Remove the WLAN policy of an SSID</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.wlan_exception.keep">
+        <segment><source>Keep a host on a WLAN</source></segment>
+      </unit>
+      <unit id="audit.action.ipam.wlan_exception.clear">
+        <segment><source>Remove a WLAN exception</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

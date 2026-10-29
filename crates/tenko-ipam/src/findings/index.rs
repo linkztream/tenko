@@ -58,6 +58,8 @@ struct State {
     conflicts: BTreeMap<(VrfId, IpAddr), u32>,
     /// When each health condition was first seen by this index.
     health_since: BTreeMap<String, Timestamp>,
+    /// When each topology finding was first seen by this index.
+    topology_since: BTreeMap<String, Timestamp>,
     /// The counts of every visible finding, until the next change.
     counts: Option<FindingCounts>,
 }
@@ -517,6 +519,39 @@ impl FindingsIndex {
             let id = item.id();
             let since = *state.health_since.entry(id.clone()).or_insert(now);
             changed |= state.put(&id, Some(map::of_health(item, since)), false);
+        }
+        changed
+    }
+
+    /// Replaces the topology's findings (its root and the WLAN rules) with `findings` as of
+    /// `now`; a finding keeps the time it was first seen while it lasts. Answers whether they
+    /// changed.
+    pub fn set_topology(&self, findings: Vec<Finding>, now: Timestamp) -> bool {
+        const PREFIX: &str = "topology:";
+        let mut state = self.write();
+        let ids: BTreeSet<String> = findings.iter().map(|f| f.id.clone()).collect();
+        state.topology_since.retain(|id, _| ids.contains(id));
+        let mut changed = false;
+        let gone: Vec<String> = state
+            .entries
+            .range(PREFIX.to_owned()..)
+            .take_while(|(id, _)| id.starts_with(PREFIX))
+            .filter(|(id, _)| !ids.contains(*id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in gone {
+            changed |= state.remove(&id);
+        }
+        for mut finding in findings {
+            if !finding.id.starts_with(PREFIX) {
+                continue;
+            }
+            finding.since = *state
+                .topology_since
+                .entry(finding.id.clone())
+                .or_insert(now);
+            let id = finding.id.clone();
+            changed |= state.put(&id, Some(finding), false);
         }
         changed
     }

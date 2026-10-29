@@ -125,6 +125,7 @@ fn port_state(index: u16) -> ControllerPortState {
 
 fn wlan(ssid: &str, vid: u16) -> ControllerWlan {
     ControllerWlan {
+        guest: false,
         ssid: ssid.to_owned(),
         vlan: Some(vid),
         enabled: true,

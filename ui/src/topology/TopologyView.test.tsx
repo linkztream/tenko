@@ -1,26 +1,31 @@
-import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { cleanup, fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import type { components } from "../api/generated/schema";
 import { server } from "../api/mock/node";
-import { TOPOLOGY_COUNTS, TOPOLOGY_IDS, topologyState } from "../api/mock/topology-store";
+import { mockVlanController, TOPOLOGY_COUNTS, TOPOLOGY_IDS, TOPOLOGY_SSIDS, topologyState } from "../api/mock/topology-store";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { bridgeMockEvents } from "../audit/testkit";
-import { signInAlex } from "../auth/account/testkit";
+import { db, signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
 import TopologyView from "./TopologyView";
 
 type Graph = components["schemas"]["TopologyGraph"];
 
 const T = TOPOLOGY_IDS;
+const SSID = TOPOLOGY_SSIDS;
 const PROBLEM = { "content-type": "application/problem+json" };
 
 let stopBridge: (() => void) | undefined;
 
+/** The browser's "Endpoints" switch of the map: these scenarios draw every endpoint. */
+const ENDPOINTS_KEY = "tenko-topology-endpoints";
+
 beforeEach(async () => {
   await signInAlex();
+  localStorage.setItem(ENDPOINTS_KEY, "all");
 });
 
 afterEach(() => {
@@ -115,8 +120,8 @@ describe("the map", () => {
       for (const item of items) out[item.dataset.kind as string] = (out[item.dataset.kind as string] ?? 0) + 1;
       return out;
     };
-    expect(count(nodes())).toEqual({ access_point: 3, container: 1, host: 14, hypervisor: 1, router: 1, switch: 2, vm: 2 });
-    expect(count(edges())).toEqual({ lldp: 1, uplink: 4, vm_host: 3, wired: 9, wireless: 6 });
+    expect(count(nodes())).toEqual({ access_point: 3, container: 1, host: 15, hypervisor: 1, router: 1, switch: 2, vm: 2 });
+    expect(count(edges())).toEqual({ lldp: 1, uplink: 4, vm_host: 3, wired: 9, wireless: 7 });
 
     // Every device has a shape, a name with its kind in words, a visible label and a tooltip.
     const gateway = node(T.gateway);
@@ -150,7 +155,7 @@ describe("the map", () => {
 
   it("says how much of the graph is shown and how the controller read went", async () => {
     await openMap();
-    expect(screen.getByTestId("topology-summary").textContent).toBe("Showing 24 of 24 devices and 23 of 23 links");
+    expect(screen.getByTestId("topology-summary").textContent).toBe(`Showing ${TOPOLOGY_COUNTS.nodes} of ${TOPOLOGY_COUNTS.nodes} devices and ${TOPOLOGY_COUNTS.edges} of ${TOPOLOGY_COUNTS.edges} links`);
     expect(screen.queryByTestId("topology-truncated")).toBeNull();
     const controllers = screen.getAllByTestId("topology-controller");
     expect(controllers).toHaveLength(1);
@@ -192,7 +197,14 @@ describe("the map", () => {
     expect(vids).toEqual(graph.summary.vlans.map((v) => String(v.vid)));
     expect(within(legend).getAllByTestId("legend-vlan")[0]?.textContent).toMatch(/^10\s*\S/);
     // The edge kinds in view come with a line sample and a word, the device kinds with a shape and a word.
-    expect(within(legend).getAllByTestId("legend-edge").map((li) => li.dataset.kind)).toEqual(["uplink", "wired", "wireless", "lldp", "vm_host"]);
+    expect(within(legend).getAllByTestId("legend-edge").map((li) => li.dataset.kind)).toEqual([
+      "uplink",
+      "wired",
+      "wireless",
+      "lldp",
+      "vm_host",
+      "inferred",
+    ]);
     expect(within(legend).getAllByTestId("legend-edge")[0]?.textContent).toBe("Uplink");
     expect(within(legend).getAllByTestId("legend-kind").map((li) => li.dataset.kind)).toEqual([
       "router",
@@ -216,7 +228,7 @@ describe("the map", () => {
     expect(edges().filter((e) => e.dataset.kind === "wired" && e.dataset.vlan === undefined).length).toBeGreaterThan(0);
     const legend = screen.getByTestId("topology-legend");
     expect(within(legend).getAllByTestId("legend-vlan").map((li) => li.dataset.vid)).toEqual(["30"]);
-    expect(within(legend).getByTestId("legend-vlans-neutral").textContent).toContain("203 VLANs are in view");
+    expect(within(legend).getByTestId("legend-vlans-neutral").textContent).toContain("204 VLANs are in view");
   });
 
   it("opens in the selected language", async () => {
@@ -224,7 +236,7 @@ describe("the map", () => {
     await setLocale("sv");
     try {
       await openMap();
-      expect(screen.getByTestId("topology-summary").textContent).toBe("Visar 24 av 24 enheter och 23 av 23 länkar");
+      expect(screen.getByTestId("topology-summary").textContent).toBe(`Visar ${TOPOLOGY_COUNTS.nodes} av ${TOPOLOGY_COUNTS.nodes} enheter och ${TOPOLOGY_COUNTS.edges} av ${TOPOLOGY_COUNTS.edges} länkar`);
       expect(node(T.gateway).getAttribute("aria-label")).toBe("gw, Router");
       expect(node(T.apHall).getAttribute("aria-label")).toBe("ap-hall, Accesspunkt");
       expect(screen.getByTestId("topology-map").getAttribute("aria-label")).toBe("Nätverkskarta");
@@ -246,7 +258,7 @@ describe("the filters", () => {
     await waitFor(() => expect(nodeIds()).toEqual(sorted(expected)));
     expect(nodes().length).toBeLessThan(TOPOLOGY_COUNTS.nodes);
     expect(view.location()).toBe("/topology?vlan=30");
-    expect(screen.getByTestId("topology-summary").textContent).toContain(`Showing ${expected.length} of 24 devices`);
+    expect(screen.getByTestId("topology-summary").textContent).toContain(`Showing ${expected.length} of ${TOPOLOGY_COUNTS.nodes} devices`);
     expect((screen.getByTestId("filter-vlan") as HTMLSelectElement).value).toBe("30");
 
     fireEvent.change(screen.getByTestId("filter-vlan"), { target: { value: "" } });
@@ -393,7 +405,7 @@ describe("groups", () => {
 
   it("opens on Space and on click", async () => {
     addClients(T.swDesk, 10);
-    await openMap("/topology", 24 + 10 - 15);
+    await openMap("/topology", TOPOLOGY_COUNTS.nodes + 10 - 15);
     fireEvent.keyDown(screen.getByTestId("topology-group"), { key: " " });
     await waitFor(() => expect(groups()).toHaveLength(0));
     fireEvent.click(screen.getByTestId("topology-groups-close"));
@@ -404,7 +416,7 @@ describe("groups", () => {
 
   it("opens the group of a device that a link names", async () => {
     const extra = addClients(T.swDesk, 10);
-    await openMap(`/topology/${extra[3]}`, 24 + 10);
+    await openMap(`/topology/${extra[3]}`, TOPOLOGY_COUNTS.nodes + 10);
     expect(groups()).toHaveLength(0);
     expect(node(extra[3] as string).dataset.selected).toBe("true");
     expect((await screen.findByTestId("node-panel")).dataset.id).toBe(extra[3]);
@@ -413,7 +425,7 @@ describe("groups", () => {
 
 describe("selecting a device", () => {
   it("opens the panel at /topology/<id> when the device is clicked, and keeps the filters", async () => {
-    const view = await openMap("/topology?kind=host,switch,router", 17);
+    const view = await openMap("/topology?kind=host,switch,router", 18);
     fireEvent.click(node(T.swCore));
     await waitFor(() => expect(view.location()).toBe(`/topology/${T.swCore}?kind=host,switch,router`));
     const panel = await screen.findByTestId("node-panel");
@@ -524,7 +536,7 @@ describe("paths", () => {
   });
 
   it("disables the path to a router with its reason when no router is in view", async () => {
-    await openMap(`/topology/${T.nas}?kind=host`, 14);
+    await openMap(`/topology/${T.nas}?kind=host`, 15);
     const button = (await screen.findByTestId("node-path-router")) as HTMLButtonElement;
     await screen.findByTestId("node-label");
     expect(button.disabled).toBe(true);
@@ -541,7 +553,7 @@ describe("paths", () => {
 
   it("marks the group when the path ends in a hidden device", async () => {
     const extra = addClients(T.swDesk, 10);
-    const view = await openMap(`/topology/${extra[0]}`, 24 + 10);
+    const view = await openMap(`/topology/${extra[0]}`, TOPOLOGY_COUNTS.nodes + 10);
     fireEvent.click(await screen.findByTestId("node-path-router"));
     await waitFor(() => expect(pathNodeIds()).toEqual(sorted([extra[0] as string, T.swDesk, T.swCore, T.gateway])));
     expect(view.location()).toBe(`/topology/${extra[0]}`);
@@ -571,7 +583,7 @@ describe("the keyboard", () => {
   });
 
   it("starts at the first device when there is no router", async () => {
-    await openMap("/topology?kind=switch,host", 16);
+    await openMap("/topology?kind=switch,host", 17);
     expect(tabStops()).toHaveLength(1);
     expect(tabStops()[0]?.dataset.id).toBe(nodeIds()[0]);
   });
@@ -723,7 +735,7 @@ describe("states", () => {
     const empty = await screen.findByTestId("topology-empty");
     expect(empty.textContent).toContain("No device matches the filter");
     expect(empty.textContent).not.toContain("Nothing to draw yet");
-    expect(screen.getByTestId("topology-summary").textContent).toContain("Showing 0 of 24 devices");
+    expect(screen.getByTestId("topology-summary").textContent).toContain(`Showing 0 of ${TOPOLOGY_COUNTS.nodes} devices`);
     expect((screen.getByTestId("filter-input") as HTMLInputElement).value).toBe("no-such-device");
   });
 
@@ -890,6 +902,485 @@ describe("the drawing", () => {
   });
 });
 
+/** The translation of a drawn device, `translate(x y)`. */
+function positionOf(id: string): [number, number] {
+  const m = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(node(id).getAttribute("transform") ?? "");
+  return [Number(m?.[1]), Number(m?.[2])];
+}
+
+/** The first address of a device of the mock lab. */
+function addressOf(id: string): string {
+  const ip = topologyState().nodes.find((n) => n.id === id)?.ips?.[0];
+  if (ip === undefined) throw new Error(`the device ${id} has no address`);
+  return ip;
+}
+
+/** A device of the mock lab that no source links to anything. */
+function addIsolated(id: string, label: string, extra: Partial<components["schemas"]["TopologyNode"]> = {}): string {
+  const mac = `00:00:5e:00:${id.slice(-4, -2)}:${id.slice(-2)}`;
+  topologyState().nodes.push({ id, kind: "host", label, macs: [mac], subject: mac, sources: ["network_controller:test"], ...extra });
+  return id;
+}
+
+/** Adds `count` wired clients on one port of a switch; returns their ids. */
+function addOnPort(parent: string, port: string, count: number): string[] {
+  const ids: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const n = String(i).padStart(2, "0");
+    const id = `m-00005e00fe${n}`;
+    const mac = `00:00:5e:00:fe:${n}`;
+    topologyState().nodes.push({ id, kind: "host", label: `shared-${n}`, macs: [mac], subject: mac, vlans: [10], sources: ["network_controller:test"] });
+    topologyState().edges.push({ id: `e-0000000fe0${n}`, kind: "wired", a: parent, a_port: port, b: id, vlan: 10, sources: ["network_controller:test"] });
+    ids.push(id);
+  }
+  return ids;
+}
+
+describe("endpoints", () => {
+  // The default of the browser: infrastructure first, the switch of the map is off.
+  beforeEach(() => {
+    localStorage.removeItem(ENDPOINTS_KEY);
+  });
+
+  const groupIds = (): string[] => groups().map((g) => g.dataset.id as string).sort();
+  // Three devices on iot.example.test under ap-hall, two under ap-garage, and the three guests
+  // of pve1, which have no port or SSID, are hidden: eight devices in three groups.
+  const COLLAPSED = TOPOLOGY_COUNTS.nodes - 8;
+  const HALL = `group:${T.apHall}#${SSID.iot}`;
+  const GARAGE = `group:${T.apGarage}#${SSID.iot}`;
+
+  it("collapses the endpoints of one SSID into a group that names the SSID", async () => {
+    await openMap("/topology", COLLAPSED);
+    expect(groupIds()).toEqual([GARAGE, HALL, `group:${T.pve1}`].sort());
+    const hall = groups().find((g) => g.dataset.id === HALL) as HTMLElement;
+    expect(hall.dataset.bucket).toBe(SSID.iot);
+    expect(hall.dataset.count).toBe("3");
+    expect(hall.textContent).toBe("iot.example.test · 3 devices");
+    expect(hall.getAttribute("aria-label")).toBe("3 devices on iot.example.test, open the group");
+    const garage = groups().find((g) => g.dataset.id === GARAGE) as HTMLElement;
+    expect(garage.dataset.count).toBe("2");
+    // The virtual machines of a hypervisor have no port or SSID: a group of the whole parent, with no bucket.
+    const guests = groups().find((g) => g.dataset.id === `group:${T.pve1}`) as HTMLElement;
+    expect(guests.dataset.bucket).toBeUndefined();
+    expect(guests.dataset.count).toBe("3");
+    expect(guests.textContent).toBe("3 devices");
+    // The IoT devices and the guests are not drawn; the one device on its own SSID and the infrastructure are.
+    for (const id of [T.plug, T.camera, T.speaker, T.thermostat, T.sensor, T.mediaPc, T.buildVm, T.dnsCt]) expect(nodeIds()).not.toContain(id);
+    expect(nodeIds()).toContain(T.tv);
+    expect(nodeIds()).toContain(T.guestClient);
+    expect(nodes().filter((n) => n.dataset.kind !== "host")).toHaveLength(7);
+    // Eight links to the devices become one link per group.
+    expect(edges()).toHaveLength(TOPOLOGY_COUNTS.edges - 8 + 3);
+    expect(screen.getByTestId("filter-endpoints").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("collapses the endpoints of one port into a group that names the port", async () => {
+    const ids = addOnPort(T.swDesk, "9", 3);
+    await openMap("/topology", COLLAPSED + ids.length - 3);
+    const group = groups().find((g) => g.dataset.id === `group:${T.swDesk}#9`) as HTMLElement;
+    expect(group.dataset.bucket).toBe("9");
+    expect(group.dataset.count).toBe("3");
+    expect(group.textContent).toBe("9 · 3 devices");
+    expect(group.getAttribute("aria-label")).toBe("3 devices on 9, open the group");
+    // A device alone on its port stays a device.
+    expect(nodeIds()).toContain(T.tenko1);
+    expect(nodeIds()).not.toContain(ids[0]);
+  });
+
+  it("opens a group on click and shows its members, and only those", async () => {
+    await openMap("/topology", COLLAPSED);
+    expect(screen.queryByTestId("topology-groups-close")).toBeNull();
+    fireEvent.click(groups().find((g) => g.dataset.id === HALL) as HTMLElement);
+    await waitFor(() => expect(groups()).toHaveLength(2));
+    expect(groupIds()).toEqual([GARAGE, `group:${T.pve1}`].sort());
+    expect(nodes()).toHaveLength(COLLAPSED + 3);
+    for (const id of [T.plug, T.camera, T.speaker]) expect(nodeIds()).toContain(id);
+    for (const id of [T.thermostat, T.sensor, T.mediaPc]) expect(nodeIds()).not.toContain(id);
+    expect(edges()).toHaveLength(TOPOLOGY_COUNTS.edges - 5 + 2);
+
+    fireEvent.click(screen.getByTestId("topology-groups-close"));
+    await waitFor(() => expect(groups()).toHaveLength(3));
+  });
+
+  it("shows every endpoint with the Endpoints chip and remembers the choice in the browser", async () => {
+    await openMap("/topology", COLLAPSED);
+    const chip = screen.getByTestId("filter-endpoints");
+    expect(chip.textContent).toBe("Endpoints");
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    expect(localStorage.getItem(ENDPOINTS_KEY)).toBeNull();
+
+    fireEvent.click(chip);
+    await waitFor(() => expect(nodes()).toHaveLength(TOPOLOGY_COUNTS.nodes));
+    expect(groups()).toHaveLength(0);
+    expect(edges()).toHaveLength(TOPOLOGY_COUNTS.edges);
+    expect(screen.getByTestId("filter-endpoints").getAttribute("aria-pressed")).toBe("true");
+    expect(localStorage.getItem(ENDPOINTS_KEY)).toBe("all");
+
+    // A new page load starts the way the person left it.
+    cleanup();
+    await openMap();
+    expect(groups()).toHaveLength(0);
+    expect(screen.getByTestId("filter-endpoints").getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByTestId("filter-endpoints"));
+    await waitFor(() => expect(groups()).toHaveLength(3));
+    expect(localStorage.getItem(ENDPOINTS_KEY)).toBeNull();
+    expect(screen.getByTestId("filter-endpoints").getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("keeps working for the page when the browser refuses storage", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    try {
+      await openMap("/topology", COLLAPSED);
+      fireEvent.click(screen.getByTestId("filter-endpoints"));
+      await waitFor(() => expect(nodes()).toHaveLength(TOPOLOGY_COUNTS.nodes));
+      expect(screen.getByTestId("filter-endpoints").getAttribute("aria-pressed")).toBe("true");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe("inferred links", () => {
+  it("draws a link only a MAC table names dashed with a question mark and lists it in the legend", async () => {
+    await openMap();
+    const graph = await graphOf();
+    const inferred = graph.edges.filter((e) => e.inferred === true);
+    expect(inferred).toHaveLength(1);
+    expect(inferred[0]?.b).toBe(T.printer);
+
+    const drawn = edges().filter((e) => e.dataset.inferred === "true");
+    expect(drawn.map((e) => e.dataset.id)).toEqual([inferred[0]?.id]);
+    expect(drawn[0]?.dataset.kind).toBe("wired");
+    expect(drawn[0]?.classList.contains("edge-inferred")).toBe(true);
+    // The links that a controller reports are not marked.
+    expect(edges().filter((e) => e.dataset.inferred !== undefined)).toHaveLength(1);
+    expect(edges().filter((e) => e.classList.contains("edge-inferred"))).toHaveLength(1);
+
+    const marks = screen.getAllByTestId("topology-edge-inferred");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.textContent).toContain("?");
+    expect(marks[0]?.querySelector("title")?.textContent).toBe("inferred from the MAC table");
+
+    const entry = within(screen.getByTestId("topology-legend"))
+      .getAllByTestId("legend-edge")
+      .find((li) => li.dataset.kind === "inferred") as HTMLElement;
+    expect(entry.textContent).toBe("Inferred from the MAC table (?)");
+    expect(entry.querySelector("line")?.classList.contains("edge-inferred")).toBe(true);
+  });
+
+  it("has neither mark nor legend entry when no drawn link is inferred", async () => {
+    await openMap("/topology?kind=router,switch,access_point", 6);
+    expect(edges().filter((e) => e.dataset.inferred !== undefined)).toHaveLength(0);
+    expect(screen.queryAllByTestId("topology-edge-inferred")).toHaveLength(0);
+    expect(within(screen.getByTestId("topology-legend")).getAllByTestId("legend-edge").map((li) => li.dataset.kind)).not.toContain("inferred");
+  });
+});
+
+describe("devices with a hashed name", () => {
+  it("shows the vendor and the address as a second line", async () => {
+    const id = "m-00005e00ff01";
+    const label = "host-00005e00ff01";
+    topologyState().nodes.push({
+      id,
+      kind: "host",
+      label,
+      macs: ["00:00:5e:00:ff:01"],
+      subject: "00:00:5e:00:ff:01",
+      vendor: "Acme",
+      ips: ["192.0.2.77"],
+      vlans: [10],
+      sources: ["network_controller:test"],
+    });
+    topologyState().edges.push({ id: "e-0000000000a1", kind: "wired", a: T.swDesk, a_port: "9", b: id, vlan: 10, sources: ["network_controller:test"] });
+    await openMap("/topology", TOPOLOGY_COUNTS.nodes + 1);
+    const second = within(node(id)).getByTestId("topology-node-second");
+    expect(second.textContent).toBe("Acme · 192.0.2.77");
+    expect(node(id).querySelector("text.label")?.textContent).toBe(label);
+    expect(node(id).getAttribute("aria-label")).toBe(`${label}, Host`);
+    // A device with a name that says something has no second line, and neither has a made-up vendor label.
+    expect(screen.getAllByTestId("topology-node-second")).toHaveLength(1);
+    expect(within(node(T.unknown)).queryByTestId("topology-node-second")).toBeNull();
+    expect(within(node(T.gateway)).queryByTestId("topology-node-second")).toBeNull();
+  });
+
+  it("leaves the second line out when the device has neither vendor nor address", async () => {
+    const id = "m-00005e00ff03";
+    topologyState().nodes.push({ id, kind: "host", label: "host-00005e00ff03", macs: ["00:00:5e:00:ff:03"], subject: "00:00:5e:00:ff:03", sources: ["network_controller:test"] });
+    topologyState().edges.push({ id: "e-0000000000a3", kind: "wired", a: T.swDesk, a_port: "9", b: id, sources: ["network_controller:test"] });
+    await openMap("/topology", TOPOLOGY_COUNTS.nodes + 1);
+    expect(within(node(id)).queryByTestId("topology-node-second")).toBeNull();
+  });
+});
+
+describe("not placed", () => {
+  it("lists a device no source links to and does not draw it", async () => {
+    const id = addIsolated("m-00005e00ff02", "lonely-host");
+    await openMap();
+    expect(nodeIds()).not.toContain(id);
+    const section = screen.getByTestId("topology-unplaced");
+    expect(section.querySelector("h2")?.textContent).toBe("Not placed · 1");
+    const items = within(section).getAllByTestId("topology-unplaced-device");
+    expect(items.map((li) => li.dataset.id)).toEqual([id]);
+    expect(items[0]?.textContent).toContain("lonely-host");
+    expect(items[0]?.textContent).toContain("Host");
+    expect(within(section).queryByTestId("topology-duplicate")).toBeNull();
+    expect(section.getAttribute("aria-label")).toBe("Devices not placed on the map");
+    // The summary still counts it.
+    expect(screen.getByTestId("topology-summary").textContent).toContain(`Showing ${TOPOLOGY_COUNTS.nodes + 1} of ${TOPOLOGY_COUNTS.nodes + 1} devices`);
+  });
+
+  it("has no list when every device is placed", async () => {
+    await openMap();
+    expect(screen.queryByTestId("topology-unplaced")).toBeNull();
+  });
+
+  it("opens the panel of an unplaced device from the list", async () => {
+    const id = addIsolated("m-00005e00ff02", "lonely-host");
+    const view = await openMap();
+    fireEvent.click(within(screen.getByTestId("topology-unplaced-device")).getByRole("button", { name: "lonely-host" }));
+    await waitFor(() => expect(view.location()).toBe(`/topology/${id}`));
+    expect((await screen.findByTestId("node-panel")).dataset.id).toBe(id);
+    expect(screen.getByTestId("topology-unplaced-device").querySelector("button")?.getAttribute("aria-current")).toBe("true");
+    expect(nodeIds()).not.toContain(id);
+  });
+
+  it("marks an unplaced device with the label of another device as a duplicate", async () => {
+    addIsolated("m-00005e00ff02", "NAS");
+    await openMap();
+    const mark = screen.getByTestId("topology-duplicate");
+    expect(mark.textContent).toBe("Duplicate");
+    expect(mark.getAttribute("title")).toBe("nas");
+  });
+
+  it("marks an unplaced device with the address of another device as a duplicate", async () => {
+    addIsolated("m-00005e00ff02", "old-tenko", { ips: [addressOf(T.tenko1)] });
+    await openMap();
+    const mark = screen.getByTestId("topology-duplicate");
+    expect(mark.textContent).toBe("Duplicate");
+    expect(mark.getAttribute("title")).toBe("tenko1");
+  });
+
+  it("counts the duplicates when several devices share a label or an address", async () => {
+    addIsolated("m-00005e00ff02", "nas", { ips: [addressOf(T.tenko1)] });
+    await openMap();
+    const mark = screen.getByTestId("topology-duplicate");
+    expect(mark.textContent).toBe("2 duplicates");
+    expect((mark.getAttribute("title") ?? "").split(", ").sort()).toEqual(["nas", "tenko1"]);
+  });
+
+  it("gathers nothing while a kind filter is on, because the filter drops the links", async () => {
+    const id = addIsolated("m-00005e00ff02", "lonely-host");
+    await openMap("/topology?kind=host", 16);
+    expect(nodeIds()).toContain(id);
+    expect(screen.queryByTestId("topology-unplaced")).toBeNull();
+  });
+
+  it("speaks Swedish", async () => {
+    addIsolated("m-00005e00ff02", "lonely-host");
+    const { setLocale } = await import("../i18n");
+    await setLocale("sv");
+    try {
+      await openMap();
+      expect(screen.getByTestId("topology-unplaced").querySelector("h2")?.textContent).toBe("Inte placerade · 1");
+    } finally {
+      await setLocale("en");
+    }
+  });
+});
+
+describe("the root of the map", () => {
+  /** The default route points at sw-desk while the controller names the gateway. */
+  function disagree(): string {
+    const ip = addressOf(T.swDesk);
+    topologyState().nextHops = [ip];
+    return ip;
+  }
+
+  it("draws the map from the root the summary names", async () => {
+    await openMap();
+    expect((await graphOf()).summary.root).toEqual({ source: "controller", chosen: false, node: T.gateway });
+    const [, top] = positionOf(T.gateway);
+    for (const n of nodes()) expect(positionOf(n.dataset.id as string)[1]).toBeGreaterThanOrEqual(top);
+    // The root is the first tree and the one the keyboard starts at.
+    expect(positionOf(T.swDesk)[1]).toBeGreaterThan(top);
+  });
+
+  it("lists two candidates when the sources disagree and draws from the first until the person chooses", async () => {
+    disagree();
+    await openMap();
+    const notice = await screen.findByTestId("topology-root-notice");
+    expect(within(notice).getAllByTestId("topology-root-candidate").map((c) => c.dataset.source)).toEqual(["controller", "default_route"]);
+    expect(notice.textContent).toContain("gw (controller)");
+    expect(notice.textContent).toContain("sw-desk (default route)");
+    expect(within(notice).getAllByTestId("topology-root-use")).toHaveLength(2);
+    expect(positionOf(T.gateway)[1]).toBeLessThan(positionOf(T.swDesk)[1]);
+  });
+
+  it("stores \"Use this\", redraws the map from the chosen root and does not ask again", async () => {
+    disagree();
+    await openMap();
+    const notice = await screen.findByTestId("topology-root-notice");
+    const route = within(notice).getAllByTestId("topology-root-candidate").find((c) => c.dataset.source === "default_route") as HTMLElement;
+    fireEvent.click(within(route).getByTestId("topology-root-use"));
+    await waitFor(() => expect(screen.queryByTestId("topology-root-notice")).toBeNull());
+    expect((await graphOf()).summary.root).toEqual({ source: "default_route", chosen: true, node: T.swDesk });
+    // sw-desk is the root now: nothing is drawn above it, and the gateway moved down.
+    await waitFor(() => expect(positionOf(T.swDesk)[1]).toBeLessThan(positionOf(T.gateway)[1]));
+    for (const n of nodes()) expect(positionOf(n.dataset.id as string)[1]).toBeGreaterThanOrEqual(positionOf(T.swDesk)[1]);
+
+    // A new page does not bring the note back.
+    cleanup();
+    let answered = 0;
+    server.events.on("response:mocked", ({ request }) => {
+      if (new URL(request.url).pathname === "/api/v1/topology/root") answered += 1;
+    });
+    await openMap();
+    await waitFor(() => expect(answered).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    server.events.removeAllListeners();
+    expect(screen.queryByTestId("topology-root-notice")).toBeNull();
+    expect(positionOf(T.swDesk)[1]).toBeLessThan(positionOf(T.gateway)[1]);
+  });
+});
+
+describe("the view switch", () => {
+  const tabs = () => [screen.getByTestId("topology-view-map"), screen.getByTestId("topology-view-ssids")];
+
+  it("starts on the map, with the map tab selected and the only one in the tab order", async () => {
+    await openMap();
+    expect(screen.getByTestId("topology-view-switch").getAttribute("role")).toBe("tablist");
+    expect(screen.getByTestId("topology-view-switch").getAttribute("aria-label")).toBe("Topology views");
+    expect(tabs().map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
+    expect(tabs().map((tab) => tab.getAttribute("tabindex"))).toEqual(["0", "-1"]);
+    expect(tabs().map((tab) => tab.textContent)).toEqual(["Map", "SSIDs"]);
+    expect(screen.queryByTestId("ssid-view")).toBeNull();
+  });
+
+  it("shows the SSID view with view=ssids in the URL and returns to the map", async () => {
+    const view = await openMap();
+    fireEvent.click(screen.getByTestId("topology-view-ssids"));
+    await waitFor(() => expect(view.location()).toBe("/topology?view=ssids"));
+    expect(screen.getByTestId("ssid-view")).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByTestId("ssid-row")).toHaveLength(3));
+    expect(screen.queryByTestId("topology-map")).toBeNull();
+    expect(screen.queryByTestId("filterbar")).toBeNull();
+    expect(tabs().map((tab) => tab.getAttribute("aria-selected"))).toEqual(["false", "true"]);
+    expect(tabs().map((tab) => tab.getAttribute("tabindex"))).toEqual(["-1", "0"]);
+
+    fireEvent.click(screen.getByTestId("topology-view-map"));
+    await waitFor(() => expect(view.location()).toBe("/topology"));
+    expect(screen.queryByTestId("ssid-view")).toBeNull();
+    await waitFor(() => expect(nodes()).toHaveLength(TOPOLOGY_COUNTS.nodes));
+  });
+
+  it("opens on the SSID view when the URL says so", async () => {
+    renderMap("/topology?view=ssids");
+    await waitFor(() => expect(screen.getAllByTestId("ssid-row")).toHaveLength(3));
+    expect(screen.queryByTestId("topology-map")).toBeNull();
+    expect(screen.getByTestId("topology-view-ssids").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps the filters of the map in the URL while the other view is open", async () => {
+    const view = await openMap("/topology?vlan=30", (await graphOf({ vlan: "30" })).nodes.length);
+    fireEvent.click(screen.getByTestId("topology-view-ssids"));
+    await waitFor(() => expect(view.location()).toBe("/topology?vlan=30&view=ssids"));
+    fireEvent.click(screen.getByTestId("topology-view-map"));
+    await waitFor(() => expect(view.location()).toBe("/topology?vlan=30"));
+  });
+
+  it("moves between the two tabs with the arrow keys and focuses the one it moved to", async () => {
+    const view = await openMap();
+    const [map, ssids] = tabs() as [HTMLElement, HTMLElement];
+    map.focus();
+    fireEvent.keyDown(map, { key: "ArrowRight" });
+    await waitFor(() => expect(view.location()).toBe("/topology?view=ssids"));
+    expect(document.activeElement).toBe(ssids);
+    expect(screen.getByTestId("ssid-view")).toBeTruthy();
+
+    fireEvent.keyDown(ssids, { key: "ArrowLeft" });
+    await waitFor(() => expect(view.location()).toBe("/topology"));
+    expect(document.activeElement).toBe(map);
+    await waitFor(() => expect(nodes()).toHaveLength(TOPOLOGY_COUNTS.nodes));
+
+    // With two tabs the other direction also reaches the other tab.
+    fireEvent.keyDown(map, { key: "ArrowLeft" });
+    await waitFor(() => expect(view.location()).toBe("/topology?view=ssids"));
+    expect(document.activeElement).toBe(ssids);
+    fireEvent.keyDown(ssids, { key: "ArrowRight" });
+    await waitFor(() => expect(view.location()).toBe("/topology"));
+    expect(document.activeElement).toBe(map);
+    // Other keys do nothing.
+    fireEvent.keyDown(map, { key: "ArrowDown" });
+    expect(view.location()).toBe("/topology");
+  });
+});
+
+describe("Hardened, read-only", () => {
+  async function signInHardened(writes: boolean): Promise<void> {
+    await signInAlex({
+      prepare: () => {
+        db.settings.profile = "hardened";
+      },
+    });
+    mockVlanController.writes_enabled = writes;
+  }
+
+  /** The default route points at sw-desk, so the root note is open. */
+  function disagree(): void {
+    topologyState().nextHops = [addressOf(T.swDesk)];
+  }
+
+  const waitForSsids = () => waitFor(() => expect(screen.getAllByTestId("ssid-row")).toHaveLength(3));
+
+  it("says the map is read-only and offers no choice of the root when no controller allows writes", async () => {
+    await signInHardened(false);
+    disagree();
+    await openMap();
+    expect(screen.getByTestId("topology-read-only").textContent).toContain("Read-only");
+    const notice = await screen.findByTestId("topology-root-notice");
+    expect(within(notice).getAllByTestId("topology-root-candidate")).toHaveLength(2);
+    expect(screen.queryAllByTestId("topology-root-use")).toHaveLength(0);
+  });
+
+  it("offers no write action in the SSID view either", async () => {
+    await signInHardened(false);
+    renderMap("/topology?view=ssids");
+    await waitForSsids();
+    await waitFor(() => expect(screen.getByTestId("ssid-read-only")).toBeTruthy());
+    expect(screen.queryAllByTestId("ssid-client-keep")).toHaveLength(0);
+    expect(screen.queryAllByTestId("ssid-client-move")).toHaveLength(0);
+    for (const chip of screen.getAllByTestId("ssid-policy")) expect(chip.tagName).toBe("SPAN");
+  });
+
+  it("offers the choice of the root and the SSID actions when a controller allows writes", async () => {
+    await signInHardened(true);
+    disagree();
+    await openMap();
+    await screen.findByTestId("topology-root-notice");
+    expect(screen.queryByTestId("topology-read-only")).toBeNull();
+    expect(screen.getAllByTestId("topology-root-use")).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId("topology-view-ssids"));
+    await waitForSsids();
+    await waitFor(() => expect(screen.getAllByTestId("ssid-client-keep")).toHaveLength(1));
+    expect(screen.queryByTestId("ssid-read-only")).toBeNull();
+    expect(screen.getAllByTestId("ssid-client-move")).toHaveLength(1);
+    for (const chip of screen.getAllByTestId("ssid-policy")) expect(chip.tagName).toBe("BUTTON");
+  });
+
+  it("is not read-only under the Standard profile, whatever the controller allows", async () => {
+    mockVlanController.writes_enabled = false;
+    disagree();
+    await openMap();
+    await screen.findByTestId("topology-root-notice");
+    expect(screen.queryByTestId("topology-read-only")).toBeNull();
+    expect(screen.getAllByTestId("topology-root-use")).toHaveLength(2);
+  });
+});
+
 describe("accessibility", () => {
   it("has no axe violations without the panel", async () => {
     await openMap();
@@ -913,7 +1404,23 @@ describe("accessibility", () => {
 
   it("has no axe violations with a group", async () => {
     addClients(T.swDesk, 10);
-    await openMap("/topology", 24 + 10 - 15);
+    await openMap("/topology", TOPOLOGY_COUNTS.nodes + 10 - 15);
+    expect(await axeViolations(screen.getByTestId("page-topology"))).toEqual([]);
+  });
+
+  it("has no axe violations with collapsed endpoints, a root note and a device that is not placed", async () => {
+    localStorage.removeItem(ENDPOINTS_KEY);
+    topologyState().nextHops = [addressOf(T.swDesk)];
+    addIsolated("m-00005e00ff02", "NAS");
+    await openMap("/topology", TOPOLOGY_COUNTS.nodes - 8);
+    await screen.findByTestId("topology-root-notice");
+    expect(screen.getByTestId("topology-duplicate")).toBeTruthy();
+    expect(await axeViolations(screen.getByTestId("page-topology"))).toEqual([]);
+  });
+
+  it("has no axe violations in the SSID view", async () => {
+    renderMap("/topology?view=ssids");
+    await waitFor(() => expect(screen.getAllByTestId("ssid-row")).toHaveLength(3));
     expect(await axeViolations(screen.getByTestId("page-topology"))).toEqual([]);
   });
 });

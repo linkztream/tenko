@@ -140,6 +140,9 @@ message ClientAttachment {
   // Whether `name` is a placeholder the controller makes up for a client without a name
   // (for example `host-192-0-2-10`); such a name never names a host.
   bool name_placeholder = 11;
+  // The radio band of a wireless client: `2g` (2.4 GHz), `5g` or `6g`. Another value is
+  // ignored, so a later band does not break an older host.
+  optional string band = 12;
 }
 
 // The DHCP service of the controller for a network: Tenko serves DHCP, so it is off or
@@ -197,6 +200,8 @@ message WirelessNetwork {
   bool enabled = 5;
   // Device references of the access points that broadcast it.
   repeated string access_points = 6;
+  // Whether the controller marks it as a guest network (isolated clients, a captive portal).
+  bool guest = 7;
 }
 
 // A change the host asks the controller to make.

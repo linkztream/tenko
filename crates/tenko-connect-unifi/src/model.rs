@@ -412,6 +412,7 @@ impl<'a> View<'a> {
             name_placeholder: client_placeholder(client),
             vendor: client.vendor.clone(),
             management: self.management_clients.contains(&client.mac),
+            band: client.band(),
         })
     }
 
@@ -453,6 +454,7 @@ impl<'a> View<'a> {
             vlan: network.and_then(|id| self.vlan_of(id)).or(wlan.vlan),
             enabled: wlan.enabled,
             access_points: access_points.into_iter().map(DeviceRef).collect(),
+            guest: wlan.guest,
         }
     }
 }

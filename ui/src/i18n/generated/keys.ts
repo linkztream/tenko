@@ -489,6 +489,8 @@ export type MessageKey =
   | "audit.action.ipam.tenant.delete"
   | "audit.action.ipam.tenant.restore"
   | "audit.action.ipam.tenant.update"
+  | "audit.action.ipam.topology_root.choose"
+  | "audit.action.ipam.topology_root.clear"
   | "audit.action.ipam.vlan.create"
   | "audit.action.ipam.vlan.delete"
   | "audit.action.ipam.vlan.restore"
@@ -497,6 +499,10 @@ export type MessageKey =
   | "audit.action.ipam.vrf.delete"
   | "audit.action.ipam.vrf.restore"
   | "audit.action.ipam.vrf.update"
+  | "audit.action.ipam.wlan_exception.clear"
+  | "audit.action.ipam.wlan_exception.keep"
+  | "audit.action.ipam.wlan_policy.clear"
+  | "audit.action.ipam.wlan_policy.set"
   | "audit.action.jobs.job.cancel"
   | "audit.action.jobs.job.cancel_request"
   | "audit.action.jobs.job.claim"
@@ -1447,6 +1453,8 @@ export type MessageKey =
   | "dashboard.finding.action.open_nodes"
   | "dashboard.finding.action.open_prefix"
   | "dashboard.finding.action.open_settings"
+  | "dashboard.finding.action.open_ssids"
+  | "dashboard.finding.action.open_topology"
   | "dashboard.finding.action.resolve"
   | "dashboard.finding.action.review"
   | "dashboard.finding.evidence.disk_low"
@@ -1465,9 +1473,12 @@ export type MessageKey =
   | "dashboard.finding.kind.outside_prefixes"
   | "dashboard.finding.kind.ptr_mismatch"
   | "dashboard.finding.kind.scan_artifact"
+  | "dashboard.finding.kind.topology_root"
   | "dashboard.finding.kind.unknown_device"
   | "dashboard.finding.kind.utilization"
   | "dashboard.finding.kind.vlan"
+  | "dashboard.finding.kind.wlan_class"
+  | "dashboard.finding.kind.wlan_prefix"
   | "dashboard.health.alarms"
   | "dashboard.health.alarms_critical"
   | "dashboard.health.alarms_none"
@@ -2519,6 +2530,8 @@ export type MessageKey =
   | "discovery.findings.action.open_prefix"
   | "discovery.findings.action.open_record"
   | "discovery.findings.action.open_settings"
+  | "discovery.findings.action.open_ssids"
+  | "discovery.findings.action.open_topology"
   | "discovery.findings.action.resolve"
   | "discovery.findings.col.action"
   | "discovery.findings.col.evidence"
@@ -2557,9 +2570,12 @@ export type MessageKey =
   | "discovery.findings.kind.outside_prefixes"
   | "discovery.findings.kind.ptr_mismatch"
   | "discovery.findings.kind.scan_artifact"
+  | "discovery.findings.kind.topology_root"
   | "discovery.findings.kind.unknown_device"
   | "discovery.findings.kind.utilization"
   | "discovery.findings.kind.vlan"
+  | "discovery.findings.kind.wlan_class"
+  | "discovery.findings.kind.wlan_prefix"
   | "discovery.findings.level.act"
   | "discovery.findings.level.info"
   | "discovery.findings.level.review"
@@ -2579,6 +2595,7 @@ export type MessageKey =
   | "discovery.findings.source.job"
   | "discovery.findings.source.proposal"
   | "discovery.findings.source.reconcile"
+  | "discovery.findings.source.topology"
   | "discovery.grid.label"
   | "discovery.info"
   | "discovery.kind.address_mismatch"
@@ -4175,7 +4192,10 @@ export type MessageKey =
   | "errors.ipam.revision_mismatch"
   | "errors.ipam.site.cycle"
   | "errors.ipam.status.transition"
+  | "errors.ipam.topology.invalid"
+  | "errors.ipam.topology.no_candidate"
   | "errors.ipam.topology.not_found"
+  | "errors.ipam.topology.not_stored"
   | "errors.ipam.topology.unavailable"
   | "errors.ipam.unavailable"
   | "errors.ipam.validation"
@@ -7429,9 +7449,14 @@ export type MessageKey =
   | "toggles.updates.install.upload_only"
   | "toggles.updates.name"
   | "toggles.updates.value"
+  | "topology.band.2g"
+  | "topology.band.5g"
+  | "topology.band.6g"
   | "topology.controller.error_generic"
   | "topology.controller.label"
   | "topology.controller.ok"
+  | "topology.edge.inferred"
+  | "topology.edge.inferred_legend"
   | "topology.edge.lldp"
   | "topology.edge.uplink"
   | "topology.edge.vm_host"
@@ -7443,6 +7468,8 @@ export type MessageKey =
   | "topology.empty.link"
   | "topology.empty.title"
   | "topology.filter.clear"
+  | "topology.filter.endpoints"
+  | "topology.filter.endpoints_hint"
   | "topology.filter.label"
   | "topology.filter.placeholder"
   | "topology.filter.site"
@@ -7452,6 +7479,8 @@ export type MessageKey =
   | "topology.filter.vlan"
   | "topology.filter.vlan_all"
   | "topology.group.aria"
+  | "topology.group.bucket"
+  | "topology.group.bucket_aria"
   | "topology.group.close_all"
   | "topology.group.label"
   | "topology.kind.access_point"
@@ -7527,12 +7556,49 @@ export type MessageKey =
   | "topology.port.up"
   | "topology.port.uplink"
   | "topology.port.vlan"
+  | "topology.read_only"
+  | "topology.root.disagree"
+  | "topology.root.disagree_hint"
+  | "topology.root.from_controller"
+  | "topology.root.from_route"
+  | "topology.root.use"
   | "topology.source.intent"
   | "topology.source.inventory"
   | "topology.source.network_controller"
   | "topology.source.probe"
+  | "topology.ssid.clients"
+  | "topology.ssid.col.access_point"
+  | "topology.ssid.col.actions"
+  | "topology.ssid.col.address"
+  | "topology.ssid.col.band"
+  | "topology.ssid.col.client"
+  | "topology.ssid.col.findings"
+  | "topology.ssid.col.mac"
+  | "topology.ssid.collapse"
+  | "topology.ssid.empty"
+  | "topology.ssid.expand"
+  | "topology.ssid.finding.wlan_class"
+  | "topology.ssid.finding.wlan_prefix"
+  | "topology.ssid.findings"
+  | "topology.ssid.guest"
+  | "topology.ssid.iot_device"
+  | "topology.ssid.keep"
+  | "topology.ssid.kept"
+  | "topology.ssid.label"
+  | "topology.ssid.move"
+  | "topology.ssid.policy.hint"
+  | "topology.ssid.policy.ignore"
+  | "topology.ssid.policy.track"
+  | "topology.ssid.untagged"
+  | "topology.ssid.vlan"
   | "topology.summary"
   | "topology.truncated"
+  | "topology.unplaced.duplicate"
+  | "topology.unplaced.label"
+  | "topology.unplaced.title"
+  | "topology.view.label"
+  | "topology.view.map"
+  | "topology.view.ssids"
   | "topology.zoom.fit"
   | "topology.zoom.in"
   | "topology.zoom.label"
@@ -8492,6 +8558,7 @@ export interface MessageArgs {
   "errors.ipam.reference_missing": { kind: string | number };
   "errors.ipam.revision_mismatch": { kind: string | number };
   "errors.ipam.status.transition": { from: string | number; to: string | number };
+  "errors.ipam.topology.invalid": { field: string | number };
   "errors.ipam.vlan.duplicate": { vid: string | number };
   "errors.vault.pin_coupling": { accounts: string | number };
   "errors.vault.reveal.rate_limited": { retry_after: string | number };
@@ -9157,6 +9224,8 @@ export interface MessageArgs {
   "topology.filter.unknown_site": { id: string | number };
   "topology.filter.unknown_vlan": { id: string | number };
   "topology.group.aria": { count: number };
+  "topology.group.bucket": { bucket: string | number; count: number };
+  "topology.group.bucket_aria": { bucket: string | number; count: number };
   "topology.group.label": { count: number };
   "topology.legend.too_many": { count: number };
   "topology.neighbour.local": { port: string | number };
@@ -9169,7 +9238,16 @@ export interface MessageArgs {
   "topology.port.count": { count: number };
   "topology.port.hide_aria": { port: string | number };
   "topology.port.open_aria": { port: string | number };
+  "topology.root.from_controller": { label: string | number };
+  "topology.root.from_route": { label: string | number };
+  "topology.ssid.clients": { count: number };
+  "topology.ssid.collapse": { ssid: string | number };
+  "topology.ssid.expand": { ssid: string | number };
+  "topology.ssid.findings": { count: number };
+  "topology.ssid.vlan": { name: string | number; vid: number };
   "topology.summary": { edges: number; nodes: number; total_edges: number; total_nodes: number };
+  "topology.unplaced.duplicate": { count: number };
+  "topology.unplaced.title": { count: number };
   "updates.attempt.failed": { to: string | number };
   "updates.attempt.rolled_back": { from: string | number; to: string | number };
   "updates.backup.age": { age: string | number };
@@ -9705,6 +9783,8 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.ipam.tenant.delete",
   "audit.action.ipam.tenant.restore",
   "audit.action.ipam.tenant.update",
+  "audit.action.ipam.topology_root.choose",
+  "audit.action.ipam.topology_root.clear",
   "audit.action.ipam.vlan.create",
   "audit.action.ipam.vlan.delete",
   "audit.action.ipam.vlan.restore",
@@ -9713,6 +9793,10 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.ipam.vrf.delete",
   "audit.action.ipam.vrf.restore",
   "audit.action.ipam.vrf.update",
+  "audit.action.ipam.wlan_exception.clear",
+  "audit.action.ipam.wlan_exception.keep",
+  "audit.action.ipam.wlan_policy.clear",
+  "audit.action.ipam.wlan_policy.set",
   "audit.action.jobs.job.cancel",
   "audit.action.jobs.job.cancel_request",
   "audit.action.jobs.job.claim",
@@ -10663,6 +10747,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.action.open_nodes",
   "dashboard.finding.action.open_prefix",
   "dashboard.finding.action.open_settings",
+  "dashboard.finding.action.open_ssids",
+  "dashboard.finding.action.open_topology",
   "dashboard.finding.action.resolve",
   "dashboard.finding.action.review",
   "dashboard.finding.evidence.disk_low",
@@ -10681,9 +10767,12 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.kind.outside_prefixes",
   "dashboard.finding.kind.ptr_mismatch",
   "dashboard.finding.kind.scan_artifact",
+  "dashboard.finding.kind.topology_root",
   "dashboard.finding.kind.unknown_device",
   "dashboard.finding.kind.utilization",
   "dashboard.finding.kind.vlan",
+  "dashboard.finding.kind.wlan_class",
+  "dashboard.finding.kind.wlan_prefix",
   "dashboard.health.alarms",
   "dashboard.health.alarms_critical",
   "dashboard.health.alarms_none",
@@ -11735,6 +11824,8 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.findings.action.open_prefix",
   "discovery.findings.action.open_record",
   "discovery.findings.action.open_settings",
+  "discovery.findings.action.open_ssids",
+  "discovery.findings.action.open_topology",
   "discovery.findings.action.resolve",
   "discovery.findings.col.action",
   "discovery.findings.col.evidence",
@@ -11773,9 +11864,12 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.findings.kind.outside_prefixes",
   "discovery.findings.kind.ptr_mismatch",
   "discovery.findings.kind.scan_artifact",
+  "discovery.findings.kind.topology_root",
   "discovery.findings.kind.unknown_device",
   "discovery.findings.kind.utilization",
   "discovery.findings.kind.vlan",
+  "discovery.findings.kind.wlan_class",
+  "discovery.findings.kind.wlan_prefix",
   "discovery.findings.level.act",
   "discovery.findings.level.info",
   "discovery.findings.level.review",
@@ -11795,6 +11889,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.findings.source.job",
   "discovery.findings.source.proposal",
   "discovery.findings.source.reconcile",
+  "discovery.findings.source.topology",
   "discovery.grid.label",
   "discovery.info",
   "discovery.kind.address_mismatch",
@@ -13391,7 +13486,10 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.ipam.revision_mismatch",
   "errors.ipam.site.cycle",
   "errors.ipam.status.transition",
+  "errors.ipam.topology.invalid",
+  "errors.ipam.topology.no_candidate",
   "errors.ipam.topology.not_found",
+  "errors.ipam.topology.not_stored",
   "errors.ipam.topology.unavailable",
   "errors.ipam.unavailable",
   "errors.ipam.validation",
@@ -16645,9 +16743,14 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.updates.install.upload_only",
   "toggles.updates.name",
   "toggles.updates.value",
+  "topology.band.2g",
+  "topology.band.5g",
+  "topology.band.6g",
   "topology.controller.error_generic",
   "topology.controller.label",
   "topology.controller.ok",
+  "topology.edge.inferred",
+  "topology.edge.inferred_legend",
   "topology.edge.lldp",
   "topology.edge.uplink",
   "topology.edge.vm_host",
@@ -16659,6 +16762,8 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.empty.link",
   "topology.empty.title",
   "topology.filter.clear",
+  "topology.filter.endpoints",
+  "topology.filter.endpoints_hint",
   "topology.filter.label",
   "topology.filter.placeholder",
   "topology.filter.site",
@@ -16668,6 +16773,8 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.filter.vlan",
   "topology.filter.vlan_all",
   "topology.group.aria",
+  "topology.group.bucket",
+  "topology.group.bucket_aria",
   "topology.group.close_all",
   "topology.group.label",
   "topology.kind.access_point",
@@ -16743,12 +16850,49 @@ export const messageKeys: readonly MessageKey[] = [
   "topology.port.up",
   "topology.port.uplink",
   "topology.port.vlan",
+  "topology.read_only",
+  "topology.root.disagree",
+  "topology.root.disagree_hint",
+  "topology.root.from_controller",
+  "topology.root.from_route",
+  "topology.root.use",
   "topology.source.intent",
   "topology.source.inventory",
   "topology.source.network_controller",
   "topology.source.probe",
+  "topology.ssid.clients",
+  "topology.ssid.col.access_point",
+  "topology.ssid.col.actions",
+  "topology.ssid.col.address",
+  "topology.ssid.col.band",
+  "topology.ssid.col.client",
+  "topology.ssid.col.findings",
+  "topology.ssid.col.mac",
+  "topology.ssid.collapse",
+  "topology.ssid.empty",
+  "topology.ssid.expand",
+  "topology.ssid.finding.wlan_class",
+  "topology.ssid.finding.wlan_prefix",
+  "topology.ssid.findings",
+  "topology.ssid.guest",
+  "topology.ssid.iot_device",
+  "topology.ssid.keep",
+  "topology.ssid.kept",
+  "topology.ssid.label",
+  "topology.ssid.move",
+  "topology.ssid.policy.hint",
+  "topology.ssid.policy.ignore",
+  "topology.ssid.policy.track",
+  "topology.ssid.untagged",
+  "topology.ssid.vlan",
   "topology.summary",
   "topology.truncated",
+  "topology.unplaced.duplicate",
+  "topology.unplaced.label",
+  "topology.unplaced.title",
+  "topology.view.label",
+  "topology.view.map",
+  "topology.view.ssids",
   "topology.zoom.fit",
   "topology.zoom.in",
   "topology.zoom.label",

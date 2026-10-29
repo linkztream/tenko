@@ -188,6 +188,12 @@ pub struct TopologyEdge {
     pub ssid: Option<String>,
     /// Source keys of the facts behind the edge.
     pub sources: Vec<String>,
+    /// Whether the edge is only inferred from a MAC table (a bridge table of a probe): a
+    /// client edge no network controller reports. A MAC address learned on a port says that
+    /// the device is somewhere behind it, not that it hangs on it; the map draws such an
+    /// edge dashed with a question mark.
+    #[serde(default)]
+    pub inferred: bool,
 }
 
 /// One VLAN in view, for the legend.
@@ -217,6 +223,10 @@ pub struct ControllerStatus {
     pub observed_at: Option<Timestamp>,
     /// Managed devices it reported.
     pub devices: usize,
+    /// Whether writes through it are allowed (TGL-20); the map offers no write action under
+    /// Hardened while no controller allows them.
+    #[serde(default)]
+    pub writes_enabled: bool,
     /// Why the last read failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<CodedError>,
@@ -261,6 +271,22 @@ pub struct TopologySummary {
     /// Whether the answer was cut at the node limit.
     #[serde(default)]
     pub truncated: bool,
+    /// The root the map is drawn from (UI-Q10); absent when no source names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<MapRoot>,
+}
+
+/// The node the map is drawn from and why (UI-Q10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct MapRoot {
+    /// The node; absent when the source names an address no node has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    /// The source that names it.
+    pub source: super::root::RootSource,
+    /// Whether a person chose it ("Use this").
+    #[serde(default)]
+    pub chosen: bool,
 }
 
 /// The graph: nodes, edges and a summary, computed from one store revision.
@@ -330,6 +356,9 @@ pub struct Neighbour {
     /// The wireless network of the edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssid: Option<String>,
+    /// Whether the edge is only inferred from a MAC table ([`TopologyEdge::inferred`]).
+    #[serde(default)]
+    pub inferred: bool,
 }
 
 /// A port of a node and what hangs on it.

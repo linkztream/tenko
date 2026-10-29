@@ -362,6 +362,7 @@ mod tests {
         let connector = ConnectorId::generate();
         let now: Timestamp = "2026-10-09T12:00:00Z".parse().expect("time");
         let client = |last: u8, name: Option<&str>, vendor: Option<&str>| crate::ClientAttachment {
+            band: None,
             mac: tenko_core::MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, last]),
             ip: Some(std::net::IpAddr::from([192, 0, 2, last])),
             device: crate::DeviceRef("ap-a".to_owned()),

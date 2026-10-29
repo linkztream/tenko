@@ -18,6 +18,10 @@
 // and to review with the action `decommission` once unseen for 30 days. They are on in the
 // browser's mock and in the tests that ask for them (reconcile-view.ts, `setMockViewFindings`).
 //
+// U7: the topology adds its findings (source `topology`, area `topology`, to review): the root when
+// the sources that name it disagree and no choice covers them, and the two WLAN rules
+// (topology-decisions.ts).
+//
 // What is not: the status's health conditions and scan artifacts. A test adds health findings with
 // `setMockHealthFindings` (U3), or counts of any area and severity with `setMockFindingsExtra`,
 // each then one placeholder finding of the source `health`. Simplification: a job that rolls back
@@ -29,6 +33,7 @@ import { allLevels } from "./ipam/tree";
 import { jobStore } from "./job-store";
 import { digestOf, reconcileState } from "./reconcile-store";
 import { mockViewFindings, mockViewRows } from "./reconcile-view";
+import { topologyFindings } from "./topology-decisions";
 
 type S = components["schemas"];
 export type FindingCounts = S["FindingCounts"];
@@ -287,6 +292,8 @@ export function mockFindings(): MockFinding[] {
     });
   }
 
+  out.push(...topologyFindings());
+
   for (const item of health) {
     out.push({
       id: `health:${item.code}`,
@@ -331,7 +338,7 @@ export function mockFindings(): MockFinding[] {
 /** The counts the mock's state stands for, with the revision it was read at: the list, counted. */
 export function mockFindingCounts(): FindingCounts {
   const areas = Object.fromEntries(FINDING_AREAS.map((area) => [area, zero()])) as AreaCounts;
-  const sources = { alarm: 0, health: 0, job: 0, proposal: 0, reconcile: 0 };
+  const sources: Record<MockFinding["source"], number> = { alarm: 0, health: 0, job: 0, proposal: 0, reconcile: 0, topology: 0 };
   for (const finding of mockFindings()) {
     areas[finding.area][finding.severity] += 1;
     sources[finding.source] += 1;

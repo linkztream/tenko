@@ -69,3 +69,49 @@ export async function listVlans(signal?: AbortSignal): Promise<Vlan[]> {
 export function isNodeGone(err: unknown): boolean {
   return isApiError(err, "ipam.topology.not_found");
 }
+
+// ---------------------------------------------------------------------------------
+// The root of the map and the SSID view (U7)
+
+export type MapRoot = S["MapRoot"];
+export type RootDecision = S["RootDecision"];
+export type RootCandidate = S["RootCandidate"];
+export type RootSource = S["RootSource"];
+export type SsidView = S["SsidView"];
+export type SsidEntry = S["SsidEntry"];
+export type SsidVlan = S["SsidVlan"];
+export type SsidClient = S["SsidClient"];
+export type WlanPolicy = S["WlanPolicy"];
+export type RadioBand = S["RadioBand"];
+export type Finding = S["Finding"];
+
+/** The root of the map with its candidates and the stored choice. */
+export function getRoot(signal?: AbortSignal): Promise<RootDecision> {
+  return api.get("/api/v1/topology/root", { signal });
+}
+
+/** "Use this": the map follows the candidate of `source`, remembered on the server. */
+export function chooseRoot(source: RootSource): Promise<RootDecision> {
+  return api.put("/api/v1/topology/root", { body: { source } });
+}
+
+/** The SSIDs with their VLANs and clients. */
+export function getSsids(signal?: AbortSignal): Promise<SsidView> {
+  return api.get("/api/v1/topology/ssids", { signal });
+}
+
+/** Whether the WLAN rules read an SSID. */
+export function setWlanPolicy(ssid: string, policy: WlanPolicy): Promise<S["StoredWlanPolicy"]> {
+  return api.put("/api/v1/topology/ssids/{ssid}/policy", { path: { ssid }, body: { policy } });
+}
+
+/** "Keep on this WLAN": the WLAN rules skip the host on the SSID from now on. */
+export function keepOnWlan(ssid: string, host: string, reason?: string): Promise<S["WlanException"]> {
+  return api.put("/api/v1/topology/ssids/{ssid}/exceptions/{host}", { path: { ssid, host }, body: reason ? { reason } : {} });
+}
+
+/** The findings of the topology (the root, the WLAN rules), the most urgent first. */
+export async function listTopologyFindings(signal?: AbortSignal): Promise<Finding[]> {
+  const page = await api.get("/api/v1/findings", { query: { area: "topology", limit: 1000 }, signal });
+  return page.items;
+}

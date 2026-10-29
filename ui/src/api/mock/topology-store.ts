@@ -9,7 +9,8 @@
 // first two access points are hosts of intent, so their nodes are `h-<host>`; ap-attic is
 // known to the controller only (`c-...`). pve1 is a hypervisor with two virtual machines and a
 // container (inventory nodes `i-...`). The IoT devices sit on the access points over the SSID
-// `iot.example.test` (VLAN 30), one client is unknown (`m-<mac>`).
+// `iot.example.test` (VLAN 30), one client is unknown (`m-<mac>`). The guest network
+// `guest.example.test` (VLAN 40) carries one client, also without intent, on ap-attic.
 import type { components } from "../generated/schema";
 import { compareIp, containsIp, parseIp } from "../../ipam/ip";
 import { db, onMockReset } from "./db";
@@ -25,6 +26,7 @@ export type NodeKind = S["NodeKind"];
 export type EdgeKind = S["EdgeKind"];
 export type ControllerNetwork = S["ControllerNetwork"];
 export type ControllerInfo = S["ControllerInfo"];
+type RadioBand = S["RadioBand"];
 
 // ---------------------------------------------------------------------------------
 // The controller
@@ -33,8 +35,18 @@ export type ControllerInfo = S["ControllerInfo"];
 export const CONTROLLER_NAME = "unifi.example.test";
 
 /** The wireless networks of the lab and the VLAN each one carries. */
-export const TOPOLOGY_SSIDS = { iot: "iot.example.test", home: "home.example.test" } as const;
-const SSID_VLAN: Readonly<Record<string, number>> = { [TOPOLOGY_SSIDS.iot]: 30, [TOPOLOGY_SSIDS.home]: 10 };
+export const TOPOLOGY_SSIDS = { iot: "iot.example.test", home: "home.example.test", guest: "guest.example.test" } as const;
+const SSID_VLAN: Readonly<Record<string, number>> = {
+  [TOPOLOGY_SSIDS.iot]: 30,
+  [TOPOLOGY_SSIDS.home]: 10,
+  [TOPOLOGY_SSIDS.guest]: 40,
+};
+/** The wireless networks the controller reports, with the guest flag. */
+const WLANS: readonly MockWlan[] = [
+  { ssid: TOPOLOGY_SSIDS.home, vid: 10, guest: false, enabled: true },
+  { ssid: TOPOLOGY_SSIDS.iot, vid: 30, guest: false, enabled: true },
+  { ssid: TOPOLOGY_SSIDS.guest, vid: 40, guest: true, enabled: true },
+];
 
 /**
  * The mock network controller, shared by the topology and the VLAN provision. Tests change its
@@ -138,10 +150,12 @@ export const TOPOLOGY_IDS = {
   tv: hostNode("tv-living"),
   /** A client without intent (a vendor, no host). */
   unknown: "m-00005e0053d2",
+  /** The one client of the guest network, also without intent. */
+  guestClient: "m-00005e0053d3",
 } as const;
 
 /** The nodes and the number of edges of the seeded graph. */
-export const TOPOLOGY_COUNTS = { nodes: 24, edges: 23, controllerDevices: 6 } as const;
+export const TOPOLOGY_COUNTS = { nodes: 25, edges: 24, controllerDevices: 6 } as const;
 
 // ---------------------------------------------------------------------------------
 // The state
@@ -156,6 +170,29 @@ export interface MockPort {
   up: boolean;
 }
 
+/** A wireless network of the controller. */
+export interface MockWlan {
+  ssid: string;
+  /** The VLAN it carries. */
+  vid: number | null;
+  guest: boolean;
+  enabled: boolean;
+}
+
+/** A wireless client as the controller reports it: the table the SSID view reads. */
+export interface MockWirelessClient {
+  /** The client node. */
+  node: string;
+  mac: string;
+  /** The address the controller reports. */
+  ip?: string;
+  ssid: string;
+  vid: number;
+  /** The node of the access point. */
+  accessPoint: string;
+  band: RadioBand;
+}
+
 export interface TopologyState {
   /** Nodes by identifier. */
   nodes: TopologyNode[];
@@ -167,6 +204,16 @@ export interface TopologyState {
   controllerDevices: number;
   /** When the graph was computed. */
   computedAt: string;
+  /** The wireless networks the controller reports. */
+  wlans: MockWlan[];
+  /** The wireless clients the controller reports. */
+  wireless: MockWirelessClient[];
+  /**
+   * The next hops of the default routes of the host Tenko runs on, the source of the second
+   * root candidate. Default: the gateway's own address, so the sources agree; a test sets
+   * another hop to make them disagree.
+   */
+  nextHops: string[];
 }
 
 let state: TopologyState | null = null;
@@ -175,7 +222,7 @@ let state: TopologyState | null = null;
 function seed(): TopologyState {
   const empty = db.scenario === "setup" || db.scenario === "setup-slow-disk";
   return empty
-    ? { nodes: [], edges: [], ports: new Map(), controllerDevices: 0, computedAt: iso(Date.now()) }
+    ? { nodes: [], edges: [], ports: new Map(), controllerDevices: 0, computedAt: iso(Date.now()), wlans: [], wireless: [], nextHops: [] }
     : buildTopology(Date.now());
 }
 
@@ -314,6 +361,9 @@ interface LinkDef {
   bPort?: string;
   vlan?: number;
   ssid?: string;
+  /** Wireless: the band, and the address the controller reports. */
+  band?: RadioBand;
+  ip?: string;
   sources: string[];
 }
 
@@ -359,7 +409,7 @@ function definitions(): Def[] {
       macs: ["00:00:5e:00:53:a6"],
       ips: ["192.0.2.6"],
       model: "U6-Lite",
-      ssids: [TOPOLOGY_SSIDS.home],
+      ssids: [TOPOLOGY_SSIDS.home, TOPOLOGY_SSIDS.guest],
       sources: [CONTROLLER_SOURCE],
       seen: 2,
     },
@@ -400,13 +450,24 @@ function definitions(): Def[] {
     client(T.tenko2, "tenko2", 4),
     client(T.tenko3, "tenko3", 4),
     client(T.laptop, "laptop-ak", 6),
-    client(T.printer, "printer-1", 9),
+    // Seen in the bridge table of a probe only, so its edge is inferred.
+    { ...client(T.printer, "printer-1", 9), sources: ["intent", SNMP_SOURCE] },
     client(T.thermostat, "thermostat-1", 5, TOPOLOGY_SSIDS.iot),
     client(T.plug, "plug-kitchen", 5, TOPOLOGY_SSIDS.iot),
     client(T.camera, "cam-door", 5, TOPOLOGY_SSIDS.iot),
     client(T.speaker, "speaker-den", 7, TOPOLOGY_SSIDS.iot),
     client(T.sensor, "sensor-garage", 5, TOPOLOGY_SSIDS.iot),
     client(T.tv, "tv-living", 8, TOPOLOGY_SSIDS.home),
+    {
+      id: T.guestClient,
+      kind: "host",
+      label: vendorLabel("Example Devices", "00:00:5e:00:53:d3"),
+      macs: ["00:00:5e:00:53:d3"],
+      vendor: "Example Devices",
+      ssids: [TOPOLOGY_SSIDS.guest],
+      sources: [CONTROLLER_SOURCE],
+      seen: 3,
+    },
     {
       id: T.unknown,
       kind: "host",
@@ -430,12 +491,16 @@ function links(): LinkDef[] {
     vlan,
     sources,
   });
-  const wireless = (ap: string, client: string, ssid: string): LinkDef => ({
+  // The IoT clients report an address of the IoT network (198.51.100.0/24, VLAN 30), as the
+  // controller sees their leases there.
+  const wireless = (ap: string, client: string, ssid: string, band: RadioBand, ip?: string): LinkDef => ({
     kind: "wireless",
     a: ap,
     b: client,
     ssid,
     vlan: SSID_VLAN[ssid] ?? 10,
+    band,
+    ...(ip ? { ip } : {}),
     sources: c,
   });
   const iot = TOPOLOGY_SSIDS.iot;
@@ -448,18 +513,19 @@ function links(): LinkDef[] {
     wired(T.swCore, "2", T.pve1, 10),
     wired(T.swCore, "3", T.nas, 10, [CONTROLLER_SOURCE, SNMP_SOURCE]),
     wired(T.swCore, "4", T.ha, 10),
-    wired(T.swCore, "5", T.printer, 10),
+    wired(T.swCore, "5", T.printer, 10, [SNMP_SOURCE]),
     wired(T.swDesk, "2", T.tenko1, 20),
     wired(T.swDesk, "3", T.tenko2, 20),
     wired(T.swDesk, "4", T.tenko3, 20),
     wired(T.swDesk, "5", T.laptop, 10),
     wired(T.swDesk, "7", T.unknown, 10),
-    wireless(T.apHall, T.plug, iot),
-    wireless(T.apHall, T.camera, iot),
-    wireless(T.apHall, T.speaker, iot),
-    wireless(T.apHall, T.tv, TOPOLOGY_SSIDS.home),
-    wireless(T.apGarage, T.thermostat, iot),
-    wireless(T.apGarage, T.sensor, iot),
+    wireless(T.apHall, T.plug, iot, "2g", "198.51.100.42"),
+    wireless(T.apHall, T.camera, iot, "5g", "198.51.100.43"),
+    wireless(T.apHall, T.speaker, iot, "5g", "198.51.100.45"),
+    wireless(T.apHall, T.tv, TOPOLOGY_SSIDS.home, "6g", "192.0.2.57"),
+    wireless(T.apGarage, T.thermostat, iot, "2g", "198.51.100.41"),
+    wireless(T.apGarage, T.sensor, iot, "2g", "198.51.100.44"),
+    wireless(T.apAttic, T.guestClient, TOPOLOGY_SSIDS.guest, "5g", "203.0.113.130"),
     { kind: "vm_host", a: T.pve1, b: T.mediaPc, sources: [INVENTORY_SOURCE] },
     { kind: "vm_host", a: T.pve1, b: T.buildVm, sources: [INVENTORY_SOURCE] },
     { kind: "vm_host", a: T.pve1, b: T.dnsCt, sources: [INVENTORY_SOURCE] },
@@ -516,6 +582,9 @@ function buildTopology(now: number): TopologyState {
       b,
       sources: [...link.sources].sort(),
     };
+    // A client edge no network controller reports is only inferred (a bridge table of a probe).
+    edge.inferred =
+      (link.kind === "wired" || link.kind === "wireless") && !link.sources.some((s) => s.startsWith("network_controller:"));
     if (aPort !== undefined) edge.a_port = aPort;
     if (bPort !== undefined) edge.b_port = bPort;
     if (link.vlan !== undefined) edge.vlan = link.vlan;
@@ -571,12 +640,32 @@ function buildTopology(now: number): TopologyState {
   const wholeEdges = edges.filter((e) => kept.has(e.a) && kept.has(e.b));
   wholeEdges.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   const tables = new Map([...ports].filter(([id]) => kept.has(id)));
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const wireless: MockWirelessClient[] = [];
+  for (const link of links()) {
+    const client = byId.get(link.b);
+    const mac = client?.macs?.[0];
+    if (link.kind !== "wireless" || !client || mac === undefined || !byId.has(link.a)) continue;
+    wireless.push({
+      node: client.id,
+      mac,
+      ...(link.ip ? { ip: link.ip } : {}),
+      ssid: link.ssid ?? "",
+      vid: link.vlan ?? 0,
+      accessPoint: link.a,
+      band: link.band ?? "5g",
+    });
+  }
+  const gateway = byId.get(TOPOLOGY_IDS.gateway);
   return {
     nodes,
     edges: wholeEdges,
     ports: tables,
     controllerDevices: nodes.filter((n) => n.sources.includes(CONTROLLER_SOURCE) && isController(n)).length,
     computedAt: iso(now),
+    wlans: WLANS.map((wlan) => ({ ...wlan })),
+    wireless,
+    nextHops: gateway?.ips?.[0] ? [gateway.ips[0]] : [],
   };
 }
 

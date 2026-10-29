@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { components } from "../generated/schema";
 import { recordAlarm, resetMockDb, subscribeEvents, type MockEvent } from "./db";
 import { FINDING_AREAS, mockFindingCounts, setMockFindingsExtra, setMockHealthFindings } from "./findings-store";
-import { ipamState } from "./ipam/api";
+import { HOST_IDS, applyCommands, ipamState } from "./ipam/api";
 import { jobStore } from "./job-store";
 import { RECONCILE_IDS, reconcileState } from "./reconcile-store";
+import { topologyState } from "./topology-store";
 
 type S = components["schemas"];
 
@@ -68,9 +69,10 @@ describe("GET /findings/counts", () => {
     expect(body.areas.discovery).toEqual({ act: want.conflicts, review: want.open - want.conflicts, info: 0 });
     expect(body.areas.jobs).toEqual({ act: want.waiting, review: 0, info: 0 });
     expect(body.areas.ipam).toEqual({ act: want.critical, review: want.warning, info: 0 });
-    expect(body.sources).toEqual({ proposal: want.open, job: want.waiting, alarm: want.critical + want.warning, health: 0, reconcile: 0 });
+    expect(body.areas.topology).toEqual({ act: 0, review: 1, info: 0 });
+    expect(body.sources).toEqual({ proposal: want.open, job: want.waiting, alarm: want.critical + want.warning, health: 0, reconcile: 0, topology: 1 });
     expect(body.total.act).toBe(want.conflicts + want.waiting + want.critical);
-    expect(body.total.review).toBe(want.open - want.conflicts + want.warning);
+    expect(body.total.review).toBe(want.open - want.conflicts + want.warning + 1);
     expect(body.total.info).toBe(0);
     expect(body.problems).toBe(body.total.act + body.total.review);
     expect(body.revision).toBe(mockFindingCounts().revision);
@@ -159,6 +161,100 @@ describe("GET /findings", () => {
     const health = await list("?source=health");
     expect(health.map((f) => [f.code, f.severity, f.area, f.action])).toEqual([["node.disk.low", "act", "nodes", "open_status"]]);
     expect((await counts()).areas.nodes.act).toBe(1);
+  });
+});
+
+// The topology: the root when the sources disagree, and the two WLAN rules.
+describe("the topology findings", () => {
+  async function list(query = ""): Promise<S["Finding"][]> {
+    const res = await fetch(`${V}/findings${query}`, { headers: { accept: "application/json" } });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { items: S["Finding"][] }).items;
+  }
+  const send = (method: string, path: string, json?: unknown) =>
+    fetch(`${V}${path}`, {
+      method,
+      headers: json === undefined ? {} : { "content-type": "application/json" },
+      body: json === undefined ? null : JSON.stringify(json),
+    });
+  const keepTv = () => send("PUT", `/topology/ssids/${encodeURIComponent("home.example.test")}/exceptions/${HOST_IDS["tv-living"]}`);
+
+  it("counts one finding by default: the IoT-classed host on the home WLAN, to review", async () => {
+    const [finding, ...rest] = await list("?source=topology");
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      kind: "wlan_class",
+      severity: "review",
+      area: "topology",
+      source: "topology",
+      action: "move_host",
+      code: "ipam.topology.wlan_class",
+    });
+    expect(finding?.id.startsWith("topology:")).toBe(true);
+    const body = await counts();
+    expect(body.sources.topology).toBe(1);
+    expect(body.areas.topology).toEqual({ act: 0, review: 1, info: 0 });
+    expect(body.problems).toBe(body.total.act + body.total.review);
+  });
+
+  it("filters by area, kind and source, and keeps every other filter working", async () => {
+    topologyState().nextHops = ["192.0.2.2"];
+    expect((await list("?area=topology")).map((f) => f.kind).sort()).toEqual(["topology_root", "wlan_class"]);
+    expect((await list("?kind=wlan_class")).map((f) => f.kind)).toEqual(["wlan_class"]);
+    expect((await list("?kind=topology_root")).map((f) => [f.action, f.severity])).toEqual([["use_root", "review"]]);
+    expect(await list("?source=topology&kind=wlan_prefix")).toEqual([]);
+    expect((await list("?area=topology&severity=act"))).toEqual([]);
+    expect((await list("?source=proposal")).every((f) => f.source === "proposal")).toBe(true);
+    expect((await list("?area=discovery")).every((f) => f.area === "discovery")).toBe(true);
+    // The topology findings are part of the whole list and of its count.
+    const all = await list("?limit=1000");
+    expect(all.filter((f) => f.source === "topology")).toHaveLength(2);
+    const body = await counts();
+    expect(all.length).toBe(body.total.act + body.total.review + body.total.info);
+    expect(body.sources.topology).toBe(2);
+    expect(body.areas.topology.review).toBe(2);
+  });
+
+  it("raises the root finding while the sources disagree and takes it away with the choice", async () => {
+    const before = await counts();
+    topologyState().nextHops = ["192.0.2.2"];
+    const disagreeing = await counts();
+    expect(disagreeing.sources.topology).toBe(2);
+    expect(disagreeing.total.review).toBe(before.total.review + 1);
+    const chosen = await send("PUT", "/topology/root", { source: "default_route" });
+    expect(chosen.status).toBe(200);
+    expect((await counts()).sources.topology).toBe(1);
+    expect(await send("DELETE", "/topology/root")).toHaveProperty("status", 204);
+    expect((await counts()).sources.topology).toBe(2);
+  });
+
+  it("drops the finding of a host that is kept on its WLAN, and no other", async () => {
+    const plug = HOST_IDS["plug-kitchen"] as string;
+    applyCommands([{ op: "update_host", args: { id: plug, patch: { tags: ["class:iot"] } } }] as never);
+    expect((await list("?source=topology")).map((f) => f.subject.label).sort()).toEqual(["plug-kitchen", "tv-living"]);
+    expect((await keepTv()).status).toBe(200);
+    expect((await list("?source=topology")).map((f) => f.subject.label)).toEqual(["plug-kitchen"]);
+    expect((await counts()).sources.topology).toBe(1);
+    // An ignored SSID raises none.
+    const ignored = await send("PUT", `/topology/ssids/${encodeURIComponent("iot.example.test")}/policy`, { policy: "ignore" });
+    expect(ignored.status).toBe(200);
+    expect(await list("?source=topology")).toEqual([]);
+    expect((await counts()).areas.topology).toEqual({ act: 0, review: 0, info: 0 });
+  });
+
+  it("publishes findings.changed after a decision, and refreshes the counts at once", async () => {
+    const before = (await counts()).sources.topology;
+    events.length = 0;
+    expect((await keepTv()).status).toBe(200);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.at(-1)?.data.kind).toBe("findings.changed");
+    expect((await counts()).sources.topology).toBe((before ?? 0) - 1);
+  });
+
+  it("counts nothing in the topology area while the graph is empty", async () => {
+    Object.assign(topologyState(), { nodes: [], edges: [], wireless: [], nextHops: [] });
+    expect((await counts()).sources.topology).toBe(0);
+    expect(await list("?source=topology")).toEqual([]);
   });
 });
 

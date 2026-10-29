@@ -2,10 +2,21 @@
  * Deterministic layout of the topology map.
  *
  * The server sends a graph of nodes and edges. The map draws it as a forest: a breadth-first
- * spanning forest rooted at the routers, laid out row by row. The client leaves of a node sit
- * in a grid right below it and its other children (switches, access points, hypervisors, ...)
- * sit side by side under that grid. A parent with many leaf children shows them as one group
- * unless it is expanded, so a graph of a few thousand clients stays a few dozen shapes.
+ * spanning forest rooted at the `root` option, then the routers, then the other network
+ * devices (switches and devices before access points), then everything else, laid out row by
+ * row. A host, VM, container or hypervisor never becomes the tree parent of a network device
+ * unless an `lldp` or `uplink` edge joins the two, so a MAC table edge cannot draw a server
+ * as the uplink of a switch. The client leaves of a node sit in a grid right below it and its
+ * other children (switches, access points, hypervisors, ...) sit side by side under that grid.
+ *
+ * Leaves collapse into groups so a graph of a few thousand clients stays a few dozen shapes.
+ * By default a parent with more than `maxLeaves` leaf children shows them as the one group
+ * `group:<parent id>` unless it is expanded. With `collapseEndpoints` ("infrastructure
+ * first") the leaves of a parent are bucketed by the port or SSID of their tree edge, and
+ * every bucket with two or more leaves becomes the group `group:<parent id>#<bucket>` (or
+ * `group:<parent id>` for no bucket) unless the group or the parent is expanded. With
+ * `gatherUnplaced` the nodes without any edge that are neither network devices nor
+ * hypervisors are not drawn at all but listed in `unplaced`.
  *
  * Everything here is a pure function of the graph and the options. The input order never
  * matters: nodes and edges are sorted first, and every tie is broken by label and id with a
@@ -34,6 +45,10 @@ export interface LayoutEdge {
   kind: EdgeKind;
   a: string;
   b: string;
+  /** The edge is only inferred from a MAC table (a placed edge is inferred when all its members are). */
+  inferred?: boolean;
+  /** For a client edge: the port at the parent end of a wired edge, or the SSID of a wireless one. */
+  bucket?: string;
 }
 
 export interface LayoutOptions {
@@ -47,10 +62,20 @@ export interface LayoutOptions {
   colGap?: number;
   /** Vertical distance between rows in px (default 90). */
   rowGap?: number;
+  /** A node id the spanning forest starts from before any other root candidate. */
+  root?: string;
+  /**
+   * Infrastructure first: the leaves of a parent are bucketed by the `bucket` of their tree
+   * edge and every bucket of two or more leaves is one group, unless `expanded` holds the
+   * group id or the parent id. Replaces the `maxLeaves` rule.
+   */
+  collapseEndpoints?: boolean;
+  /** Leave nodes without any edge (other than network devices and hypervisors) out of the drawing. */
+  gatherUnplaced?: boolean;
 }
 
 export interface PlacedNode {
-  /** The node id, or `group:<parentId>` for a group. */
+  /** The node id, or `group:<parentId>` / `group:<parentId>#<bucket>` for a group. */
   id: string;
   kind: NodeKind | "group";
   /** For a group: the empty string (the view renders a translated count). */
@@ -64,6 +89,8 @@ export interface PlacedNode {
   parent: string | null;
   /** For a group: the ids of the hidden nodes, sorted. */
   members?: string[];
+  /** For a group of one port or SSID: that bucket (absent for `group:<parentId>`). */
+  bucket?: string;
 }
 
 export interface PlacedEdge {
@@ -81,6 +108,8 @@ export interface PlacedEdge {
   tree: boolean;
   /** The original edge ids this placed edge stands for, sorted. */
   members: string[];
+  /** True when every edge this one stands for is inferred. */
+  inferred: boolean;
 }
 
 export interface Layout {
@@ -95,6 +124,17 @@ export interface Layout {
   hidden: Map<string, string>;
   /** Placed id to node; a hidden node id maps to the node of its group too. */
   position: Map<string, PlacedNode>;
+  /** Ids of the nodes left out by `gatherUnplaced`, sorted. */
+  unplaced: string[];
+}
+
+// The group id format; model.ts parses it (GROUP_PREFIX, GROUP_BUCKET) and must stay in step.
+// Kept as literals here so this pure module pulls in nothing else.
+const GROUP_ID_PREFIX = "group:";
+const GROUP_ID_BUCKET = "#";
+
+function groupId(parent: string, bucket: string): string {
+  return bucket === "" ? `${GROUP_ID_PREFIX}${parent}` : `${GROUP_ID_PREFIX}${parent}${GROUP_ID_BUCKET}${bucket}`;
 }
 
 const DEFAULT_MAX_LEAVES = 12;
@@ -122,6 +162,7 @@ interface Slot {
   depth: number;
   parent: string | null;
   members?: string[];
+  bucket?: string;
   /** Distinct nodes joined to this one by a valid edge. */
   neighbours: Set<Slot>;
   /** Tree children in discovery order. */
@@ -195,6 +236,11 @@ function compareEdges(a: LayoutEdge, b: LayoutEdge): number {
   return compareText(a.id, b.id) || compareText(a.kind, b.kind) || compareText(a.a, b.a) || compareText(a.b, b.b);
 }
 
+/** Whether a node of this kind may be left out of the drawing when it has no edge. */
+function isGatherable(kind: NodeKind | "group"): boolean {
+  return !isInfrastructure(kind) && kind !== "hypervisor";
+}
+
 function wholeAtLeast(value: number | undefined, fallback: number, minimum: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.max(minimum, Math.floor(value));
@@ -214,7 +260,7 @@ function pairKey(a: string, b: string): string {
  * Lays out the graph (see the module comment). Edges with an unknown end and self-loops are
  * ignored, and so are repeated edge ids. An edge whose two ends map to the same placed node
  * (both hidden in one group) is dropped; edges between the same two placed nodes are merged
- * into one.
+ * into one, and that edge is inferred only when all the merged edges are.
  */
 export function layout(
   nodes: readonly LayoutNode[],
@@ -226,6 +272,7 @@ export function layout(
   const colGap = positive(options.colGap, DEFAULT_COL_GAP);
   const rowGap = positive(options.rowGap, DEFAULT_ROW_GAP);
   const expanded = options.expanded;
+  const collapseEndpoints = options.collapseEndpoints === true;
 
   // 1. Clean input: sorted, unique ids, only edges between two known nodes.
   const slots = new Map<string, Slot>();
@@ -234,6 +281,10 @@ export function layout(
   }
   const edgeIds = new Set<string>();
   const kept: LayoutEdge[] = [];
+  // The kept edges of each pair of nodes in id order, and the pairs joined by an `lldp` or
+  // `uplink` edge (the only edges that may hang a network device below a server).
+  const between = new Map<string, LayoutEdge[]>();
+  const linked = new Set<string>();
   for (const edge of [...edges].sort(compareEdges)) {
     const a = slots.get(edge.a);
     const b = slots.get(edge.b);
@@ -242,14 +293,34 @@ export function layout(
     a.neighbours.add(b);
     b.neighbours.add(a);
     kept.push(edge);
+    const key = pairKey(edge.a, edge.b);
+    const list = between.get(key);
+    if (list) list.push(edge);
+    else between.set(key, [edge]);
+    if (edge.kind === "lldp" || edge.kind === "uplink") linked.add(key);
   }
 
   // 2. Spanning forest by breadth-first search. `order` holds the searches of the roots one
   // after the other, so a parent always comes before its children.
+  // Nodes without a kept edge can be left out; they are not part of the forest then.
+  const unplaced: string[] = [];
+  if (options.gatherUnplaced === true) {
+    for (const slot of [...slots.values()]) {
+      if (slot.neighbours.size === 0 && isGatherable(slot.kind)) {
+        unplaced.push(slot.id);
+        slots.delete(slot.id);
+      }
+    }
+    unplaced.sort(compareText);
+  }
   const real = [...slots.values()];
+  const first = options.root === undefined ? undefined : slots.get(options.root);
+  // An access point is never the root while a router, switch or device can reach it.
   const candidates = [
+    ...(first ? [first] : []),
     ...real.filter((s) => s.kind === "router").sort(byLabel),
-    ...real.filter((s) => s.kind !== "router" && isInfrastructure(s.kind)).sort(byDegree),
+    ...real.filter((s) => s.kind !== "router" && s.kind !== "access_point" && isInfrastructure(s.kind)).sort(byDegree),
+    ...real.filter((s) => s.kind === "access_point").sort(byDegree),
     ...real.filter((s) => !isInfrastructure(s.kind)).sort(byDegree),
   ];
   const visited = new Set<Slot>();
@@ -263,7 +334,13 @@ export function layout(
     order.push(root);
     while (head < order.length) {
       const slot = order[head++] as Slot;
-      const fresh = [...slot.neighbours].filter((n) => !visited.has(n)).sort(byVisit);
+      // A server is no uplink of a network device unless an lldp or uplink edge says so; such
+      // a neighbour is reached from elsewhere or becomes a root of its own.
+      const server = !isInfrastructure(slot.kind);
+      const fresh = [...slot.neighbours]
+        .filter((n) => !visited.has(n))
+        .filter((n) => !(server && isInfrastructure(n.kind)) || linked.has(pairKey(slot.id, n.id)))
+        .sort(byVisit);
       for (const next of fresh) {
         visited.add(next);
         next.parent = slot.id;
@@ -276,6 +353,37 @@ export function layout(
 
   // 3. Leaves and groups.
   const hidden = new Map<string, string>();
+  /** Puts the leaves under one group slot of the parent and records them as hidden. */
+  const hide = (parent: Slot, members: Slot[], bucket: string): Slot => {
+    const group = newSlot(groupId(parent.id, bucket), "group", "");
+    group.depth = parent.depth + 1;
+    group.parent = parent.id;
+    group.leaf = true;
+    group.members = members.map((leaf) => leaf.id).sort(compareText);
+    if (bucket !== "") group.bucket = bucket;
+    for (const leaf of members) hidden.set(leaf.id, group.id);
+    slots.set(group.id, group);
+    return group;
+  };
+  /** Infrastructure first: one group per port or SSID with two or more leaves, in bucket order. */
+  const bucketLeaves = (parent: Slot, leaves: Slot[]): Slot[] => {
+    if (expanded?.has(parent.id)) return leaves;
+    const buckets = new Map<string, Slot[]>();
+    for (const leaf of leaves) {
+      // `between` is in edge id order, so the first edge is the tree edge or its smallest twin.
+      const bucket = between.get(pairKey(parent.id, leaf.id))?.[0]?.bucket ?? "";
+      const list = buckets.get(bucket);
+      if (list) list.push(leaf);
+      else buckets.set(bucket, [leaf]);
+    }
+    const result: Slot[] = [];
+    for (const bucket of [...buckets.keys()].sort(compareText)) {
+      const members = buckets.get(bucket) as Slot[];
+      if (members.length >= 2 && !expanded?.has(groupId(parent.id, bucket))) result.push(hide(parent, members, bucket));
+      else result.push(...members);
+    }
+    return result;
+  };
   for (const slot of order) {
     const leaves: Slot[] = [];
     for (const child of slot.children) {
@@ -283,15 +391,10 @@ export function layout(
       if (child.leaf) leaves.push(child);
       else slot.branches.push(child);
     }
-    if (leaves.length > maxLeaves && !expanded?.has(slot.id)) {
-      const group = newSlot(`group:${slot.id}`, "group", "");
-      group.depth = slot.depth + 1;
-      group.parent = slot.id;
-      group.leaf = true;
-      group.members = leaves.map((leaf) => leaf.id).sort(compareText);
-      for (const leaf of leaves) hidden.set(leaf.id, group.id);
-      slots.set(group.id, group);
-      slot.leaves = [group];
+    if (collapseEndpoints) {
+      slot.leaves = bucketLeaves(slot, leaves);
+    } else if (leaves.length > maxLeaves && !expanded?.has(slot.id) && !expanded?.has(groupId(slot.id, ""))) {
+      slot.leaves = [hide(slot, leaves, "")];
     } else {
       slot.leaves = leaves;
     }
@@ -349,6 +452,7 @@ export function layout(
       parent: slot.parent,
     };
     if (slot.members) node.members = [...slot.members];
+    if (slot.bucket !== undefined) node.bucket = slot.bucket;
     placed.set(slot.id, node);
     maxX = Math.max(maxX, slot.x);
     maxY = Math.max(maxY, slot.y);
@@ -370,6 +474,7 @@ export function layout(
     const existing = merged.get(key);
     if (existing) {
       existing.members.push(edge.id);
+      existing.inferred = existing.inferred && edge.inferred === true;
       continue;
     }
     const start = placed.get(from);
@@ -386,6 +491,7 @@ export function layout(
       y2: end.y,
       tree: start.parent === to || end.parent === from,
       members: [edge.id],
+      inferred: edge.inferred === true,
     });
   }
 
@@ -396,5 +502,6 @@ export function layout(
     height: Math.max(rowGap, maxY + rowGap / 2),
     hidden,
     position,
+    unplaced,
   };
 }

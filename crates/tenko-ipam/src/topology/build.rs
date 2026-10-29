@@ -41,6 +41,9 @@ use crate::{
     vlan::controllers::{ControllerDeviceKind, ControllerPort, ControllerTopology},
 };
 
+/// The prefix of the source keys of network controllers (`network_controller:<connector>`).
+pub(crate) const CONTROLLER_SOURCE: &str = "network_controller:";
+
 /// The live intent the graph joins in.
 #[derive(Debug, Clone, Default)]
 pub struct Intent {
@@ -82,6 +85,10 @@ pub struct Computed {
     pub ports: HashMap<String, Vec<ControllerPort>>,
     /// The position of each node in `graph.nodes`.
     pub index: HashMap<String, usize>,
+    /// The intent the graph was computed from (the WLAN rules read it again).
+    pub intent: Intent,
+    /// The controllers' tables the graph was computed from.
+    pub controllers: Vec<std::sync::Arc<ControllerTopology>>,
 }
 
 impl Default for TopologyGraph {
@@ -823,6 +830,7 @@ pub fn build(inputs: &Inputs) -> Computed {
         graph,
         ports,
         index,
+        ..Computed::default()
     }
 }
 
@@ -885,11 +893,19 @@ fn assemble_edges(
             vlan: edge.vlan,
             ssid: edge.ssid.clone(),
             sources: Vec::new(),
+            inferred: false,
         });
         if !entry.sources.contains(&edge.source) {
             entry.sources.push(edge.source);
             entry.sources.sort();
         }
+        // A client edge is inferred until a network controller reports it: only a bridge
+        // table of a probe names it. LLDP links, uplinks and placements are never inferred.
+        entry.inferred = matches!(entry.kind, EdgeKind::Wired | EdgeKind::Wireless)
+            && !entry
+                .sources
+                .iter()
+                .any(|source| source.starts_with(CONTROLLER_SOURCE));
         entry.vlan = entry.vlan.or(edge.vlan);
         if entry.ssid.is_none() {
             entry.ssid = edge.ssid;

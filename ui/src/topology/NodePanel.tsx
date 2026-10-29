@@ -55,6 +55,8 @@ function linkText(n: Neighbour): string {
   if (n.port) parts.push(t("topology.neighbour.local", { port: n.port }));
   if (n.remote_port) parts.push(t("topology.neighbour.remote", { port: n.remote_port }));
   if (n.ssid) parts.push(t("topology.neighbour.ssid", { ssid: n.ssid }));
+  // U7: a link only a MAC table names says where the device is learned, not that it hangs there.
+  if (n.inferred) parts.push(t("topology.edge.inferred"));
   return formatList(parts, "unit");
 }
 

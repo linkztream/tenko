@@ -27,6 +27,7 @@ use crate::{
     NetworkDevice, NetworkRef, PortProfile, ProfileRef, Secrets, TopologyLink, TopologySnapshot,
     VendorFact, WirelessNetwork, WriteMode, proto::v1,
 };
+use tenko_core::observe::RadioBand;
 
 /// A message member that does not convert.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -848,6 +849,7 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                 vendor: client.vendor.clone(),
                 management: client.management,
                 name_placeholder: client.name_placeholder,
+                band: client.band.map(|band| band.as_str().to_owned()),
             })
             .collect(),
         networks: topology
@@ -882,6 +884,7 @@ pub fn topology_to_proto(topology: &TopologySnapshot) -> v1::Topology {
                 vlan: wlan.vlan.map(u32::from),
                 enabled: wlan.enabled,
                 access_points: wlan.access_points.iter().map(|ap| ap.0.clone()).collect(),
+                guest: wlan.guest,
             })
             .collect(),
     }
@@ -979,6 +982,8 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                 name_placeholder: client.name_placeholder,
                 vendor: opt_text(&format!("{at}.vendor"), client.vendor)?,
                 management: client.management,
+                // An unknown band is left out rather than refused (a compatible addition).
+                band: client.band.as_deref().and_then(RadioBand::parse),
             })
         })
         .collect::<Result<_>>()?;
@@ -1047,6 +1052,7 @@ pub fn topology_from_proto(topology: Option<v1::Topology>) -> Result<TopologySna
                     .enumerate()
                     .map(|(a, ap)| nonempty(&format!("{at}.access_points[{a}]"), ap).map(DeviceRef))
                     .collect::<Result<_>>()?,
+                guest: wlan.guest,
             })
         })
         .collect::<Result<_>>()?;
@@ -1667,6 +1673,7 @@ mod tests {
                 vendor: Some("Example Devices".to_owned()),
                 management: true,
                 name_placeholder: false,
+                band: Some(tenko_core::observe::RadioBand::G5),
             }],
             networks: vec![ControllerNetwork {
                 id: NetworkRef("lan".to_owned()),
@@ -1689,8 +1696,20 @@ mod tests {
                 vlan: Some(20),
                 enabled: true,
                 access_points: vec![DeviceRef("ap-a".to_owned())],
+                guest: true,
             }],
         }
+    }
+
+    #[test]
+    fn an_unknown_band_is_left_out_and_the_guest_flag_kept() {
+        let mut message = topology_to_proto(&topology());
+        assert_eq!(message.clients[0].band.as_deref(), Some("5g"));
+        assert!(message.wlans[0].guest);
+        message.clients[0].band = Some("60g".to_owned());
+        let read = topology_from_proto(Some(message)).expect("topology");
+        assert_eq!(read.clients[0].band, None);
+        assert!(read.wlans[0].guest);
     }
 
     #[test]

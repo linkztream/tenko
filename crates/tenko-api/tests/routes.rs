@@ -337,6 +337,27 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     // topology (WP2.7)
     ("GET", "/topology", "get_topology"),
     ("GET", "/topology/nodes/{id}", "get_topology_node"),
+    // the root and the SSID view (U7)
+    ("GET", "/topology/root", "get_topology_root"),
+    ("PUT", "/topology/root", "choose_topology_root"),
+    ("DELETE", "/topology/root", "clear_topology_root"),
+    ("GET", "/topology/ssids", "list_topology_ssids"),
+    ("PUT", "/topology/ssids/{ssid}/policy", "set_wlan_policy"),
+    (
+        "DELETE",
+        "/topology/ssids/{ssid}/policy",
+        "clear_wlan_policy",
+    ),
+    (
+        "PUT",
+        "/topology/ssids/{ssid}/exceptions/{host}",
+        "keep_on_wlan",
+    ),
+    (
+        "DELETE",
+        "/topology/ssids/{ssid}/exceptions/{host}",
+        "clear_wlan_exception",
+    ),
     // VLAN provisioning (WP2.7)
     ("POST", "/vlans/provision", "provision_vlan"),
     ("GET", "/vlans/{id}/prefixes", "list_vlan_prefixes"),

@@ -19,11 +19,14 @@
 
 use std::{
     collections::HashMap,
+    net::IpAddr,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 
-use tenko_core::{CodedError, ConnectorId, Revision, Timestamp, UserId, codec::encode_key};
+use tenko_core::{
+    CodedError, ConnectorId, HostId, RequestCtx, Revision, Timestamp, UserId, codec::encode_key,
+};
 use tenko_store::{KeyRange, ReadView, ReadViewExt};
 use tokio::{sync::watch, time::Instant};
 
@@ -34,9 +37,13 @@ use super::{
         ControllerStatus, IntentAddress, NodeIntent, TopologyFilter, TopologyGraph,
         TopologyNodeView,
     },
+    root::{self, DefaultRoute, RootDecision, RootSource},
+    stored::{self, Stored, StoredWlanPolicy, WlanException, WlanPolicy},
+    wlan::{self, SsidView},
 };
 use crate::{
     error::{IpamError, IpamResult},
+    findings::Finding,
     observe::tables::FACTS,
     service::IpamService,
     tables::{ADDRESSES, HOSTS, INTERFACE_ADDRESSES, INTERFACES, PREFIXES, VLANS},
@@ -100,6 +107,7 @@ pub struct TopologyService {
     config: TopologyConfig,
     state: Arc<Mutex<ControllerState>>,
     kept: Mutex<Option<Kept>>,
+    route: Mutex<Option<Arc<dyn DefaultRoute>>>,
 }
 
 impl std::fmt::Debug for TopologyService {
@@ -152,7 +160,27 @@ impl TopologyService {
             config,
             state: Arc::new(Mutex::new(ControllerState::default())),
             kept: Mutex::new(None),
+            route: Mutex::new(None),
         })
+    }
+
+    /// Sets where the next hops of this node's default routes come from (the second source
+    /// of the root, UI-Q10). Without one, only the controller's gateway names the root.
+    pub fn set_default_route(&self, route: Arc<dyn DefaultRoute>) {
+        *self.route.lock().unwrap_or_else(PoisonError::into_inner) = Some(route);
+    }
+
+    /// The next hops of the default routes; none without a reader.
+    async fn hops(&self) -> Vec<IpAddr> {
+        let route = self
+            .route
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match route {
+            Some(route) => route.next_hops().await,
+            None => Vec::new(),
+        }
     }
 
     /// The network controllers.
@@ -244,9 +272,10 @@ impl TopologyService {
             .collect();
         let intent = intent(view.as_ref())?;
         let vlans = Arc::new(intent.vlans.clone());
-        let mut controllers: Vec<ControllerTopology> =
+        let mut tables = tables;
+        tables.sort_by_key(|t| t.connector);
+        let controllers: Vec<ControllerTopology> =
             tables.iter().map(|t| t.as_ref().clone()).collect();
-        controllers.sort_by_key(|t| t.connector);
         let inputs = Inputs {
             facts,
             intent,
@@ -255,7 +284,10 @@ impl TopologyService {
             revision,
             now: Timestamp::now(),
         };
-        let computed = Arc::new(build::build(&inputs));
+        let mut computed = build::build(&inputs);
+        computed.intent = inputs.intent;
+        computed.controllers = tables;
+        let computed = Arc::new(computed);
         *self.kept.lock().unwrap_or_else(PoisonError::into_inner) = Some(Kept {
             revision,
             version,
@@ -264,6 +296,13 @@ impl TopologyService {
             vlans: Arc::clone(&vlans),
         });
         Ok((computed, vlans))
+    }
+
+    /// The decisions a person stored, read fresh on every call: the graph may be kept for
+    /// [`TopologyConfig::min_recompute`], a decision takes effect at once.
+    async fn decisions(&self, at_least: Option<Revision>) -> IpamResult<Stored> {
+        let view = self.ipam.view(at_least).await?;
+        Stored::load(view.as_ref())
     }
 
     /// The graph, filtered.
@@ -278,7 +317,191 @@ impl TopologyService {
         on_behalf_of: Option<UserId>,
     ) -> IpamResult<TopologyGraph> {
         let (computed, vlans) = self.computed(at_least, on_behalf_of).await?;
-        Ok(filter::apply(&computed, filter, &vlans))
+        let stored = self.decisions(at_least).await?;
+        let decision = root::decide(&computed.graph, &self.hops().await, stored.root.as_ref());
+        let mut graph = filter::apply(&computed, filter, &vlans);
+        graph.summary.root = decision.root;
+        Ok(graph)
+    }
+
+    /// The root of the map with its candidates and the stored choice (UI-Q10).
+    ///
+    /// # Errors
+    ///
+    /// The store's errors.
+    pub async fn root(
+        &self,
+        at_least: Option<Revision>,
+        on_behalf_of: Option<UserId>,
+    ) -> IpamResult<RootDecision> {
+        let (computed, _) = self.computed(at_least, on_behalf_of).await?;
+        let stored = self.decisions(at_least).await?;
+        Ok(root::decide(
+            &computed.graph,
+            &self.hops().await,
+            stored.root.as_ref(),
+        ))
+    }
+
+    /// "Use this": stores `source` as the root of the map with the candidates on offer now,
+    /// and answers the decision after the write.
+    ///
+    /// # Errors
+    ///
+    /// 409 `ipam.topology.no_candidate` when the source names no root now, 412
+    /// `ipam.revision_mismatch`, the store's errors.
+    pub async fn choose_root(
+        &self,
+        cx: &RequestCtx,
+        source: RootSource,
+        if_match: Option<Revision>,
+    ) -> IpamResult<RootDecision> {
+        let decision = self.root(None, cx.principal.user()).await?;
+        let Some(candidate) = decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.source == source)
+        else {
+            return Err(IpamError::new(
+                stored::codes::NO_CANDIDATE,
+                409,
+                format!("the source {} names no root now", source.as_str()),
+            )
+            .titled("No such root")
+            .param("source", source.as_str()));
+        };
+        let mut offered: Vec<String> = decision
+            .candidates
+            .iter()
+            .map(root::RootCandidate::key)
+            .collect();
+        offered.sort();
+        let row = stored::choose_root(
+            self.ipam.store().as_ref(),
+            cx,
+            source,
+            offered,
+            &candidate.label,
+            if_match,
+        )
+        .await?;
+        self.root(Some(row.revision), cx.principal.user()).await
+    }
+
+    /// Forgets the chosen root.
+    ///
+    /// # Errors
+    ///
+    /// 404 `ipam.topology.not_stored`, 412, the store's errors.
+    pub async fn clear_root(&self, cx: &RequestCtx, if_match: Option<Revision>) -> IpamResult<()> {
+        stored::clear_root(self.ipam.store().as_ref(), cx, if_match).await
+    }
+
+    /// The SSID view: every SSID of the controllers with its VLANs and clients.
+    ///
+    /// # Errors
+    ///
+    /// The store's errors.
+    pub async fn ssids(
+        &self,
+        at_least: Option<Revision>,
+        on_behalf_of: Option<UserId>,
+    ) -> IpamResult<SsidView> {
+        let (computed, _) = self.computed(at_least, on_behalf_of).await?;
+        let stored = self.decisions(at_least).await?;
+        let evaluation = wlan::evaluate(
+            &computed.controllers,
+            &computed.intent,
+            &stored,
+            &computed.graph,
+            Timestamp::now(),
+        );
+        Ok(SsidView {
+            ssids: evaluation.ssids,
+            revision: computed.graph.revision,
+        })
+    }
+
+    /// The topology's findings: the root's disagreement and the WLAN rules.
+    ///
+    /// # Errors
+    ///
+    /// The store's errors.
+    pub async fn findings(&self, on_behalf_of: Option<UserId>) -> IpamResult<Vec<Finding>> {
+        let (computed, _) = self.computed(None, on_behalf_of).await?;
+        let stored = self.decisions(None).await?;
+        let now = Timestamp::now();
+        let decision = root::decide(&computed.graph, &self.hops().await, stored.root.as_ref());
+        let mut out = wlan::evaluate(
+            &computed.controllers,
+            &computed.intent,
+            &stored,
+            &computed.graph,
+            now,
+        )
+        .findings;
+        out.extend(root::finding(&decision, now));
+        Ok(out)
+    }
+
+    /// Sets the policy of an SSID.
+    ///
+    /// # Errors
+    ///
+    /// See [`stored::set_policy`].
+    pub async fn set_policy(
+        &self,
+        cx: &RequestCtx,
+        ssid: &str,
+        policy: WlanPolicy,
+        if_match: Option<Revision>,
+    ) -> IpamResult<StoredWlanPolicy> {
+        stored::set_policy(self.ipam.store().as_ref(), cx, ssid, policy, if_match).await
+    }
+
+    /// Removes the policy of an SSID.
+    ///
+    /// # Errors
+    ///
+    /// See [`stored::clear_policy`].
+    pub async fn clear_policy(
+        &self,
+        cx: &RequestCtx,
+        ssid: &str,
+        if_match: Option<Revision>,
+    ) -> IpamResult<()> {
+        stored::clear_policy(self.ipam.store().as_ref(), cx, ssid, if_match).await
+    }
+
+    /// "Keep on this WLAN".
+    ///
+    /// # Errors
+    ///
+    /// See [`stored::keep`].
+    pub async fn keep(
+        &self,
+        cx: &RequestCtx,
+        host: HostId,
+        ssid: &str,
+        reason: Option<String>,
+        if_match: Option<Revision>,
+    ) -> IpamResult<WlanException> {
+        stored::keep(self.ipam.store().as_ref(), cx, host, ssid, reason, if_match).await
+    }
+
+    /// Removes an exception.
+    ///
+    /// # Errors
+    ///
+    /// See [`stored::forget`].
+    pub async fn forget(
+        &self,
+        cx: &RequestCtx,
+        host: HostId,
+        ssid: &str,
+        if_match: Option<Revision>,
+    ) -> IpamResult<()> {
+        stored::forget(self.ipam.store().as_ref(), cx, host, ssid, if_match).await
     }
 
     /// One node with its ports (only `port` when given), neighbours and intent.
@@ -350,6 +573,7 @@ async fn read_controllers(
                     name: controller.name,
                     observed_at: Some(topology.observed_at),
                     devices: topology.devices.len(),
+                    writes_enabled: controller.writes_enabled,
                     error: None,
                 });
                 tables.insert(controller.id, Arc::new(topology));
@@ -359,6 +583,7 @@ async fn read_controllers(
                 name: controller.name,
                 observed_at: None,
                 devices: 0,
+                writes_enabled: controller.writes_enabled,
                 error: Some(CodedError {
                     params: std::collections::BTreeMap::default(),
                     errors: Vec::new(),

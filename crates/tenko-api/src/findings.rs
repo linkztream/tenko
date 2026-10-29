@@ -10,6 +10,11 @@
 //! whose findings changed, so every surface reads one query and one subscription. A
 //! subscriber that falls behind or a journal gap reloads the index from the store.
 //!
+//! The topology's findings (its root and the WLAN rules, U7) come from the topology service
+//! ([`FindingsService::set_topology`]): they are derived again with the view's findings and
+//! at least every [`TOPOLOGY_EVERY`], in a task of their own so that a slow network
+//! controller never holds the journal.
+//!
 //! Health conditions are the warnings of `GET /system/status`: the status sets them on every
 //! read, and the findings routes assemble them again when they are older than
 //! [`HEALTH_TTL`]. The lease-conflict warning (`ipam.lease_conflict`) is left out, because
@@ -18,13 +23,19 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use futures::StreamExt;
 use tenko_core::{ObjectRef, Revision, Timestamp};
-use tenko_ipam::findings::{FindingLevel, FindingsConfig, FindingsIndex, HealthItem};
+use tenko_ipam::{
+    findings::{FindingLevel, FindingsConfig, FindingsIndex, HealthItem},
+    topology::TopologyService,
+};
 use tenko_store::{ReadConsistency, Store, StoreError, WatchError, WatchFilter};
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -69,6 +80,10 @@ const DEBOUNCE: Duration = Duration::from_secs(2);
 /// The view's findings are refreshed at least this often, for what ages with time.
 const PERIODIC: Duration = Duration::from_secs(60);
 
+/// The topology's findings are derived again at least this often: the controllers' tables
+/// change without a write to the store.
+pub const TOPOLOGY_EVERY: Duration = Duration::from_secs(30);
+
 /// The findings index of this controller with the task that keeps it current.
 pub struct FindingsService {
     index: FindingsIndex,
@@ -78,6 +93,8 @@ pub struct FindingsService {
     events: EventHub,
     loaded: watch::Sender<bool>,
     health_at: Mutex<Option<Instant>>,
+    topology: Mutex<Option<Arc<TopologyService>>>,
+    topology_running: AtomicBool,
 }
 
 impl std::fmt::Debug for FindingsService {
@@ -105,7 +122,44 @@ impl FindingsService {
             events,
             loaded: watch::channel(false).0,
             health_at: Mutex::new(None),
+            topology: Mutex::new(None),
+            topology_running: AtomicBool::new(false),
         })
+    }
+
+    /// Sets the topology service whose findings (the root, the WLAN rules) the index holds.
+    pub fn set_topology(&self, topology: Arc<TopologyService>) {
+        *self.topology.lock().unwrap_or_else(PoisonError::into_inner) = Some(topology);
+    }
+
+    /// Derives the topology's findings again in a task of its own, unless a derivation runs;
+    /// publishes a `findings` event when they changed.
+    pub fn refresh_topology(self: &Arc<Self>) {
+        let Some(topology) = self
+            .topology
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        if self.topology_running.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let service = Arc::clone(self);
+        tokio::spawn(async move {
+            match topology.findings(None).await {
+                Ok(findings) => {
+                    if service.index.set_topology(findings, Timestamp::now()) {
+                        service.publish(&[]);
+                    }
+                }
+                Err(error) => {
+                    tracing::debug!(error = %error.code_str(), "the topology's findings cannot be derived now");
+                }
+            }
+            service.topology_running.store(false, Ordering::Release);
+        });
     }
 
     /// The index.
@@ -188,6 +242,7 @@ impl FindingsService {
         }
         self.loaded.send_replace(true);
         self.publish(&[]);
+        self.refresh_topology();
         Ok(revision)
     }
 
@@ -244,6 +299,7 @@ impl FindingsService {
             };
             let mut dirty: Option<Instant> = None;
             let mut refreshed = Instant::now();
+            let mut topology_at = Instant::now();
             let mut tick = tokio::time::interval(Duration::from_secs(1));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
@@ -296,6 +352,11 @@ impl FindingsService {
                             dirty = None;
                             refreshed = Instant::now();
                             self.refresh_view().await;
+                            topology_at = Instant::now();
+                            self.refresh_topology();
+                        } else if topology_at.elapsed() >= TOPOLOGY_EVERY {
+                            topology_at = Instant::now();
+                            self.refresh_topology();
                         }
                     }
                     _ = stop.changed() => return,

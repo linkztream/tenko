@@ -98,6 +98,7 @@ fn controller_table(connector: ConnectorId) -> ControllerTopology {
     let mut switch = device("sw-1", "USW-24", ControllerDeviceKind::Switch, 2);
     switch.ports = vec![port(1, 10, true), port(5, 20, false), port(6, 20, false)];
     ControllerTopology {
+        clients: Vec::new(),
         connector,
         observed_at: now(),
         devices: vec![
@@ -124,6 +125,7 @@ fn controller_table(connector: ConnectorId) -> ControllerTopology {
             },
         ],
         wlans: vec![ControllerWlan {
+            guest: false,
             ssid: "iot.example.test".to_owned(),
             vlan: Some(30),
             enabled: true,

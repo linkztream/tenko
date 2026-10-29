@@ -1,12 +1,15 @@
 // The topology map of the mock API through `fetch` against the msw server: the seeded graph
 // and its consistency with the IPAM seed, the filters with the context rule of the server,
-// the limit, and the view of one node with its ports, neighbours and intent.
+// the limit, the view of one node with its ports, neighbours and intent, the root of the map
+// (UI-Q10), the SSID view with the two WLAN rules and the decisions stored on them.
 import { beforeEach, describe, expect, it } from "vitest";
 import { apiOperations } from "../generated/operations";
 import type { components } from "../generated/schema";
+import { signInWithRoles } from "../../auth/scope-testkit";
 import { db, resetMockDb } from "./db";
 import { HOST_IDS, IPAM_IDS, applyCommands, ipamState } from "./ipam/api";
-import { TOPOLOGY_COUNTS, TOPOLOGY_IDS, TOPOLOGY_SOURCES, TOPOLOGY_SSIDS, mockVlanController } from "./topology-store";
+import { mockTopologyDecisions } from "./topology-decisions";
+import { TOPOLOGY_COUNTS, TOPOLOGY_IDS, TOPOLOGY_SOURCES, TOPOLOGY_SSIDS, mockVlanController, topologyState } from "./topology-store";
 
 type S = components["schemas"];
 type Graph = S["TopologyGraph"];
@@ -28,6 +31,14 @@ interface Answer<T> {
 
 async function get<T>(path: string): Promise<Answer<T>> {
   const res = await fetch(path, { headers: { accept: "application/json" } });
+  const text = await res.text();
+  return { res, status: res.status, body: (text ? JSON.parse(text) : undefined) as T };
+}
+
+async function send<T>(method: string, path: string, json?: unknown, headers: Record<string, string> = {}): Promise<Answer<T>> {
+  const all: Record<string, string> = { accept: "application/json", ...headers };
+  if (json !== undefined) all["content-type"] = "application/json";
+  const res = await fetch(path, { method, headers: all, body: json === undefined ? null : JSON.stringify(json) });
   const text = await res.text();
   return { res, status: res.status, body: (text ? JSON.parse(text) : undefined) as T };
 }
@@ -62,13 +73,26 @@ beforeEach(() => {
 describe("the topology operations of the document", () => {
   it("are answered, each after the session check", async () => {
     const operations = apiOperations.filter((o) => o.path.startsWith("/api/v1/topology"));
-    expect(operations.map((o) => o.path).sort()).toEqual(["/api/v1/topology", "/api/v1/topology/nodes/{id}"]);
+    expect(operations.map((o) => `${o.method} ${o.path}`).sort()).toEqual([
+      "delete /api/v1/topology/root",
+      "delete /api/v1/topology/ssids/{ssid}/exceptions/{host}",
+      "delete /api/v1/topology/ssids/{ssid}/policy",
+      "get /api/v1/topology",
+      "get /api/v1/topology/nodes/{id}",
+      "get /api/v1/topology/root",
+      "get /api/v1/topology/ssids",
+      "put /api/v1/topology/root",
+      "put /api/v1/topology/ssids/{ssid}/exceptions/{host}",
+      "put /api/v1/topology/ssids/{ssid}/policy",
+    ]);
     for (const operation of operations) {
-      const path = operation.path.replace("{id}", T.swCore);
-      resetMockDb("signed-in");
-      expect((await get(path)).status, path).toBe(200);
+      const path = operation.path.replace("{id}", T.swCore).replace("{ssid}", "home.example.test").replace("{host}", HOST_IDS.nas as string);
+      if (operation.method === "get") {
+        resetMockDb("signed-in");
+        expect((await get(path)).status, path).toBe(200);
+      }
       resetMockDb("signed-out");
-      expectProblem(await get(path), 401, "auth.unauthenticated");
+      expectProblem(await send(operation.method.toUpperCase(), path, operation.method === "put" ? { source: "controller", policy: "track" } : undefined), 401, "auth.unauthenticated");
     }
   });
 });
@@ -82,13 +106,13 @@ describe("the seeded graph", () => {
     expect(g.nodes.map((n) => n.id)).toEqual(sorted(g.nodes.map((n) => n.id)));
     expect(g.edges.map((e) => e.id)).toEqual(sorted(g.edges.map((e) => e.id)));
     expect(g.summary).toMatchObject({
-      nodes: 24,
-      edges: 23,
-      total_nodes: 24,
-      total_edges: 23,
+      nodes: TOPOLOGY_COUNTS.nodes,
+      edges: TOPOLOGY_COUNTS.edges,
+      total_nodes: TOPOLOGY_COUNTS.nodes,
+      total_edges: TOPOLOGY_COUNTS.edges,
       truncated: false,
-      by_kind: { access_point: 3, container: 1, host: 14, hypervisor: 1, router: 1, switch: 2, vm: 2 },
-      by_edge_kind: { lldp: 1, uplink: 4, vm_host: 3, wired: 9, wireless: 6 },
+      by_kind: { access_point: 3, container: 1, host: 15, hypervisor: 1, router: 1, switch: 2, vm: 2 },
+      by_edge_kind: { lldp: 1, uplink: 4, vm_host: 3, wired: 9, wireless: 7 },
     });
     // Every id the tests export is a node, and every edge joins two nodes.
     const known = new Set(g.nodes.map((n) => n.id));
@@ -150,10 +174,11 @@ describe("the seeded graph", () => {
     });
     // Sites: the host's, else the network's. Only ap-garage is in the Garage.
     expect(byId.get(T.apGarage)?.site).toBe(IPAM_IDS.site.garage);
-    for (const node of g.nodes.filter((n) => n.id !== T.apGarage && n.id !== T.unknown)) {
+    for (const node of g.nodes.filter((n) => n.id !== T.apGarage && n.id !== T.unknown && n.id !== T.guestClient)) {
       expect(node.site, node.label).toBe(IPAM_IDS.site.home);
     }
     expect(byId.get(T.unknown)?.site).toBeUndefined();
+    expect(byId.get(T.guestClient)?.site).toBeUndefined();
     expect(g.summary.sites).toEqual([IPAM_IDS.site.home, IPAM_IDS.site.garage]);
     expect(HOST_IDS.gw).toBe(byId.get(T.gateway)?.host);
   });
@@ -221,10 +246,11 @@ describe("the seeded graph", () => {
       [10, "LAN", IPAM_IDS.vlan.v10],
       [20, "Lab", IPAM_IDS.vlan.v20],
       [30, "IoT", IPAM_IDS.vlan.v30],
+      [40, "DMZ", IPAM_IDS.vlan.v40],
     ]);
     for (const entry of g.summary.vlans) expect(entry.nodes).toBe(g.nodes.filter((n) => n.vlans?.includes(entry.vid)).length);
     expect(g.summary.controllers).toEqual([
-      { connector: T.controller, name: "unifi.example.test", observed_at: g.summary.computed_at, devices: TOPOLOGY_COUNTS.controllerDevices },
+      { connector: T.controller, name: "unifi.example.test", observed_at: g.summary.computed_at, devices: TOPOLOGY_COUNTS.controllerDevices, writes_enabled: true },
     ]);
     expect(g.summary.networks).toEqual([
       { id: "net-mgmt", name: "Management", vlan: 10, subnet: "192.0.2.0/24", management: true, dhcp: "server", connector: T.controller },
@@ -243,7 +269,7 @@ describe("the filters", () => {
     // ap-garage is the only node of the Garage; the backbone completes the picture.
     const garage = await graph(`?site=${IPAM_IDS.site.garage}`);
     expect(ids(garage)).toEqual(sorted(NETWORK_DEVICES));
-    expect(garage.summary).toMatchObject({ nodes: 6, edges: 5, total_nodes: 24, total_edges: 23, truncated: false });
+    expect(garage.summary).toMatchObject({ nodes: 6, edges: 5, total_nodes: TOPOLOGY_COUNTS.nodes, total_edges: TOPOLOGY_COUNTS.edges, truncated: false });
     expect(garage.summary.sites).toEqual([IPAM_IDS.site.home, IPAM_IDS.site.garage]);
     // Exactly the hosts of a site, without context: the unknown client has no site.
     const home = await graph(`?site=${IPAM_IDS.site.home}&kind=host`);
@@ -252,7 +278,7 @@ describe("the filters", () => {
     expect(ids(home)).not.toContain(T.unknown);
     expect(home.edges).toEqual([]);
     expect((await graph(`?site=${IPAM_IDS.site.lab}`)).nodes).toEqual([]);
-    expect((await graph(`?site=${IPAM_IDS.site.lab}`)).summary).toMatchObject({ nodes: 0, edges: 0, total_nodes: 24, vlans: [], sites: [] });
+    expect((await graph(`?site=${IPAM_IDS.site.lab}`)).summary).toMatchObject({ nodes: 0, edges: 0, total_nodes: TOPOLOGY_COUNTS.nodes, vlans: [], sites: [] });
     expectProblem(await get(`${V}/topology?site=garage`), 400, "sys.invalid_query");
   });
 
@@ -313,8 +339,8 @@ describe("the filters", () => {
     expect(guests.edges).toHaveLength(3);
     // No node of the kind `device` in the lab; blank values are dropped.
     expect((await graph("?kind=device")).nodes).toEqual([]);
-    expect((await graph("?kind=")).nodes).toHaveLength(24);
-    expect((await graph("?kind=,")).nodes).toHaveLength(24);
+    expect((await graph("?kind=")).nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
+    expect((await graph("?kind=,")).nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
     const bad = expectProblem(await get(`${V}/topology?kind=toaster`), 400, "sys.invalid_query");
     expect(bad.detail).toContain("toaster");
     expectProblem(await get(`${V}/topology?kind=switch,toaster`), 400, "sys.invalid_query");
@@ -328,15 +354,15 @@ describe("the filters", () => {
     expect(ids(await only("00:00:5e:00:53:d2", "host"))).toEqual([T.unknown]);
     expect(ids(await only("53:D2", "host"))).toEqual([T.unknown]);
     expect(ids(await only("192.0.2.150", "vm"))).toEqual([T.mediaPc]);
-    expect(ids(await only("example devices", "host"))).toEqual([T.unknown]);
+    expect(ids(await only("example devices", "host"))).toEqual(sorted([T.unknown, T.guestClient]));
     expect(ids(await only("u6-lite", "access_point"))).toEqual(sorted([T.apGarage, T.apAttic]));
     expect(ids(await only("home.example", "access_point"))).toEqual(sorted([T.apHall, T.apAttic]));
     expect(ids(await only("iot.example", "access_point"))).toEqual(sorted([T.apHall, T.apGarage]));
     expect(ids(await only("iot.example", "host"))).toEqual(sorted(IOT));
     expect((await only("no such thing", "host")).nodes).toEqual([]);
     // Blank text keeps everything.
-    expect((await graph("?q=")).nodes).toHaveLength(24);
-    expect((await graph("?q=%20%20")).nodes).toHaveLength(24);
+    expect((await graph("?q=")).nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
+    expect((await graph("?q=%20%20")).nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
   });
 
   it("combine with AND", async () => {
@@ -398,7 +424,7 @@ describe("the context of a filter", () => {
     const one = await graph("?kind=host&q=thermostat");
     expect(ids(one)).toEqual([T.thermostat]);
     expect(one.edges).toEqual([]);
-    expect(one.summary).toMatchObject({ nodes: 1, edges: 0, total_nodes: 24 });
+    expect(one.summary).toMatchObject({ nodes: 1, edges: 0, total_nodes: TOPOLOGY_COUNTS.nodes });
     // A hypervisor and its guests: the edges between them, not the switch behind pve1.
     const pve = await graph("?kind=hypervisor,vm&q=pve1");
     expect(ids(pve)).toEqual([T.pve1]);
@@ -411,7 +437,7 @@ describe("the context of a filter", () => {
       { vid: 20, vlan: IPAM_IDS.vlan.v20, name: "Lab", nodes: 3 },
     ]);
     expect(lab.summary.sites).toEqual([IPAM_IDS.site.home]);
-    expect(lab.summary.total_nodes).toBe(24);
+    expect(lab.summary.total_nodes).toBe(TOPOLOGY_COUNTS.nodes);
   });
 });
 
@@ -420,7 +446,7 @@ describe("the limit", () => {
     const infrastructure = sorted(NETWORK_DEVICES);
     const three = await graph("?limit=3");
     expect(ids(three)).toEqual(infrastructure.slice(0, 3));
-    expect(three.summary).toMatchObject({ nodes: 3, total_nodes: 24, truncated: true });
+    expect(three.summary).toMatchObject({ nodes: 3, total_nodes: TOPOLOGY_COUNTS.nodes, truncated: true });
     expect(three.edges.every((e) => ids(three).includes(e.a) && ids(three).includes(e.b))).toBe(true);
     const six = await graph("?limit=6");
     expect(ids(six)).toEqual(infrastructure);
@@ -432,10 +458,10 @@ describe("the limit", () => {
   });
 
   it("does not cut an answer that fits", async () => {
-    expect((await graph("?limit=24")).summary).toMatchObject({ nodes: 24, truncated: false });
-    expect((await graph("?limit=23")).summary).toMatchObject({ nodes: 23, truncated: true });
+    expect((await graph(`?limit=${TOPOLOGY_COUNTS.nodes}`)).summary).toMatchObject({ nodes: TOPOLOGY_COUNTS.nodes, truncated: false });
+    expect((await graph(`?limit=${TOPOLOGY_COUNTS.nodes - 1}`)).summary).toMatchObject({ nodes: TOPOLOGY_COUNTS.nodes - 1, truncated: true });
     expect((await graph()).summary.truncated).toBe(false);
-    expect((await graph("?limit=20000")).nodes).toHaveLength(24);
+    expect((await graph("?limit=20000")).nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
   });
 
   it("cuts a filtered answer after the context was added", async () => {
@@ -460,7 +486,7 @@ describe("GET /topology/nodes/{id}", () => {
     expect(view.ports.map((p) => p.port)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
     expect(view.ports[0]).toMatchObject({ port: "1", name: "Port 1", uplink: true, native_vlan: 10, up: true });
     expect(view.ports[0]?.neighbours).toEqual([
-      { node: T.gateway, label: "gw", kind: "router", edge: expect.stringMatching(/^e-/) as string, edge_kind: "uplink", port: "1", remote_port: "1" },
+      { node: T.gateway, label: "gw", kind: "router", edge: expect.stringMatching(/^e-/) as string, edge_kind: "uplink", inferred: false, port: "1", remote_port: "1" },
     ]);
     const hanging = Object.fromEntries(view.ports.map((p) => [p.port, p.neighbours.map((n) => [n.label, n.edge_kind, n.vlan ?? null])]));
     expect(hanging).toEqual({
@@ -589,7 +615,7 @@ describe("the network controller", () => {
     const removed = await graph();
     expect(removed.summary).toMatchObject({ controllers: [], networks: [] });
     // The graph itself is what the sources observed.
-    expect(removed.nodes).toHaveLength(24);
+    expect(removed.nodes).toHaveLength(TOPOLOGY_COUNTS.nodes);
   });
 
   it("shows the networks it has now and is restored by a reset", async () => {
@@ -605,5 +631,566 @@ describe("the network controller", () => {
     expect(mockVlanController).toBe(same);
     expect(mockVlanController).toMatchObject({ present: true, enabled: true, writes_enabled: true, id: T.controller });
     expect((await graph()).summary.networks).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The inferred edges, the controller's write flag and the root
+
+describe("the inferred edges", () => {
+  it("mark a client edge no network controller reports, and only that", async () => {
+    const g = await graph();
+    const inferred = g.edges.filter((e) => e.inferred);
+    expect(inferred.map((e) => [e.kind, e.b])).toEqual([["wired", T.printer]]);
+    expect(inferred[0]?.sources.every((s) => !s.startsWith("network_controller:"))).toBe(true);
+    // Every edge carries the flag; links between devices and placements are never inferred.
+    expect(g.edges.every((e) => typeof e.inferred === "boolean")).toBe(true);
+    expect(g.edges.filter((e) => e.kind !== "wired" && e.kind !== "wireless").some((e) => e.inferred)).toBe(false);
+    // An edge the controller reports stays certain although a probe saw it too.
+    expect(g.edges.find((e) => e.kind === "wired" && e.b === T.nas)).toMatchObject({ inferred: false });
+  });
+
+  it("reach the neighbours of the node view", async () => {
+    const view = (await get<NodeView>(`${V}/topology/nodes/${T.swCore}`)).body;
+    const byLabel = new Map(view.neighbours.map((n) => [n.label, n.inferred] as const));
+    expect(byLabel.get("printer-1")).toBe(true);
+    expect(byLabel.get("nas")).toBe(false);
+    expect(byLabel.get("gw")).toBe(false);
+  });
+});
+
+describe("the controllers of the summary", () => {
+  it("carry whether writes through them are allowed", async () => {
+    expect((await graph()).summary.controllers[0]?.writes_enabled).toBe(true);
+    mockVlanController.writes_enabled = false;
+    expect((await graph()).summary.controllers[0]?.writes_enabled).toBe(false);
+  });
+});
+
+describe("the root of the map", () => {
+  const rootAnswer = () => get<S["RootDecision"]>(`${V}/topology/root`);
+  const chosen = (source: string, headers?: Record<string, string>) => send<S["RootDecision"]>("PUT", `${V}/topology/root`, { source }, headers);
+  const findingsOf = async (kind: string): Promise<S["Finding"][]> =>
+    (await get<{ items: S["Finding"][] }>(`${V}/findings?kind=${kind}`)).body.items;
+  const SW_CORE_IP = "192.0.2.2";
+
+  it("is the gateway the controller reports while both sources agree", async () => {
+    const { body, status } = await rootAnswer();
+    expect(status).toBe(200);
+    expect(body.candidates.map((c) => [c.source, c.node, c.label, c.ip])).toEqual([
+      ["controller", T.gateway, "gw", "192.0.2.1"],
+      ["default_route", T.gateway, "gw", "192.0.2.1"],
+    ]);
+    expect(body).toMatchObject({ disagree: false, open: false, root: { source: "controller", node: T.gateway, chosen: false }, revision: db.revision });
+    expect(body.choice).toBeUndefined();
+    expect((await graph()).summary.root).toEqual({ source: "controller", node: T.gateway, chosen: false });
+    expect(await findingsOf("topology_root")).toEqual([]);
+  });
+
+  it("raises one finding to review when the sources disagree, with the labels and addresses as parameters", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    const { body } = await rootAnswer();
+    expect(body).toMatchObject({ disagree: true, open: true, root: { source: "controller", node: T.gateway, chosen: false } });
+    expect(body.candidates[1]).toMatchObject({ source: "default_route", node: T.swCore, label: "sw-core", ip: SW_CORE_IP });
+    const [finding, ...rest] = await findingsOf("topology_root");
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      severity: "review",
+      area: "topology",
+      source: "topology",
+      action: "use_root",
+      code: "ipam.topology.root_disagree",
+      evidence: { id: "root", path: "/topology/root" },
+      subject: { kind: "node", label: "gw / sw-core" },
+      params: {
+        controller_label: "gw",
+        controller_node: T.gateway,
+        controller_ip: "192.0.2.1",
+        default_route_label: "sw-core",
+        default_route_node: T.swCore,
+        default_route_ip: SW_CORE_IP,
+      },
+    });
+    expect(finding?.id).toMatch(/^topology:root:[0-9a-f]{32}$/);
+  });
+
+  it("follows the chosen source, stores the candidates on offer and clears the finding", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    const before = await findingsOf("topology_root");
+    const answer = await chosen("default_route");
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ disagree: true, open: false, root: { source: "default_route", node: T.swCore, chosen: true } });
+    expect(answer.body.choice).toMatchObject({ source: "default_route", offered: [`controller:${T.gateway}`, `route:${SW_CORE_IP}`] });
+    expect(answer.body.choice?.revision).toBeGreaterThan(0);
+    expect(answer.body.choice?.decided.by.kind).toBe("user");
+    expect((await graph()).summary.root).toEqual({ source: "default_route", node: T.swCore, chosen: true });
+    expect(await findingsOf("topology_root")).toEqual([]);
+    expect(before).toHaveLength(1);
+    // The read answers the stored choice with its ETag.
+    const read = await rootAnswer();
+    expect(read.res.headers.get("etag")).toBe(`"${answer.body.choice?.revision}"`);
+    expect(read.body.choice).toEqual(answer.body.choice);
+    // A choice of the other source replaces it.
+    expect((await chosen("controller")).body).toMatchObject({ root: { source: "controller", node: T.gateway, chosen: true }, open: false });
+  });
+
+  it("opens the finding again when the candidates on offer change, and when the choice is cleared", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    await chosen("controller");
+    expect((await rootAnswer()).body.open).toBe(false);
+    topologyState().nextHops = ["192.0.2.3"];
+    const changed = (await rootAnswer()).body;
+    expect(changed).toMatchObject({ disagree: true, open: true, root: { source: "controller", chosen: true } });
+    expect(await findingsOf("topology_root")).toHaveLength(1);
+    // Choosing again records the new candidates.
+    await chosen("controller");
+    expect((await rootAnswer()).body.open).toBe(false);
+    // Forgetting the choice lets the ranked source decide and raises the finding again.
+    const cleared = await send("DELETE", `${V}/topology/root`);
+    expect(cleared.status).toBe(204);
+    expect((await rootAnswer()).body).toMatchObject({ open: true, root: { source: "controller", chosen: false } });
+    expect((await rootAnswer()).body.choice).toBeUndefined();
+    expect(await findingsOf("topology_root")).toHaveLength(1);
+  });
+
+  it("closes the finding when the sources agree again, and keeps the choice", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    await chosen("default_route");
+    topologyState().nextHops = ["192.0.2.1"];
+    expect((await rootAnswer()).body).toMatchObject({ disagree: false, open: false, choice: { source: "default_route" } });
+    expect(await findingsOf("topology_root")).toEqual([]);
+  });
+
+  it("names a next hop no node holds by its address, and never an access point", async () => {
+    topologyState().nextHops = ["192.0.2.99"];
+    const outside = (await rootAnswer()).body;
+    expect(outside.candidates[1]).toEqual({ source: "default_route", label: "192.0.2.99", ip: "192.0.2.99" });
+    expect(outside.disagree).toBe(true);
+    expect((await chosen("default_route")).body.root).toEqual({ source: "default_route", chosen: true });
+    expect((await rootAnswer()).body.choice?.offered).toEqual([`controller:${T.gateway}`, "route:192.0.2.99"]);
+    // ap-hall holds 192.0.2.4 and is no candidate; the next hop stays an address.
+    topologyState().nextHops = ["192.0.2.4"];
+    expect((await rootAnswer()).body.candidates[1]).toEqual({ source: "default_route", label: "192.0.2.4", ip: "192.0.2.4" });
+    // The first hop a node holds wins over an earlier hop nobody holds.
+    topologyState().nextHops = ["192.0.2.99", SW_CORE_IP];
+    expect((await rootAnswer()).body.candidates[1]).toMatchObject({ node: T.swCore, ip: SW_CORE_IP });
+  });
+
+  it("refuses a source without a candidate with 409 ipam.topology.no_candidate", async () => {
+    topologyState().nextHops = [];
+    const one = (await rootAnswer()).body;
+    expect(one.candidates.map((c) => c.source)).toEqual(["controller"]);
+    expect(one).toMatchObject({ disagree: false, open: false });
+    const refused = expectProblem(await chosen("default_route"), 409, "ipam.topology.no_candidate");
+    expect(refused.params).toEqual({ source: "default_route" });
+    expect(mockTopologyDecisions.root).toBeNull();
+    // Without a network controller the controller source has none.
+    topologyState().nextHops = ["192.0.2.1"];
+    mockVlanController.enabled = false;
+    expect((await rootAnswer()).body.candidates.map((c) => c.source)).toEqual(["default_route"]);
+    expectProblem(await chosen("controller"), 409, "ipam.topology.no_candidate");
+  });
+
+  it("answers 404 ipam.topology.not_stored when no root was chosen, and 400 for a bad body", async () => {
+    const missing = expectProblem(await send("DELETE", `${V}/topology/root`), 404, "ipam.topology.not_stored");
+    expect(missing.params).toEqual({ kind: "root choice" });
+    expectProblem(await chosen("sideways"), 400, "sys.invalid_request");
+    expectProblem(await send("PUT", `${V}/topology/root`, { source: "controller", extra: 1 }), 400, "sys.invalid_request");
+    expectProblem(await send("PUT", `${V}/topology/root`), 400, "sys.invalid_request");
+  });
+
+  it("honours If-Match on the stored choice", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    const first = await chosen("controller");
+    const revision = first.body.choice?.revision as number;
+    expectProblem(await chosen("default_route", { "if-match": `"${revision + 100}"` }), 412, "ipam.revision_mismatch");
+    expectProblem(await send("DELETE", `${V}/topology/root`, undefined, { "if-match": `"${revision + 100}"` }), 412, "ipam.revision_mismatch");
+    expect((await chosen("default_route", { "if-match": `"${revision}"` })).status).toBe(200);
+  });
+
+  it("is written by administrators and operators, read by every account", async () => {
+    await signInWithRoles(["viewer"]);
+    expect((await rootAnswer()).status).toBe(200);
+    expectProblem(await chosen("controller"), 403, "auth.forbidden");
+    expectProblem(await send("DELETE", `${V}/topology/root`), 403, "auth.forbidden");
+    await signInWithRoles(["operator"]);
+    expect((await chosen("controller")).status).toBe(200);
+    expect((await send("DELETE", `${V}/topology/root`)).status).toBe(204);
+  });
+
+  it("is a reset away from the seed", async () => {
+    topologyState().nextHops = [SW_CORE_IP];
+    await chosen("controller");
+    resetMockDb("signed-in");
+    expect((await rootAnswer()).body).toMatchObject({ disagree: false, open: false });
+    expect((await rootAnswer()).body.choice).toBeUndefined();
+  });
+
+  it("has no root while the graph is empty", async () => {
+    Object.assign(topologyState(), { nodes: [], edges: [], wireless: [], nextHops: [] });
+    const body = (await rootAnswer()).body;
+    expect(body).toMatchObject({ candidates: [], disagree: false, open: false });
+    expect(body.root).toBeUndefined();
+    expect((await graph()).summary.root).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// The SSID view, the policies and the two WLAN rules
+
+describe("the SSID view and the WLAN rules", () => {
+  const HOME = TOPOLOGY_SSIDS.home;
+  const IOT_SSID = TOPOLOGY_SSIDS.iot;
+  const GUEST = TOPOLOGY_SSIDS.guest;
+  const ssidPath = (ssid: string) => encodeURIComponent(ssid);
+  const view = async (): Promise<S["SsidView"]> => {
+    const answer = await get<S["SsidView"]>(`${V}/topology/ssids`);
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    return answer.body;
+  };
+  const entry = async (ssid: string): Promise<S["SsidEntry"]> => {
+    const found = (await view()).ssids.find((s) => s.ssid === ssid);
+    expect(found, ssid).toBeDefined();
+    return found as S["SsidEntry"];
+  };
+  const clientsOf = (e: S["SsidEntry"]): S["SsidClient"][] => e.vlans.flatMap((v) => v.clients);
+  const topology = async (): Promise<S["Finding"][]> => (await get<{ items: S["Finding"][] }>(`${V}/findings?source=topology`)).body.items;
+  const tag = (name: string, tags: string[]) => {
+    const id = HOST_IDS[name] as string;
+    applyCommands([{ op: "update_host", args: { id, patch: { tags } } }] as never);
+    return id;
+  };
+  const policy = (ssid: string, value: string) => send<S["StoredWlanPolicy"]>("PUT", `${V}/topology/ssids/${ssidPath(ssid)}/policy`, { policy: value });
+  const keep = (ssid: string, name: string, json?: unknown) => send<S["WlanException"]>("PUT", `${V}/topology/ssids/${ssidPath(ssid)}/exceptions/${HOST_IDS[name]}`, json);
+  const tv = () => topologyState().wireless.find((c) => c.node === T.tv) as { ip?: string };
+
+  it("is a tree of SSIDs, VLANs and clients with the access point and the band as attributes", async () => {
+    const { ssids, revision } = await view();
+    expect(revision).toBe(db.revision);
+    expect(ssids.map((s) => s.ssid)).toEqual([GUEST, HOME, IOT_SSID]);
+
+    const iot = ssids.find((s) => s.ssid === IOT_SSID) as S["SsidEntry"];
+    expect(iot).toMatchObject({
+      vid: 30,
+      guest: false,
+      enabled: true,
+      policy: "track",
+      policy_set: false,
+      connectors: [T.controller],
+      access_points: ["ap-garage", "ap-hall"],
+      clients: 5,
+      findings: 0,
+    });
+    expect(iot.vlans).toHaveLength(1);
+    expect(iot.vlans[0]).toMatchObject({ vid: 30, vlan: IPAM_IDS.vlan.v30, name: "IoT", iot: false });
+    expect((iot.vlans[0]?.prefixes ?? []).map((p) => p.cidr).sort()).toEqual(["198.51.100.0/24", "2001:db8:0:30::/64"].sort());
+    expect(clientsOf(iot).map((c) => [c.label, c.band, c.access_point])).toEqual([
+      ["cam-door", "5g", "ap-hall"],
+      ["plug-kitchen", "2g", "ap-hall"],
+      ["sensor-garage", "2g", "ap-garage"],
+      ["speaker-den", "5g", "ap-hall"],
+      ["thermostat-1", "2g", "ap-garage"],
+    ]);
+    const plug = clientsOf(iot).find((c) => c.label === "plug-kitchen") as S["SsidClient"];
+    expect(plug).toMatchObject({
+      mac: "00:00:5e:00:53:2a",
+      ip: "198.51.100.42",
+      node: T.plug,
+      host: HOST_IDS["plug-kitchen"],
+      access_point_node: T.apHall,
+      iot: false,
+      kept: false,
+    });
+
+    const home = ssids.find((s) => s.ssid === HOME) as S["SsidEntry"];
+    expect(home).toMatchObject({ vid: 10, policy: "track", access_points: ["ap-attic", "ap-hall"], clients: 1, findings: 1 });
+    expect(home.vlans[0]).toMatchObject({ vid: 10, name: "LAN", iot: false });
+    expect(clientsOf(home)).toEqual([
+      expect.objectContaining({
+        label: "tv-living",
+        band: "6g",
+        host: HOST_IDS["tv-living"],
+        iot: true,
+        access_point: "ap-hall",
+        access_point_node: T.apHall,
+        findings: ["wlan_class"],
+        kept: false,
+      }),
+    ]);
+
+    // The guest network: ignored by default, one client without a host, known by vendor.
+    const guest = ssids.find((s) => s.ssid === GUEST) as S["SsidEntry"];
+    expect(guest).toMatchObject({ vid: 40, guest: true, policy: "ignore", policy_set: false, clients: 1, findings: 0, access_points: ["ap-attic"] });
+    expect(guest.vlans[0]).toMatchObject({ vid: 40, name: "DMZ" });
+    expect(clientsOf(guest)).toEqual([
+      expect.objectContaining({
+        label: "Example Devices 00:53:d3",
+        band: "5g",
+        node: T.guestClient,
+        vendor: "Example Devices",
+        access_point: "ap-attic",
+        access_point_node: T.apAttic,
+        ip: "203.0.113.130",
+        iot: false,
+      }),
+    ]);
+    expect(clientsOf(guest)[0]?.host).toBeUndefined();
+    // The three bands appear in the lab.
+    expect(new Set(ssids.flatMap(clientsOf).map((c) => c.band))).toEqual(new Set(["2g", "5g", "6g"]));
+  });
+
+  it("lists no SSID without a network controller or while the graph is empty", async () => {
+    mockVlanController.enabled = false;
+    expect((await view()).ssids).toEqual([]);
+    expect(await topology()).toEqual([]);
+    mockVlanController.enabled = true;
+    Object.assign(topologyState(), { nodes: [], edges: [], wireless: [] });
+    expect((await view()).ssids).toEqual([]);
+  });
+
+  it("raises exactly one wlan_class finding by default: the IoT-classed host on the home WLAN", async () => {
+    const [finding, ...rest] = await topology();
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      kind: "wlan_class",
+      severity: "review",
+      area: "topology",
+      source: "topology",
+      action: "move_host",
+      code: "ipam.topology.wlan_class",
+      summary: "tv-living is classed as IoT and is on the WLAN home.example.test (VLAN 10), which is not an IoT network",
+      evidence: { id: `${HOST_IDS["tv-living"]}/${HOME}`, path: "/topology/ssids" },
+      subject: { kind: "host", label: "tv-living", host: HOST_IDS["tv-living"], mac: "00:00:5e:00:53:39", ip: "192.0.2.57", prefix: IPAM_IDS.prefix.lan },
+      params: {
+        host: "tv-living",
+        ssid: HOME,
+        mac: "00:00:5e:00:53:39",
+        class: "iot",
+        role: "other",
+        access_point: "ap-hall",
+        vlan: "10",
+        vlan_name: "LAN",
+        ip: "192.0.2.57",
+        band: "6g",
+      },
+    });
+    expect(finding?.id).toMatch(/^topology:wlan:[0-9a-f]{32}$/);
+    expect(finding?.subject.objects).toEqual([{ kind: "host", id: HOST_IDS["tv-living"] }]);
+    expect(finding?.params?.prefix).toContain("192.0.2.0/24");
+  });
+
+  it("class rule: the IoT role of the VLAN or of one of its networks clears the finding", async () => {
+    applyCommands([{ op: "update_vlan", args: { id: IPAM_IDS.vlan.v10, patch: { tags: ["role:iot"] } } }] as never);
+    expect(await topology()).toEqual([]);
+    expect((await entry(HOME)).vlans[0]?.iot).toBe(true);
+    applyCommands([{ op: "update_vlan", args: { id: IPAM_IDS.vlan.v10, patch: { tags: [] } } }] as never);
+    expect(await topology()).toHaveLength(1);
+    applyCommands([{ op: "update_prefix", args: { id: IPAM_IDS.prefix.lan, patch: { tags: ["role:iot"] } } }] as never);
+    expect(await topology()).toEqual([]);
+    expect((await entry(HOME)).vlans[0]?.iot).toBe(true);
+  });
+
+  it("class rule: a host tagged class:iot on a WLAN without the role raises one, an unclassed host none", async () => {
+    tag("plug-kitchen", ["iot", "class:iot"]);
+    const findings = await topology();
+    expect(findings.map((f) => [f.kind, f.subject.label]).sort()).toEqual([
+      ["wlan_class", "plug-kitchen"],
+      ["wlan_class", "tv-living"],
+    ]);
+    const iot = await entry(IOT_SSID);
+    expect(clientsOf(iot).find((c) => c.label === "plug-kitchen")).toMatchObject({ iot: true, findings: ["wlan_class"] });
+    expect(iot.findings).toBe(1);
+    // The IoT role on the IoT network is what such a host belongs on.
+    applyCommands([{ op: "update_prefix", args: { id: IPAM_IDS.prefix.iot, patch: { tags: ["role:iot"] } } }] as never);
+    expect((await topology()).map((f) => f.subject.label)).toEqual(["tv-living"]);
+    expect((await entry(IOT_SSID)).vlans[0]).toMatchObject({ iot: true });
+    // Without the classification the TV is no IoT device either.
+    mockTopologyDecisions.iotHosts.clear();
+    expect(await topology()).toEqual([]);
+  });
+
+  it("prefix rule: an address outside the networks of the VLAN, of the same family", async () => {
+    // Inside the network: nothing besides the class finding.
+    expect((await topology()).map((f) => f.kind)).toEqual(["wlan_class"]);
+    // An IPv4 address outside 192.0.2.0/24.
+    tv().ip = "198.51.100.57";
+    const findings = await topology();
+    expect(findings.map((f) => f.kind).sort()).toEqual(["wlan_class", "wlan_prefix"]);
+    const prefix = findings.find((f) => f.kind === "wlan_prefix") as S["Finding"];
+    expect(prefix).toMatchObject({
+      severity: "review",
+      action: "move_host",
+      code: "ipam.topology.wlan_prefix",
+      subject: { kind: "host", label: "tv-living", ip: "198.51.100.57", prefix: IPAM_IDS.prefix.iot },
+      params: { host: "tv-living", ssid: HOME, ip: "198.51.100.57", vlan: "10", class: "iot" },
+    });
+    expect(prefix.params?.prefix).toContain("192.0.2.0/24");
+    expect(prefix.summary).toMatch(/^tv-living has the address 198\.51\.100\.57 on the WLAN home\.example\.test, outside .*192\.0\.2\.0\/24.* of VLAN 10$/);
+    expect(clientsOf(await entry(HOME))[0]?.findings).toEqual(["wlan_class", "wlan_prefix"]);
+    // An IPv6 address inside the IPv6 network is fine, outside it is not.
+    tv().ip = "2001:db8:0:10::5";
+    expect((await topology()).map((f) => f.kind)).toEqual(["wlan_class"]);
+    tv().ip = "2001:db8:ffff::5";
+    expect((await topology()).map((f) => f.kind).sort()).toEqual(["wlan_class", "wlan_prefix"]);
+    // No address, no judgement.
+    delete tv().ip;
+    expect((await topology()).map((f) => f.kind)).toEqual(["wlan_class"]);
+  });
+
+  it("prefix rule: a VLAN without networks of the family is not judged, and the class tag is not needed", async () => {
+    mockTopologyDecisions.iotHosts.clear();
+    // The LAN has an IPv4 and an IPv6 network; remove the IPv6 one: an IPv6 address has nothing to be outside of.
+    applyCommands([{ op: "delete", args: { object: { kind: "prefix", id: IPAM_IDS.prefix.lanV6 }, cascade: true } }] as never);
+    tv().ip = "2001:db8:ffff::5";
+    expect(await topology()).toEqual([]);
+    tv().ip = "198.51.100.57";
+    const [finding, ...rest] = await topology();
+    expect(rest).toEqual([]);
+    expect(finding?.kind).toBe("wlan_prefix");
+    expect(finding?.params?.class).toBeUndefined();
+  });
+
+  it("skips unmanaged and decommissioned hosts, clients without a host and deleted hosts", async () => {
+    expect(await topology()).toHaveLength(1);
+    const id = HOST_IDS["tv-living"] as string;
+    applyCommands([{ op: "update_host", args: { id, patch: { mode: "unmanaged" } } }] as never);
+    expect(await topology()).toEqual([]);
+    applyCommands([{ op: "update_host", args: { id, patch: { mode: "dynamic" } } }] as never);
+    expect(await topology()).toHaveLength(1);
+    expect((await send("POST", `${V}/hosts/${id}/decommission`, {})).status).toBe(200);
+    expect(await topology()).toEqual([]);
+    expect(clientsOf(await entry(HOME))[0]).toMatchObject({ label: "tv-living", findings: [] });
+    // The guest client has no host: tracking its SSID raises nothing.
+    expect((await policy(GUEST, "track")).status).toBe(200);
+    expect(await topology()).toEqual([]);
+    // A host that is deleted is no host any more: the client is named by the controller.
+    resetMockDb("signed-in");
+    applyCommands([{ op: "delete", args: { object: { kind: "host", id }, cascade: true } }] as never);
+    expect(await topology()).toEqual([]);
+    expect(clientsOf(await entry(HOME)).find((c) => c.node === T.tv)?.host).toBeUndefined();
+  });
+
+  it("an ignored SSID raises none, and the default of a guest SSID is ignore", async () => {
+    tag("plug-kitchen", ["class:iot"]);
+    expect(await topology()).toHaveLength(2);
+    const set = await policy(IOT_SSID, "ignore");
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ssid: IOT_SSID, policy: "ignore" });
+    expect(set.body.revision).toBeGreaterThan(0);
+    expect(set.res.headers.get("etag")).toBe(`"${set.body.revision}"`);
+    expect((await topology()).map((f) => f.subject.label)).toEqual(["tv-living"]);
+    expect(await entry(IOT_SSID)).toMatchObject({ policy: "ignore", policy_set: true, findings: 0 });
+    // Tracking the home WLAN explicitly changes nothing but `policy_set`.
+    await policy(HOME, "track");
+    expect(await entry(HOME)).toMatchObject({ policy: "track", policy_set: true, findings: 1 });
+    // The guest network is ignored until a person tracks it, and is ignored again after the delete.
+    await policy(GUEST, "track");
+    expect(await entry(GUEST)).toMatchObject({ policy: "track", policy_set: true });
+    expect((await send("DELETE", `${V}/topology/ssids/${ssidPath(GUEST)}/policy`)).status).toBe(204);
+    expect(await entry(GUEST)).toMatchObject({ policy: "ignore", policy_set: false });
+    // Removing the policy of the IoT SSID brings the rule back.
+    expect((await send("DELETE", `${V}/topology/ssids/${ssidPath(IOT_SSID)}/policy`)).status).toBe(204);
+    expect(await topology()).toHaveLength(2);
+    expect(mockTopologyDecisions.policies.has(IOT_SSID)).toBe(false);
+  });
+
+  it("keeps a host on one WLAN: the finding of that pair goes away and no other", async () => {
+    tag("plug-kitchen", ["class:iot"]);
+    tag("thermostat-1", ["class:iot"]);
+    expect(await topology()).toHaveLength(3);
+    const kept = await keep(HOME, "tv-living", { reason: "  The TV is a media device  " });
+    expect(kept.status).toBe(200);
+    expect(kept.body).toMatchObject({ host: HOST_IDS["tv-living"], ssid: HOME, reason: "The TV is a media device" });
+    expect(kept.res.headers.get("etag")).toBe(`"${kept.body.revision}"`);
+    expect((await topology()).map((f) => f.subject.label).sort()).toEqual(["plug-kitchen", "thermostat-1"]);
+    expect(clientsOf(await entry(HOME))[0]).toMatchObject({ kept: true, findings: [] });
+    // Another host on another SSID is judged as before (the pair is the key).
+    const other = await keep(IOT_SSID, "plug-kitchen");
+    expect(other.body.reason).toBeUndefined();
+    expect((await topology()).map((f) => f.subject.label)).toEqual(["thermostat-1"]);
+    expect(clientsOf(await entry(IOT_SSID)).find((c) => c.label === "plug-kitchen")).toMatchObject({ kept: true, findings: [] });
+    expect(clientsOf(await entry(IOT_SSID)).find((c) => c.label === "thermostat-1")).toMatchObject({ kept: false, findings: ["wlan_class"] });
+    // Keeping again with the same reason changes nothing; a new reason is a new decision.
+    const revision = db.revision;
+    expect((await keep(HOME, "tv-living", { reason: "The TV is a media device" })).body.revision).toBe(kept.body.revision);
+    expect(db.revision).toBe(revision);
+    expect((await keep(HOME, "tv-living", { reason: "Moved to the media room" })).body.revision).toBeGreaterThan(kept.body.revision ?? 0);
+    // Removing an exception brings the finding back.
+    expect((await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/${HOST_IDS["tv-living"]}`)).status).toBe(204);
+    expect((await topology()).map((f) => f.subject.label).sort()).toEqual(["thermostat-1", "tv-living"]);
+    const gone = expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/${HOST_IDS["tv-living"]}`), 404, "ipam.topology.not_stored");
+    expect(gone.params).toEqual({ kind: "WLAN exception" });
+  });
+
+  it("refuses bad SSIDs, hosts and reasons with the codes of the server", async () => {
+    const long = "x".repeat(33);
+    const tooLong = expectProblem(await policy(long, "track"), 422, "ipam.topology.invalid");
+    expect(tooLong.params).toEqual({ field: "ssid" });
+    expect((await policy("x".repeat(32), "track")).status).toBe(200);
+    // Multi-byte characters count as octets: 17 two-byte letters are 34 octets.
+    expectProblem(await policy("é".repeat(17), "track"), 422, "ipam.topology.invalid");
+    expect((await policy("é".repeat(16), "track")).status).toBe(200);
+    expectProblem(await send("PUT", `${V}/topology/ssids/bad%07name/policy`, { policy: "track" }), 422, "ipam.topology.invalid");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${long}/policy`), 422, "ipam.topology.invalid");
+    expectProblem(await keep(long, "tv-living"), 422, "ipam.topology.invalid");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${long}/exceptions/${HOST_IDS["tv-living"]}`), 422, "ipam.topology.invalid");
+    // The reason: at most 1,024 octets, no control characters other than line breaks and tabs.
+    expectProblem(await keep(HOME, "tv-living", { reason: "r".repeat(1025) }), 422, "ipam.topology.invalid");
+    expectProblem(await keep(HOME, "tv-living", { reason: "bell\u0007" }), 422, "ipam.topology.invalid");
+    expect((await keep(HOME, "tv-living", { reason: "two\nlines\tand a tab" })).status).toBe(200);
+    // An unknown host, a host that is deleted, a malformed identifier and a malformed body.
+    expectProblem(await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/0190d1c2-0000-7000-8000-0000000b0fff`), 404, "ipam.not_found");
+    const id = HOST_IDS["ha"] as string;
+    applyCommands([{ op: "delete", args: { object: { kind: "host", id }, cascade: true } }] as never);
+    expect(expectProblem(await keep(HOME, "ha"), 404, "ipam.not_found").params).toMatchObject({ kind: "host", id });
+    expectProblem(await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/not-a-host`), 400, "sys.invalid_request");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/not-a-host`), 400, "sys.invalid_request");
+    expectProblem(await keep(HOME, "tv-living", { reason: 7 }), 400, "sys.invalid_request");
+    expectProblem(await keep(HOME, "tv-living", { why: "x" }), 400, "sys.invalid_request");
+    expectProblem(await policy(HOME, "sometimes"), 400, "sys.invalid_request");
+    expectProblem(await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/policy`, {}), 400, "sys.invalid_request");
+    // Nothing stored: 404 ipam.topology.not_stored.
+    expect(expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/policy`), 404, "ipam.topology.not_stored").params).toEqual({ kind: "WLAN policy" });
+  });
+
+  it("encodes an SSID with spaces and non-ASCII letters in the path", async () => {
+    const name = "Café WLAN 2.4";
+    const set = await policy(name, "ignore");
+    expect(set.body.ssid).toBe(name);
+    expect(mockTopologyDecisions.policies.get(name)?.policy).toBe("ignore");
+    expect((await send("DELETE", `${V}/topology/ssids/${ssidPath(name)}/policy`)).status).toBe(204);
+  });
+
+  it("honours If-Match on a stored policy and exception", async () => {
+    const first = await policy(HOME, "ignore");
+    const revision = first.body.revision as number;
+    expectProblem(await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/policy`, { policy: "track" }, { "if-match": `"${revision + 9}"` }), 412, "ipam.revision_mismatch");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/policy`, undefined, { "if-match": `"${revision + 9}"` }), 412, "ipam.revision_mismatch");
+    expect((await send("PUT", `${V}/topology/ssids/${ssidPath(HOME)}/policy`, { policy: "track" }, { "if-match": `"${revision}"` })).status).toBe(200);
+    const kept = await keep(HOME, "tv-living");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/${HOST_IDS["tv-living"]}`, undefined, { "if-match": `"${(kept.body.revision as number) + 9}"` }), 412, "ipam.revision_mismatch");
+  });
+
+  it("is written by administrators and operators only, and read by every account", async () => {
+    await signInWithRoles(["viewer"]);
+    expect((await view()).ssids).toHaveLength(3);
+    expectProblem(await policy(HOME, "ignore"), 403, "auth.forbidden");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/policy`), 403, "auth.forbidden");
+    expectProblem(await keep(HOME, "tv-living"), 403, "auth.forbidden");
+    expectProblem(await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/exceptions/${HOST_IDS["tv-living"]}`), 403, "auth.forbidden");
+    expect(mockTopologyDecisions.policies.size + mockTopologyDecisions.exceptions.size).toBe(0);
+    await signInWithRoles(["operator"]);
+    expect((await policy(HOME, "ignore")).status).toBe(200);
+    expect((await keep(HOME, "tv-living")).status).toBe(200);
+  });
+
+  it("writes an audit record for each decision", async () => {
+    await policy(HOME, "ignore");
+    await keep(HOME, "tv-living", { reason: "kept" });
+    await send("DELETE", `${V}/topology/ssids/${ssidPath(HOME)}/policy`);
+    const records = (await get<{ items: S["AuditRecord"][] }>(`${V}/audit?limit=1000`)).body.items;
+    expect(records.map((r) => r.draft.action)).toEqual(
+      expect.arrayContaining(["ipam.wlan_policy.set", "ipam.wlan_exception.keep", "ipam.wlan_policy.clear"]),
+    );
   });
 });

@@ -77,11 +77,16 @@ use crate::{
     state::AppState,
 };
 
+mod decisions;
+
+pub use decisions::{ChooseRoot, KeepOnWlan, SetWlanPolicy};
+
 /// The routes of the area.
 pub fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_topology))
         .routes(routes!(get_topology_node))
+        .merge(decisions::routes())
 }
 
 /// The topology service of the request, from the `Arc<TopologyService>` extension; 503

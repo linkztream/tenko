@@ -243,6 +243,45 @@ pub enum NetworkDhcp {
     Server,
 }
 
+/// The radio band a wireless client is associated on, as a network controller reports it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+pub enum RadioBand {
+    /// 2.4 GHz.
+    #[serde(rename = "2g")]
+    G2,
+    /// 5 GHz.
+    #[serde(rename = "5g")]
+    G5,
+    /// 6 GHz.
+    #[serde(rename = "6g")]
+    G6,
+}
+
+impl RadioBand {
+    /// Every band, the lowest first.
+    pub const ALL: [RadioBand; 3] = [RadioBand::G2, RadioBand::G5, RadioBand::G6];
+
+    /// The wire name: `2g`, `5g` or `6g`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            RadioBand::G2 => "2g",
+            RadioBand::G5 => "5g",
+            RadioBand::G6 => "6g",
+        }
+    }
+
+    /// The band of a wire name, without case; `None` for any other text, so a band a later
+    /// protocol adds does not break an older reader.
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        Self::ALL
+            .into_iter()
+            .find(|band| band.as_str().eq_ignore_ascii_case(text))
+    }
+}
+
 /// A host as an inventory source reports it (CONN-02).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ObservedHost {
@@ -482,6 +521,20 @@ mod tests {
         codec::{from_cbor, to_cbor},
         principal::{Principal, SystemComponent},
     };
+
+    #[test]
+    fn radio_bands_parse_their_wire_names_and_nothing_else() {
+        for band in RadioBand::ALL {
+            assert_eq!(RadioBand::parse(band.as_str()), Some(band));
+            assert_eq!(
+                serde_json::to_value(band).expect("json"),
+                serde_json::json!(band.as_str())
+            );
+        }
+        assert_eq!(RadioBand::parse(" 5G "), Some(RadioBand::G5));
+        assert_eq!(RadioBand::parse("60g"), None);
+        assert_eq!(RadioBand::parse(""), None);
+    }
 
     #[test]
     fn placeholder_names_are_told_from_real_ones() {

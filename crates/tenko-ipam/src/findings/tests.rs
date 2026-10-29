@@ -479,6 +479,55 @@ fn finding(id: &str, level: FindingLevel, area: FindingArea, source: FindingSour
     }
 }
 
+/// U7: the topology's findings are replaced as a whole, keep their first sighting while they
+/// last, count under the source topology and leave every other finding alone.
+#[test]
+fn the_topology_findings_are_replaced_as_a_whole_and_keep_their_first_sighting() {
+    let index = FindingsIndex::new(FindingsConfig::default());
+    index.insert_for_test(finding(
+        "health:x",
+        FindingLevel::Review,
+        FindingArea::Settings,
+        FindingSource::Health,
+    ));
+    let topology = |id: &str| Finding {
+        kind: FindingKind::WlanClass,
+        action: FindingAction::MoveHost,
+        ..finding(
+            id,
+            FindingLevel::Review,
+            FindingArea::Topology,
+            FindingSource::Topology,
+        )
+    };
+    let now = at("2026-10-29T12:00:00Z");
+    let later = now.checked_add(Duration::from_secs(60)).expect("time");
+    assert!(index.set_topology(
+        vec![topology("topology:wlan:a"), topology("topology:wlan:b")],
+        now
+    ));
+    assert!(
+        !index.set_topology(
+            vec![topology("topology:wlan:a"), topology("topology:wlan:b")],
+            later
+        ),
+        "unchanged"
+    );
+    assert_eq!(index.get("topology:wlan:a").expect("listed").since, now);
+    let counts = index.counts();
+    assert_eq!(counts.sources.topology, 2);
+    assert_eq!(counts.areas.topology.review, 2);
+    // A finding of another source is never taken in, and a gone one is removed.
+    assert!(index.set_topology(
+        vec![topology("topology:wlan:b"), topology("health:y")],
+        later
+    ));
+    assert!(index.get("topology:wlan:a").is_none());
+    assert!(index.get("health:y").is_none());
+    assert!(index.get("health:x").is_some(), "other sources stay");
+    assert_eq!(index.counts().sources.topology, 1);
+}
+
 /// IPAM-21: the counts per severity, area and source, and the list's order and paging.
 #[test]
 #[allow(
@@ -555,6 +604,7 @@ fn the_counts_are_per_severity_area_and_source_and_info_is_never_a_problem() {
     assert_eq!(
         counts.sources,
         SourceCounts {
+            topology: 0,
             proposal: 1,
             alarm: 1,
             reconcile: 2,

@@ -1746,17 +1746,26 @@ async fn start(
             if let Some(change_queue) = &change_queue {
                 server.extensions.insert(Arc::clone(change_queue));
             }
+            // U7: the topology's root reads this node's default route as the service account
+            // can (no privilege), and its findings join the findings index below.
+            let topology_service = ipam.as_ref().map(|ipam| {
+                let topology = tenko_ipam::topology::TopologyService::new(
+                    Arc::clone(ipam),
+                    Arc::clone(&vlan_controllers),
+                    tenko_ipam::topology::TopologyConfig::default(),
+                );
+                topology.set_default_route(Arc::new(
+                    tenko_api::host::route::OsDefaultRoute::new(),
+                ));
+                topology
+            });
             if let Some(ipam) = &ipam {
                 server.extensions.insert(Arc::clone(ipam));
                 server.extensions.insert(Arc::clone(&scope));
                 server.extensions.insert(Arc::clone(&vlan_controllers));
-                server
-                    .extensions
-                    .insert(tenko_ipam::topology::TopologyService::new(
-                        Arc::clone(ipam),
-                        Arc::clone(&vlan_controllers),
-                        tenko_ipam::topology::TopologyConfig::default(),
-                    ));
+            }
+            if let Some(topology) = &topology_service {
+                server.extensions.insert(Arc::clone(topology));
             }
             server.extensions.insert(engine.clone());
             if let Some(zones) = &zones {
@@ -1847,6 +1856,9 @@ async fn start(
                 ipam.is_some(),
                 state.events().clone(),
             );
+            if let Some(topology) = &topology_service {
+                findings.set_topology(Arc::clone(topology));
+            }
             let findings_task = findings.spawn(findings_stop);
             server.extensions.insert(findings);
             server.extensions.insert(Arc::clone(&operator_secrets));

@@ -21,7 +21,18 @@
 //! | 8 | one wired client, `00:00:5e:00:53:18` |
 //!
 //! On the access point: the wireless client `00:00:5e:00:53:21` and Tenko's host
-//! `00:00:5e:00:53:0b` (a management client).
+//! `00:00:5e:00:53:0b` (a management client) on `lab.example.test`, and the clients of the
+//! WLAN rules (`docs/reconciliation.md` section 4.12), each a case of them:
+//!
+//! | SSID (VLAN, network) | Client | Band | Address |
+//! |---|---|---|---|
+//! | `lab.example.test` (20, `192.0.2.0/24`) | `00:00:5e:00:53:22`, a device an operator classes as IoT | 2.4 GHz | `192.0.2.22` |
+//! | `lab.example.test` | `00:00:5e:00:53:23`, an address of another network | 5 GHz | `198.51.100.23` |
+//! | `iot.example.test` (30, `198.51.100.0/24`) | `00:00:5e:00:53:31`, at home | 2.4 GHz | `198.51.100.31` |
+//! | `guest.example.test` (40, `203.0.113.0/24`, guest) | `00:00:5e:00:53:41` | 5 GHz | `198.51.100.41` |
+//!
+//! The SSIDs carry their VLANs through the networks `lab`, `iot` and `guest`; none of them is
+//! marked as the management network, so the guardrails stay those of the ports and clients.
 //!
 //! Settings: `ports_down` (ports that are switched off when the process starts) and
 //! `stuck` (bringing a port up fails as if the controller were unreachable). The state lives
@@ -36,13 +47,14 @@ use std::{
 use serde::Deserialize;
 use tenko_core::{
     MacAddr, Timestamp,
-    observe::{Endpoint, LinkKind},
+    observe::{Endpoint, LinkKind, RadioBand},
 };
 
 use crate::{
-    CallContext, ClientAttachment, Connector, ConnectorError, DeviceKind, DevicePort, DeviceRef,
-    DiffLine, Health, HealthReport, L2Change, L2Plan, L2Receipt, NetworkController, NetworkDevice,
-    TopologyLink, TopologySnapshot, WriteMode, manifest::Manifest, sdk::Plugin,
+    CallContext, ClientAttachment, Connector, ConnectorError, ControllerDhcp, ControllerNetwork,
+    DeviceKind, DevicePort, DeviceRef, DiffLine, Health, HealthReport, L2Change, L2Plan, L2Receipt,
+    NetworkController, NetworkDevice, NetworkRef, TopologyLink, TopologySnapshot, WirelessNetwork,
+    WriteMode, manifest::Manifest, sdk::Plugin,
 };
 
 /// The plugin name.
@@ -53,6 +65,10 @@ pub const SWITCH: &str = "00:00:5e:00:53:a0";
 pub const ACCESS_POINT: &str = "00:00:5e:00:53:b0";
 /// The SSID of the access point.
 pub const SSID: &str = "lab.example.test";
+/// The SSID of the IoT network.
+pub const IOT_SSID: &str = "iot.example.test";
+/// The guest SSID.
+pub const GUEST_SSID: &str = "guest.example.test";
 /// The ports of the switch.
 pub const PORTS: u16 = 8;
 
@@ -151,6 +167,7 @@ fn wired(low: u8, port: u16, management: bool) -> ClientAttachment {
         name_placeholder: false,
         vendor: None,
         management,
+        band: None,
     }
 }
 
@@ -159,7 +176,26 @@ fn wireless(low: u8, management: bool) -> ClientAttachment {
         port: None,
         ssid: Some(SSID.to_owned()),
         device: DeviceRef(ACCESS_POINT.to_owned()),
+        network: Some(NetworkRef("lab".to_owned())),
+        band: Some(RadioBand::G5),
         ..wired(low, 0, management)
+    }
+}
+
+/// A wireless client of `ssid` in VLAN `vid` with the address `ip`.
+fn on_ssid(low: u8, ssid: &str, vid: u16, ip: [u8; 4], band: RadioBand) -> ClientAttachment {
+    let network = match vid {
+        30 => "iot",
+        40 => "guest",
+        _ => "lab",
+    };
+    ClientAttachment {
+        ip: Some(std::net::IpAddr::from(ip)),
+        ssid: Some(ssid.to_owned()),
+        vlan: Some(vid),
+        network: Some(NetworkRef(network.to_owned())),
+        band: Some(band),
+        ..wireless(low, false)
     }
 }
 
@@ -173,7 +209,43 @@ fn clients() -> Vec<ClientAttachment> {
         wired(0x18, 8, false),
         wireless(0x21, false),
         wireless(0x0b, true),
+        on_ssid(0x22, SSID, 20, [192, 0, 2, 0x22], RadioBand::G2),
+        on_ssid(0x23, SSID, 20, [198, 51, 100, 0x23], RadioBand::G5),
+        on_ssid(0x31, IOT_SSID, 30, [198, 51, 100, 0x31], RadioBand::G2),
+        on_ssid(0x41, GUEST_SSID, 40, [198, 51, 100, 0x41], RadioBand::G5),
     ]
+}
+
+fn network(id: &str, name: &str, vid: u16, subnet: &str, management: bool) -> ControllerNetwork {
+    ControllerNetwork {
+        id: NetworkRef(id.to_owned()),
+        name: name.to_owned(),
+        vlan: Some(vid),
+        subnet: subnet.parse().ok(),
+        dhcp: ControllerDhcp::Disabled,
+        management,
+    }
+}
+
+fn wlan(id: &str, ssid: &str, network: &str, vid: u16, guest: bool) -> WirelessNetwork {
+    WirelessNetwork {
+        id: id.to_owned(),
+        ssid: ssid.to_owned(),
+        network: Some(NetworkRef(network.to_owned())),
+        vlan: Some(vid),
+        enabled: true,
+        access_points: vec![DeviceRef(ACCESS_POINT.to_owned())],
+        guest,
+    }
+}
+
+/// The topology the sample controller reports on its first read, for tests of what reads
+/// it (the WLAN rules and the SSID view).
+pub fn sample_topology() -> TopologySnapshot {
+    topology(&State {
+        enabled: (1..=PORTS).map(|port| (port, true)).collect(),
+        kicked: Vec::new(),
+    })
 }
 
 fn topology(state: &State) -> TopologySnapshot {
@@ -233,9 +305,17 @@ fn topology(state: &State) -> TopologySnapshot {
             clients.retain(|c| c.mac != *kicked);
             clients
         }),
-        networks: Vec::new(),
+        networks: vec![
+            network("lab", "Lab", 20, "192.0.2.0/24", false),
+            network("iot", "IoT", 30, "198.51.100.0/24", false),
+            network("guest", "Guest", 40, "203.0.113.0/24", false),
+        ],
         profiles: Vec::new(),
-        wlans: Vec::new(),
+        wlans: vec![
+            wlan("w-lab", SSID, "lab", 20, false),
+            wlan("w-iot", IOT_SSID, "iot", 30, false),
+            wlan("w-guest", GUEST_SSID, "guest", 40, true),
+        ],
     }
 }
 

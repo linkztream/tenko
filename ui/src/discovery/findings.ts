@@ -39,6 +39,9 @@ export const FINDING_KINDS: readonly FindingKind[] = [
   "ghost",
   "scan_artifact",
   "health",
+  "topology_root",
+  "wlan_class",
+  "wlan_prefix",
 ];
 
 /** The kinds of the reconciliation view's rows, by the tail of a finding's code. */
@@ -237,6 +240,11 @@ export function actionOf(finding: Finding): ActionPlan | null {
         : { kind: "link", label: t("discovery.findings.action.open_host"), href: paths.host(s.label) };
     case "open_status":
       return statusAction(finding);
+    // U7: the root is chosen on the map, a WLAN finding is decided in the SSID view; both are links.
+    case "use_root":
+      return { kind: "link", label: t("discovery.findings.action.open_topology"), href: paths.topology() };
+    case "move_host":
+      return { kind: "link", label: t("discovery.findings.action.open_ssids"), href: `${paths.topology()}?view=ssids` };
     case "none":
       return null;
   }
@@ -272,6 +280,8 @@ export function selectionOf(finding: Finding): { panel: string } | { href: strin
   switch (finding.source) {
     case "job":
       return { href: paths.job(finding.evidence.id) };
+    case "topology":
+      return { href: finding.action === "move_host" ? `${paths.topology()}?view=ssids` : paths.topology() };
     case "alarm":
       return { href: finding.subject.cidr ? paths.prefix(finding.subject.cidr, finding.subject.vrf ?? undefined) : paths.ipam() };
     default: {

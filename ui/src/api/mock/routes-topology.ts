@@ -5,17 +5,31 @@
 // The graph is static (topology-store.ts); the filters, the context rule, the truncation, the
 // summary and the node view follow the server. The VLAN and network names and the intent come
 // live from the IPAM mock. Every signed-in account may read.
+//
+// The root of the map, the SSID view and the decisions on them (`/topology/root`,
+// `/topology/ssids` and below) are served from topology-decisions.ts; administrators and
+// operators write them, as they write the other IPAM objects.
 import type { HttpHandler } from "msw";
 import { compareIp, containsIp, parseCidr, parseIp, type Cidr } from "../../ipam/ip";
 import type { components } from "../generated/schema";
 import { requireSession } from "./auth";
-import { db } from "./db";
+import { db, isAdmin } from "./db";
 import { ipamState } from "./ipam/api";
 import { ipOf } from "./ipam/net";
 import { invalidQuery, notFound } from "./ipam/problems";
 import { Query } from "./ipam/query";
-import { Problem, ok } from "./reply";
+import { Problem, fail, noContent, ok } from "./reply";
 import { route } from "./route";
+import {
+  chooseRoot,
+  clearPolicy,
+  clearRoot,
+  forgetException,
+  keepOnWlan,
+  rootDecision,
+  setPolicy,
+  ssidView,
+} from "./topology-decisions";
 import {
   mockVlanController,
   topologyState,
@@ -237,7 +251,15 @@ function wholeSummary(graph: TopologyState, truncated: boolean): TopologySummary
     vlans: [],
     sites: [],
     controllers: listed
-      ? [{ connector: controller.id, name: controller.name, observed_at: graph.computedAt, devices: graph.controllerDevices }]
+      ? [
+          {
+            connector: controller.id,
+            name: controller.name,
+            observed_at: graph.computedAt,
+            devices: graph.controllerDevices,
+            writes_enabled: controller.writes_enabled,
+          },
+        ]
       : [],
     networks: listed
       ? [...controller.networks]
@@ -247,6 +269,8 @@ function wholeSummary(graph: TopologyState, truncated: boolean): TopologySummary
     computed_at: graph.computedAt,
   };
   summary.truncated = truncated;
+  const root = graph.nodes.length > 0 ? rootDecision().root : null;
+  if (root) summary.root = root;
   return summary;
 }
 
@@ -317,6 +341,7 @@ export function neighboursOf(graph: TopologyState, id: string): Neighbour[] {
     if (remote != null) neighbour.remote_port = remote;
     if (edge.vlan != null) neighbour.vlan = edge.vlan;
     if (edge.ssid != null) neighbour.ssid = edge.ssid;
+    if (edge.inferred !== undefined) neighbour.inferred = edge.inferred;
     out.push(neighbour);
   }
   return out.sort((a, b) => comparePorts(a.port, b.port) || plainCompare(a.label, b.label) || plainCompare(a.node, b.node));
@@ -407,4 +432,111 @@ const nodeRoute = route("get", "/api/v1/topology/nodes/{id}", (ctx) => {
   return ok(view);
 });
 
-export const topologyRoutes: HttpHandler[] = [graphRoute, nodeRoute];
+// ---------------------------------------------------------------------------------
+// The root, the SSIDs and the decisions on them (routes/topology/decisions.rs)
+
+/** Operators and administrators write the decisions, as the IPAM writes of the server need. */
+function requireWriter(): void {
+  const principal = requireSession();
+  if (!isAdmin(principal.user) && !principal.user.roles.includes("operator")) {
+    throw new Problem("auth.forbidden", { status: 403, detail: "this needs the permission to change IPAM objects" });
+  }
+}
+
+const etagged = <T extends { revision?: number }>(row: T) => ({ ETag: `"${row.revision ?? 0}"` });
+
+/** The members of a body, none other than `allowed` (the server refuses unknown members). */
+function checkMembers(body: Record<string, unknown>, allowed: readonly string[]): void {
+  for (const key of Object.keys(body)) {
+    if (!allowed.includes(key)) {
+      fail("sys.invalid_request", { detail: `the body is not a valid request: unknown field \`${key}\`, expected one of ${allowed.join(", ")}` });
+    }
+  }
+}
+
+function oneOf<T extends string>(body: Record<string, unknown>, name: string, values: readonly T[]): T {
+  const value = body[name];
+  if (typeof value !== "string" || !values.includes(value as T)) {
+    return fail("sys.invalid_request", { detail: `the body is not a valid request: \`${name}\` must be one of ${values.join(", ")}` });
+  }
+  return value as T;
+}
+
+const rootGet = route("get", "/api/v1/topology/root", () => {
+  requireSession();
+  const decision = rootDecision();
+  return ok(decision, decision.choice ? etagged(decision.choice) : undefined);
+});
+
+const rootPut = route("put", "/api/v1/topology/root", async (ctx) => {
+  requireWriter();
+  const body = await ctx.body();
+  checkMembers(body, ["source"]);
+  const source = oneOf(body, "source", ["controller", "default_route"] as const);
+  return ok(chooseRoot(source, ctx.ifMatch()));
+});
+
+const rootDelete = route("delete", "/api/v1/topology/root", (ctx) => {
+  requireWriter();
+  clearRoot(ctx.ifMatch());
+  return noContent();
+});
+
+const ssidsGet = route("get", "/api/v1/topology/ssids", () => {
+  requireSession();
+  return ok(ssidView());
+});
+
+const policyPut = route("put", "/api/v1/topology/ssids/{ssid}/policy", async (ctx) => {
+  requireWriter();
+  const body = await ctx.body();
+  checkMembers(body, ["policy"]);
+  const policy = oneOf(body, "policy", ["track", "ignore"] as const);
+  const row = setPolicy(ctx.params.ssid, policy, ctx.ifMatch());
+  return ok(row, etagged(row));
+});
+
+const policyDelete = route("delete", "/api/v1/topology/ssids/{ssid}/policy", (ctx) => {
+  requireWriter();
+  clearPolicy(ctx.params.ssid, ctx.ifMatch());
+  return noContent();
+});
+
+/** The host of a path: a UUID, else 400 `sys.invalid_request`. */
+function hostOfPath(id: string): string {
+  if (!isUuid(id)) fail("sys.invalid_request", { detail: `the host identifier ${id} is malformed`, params: { part: "path" } });
+  return id.toLowerCase();
+}
+
+const exceptionPut = route("put", "/api/v1/topology/ssids/{ssid}/exceptions/{host}", async (ctx) => {
+  requireWriter();
+  const host = hostOfPath(ctx.params.host);
+  // An empty body keeps without a reason.
+  const body = await ctx.optionalBody();
+  checkMembers(body, ["reason"]);
+  const reason = body.reason;
+  if (reason !== undefined && reason !== null && typeof reason !== "string") {
+    fail("sys.invalid_request", { detail: "the body is not a valid request: `reason` must be a text" });
+  }
+  const row = keepOnWlan(host, ctx.params.ssid, typeof reason === "string" ? reason : null, ctx.ifMatch());
+  return ok(row, etagged(row));
+});
+
+const exceptionDelete = route("delete", "/api/v1/topology/ssids/{ssid}/exceptions/{host}", (ctx) => {
+  requireWriter();
+  forgetException(hostOfPath(ctx.params.host), ctx.params.ssid, ctx.ifMatch());
+  return noContent();
+});
+
+export const topologyRoutes: HttpHandler[] = [
+  graphRoute,
+  nodeRoute,
+  rootGet,
+  rootPut,
+  rootDelete,
+  ssidsGet,
+  policyPut,
+  policyDelete,
+  exceptionPut,
+  exceptionDelete,
+];

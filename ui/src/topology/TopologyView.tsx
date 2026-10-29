@@ -5,6 +5,12 @@
 //
 // Filters and the selected device live in the URL, so a filtered map is a link that can be
 // shared: `/topology/<id>?site=...&vlan=30&kind=router,switch&q=...`.
+//
+// U7: the map is drawn from the root the server names (the controller's gateway, else the
+// default route's next hop, or the person's choice), infrastructure first: the endpoints of a
+// port or an SSID collapse into a count until opened or until "Endpoints" is on. Devices with
+// no link gather in "Not placed" with their duplicates. `?view=ssids` shows the SSID view
+// instead of the map. Under Hardened with no controller allowing writes nothing here writes.
 import { A, useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, createResource, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { createLiveQuery, latest } from "../api/live";
@@ -16,30 +22,37 @@ import { TimeAgo } from "../grid/cells";
 import { t, tDynamic } from "../i18n";
 import { createVlanStyles } from "../ipam/vlan/palette";
 import { VlanChip } from "../ipam/vlan/VlanChip";
+import { session } from "../auth/session";
 import { isTyping } from "../shell/keyboard";
 import { getTopology, listSites, listVlans, type ControllerStatus, type TopologyEdge, type TopologyGraph, type TopologyNode } from "./api";
 import { layout as computeLayout, type LayoutEdge, type LayoutNode } from "./layout";
 import {
   EDGE_KINDS,
+  edgeBucket,
   edgeClass,
   edgeWord,
   filterKey,
   filterParams,
-  groupParent,
   isFiltered,
   kindIcon,
   kindWord,
+  mapReadOnly,
   NODE_KINDS,
+  nodeSecondLine,
   parseFilter,
   SHAPES,
   toggleKind,
   topologyPath,
+  unplacedDevices,
   VLAN_COLOR_LIMIT,
   vlanColorIds,
+  viewOf,
 } from "./model";
 import { NetworkList } from "./NetworkList";
 import { NodePanel } from "./NodePanel";
 import { edgesOnPath, pathToRouter, placedPath, shortestPath } from "./path";
+import { RootNotice } from "./RootNotice";
+import { SsidView } from "./SsidView";
 import { TopologyMap } from "./TopologyMap";
 import "./topology.css";
 
@@ -59,6 +72,26 @@ interface ShownPath {
 const TYPING_PAUSE_MS = 300;
 
 const NO_IDS: ReadonlySet<string> = new Set();
+
+/** Where the browser keeps the "Endpoints" switch of the map. */
+const ENDPOINTS_KEY = "tenko-topology-endpoints";
+
+function readEndpoints(): boolean {
+  try {
+    return localStorage.getItem(ENDPOINTS_KEY) === "all";
+  } catch {
+    return false;
+  }
+}
+
+function writeEndpoints(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(ENDPOINTS_KEY, "all");
+    else localStorage.removeItem(ENDPOINTS_KEY);
+  } catch {
+    // Storage unavailable: the switch holds for this page only.
+  }
+}
 
 /** The controller status line: the devices it read and when, or why the read failed. */
 function ControllerLine(props: { controller: ControllerStatus }) {
@@ -159,12 +192,35 @@ export default function TopologyView() {
   const edgeMap = createMemo(() => new Map(edges().map((e) => [e.id, e])));
 
   const layoutNodes = createMemo<LayoutNode[]>(() => nodes().map((n) => ({ id: n.id, kind: n.kind, label: n.label })));
-  const layoutEdges = createMemo<LayoutEdge[]>(() => edges().map((e) => ({ id: e.id, kind: e.kind, a: e.a, b: e.b })));
+  const layoutEdges = createMemo<LayoutEdge[]>(() =>
+    edges().map((e) => ({ id: e.id, kind: e.kind, a: e.a, b: e.b, inferred: e.inferred === true, bucket: edgeBucket(e) })),
+  );
 
-  // The groups of hidden devices the person opened (by parent id).
+  // The groups of hidden devices the person opened (by group id).
   const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set());
-  const openGroup = (parent: string) => setExpanded((prev) => new Set(prev).add(parent));
-  const lay = createMemo(() => computeLayout(layoutNodes(), layoutEdges(), { expanded: expanded() }));
+  const openGroup = (group: string) => setExpanded((prev) => new Set(prev).add(group));
+  // Infrastructure first: the endpoints of a port or an SSID are a count until "Endpoints" is on.
+  // The switch is remembered per browser; storage that cannot be used keeps it for the page.
+  const [showEndpoints, setShowEndpointsSignal] = createSignal(readEndpoints());
+  const setShowEndpoints = (change: (on: boolean) => boolean) => {
+    const next = change(showEndpoints());
+    setShowEndpointsSignal(next);
+    writeEndpoints(next);
+  };
+  const rootId = () => summary()?.root?.node ?? undefined;
+  const lay = createMemo(() =>
+    computeLayout(layoutNodes(), layoutEdges(), {
+      expanded: expanded(),
+      root: rootId(),
+      collapseEndpoints: !showEndpoints(),
+      // A kind filter drops the links to other kinds, so "Not placed" would say nothing there.
+      gatherUnplaced: filter().kinds.length === 0,
+    }),
+  );
+  const unplaced = createMemo(() => unplacedDevices(lay().unplaced, nodes()));
+  const readOnly = () => mapReadOnly(session()?.profile, summary()?.controllers ?? []);
+  const view = () => viewOf(search.view);
+  const setView = (name: "map" | "ssids") => setSearch({ view: name === "map" ? undefined : name });
 
   // A device chosen by a link or from the panel that sits in a closed group opens the group.
   let revealed: string | undefined;
@@ -178,7 +234,8 @@ export default function TopologyView() {
     if (revealed === id || !l.position.has(id)) return;
     revealed = id;
     const group = l.hidden.get(id);
-    if (group !== undefined) openGroup(groupParent(group));
+    if (group !== undefined) openGroup(group);
+    else if (l.unplaced.includes(id)) revealed = id;
   });
 
   // ----- sites, VLANs and their colors
@@ -278,14 +335,60 @@ export default function TopologyView() {
       <PageHead
         title={t("shell.nav.topology")}
         actions={
-          <Show when={expanded().size > 0}>
-            <button type="button" class="btn" data-testid="topology-groups-close" onClick={() => setExpanded(new Set())}>
-              <Icon name="layers" />
-              {t("topology.group.close_all")}
-            </button>
-          </Show>
+          <>
+            <div class="seg" role="tablist" aria-label={t("topology.view.label")} data-testid="topology-view-switch">
+              <button
+                type="button"
+                role="tab"
+                class="seg-btn"
+                aria-selected={view() === "map"}
+                tabindex={view() === "map" ? 0 : -1}
+                data-testid="topology-view-map"
+                onClick={() => setView("map")}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setView("ssids");
+                    (e.currentTarget.nextElementSibling as HTMLElement | null)?.focus();
+                  }
+                }}
+              >
+                <Icon name="topology" />
+                {t("topology.view.map")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="seg-btn"
+                aria-selected={view() === "ssids"}
+                tabindex={view() === "ssids" ? 0 : -1}
+                data-testid="topology-view-ssids"
+                onClick={() => setView("ssids")}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                    e.preventDefault();
+                    setView("map");
+                    (e.currentTarget.previousElementSibling as HTMLElement | null)?.focus();
+                  }
+                }}
+              >
+                <Icon name="wifi" />
+                {t("topology.view.ssids")}
+              </button>
+            </div>
+            <Show when={view() === "map" && expanded().size > 0}>
+              <button type="button" class="btn" data-testid="topology-groups-close" onClick={() => setExpanded(new Set())}>
+                <Icon name="layers" />
+                {t("topology.group.close_all")}
+              </button>
+            </Show>
+          </>
         }
       />
+      <Show when={view() === "ssids"}>
+        <SsidView readOnly={readOnly()} vlanStyle={vlanStyle} onShowNode={(id) => navigate(topologyPath(id, ""))} />
+      </Show>
+      <Show when={view() === "map"}>
       <div class="filterbar" role="toolbar" aria-label={t("topology.filter.label")} data-testid="filterbar">
         <label class="query">
           <Icon name="search" size="sm" />
@@ -357,6 +460,18 @@ export default function TopologyView() {
             </button>
           )}
         </For>
+        <span class="divider" />
+        <button
+          type="button"
+          class="chip"
+          aria-pressed={showEndpoints()}
+          title={t("topology.filter.endpoints_hint")}
+          data-testid="filter-endpoints"
+          onClick={() => setShowEndpoints((v) => !v)}
+        >
+          <Icon name="layers" />
+          {t("topology.filter.endpoints")}
+        </button>
         <Show when={filtered()}>
           <button type="button" class="btn ghost sm" data-testid="filter-clear" onClick={clearFilters}>
             <Icon name="x" />
@@ -375,6 +490,12 @@ export default function TopologyView() {
               <Notice kind="warn" testid="topology-truncated">
                 {t("topology.truncated")}
               </Notice>
+            </Show>
+            <Show when={readOnly()}>
+              <span class="muted" data-testid="topology-read-only">
+                <Icon name="lock" size="xs" />
+                {t("topology.read_only")}
+              </span>
             </Show>
             <Show when={s().controllers.length > 0}>
               <ul class="topology-controllers" aria-label={t("topology.controller.label")}>
@@ -396,6 +517,8 @@ export default function TopologyView() {
           </div>
         )}
       </Show>
+
+      <RootNotice readOnly={readOnly()} onChosen={() => live.refetch()} />
 
       <div class="topology-split" classList={{ "with-panel": selectedId() !== undefined }}>
         <div class="topology-main">
@@ -449,6 +572,43 @@ export default function TopologyView() {
                 onClear={clearSelection}
                 onOpenGroup={openGroup}
               />
+              <Show when={unplaced().length > 0}>
+                <section class="topology-unplaced" aria-label={t("topology.unplaced.label")} data-testid="topology-unplaced">
+                  <h2>{t("topology.unplaced.title", { count: unplaced().length })}</h2>
+                  <ul class="legend-list">
+                    <For each={unplaced()}>
+                      {(device) => {
+                        const node = () => nodeMap().get(device.id);
+                        return (
+                          <li data-testid="topology-unplaced-device" data-id={device.id}>
+                            <button
+                              type="button"
+                              class="link"
+                              aria-current={selectedId() === device.id ? "true" : undefined}
+                              onClick={() => select(device.id)}
+                            >
+                              {node()?.label ?? device.id}
+                            </button>
+                            <span class="muted"> {kindWord(node()?.kind ?? "device")}</span>
+                            <Show when={node() && nodeSecondLine(node() as TopologyNode)}>
+                              {(line) => <span class="muted"> · {line()}</span>}
+                            </Show>
+                            <Show when={device.duplicates.length > 0}>
+                              <span
+                                class="tag"
+                                data-testid="topology-duplicate"
+                                title={device.duplicates.map((id) => nodeMap().get(id)?.label ?? id).join(", ")}
+                              >
+                                {t("topology.unplaced.duplicate", { count: device.duplicates.length })}
+                              </span>
+                            </Show>
+                          </li>
+                        );
+                      }}
+                    </For>
+                  </ul>
+                </section>
+              </Show>
               <section class="topology-legend" aria-label={t("topology.legend.label")} data-testid="topology-legend">
                 <div class="legend-block">
                   <h2>{t("topology.legend.vlans")}</h2>
@@ -482,6 +642,14 @@ export default function TopologyView() {
                         </li>
                       )}
                     </For>
+                    <Show when={edges().some((e) => e.inferred === true)}>
+                      <li data-testid="legend-edge" data-kind="inferred">
+                        <svg class="legend-sample" viewBox="0 0 40 8" aria-hidden="true">
+                          <line class="topology-edge edge-wired edge-inferred" x1="2" y1="4" x2="38" y2="4" />
+                        </svg>
+                        {t("topology.edge.inferred_legend")}
+                      </li>
+                    </Show>
                   </ul>
                 </div>
                 <div class="legend-block">
@@ -537,6 +705,7 @@ export default function TopologyView() {
           }}
         </Show>
       </div>
+      </Show>
     </div>
   );
 }

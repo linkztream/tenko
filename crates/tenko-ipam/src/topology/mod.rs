@@ -13,15 +13,24 @@
 //! | [`model`] | nodes, edges, the summary, the filter, the view of one node |
 //! | [`build`] | the computation: aliases joined by facts and intent, nodes, edges |
 //! | [`filter`] | filters with their context, the summary counts, ports and neighbours |
+//! | [`root`] | the root of the map from the ranked sources (UI-Q10) and its finding |
+//! | [`wlan`] | the SSID view and the two WLAN rules with their findings |
+//! | [`stored`] | what a person decided: the root, the SSID policies, the WLAN exceptions |
 //! | [`service`] | [`TopologyService`]: the cached graph and the controllers' device tables |
 
 pub mod build;
 pub mod filter;
 pub mod model;
+pub mod root;
 pub mod service;
+pub mod stored;
+pub mod wlan;
 
 pub use model::{
-    EdgeKind, Neighbour, NodeIntent, NodeKind, TopologyEdge, TopologyFilter, TopologyGraph,
-    TopologyNode, TopologyNodeView, TopologyPort, TopologySummary,
+    EdgeKind, MapRoot, Neighbour, NodeIntent, NodeKind, TopologyEdge, TopologyFilter,
+    TopologyGraph, TopologyNode, TopologyNodeView, TopologyPort, TopologySummary,
 };
+pub use root::{DefaultRoute, RootCandidate, RootDecision, RootSource};
 pub use service::{TopologyConfig, TopologyService, codes};
+pub use stored::{RootChoice, StoredWlanPolicy, WlanException, WlanPolicy};
+pub use wlan::{SsidClient, SsidEntry, SsidPrefix, SsidView, SsidVlan};

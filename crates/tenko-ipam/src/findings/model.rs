@@ -84,11 +84,18 @@ pub enum FindingKind {
     ScanArtifact,
     /// A health condition of the installation (`GET /system/status`).
     Health,
+    /// The sources of the topology root disagree (UI-Q10): the controller's gateway and the
+    /// next hop of the default route are different nodes.
+    TopologyRoot,
+    /// An IoT-classed host on a WLAN whose VLAN has no IoT role.
+    WlanClass,
+    /// A host's address outside the networks of its SSID's VLAN.
+    WlanPrefix,
 }
 
 impl FindingKind {
     /// Every kind.
-    pub const ALL: [FindingKind; 15] = [
+    pub const ALL: [FindingKind; 18] = [
         FindingKind::Conflict,
         FindingKind::JobWaiting,
         FindingKind::Utilization,
@@ -104,6 +111,9 @@ impl FindingKind {
         FindingKind::Ghost,
         FindingKind::ScanArtifact,
         FindingKind::Health,
+        FindingKind::TopologyRoot,
+        FindingKind::WlanClass,
+        FindingKind::WlanPrefix,
     ];
 
     /// The `snake_case` name.
@@ -124,6 +134,9 @@ impl FindingKind {
             FindingKind::Ghost => "ghost",
             FindingKind::ScanArtifact => "scan_artifact",
             FindingKind::Health => "health",
+            FindingKind::TopologyRoot => "topology_root",
+            FindingKind::WlanClass => "wlan_class",
+            FindingKind::WlanPrefix => "wlan_prefix",
         }
     }
 }
@@ -145,16 +158,20 @@ pub enum FindingSource {
     Job,
     /// A health condition of `GET /system/status`.
     Health,
+    /// The topology: its root and the WLAN rules, derived from the graph, the controllers'
+    /// SSIDs and the stored decisions.
+    Topology,
 }
 
 impl FindingSource {
     /// Every source.
-    pub const ALL: [FindingSource; 5] = [
+    pub const ALL: [FindingSource; 6] = [
         FindingSource::Proposal,
         FindingSource::Alarm,
         FindingSource::Reconcile,
         FindingSource::Job,
         FindingSource::Health,
+        FindingSource::Topology,
     ];
 
     /// The `snake_case` name, also the prefix of the finding identifiers.
@@ -165,6 +182,7 @@ impl FindingSource {
             FindingSource::Reconcile => "reconcile",
             FindingSource::Job => "job",
             FindingSource::Health => "health",
+            FindingSource::Topology => "topology",
         }
     }
 }
@@ -319,6 +337,12 @@ pub enum FindingAction {
     Decommission,
     /// Open the status of the installation.
     OpenStatus,
+    /// Choose the root of the topology map: "Use this" per candidate
+    /// (`PUT /topology/root`), remembered.
+    UseRoot,
+    /// Move the host to another network (the move flow of ADR 0027); "Keep on this WLAN"
+    /// (`PUT /topology/ssids/{ssid}/exceptions/{host}`) is the other action.
+    MoveHost,
     /// Nothing to do: the finding is listed for information.
     None,
 }
@@ -508,6 +532,9 @@ pub struct SourceCounts {
     pub job: u64,
     /// Health conditions.
     pub health: u64,
+    /// The topology's root and WLAN findings.
+    #[serde(default)]
+    pub topology: u64,
 }
 
 impl SourceCounts {
@@ -519,6 +546,7 @@ impl SourceCounts {
             FindingSource::Reconcile => self.reconcile += 1,
             FindingSource::Job => self.job += 1,
             FindingSource::Health => self.health += 1,
+            FindingSource::Topology => self.topology += 1,
         }
     }
 }

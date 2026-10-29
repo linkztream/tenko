@@ -116,6 +116,11 @@ export function findingAction(finding: Finding): { label: string; href: string }
       };
     case "open_status":
       return statusAction(finding);
+    // U7: the root is chosen on the map, a WLAN finding is decided in the SSID view.
+    case "use_root":
+      return { label: t("dashboard.finding.action.open_topology"), href: paths.topology() };
+    case "move_host":
+      return { label: t("dashboard.finding.action.open_ssids"), href: `${paths.topology()}?view=ssids` };
     case "none":
       return null;
   }

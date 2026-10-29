@@ -363,6 +363,25 @@ A single source naming a host otherwise than its intent raises nothing: intent w
 
 **The operator's choice.** The Discovery page shows every name of such a proposal with its sources and last sighting, and offers "Use this name from <source>" for each besides Dismiss. It approves the proposal with `{"choice": "<name>"}` (section 5.1): the host takes that name, the other names are recorded as rejected in the audit record, and the decision is kept (`ipam.name_choices`) so that the same names do not open a proposal again; only a name no source gave before does. Choosing the name the host already has changes no intent and only closes the proposal. "Remember for this host" (`remember: host`) makes the host prefer the chosen source from then on; "Always prefer <source>" (`remember: source`, administrators only) puts the source first in the rule that decided, the site's rule when one was in force, else the global rule. Both show in the rules page, where a preference can be forgotten. An approval without a choice records the proposed name the same way, and so does an adoption.
 
+### 4.12 The WLAN rules, the exception and the policy
+
+Two rules read the clients of the network controllers' SSIDs (the SSID view, [topology.md](topology.md) section 6.2; U7 of the UI plan, UI-R8). They run where the topology is computed, because they need what only a controller's topology read carries (the SSIDs with their VLANs, the guest flag, the access point and the band of each client), and their findings join the findings index as the source `topology` (section 12): derived again with the view's findings and at least every 30 seconds, never stored. They raise no proposal and carry no command: the decision is a move or an exception. The code is `tenko_ipam::topology::wlan`.
+
+| Rule (the finding's `code`) | Finding kind | A finding to review when |
+|---|---|---|
+| `ipam.topology.wlan_class` | `wlan_class` | a host classed as IoT is on a WLAN whose VLAN has no IoT role |
+| `ipam.topology.wlan_prefix` | `wlan_prefix` | a host's address, as the controller reports it, lies outside every network of intent of its SSID's VLAN (the same address family only) |
+
+**The classification reads only the host's class and the network's role.** A host is classed as IoT when it carries the tag `class:iot`; a VLAN has the IoT role when the VLAN object or one of its network prefixes carries the tag `role:iot` (tags without case, set like any other tag of IPAM-08). Nothing else is guessed: not the vendor, not the name, not the SSID's name. The VLAN of a client is the one the controller puts it in, else its SSID's; the VLAN object is the one of that VLAN id at the host's site, else the global one. Not judged: a client that is no host of intent, an `unmanaged` or decommissioned host, and for the address rule a VLAN without a VLAN object or without networks of the address's family.
+
+**A finding** has the area topology, the severity review, the host as its subject (with its MAC address, the reported address, and the network that holds that address when there is one) and the parameters `host`, `ssid`, `vlan`, `vlan_name`, `prefix` (the VLAN's networks), `mac`, `ip`, `class`, `role` (`iot` or `other`), `access_point` and `band`. Its action is `move_host`: the move of the host (the move flow of [moves.md](moves.md), no move code of its own); **Keep on this WLAN** is the other. Its identifier is `topology:wlan:<digest of the rule, the host and the SSID>`, stable while the pair is.
+
+**Keep on this WLAN** stores an exception for one host on one SSID (`ipam.wlan_exceptions`, key host and SSID: the reason, who and when). It is written only by `PUT /api/v1/topology/ssids/{ssid}/exceptions/{host}` with its audit record `ipam.wlan_exception.keep` in the same batch, and both rules skip the pair from then on; other hosts on the SSID and the same host on another SSID are judged as before. A stored row instead of a rejection with a kept set (section 4.3) because there is no proposal to reject, and because the row depends on nothing a connector reports: it survives a restart and every re-read of a controller. `DELETE` on the same path removes it (`ipam.wlan_exception.clear`).
+
+**The per-SSID policy** decides whether the rules read an SSID at all: `track` or `ignore`, stored per SSID name (`ipam.wlan_policies`) by `PUT /api/v1/topology/ssids/{ssid}/policy` and audited as `ipam.wlan_policy.set`; `DELETE` returns to the default (`ipam.wlan_policy.clear`). The default is `ignore` for an SSID a controller marks as a guest network (`guest` of the connector protocol, UniFi's `is_guest`) and `track` for every other. An ignored SSID raises nothing; its clients still show in the SSID view.
+
+Writes need `update` on VLANs for a policy and `update` on the host for an exception, take an optional `If-Match` with the row's revision (412 `ipam.revision_mismatch`), and refuse an SSID of no or more than 32 octets or with control characters, and a reason over 1,024 bytes (422 `ipam.topology.invalid`). Nothing here writes to a network controller (CONN-08, CONN-09).
+
 ## 5. Decisions
 
 ### 5.1 Approve
@@ -410,6 +429,9 @@ The commands are applied as the intent stands at the approval: a VLAN the propos
 | `ipam.name_authority.set` | A rule of the name authority was set, by an administrator or by an approval with `remember: source`; records the old and the new order | The person |
 | `ipam.name_authority.clear` | A rule of the name authority was removed; records the old order | The person |
 | `ipam.name_preference.clear` | A host's preferred source was forgotten | The person |
+| `ipam.topology_root.choose`, `ipam.topology_root.clear` | A person chose the root of the topology map or forgot the choice ([topology.md](topology.md) section 6.1); records the old and the new source | The person |
+| `ipam.wlan_exception.keep`, `ipam.wlan_exception.clear` | A person kept a host on a WLAN or removed the exception (section 4.12); on the host, with the SSID and the reason | The person |
+| `ipam.wlan_policy.set`, `ipam.wlan_policy.clear` | A person set or removed the policy of an SSID; records the SSID and the old and the new policy | The person |
 
 An approval of a proposal that offers names adds to `ipam.proposal.approve` the context `choice` (the name the host took), `rejected` (the other names on offer), `source` (the kind of source of the chosen name) and `remember` (`host` or `source`, when given).
 
@@ -512,6 +534,9 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.reconciler_settings` | None (one row) | `ReconcilerSettings` (section 3.1.1) |
 | `ipam.name_authority` | Site id, or none for the global rule | `StoredAuthority`: the order of kinds of sources, who set it and when (section 4.11) |
 | `ipam.name_choices` | Host id | `HostNameChoice`: the name chosen, the names on offer, the kind of source, whether the host prefers it, who and when |
+| `ipam.topology_root` | None (one row) | `RootChoice`: the source the map follows, the keys of the candidates on offer, who and when ([topology.md](topology.md) section 6.1) |
+| `ipam.wlan_policies` | SSID | `StoredWlanPolicy`: track or ignore, who and when (section 4.12) |
+| `ipam.wlan_exceptions` | (host id, SSID) | `WlanException`: the reason, who and when (section 4.12) |
 
 The index tables follow their fact in the same batch.
 
@@ -538,6 +563,9 @@ The index tables follow their fact in the same batch.
 | `PUT`, `DELETE /api/v1/settings/reconciler/name-authority` | `set_name_authority`, `clear_name_authority` | administrators |
 | `PUT`, `DELETE /api/v1/settings/reconciler/name-authority/sites/{site}` | `set_site_name_authority`, `clear_site_name_authority` | administrators |
 | `DELETE /api/v1/settings/reconciler/name-authority/hosts/{host}` | `clear_name_preference` | administrators |
+| `GET /api/v1/topology/ssids` | `list_topology_ssids` | `read` on observations |
+| `PUT`, `DELETE /api/v1/topology/ssids/{ssid}/policy` | `set_wlan_policy`, `clear_wlan_policy` | `update` on VLANs |
+| `PUT`, `DELETE /api/v1/topology/ssids/{ssid}/exceptions/{host}` | `keep_on_wlan`, `clear_wlan_exception` | `update` on the host |
 
 `GET /api/v1/proposals` takes the filters `kind`, `state` and `severity` (each repeatable or comma-separated), `prefix` (proposals about the prefix, its addresses and its networks), `subject` (a MAC address, an IP address, an object identifier, or text of the subject name or key) and `sort` (`created`, `updated`, `severity`, `kind`, `state`, `last_seen`; `-created` by default), with the usual paging. A list is empty for a principal who may not read the kind.
 
@@ -633,6 +661,8 @@ A finding is anything Tenko noticed that a person may need to decide on (U1 of t
 | View row `rogue` whose discovered-host proposal was decided | `unknown_device` | info | none | ipam |
 | A sighting of a network's edge address (section 4.8) | `scan_artifact` | info | none | ipam |
 | Health condition: error / warning / informational (the severities of `GET /system/diagnostics`); low disk (`node.disk.low`) is to act on although its diagnostics severity is a warning (U3) | `health` | act / review / info | `open_status` | by its code: `dns.*` dns, `dhcp.*` dhcp, `ipam.*` ipam, `connect.*` connectors, `cluster.*` and the store nodes, the rest settings |
+| The topology root's sources disagree and no choice covers the candidates ([topology.md](topology.md) section 6.1; source `topology`) | `topology_root` | review | `use_root` | topology |
+| An IoT-classed host on a non-IoT WLAN; a host's address outside its SSID's VLAN (section 4.12; source `topology`) | `wlan_class`, `wlan_prefix` | review | `move_host`, with Keep on this WLAN | topology |
 
 Rules that keep the counts honest:
 
@@ -664,7 +694,7 @@ The counts are cached until the next change, so a read of the counts costs a cop
 
 A server without the service answers 503 `findings.unavailable`. A principal sees the findings whose source it may read: a proposal's where it may read the proposal (a scoped reader: where the proposal's subject lies in its scope), an alarm's where it may read the prefix, a job's where it may read the job, a view row's where it may read observations, a health condition's where it may read the system. The counts count what the principal sees.
 
-Identifiers are derived from the source's and stay the same while the source lasts: `proposal:<id>`, `alarm:<prefix id>`, `job:<id>`, `reconcile:<digest of the view row's key>` and `health:<digest of the code and its parameters>`.
+Identifiers are derived from the source's and stay the same while the source lasts: `proposal:<id>`, `alarm:<prefix id>`, `job:<id>`, `reconcile:<digest of the view row's key>`, `health:<digest of the code and its parameters>`, `topology:root:<digest of the candidates>` and `topology:wlan:<digest of the rule, the host and the SSID>`. A topology finding keeps the time this controller first saw it as its `since`.
 
 The topic `findings` of `GET /api/v1/events` carries one event per change of the index, kind `findings.changed`, with the proposals, prefixes and jobs whose findings changed among `objects` (none for a change of the view or of health) and `params.revision`, the store revision the index applied. It is published after the index applied the change, so a client that reloads on the event reads the new state. These events come from the index, not the journal, and are not replayed: a client reloads the counts when it connects.
 

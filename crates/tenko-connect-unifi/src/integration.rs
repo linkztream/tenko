@@ -450,6 +450,8 @@ pub fn topology(read: &Read, local: &Local, observed_at: Timestamp) -> TopologyS
                     name_placeholder: client_placeholder(client),
                     vendor: None,
                     management: false,
+                    // The integration API reports no radio.
+                    band: None,
                 })
             })
             .collect(),

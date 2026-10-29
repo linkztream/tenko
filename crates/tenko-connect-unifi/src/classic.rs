@@ -679,9 +679,22 @@ pub struct Client {
     pub network_id: Option<String>,
     /// The VLAN the controller reports for it.
     pub vlan: Option<u16>,
+    /// The radio of a wireless client: `ng` (2.4 GHz), `na` (5 GHz) or `6e` (6 GHz).
+    pub radio: Option<String>,
 }
 
 impl Client {
+    /// The band of a wireless client's radio; `None` for a wired client or another radio.
+    pub fn band(&self) -> Option<tenko_core::observe::RadioBand> {
+        use tenko_core::observe::RadioBand;
+        match self.radio.as_deref()?.trim() {
+            "ng" => Some(RadioBand::G2),
+            "na" => Some(RadioBand::G5),
+            "6e" => Some(RadioBand::G6),
+            _ => None,
+        }
+    }
+
     pub(crate) fn from_value(value: &Value) -> Option<Self> {
         let mac = json::mac(value, "mac")?;
         let mut ipv6: Vec<IpAddr> = json::array(value, "ipv6_addresses")
@@ -716,6 +729,11 @@ impl Client {
             },
             network_id: json::id(value, "network_id"),
             vlan: json::vlan(value, "vlan"),
+            radio: if wired {
+                None
+            } else {
+                json::text(value, "radio")
+            },
         })
     }
 
@@ -800,6 +818,8 @@ pub struct Wlan {
     pub network_id: Option<String>,
     /// The VLAN of older controllers, which tag the SSID directly.
     pub vlan: Option<u16>,
+    /// Whether it is a guest network (`is_guest`).
+    pub guest: bool,
 }
 
 impl Wlan {
@@ -815,6 +835,7 @@ impl Wlan {
             } else {
                 None
             },
+            guest: json::flag(value, "is_guest").unwrap_or(false),
         })
     }
 }

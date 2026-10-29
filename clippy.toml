@@ -20,5 +20,6 @@ doc-valid-idents = [
   "DoT",
   "DoH",
   "XoT",
+  "IoT",
   "..",
 ]

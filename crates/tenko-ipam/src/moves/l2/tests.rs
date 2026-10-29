@@ -88,6 +88,7 @@ fn switch_port(index: u16, profile: Option<&str>, up: bool) -> ControllerPortSta
 
 fn wlan(ssid: &str, vlan: u16, enabled: bool, access_points: &[&str]) -> ControllerWlan {
     ControllerWlan {
+        guest: false,
         ssid: ssid.to_owned(),
         vlan: Some(vlan),
         enabled,

@@ -234,6 +234,7 @@ pub fn neighbours(computed: &Computed, id: &str) -> Vec<Neighbour> {
                 remote_port: remote_port.clone(),
                 vlan: edge.vlan,
                 ssid: edge.ssid.clone(),
+                inferred: edge.inferred,
             })
         })
         .collect();

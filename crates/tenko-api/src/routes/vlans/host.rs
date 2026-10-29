@@ -40,7 +40,7 @@ use tenko_ipam::vlan::controllers::{
     ControllerDeviceKind, ControllerInfo, ControllerLink, ControllerNetwork, ControllerPort,
     ControllerPortState, ControllerProfile, ControllerTopology, ControllerWlan, DiffEntry,
     NetworkControllers, NetworkPlan, NetworkReceipt, NetworkSpec, NudgeChange, NudgeOutcome,
-    NudgeReport, PortFuture,
+    NudgeReport, PortFuture, WirelessClient,
 };
 use tokio::sync::{Notify, watch};
 
@@ -293,6 +293,23 @@ pub fn topology_of(connector: ConnectorId, snapshot: &TopologySnapshot) -> Contr
                 vlan: wlan.vlan,
                 enabled: wlan.enabled,
                 access_points: wlan.access_points.iter().map(|ap| ap.0.clone()).collect(),
+                guest: wlan.guest,
+            })
+            .collect(),
+        clients: snapshot
+            .clients
+            .iter()
+            .filter_map(|client| {
+                Some(WirelessClient {
+                    mac: client.mac,
+                    ip: client.ip,
+                    access_point: client.device.0.clone(),
+                    ssid: client.ssid.clone()?,
+                    vlan: client.vlan,
+                    band: client.band,
+                    // A placeholder never names anything (docs/reconciliation.md 4.11).
+                    name: client.name.clone().filter(|_| !client.name_placeholder),
+                })
             })
             .collect(),
     }
@@ -462,6 +479,7 @@ pub fn guardrail_view_of(state: &ControllerAttachments) -> TopologySnapshot {
             .clients
             .iter()
             .map(|client| ClientAttachment {
+                band: None,
                 mac: client.mac,
                 ip: client.ip,
                 device: DeviceRef(client.device.clone()),
@@ -885,6 +903,7 @@ mod tests {
             }],
             profiles: Vec::new(),
             wlans: vec![WirelessNetwork {
+                guest: false,
                 id: "wlan-1".to_owned(),
                 ssid: "iot.example.test".to_owned(),
                 network: Some(NetworkRef("net-iot".to_owned())),
@@ -1035,6 +1054,7 @@ mod tests {
         vlan: u16,
     ) -> ClientAttachment {
         ClientAttachment {
+            band: None,
             mac: mac(n),
             ip: None,
             device: DeviceRef(device.to_owned()),
@@ -1140,6 +1160,7 @@ mod tests {
                 },
             ],
             wlans: vec![WirelessNetwork {
+                guest: false,
                 id: "wlan-1".to_owned(),
                 ssid: "iot.example.test".to_owned(),
                 network: Some(NetworkRef("net-iot".to_owned())),

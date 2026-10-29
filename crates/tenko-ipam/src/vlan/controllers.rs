@@ -131,7 +131,8 @@ pub struct NetworkReceipt {
 
 /// What a controller reports about its devices, networks and wireless networks, for the
 /// topology (IPAM-20). Links and client attachments arrive as observations; this adds what
-/// observations do not carry: names, kinds and port tables of the managed devices.
+/// observations do not carry: names, kinds and port tables of the managed devices, and the
+/// wireless clients with their access point and band for the SSID view (CONN-05).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTopology {
     /// The controller.
@@ -144,6 +145,33 @@ pub struct ControllerTopology {
     pub networks: Vec<ControllerNetwork>,
     /// Wireless networks.
     pub wlans: Vec<ControllerWlan>,
+    /// The wireless clients, each on its SSID.
+    #[serde(default)]
+    pub clients: Vec<WirelessClient>,
+}
+
+/// A wireless client as the controller reports it in its topology: the access point, the
+/// SSID, the VLAN and the band (CONN-05). Read only; nothing is ever written back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WirelessClient {
+    /// The client.
+    pub mac: MacAddr,
+    /// Its address.
+    #[serde(default)]
+    pub ip: Option<IpAddr>,
+    /// The access point, by controller reference.
+    pub access_point: String,
+    /// The SSID.
+    pub ssid: String,
+    /// The VLAN the controller puts it in.
+    #[serde(default)]
+    pub vlan: Option<u16>,
+    /// The radio band.
+    #[serde(default)]
+    pub band: Option<tenko_core::observe::RadioBand>,
+    /// The name on the controller.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Kinds of managed devices.
@@ -238,6 +266,9 @@ pub struct ControllerWlan {
     /// The access points that broadcast it, by controller reference.
     #[serde(default)]
     pub access_points: Vec<String>,
+    /// Whether the controller marks it as a guest network.
+    #[serde(default)]
+    pub guest: bool,
 }
 
 /// A client as a network controller sees it: the switch port or access point it is

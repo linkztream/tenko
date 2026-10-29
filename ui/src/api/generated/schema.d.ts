@@ -5103,6 +5103,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/topology/root": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the root of the topology map */
+        get: operations["get_topology_root"];
+        /** Choose the root of the topology map */
+        put: operations["choose_topology_root"];
+        post?: never;
+        /** Forget the chosen root of the topology map */
+        delete: operations["clear_topology_root"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topology/ssids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the SSIDs with their VLANs and clients */
+        get: operations["list_topology_ssids"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topology/ssids/{ssid}/exceptions/{host}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Keep a host on a WLAN */
+        put: operations["keep_on_wlan"];
+        post?: never;
+        /** Remove a WLAN exception */
+        delete: operations["clear_wlan_exception"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topology/ssids/{ssid}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the policy of an SSID */
+        put: operations["set_wlan_policy"];
+        post?: never;
+        /** Remove the policy of an SSID */
+        delete: operations["clear_wlan_policy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -6672,6 +6744,11 @@ export interface components {
             /** @description The chain position the checkpoint names: the last record sent before it. */
             head: components["schemas"]["ChainHead"];
         };
+        /** @description The body of `PUT /topology/root`: the source the map follows. */
+        ChooseRoot: {
+            /** @description The source whose candidate is the root. */
+            source: components["schemas"]["RootSource"];
+        };
         /**
          * @description A named match on requests (`dhcp.classes`, DHCP-03): it matches when any of its
          *     matches holds.
@@ -7074,6 +7151,11 @@ export interface components {
             /** @description Its name. */
             name: string;
             observed_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * @description Whether writes through it are allowed (TGL-20); the map offers no write action under
+             *     Hardened while no controller allows them.
+             */
+            writes_enabled?: boolean;
         };
         /** @description Answer of `POST /nodes/enrolments`: the token, shown once. */
         CreatedEnrolment: {
@@ -9078,7 +9160,7 @@ export interface components {
          * @description The default action of a finding, which the UI maps to its button.
          * @enum {string}
          */
-        FindingAction: "resolve" | "open_manual_step" | "open_prefix" | "adopt" | "delete_record" | "fix_ptr" | "open_host" | "decide" | "decommission" | "open_status" | "none";
+        FindingAction: "resolve" | "open_manual_step" | "open_prefix" | "adopt" | "delete_record" | "fix_ptr" | "open_host" | "decide" | "decommission" | "open_status" | "use_root" | "move_host" | "none";
         /**
          * @description The area of the UI a finding belongs to: the rail entry whose badge counts it.
          * @enum {string}
@@ -9123,7 +9205,7 @@ export interface components {
          * @description What a finding is about.
          * @enum {string}
          */
-        FindingKind: "conflict" | "job_waiting" | "utilization" | "unknown_device" | "orphaned_record" | "orphaned_address" | "ptr_mismatch" | "intent_differs" | "outside_prefixes" | "vlan" | "host_name" | "dns" | "ghost" | "scan_artifact" | "health";
+        FindingKind: "conflict" | "job_waiting" | "utilization" | "unknown_device" | "orphaned_record" | "orphaned_address" | "ptr_mismatch" | "intent_differs" | "outside_prefixes" | "vlan" | "host_name" | "dns" | "ghost" | "scan_artifact" | "health" | "topology_root" | "wlan_class" | "wlan_prefix";
         /**
          * @description How much a finding needs a person: the severity of the findings model. Only `act` colors
          *     the dashboard, the rail and the status bar; `info` is listed but never counted as a
@@ -9141,7 +9223,7 @@ export interface components {
          *     index only reads them.
          * @enum {string}
          */
-        FindingSource: "proposal" | "alarm" | "reconcile" | "job" | "health";
+        FindingSource: "proposal" | "alarm" | "reconcile" | "job" | "health" | "topology";
         /**
          * @description The subject of a finding: what it is about, with the identities the filters and the
          *     scope of a reader use.
@@ -10592,6 +10674,14 @@ export interface components {
              */
             to_serial: number;
         };
+        /** @description The body of `PUT /topology/ssids/{ssid}/exceptions/{host}`; may be empty. */
+        KeepOnWlan: {
+            /**
+             * @description Why the host stays on this WLAN: at most 1,024 bytes, no control characters other
+             *     than line breaks and tabs.
+             */
+            reason?: string | null;
+        };
         /** @description One key generation of the installation, as this controller sees it. */
         KekGenerationView: {
             /** @description Whether the generation wraps new data keys. */
@@ -11355,6 +11445,15 @@ export interface components {
             /** @description What to do. */
             instruction: components["schemas"]["MessageKey"];
             undo?: components["schemas"]["MessageKey"] | null;
+        };
+        /** @description The node the map is drawn from and why (UI-Q10). */
+        MapRoot: {
+            /** @description Whether a person chose it ("Use this"). */
+            chosen?: boolean;
+            /** @description The node; absent when the source names an address no node has. */
+            node?: string | null;
+            /** @description The source that names it. */
+            source: components["schemas"]["RootSource"];
         };
         /** @description The mapping of an import: one entry per sheet, and the options. */
         Mapping: {
@@ -12600,6 +12699,8 @@ export interface components {
             edge: string;
             /** @description The kind of the edge. */
             edge_kind: components["schemas"]["EdgeKind"];
+            /** @description Whether the edge is only inferred from a MAC table ([`TopologyEdge::inferred`]). */
+            inferred?: boolean;
             /** @description Its kind. */
             kind: components["schemas"]["NodeKind"];
             /** @description Its label. */
@@ -16892,6 +16993,11 @@ export interface components {
             /** @description The state. */
             state: components["schemas"]["QuorumKind"];
         };
+        /**
+         * @description The radio band a wireless client is associated on, as a network controller reports it.
+         * @enum {string}
+         */
+        RadioBand: "2g" | "5g" | "6g";
         /** @description A range of addresses inside a prefix. */
         Range: {
             /**
@@ -18212,6 +18318,53 @@ export interface components {
             /** @description The role of the key to roll. */
             role: components["schemas"]["KeyRole"];
         };
+        /** @description One candidate for the root. */
+        RootCandidate: {
+            /** @description The address: the gateway's first address, or the next hop. */
+            ip?: string | null;
+            /** @description The node's label, else the address. */
+            label: string;
+            /** @description The node; absent when the next hop is an address no node holds. */
+            node?: string | null;
+            /** @description The source that names it. */
+            source: components["schemas"]["RootSource"];
+        };
+        /** @description The root a person chose, with the candidates on offer then. */
+        RootChoice: {
+            /** @description Who chose and when. */
+            decided: components["schemas"]["Stamp"];
+            /**
+             * @description The keys of the candidates on offer (`controller:<node>`, `route:<address>`): while
+             *     the sources offer the same, their disagreement raises no finding again.
+             */
+            offered?: string[];
+            /**
+             * Format: int64
+             * @description Store revision (filled when read): the `ETag`.
+             */
+            revision?: number;
+            /** @description The source the map follows. */
+            source: components["schemas"]["RootSource"];
+        };
+        /** @description The root of the map with its sources (`GET /topology/root`). */
+        RootDecision: {
+            /** @description The candidates, the ranked source first. */
+            candidates: components["schemas"]["RootCandidate"][];
+            choice?: components["schemas"]["RootChoice"] | null;
+            /** @description Whether the two sources name different roots. */
+            disagree: boolean;
+            /**
+             * @description Whether the sources disagree and no choice covers the candidates on offer: the
+             *     finding is raised.
+             */
+            open: boolean;
+            /**
+             * Format: int64
+             * @description The store revision of the graph.
+             */
+            revision: number;
+            root?: components["schemas"]["MapRoot"] | null;
+        };
         /** @description One root server of a node's resolver with its smoothed round-trip time. */
         RootServerItem: {
             /** @description The address in use. */
@@ -18224,6 +18377,11 @@ export interface components {
              */
             srtt_ms?: number | null;
         };
+        /**
+         * @description A source of the root.
+         * @enum {string}
+         */
+        RootSource: "controller" | "default_route";
         /** @description Rows of the source by outcome. */
         RowCounts: {
             /** @description Address-only rows of pre-filled lists (free addresses). */
@@ -19281,6 +19439,11 @@ export interface components {
             /** @description The client's user agent at login. */
             user_agent?: string | null;
         };
+        /** @description The body of `PUT /topology/ssids/{ssid}/policy`. */
+        SetWlanPolicy: {
+            /** @description Track: the WLAN rules read the SSID; ignore: they skip it. */
+            policy: components["schemas"]["WlanPolicy"];
+        };
         /**
          * @description A change of the security settings (`PATCH /settings/security`). A new profile resets
          *     every toggle to its values first; explicit toggles then apply on top.
@@ -19756,6 +19919,11 @@ export interface components {
              * @description Rows of the reconciliation view and scan artifacts not covered by a proposal.
              */
             reconcile: number;
+            /**
+             * Format: int64
+             * @description The topology's root and WLAN findings.
+             */
+            topology?: number;
         };
         /**
          * @description The format of an uploaded file.
@@ -19790,6 +19958,93 @@ export interface components {
             uri: string;
             /** @description The user name, when one is known. */
             username?: string | null;
+        };
+        /** @description A client of an SSID. */
+        SsidClient: {
+            /** @description The access point, by its name on the controller. */
+            access_point: string;
+            /** @description The node of the access point. */
+            access_point_node?: string | null;
+            band?: components["schemas"]["RadioBand"] | null;
+            /** @description The kinds of the findings about it. */
+            findings?: components["schemas"]["FindingKind"][];
+            host?: components["schemas"]["HostId"] | null;
+            /** @description Whether the host is classed as IoT. */
+            iot?: boolean;
+            /** @description Its address, as the controller reports it. */
+            ip?: string | null;
+            /** @description Whether a person kept the host on this WLAN. */
+            kept?: boolean;
+            /** @description The best name: the host of intent, else the controller's name, else the MAC address. */
+            label: string;
+            /** @description The client. */
+            mac: components["schemas"]["MacAddr"];
+            /** @description The node of the map. */
+            node?: string | null;
+            /** @description The vendor of the MAC address, when a source names it. */
+            vendor?: string | null;
+        };
+        /** @description One SSID with its VLANs and clients. */
+        SsidEntry: {
+            /** @description The access points that broadcast it, by name. */
+            access_points?: string[];
+            /** @description The clients. */
+            clients: number;
+            /** @description The controllers that report it. */
+            connectors: components["schemas"]["ConnectorId"][];
+            /** @description Whether it is broadcast. */
+            enabled?: boolean;
+            /** @description The findings about its clients. */
+            findings: number;
+            /** @description Whether a controller marks it as a guest network. */
+            guest?: boolean;
+            /** @description The policy of the WLAN rules. */
+            policy: components["schemas"]["WlanPolicy"];
+            /** @description Whether a person set the policy (else it is the default). */
+            policy_set?: boolean;
+            /** @description The SSID. */
+            ssid: string;
+            /**
+             * Format: int32
+             * @description The VLAN the SSID carries; absent when untagged or unknown.
+             */
+            vid?: number | null;
+            /** @description The clients by VLAN, the SSID's own VLAN first. */
+            vlans: components["schemas"]["SsidVlan"][];
+        };
+        /** @description A network of a VLAN. */
+        SsidPrefix: {
+            /** @description The network. */
+            cidr: string;
+            /** @description The prefix. */
+            id: components["schemas"]["PrefixId"];
+        };
+        /** @description `GET /topology/ssids`: every SSID of the network controllers. */
+        SsidView: {
+            /**
+             * Format: int64
+             * @description The store revision of the graph.
+             */
+            revision: number;
+            /** @description The SSIDs, by name. */
+            ssids: components["schemas"]["SsidEntry"][];
+        };
+        /** @description The clients of an SSID in one VLAN. */
+        SsidVlan: {
+            /** @description The clients, by label. */
+            clients: components["schemas"]["SsidClient"][];
+            /** @description Whether it has the IoT role. */
+            iot?: boolean;
+            /** @description Its name. */
+            name?: string | null;
+            /** @description Its networks. */
+            prefixes?: components["schemas"]["SsidPrefix"][];
+            /**
+             * Format: int32
+             * @description The VLAN id; absent for untagged clients.
+             */
+            vid?: number | null;
+            vlan?: components["schemas"]["VlanId"] | null;
         };
         /** @description When and by whom something happened. */
         Stamp: {
@@ -20015,6 +20270,20 @@ export interface components {
              */
             revision?: number;
             site?: components["schemas"]["SiteId"] | null;
+            /** @description Who set it and when. */
+            updated: components["schemas"]["Stamp"];
+        };
+        /** @description The policy a person set for an SSID. */
+        StoredWlanPolicy: {
+            /** @description The policy. */
+            policy: components["schemas"]["WlanPolicy"];
+            /**
+             * Format: int64
+             * @description Store revision (filled when read): the `ETag`.
+             */
+            revision?: number;
+            /** @description The SSID. */
+            ssid: string;
             /** @description Who set it and when. */
             updated: components["schemas"]["Stamp"];
         };
@@ -20588,6 +20857,13 @@ export interface components {
             b_port?: string | null;
             /** @description Stable identifier, from the kind, the ends and their ports. */
             id: string;
+            /**
+             * @description Whether the edge is only inferred from a MAC table (a bridge table of a probe): a
+             *     client edge no network controller reports. A MAC address learned on a port says that
+             *     the device is somewhere behind it, not that it hangs on it; the map draws such an
+             *     edge dashed with a question mark.
+             */
+            inferred?: boolean;
             /** @description What it is. */
             kind: components["schemas"]["EdgeKind"];
             /** @description Source keys of the facts behind the edge. */
@@ -20711,6 +20987,7 @@ export interface components {
             networks: components["schemas"]["NetworkInView"][];
             /** @description Nodes in the answer. */
             nodes: number;
+            root?: components["schemas"]["MapRoot"] | null;
             /** @description The sites of the nodes in the answer. */
             sites: components["schemas"]["SiteId"][];
             /** @description Edges of the whole graph before filtering. */
@@ -21820,6 +22097,27 @@ export interface components {
          * @enum {string}
          */
         WinRule: "intent_managed" | "lease_dynamic" | "newest_sighting" | "never_automatic" | "orphan_rule" | "manual_record" | "forward_record";
+        /** @description "Keep on this WLAN": the WLAN rules skip this host on this SSID. */
+        WlanException: {
+            /** @description Who decided and when. */
+            decided: components["schemas"]["Stamp"];
+            /** @description The host. */
+            host: components["schemas"]["HostId"];
+            /** @description Why, as the person wrote it. */
+            reason?: string | null;
+            /**
+             * Format: int64
+             * @description Store revision (filled when read): the `ETag`.
+             */
+            revision?: number;
+            /** @description The SSID. */
+            ssid: string;
+        };
+        /**
+         * @description Whether the WLAN rules read an SSID at all.
+         * @enum {string}
+         */
+        WlanPolicy: "track" | "ignore";
         /** @description The answer of a write. */
         WriteResponse_Address: {
             /** @description Whether this is a dry run. */
@@ -33980,13 +34278,13 @@ export interface operations {
                 at_least?: number;
                 /** @description Only findings of these severities: `act`, `review`, `info`. Repeat the parameter or separate the values with commas. */
                 severity?: string;
-                /** @description Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`. */
+                /** @description Only findings of these kinds: `conflict`, `job_waiting`, `utilization`, `unknown_device`, `orphaned_record`, `orphaned_address`, `ptr_mismatch`, `intent_differs`, `outside_prefixes`, `vlan`, `host_name`, `dns`, `ghost`, `scan_artifact`, `health`, `topology_root`, `wlan_class`, `wlan_prefix`. */
                 kind?: string;
                 /** @description Only findings whose subject is of these kinds: `address`, `host`, `prefix`, `record`, `job`, `node`, `device`. */
                 subject?: string;
                 /** @description Only findings of these areas: `ipam`, `dns`, `dhcp`, `discovery`, `topology`, `jobs`, `connectors`, `nodes`, `settings`. */
                 area?: string;
-                /** @description Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`. */
+                /** @description Only findings of these sources: `proposal`, `alarm`, `reconcile`, `job`, `health`, `topology`. */
                 source?: string;
                 /** @description Only findings about this prefix (identifier): its own subject, an address or a network inside it. */
                 prefix?: string;
@@ -47130,6 +47428,557 @@ export interface operations {
                 };
             };
             /** @description IPAM or the topology is not configured (`ipam.unavailable`, `ipam.topology.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_topology_root: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candidates, the root and the stored choice; the `ETag` is the choice's revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RootDecision"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    choose_topology_root: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChooseRoot"];
+            };
+        };
+        responses: {
+            /** @description The root after the choice */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RootDecision"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed: the choice needs `update` on VLANs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The source names no root now (`ipam.topology.no_candidate`), or a concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The choice changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_topology_root: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ranked sources decide again */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not allowed: needs `update` on VLANs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No root was chosen (`ipam.topology.not_stored`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The choice changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_topology_ssids: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The SSIDs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsidView"];
+                };
+            };
+            /** @description The principal may not read observations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    keep_on_wlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description The SSID, percent-encoded */
+                ssid: string;
+                /** @description Host identifier */
+                host: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeepOnWlan"];
+            };
+        };
+        responses: {
+            /** @description The stored exception */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WlanException"];
+                };
+            };
+            /** @description The body or the host identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed: needs `update` on the host */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such host (`ipam.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The exception changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The SSID or the reason is invalid (`ipam.topology.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_wlan_exception: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description The SSID, percent-encoded */
+                ssid: string;
+                /** @description Host identifier */
+                host: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules read the pair again */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The host identifier is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed: needs `update` on the host */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such exception (`ipam.topology.not_stored`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The exception changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The SSID is invalid (`ipam.topology.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    set_wlan_policy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description The SSID, percent-encoded */
+                ssid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetWlanPolicy"];
+            };
+        };
+        responses: {
+            /** @description The stored policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredWlanPolicy"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed: needs `update` on VLANs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A concurrent change won (`sys.store.precondition_failed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The policy changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The SSID is empty, longer than 32 octets or has control characters (`ipam.topology.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    clear_wlan_policy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description The revision the client read, as `"12"`; the write fails with 412
+                 *     `ipam.revision_mismatch` when the object changed since.
+                 */
+                "If-Match"?: string | null;
+            };
+            path: {
+                /** @description The SSID, percent-encoded */
+                ssid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The default applies again */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not allowed: needs `update` on VLANs */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No policy is set (`ipam.topology.not_stored`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The policy changed since `If-Match` (`ipam.revision_mismatch`) */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The SSID is invalid (`ipam.topology.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM or the topology is not configured */
             503: {
                 headers: {
                     [name: string]: unknown;

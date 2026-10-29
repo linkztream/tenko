@@ -39,8 +39,8 @@ use super::controllers::{
     AttachmentChange, AttachmentPlan, ControllerAttachments, ControllerClient, ControllerDevice,
     ControllerInfo, ControllerLink, ControllerNetwork, ControllerPortState, ControllerProfile,
     ControllerTopology, ControllerWlan, DiffEntry, NetworkControllers, NetworkPlan, NetworkReceipt,
-    NetworkSpec, NudgeChange, NudgeOutcome, NudgeReport, PortFuture, derived_guardrails,
-    derived_nudge_guardrails,
+    NetworkSpec, NudgeChange, NudgeOutcome, NudgeReport, PortFuture, WirelessClient,
+    derived_guardrails, derived_nudge_guardrails,
 };
 
 /// One call the controllers received.
@@ -874,6 +874,21 @@ impl MemoryControllers {
             devices: controller.devices.clone(),
             networks: controller.networks.clone(),
             wlans: controller.wlans.clone(),
+            clients: controller
+                .clients
+                .iter()
+                .filter_map(|client| {
+                    Some(WirelessClient {
+                        mac: client.mac,
+                        ip: client.ip,
+                        access_point: client.device.clone(),
+                        ssid: client.ssid.clone()?,
+                        vlan: client.vlan,
+                        band: None,
+                        name: client.name.clone(),
+                    })
+                })
+                .collect(),
         })
     }
 }

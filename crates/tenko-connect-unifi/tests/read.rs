@@ -17,7 +17,10 @@ use tenko_connect::{
     convert::{topology_from_proto, topology_to_proto},
 };
 use tenko_connect_unifi::Unifi;
-use tenko_core::{Coded as _, MacAddr, observe::LinkKind};
+use tenko_core::{
+    Coded as _, MacAddr,
+    observe::{LinkKind, RadioBand},
+};
 
 /// A link as a sortable row: kind, near device and port, far device and port.
 type LinkRow = (LinkKind, String, Option<String>, String, Option<String>);
@@ -108,6 +111,7 @@ fn wlan<'a>(snapshot: &'a TopologySnapshot, ssid: &str) -> &'a WirelessNetwork {
 /// A client attached to a device, with nothing else known.
 fn attachment(client: &str, device: &str) -> ClientAttachment {
     ClientAttachment {
+        band: None,
         mac: mac(client),
         ip: None,
         device: dev(device),
@@ -441,6 +445,7 @@ async fn clients_are_attached_to_their_switch_port_or_access_point() {
             network: Some(net(ids::NET_DEFAULT)),
             name: Some("phone.example.test".to_owned()),
             vendor: Some("Example Mobile Co".to_owned()),
+            band: Some(RadioBand::G5),
             ..attachment(ids::PHONE, ids::HALL)
         }
     );
@@ -452,6 +457,7 @@ async fn clients_are_attached_to_their_switch_port_or_access_point() {
             network: Some(net(ids::NET_IOT)),
             vlan: Some(30),
             name: Some("sensor".to_owned()),
+            band: Some(RadioBand::G2),
             ..attachment(ids::SENSOR, ids::GARDEN)
         }
     );
@@ -463,6 +469,7 @@ async fn clients_are_attached_to_their_switch_port_or_access_point() {
             network: Some(net(ids::NET_GUEST)),
             vlan: Some(40),
             name: Some("laptop".to_owned()),
+            band: Some(RadioBand::G2),
             ..attachment(ids::LAPTOP, ids::HALL)
         }
     );
@@ -650,6 +657,8 @@ async fn wireless_networks_name_their_access_points_network_and_vlan() {
     let guest = wlan(&snapshot, "guest.example");
     assert_eq!(guest.network, Some(net(ids::NET_GUEST)));
     assert_eq!(guest.vlan, Some(40));
+    assert!(guest.guest, "is_guest marks the guest network");
+    assert!(!home.guest && !iot.guest);
 
     // Older controllers tag the SSID itself.
     let legacy = wlan(&snapshot, "legacy.example");

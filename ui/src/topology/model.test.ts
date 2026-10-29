@@ -1,21 +1,27 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { setLocale } from "../i18n";
-import type { NodeKind, VlanInView } from "./api";
+import type { NodeKind, TopologyNode, VlanInView } from "./api";
 import {
+  bandWord,
   EDGE_KINDS,
+  edgeBucket,
   edgeClass,
   edgeWord,
   EMPTY_FILTER,
   filterKey,
   filterParams,
   filterSearch,
+  groupBucket,
   groupParent,
   isFiltered,
   isGroupId,
+  isHashedName,
   kindIcon,
   kindWord,
+  mapReadOnly,
   NODE_KINDS,
   nodeAriaLabel,
+  nodeSecondLine,
   parseFilter,
   portStateWord,
   portTitle,
@@ -25,9 +31,11 @@ import {
   sourceWord,
   toggleKind,
   topologyPath,
+  unplacedDevices,
   VLAN_COLOR_LIMIT,
   vlanColorIds,
   vidOf,
+  viewOf,
 } from "./model";
 
 beforeEach(async () => {
@@ -96,6 +104,18 @@ describe("the words of kinds and edges", () => {
     expect(isGroupId("h-1")).toBe(false);
     expect(groupParent("group:h-1")).toBe("h-1");
     expect(groupParent("h-1")).toBe("h-1");
+  });
+
+  it("reads the port or SSID of a group id and leaves a group of a whole parent without one", () => {
+    expect(groupParent("group:h-1#iot.example.test")).toBe("h-1");
+    expect(groupBucket("group:h-1#iot.example.test")).toBe("iot.example.test");
+    expect(groupBucket("group:h-1#7")).toBe("7");
+    expect(groupBucket("group:h-1")).toBeUndefined();
+    expect(groupBucket("h-1")).toBeUndefined();
+    // Only the first separator counts: a bucket may hold one itself.
+    expect(groupParent("group:h-1#guest#2")).toBe("h-1");
+    expect(groupBucket("group:h-1#guest#2")).toBe("guest#2");
+    expect(isGroupId("group:h-1#7")).toBe(true);
   });
 });
 
@@ -221,5 +241,153 @@ describe("the link of a selected device", () => {
     expect(topologyPath("m-00005e0053d2", "?kind=host")).toBe("/topology/m-00005e0053d2?kind=host");
     expect(topologyPath("group:h-1")).toBe("/topology/group:h-1");
     expect(topologyPath("a b/c")).toBe("/topology/a%20b%2Fc");
+  });
+});
+
+// ---------------------------------------------------------------------------------
+// U7
+
+type Plain = Pick<TopologyNode, "label" | "vendor" | "ips">;
+
+describe("hashed names", () => {
+  it("knows the name Tenko makes up from twelve hexadecimal digits", () => {
+    expect(isHashedName("host-00005e005301")).toBe(true);
+    expect(isHashedName("host-00005E00ABCD")).toBe(true);
+    expect(isHashedName("host-00005e005301-2")).toBe(true);
+    expect(isHashedName("  host-00005e005301  ")).toBe(true);
+  });
+
+  it("refuses a name that says something", () => {
+    expect(isHashedName("host-1")).toBe(false);
+    expect(isHashedName("host-00005e00530")).toBe(false);
+    expect(isHashedName("host-00005e0053011")).toBe(false);
+    expect(isHashedName("host-00005e00530g")).toBe(false);
+    expect(isHashedName("my-host-00005e005301")).toBe(false);
+    expect(isHashedName("nas")).toBe(false);
+    expect(isHashedName("")).toBe(false);
+  });
+
+  it("gives a hashed name a second line of vendor and first address", () => {
+    const node = (extra: Partial<Plain>): Plain => ({ label: "host-00005e005301", ...extra });
+    expect(nodeSecondLine(node({ vendor: "Example Devices", ips: ["192.0.2.7", "192.0.2.8"] }))).toBe("Example Devices · 192.0.2.7");
+    expect(nodeSecondLine(node({ vendor: "Example Devices" }))).toBe("Example Devices");
+    expect(nodeSecondLine(node({ ips: ["2001:db8::7"] }))).toBe("2001:db8::7");
+    expect(nodeSecondLine(node({ vendor: "Example Devices", ips: [] }))).toBe("Example Devices");
+    // Blank parts are left out, and no part leaves no line.
+    expect(nodeSecondLine(node({ vendor: "  ", ips: ["192.0.2.7"] }))).toBe("192.0.2.7");
+    expect(nodeSecondLine(node({ vendor: null, ips: [] }))).toBeUndefined();
+    expect(nodeSecondLine(node({}))).toBeUndefined();
+  });
+
+  it("gives a name that says something no second line", () => {
+    expect(nodeSecondLine({ label: "nas", vendor: "Example Devices", ips: ["192.0.2.7"] })).toBeUndefined();
+    expect(nodeSecondLine({ label: "Example Devices 00:53:d2", vendor: "Example Devices", ips: [] })).toBeUndefined();
+  });
+});
+
+describe("the bucket of a client link", () => {
+  it("is the SSID of a wireless link and the port of a wired one", () => {
+    expect(edgeBucket({ kind: "wireless", ssid: "iot.example.test", a_port: "3" })).toBe("iot.example.test");
+    expect(edgeBucket({ kind: "wired", ssid: "iot.example.test", a_port: "3" })).toBe("3");
+    expect(edgeBucket({ kind: "wireless", ssid: null, a_port: "3" })).toBeUndefined();
+    expect(edgeBucket({ kind: "wired", a_port: null })).toBeUndefined();
+    expect(edgeBucket({ kind: "wired" })).toBeUndefined();
+  });
+
+  it("is none for a link between network devices or a virtual placement", () => {
+    for (const kind of ["uplink", "lldp", "vm_host"] as const) {
+      expect(edgeBucket({ kind, ssid: "iot.example.test", a_port: "3" })).toBeUndefined();
+    }
+  });
+});
+
+describe("devices that are not placed", () => {
+  const node = (id: string, label: string, ips?: string[]): TopologyNode => ({
+    id,
+    kind: "host",
+    label,
+    sources: ["network_controller:test"],
+    ...(ips ? { ips } : {}),
+  });
+
+  it("lists each unplaced device, in the order given, with no duplicates for a unique one", () => {
+    const nodes = [node("a", "alpha", ["192.0.2.1"]), node("b", "beta", ["192.0.2.2"]), node("c", "gamma")];
+    expect(unplacedDevices(["b", "a"], nodes)).toEqual([
+      { id: "b", duplicates: [] },
+      { id: "a", duplicates: [] },
+    ]);
+    expect(unplacedDevices([], nodes)).toEqual([]);
+  });
+
+  it("finds duplicates by label, ignoring case and blanks, and by a shared address", () => {
+    const nodes = [
+      node("a", "Printer", ["192.0.2.9"]),
+      node("b", " printer ", ["192.0.2.10"]),
+      node("c", "scanner", ["192.0.2.9", "192.0.2.20"]),
+      node("d", "other", ["198.51.100.1"]),
+    ];
+    expect(unplacedDevices(["a"], nodes)).toEqual([{ id: "a", duplicates: ["b", "c"] }]);
+    expect(unplacedDevices(["d"], nodes)).toEqual([{ id: "d", duplicates: [] }]);
+    // A device is no duplicate of itself, and the duplicates are in id order.
+    expect(unplacedDevices(["c", "b"], nodes)).toEqual([
+      { id: "c", duplicates: ["a"] },
+      { id: "b", duplicates: ["a"] },
+    ]);
+  });
+
+  it("leaves out an id the graph does not have", () => {
+    expect(unplacedDevices(["gone", "a"], [node("a", "alpha")])).toEqual([{ id: "a", duplicates: [] }]);
+  });
+});
+
+describe("a read-only map", () => {
+  const off = [{ writes_enabled: false }];
+  const on = [{ writes_enabled: true }];
+
+  it("is read-only under Hardened while no controller allows writes", () => {
+    expect(mapReadOnly("hardened", [])).toBe(true);
+    expect(mapReadOnly("hardened", off)).toBe(true);
+    expect(mapReadOnly("hardened", [{}])).toBe(true);
+    expect(mapReadOnly("hardened", [...off, ...off])).toBe(true);
+  });
+
+  it("is writable once one controller allows writes", () => {
+    expect(mapReadOnly("hardened", on)).toBe(false);
+    expect(mapReadOnly("hardened", [...off, ...on])).toBe(false);
+  });
+
+  it("is writable under every other profile, with or without a controller", () => {
+    for (const profile of ["standard", "home", "lab", undefined, null, ""]) {
+      expect(mapReadOnly(profile, off)).toBe(false);
+      expect(mapReadOnly(profile, [])).toBe(false);
+    }
+  });
+});
+
+describe("radio bands and views", () => {
+  it("writes a band in words", () => {
+    expect(bandWord("2g")).toBe("2.4 GHz");
+    expect(bandWord("5g")).toBe("5 GHz");
+    expect(bandWord("6g")).toBe("6 GHz");
+    expect(bandWord(null)).toBe("");
+    expect(bandWord(undefined)).toBe("");
+  });
+
+  it("writes a band in Swedish", async () => {
+    await setLocale("sv");
+    try {
+      expect(bandWord("2g")).toBe("2,4 GHz");
+    } finally {
+      await setLocale("en");
+    }
+  });
+
+  it("shows the SSID view only when the URL asks for it", () => {
+    expect(viewOf("ssids")).toBe("ssids");
+    expect(viewOf(undefined)).toBe("map");
+    expect(viewOf("map")).toBe("map");
+    expect(viewOf("")).toBe("map");
+    expect(viewOf("SSIDS")).toBe("map");
+    expect(viewOf(["ssids", "map"])).toBe("map");
   });
 });

@@ -115,3 +115,39 @@
 .neighbour-link { grid-column: 1; font-size: var(--fs-12); }
 .neighbour .vlan { grid-column: 2; grid-row: 1 / span 2; }
 .intent-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+
+/* ---------- U7: inferred links, second lines, Not placed, the root, the SSID view ---------- */
+/* A link only a MAC table names: dashed, with a question mark at its middle. */
+.topology-edge.edge-inferred { stroke-dasharray: 3 4; }
+.edge-mark {
+  fill: var(--ink-2); font-size: var(--fs-11); font-weight: var(--fw-semibold);
+  paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round;
+}
+.topology-node .label.sub { fill: var(--ink-3); font-weight: var(--fw-regular); }
+.topology-page .seg button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line-strong); }
+
+.topology-unplaced {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-6);
+  padding: var(--sp-3) var(--sp-6); border-top: 1px solid var(--line); background: var(--surface-2);
+  font-size: var(--fs-12); color: var(--ink-2);
+}
+.topology-unplaced h2 { font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--ink-3); }
+.topology-root-candidates { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-6); }
+.topology-root-candidates li { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.topology-root-failure { display: block; color: var(--danger-ink); }
+
+.ssid-view { flex: 1; overflow: auto; padding: var(--sp-4) var(--sp-6); display: grid; align-content: start; gap: var(--sp-4); }
+.ssid-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.ssid-table th, .ssid-table td { text-align: start; padding: 0 var(--sp-4); height: 28px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ssid-table thead th { color: var(--ink-3); font-weight: var(--fw-medium); }
+.ssid-head th { background: var(--surface-2); font-weight: var(--fw-regular); }
+.ssid-head-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-height: 28px; }
+.ssid-head-line .grow { flex: 1; }
+.ssid-name { font-weight: var(--fw-semibold); }
+.ssid-vlan td { color: var(--ink-2); padding-inline-start: var(--sp-8); }
+.ssid-table td.ssid-client-name { padding-inline-start: var(--sp-8); }
+.ssid-client td > * + * { margin-inline-start: var(--sp-3); }
+.ssid-second { font-size: var(--fs-11); }
+.ssid-finding { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--ink-2); }
+
+.ssid-table td.ssid-client-actions { text-align: end; }

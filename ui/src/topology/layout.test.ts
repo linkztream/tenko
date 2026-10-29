@@ -536,6 +536,423 @@ describe("layout of several components", () => {
   });
 });
 
+/** An edge with the bucket (a port or an SSID) of a client edge and the inferred flag. */
+function bucketed(id: string, kind: EdgeKind, a: string, b: string, bucket?: string, inferred?: boolean): LayoutEdge {
+  const result: LayoutEdge = { id, kind, a, b };
+  if (bucket !== undefined) result.bucket = bucket;
+  if (inferred !== undefined) result.inferred = inferred;
+  return result;
+}
+
+describe("layout root option", () => {
+  it("starts the forest at the named node before any router", () => {
+    const nodes = [node("r1", "router", "Beta"), node("r2", "router", "Alpha")];
+    expect(placed(layout(nodes, []), "r2").x).toBe(120);
+    const result = layout(nodes, [], { root: "r1" });
+    expect(placed(result, "r1").x).toBe(120);
+    expect(placed(result, "r2").x).toBe(360);
+  });
+
+  it("makes a connected switch the root of its component, with the routers below it", () => {
+    const result = layout(
+      [node("r1", "router", "A"), node("r2", "router", "B"), node("sw", "switch", "Core")],
+      [edge("e1", "uplink", "sw", "r1"), edge("e2", "uplink", "sw", "r2")],
+      { root: "sw" },
+    );
+    expect(placed(result, "sw")).toMatchObject({ parent: null, depth: 0 });
+    expect(placed(result, "r1")).toMatchObject({ parent: "sw", depth: 1 });
+    expect(placed(result, "r2")).toMatchObject({ parent: "sw", depth: 1 });
+  });
+
+  it("ignores a root that names no node", () => {
+    const nodes = [node("r1", "router", "Beta"), node("r2", "router", "Alpha")];
+    expect(layout(nodes, [], { root: "ghost" })).toEqual(layout(nodes, []));
+  });
+});
+
+describe("layout root candidates among the infrastructure", () => {
+  it("does not root an access point that a switch reaches, even with the higher degree", () => {
+    const result = layout(
+      [
+        node("sw", "switch", "Core"),
+        node("ap", "access_point", "AP"),
+        node("h", "host", "Desktop"),
+        node("c1", "host", "Phone"),
+        node("c2", "host", "Tablet"),
+        node("c3", "host", "Laptop"),
+      ],
+      [
+        edge("e1", "uplink", "sw", "ap"),
+        edge("e2", "wired", "sw", "h"),
+        edge("e3", "wireless", "ap", "c1"),
+        edge("e4", "wireless", "ap", "c2"),
+        edge("e5", "wireless", "ap", "c3"),
+      ],
+    );
+    expect(placed(result, "sw")).toMatchObject({ parent: null, depth: 0 });
+    expect(placed(result, "ap")).toMatchObject({ parent: "sw", depth: 1 });
+  });
+
+  it("still roots an access point that only has clients", () => {
+    const result = layout(
+      [
+        node("sw", "switch", "Core"),
+        node("h", "host", "Desktop"),
+        node("ap", "access_point", "AP"),
+        node("c1", "host", "Phone"),
+        node("c2", "host", "Tablet"),
+      ],
+      [edge("e1", "wired", "sw", "h"), edge("e2", "wireless", "ap", "c1"), edge("e3", "wireless", "ap", "c2")],
+    );
+    expect(placed(result, "sw").parent).toBeNull();
+    expect(placed(result, "ap")).toMatchObject({ parent: null, depth: 0 });
+    // The switch component comes first, then the access point.
+    expect(placed(result, "sw").x).toBeLessThan(placed(result, "ap").x);
+  });
+
+  it("roots a device before an access point", () => {
+    const result = layout(
+      [node("d", "device", "Unknown"), node("ap", "access_point", "AP"), node("c1", "host"), node("c2", "host")],
+      [edge("e1", "wired", "d", "ap"), edge("e2", "wireless", "ap", "c1"), edge("e3", "wireless", "ap", "c2")],
+    );
+    expect(placed(result, "d").parent).toBeNull();
+    expect(placed(result, "ap").parent).toBe("d");
+  });
+});
+
+describe("layout servers and network devices", () => {
+  // The router sees a server on a wired edge; a switch is only reachable through that server.
+  const nodes = [node("r", "router", "Gateway"), node("h", "host", "Server"), node("sw", "switch", "Spare switch")];
+
+  it("never makes a host the parent of a switch over a wired edge", () => {
+    const result = layout(nodes, [edge("e1", "wired", "r", "h"), edge("e2", "wired", "h", "sw")]);
+    expect(placed(result, "h").parent).toBe("r");
+    expect(placed(result, "sw")).toMatchObject({ parent: null, depth: 0 });
+    // The edge is still drawn, as an extra one.
+    expect(placedEdge(result, "e2")).toMatchObject({ from: "h", to: "sw", tree: false });
+  });
+
+  it("makes a host the parent of a switch over an lldp edge", () => {
+    const result = layout(nodes, [edge("e1", "wired", "r", "h"), edge("e2", "lldp", "h", "sw")]);
+    expect(placed(result, "sw")).toMatchObject({ parent: "h", depth: 2 });
+    expect(placedEdge(result, "e2").tree).toBe(true);
+  });
+
+  it("makes a host the parent of a switch over an uplink edge", () => {
+    const result = layout(nodes, [edge("e1", "wired", "r", "h"), edge("e2", "uplink", "h", "sw")]);
+    expect(placed(result, "sw")).toMatchObject({ parent: "h", depth: 2 });
+  });
+
+  it("does the same for a hypervisor, and a switch still parents a hypervisor over a wired edge", () => {
+    const wired = layout(
+      [node("r", "router"), node("hv", "hypervisor"), node("sw", "switch"), node("vm", "vm")],
+      [edge("e1", "wired", "r", "hv"), edge("e2", "wired", "hv", "sw"), edge("e3", "vm_host", "hv", "vm")],
+    );
+    expect(placed(wired, "sw").parent).toBeNull();
+    expect(placed(wired, "hv").parent).toBe("r");
+    const below = layout(
+      [node("r", "router"), node("hv", "hypervisor"), node("sw", "switch")],
+      [edge("e1", "uplink", "r", "sw"), edge("e2", "wired", "sw", "hv")],
+    );
+    expect(placed(below, "hv").parent).toBe("sw");
+  });
+
+  it("accepts a link in either direction", () => {
+    const result = layout(nodes, [edge("e1", "wired", "r", "h"), edge("e2", "lldp", "sw", "h")]);
+    expect(placed(result, "sw").parent).toBe("h");
+  });
+});
+
+describe("layout with collapseEndpoints", () => {
+  const base = [node("r", "router", "Gateway"), node("sw", "switch", "Core switch")];
+  const hosts = ["a1", "a2", "a3", "b1", "c1", "c2"].map((id) => node(id, "host", id.toUpperCase()));
+  const nodes = [...base, ...hosts];
+  const edges = [
+    edge("u1", "uplink", "r", "sw"),
+    bucketed("w-a3", "wired", "sw", "a3", "Port 1"),
+    bucketed("w-a1", "wired", "sw", "a1", "Port 1"),
+    bucketed("w-a2", "wired", "a2", "sw", "Port 1"),
+    bucketed("w-b1", "wired", "sw", "b1", "Port 2"),
+    bucketed("w-c2", "wired", "sw", "c2"),
+    bucketed("w-c1", "wired", "sw", "c1"),
+  ];
+  const collapse = { collapseEndpoints: true };
+
+  it("makes one group per bucket with two or more leaves and keeps a single leaf visible", () => {
+    const result = layout(nodes, edges, collapse);
+    expect(result.nodes.map((n) => n.id)).toEqual(["b1", "group:sw", "group:sw#Port 1", "r", "sw"]);
+    expect(placed(result, "group:sw#Port 1")).toMatchObject({ kind: "group", label: "", parent: "sw", depth: 2 });
+    expect(placed(result, "group:sw")).toMatchObject({ kind: "group", parent: "sw", depth: 2 });
+    expect(placed(result, "b1")).toMatchObject({ kind: "host", parent: "sw" });
+    expect(result.hidden.size).toBe(5);
+    expect(result.hidden.get("a2")).toBe("group:sw#Port 1");
+    expect(result.hidden.get("c1")).toBe("group:sw");
+    expect(result.position.get("a3")).toBe(placed(result, "group:sw#Port 1"));
+  });
+
+  it("sets the bucket on a bucket group only and sorts the members", () => {
+    const result = layout(nodes, edges, collapse);
+    expect(placed(result, "group:sw#Port 1").bucket).toBe("Port 1");
+    expect(placed(result, "group:sw#Port 1").members).toEqual(["a1", "a2", "a3"]);
+    expect(placed(result, "group:sw")).not.toHaveProperty("bucket");
+    expect(placed(result, "group:sw").members).toEqual(["c1", "c2"]);
+  });
+
+  it("merges the edges of a group into one placed edge", () => {
+    const result = layout(nodes, edges, collapse);
+    expect(placedEdge(result, "w-a1")).toMatchObject({
+      from: "sw",
+      to: "group:sw#Port 1",
+      tree: true,
+      members: ["w-a1", "w-a2", "w-a3"],
+    });
+    expect(placedEdge(result, "w-b1")).toMatchObject({ from: "sw", to: "b1", members: ["w-b1"] });
+  });
+
+  it("places the groups and the single leaf in the grid under the switch in bucket order", () => {
+    const result = layout(nodes, edges, collapse);
+    const row = ["group:sw", "group:sw#Port 1", "b1"].map((id) => placed(result, id));
+    expect(new Set(row.map((n) => n.y)).size).toBe(1);
+    expect(row[0]?.x).toBeLessThan(row[1]?.x ?? 0);
+    expect(row[1]?.x).toBeLessThan(row[2]?.x ?? 0);
+  });
+
+  it("takes the bucket of the first edge by id between a parent and a leaf", () => {
+    const result = layout(
+      [...base, node("h1", "host"), node("h2", "host")],
+      [
+        edge("u1", "uplink", "r", "sw"),
+        bucketed("x2", "wired", "sw", "h1", "Port 2"),
+        bucketed("x1", "wired", "sw", "h1", "Port 1"),
+        bucketed("y1", "wired", "sw", "h2", "Port 1"),
+      ],
+      collapse,
+    );
+    expect(placed(result, "group:sw#Port 1").members).toEqual(["h1", "h2"]);
+    expect(result.nodes.some((n) => n.id === "group:sw#Port 2")).toBe(false);
+  });
+
+  it("opens a bucket when its group id is expanded and keeps the others closed", () => {
+    const result = layout(nodes, edges, { ...collapse, expanded: new Set(["group:sw#Port 1"]) });
+    expect(result.nodes.map((n) => n.id)).toEqual(["a1", "a2", "a3", "b1", "group:sw", "r", "sw"]);
+    expect(result.hidden.size).toBe(2);
+  });
+
+  it("opens the bare group when its id is expanded", () => {
+    const result = layout(nodes, edges, { ...collapse, expanded: new Set(["group:sw"]) });
+    expect(result.nodes.map((n) => n.id)).toEqual(["b1", "c1", "c2", "group:sw#Port 1", "r", "sw"]);
+  });
+
+  it("opens every bucket of an expanded parent", () => {
+    const result = layout(nodes, edges, { ...collapse, expanded: new Set(["sw"]) });
+    expect(result.hidden.size).toBe(0);
+    expect(result.nodes.map((n) => n.id)).toEqual(["a1", "a2", "a3", "b1", "c1", "c2", "r", "sw"]);
+  });
+
+  it("ignores maxLeaves: many buckets of one leaf each stay visible", () => {
+    const many = crowdedSwitch(20);
+    const spread = many.edges.map((e) => (e.id.startsWith("w") ? { ...e, bucket: `Port ${e.id.slice(1)}` } : e));
+    const result = layout(many.nodes, spread, collapse);
+    expect(result.hidden.size).toBe(0);
+    expect(result.nodes).toHaveLength(22);
+  });
+
+  it("collapses a bucket of two even when maxLeaves would allow them", () => {
+    const result = layout(nodes, edges, { ...collapse, maxLeaves: 100 });
+    expect(result.hidden.size).toBe(5);
+  });
+
+  it("keeps the maxLeaves rule when collapseEndpoints is false or absent", () => {
+    const crowd = crowdedSwitch(30).edges.map((e) => (e.id.startsWith("w") ? { ...e, bucket: "Port 1" } : e));
+    const plain = layout(crowdedSwitch(30).nodes, crowd);
+    expect(plain.nodes.map((n) => n.id)).toEqual(["group:sw1", "r1", "sw1"]);
+    expect(layout(crowdedSwitch(30).nodes, crowd, { collapseEndpoints: false })).toEqual(plain);
+    expect(layout(nodes, edges).hidden.size).toBe(0);
+  });
+
+  it("groups the clients of an access point per SSID", () => {
+    const result = layout(
+      [node("ap", "access_point", "AP"), node("p1", "host"), node("p2", "host"), node("g1", "host"), node("g2", "host")],
+      [
+        bucketed("e1", "wireless", "ap", "p1", "Home"),
+        bucketed("e2", "wireless", "ap", "p2", "Home"),
+        bucketed("e3", "wireless", "ap", "g1", "Guest"),
+        bucketed("e4", "wireless", "ap", "g2", "Guest"),
+      ],
+      collapse,
+    );
+    expect(result.nodes.map((n) => n.id)).toEqual(["ap", "group:ap#Guest", "group:ap#Home"]);
+  });
+});
+
+describe("layout inferred edges", () => {
+  const nodes = [node("r", "router"), node("sw", "switch"), node("h1", "host"), node("h2", "host")];
+
+  it("is false for an edge without the flag", () => {
+    const result = layout(nodes, [edge("u1", "uplink", "r", "sw"), edge("w1", "wired", "sw", "h1")]);
+    expect(result.edges.map((e) => e.inferred)).toEqual([false, false]);
+  });
+
+  it("carries the flag of a single edge", () => {
+    const result = layout(nodes, [
+      bucketed("u1", "uplink", "r", "sw", undefined, false),
+      bucketed("w1", "wired", "sw", "h1", undefined, true),
+    ]);
+    expect(placedEdge(result, "u1").inferred).toBe(false);
+    expect(placedEdge(result, "w1").inferred).toBe(true);
+  });
+
+  it("is true for a placed edge when every merged member is inferred", () => {
+    const result = layout(
+      nodes,
+      [
+        bucketed("u1", "uplink", "r", "sw"),
+        bucketed("w1", "wired", "sw", "h1", "P", true),
+        bucketed("w2", "wired", "sw", "h2", "P", true),
+      ],
+      { collapseEndpoints: true },
+    );
+    expect(placedEdge(result, "w1")).toMatchObject({ to: "group:sw#P", members: ["w1", "w2"], inferred: true });
+  });
+
+  it("is false for a placed edge merged from an inferred and a non-inferred edge", () => {
+    const result = layout(
+      nodes,
+      [
+        bucketed("u1", "uplink", "r", "sw"),
+        bucketed("w1", "wired", "sw", "h1", "P", true),
+        bucketed("w2", "wired", "sw", "h2", "P", false),
+      ],
+      { collapseEndpoints: true },
+    );
+    expect(placedEdge(result, "w1")).toMatchObject({ members: ["w1", "w2"], inferred: false });
+    // The order of the members does not matter.
+    const swapped = layout(
+      nodes,
+      [
+        bucketed("u1", "uplink", "r", "sw"),
+        bucketed("w1", "wired", "sw", "h1", "P", false),
+        bucketed("w2", "wired", "sw", "h2", "P", true),
+      ],
+      { collapseEndpoints: true },
+    );
+    expect(placedEdge(swapped, "w1").inferred).toBe(false);
+  });
+
+  it("merges parallel edges the same way", () => {
+    const both = layout(nodes, [bucketed("a", "wired", "r", "sw", undefined, true), bucketed("b", "lldp", "r", "sw", undefined, true)]);
+    expect(placedEdge(both, "a")).toMatchObject({ members: ["a", "b"], inferred: true });
+    const mixed = layout(nodes, [bucketed("a", "wired", "r", "sw", undefined, true), bucketed("b", "lldp", "r", "sw")]);
+    expect(placedEdge(mixed, "a")).toMatchObject({ members: ["a", "b"], inferred: false });
+  });
+});
+
+describe("layout with gatherUnplaced", () => {
+  const nodes = [
+    node("r", "router", "Gateway"),
+    node("h", "host", "Desktop"),
+    node("lone", "router", "Spare router"),
+    node("sw", "switch", "Spare switch"),
+    node("dev", "device", "Unknown device"),
+    node("ap", "access_point", "Spare AP"),
+    node("hv", "hypervisor", "Spare hypervisor"),
+    node("z", "host", "Lone host"),
+    node("a", "host", "Another host"),
+    node("vm", "vm", "Lone VM"),
+    node("ct", "container", "Lone container"),
+    node("g", "host", "Only a dangling edge"),
+  ];
+  const edges = [edge("e1", "wired", "r", "h"), edge("e2", "wired", "g", "ghost"), edge("e3", "lldp", "g", "g")];
+
+  it("lists the isolated non-infrastructure nodes other than hypervisors, sorted, and leaves them out", () => {
+    const result = layout(nodes, edges, { gatherUnplaced: true });
+    expect(result.unplaced).toEqual(["a", "ct", "g", "vm", "z"]);
+    expect(result.nodes.map((n) => n.id)).toEqual(["ap", "dev", "h", "hv", "lone", "r", "sw"]);
+    for (const id of result.unplaced) {
+      expect(result.position.has(id), id).toBe(false);
+      expect(result.hidden.has(id), id).toBe(false);
+    }
+  });
+
+  it("keeps isolated routers, switches, access points, devices and hypervisors as roots", () => {
+    const result = layout(nodes, edges, { gatherUnplaced: true });
+    for (const id of ["lone", "sw", "ap", "dev", "hv"]) {
+      expect(placed(result, id), id).toMatchObject({ parent: null, depth: 0 });
+    }
+  });
+
+  it("places everything and lists nothing when the option is false or absent", () => {
+    const plain = layout(nodes, edges);
+    expect(plain.unplaced).toEqual([]);
+    expect(plain.nodes).toHaveLength(nodes.length);
+    expect(layout(nodes, edges, { gatherUnplaced: false })).toEqual(plain);
+  });
+
+  it("does not leave out a host that has an edge", () => {
+    const result = layout([node("a", "host"), node("b", "host")], [edge("e", "lldp", "a", "b")], { gatherUnplaced: true });
+    expect(result.unplaced).toEqual([]);
+    expect(result.nodes.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("sizes the drawing without the unplaced nodes", () => {
+    const result = layout([node("r", "router"), node("z", "host")], [], { gatherUnplaced: true });
+    expect(result.unplaced).toEqual(["z"]);
+    // Without the host the router is the only slot: no empty slot and no second root after it.
+    expect(xy(result, "r")).toEqual([120, 45]);
+    expect(result.width).toBe(180);
+    expect(result.height).toBe(90);
+  });
+});
+
+describe("layout determinism with the new options", () => {
+  const nodes = [
+    node("r", "router", "Gateway"),
+    node("sw", "switch", "Core switch"),
+    node("ap", "access_point", "AP"),
+    node("hv", "hypervisor", "Proxmox"),
+    node("vm1", "vm", "Mail"),
+    node("sw2", "switch", "Spare switch"),
+    node("srv", "host", "Server"),
+    node("lone", "host", "Lone"),
+    node("lone2", "host", "Lone 2"),
+    ...["a", "b", "c", "d", "e"].map((id) => node(`h-${id}`, "host", `Host ${id}`)),
+    ...["x", "y", "z"].map((id) => node(`w-${id}`, "host", `Phone ${id}`)),
+  ];
+  const edges = [
+    bucketed("e01", "uplink", "r", "sw"),
+    bucketed("e02", "wired", "sw", "ap", "Port 9", true),
+    bucketed("e03", "wired", "sw", "hv", "Port 8"),
+    bucketed("e04", "vm_host", "hv", "vm1"),
+    bucketed("e05", "wired", "r", "srv", "Port 1", true),
+    bucketed("e06", "wired", "srv", "sw2", "Port 2", true),
+    bucketed("e07", "wired", "sw", "h-a", "Port 1"),
+    bucketed("e08", "wired", "sw", "h-b", "Port 1", true),
+    bucketed("e09", "wired", "sw", "h-c", "Port 2"),
+    bucketed("e10", "wired", "sw", "h-d", "Port 2", true),
+    bucketed("e11", "wired", "sw", "h-e"),
+    bucketed("e12", "wireless", "ap", "w-x", "Home"),
+    bucketed("e13", "wireless", "ap", "w-y", "Home", true),
+    bucketed("e14", "wireless", "ap", "w-z", "Guest"),
+  ];
+
+  it("gives the same result for shuffled input", () => {
+    const option = { collapseEndpoints: true, gatherUnplaced: true, root: "sw", expanded: new Set(["group:sw#Port 2"]) };
+    const expected = layout(nodes, edges, option);
+    expect(expected.unplaced).toEqual(["lone", "lone2"]);
+    expect(expected.nodes.map((n) => n.id)).toContain("group:sw#Port 1");
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      expect(layout(shuffled(nodes, seed), shuffled(edges, seed + 50), option)).toEqual(expected);
+    }
+  });
+
+  it("gives the same result for shuffled input without the options", () => {
+    const expected = layout(nodes, edges);
+    for (const seed of [11, 12, 13]) {
+      expect(layout(shuffled(nodes, seed), shuffled(edges, seed + 50))).toEqual(expected);
+    }
+  });
+});
+
 describe("layout of an empty graph", () => {
   it("is empty and has the size of one slot", () => {
     const result = layout([], []);

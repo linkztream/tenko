@@ -21,6 +21,7 @@
 
 #[cfg(any(target_os = "linux", test))]
 mod procfs;
+pub mod route;
 
 use std::{
     path::{Path, PathBuf},
