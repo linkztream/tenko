@@ -1,13 +1,16 @@
-//! The observation hook of the lease batch (WP8.1, plan section 2.8): the committer adds the
-//! IPAM fact of every lease change to its own batch; a renewal within the refresh interval
-//! writes none and is counted, a release expires it, and the row records when its fact was
-//! last written.
+//! The observation hook of the lease change (WP8.1, plan section 2.8, ADR 0030): the
+//! committer builds the IPAM fact of every lease change with its row and hands it to the
+//! asynchronous writer once the lease committed; a renewal within the refresh interval
+//! writes none and is counted, a release expires it, the row records when its fact was last
+//! written, and a change that follows before the writer's flush is judged against the fact
+//! of the change before it.
 
 mod lease_support;
 
 use std::{sync::Arc, time::Duration};
 
-use lease_support::{NODE, addr, change, completions, from_now, mac, mem_store};
+use lease_support::{NODE, addr, change, completions, from_now, mac, mem_store, rows};
+
 use tenko_core::{
     MacAddr, PrefixId, Timestamp, VrfId,
     dhcp::{BindingState, LeaseEventKind, tables},
@@ -22,7 +25,7 @@ use tenko_store::{ReadConsistency, ReadViewExt, Store};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-async fn the_committer_writes_the_fact_in_the_lease_batch_and_a_renewal_writes_none() {
+async fn the_writer_writes_the_fact_after_the_lease_and_a_renewal_writes_none() {
     let store: Arc<dyn Store> = mem_store();
     let hook = IpamObservations::register(store.as_ref(), NODE, ObserveConfig::default())
         .expect("the hook");
@@ -58,6 +61,7 @@ async fn the_committer_writes_the_fact_in_the_lease_batch_and_a_renewal_writes_n
     let done = completions(&lease_store, 1, Duration::from_secs(10)).await;
     let revision = *done[0].outcome.as_ref().expect("committed");
     assert_eq!(hook.counts().new, 1);
+    lease_store.derived().flush().await;
     let view = store.read(ReadConsistency::Local).await.expect("view");
     let (row, row_revision) = view
         .get_typed(&tables::LEASES, &(vrf, addr(10)))
@@ -70,10 +74,11 @@ async fn the_committer_writes_the_fact_in_the_lease_batch_and_a_renewal_writes_n
         ip: addr(10).into(),
     };
     let fact = hook.facts().fact(&subject).expect("the fact");
-    assert_eq!(
-        fact.revision, revision,
-        "one commit for the row and the fact"
+    assert!(
+        fact.revision > revision,
+        "the fact follows the row in a batch of the writer"
     );
+    let fact_revision = fact.revision;
     assert_eq!(
         fact.observed,
         Observed::Address {
@@ -96,11 +101,12 @@ async fn the_committer_writes_the_fact_in_the_lease_batch_and_a_renewal_writes_n
         from_now(3_660),
     );
     completions(&lease_store, 1, Duration::from_secs(10)).await;
+    lease_store.derived().flush().await;
     let counts = hook.counts();
     assert_eq!((counts.unchanged, counts.written()), (1, 1), "{counts:?}");
     assert_eq!(
         hook.facts().fact(&subject).expect("the fact").revision,
-        revision
+        fact_revision
     );
 
     // The release expires the fact in its batch.
@@ -113,9 +119,107 @@ async fn the_committer_writes_the_fact_in_the_lease_batch_and_a_renewal_writes_n
         released,
     );
     completions(&lease_store, 1, Duration::from_secs(10)).await;
+    lease_store.derived().flush().await;
     assert_eq!(hook.counts().expired, 1);
     let fact = hook.facts().fact(&subject).expect("the fact");
     assert!(!fact.is_current(Timestamp::now()));
+    stop.cancel();
+    task.await.expect("the committer");
+}
+
+#[tokio::test]
+async fn a_change_before_the_flush_is_judged_against_the_fact_of_the_change_before_it() {
+    let store: Arc<dyn Store> = mem_store();
+    let hook = IpamObservations::register(store.as_ref(), NODE, ObserveConfig::default())
+        .expect("the hook");
+    let leases = SharedLeases::new(LeaseIndex::new());
+    // The writer flushes once an hour: every change below commits before any flush.
+    let settings = CommitSettings {
+        derived: tenko_dhcp::lease::derived::DerivedSettings {
+            interval: Duration::from_secs(3_600),
+            ..tenko_dhcp::lease::derived::DerivedSettings::default()
+        },
+        ..CommitSettings::default()
+    };
+    let (lease_store, committer) = StoreLeases::with_hook(
+        Arc::clone(&store),
+        leases.clone(),
+        NODE,
+        settings,
+        Arc::clone(&hook) as Arc<dyn tenko_dhcp::lease::batch::ObservationHook>,
+    );
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(committer.run(stop.clone()));
+    let (vrf, scope) = (VrfId::generate(), PrefixId::generate());
+    let granted = Timestamp::now();
+    let later = |secs| {
+        granted
+            .checked_add(Duration::from_secs(secs))
+            .expect("a time")
+    };
+    let steps = [
+        (
+            LeaseEventKind::Granted,
+            BindingState::Active,
+            granted,
+            from_now(3_600),
+        ),
+        (
+            LeaseEventKind::Released,
+            BindingState::Released,
+            later(1),
+            later(1),
+        ),
+        (
+            LeaseEventKind::Granted,
+            BindingState::Active,
+            later(2),
+            from_now(3_600),
+        ),
+    ];
+    for (ticket, (kind, state, cltt, ends)) in steps.into_iter().enumerate() {
+        let pending = change(kind, vrf, scope, addr(20), 3, state, cltt, ends);
+        lease_store
+            .submit(&pending, Ticket(ticket as u64))
+            .expect("the queue has room");
+        completions(&lease_store, 1, Duration::from_secs(10)).await;
+    }
+    let counts = hook.counts();
+    assert_eq!(
+        (counts.new, counts.expired, counts.changed),
+        (1, 1, 1),
+        "the release expired the pending fact and the grant revived it: {counts:?}"
+    );
+    assert_eq!(
+        lease_store.derived().stats().written,
+        0,
+        "nothing flushed yet"
+    );
+    lease_store.derived().flush().await;
+    let subject = FactSubject::Address {
+        vrf,
+        ip: addr(20).into(),
+    };
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let stored = view
+        .get_typed(
+            &tenko_ipam::observe::tables::FACTS,
+            &(
+                hook.facts().fact(&subject).expect("the fact").source_key,
+                subject.key(),
+            ),
+        )
+        .expect("read")
+        .expect("the stored fact");
+    assert!(
+        stored.0.is_current(Timestamp::now()),
+        "the last change wins: the address is bound again"
+    );
+    assert_eq!(
+        rows(store.as_ref()).await.history.len(),
+        3,
+        "three history rows in one flush"
+    );
     stop.cancel();
     task.await.expect("the committer");
 }

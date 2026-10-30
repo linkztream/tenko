@@ -3369,6 +3369,7 @@ version = "0.0.9"
 dependencies = [
  "async-trait",
  "bytes",
+ "flate2",
  "futures",
  "openraft",
  "redb",

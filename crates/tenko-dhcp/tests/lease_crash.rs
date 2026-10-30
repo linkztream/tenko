@@ -16,7 +16,10 @@
 //!
 //! 1. every ACK is in the rows: the row of its address was written at the ACK's revision or
 //!    later, and at that revision it is the ACK's client, state and end;
-//! 2. every ACK's history row is there (the batch is atomic);
+//! 2. every ACK's history row is there once the start's catch-up ran (ADR 0030: the history
+//!    is written by the asynchronous writer, and the catch-up rebuilds what the kill lost
+//!    from the lease rows), except for an ACK that a later ACK of the same address
+//!    superseded within the lost interval: those are counted as lost, as the ADR says;
 //! 3. the table rebuilt from the store equals the rows and the stored client index, and the
 //!    index is the one the rows imply;
 //! 4. the history never shows an address granted to a client while another client's
@@ -24,6 +27,12 @@
 //!
 //! `TENKO_CRASH_KILLS` sets the number of kills (default 3; the results file runs 20 with
 //! `bench/phase3-dhcp/scripts/crash-test.sh`), `TENKO_CRASH_REPORT` a file for the figures.
+//!
+//! The store runs with the default deferred durability of the state machine (one durable
+//! checkpoint of `sm.redb` a second, the Raft log durable before every ACK), so a kill
+//! falls between a log commit and the state machine's next durable commit nearly every
+//! time: the restart replays the log from the last applied index of the durable state, and
+//! check 1 holds only because it does (WP9.6, point (f) of the package).
 
 mod lease_support;
 
@@ -52,7 +61,7 @@ use tenko_dhcp::{
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
     lease::{
         CommitSettings, LeaseTable, MemLeaseTable, OfferTable, PendingChange, SharedLeases,
-        StoreLeases, rebuild_from_view,
+        StoreLeases, batch::NoObservations, derived, rebuild_from_view,
     },
     store::{LeaseStore, Ticket},
 };
@@ -184,12 +193,26 @@ async fn node(dir: PathBuf, seed: u64) {
     let rebuilt = rebuilding.elapsed();
     let rows = table.len();
     drop(view);
+    let recent: Vec<_> = table.sorted_rows().into_values().collect();
     let leases = SharedLeases::new(table);
     let store: Arc<dyn Store> = raft.clone();
-    let (lease_store, committer) =
-        StoreLeases::new(store, leases.clone(), NODE, CommitSettings::default());
+    let (lease_store, committer) = StoreLeases::new(
+        Arc::clone(&store),
+        leases.clone(),
+        NODE,
+        CommitSettings::default(),
+    );
     let stop = CancellationToken::new();
     tokio::spawn(committer.run(stop.clone()));
+    // ADR 0030: the start rebuilds the history a kill lost, as the role does.
+    derived::catch_up(
+        store.as_ref(),
+        recent,
+        &NoObservations,
+        lease_store.derived(),
+    )
+    .await
+    .expect("the catch-up");
     let image = image();
     let scope = image.scope(scope_id()).expect("the scope").clone();
     let offers = OfferTable::new(Duration::from_secs(10), 4_096);
@@ -393,11 +416,46 @@ fn run_node(dir: &Path, seed: u64, after: Duration) -> Run {
     Run { ready, acks }
 }
 
-/// Checks the data directory against every ACK received so far; returns the rows.
-async fn verify(dir: &Path, acks: &[Ack]) -> (usize, usize) {
+/// The start's catch-up of the derived rows on a reopened store (ADR 0030), as the role
+/// runs it, through a writer flushed before it returns.
+async fn catch_up(raft: &RaftStore) -> derived::CatchUp {
+    let store: Arc<dyn Store> = Arc::new(raft.clone());
+    let view = raft.read(ReadConsistency::Local).await.expect("a view");
+    let table = rebuild_from_view(view.as_ref()).expect("the table rebuilds");
+    drop(view);
+    let (writer, flusher) =
+        derived::DerivedWriter::new(Arc::clone(&store), derived::DerivedSettings::default());
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(flusher.run(stop.clone()));
+    let rebuilt = derived::catch_up(
+        store.as_ref(),
+        table.sorted_rows().into_values(),
+        &NoObservations,
+        &writer,
+    )
+    .await
+    .expect("the catch-up");
+    writer.flush().await;
+    stop.cancel();
+    task.await.expect("the flusher");
+    rebuilt
+}
+
+/// Checks the data directory against every ACK received so far; `gaps` collects the
+/// addresses whose history a kill cut (the catch-up rebuilt their last row). Returns the
+/// rows, the history rows and the ACKs whose history row a later change superseded.
+#[allow(clippy::too_many_lines, reason = "the four checks, read top to bottom")]
+async fn verify(dir: &Path, acks: &[Ack], gaps: &mut HashSet<Ipv4Addr>) -> (usize, usize, usize) {
     let raft = RaftStore::open(store_config(dir))
         .await
         .expect("the store reopens");
+    gaps.extend(
+        catch_up(&raft)
+            .await
+            .addresses
+            .into_iter()
+            .map(|(_, addr)| addr),
+    );
     let view = raft.read(ReadConsistency::Local).await.expect("a view");
     let mut rows = BTreeMap::new();
     let mut revisions = BTreeMap::new();
@@ -441,7 +499,9 @@ async fn verify(dir: &Path, acks: &[Ack]) -> (usize, usize) {
             assert_eq!(row.ends.unix_nanos(), ack.ends, "{ack:?}");
         }
     }
-    // 2. Every ACK's history row is there.
+    // 2. Every ACK's history row is there, or a later ACK of its address superseded it
+    // within the interval the kill lost (ADR 0030). A rebuilt row records the state of the
+    // lease row; a renewal's rebuilt row reads as a grant.
     let events: HashSet<(Ipv4Addr, String, i128, String)> = history
         .iter()
         .map(|(_, event, _)| {
@@ -453,10 +513,28 @@ async fn verify(dir: &Path, acks: &[Ack]) -> (usize, usize) {
             )
         })
         .collect();
+    let mut lost = 0;
+
     for ack in acks {
+        let kinds = if ack.kind == "Renewed" {
+            vec![ack.kind.clone(), "Granted".to_owned()]
+        } else {
+            vec![ack.kind.clone()]
+        };
+        let found = kinds
+            .into_iter()
+            .any(|kind| events.contains(&(ack.addr, ack.identity.clone(), ack.ends, kind)));
+        if found {
+            continue;
+        }
+        // A later commit of the address (acknowledged or not before the kill) took the
+        // lease row on; the catch-up rebuilt its history row only.
+        let superseded = revisions[&(vrf, ack.addr)].0 > ack.revision;
+        assert!(superseded, "the history row of {ack:?} is missing");
+        lost += 1;
         assert!(
-            events.contains(&(ack.addr, ack.identity.clone(), ack.ends, ack.kind.clone())),
-            "the history row of {ack:?} is missing"
+            gaps.contains(&ack.addr),
+            "{ack:?} lost its history row outside a cut"
         );
     }
     // 3. The rebuilt table equals the rows and the index.
@@ -468,9 +546,13 @@ async fn verify(dir: &Path, acks: &[Ack]) -> (usize, usize) {
         let lease = implied.by_client(*scope, identity).expect("indexed");
         assert_eq!((lease.vrf, lease.addr), (target.vrf, target.addr));
     }
-    // 4. No address on two clients.
+    // 4. No address on two clients, read from the history of every address whose history
+    // has no lost row (an address with a gap is held to checks 1 and the bound rows).
     let mut holder: HashMap<Ipv4Addr, (Vec<u8>, BindingState, Timestamp)> = HashMap::new();
-    for (_, event, _) in &history {
+    for (_, event, _) in history
+        .iter()
+        .filter(|(_, event, _)| !gaps.contains(&event.addr))
+    {
         let identity = event.client.identity();
         if event.state.holds_address()
             && let Some((held, state, ends)) = holder.get(&event.addr)
@@ -494,7 +576,7 @@ async fn verify(dir: &Path, acks: &[Ack]) -> (usize, usize) {
         bound.values().all(|count| *count == 1),
         "a client holds two bound rows"
     );
-    let counts = (rows.len(), history.len());
+    let counts = (rows.len(), history.len(), lost);
     drop(view);
     raft.shutdown().await.expect("the store shuts down");
     counts
@@ -510,6 +592,7 @@ async fn the_node_loses_no_acknowledged_lease() {
     let data = dir.path().join("data");
     let mut rng = Rng(0x00E2_4C4A);
     let mut acks: Vec<Ack> = Vec::new();
+    let mut gaps: HashSet<Ipv4Addr> = HashSet::new();
     let mut report = String::new();
     for kill in 1..=kills {
         let after = Duration::from_millis(if kill % 5 == 0 {
@@ -523,9 +606,10 @@ async fn the_node_loses_no_acknowledged_lease() {
             .await
             .expect("the run");
         acks.extend(run.acks.iter().cloned());
-        let (rows, history) = verify(&data, &acks).await;
+        let (rows, history, lost) = verify(&data, &acks, &mut gaps).await;
         let line = format!(
-            "kill {kill}: after {} ms, {} ACKs (total {}), {} rows, {} history rows; {}",
+            "kill {kill}: after {} ms, {} ACKs (total {}), {} rows, {} history rows, \
+             {lost} superseded history rows lost; {}",
             after.as_millis(),
             run.acks.len(),
             acks.len(),
@@ -569,9 +653,9 @@ async fn verify_after_power_off() {
         .lines()
         .filter_map(|line| line.find("ACK ").and_then(|at| parse_ack(&line[at..])))
         .collect();
-    let (rows, history) = verify(&dir, &acks).await;
+    let (rows, history, lost) = verify(&dir, &acks, &mut HashSet::new()).await;
     println!(
-        "POWER-OFF OK: {} ACKs checked, {rows} rows, {history} history rows, none lost, no address on two clients",
+        "POWER-OFF OK: {} ACKs checked, {rows} rows, {history} history rows ({lost} superseded lost), none lost, no address on two clients",
         acks.len()
     );
 }

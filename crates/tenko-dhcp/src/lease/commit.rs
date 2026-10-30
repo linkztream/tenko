@@ -5,9 +5,10 @@
 //! queue allocated up front and wakes the [`Committer`], without allocating or waiting
 //! (`tests/lease_alloc.rs`). The committer, a task of the role:
 //!
-//! 1. takes the queued changes in order and builds each into one batch
-//!    ([`batch::build`]: the lease row, the client index rows it moves, the history row,
-//!    the observation fact) from the row the role's table holds for the address;
+//! 1. takes the queued changes in order and builds each ([`batch::build`]) from the row the
+//!    role's table holds for the address into the synchronous batch, the lease row and the
+//!    client index rows it moves, and the derived one, the history row and the observation
+//!    facts (ADR 0030);
 //! 2. proposes the batches concurrently, up to [`CommitSettings::max_in_flight`], so the
 //!    store's coalescer folds the waiting ones into one Raft entry and one fsync. Changes
 //!    that touch the same address or the same client (as new or as previous holder) are
@@ -16,7 +17,9 @@
 //! 3. when a batch commits (durable on this node: the store answers after its log entry is
 //!    on disk and applied), applies the row to the role's table at the commit's revision
 //!    and only then reports the ticket committed with that revision: the ACK the worker
-//!    sends for it is released by the durable commit and the table holds what it promised;
+//!    sends for it is released by the durable commit and the table holds what it promised.
+//!    The derived batch goes to the asynchronous writer ([`super::derived`]), which writes
+//!    it within the next 250 ms in a batch of its own; a refused commit drops it;
 //! 4. reports a ticket failed when its commit is refused, or when it has not committed
 //!    within [`CommitSettings::commit_wait`] of its hand-off (the worker drops the request
 //!    as the DNS update path answers SERVFAIL past its index wait; a commit that lands
@@ -50,6 +53,7 @@ use tokio_util::sync::CancellationToken;
 use super::{
     LeaseTable, PendingChange,
     batch::{self, BuildError, NoObservations, ObservationHook},
+    derived::{DerivedFlusher, DerivedSettings, DerivedWriter},
     metrics,
     refusal::RefusalGate,
     table::SharedLeases,
@@ -69,6 +73,8 @@ pub struct CommitSettings {
     pub commit_wait: Duration,
     /// How long after a refusal the gate stays closed before a trial.
     pub retry_after: Duration,
+    /// The asynchronous writer of the derived rows (ADR 0030).
+    pub derived: DerivedSettings,
 }
 
 impl Default for CommitSettings {
@@ -78,6 +84,7 @@ impl Default for CommitSettings {
             max_in_flight: 512,
             commit_wait: Duration::from_secs(2),
             retry_after: Duration::from_secs(1),
+            derived: DerivedSettings::default(),
         }
     }
 }
@@ -125,6 +132,8 @@ struct Shared {
     gate: Arc<RefusalGate>,
     leases: SharedLeases,
     counters: Counters,
+    // WP9.6: the writer of the derived rows.
+    derived: DerivedWriter,
 }
 
 impl std::fmt::Debug for Shared {
@@ -159,6 +168,7 @@ pub struct Committer {
     hook: Arc<dyn ObservationHook>,
     settings: CommitSettings,
     hasher: RandomState,
+    flusher: DerivedFlusher,
 }
 
 impl std::fmt::Debug for Committer {
@@ -190,6 +200,7 @@ impl StoreLeases {
         hook: Arc<dyn ObservationHook>,
     ) -> (Self, Committer) {
         let capacity = settings.queue.max(1);
+        let (derived, flusher) = DerivedWriter::new(Arc::clone(&store), settings.derived);
         let shared = Arc::new(Shared {
             node,
             capacity: AtomicUsize::new(capacity),
@@ -200,6 +211,7 @@ impl StoreLeases {
             gate: Arc::new(RefusalGate::new(settings.retry_after)),
             leases,
             counters: Counters::default(),
+            derived,
         });
         (
             Self {
@@ -211,8 +223,16 @@ impl StoreLeases {
                 hook,
                 settings,
                 hasher: RandomState::new(),
+                flusher,
             },
         )
+    }
+
+    // WP9.6: the writer of the history rows and the facts.
+    /// The asynchronous writer of the derived rows: [`DerivedWriter::flush`] waits until
+    /// the history and the facts of every change committed so far are written.
+    pub fn derived(&self) -> &DerivedWriter {
+        &self.shared.derived
     }
 
     /// The refusal state (P3-Q14).
@@ -348,6 +368,52 @@ fn is_refusal(error: &StoreError) -> bool {
 type InFlight = FuturesUnordered<BoxFuture<'static, [u64; 3]>>;
 
 impl Committer {
+    /// Runs until `stop` fires; then waits for the batches in flight, fails the changes
+    /// still queued and lets the writer of the derived rows flush what it holds.
+    pub async fn run(self, stop: CancellationToken) {
+        let Self {
+            shared,
+            store,
+            hook,
+            settings,
+            hasher,
+            flusher,
+        } = self;
+        let flushing = CancellationToken::new();
+        let writer = tokio::spawn(flusher.run(flushing.clone()));
+        let committer = Self::parts(shared, store, hook, settings, hasher);
+        committer.commit_loop(stop).await;
+        flushing.cancel();
+        let _ = writer.await;
+    }
+
+    fn parts(
+        shared: Arc<Shared>,
+        store: Arc<dyn Store>,
+        hook: Arc<dyn ObservationHook>,
+        settings: CommitSettings,
+        hasher: RandomState,
+    ) -> Running {
+        Running {
+            shared,
+            store,
+            hook,
+            settings,
+            hasher,
+        }
+    }
+}
+
+/// The committer while it runs (its flusher runs beside it).
+struct Running {
+    shared: Arc<Shared>,
+    store: Arc<dyn Store>,
+    hook: Arc<dyn ObservationHook>,
+    settings: CommitSettings,
+    hasher: RandomState,
+}
+
+impl Running {
     fn key_of(&self, value: impl Hash) -> u64 {
         self.hasher.hash_one(value)
     }
@@ -372,9 +438,7 @@ impl Committer {
         [address, client, holder]
     }
 
-    /// Runs until `stop` fires; then waits for the batches in flight, and fails the
-    /// changes still queued.
-    pub async fn run(self, stop: CancellationToken) {
+    async fn commit_loop(self, stop: CancellationToken) {
         let mut inflight: InFlight = FuturesUnordered::new();
         let mut busy: HashSet<u64> = HashSet::new();
         let mut deferred: VecDeque<Queued> = VecDeque::new();
@@ -490,6 +554,7 @@ impl Committer {
         };
         let shared = Arc::clone(&self.shared);
         let store = Arc::clone(&self.store);
+        let hook = Arc::clone(&self.hook);
         let deadline = tokio::time::Instant::from_std(queued.at + self.settings.commit_wait);
         let wait = self.settings.commit_wait;
         let (ticket, at) = (queued.ticket, queued.at);
@@ -518,7 +583,11 @@ impl Committer {
                     shared.counters.committed.fetch_add(1, Ordering::Relaxed);
                     metrics::COMMIT_DURATION
                         .observe(u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX));
-                    metrics::HISTORY_WRITTEN.fetch_add(1, Ordering::Relaxed);
+                    // ADR 0030: the history row and the facts go to the writer (a push into
+                    // its queue, never a wait) before the ticket completes, so that a flush
+                    // after a completion covers it.
+                    hook.committed(&built.derived);
+                    shared.derived.push(built.derived);
                     if !late {
                         shared.complete(ticket, Ok(committed.revision));
                     }

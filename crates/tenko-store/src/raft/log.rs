@@ -28,7 +28,9 @@
 //! - `logs: u64 -> bytes`. The key is the log index. The value is
 //!   `[u32 big-endian length of the CBOR LogId][CBOR LogId][CBOR Entry]`, so
 //!   `get_log_state` decodes only the head (the log id) of the last entry and never its
-//!   payload.
+//!   payload. WP9.6 (ADR 0030): when the high bit of the length is set, the entry is raw
+//!   DEFLATE of its CBOR (`compress`), stored so only when that is smaller; records written
+//!   before have the bit clear and read as they did.
 //! - `log_meta: str -> bytes` with the keys `vote` (CBOR `Vote`), `last_purged` (CBOR
 //!   `LogId`) and `committed` (CBOR `Option<LogId>`).
 //!
@@ -92,6 +94,8 @@ const KEY_COMMITTED: &str = "committed";
 const MAX_GROUP_OPS: usize = 4096;
 /// Size of the length prefix in front of the encoded log id.
 const HEAD_PREFIX: usize = 4;
+/// The bit of the length prefix that marks a compressed entry (a log id is never 2 GiB).
+const COMPRESSED: u32 = 1 << 31;
 /// Name of the writer thread.
 const WRITER_NAME: &str = "tenko-log-writer";
 
@@ -211,27 +215,37 @@ fn count(len: usize) -> u64 {
     u64::try_from(len).unwrap_or(u64::MAX)
 }
 
-/// Encodes a log record: `[u32 BE head length][CBOR LogId][CBOR Entry]`.
+/// Encodes a log record: `[u32 BE head length, high bit: compressed][CBOR LogId][entry]`,
+/// the entry as CBOR or, when smaller, raw DEFLATE of it (ADR 0030).
 fn encode_record(entry: &Entry) -> Result<Vec<u8>, CodecError> {
     let head = to_cbor(&entry.log_id)?;
     let body = to_cbor(entry)?;
     let head_len = u32::try_from(head.len())
-        .map_err(|_| CodecError::Encode("encoded log id is longer than u32::MAX".to_owned()))?;
+        .ok()
+        .filter(|len| len & COMPRESSED == 0)
+        .ok_or_else(|| CodecError::Encode("encoded log id is too long".to_owned()))?;
+    let (flag, body) = match super::compress::compress(&body) {
+        Some(packed) => (COMPRESSED, bytes::Bytes::from(packed)),
+        None => (0, body),
+    };
     let mut record = Vec::with_capacity(HEAD_PREFIX + head.len() + body.len());
-    record.extend_from_slice(&head_len.to_be_bytes());
+    record.extend_from_slice(&(head_len | flag).to_be_bytes());
     record.extend_from_slice(&head);
     record.extend_from_slice(&body);
     Ok(record)
 }
 
-/// Splits a record into the CBOR log id and the CBOR entry.
-fn split_record(record: &[u8]) -> Result<(&[u8], &[u8]), CodecError> {
+/// Splits a record into the CBOR log id and the entry, and whether the entry is
+/// compressed.
+fn split_record(record: &[u8]) -> Result<(&[u8], &[u8], bool), CodecError> {
     let malformed = || CodecError::Decode("log record is shorter than its head".to_owned());
     let (prefix, rest) = record
         .split_first_chunk::<HEAD_PREFIX>()
         .ok_or_else(malformed)?;
-    let head_len = usize::try_from(u32::from_be_bytes(*prefix)).map_err(|_| malformed())?;
-    rest.split_at_checked(head_len).ok_or_else(malformed)
+    let prefix = u32::from_be_bytes(*prefix);
+    let head_len = usize::try_from(prefix & !COMPRESSED).map_err(|_| malformed())?;
+    let (head, body) = rest.split_at_checked(head_len).ok_or_else(malformed)?;
+    Ok((head, body, prefix & COMPRESSED != 0))
 }
 
 /// Decodes only the log id of a record.
@@ -241,7 +255,14 @@ fn decode_head(record: &[u8]) -> Result<LogId, CodecError> {
 
 /// Decodes the whole entry of a record.
 fn decode_entry(record: &[u8]) -> Result<Entry, CodecError> {
-    from_cbor(split_record(record)?.1)
+    let (_, body, compressed) = split_record(record)?;
+    if compressed {
+        let body = super::compress::decompress(body)
+            .map_err(|error| CodecError::Decode(format!("a compressed log entry: {error}")))?;
+        from_cbor(&body)
+    } else {
+        from_cbor(body)
+    }
 }
 
 /// Inclusive `(first, last)` indexes of a range, or `None` if the range is empty.
@@ -1427,9 +1448,11 @@ mod tests {
         for item in logs.iter().expect("iterate") {
             let (index, record) = item.expect("record");
             let (index, record) = (index.value(), record.value());
-            let head_len = u32::from_be_bytes(record[..4].try_into().expect("prefix")) as usize;
+            let prefix = u32::from_be_bytes(record[..4].try_into().expect("prefix"));
+            let head_len = (prefix & !COMPRESSED) as usize;
             let head: LogId = from_cbor(&record[4..4 + head_len]).expect("head");
-            let entry: Entry = from_cbor(&record[4 + head_len..]).expect("entry");
+            let entry: Entry = decode_entry(record).expect("entry");
+
             assert_eq!(head, entry.log_id);
             assert_eq!(head.index, index);
             indexes.push(index);

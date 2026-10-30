@@ -11,7 +11,7 @@ publish = false
 # The conformance suite (`tenko_store::testing`) for any `Store` implementation.
 testing = ["dep:arc-swap"]
 # The production store (`tenko_store::raft::RaftStore`): openraft over redb (WP1.1).
-raft = ["dep:openraft", "dep:redb", "dep:sha2", "dep:tracing"]
+raft = ["dep:flate2", "dep:openraft", "dep:redb", "dep:sha2", "dep:tracing"]
 # WP6.2: the test hooks of the store (`tenko_store::test_hooks`), for the acceptance tests
 # through the binary; never in a release build.
 test-hooks = []
@@ -20,6 +20,8 @@ test-hooks = []
 arc-swap = { workspace = true, optional = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+# WP9.6: the log records and the snapshot files are compressed (raw DEFLATE, ADR 0030).
+flate2 = { version = "1.1.10", optional = true }
 futures = { workspace = true }
 openraft = { workspace = true, optional = true }
 redb = { workspace = true, optional = true }

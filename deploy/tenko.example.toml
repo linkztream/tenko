@@ -204,10 +204,13 @@ durability = "deferred"
 checkpoint_interval_ms = 1000
 # Change sets kept for event replay.
 journal_retention = 100000
-# Snapshot-and-purge: a snapshot after this many entries or MiB of log, keeping this many
-# entries behind it.
+# Snapshot-and-purge: a snapshot after this many entries, keeping this many entries behind
+# it. The MiB of log are a sanity bound only, above 10,000 entries of the bounded entry
+# (64 KiB): at 64 MiB a lease path whose entries had grown to 82 KB snapshotted every 600
+# entries, a full copy of the state every few seconds (ADR 0030). A due snapshot waits up
+# to 30 s while the commit queue is deep; it is built from a read view beside the commits.
 snapshot_every_entries = 10000
-snapshot_every_log_mib = 64
+snapshot_every_log_mib = 1024
 snapshot_keep_entries = 1000
 # Seconds a write waits to be applied, and a consistent read to be served.
 write_timeout_secs = 60

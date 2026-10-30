@@ -3602,6 +3602,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "bytes",
+ "flate2",
  "futures",
  "openraft",
  "redb",

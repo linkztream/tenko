@@ -38,6 +38,7 @@ fn status(ra: RaReport) -> DhcpStatus {
         serving: true,
         accepting: true,
         refusal: None,
+        derived: None,
         probe: true,
         probe_expected: false,
         listeners: Vec::new(),

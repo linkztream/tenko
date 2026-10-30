@@ -336,6 +336,10 @@ pub const DHCP_ROLE_NOT_SERVING: &str = "dhcp.role.not_serving";
 /// Warning code of a `dhcp` role whose lease writes the store refuses (P3-Q14).
 pub const DHCP_ROLE_STORE_REFUSED: &str = tenko_dhcp::lease::refusal::FINDING;
 
+/// Warning code of a `dhcp` role whose writer of the lease history and facts drops rows
+/// (ADR 0030).
+pub const DHCP_ROLE_DERIVED_DROPPED: &str = tenko_dhcp::lease::derived::FINDING;
+
 /// Warning code of a profile that expects conflict detection while no `probe` role runs
 /// (TGL-16 under Hardened).
 pub const DHCP_PROBE_MISSING: &str = "dhcp.probe.missing";
@@ -374,6 +378,23 @@ pub fn dhcp_role_warnings(role: &tenko_dhcp::role::DhcpStatus) -> Vec<StatusWarn
                  ({})",
                 refusal.since.to_rfc3339(),
                 refusal.detail
+            ),
+            params,
+        });
+    }
+    // WP9.6: the writer of the lease history and facts drops what it cannot queue.
+    if let Some(dropped) = &role.derived {
+        let mut params = node();
+        params.insert("since".to_owned(), dropped.since.to_rfc3339());
+        params.insert("dropped".to_owned(), dropped.dropped.to_string());
+        warnings.push(StatusWarning {
+            code: DHCP_ROLE_DERIVED_DROPPED.to_owned(),
+            detail: format!(
+                "the dhcp role drops the history rows and IPAM facts of its lease changes \
+                 since {} because their writer cannot keep up ({} changes so far); the \
+                 leases themselves are committed",
+                dropped.since.to_rfc3339(),
+                dropped.dropped
             ),
             params,
         });

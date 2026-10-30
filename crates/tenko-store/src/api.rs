@@ -1099,6 +1099,20 @@ pub trait Store: Send + Sync + 'static {
     /// Returns the [`StoreError`] that stopped the batch; nothing was applied.
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError>;
 
+    // WP9.6 (ADR 0030): the background class.
+    /// As [`Store::propose`], in the background class: a write nobody waits on now (the
+    /// DHCP role's history and lease facts). The Raft store packs it behind the foreground
+    /// batches waiting, at most one small background batch beside them per entry, and never
+    /// lets it wait longer than a quarter of a second; a store without classes proposes it
+    /// as any batch.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::propose`].
+    async fn propose_background(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        self.propose(batch).await
+    }
+
     /// A consistent read view.
     ///
     /// # Errors

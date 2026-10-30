@@ -160,8 +160,9 @@ A real in-process openraft cluster of three voters over redb was loaded with 5 M
 Conditions that follow from the measurements (details in ADR 0002):
 
 - The store runs on SSD or NVMe only. On an SMR hard disk the same load was 93 times slower and the leader lost leadership under write load (OPS-19).
-- Writes are coalesced into Raft entries; dynamic updates return to the client after apply, so update latency of 50 to 200 ms under heavy load is expected.
-- Disk usage is about 4x raw per node; space is reclaimed by snapshot-and-purge and by re-seeding a node from a snapshot, not by online compaction.
+- Writes are coalesced into Raft entries; dynamic updates return to the client after apply, so update latency of 50 to 200 ms under heavy load is expected. The coalescer is a group commit with a bound: a lone write travels at once, concurrent writes share an entry of at most 128 batches and 64 KiB ([ADR 0030](adr/0030-durability-classes-of-the-lease-path.md)).
+- Disk usage is about 4x raw per node; space is reclaimed by snapshot-and-purge and by re-seeding a node from a snapshot, not by online compaction. A snapshot is due after `[store] snapshot_every_entries` (10,000) entries, the log size (`snapshot_every_log_mib`, 1,024) only a sanity bound; it is built from a read view beside the commits and waits up to 30 s while the commit queue is deep. The log records and the snapshot files are compressed on their way to disk (ADR 0030).
+- What is not on the answer's path is not in its batch: a DHCP lease commit holds the lease row and its client index; the lease's history and IPAM facts follow within a second from an asynchronous writer (ADR 0030).
 - A compact index layout is needed before zones beyond about 10 M RRsets per node are supported.
 - Still to build and measure in Phase 1: atomic index swap during snapshot install, crash and restart recovery, failover, and a real network transport.
 

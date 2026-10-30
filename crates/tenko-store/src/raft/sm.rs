@@ -108,6 +108,10 @@ pub(crate) struct SmStats {
     pub(crate) last_compact_micros: AtomicU64,
     pub(crate) checkpoints: AtomicU64,
     pub(crate) rewrites: AtomicU64,
+    // WP9.6: how long the maintenance task held the next build back (ADR 0030).
+    /// Milliseconds the trigger of the build in progress was deferred while the commit
+    /// queue was deep (0: built when due); read and cleared by the build's log line.
+    pub(crate) deferred_ms: AtomicU64,
 }
 
 /// The result of rewriting the state into a fresh file.
@@ -678,12 +682,17 @@ impl StateMachine {
         counters
             .last_snapshot_bytes
             .store(written.bytes, Ordering::Relaxed);
+        let deferred_ms = counters.deferred_ms.swap(0, Ordering::Relaxed);
         tracing::info!(
             snapshot = %snapshot_id,
             bytes = written.bytes,
             rows = written.rows,
+            duration_ms = started.elapsed().as_millis(),
+            deferred = deferred_ms > 0,
+            deferred_ms,
             "store snapshot built"
         );
+
         Ok(Snapshot {
             meta,
             snapshot: Box::new(SnapshotFile { path }),

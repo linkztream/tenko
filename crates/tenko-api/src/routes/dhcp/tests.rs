@@ -457,6 +457,7 @@ fn the_node_report_carries_the_ra_check_and_the_server_duid() {
         serving: true,
         accepting: true,
         refusal: None,
+        derived: None,
         probe: true,
         probe_expected: false,
         listeners: Vec::new(),

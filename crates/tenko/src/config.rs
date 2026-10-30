@@ -2616,7 +2616,8 @@ pub struct StoreSection {
     pub journal_retention: usize,
     /// Snapshot after this many entries (default 10,000).
     pub snapshot_every_entries: u64,
-    /// Snapshot after this many MiB of log (default 64).
+    /// Snapshot after this many MiB of log, a sanity bound above `snapshot_every_entries`
+    /// entries of the bounded entry (default 1,024, ADR 0030).
     pub snapshot_every_log_mib: u64,
     /// Log entries kept behind a snapshot (default 1,000).
     pub snapshot_keep_entries: u64,
@@ -2649,7 +2650,7 @@ impl Default for StoreSection {
             checkpoint_interval_ms: 1_000,
             journal_retention: 100_000,
             snapshot_every_entries: 10_000,
-            snapshot_every_log_mib: 64,
+            snapshot_every_log_mib: 1_024,
             snapshot_keep_entries: 1_000,
             write_timeout_secs: 60,
             read_wait_secs: 5,

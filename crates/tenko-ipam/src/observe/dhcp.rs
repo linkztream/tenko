@@ -309,6 +309,32 @@ impl LeaseFacts {
         self.len() == 0
     }
 
+    // WP9.6 (ADR 0030): the role writes the facts in batches of its own, after the lease.
+    /// Takes the facts of the source that `batch` writes as stored, before the store has
+    /// them: the role's lease commit hands its facts to an asynchronous writer, and the next
+    /// change of the same address must be judged against them. The index's own apply sets
+    /// their revisions once the writer's batch is applied; a batch the writer drops leaves
+    /// the facts here until the next refresh, a rebuild of the index or the next start.
+    pub fn note_written(&self, batch: &WriteBatch) {
+        let prefix = encode_key(&(self.source_key.clone(),));
+        let mut image = self.image.write().unwrap_or_else(PoisonError::into_inner);
+        for mutation in &batch.mutations {
+            let tenko_store::Mutation::Put { table, key, value } = mutation else {
+                continue;
+            };
+            if table != FACTS.name() || !key.starts_with(&prefix) {
+                continue;
+            }
+            let (Ok((source, subject)), Ok(fact)) = (FACTS.decode_key(key), FACTS.decode(value))
+            else {
+                continue;
+            };
+            if source == self.source_key {
+                image.facts.insert(subject, fact);
+            }
+        }
+    }
+
     /// Adds the facts of `lease` (the row after the change) to `batch` by the rules of the
     /// module documentation, at `now`, against the stored facts of its address.
     ///
@@ -712,6 +738,16 @@ impl DerivedIndex for LeaseFacts {
             }
             if change.deleted {
                 image.facts.remove(&subject);
+                continue;
+            }
+            // WP9.6: a fact the role took as written at its commit (`note_written`, revision
+            // zero) is the value its writer's batch stored: it takes the revision without
+            // a read. The role is the only writer of its source; the retention purge only
+            // deletes.
+            if let Some(fact) = image.facts.get_mut(&subject)
+                && fact.revision == Revision::ZERO
+            {
+                fact.revision = changes.revision;
                 continue;
             }
             match view.get_typed(&FACTS, &(source, subject.clone())) {

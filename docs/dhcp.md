@@ -266,20 +266,22 @@ A lease is a row of `dhcp.leases` in the replicated store, committed before the 
 
 The engine builds a lease change (`PendingChange`: every field inline, no heap) for a REQUEST, a renewal, a rebind, a release or a decline, and hands it to the lease store (`StoreLeases::submit`). The hand-off copies the change into a queue made before the DORA path runs, with room for a change per address the image can lease (section 10.8: at least 256, at most 4,096 changes), and returns at once; it never allocates and never waits for the disk (`tests/lease_alloc.rs`). A full queue drops the request (`tenko_dhcp_dropped_total{reason="queue"}`); the client retries. A DISCOVER writes nothing: the offered address is held in memory for the offer lifetime (`[dhcp] offer_secs`, 10 s) in the offer hold (`OfferTable`), which has room for the offers the image can need and allocates nothing either.
 
-The committer, a task of the role, turns each change into one store batch with one revision:
+The committer, a task of the role, turns each change into two store batches ([ADR 0030](adr/0030-durability-classes-of-the-lease-path.md)): the synchronous one, committed before the ACK with one revision, and the derived one, written by the asynchronous writer within a second (section 8.8):
 
-| Table | Key | What the batch writes |
-|---|---|---|
-| `dhcp.leases` | VRF, address | The row after the change; fields the change does not carry (DDNS state, partner times, observation time) come from the row held before, for the same client |
-| `dhcp.leases.by_client` | scope, client identity | The client's latest row in the scope; when the address was another client's, that client's entry moves to its next row or is removed |
-| `dhcp.history` | time, VRF, address | The event (`granted`, `renewed`, `rebound`, `released`, `declined`, `reclaimed`) |
-| IPAM observations | | The fact of `dhcp:<node>`, through the observation hook that WP8.1 fills; nothing until then |
+| Batch | Table | Key | What the batch writes |
+|---|---|---|---|
+| synchronous | `dhcp.leases` | VRF, address | The row after the change; fields the change does not carry (DDNS state, partner times, observation time) come from the row held before, for the same client |
+| synchronous | `dhcp.leases.by_client` | scope, client identity | The client's latest row in the scope; when the address was another client's, that client's entry moves to its next row or is removed |
+| derived | `dhcp.history` | time, VRF, address | The event (`granted`, `renewed`, `rebound`, `released`, `declined`, `reclaimed`) |
+| derived | IPAM observations | | The facts of `dhcp:<node>` with their index rows (section 12.3) |
 
-The batch is written as the system component `dhcp`; lease commits are not audited one by one, the history is their record. A change that would take an address another client still holds (an unexpired binding or an abandoned address) is refused before it reaches the store: it is the last guard of "no address on two clients", behind the allocator and the offer hold. An operator's reclaim may take it.
+One lease commit writes 2 rows and about 670 bytes; the derived batch of an office client (a host name, a parameter request list, a vendor class) adds 11 rows and about 3 KB (`tests/lease_write_cost.rs` caps both). The batches are written as the system component `dhcp`; lease commits are not audited one by one, the history is their record. A change that would take an address another client still holds (an unexpired binding or an abandoned address) is refused before it reaches the store: it is the last guard of "no address on two clients", behind the allocator and the offer hold. An operator's reclaim may take it.
 
 Batches are proposed concurrently, up to 512 at a time, so that the store's coalescer folds what waits into one Raft entry and one fsync. Two changes that touch the same address, or the same client as new or as previous holder, are proposed one after another, each built from the table after the one before has applied, so the rows and the index never depend on the order in which commits finish.
 
 ### 8.2 When the ACK leaves
+
+The ACK waits for the synchronous batch only: the lease row and the client index. The history row and the facts of the change are queued for the writer before the ticket completes, and written after it.
 
 The ticket of a change completes, and the worker sends the ACK, only after the store has answered the batch (on one node: its log entry is on disk and applied) and the committer has applied the row to the role's table at the commit's revision. A change that has not committed within 2 seconds of its hand-off completes as failed and the request is dropped, as the DNS update path answers SERVFAIL when its index wait passes ([dns.md](dns.md)); a commit that lands later still reaches the table, and the client's retry finds its lease. The time from the hand-off to the completion is `tenko_dhcp_commit_duration_seconds`.
 
@@ -322,7 +324,20 @@ After a refusal the role tries the store again after one second: the next change
 
 The tests are in `crates/tenko-dhcp/tests/`: `lease_table.rs` (the table against the reference table on random sequences, the index moves, the feed, own commits against older copies), `lease_store.rs` (the batches against the reference lease store, a burst of concurrent changes, another client's binding, the queue, a slow commit, a refusing store), `lease_services.rs` (expiry, its fence and its race with a renewal, the offer hold, the retention and the purge), `lease_refusal.rs` (the refusal path on the Raft store with the hook, in a child process), `lease_alloc.rs` (no allocation on the hand-off, the lookups, the offer hold and the refusal gate), `lease_rebuild.rs` (the rebuild of a large table and the commit latency) and `lease_crash.rs`.
 
-The crash test (E24, M32) kills a node under load and restarts it, again and again. The node is a child process of the test: it opens the Raft store, rebuilds its table and runs 200 clients that request, renew and release through the allocator, the offer hold and the lease store, and it prints a line for an ACK only after its ticket completed. The test kills it at a random moment (SIGKILL on Unix, TerminateProcess on Windows), opens the data directory and checks that every ACK received is in the rows at its revision or later, that its history row is there, that the rebuilt table equals the rows and the client index, and that the history never gives an address to a second client while the first one's binding had not ended. `bench/phase3-dhcp/scripts/crash-test.sh` runs it 20 times with the rebuild and the latency measurement; the results, and the procedure of the power-off runs on the lab VM, are in `bench/phase3-dhcp/results/`. Until the `dhcp` role exists in the binary (WP7.5), the crash test drives the lease path through this test entry point rather than through `tenko serve`.
+The crash test (E24, M32) kills a node under load and restarts it, again and again. The node is a child process of the test: it opens the Raft store, rebuilds its table and runs 200 clients that request, renew and release through the allocator, the offer hold and the lease store, and it prints a line for an ACK only after its ticket completed. The test kills it at a random moment (SIGKILL on Unix, TerminateProcess on Windows), opens the data directory and checks that every ACK received is in the rows at its revision or later, that its history row is there once the start's catch-up has run (section 8.8; an ACK that a later change of its address superseded within the lost interval is counted as lost instead), that the rebuilt table equals the rows and the client index, and that the history never gives an address to a second client while the first one's binding had not ended. `bench/phase3-dhcp/scripts/crash-test.sh` runs it 20 times with the rebuild and the latency measurement; the results, and the procedure of the power-off runs on the lab VM, are in `bench/phase3-dhcp/results/`. Until the `dhcp` role exists in the binary (WP7.5), the crash test drives the lease path through this test entry point rather than through `tenko serve`.
+
+### 8.8 The derived rows: the asynchronous writer and the guard
+
+What derives from a lease row, its history row and its IPAM facts, is eventually consistent within one second ([ADR 0030](adr/0030-durability-classes-of-the-lease-path.md)); the lease row alone is committed before the ACK. The writer (`tenko_dhcp::lease::derived`, one per family) works like this:
+
+- the committer pushes a committed change's derived rows into a queue of 65,536 changes, a lock and an append that never waits;
+- the flusher writes everything queued every 250 ms, or at once when 1,000 changes wait, in waves of up to 32 store batches of at most 16 KiB proposed at once in the store's background class (two batches in flight together never write the same row): the coalescer packs the lease commits waiting first and carries one such batch beside them per entry, so a lease commit waits behind at most 24 KiB of derived rows, and a background batch never waits longer than 250 ms; a store that refuses keeps the queue, and the flusher tries again every interval;
+- a push to a full queue drops the change's derived rows and counts `tenko_dhcp_derived_dropped_total`; a queue that stays full for longer than one second raises the health finding `dhcp.role.derived_dropped` until a flush succeeds. `tenko_dhcp_derived_written_total` counts the changes written, `tenko_dhcp_derived_queue` the changes waiting;
+- shutdown flushes the queue. After a crash the start rebuilds the derived rows of the last seconds from the lease table (`derived::catch_up`): every lease row changed within ten seconds of the newest history row gets its history row when it is missing, and its facts by the rules, which write nothing for a fact already stored; `tenko_dhcp_derived_rebuilt_total` counts them. An earlier change of the same address within the lost second keeps no history row.
+
+The history API shows a change within the interval; the reconciler and the move step wait far longer than that (section 12.3).
+
+The gate guard holds the lease path to its measured cost on the workstation: `bench/phase3-dhcp/scripts/guard.sh --binary <tenko> --example <dhcp_server>` starts a fresh `tenko serve` on loopback under the Lab profile, runs the example's load client for 10 s at 1,000 exchanges per second and 10 s closed loop, and compares the commit average, the closed-loop rate and the store bytes per lease with `bench/phase3-dhcp/guard.toml`. A change that costs commit time must raise the thresholds in the same commit.
 
 ## 9. The engine
 
@@ -561,7 +576,7 @@ The step reaches the role through `tenko_ipam::moves::dhcp::DhcpRolePort` (the r
 
 ### 12.3 Leases as observations
 
-The committer adds the IPAM facts of the source `dhcp:<node>` to the batch of every lease change it builds, and the operator's release (`dhcp.lease.release`) to its own batch: the lease row, the client index, the history row and the facts commit together, so there is no second write and no polling. The rules live in `tenko_ipam::observe::dhcp` (`LeaseFacts`); the hook is `tenko_dhcp::lease::observe::IpamObservations`.
+The committer builds the IPAM facts of the source `dhcp:<node>` with every lease change, against the same row, and hands them to the asynchronous writer once the lease committed (section 8.8, [ADR 0030](adr/0030-durability-classes-of-the-lease-path.md)); the operator's release (`dhcp.lease.release`) flushes the writer and then writes its facts in its own batch. There is no polling: the facts reach the store within a second of the lease. The rules live in `tenko_ipam::observe::dhcp` (`LeaseFacts`); the hook is `tenko_dhcp::lease::observe::IpamObservations`.
 
 | Fact | Subject | When |
 |---|---|---|
@@ -575,7 +590,7 @@ The rules of `observe::ingest` apply to each fact: a new subject is a new fact; 
 
 The rules need the stored facts, and the committer builds a batch without waiting on a store read. `LeaseFacts` is therefore a derived index of the store over `ipam.obs.facts`: it holds the facts of its own source in memory, built at registration and on a snapshot install, and follows every change of the table. The role is the only writer of its source, so its fact writes carry no version precondition and a lease change never fails on its observation. Each fact costs a few hundred bytes of memory in the index.
 
-A new fact wakes the reconciler like any write to the facts table; its run confirms a move waiting at its observation step when a current lease fact comes from the moved interface's MAC address at any address of the target network ([reconciliation.md](reconciliation.md) section 7).
+The facts index takes the facts of a committed change at once, before the writer's flush, so a change that follows within the interval is judged against them. A new fact wakes the reconciler like any write to the facts table, now once per flush of the writer instead of once per lease; its run confirms a move waiting at its observation step when a current lease fact comes from the moved interface's MAC address at any address of the target network ([reconciliation.md](reconciliation.md) section 7).
 
 ### 12.4 Tests
 

@@ -69,6 +69,13 @@ impl Timestamp {
         self.0.checked_add(duration).map(Self)
     }
 
+    /// The timestamp `duration` earlier, or `None` on overflow.
+    #[must_use]
+    pub fn checked_sub(self, duration: Duration) -> Option<Self> {
+        let duration = time::Duration::try_from(duration).ok()?;
+        self.0.checked_sub(duration).map(Self)
+    }
+
     /// The time elapsed from `earlier` to `self`, zero if `earlier` is later.
     pub fn saturating_since(self, earlier: Timestamp) -> Duration {
         Duration::try_from(self.0 - earlier.0).unwrap_or(Duration::ZERO)

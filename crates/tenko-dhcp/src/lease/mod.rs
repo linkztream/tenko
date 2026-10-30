@@ -33,6 +33,8 @@
 
 pub mod batch;
 pub mod commit;
+// WP9.6: the asynchronous writer of the history rows and the facts (ADR 0030).
+pub mod derived;
 pub mod expiry;
 pub mod follow;
 pub mod history;

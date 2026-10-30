@@ -1,0 +1,68 @@
+# Thresholds of the DHCP lease commit guard (WP9.6): read by scripts/guard-check.mjs after
+# scripts/guard.sh has measured one run. The file is a small TOML subset: [tables] of
+# `key = number` lines and `#` comments, nothing else.
+#
+# Each table is one figure of the run:
+#
+#   threshold   the accepted value on the gate's reference machine, set from a measured run
+#               (the median of three runs of guard.sh on the same build profile as the gate;
+#               the first run of a changed lease path is not a baseline)
+#   tolerance   a fraction of the threshold by which a run may be worse before the gate
+#               fails: commit_avg_ms and bytes_per_lease fail above
+#               threshold * (1 + tolerance), closed_loop_per_s below
+#               threshold * (1 - tolerance). Wide enough for the noise between runs of one
+#               machine (about 0.25 for the timed figures), narrower for the byte count,
+#               which hardly varies.
+#
+# A threshold of 0 is a placeholder that has not been set: guard-check.mjs fails it, so the
+# guard cannot pass before the numbers come from a measured run.
+#
+# A change that costs commit time or store bytes per lease must raise the threshold it
+# crosses in the same commit, and say why in the commit message. A change that gains
+# margin may lower the threshold, so that the gain is kept.
+#
+# The figures (guard.sh computes them from the metrics listener, the load client's own
+# line and the size of the data directory after a clean stop):
+#
+#   commit_avg_ms      mean of tenko_dhcp_commit_duration_seconds over the 10 s open-loop
+#                      phase at 1,000 exchanges per second: delta _sum / delta _count, in ms
+#   closed_loop_per_s  exchanges per second of the 10 s closed-loop phase (window 64),
+#                      from the load client's printed rate
+#   bytes_per_lease    growth of the data directory (du -sk) over both phases, divided by
+#                      the leases in the table at the end
+#   rows_per_lease     store rows written per lease; OPTIONAL and not measured: the node
+#                      exposes no store row count (tenko_store_journal_entries counts
+#                      change sets, tenko_dhcp_history_rows only the history table), so
+#                      guard.sh produces no such figure and the table below stays commented
+#                      out. Add the table and the figure together when a row counter exists.
+#
+# Set on 2026-10-30 (WP9.6) on the gate's workstation (Windows 11, Git Bash, release builds
+# of tenko and the example, the work directory on the system SSD, fsync p50 1.5 ms), the
+# median of three runs of the branch that brought the guard:
+#
+#   commit_avg_ms      9.08, 8.90, 8.52          (main before WP9.6: 9.19, 8.91)
+#   closed_loop_per_s  5,989, 5,750, 5,576       (main before WP9.6: 5,718, 5,847)
+#   bytes_per_lease    5,300, 6,774, 6,988       (main before WP9.6: 7,894, 8,036)
+#
+# The workstation's commit time did not move with WP9.6, which removed most of the store
+# work per lease (tests/lease_write_cost.rs in tenko-dhcp): on this machine the commit
+# average sits on a floor of its own (a p50 of about 8 ms), so the timed figures here catch
+# a change that adds to that floor, and the Linux lab is where the lease path's own cost
+# shows. The bytes vary by a quarter between runs because the Windows stop is not a clean
+# close and redb grows its files by doubling; hence the wider tolerance.
+
+[commit_avg_ms]
+threshold = 8.9
+tolerance = 0.25
+
+[closed_loop_per_s]
+threshold = 5750
+tolerance = 0.25
+
+[bytes_per_lease]
+threshold = 6774
+tolerance = 0.30
+
+# [rows_per_lease]
+# threshold = 0.0
+# tolerance = 0.0

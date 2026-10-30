@@ -382,6 +382,140 @@ async fn entry_byte_limit_splits_entries() {
     assert!(entries >= 11, "only {entries} entries");
 }
 
+/// ADR 0030, the snapshot policy: due by entries, the log bytes a sanity bound; deferred
+/// while the commit queue is deeper than one entry, at most 30 s or twice the entries.
+#[test]
+fn a_due_snapshot_waits_for_a_deep_commit_queue_within_its_bound() {
+    use tenko_store::raft::{SNAPSHOT_MAX_DEFERRAL, SnapshotDecision, snapshot_decision};
+    let policy = SnapshotPolicy::default();
+    assert_eq!(policy.every_entries, 10_000);
+    assert_eq!(policy.every_log_bytes, 1024 * 1024 * 1024);
+    let decide = |entries, bytes, queued, deferred| {
+        snapshot_decision(&policy, entries, bytes, queued, 128, deferred)
+    };
+    assert_eq!(decide(9_999, 0, 0, None), SnapshotDecision::NotDue);
+    // 600 entries of 82 KB: due under the old 64 MiB bound, not under this one.
+    assert_eq!(decide(600, 600 * 82_000, 0, None), SnapshotDecision::NotDue);
+    assert_eq!(decide(10_000, 0, 0, None), SnapshotDecision::Build);
+    assert_eq!(decide(10, 1 << 30, 0, None), SnapshotDecision::Build);
+    assert_eq!(decide(10_000, 0, 128, None), SnapshotDecision::Build);
+    assert_eq!(decide(10_000, 0, 129, None), SnapshotDecision::Defer);
+    assert_eq!(
+        decide(10_000, 0, 500, Some(Duration::from_secs(29))),
+        SnapshotDecision::Defer
+    );
+    assert_eq!(
+        decide(10_000, 0, 500, Some(SNAPSHOT_MAX_DEFERRAL)),
+        SnapshotDecision::Build
+    );
+    assert_eq!(decide(20_000, 0, 500, None), SnapshotDecision::Build);
+}
+
+/// ADR 0030: a snapshot built while commits keep coming never stalls them: its build reads
+/// an MVCC view beside the apply path. Every commit of a steady load through several builds
+/// completes within the bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn snapshots_built_under_load_do_not_stall_the_commits() {
+    let dir = TestDir::new("snapshot-load");
+    let mut cfg = config(dir.path());
+    cfg.snapshot = SnapshotPolicy {
+        every_entries: 300,
+        every_log_bytes: u64::MAX,
+        keep_entries: 50,
+    };
+    let store = RaftStore::open(cfg).await.expect("open");
+    // A state worth copying: 20,000 rows of 200 bytes.
+    for chunk in 0..20_u64 {
+        let mut b = batch();
+        for n in 0..1_000 {
+            b.put(ROWS, key(100_000 + chunk * 1_000 + n), vec![3_u8; 200]);
+        }
+        store.propose(b).await.expect("commit");
+    }
+    let before = store.engine_stats();
+    let mut slowest = Duration::ZERO;
+    let started = Instant::now();
+    let mut n = 0_u64;
+    while store.engine_stats().snapshots_built < before.snapshots_built + 3
+        && started.elapsed() < Duration::from_secs(60)
+    {
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            n += 1;
+            let store = store.clone();
+            tasks.push(tokio::spawn(async move {
+                let at = Instant::now();
+                put(&store, n, "v").await;
+                at.elapsed()
+            }));
+        }
+        for task in tasks {
+            slowest = slowest.max(task.await.expect("task"));
+        }
+    }
+    let built = store.engine_stats().snapshots_built - before.snapshots_built;
+    assert!(built >= 3, "{built} snapshots in a minute of commits");
+    assert!(
+        slowest < Duration::from_millis(1_500),
+        "a commit took {slowest:?} while snapshots were built"
+    );
+    store.shutdown().await.expect("shutdown");
+}
+
+/// ADR 0030, the group commit's bound: a lone batch at idle travels in an entry of its own
+/// at once, concurrent batches share entries, and no entry carries more than the default
+/// bound of 128 batches or 64 KiB.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn group_commit_never_delays_a_lone_batch_and_keeps_entries_within_the_bound() {
+    let cfg = config(Path::new("unused"));
+    assert_eq!(cfg.coalescer, tenko_store::raft::ENTRY_BOUND);
+    let store = RaftStore::open_temp(cfg).await.expect("open");
+    let before = store.engine_stats();
+    let started = Instant::now();
+    put(&store, 1, "v").await;
+    let alone = started.elapsed();
+    let stats = store.engine_stats();
+    assert_eq!(stats.entries_proposed - before.entries_proposed, 1);
+    assert_eq!(stats.batches_proposed - before.batches_proposed, 1);
+    assert!(
+        alone < Duration::from_secs(1),
+        "a lone batch took {alone:?}"
+    );
+
+    let before = store.engine_stats();
+    let mut tasks = Vec::new();
+    for n in 0..2_000_u64 {
+        let store = store.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut b = batch();
+            b.put(ROWS, key(10 + n), vec![7_u8; 200]);
+            store.propose(b).await.expect("commit")
+        }));
+    }
+    for task in tasks {
+        task.await.expect("task");
+    }
+    let stats = store.engine_stats();
+    let entries = stats.entries_proposed - before.entries_proposed;
+    let batches = stats.batches_proposed - before.batches_proposed;
+    let bytes = stats.log_appended_bytes - before.log_appended_bytes;
+    assert_eq!(batches, 2_000);
+    assert!(
+        entries < batches / 4,
+        "2,000 batches travelled in {entries} entries"
+    );
+    assert!(
+        entries * 128 >= batches,
+        "{batches} batches in {entries} entries: more than 128 in one"
+    );
+    // Each entry within 64 KiB of batches plus its encoding.
+    assert!(
+        bytes / entries <= 80 * 1024,
+        "{} bytes per entry",
+        bytes / entries
+    );
+}
+
 /// Snapshots are built by policy, the log is purged behind them, and a restart recovers
 /// from the snapshot plus the remaining log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

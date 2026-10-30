@@ -11,6 +11,11 @@
 //! 0xFF | SHA-256 of every byte before it
 //! ```
 //!
+//! WP9.6 (ADR 0030): from format 2 on, everything after the header (the records, the end
+//! tag and the hash) is one raw DEFLATE stream (`compress`), and the hash covers the bytes
+//! before compression, so it checks what the install reads. Format 1 files, written before,
+//! are read as they were.
+//!
 //! Tables appear in name order and rows in key order, so an install writes every redb
 //! B-tree sequentially (Spike A: a snapshot-installed `sm.redb` is about half the size of
 //! an incrementally written one, which is what re-seeding relies on, ADR 0002). The file is
@@ -24,6 +29,7 @@ use std::{
     path::Path,
 };
 
+use flate2::{read::DeflateDecoder, write::DeflateEncoder};
 use redb::{ReadTransaction, ReadableTable, TableHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -36,8 +42,10 @@ use super::{
 use crate::api::StoreError;
 
 const MAGIC: &[u8; 8] = b"TNKSNAP1";
-/// The format version written into the header.
-pub(crate) const FORMAT: u32 = 1;
+/// The format version written into the header: 2, the records compressed.
+pub(crate) const FORMAT: u32 = 2;
+/// The format of the files written before WP9.6: the records as they are.
+pub(crate) const FORMAT_PLAIN: u32 = 1;
 const TAG_TABLE: u8 = 0x01;
 const TAG_ROW: u8 = 0x02;
 const TAG_END: u8 = 0xFF;
@@ -64,18 +72,49 @@ pub(crate) struct WrittenSnapshot {
     pub(crate) rows: u64,
 }
 
+/// Where the bytes of a snapshot go: the file, or a DEFLATE stream into it.
+enum Sink {
+    Plain(BufWriter<File>),
+    Deflate(DeflateEncoder<BufWriter<File>>),
+    Switching,
+}
+
+impl Sink {
+    fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
+        match self {
+            Sink::Plain(out) => out.write_all(data),
+            Sink::Deflate(out) => out.write_all(data),
+            Sink::Switching => Err(io::Error::other("the snapshot writer is switching")),
+        }
+    }
+
+    /// Everything written from now on is compressed.
+    fn compress(&mut self) {
+        if let Sink::Plain(out) = std::mem::replace(self, Sink::Switching) {
+            *self = Sink::Deflate(DeflateEncoder::new(out, super::compress::level()));
+        }
+    }
+
+    /// The file, with everything written to it.
+    fn finish(self) -> io::Result<File> {
+        let out = match self {
+            Sink::Plain(out) => out,
+            Sink::Deflate(out) => out.finish()?,
+            Sink::Switching => return Err(io::Error::other("the snapshot writer is switching")),
+        };
+        out.into_inner().map_err(io::IntoInnerError::into_error)
+    }
+}
+
 struct HashingWriter {
-    out: BufWriter<File>,
+    out: Sink,
     hasher: Sha256,
-    bytes: u64,
 }
 
 impl HashingWriter {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         self.hasher.update(data);
-        self.out.write_all(data)?;
-        self.bytes += u64::try_from(data.len()).unwrap_or(u64::MAX);
-        Ok(())
+        self.out.write_all(data)
     }
 }
 
@@ -93,15 +132,17 @@ pub(crate) fn write_snapshot(
 ) -> Result<WrittenSnapshot, StoreError> {
     let file = File::create(path).map_err(storage)?;
     let mut out = HashingWriter {
-        out: BufWriter::with_capacity(BUFFER, file),
+        out: Sink::Plain(BufWriter::with_capacity(BUFFER, file)),
         hasher: Sha256::new(),
-        bytes: 0,
     };
     let encoded = to_cbor(header)?;
     out.write(MAGIC).map_err(storage)?;
     out.write(&length_u32(encoded.len(), "header").map_err(storage)?)
         .map_err(storage)?;
     out.write(&encoded).map_err(storage)?;
+    if header.format != FORMAT_PLAIN {
+        out.out.compress();
+    }
 
     let mut names: Vec<String> = txn
         .list_tables()
@@ -136,12 +177,12 @@ pub(crate) fn write_snapshot(
     out.write(&[TAG_END]).map_err(storage)?;
     let digest: [u8; 32] = out.hasher.clone().finalize().into();
     out.out.write_all(&digest).map_err(storage)?;
-    let bytes = out.bytes + 32;
     let file = out
         .out
-        .into_inner()
+        .finish()
         .map_err(|error| StoreError::Storage(error.to_string()))?;
     file.sync_all().map_err(storage)?;
+    let bytes = file.metadata().map_err(storage)?.len();
     Ok(WrittenSnapshot {
         bytes,
         tables,
@@ -159,7 +200,7 @@ pub(crate) enum Record<'a> {
 
 /// Reads a snapshot file sequentially and checks its hash at the end.
 pub(crate) struct SnapshotReader {
-    input: BufReader<File>,
+    input: Box<dyn Read + Send>,
     hasher: Sha256,
     header: SnapshotHeader,
     name: String,
@@ -186,12 +227,15 @@ impl SnapshotReader {
         let mut encoded = vec![0_u8; usize::try_from(len).map_err(storage)?];
         read_hashed(&mut input, &mut hasher, &mut encoded)?;
         let header: SnapshotHeader = from_cbor(&encoded)?;
-        if header.format != FORMAT {
-            return Err(StoreError::Storage(format!(
-                "snapshot format {} is not supported (expected {FORMAT})",
-                header.format
-            )));
-        }
+        let input: Box<dyn Read + Send> = match header.format {
+            FORMAT_PLAIN => Box::new(input),
+            FORMAT => Box::new(BufReader::with_capacity(BUFFER, DeflateDecoder::new(input))),
+            other => {
+                return Err(StoreError::Storage(format!(
+                    "snapshot format {other} is not supported (expected {FORMAT_PLAIN} or {FORMAT})"
+                )));
+            }
+        };
         Ok(Self {
             input,
             hasher,
@@ -302,7 +346,24 @@ mod tests {
 
     #[test]
     fn snapshots_round_trip_and_detect_corruption() {
-        let dir = temp_dir("round-trip");
+        round_trip_and_corruption("round-trip", FORMAT);
+    }
+
+    // WP9.6: a file of the format before compression still reads, and the compressed one
+    // is several times smaller.
+    #[test]
+    fn plain_snapshots_still_read_and_compressed_ones_are_smaller() {
+        let plain = round_trip_and_corruption("plain", FORMAT_PLAIN);
+        let compressed = round_trip_and_corruption("compressed", FORMAT);
+        assert!(
+            compressed * 3 < plain,
+            "compressed {compressed} octets, plain {plain}"
+        );
+    }
+
+    /// Writes, reads and corrupts a snapshot of `format`; returns its size.
+    fn round_trip_and_corruption(name: &str, format: u32) -> u64 {
+        let dir = temp_dir(name);
         let db = Database::builder()
             .set_cache_size(1 << 20)
             .create(dir.join("sm.redb"))
@@ -323,7 +384,7 @@ mod tests {
         txn.commit().expect("commit");
 
         let header = SnapshotHeader {
-            format: FORMAT,
+            format,
             meta: SnapshotMeta::default(),
             state: SmMeta {
                 revision: Revision(5),
@@ -367,5 +428,6 @@ mod tests {
         drop(reader);
         drop(db);
         std::fs::remove_dir_all(&dir).expect("clean up");
+        written.bytes
     }
 }

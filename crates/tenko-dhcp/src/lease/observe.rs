@@ -149,6 +149,11 @@ impl ObservationHook for IpamObservations {
         self.count(observation.name);
         Ok(observation.observed_at)
     }
+
+    // WP9.6: the facts go to the asynchronous writer; the index takes them at once.
+    fn committed(&self, derived: &WriteBatch) {
+        self.facts.note_written(derived);
+    }
 }
 
 // WP9.1: the facts of the DHCPv6 lease batch, by the same rules and counters.
@@ -164,5 +169,10 @@ impl crate::v6::lease::commit::Observation6Hook for IpamObservations {
         self.count(observation.address);
         self.count(observation.name);
         Ok(observation.observed_at)
+    }
+
+    // WP9.6: as for DHCPv4.
+    fn committed6(&self, derived: &WriteBatch) {
+        self.facts.note_written(derived);
     }
 }

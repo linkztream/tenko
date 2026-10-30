@@ -128,6 +128,9 @@ pub struct DhcpStatus {
     pub accepting: bool,
     /// The finding while the store refuses.
     pub refusal: Option<Finding>,
+    // WP9.6: the asynchronous writer of the history and the facts (ADR 0030).
+    /// The finding while the writer of the derived rows drops them (either family).
+    pub derived: Option<crate::lease::derived::DroppedFinding>,
     /// Whether a `probe` role runs in the process.
     pub probe: bool,
     /// Whether the profile expects one (TGL-16).
@@ -327,7 +330,11 @@ impl LocalNode {
         &self,
         args: &commands::ReleaseArgs,
     ) -> Result<commands::LeaseRow, CommandResult> {
+        // WP9.6: the facts of the committed changes are stored before this batch expires
+        // them, so that a later flush cannot write an older fact over the release.
+        self.lease_store.derived().flush().await;
         let now = Timestamp::now();
+
         let vrf = self.vrf_of(args.vrf, args.addr)?;
         let key = (vrf, args.addr);
         let view = self
@@ -589,6 +596,11 @@ impl DhcpNode for LocalNode {
             serving: server.is_some() && (!listeners.is_empty() || !listeners6.is_empty()),
             accepting: !gate.refusing(),
             refusal: gate.finding(),
+            derived: self
+                .lease_store
+                .derived()
+                .finding()
+                .or_else(|| self.lease_store6.derived().finding()),
             probe: self.probe.load(Ordering::Relaxed),
             probe_expected: self.probe_expected.load(Ordering::Relaxed),
             scopes: image.as_ref().map_or(0, |image| image.scopes().len()),
@@ -897,8 +909,9 @@ impl Role {
         let leases = SharedLeases::new(index_from_data(&data));
         // WP9.1: the DHCPv6 table.
         let leases6 = SharedLeases6::new(index_from_data6(&data));
-        data.leases.clear();
-        data.leases6.clear();
+        // WP9.6: the rows stay until the catch-up of the derived rows read them.
+        let rows4 = std::mem::take(&mut data.leases);
+        let rows6 = std::mem::take(&mut data.leases6);
         let held = data.revision;
         // E32: the hand-off queues as large as the first image needs, the setting their cap.
         let queue_cap = settings.commit.queue;
@@ -929,6 +942,28 @@ impl Role {
         let stop = CancellationToken::new();
         let committer = tokio::spawn(committer.run(stop.child_token()));
         let committer6 = tokio::spawn(committer6.run(stop.child_token()));
+        // WP9.6 (ADR 0030): the history rows and facts a crash may have lost, rebuilt from
+        // the lease rows through the writers, before the role answers.
+        if let Err(error) = crate::lease::derived::catch_up(
+            store.as_ref(),
+            rows4.into_values(),
+            observations.as_ref(),
+            lease_store.derived(),
+        )
+        .await
+        {
+            tracing::warn!(%error, "the lease history and facts could not be rebuilt at start");
+        }
+        if let Err(error) = crate::lease::derived::catch_up6(
+            store.as_ref(),
+            rows6.into_values(),
+            observations6.as_ref(),
+            lease_store6.derived(),
+        )
+        .await
+        {
+            tracing::warn!(%error, "the DHCPv6 lease history and facts could not be rebuilt at start");
+        }
         let mut config = settings.server.clone();
         config.node = node;
         let start_leases = leases.clone();

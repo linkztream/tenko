@@ -243,6 +243,8 @@ impl LocalNode {
     }
 
     async fn release6_row(&self, args: &Release6Args) -> Result<Lease6Row, CommandResult> {
+        // WP9.6: as for DHCPv4, the pending facts first.
+        self.lease_store6.derived().flush().await;
         let now = Timestamp::now();
         let vrf = self.vrf_of6(args.vrf, args.addr)?;
         let key = (vrf, args.addr);

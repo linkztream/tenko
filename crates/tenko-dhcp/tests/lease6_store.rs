@@ -1,7 +1,8 @@
 //! The DHCPv6 lease store on the replicated store (WP9.1): `StoreLeases6` and its
 //! committer over the in-memory store, as `lease_store.rs` tests the DHCPv4 `StoreLeases`.
 //!
-//! - One change with two bindings commits two rows and two history rows at one revision.
+//! - One change with two bindings commits two rows at one revision, and its two history
+//!   rows follow in one batch of the asynchronous writer (ADR 0030).
 //! - Another client's binding is refused whole and nothing is written; an operator's
 //!   reclaim and an ended hold do not count as held.
 //! - The refusal gate is shared with the DHCPv4 store: a refusing store closes both
@@ -155,23 +156,26 @@ fn start6(
     (lease_store, leases, stop, task)
 }
 
-/// Waits for `count` completions, at most `bound`.
+/// Waits for `count` completions, at most `bound`, and for the asynchronous writer to have
+/// written their history rows (ADR 0030).
 async fn completions(store: &StoreLeases6, count: usize, bound: Duration) -> Vec<Completion> {
     let deadline = tokio::time::Instant::now() + bound;
     let mut out = Vec::new();
     loop {
         store.completions6(&mut out);
         if out.len() >= count {
-            return out;
+            break;
         }
         if tokio::time::timeout_at(deadline, store.completed())
             .await
             .is_err()
         {
             store.completions6(&mut out);
-            return out;
+            break;
         }
     }
+    store.derived().flush().await;
+    out
 }
 
 type Leases = BTreeMap<(VrfId, Ipv6Addr), (Lease6, Revision)>;
@@ -248,11 +252,13 @@ async fn one_change_with_two_bindings_commits_two_rows_and_two_history_rows_at_o
         assert_eq!(leases.read().get(vrf, address), Some(lease));
         assert_eq!(leases.read().row_revision(vrf, address), Some(revision));
     }
-    // Two history rows, in the same revision, of kind granted.
+    // Two history rows, in one later revision (the writer's batch), of kind granted.
     let history = history_rows(store.as_ref()).await;
     assert_eq!(history.len(), 2);
+    assert_eq!(history[0].1, history[1].1, "one batch of the writer");
     for (event, at) in &history {
-        assert_eq!(*at, revision);
+        assert!(*at > revision, "after the lease commit");
+
         assert_eq!(event.kind, LeaseEventKind::Granted);
         assert_eq!(event.at, cltt);
         assert_eq!(event.vrf, vrf);

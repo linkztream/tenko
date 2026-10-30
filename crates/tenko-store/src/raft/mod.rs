@@ -35,10 +35,14 @@
 //!
 //! # Snapshots, purge and recovery
 //!
-//! A maintenance task builds a snapshot when [`SnapshotPolicy::every_entries`] entries or
-//! [`SnapshotPolicy::every_log_bytes`] bytes of log have accumulated since the last one;
-//! openraft then purges the log behind it, keeping [`SnapshotPolicy::keep_entries`]
-//! (snapshot-and-purge, ADR 0002 condition 4). Opening replays the log into the state
+//! A maintenance task builds a snapshot when [`SnapshotPolicy::every_entries`] entries
+//! have been applied since the last one, or [`SnapshotPolicy::every_log_bytes`] bytes of log
+//! as a sanity bound; openraft then purges the log behind it, keeping
+//! [`SnapshotPolicy::keep_entries`] (snapshot-and-purge, ADR 0002 condition 4). The build
+//! streams a redb read transaction (an MVCC view) to a file on a blocking task beside the
+//! apply path, and the trigger waits while the commit queue is deep, at most
+//! [`SNAPSHOT_MAX_DEFERRAL`] ([`snapshot_decision`], ADR 0030). On a single node the
+//! snapshot serves only the log's compaction. Opening replays the log into the state
 //! machine before it returns, verifies the head of the audit chain (or all of it,
 //! [`RaftStoreConfig::verify_full_audit_chain`]) and, should the durable state ever lag
 //! behind the purged log, reinstalls the current snapshot first.
@@ -95,7 +99,9 @@ pub mod network;
 pub mod types;
 
 mod apply;
+// WP9.6: what goes to disk is compressed (ADR 0030).
 mod coalescer;
+mod compress;
 mod index;
 mod leadership;
 mod sm;
@@ -249,8 +255,10 @@ pub enum SmDurability {
 pub struct SnapshotPolicy {
     /// Build a snapshot after this many applied entries since the last one.
     pub every_entries: u64,
-    /// Build a snapshot after this many bytes of appended log since the last one.
+    /// Build a snapshot after this many bytes of appended log since the last one: a
+    /// sanity bound above `every_entries` entries of the bounded entry size (ADR 0030).
     pub every_log_bytes: u64,
+
     /// Log entries kept behind the snapshot when the log is purged (a lagging follower
     /// within this distance catches up from the log instead of a snapshot).
     pub keep_entries: u64,
@@ -260,7 +268,10 @@ impl Default for SnapshotPolicy {
     fn default() -> Self {
         Self {
             every_entries: 10_000,
-            every_log_bytes: 64 * 1024 * 1024,
+            // WP9.6 (ADR 0030): a sanity bound sized to the entry. 64 MiB fired every 600
+            // entries when a lease commit's entry had grown to 82 KB; 10,000 entries of the
+            // bounded 64 KiB entry are 640 MiB.
+            every_log_bytes: 1024 * 1024 * 1024,
             keep_entries: 1_000,
         }
     }
@@ -286,6 +297,23 @@ impl Default for RaftTimings {
         }
     }
 }
+
+// WP9.6 (ADR 0030): the group commit's bound.
+/// The coalescer limits of a Raft store: group commit with a bound (ADR 0030). While an
+/// entry is being made durable, the batches that arrive wait and go into the next one, so
+/// a lone batch at idle is never delayed and the batches per entry follow the load; the
+/// bound keeps one entry at 128 batches and 64 KiB at most (a single larger batch, a bulk
+/// import, still travels alone), so no entry's append and apply holds up the commits
+/// behind it for long. With four entries in flight the store holds up to 512 batches in
+/// flight, the lease committer's own limit. The bound bites only when the batches arrive
+/// faster than about 128 per fsync, far above the M26 rates: there the commits queue in
+/// the next entries instead of growing one.
+pub const ENTRY_BOUND: CoalescerConfig = CoalescerConfig {
+    max_batches_per_entry: 128,
+    max_entry_bytes: 64 * 1024,
+    max_inflight_entries: 4,
+    max_batch_bytes: 16 * 1024 * 1024,
+};
 
 /// Configuration of a [`RaftStore`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -346,7 +374,7 @@ impl RaftStoreConfig {
             node_id: NodeId(1),
             address: String::new(),
             bootstrap: true,
-            coalescer: CoalescerConfig::default(),
+            coalescer: ENTRY_BOUND,
             journal_retention: 100_000,
             journal_max_bytes: 32 * 1024 * 1024,
             watch_max_lag: 10_000,
@@ -918,9 +946,7 @@ impl RaftStore {
     /// Write batches queued for the coalescer and not taken yet (0 once the store closed),
     /// for the metrics gauge of the queue depth.
     pub fn coalescer_queue_depth(&self) -> usize {
-        lock(&self.inner.queue)
-            .as_ref()
-            .map_or(0, |queue| queue.max_capacity() - queue.capacity())
+        self.inner.queue_depth()
     }
 
     /// Bytes on disk and the state file ratio, from the size cache.
@@ -1141,7 +1167,7 @@ impl RaftStore {
             None => None,
         };
         match inner
-            .queue_local(ProposedBatch { batch, fingerprint })
+            .queue_local(ProposedBatch { batch, fingerprint }, false)
             .await
         {
             Ok(committed) => Ok(committed),
@@ -1620,25 +1646,45 @@ impl Inner {
         self.config.node_id.0
     }
 
+    /// Batches queued for the coalescer and not in an entry yet: those in the channel and
+    /// those the coalescer took out to choose between the classes (0 once closed).
+    fn queue_depth(&self) -> usize {
+        lock(&self.queue).as_ref().map_or(0, |queue| {
+            queue.max_capacity() - queue.capacity() + self.coalescer.waiting.load(Ordering::Relaxed)
+        })
+    }
+
     fn leader(&self) -> Option<RaftNodeId> {
         self.raft.metrics().borrow().current_leader
     }
 
     /// Queues an encoded batch to this node's coalescer and waits for its answer, in the
     /// span `tenko.store.coalesce` (from the enqueue to the commit notification).
-    async fn queue_local(&self, batch: ProposedBatch) -> Result<Committed, Refused> {
-        self.queue_and_wait(batch)
+    async fn queue_local(
+        &self,
+        batch: ProposedBatch,
+        background: bool,
+    ) -> Result<Committed, Refused> {
+        self.queue_and_wait(batch, background)
             .instrument(tracing::info_span!("tenko.store.coalesce"))
             .await
     }
 
-    async fn queue_and_wait(&self, batch: ProposedBatch) -> Result<Committed, Refused> {
+    async fn queue_and_wait(
+        &self,
+        batch: ProposedBatch,
+        background: bool,
+    ) -> Result<Committed, Refused> {
         let sender = lock(&self.queue)
             .clone()
             .ok_or(Refused::Store(StoreError::ShuttingDown))?;
         let (reply, answer) = oneshot::channel();
         sender
-            .send(Queued { batch, reply })
+            .send(Queued {
+                batch,
+                reply,
+                background,
+            })
             .await
             .map_err(|_| Refused::Store(StoreError::ShuttingDown))?;
         drop(sender);
@@ -1715,11 +1761,12 @@ impl Inner {
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
+        background: bool,
     ) -> Result<Committed, StoreError> {
         let span = propose_span(encoded.len());
         let mut route = Route::default();
         let result = self
-            .propose_routed(encoded, fingerprint, &mut route)
+            .propose_routed(encoded, fingerprint, background, &mut route)
             .instrument(span.clone())
             .await;
         if let Some(leader) = route.leader {
@@ -1743,6 +1790,7 @@ impl Inner {
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
+        background: bool,
         route: &mut Route,
     ) -> Result<Committed, StoreError> {
         let started = Instant::now();
@@ -1765,7 +1813,7 @@ impl Inner {
                         batch: encoded.clone(),
                         fingerprint,
                     };
-                    match self.queue_local(batch).await {
+                    match self.queue_local(batch, background).await {
                         Ok(committed) => return Ok(committed),
                         Err(Refused::Store(error)) => return Err(error),
                         // openraft refused the entry: nothing was appended.
@@ -1906,6 +1954,30 @@ fn remove_when_released(dir: &std::path::Path) {
     }
 }
 
+impl RaftStore {
+    /// [`Store::propose`] in the foreground or the background class of the coalescer.
+    async fn propose_class(
+        &self,
+        batch: WriteBatch,
+        background: bool,
+    ) -> Result<Committed, StoreError> {
+        let started = Instant::now();
+        let inner = &self.inner;
+        inner.check_running()?;
+        batch.validate(inner.config.coalescer.max_batch_bytes)?;
+        let fingerprint = match &batch.idempotency {
+            Some(_) => Some(batch.fingerprint()?),
+            None => None,
+        };
+        let encoded = to_cbor(&batch)?;
+        let committed = inner
+            .propose_encoded(encoded, fingerprint, background)
+            .await?;
+        COMMIT_DURATION.observe(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
+        Ok(committed)
+    }
+}
+
 /// Periodic work: cached sizes, durable checkpoints and the snapshot trigger.
 async fn maintain(inner: Weak<Inner>) {
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -1914,6 +1986,7 @@ async fn maintain(inner: Weak<Inner>) {
     let mut last_checkpoint = Instant::now();
     let mut last_trigger: Option<Instant> = None;
     let mut log_bytes_at_snapshot: Option<u64> = None;
+    let mut deferred_since: Option<Instant> = None;
     loop {
         tick.tick().await;
         let Some(inner) = inner.upgrade() else {
@@ -1949,32 +2022,93 @@ async fn maintain(inner: Weak<Inner>) {
         let log_bytes = inner.log.stats().appended_bytes;
         let since_bytes = log_bytes.saturating_sub(*log_bytes_at_snapshot.get_or_insert(log_bytes));
         let policy = inner.config.snapshot;
-        let due = applied.saturating_sub(snapshot) >= policy.every_entries
-            || since_bytes >= policy.every_log_bytes;
         let settled = last_trigger.is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
-        if due && settled {
-            last_trigger = Some(Instant::now());
-            log_bytes_at_snapshot = Some(log_bytes);
-            let _ = inner.raft.trigger().snapshot().await;
+        let queued = inner.queue_depth();
+        let decision = snapshot_decision(
+            &policy,
+            applied.saturating_sub(snapshot),
+            since_bytes,
+            queued,
+            inner.config.coalescer.max_batches_per_entry,
+            deferred_since.map(|at| at.elapsed()),
+        );
+        match decision {
+            SnapshotDecision::NotDue => deferred_since = None,
+            SnapshotDecision::Defer => {
+                deferred_since.get_or_insert_with(Instant::now);
+            }
+            SnapshotDecision::Build if settled => {
+                last_trigger = Some(Instant::now());
+                log_bytes_at_snapshot = Some(log_bytes);
+                let deferred = deferred_since.take().map_or(0, |at| {
+                    u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX)
+                });
+                inner
+                    .sm
+                    .stats()
+                    .deferred_ms
+                    .store(deferred, Ordering::Relaxed);
+                let _ = inner.raft.trigger().snapshot().await;
+            }
+            SnapshotDecision::Build => {}
         }
+    }
+}
+
+// WP9.6 (ADR 0030): the snapshot policy.
+/// The longest time a due snapshot waits for the commit queue to drain.
+pub const SNAPSHOT_MAX_DEFERRAL: Duration = Duration::from_secs(30);
+
+/// What the maintenance task does about the snapshot at one tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotDecision {
+    /// Not due.
+    NotDue,
+    /// Due, held back while the commit queue is deep.
+    Defer,
+    /// Build now.
+    Build,
+}
+
+/// The snapshot policy (ADR 0030): a snapshot is due after
+/// [`SnapshotPolicy::every_entries`] applied entries, or, as a sanity bound for entries far
+/// larger than they should be, after [`SnapshotPolicy::every_log_bytes`] of log. A due
+/// snapshot is deferred while more batches wait for the coalescer than one entry takes
+/// (`entry_batches`): its build reads an MVCC view on a background task and never sits in
+/// the apply or commit path, but it competes for the disk the log's fsyncs need. It is
+/// built anyway after [`SNAPSHOT_MAX_DEFERRAL`], or once twice the entries are due, so a
+/// store under endless load still compacts its log.
+pub fn snapshot_decision(
+    policy: &SnapshotPolicy,
+    entries_since: u64,
+    log_bytes_since: u64,
+    queued_batches: usize,
+    entry_batches: usize,
+    deferred_for: Option<Duration>,
+) -> SnapshotDecision {
+    let due = entries_since >= policy.every_entries || log_bytes_since >= policy.every_log_bytes;
+    if !due {
+        return SnapshotDecision::NotDue;
+    }
+    let deep = queued_batches > entry_batches.max(1);
+    let overdue = deferred_for.is_some_and(|waited| waited >= SNAPSHOT_MAX_DEFERRAL)
+        || entries_since >= policy.every_entries.saturating_mul(2);
+    if deep && !overdue {
+        SnapshotDecision::Defer
+    } else {
+        SnapshotDecision::Build
     }
 }
 
 #[async_trait::async_trait]
 impl Store for RaftStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
-        let started = Instant::now();
-        let inner = &self.inner;
-        inner.check_running()?;
-        batch.validate(inner.config.coalescer.max_batch_bytes)?;
-        let fingerprint = match &batch.idempotency {
-            Some(_) => Some(batch.fingerprint()?),
-            None => None,
-        };
-        let encoded = to_cbor(&batch)?;
-        let committed = inner.propose_encoded(encoded, fingerprint).await?;
-        COMMIT_DURATION.observe(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
-        Ok(committed)
+        self.propose_class(batch, false).await
+    }
+
+    // WP9.6 (ADR 0030): the background class of the coalescer.
+    async fn propose_background(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        self.propose_class(batch, true).await
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {

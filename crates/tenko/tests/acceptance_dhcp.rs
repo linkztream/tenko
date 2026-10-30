@@ -288,7 +288,15 @@ fn the_dhcp_role_answers_dora_and_serves_the_same_leases_after_a_restart() {
     let one = api.get(&format!("/dhcp/leases/{first}")).expect(200);
     assert_eq!(one["addr"], first.to_string());
     api.get("/dhcp/leases/192.0.2.250").expect(404);
-    let history = api.get("/dhcp/history").expect(200);
+    // ADR 0030: the history row follows the lease within the writer's interval (250 ms).
+    let mut history = api.get("/dhcp/history").expect(200);
+    for _ in 0..40 {
+        if history["items"][0]["kind"] == "granted" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        history = api.get("/dhcp/history").expect(200);
+    }
     assert_eq!(history["items"][0]["kind"], "granted", "{history}");
     assert_eq!(history["items"][0]["addr"], first.to_string());
     let node_leases = api

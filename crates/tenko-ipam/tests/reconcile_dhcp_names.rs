@@ -383,3 +383,81 @@ async fn lease_facts_alone_make_a_light_run() {
         .expect("full run");
     assert_eq!(lab.reconciler.rule_passes(), rules + 2);
 }
+
+/// ADR 0030: the `dhcp` role's asynchronous writer flushes the facts of many lease changes
+/// in one batch of its own, without the lease rows; that batch is a change set of lease
+/// facts like the per-lease ones before it: it makes a light run, and the waiting moves are
+/// confirmed by it.
+#[tokio::test]
+async fn the_writers_batch_of_lease_facts_makes_a_light_run() {
+    use std::time::Duration;
+
+    use tenko_core::{
+        NodeId, PrefixId, Principal, VrfId,
+        dhcp::{BindingState, ClientKey, DdnsState, Lease},
+        serde_util::HexBytes,
+    };
+    use tenko_ipam::observe::{ObserveConfig, dhcp::LeaseFacts};
+    use tenko_store::WriteBatch;
+
+    let lab = lab().await;
+    lab.reconciler
+        .reconcile(Timestamp::now())
+        .await
+        .expect("full run");
+    lab.changed_run().await;
+    let (rules, dns) = (lab.reconciler.rule_passes(), lab.reconciler.dns_passes());
+
+    let store = Arc::new(lab.store.clone()) as Arc<dyn Store>;
+    let facts = LeaseFacts::new(NodeId(1), ObserveConfig::default());
+    facts.register(store.as_ref()).expect("register");
+    let (vrf, scope) = (VrfId::generate(), PrefixId::generate());
+    let now = Timestamp::now();
+    let mut flush = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+    for last in 60..90u8 {
+        let lease = Lease {
+            addr: std::net::Ipv4Addr::new(192, 0, 2, last),
+            vrf,
+            scope,
+            client: ClientKey {
+                htype: 1,
+                chaddr: HexBytes(vec![0, 0, 0x5e, 0, 0x53, last]),
+                client_id: None,
+            },
+            state: BindingState::Active,
+            cltt: now,
+            ends: now.checked_add(Duration::from_secs(3_600)).expect("end"),
+            tstp: None,
+            tsfp: None,
+            atsfp: None,
+            node: NodeId(1),
+            share: None,
+            hostname: Some(format!("client{last}")),
+            fqdn: None,
+            fqdn_flags: None,
+            ddns_policy: None,
+            ddns: DdnsState::default(),
+            fingerprint: None,
+            relay: None,
+            observed_at: None,
+        };
+        let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+        facts.observe(&lease, now, &mut derived).expect("observe");
+        // The committer hands the facts to the index at once, the writer's flush follows.
+        facts.note_written(&derived);
+        flush.mutations.extend(derived.mutations);
+    }
+    assert!(
+        flush.mutations.len() >= 30,
+        "the facts of thirty leases in one batch"
+    );
+    store.propose(flush).await.expect("the writer's flush");
+    assert_eq!(
+        facts.len(),
+        60,
+        "the address and name facts of thirty leases"
+    );
+    lab.changed_run().await;
+    assert_eq!(lab.reconciler.rule_passes(), rules, "a light run");
+    assert_eq!(lab.reconciler.dns_passes(), dns);
+}

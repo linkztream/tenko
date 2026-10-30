@@ -316,6 +316,8 @@ pub fn register(registry: &Registry) {
     registry.register(&lease::EXPIRED);
     registry.register(&lease::HISTORY_ROWS);
     registry.register(&lease::HISTORY_PURGED);
+    // WP9.6: the asynchronous writer of the history and the facts.
+    crate::lease::derived::register(registry);
 }
 
 #[cfg(test)]
@@ -336,7 +338,8 @@ mod tests {
                 desc.name
             );
         }
-        assert_eq!(names.len(), families::ALL.len() + 3);
+        // The three families of expiry and history, and the four of the derived writer.
+        assert_eq!(names.len(), families::ALL.len() + 3 + 4);
         // Without a role the families read nothing but zeros.
         let snapshot = registry.snapshot();
         let leases = snapshot.family("tenko_dhcp_leases").expect("family");

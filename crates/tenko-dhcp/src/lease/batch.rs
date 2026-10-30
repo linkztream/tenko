@@ -1,18 +1,20 @@
-//! The lease change as one store batch (plan section 2.1, ADR 0019 point 3): the lease row,
-//! the client index rows it moves, the history row and the IPAM observation fact, committed
-//! as one transaction with one revision.
+//! The lease change as store batches (plan section 2.1, ADR 0019 point 3, ADR 0030): the
+//! lease row and the client index rows it moves, committed before the ACK as one
+//! transaction with one revision; and the rows derived from it, the history row and the
+//! IPAM observation facts, built at the same time against the same row but written by the
+//! asynchronous writer ([`super::derived`]) once the lease committed.
 //!
 //! [`build`] runs on the committer's side, after the hand-off: it completes a
 //! [`PendingChange`] into the row with the fields of the row held before
 //! ([`PendingChange::to_lease`]), refuses a change that would take an address another
 //! client still holds (the last guard of "no address on two clients"), and writes:
 //!
-//! | Table | Key | Value |
-//! |---|---|---|
-//! | `dhcp.leases` | VRF, address | the row after the change |
-//! | `dhcp.leases.by_client` | scope, client identity | the client's latest row; the previous holder's entry moved or removed |
-//! | `dhcp.history` | time, VRF, address | the [`LeaseEvent`](tenko_core::dhcp::LeaseEvent) |
-//! | IPAM observations | the hook's | the fact of `dhcp:<node>` ([`ObservationHook`], WP8.1) |
+//! | Batch | Table | Key | Value |
+//! |---|---|---|---|
+//! | synchronous | `dhcp.leases` | VRF, address | the row after the change |
+//! | synchronous | `dhcp.leases.by_client` | scope, client identity | the client's latest row; the previous holder's entry moved or removed |
+//! | derived | `dhcp.history` | time, VRF, address | the [`LeaseEvent`](tenko_core::dhcp::LeaseEvent) |
+//! | derived | IPAM observations | the hook's | the facts of `dhcp:<node>` ([`ObservationHook`], WP8.1) |
 //!
 //! The principal is `system:dhcp`; the role's lease commits are not audited one by one (the
 //! history is their record, `docs/dhcp-contracts.md` section 7).
@@ -42,6 +44,12 @@ pub trait ObservationHook: Send + Sync {
         previous: Option<&Lease>,
         batch: &mut WriteBatch,
     ) -> Result<Option<Timestamp>, StoreError>;
+
+    /// The lease of a derived batch this hook filled committed and the batch goes to the
+    /// asynchronous writer (ADR 0030): the hook takes its facts as written, so that the
+    /// next change of the address is judged against them and not against the store, which
+    /// has them only after the flush.
+    fn committed(&self, _derived: &WriteBatch) {}
 }
 
 /// No observation facts (the lease tests, and a role started without the hook).
@@ -71,11 +79,14 @@ pub enum BuildError {
     Encode(String),
 }
 
-/// A built batch and the row it writes.
+/// A built change: the synchronous batch, the derived one and the row it writes.
 #[derive(Debug, Clone)]
 pub struct LeaseBatch {
-    /// The batch.
+    /// The synchronous batch: the lease row and the client index rows (DHCP-17).
     pub batch: WriteBatch,
+    /// The derived rows, the history row and the observation facts, for the asynchronous
+    /// writer once `batch` committed (ADR 0030).
+    pub derived: WriteBatch,
     /// The lease row after the change, for the table once the batch commits.
     pub lease: Lease,
 }
@@ -132,7 +143,11 @@ pub fn build(
     }
     let encode = |error: StoreError| BuildError::Encode(error.to_string());
     let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-    if let Some(observed) = hook.observe(&lease, previous, &mut batch).map_err(encode)? {
+    let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+    if let Some(observed) = hook
+        .observe(&lease, previous, &mut derived)
+        .map_err(encode)?
+    {
         lease.observed_at = Some(observed);
     }
     batch
@@ -153,8 +168,12 @@ pub fn build(
     }
     let mut event = change.to_event(node);
     event.at = lease.cltt;
-    batch
+    derived
         .put_typed(&tables::HISTORY, &(event.at, event.vrf, event.addr), &event)
         .map_err(encode)?;
-    Ok(LeaseBatch { batch, lease })
+    Ok(LeaseBatch {
+        batch,
+        derived,
+        lease,
+    })
 }

@@ -36,7 +36,12 @@ use super::{
     store::{Lease6Store, held_by_other6},
 };
 use crate::{
-    lease::{CommitSettings, CommitStats, metrics, refusal::RefusalGate},
+    lease::{
+        CommitSettings, CommitStats,
+        derived::{DerivedFlusher, DerivedWriter},
+        metrics,
+        refusal::RefusalGate,
+    },
     store::{CommitError, Completion, SubmitError, Ticket},
 };
 
@@ -54,6 +59,11 @@ pub trait Observation6Hook: Send + Sync {
         previous: Option<&Lease6>,
         batch: &mut WriteBatch,
     ) -> Result<Option<Timestamp>, StoreError>;
+
+    /// The lease of a derived batch this hook filled committed and the batch goes to the
+    /// asynchronous writer (ADR 0030); see
+    /// [`ObservationHook::committed`](crate::lease::batch::ObservationHook::committed).
+    fn committed6(&self, _derived: &WriteBatch) {}
 }
 
 /// No observation facts.
@@ -82,9 +92,10 @@ pub enum Build6Error {
     Encode(String),
 }
 
-/// Builds the batch of one change: per binding the row (completed from the row held
-/// before) and its history row, and the observation facts. `previous` gives the row the
-/// table holds at an address.
+/// Builds the batches of one change (ADR 0030): the synchronous one with the row of each
+/// binding (completed from the row held before), and the derived one with each binding's
+/// history row and the observation facts, for the asynchronous writer. `previous` gives the
+/// row the table holds at an address.
 ///
 /// # Errors
 ///
@@ -96,7 +107,7 @@ pub fn build<'t>(
     previous: impl Fn(&super::Binding6) -> Option<&'t Lease6>,
     hook: &dyn Observation6Hook,
     now: Timestamp,
-) -> Result<(WriteBatch, Vec<Lease6>), Build6Error> {
+) -> Result<(WriteBatch, WriteBatch, Vec<Lease6>), Build6Error> {
     if change
         .bindings()
         .iter()
@@ -106,6 +117,7 @@ pub fn build<'t>(
     }
     let encode = |error: StoreError| Build6Error::Encode(error.to_string());
     let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+    let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
     let mut rows = Vec::with_capacity(change.bindings().len());
     for binding in change.bindings() {
         let held = previous(binding);
@@ -116,7 +128,7 @@ pub fn build<'t>(
         {
             lease.cltt = held.cltt;
         }
-        if let Some(observed) = hook.observe6(&lease, held, &mut batch).map_err(encode)? {
+        if let Some(observed) = hook.observe6(&lease, held, &mut derived).map_err(encode)? {
             lease.observed_at = Some(observed);
         }
         let key = (lease.vrf, lease.addr6());
@@ -129,7 +141,7 @@ pub fn build<'t>(
         // the one learned before).
         event.link_layer.clone_from(&lease.link_layer);
         event.link_layer_type = lease.link_layer_type;
-        batch
+        derived
             .put_typed(
                 &tables::HISTORY6,
                 &(event.at, event.vrf, event.addr),
@@ -138,7 +150,7 @@ pub fn build<'t>(
             .map_err(encode)?;
         rows.push(lease);
     }
-    Ok((batch, rows))
+    Ok((batch, derived, rows))
 }
 
 #[derive(Debug, Default)]
@@ -168,6 +180,8 @@ struct Shared {
     gate: Arc<RefusalGate>,
     leases: SharedLeases6,
     counters: Counters,
+    // WP9.6: the writer of the derived rows.
+    derived: DerivedWriter,
 }
 
 impl Shared {
@@ -201,6 +215,7 @@ pub struct Committer6 {
     hook: Arc<dyn Observation6Hook>,
     settings: CommitSettings,
     hasher: RandomState,
+    flusher: Option<DerivedFlusher>,
 }
 
 impl std::fmt::Debug for Committer6 {
@@ -224,6 +239,7 @@ impl StoreLeases6 {
         gate: Arc<RefusalGate>,
     ) -> (Self, Committer6) {
         let capacity = settings.queue.max(1);
+        let (derived, flusher) = DerivedWriter::new(Arc::clone(&store), settings.derived);
         let shared = Arc::new(Shared {
             node,
             capacity: AtomicUsize::new(capacity),
@@ -234,6 +250,7 @@ impl StoreLeases6 {
             gate,
             leases,
             counters: Counters::default(),
+            derived,
         });
         (
             Self {
@@ -245,8 +262,15 @@ impl StoreLeases6 {
                 hook,
                 settings,
                 hasher: RandomState::new(),
+                flusher: Some(flusher),
             },
         )
+    }
+
+    // WP9.6: the writer of the history rows and the facts.
+    /// The asynchronous writer of the derived rows (ADR 0030).
+    pub fn derived(&self) -> &DerivedWriter {
+        &self.shared.derived
     }
 
     /// The table the committer applies its commits to.
@@ -375,9 +399,22 @@ impl Committer6 {
         keys
     }
 
-    /// Runs until `stop` fires; then waits for the batches in flight and fails the changes
-    /// still queued.
-    pub async fn run(self, stop: CancellationToken) {
+    /// Runs until `stop` fires; then waits for the batches in flight, fails the changes
+    /// still queued and lets the writer of the derived rows flush what it holds.
+    pub async fn run(mut self, stop: CancellationToken) {
+        let flushing = CancellationToken::new();
+        let writer = self
+            .flusher
+            .take()
+            .map(|flusher| tokio::spawn(flusher.run(flushing.clone())));
+        self.commit_loop(stop).await;
+        flushing.cancel();
+        if let Some(writer) = writer {
+            let _ = writer.await;
+        }
+    }
+
+    async fn commit_loop(&self, stop: CancellationToken) {
         let mut inflight: InFlight = FuturesUnordered::new();
         let mut busy: HashSet<u64> = HashSet::new();
         let mut deferred: VecDeque<Queued> = VecDeque::new();
@@ -469,7 +506,7 @@ impl Committer6 {
                 now,
             )
         };
-        let (batch, rows) = match built {
+        let (batch, derived, rows) = match built {
             Ok(built) => built,
             Err(error) => {
                 if error == Build6Error::HeldByOther {
@@ -485,6 +522,7 @@ impl Committer6 {
         };
         let shared = Arc::clone(&self.shared);
         let store = Arc::clone(&self.store);
+        let hook = Arc::clone(&self.hook);
         let deadline = tokio::time::Instant::from_std(queued.at + self.settings.commit_wait);
         let wait = self.settings.commit_wait;
         let (ticket, at) = (queued.ticket, queued.at);
@@ -508,7 +546,6 @@ impl Committer6 {
             };
             match result {
                 Ok(committed) => {
-                    let count = u64::try_from(rows.len()).unwrap_or(u64::MAX);
                     {
                         let mut table = shared.leases.write();
                         for row in rows {
@@ -520,7 +557,10 @@ impl Committer6 {
                     shared.counters.committed.fetch_add(1, Ordering::Relaxed);
                     metrics::COMMIT_DURATION
                         .observe(u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX));
-                    metrics::HISTORY_WRITTEN.fetch_add(count, Ordering::Relaxed);
+                    // ADR 0030: the history rows and the facts go to the writer before the
+                    // ticket completes (a push, never a wait).
+                    hook.committed6(&derived);
+                    shared.derived.push(derived);
                     if !late {
                         shared.complete(ticket, Ok(committed.revision));
                     }

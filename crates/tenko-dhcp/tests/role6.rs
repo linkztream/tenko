@@ -656,6 +656,8 @@ impl Fixture {
     }
 
     async fn history(&self, address: Ipv6Addr) -> Vec<LeaseEventKind> {
+        // ADR 0030: the history rows follow the lease in a batch of the writer.
+        self.node.lease_store6().derived().flush().await;
         let view = self
             .store
             .read(ReadConsistency::Local)
