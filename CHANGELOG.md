@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-10-31
+
 ### Changed
 
 - The store's snapshots follow the entries, not the size of the log (OPS-26, DHCP-17, DNS-11; ADR 0030): `[store] snapshot_every_log_mib` is a sanity bound of 1,024 MiB by default instead of a trigger of 64 MiB, which fired every 600 entries once a lease commit's entries had grown and wrote a full copy of the state every few seconds (the storms of the lab's DHCP and DDNS runs). A due snapshot waits up to 30 s while the commit queue is deep, and the log line `store snapshot built` names its duration and the wait. The Raft log records and the snapshot files are compressed on their way to disk (raw DEFLATE): a snapshot of 4.17 MB of rows is 501 KB. A node of this version sends snapshots that an earlier version cannot install; the members of a cluster are upgraded together. The coalescer's group commit packs at most 128 batches and 64 KiB into one Raft entry instead of 1,000 and 8 MiB.

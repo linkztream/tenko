@@ -7,7 +7,7 @@
       "name": "BUSL-1.1",
       "identifier": "BUSL-1.1"
     },
-    "version": "0.0.9"
+    "version": "0.0.10"
   },
   "paths": {
     "/api/v1/access/grants": {

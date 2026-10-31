@@ -1,6 +1,6 @@
 [package]
 name = "tenko-connect-unifi"
-version = "0.0.9"
+version = "0.0.10"
 description = "UniFi Network reference plugin (network controller)"
 edition.workspace = true
 rust-version.workspace = true

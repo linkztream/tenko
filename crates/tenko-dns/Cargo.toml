@@ -1,6 +1,6 @@
 [package]
 name = "tenko-dns"
-version = "0.0.9"
+version = "0.0.10"
 description = "DNS engine contracts: the wire codec, the zone feed, the index, the resolver and the policy, rate, upstream and log traits"
 edition.workspace = true
 rust-version.workspace = true

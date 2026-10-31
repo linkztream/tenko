@@ -1,6 +1,6 @@
 [package]
 name = "tenko-connect-hass"
-version = "0.0.9"
+version = "0.0.10"
 description = "Home Assistant reference plugin (inventory source)"
 edition.workspace = true
 rust-version.workspace = true
