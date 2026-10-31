@@ -81,4 +81,5 @@ The date is the date the ADR was written or last changed status.
 | [0027](0027-moving-clients-and-the-short-lease.md) | Moving clients and the short lease before a move | Proposed | 2026-10-26 |
 | [0028](0028-port-bounce-and-client-kick.md) | Bouncing a port and kicking a client after a move | Proposed | 2026-10-26 |
 | [0029](0029-an-agent-tool-with-guard-rails.md) | An agent tool with guard rails: `tenko mcp`, bounded reads, writes as proposals a person approves | Proposed | 2026-10-29 |
-| [0030](0030-durability-classes-of-the-lease-path.md) | Durability classes of the lease path: the lease row before the ACK, its history and facts within a second; group commit with a bound, snapshots by entries, compression on disk | Accepted | 2026-10-30 |
+| [0030](0030-durability-classes-of-the-lease-path.md) | Durability classes of the lease path: the lease row before the ACK, its history and facts within a second; group commit with a bound, snapshots by entries, compression on disk | Accepted (points 1 to 5 amended by ADR 0031) | 2026-10-30 |
+| [0031](0031-the-lease-table-is-the-observation-source.md) | The lease table is the DHCP observation source: no fact rows from DHCP, the reconciler reads the leases through a view, a lean history row, the grant time in the lease row | Accepted | 2026-10-31 |

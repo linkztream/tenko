@@ -6,7 +6,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use tenko_core::{
     NodeId, PrefixId, Principal, SystemComponent, Timestamp, VrfId,
-    dhcp::{BindingState, ClientKey, Lease6Event, LeaseEvent, LeaseEventKind, tables},
+    dhcp::{BindingState, ClientKey, HistoryRow, Lease6Event, LeaseEvent, LeaseEventKind, tables},
     net::Duid,
     serde_util::HexBytes,
 };
@@ -33,6 +33,8 @@ fn event4(second: i128, vrf: VrfId, scope: PrefixId) -> LeaseEvent {
         ends: at(second + 3_600),
         hostname: None,
         node: NodeId(1),
+        revision: None,
+        names: None,
     }
 }
 
@@ -62,7 +64,11 @@ async fn store(seconds4: &[i128], seconds6: &[i128]) -> MemStore {
     for second in seconds4 {
         let event = event4(*second, vrf, scope);
         batch
-            .put_typed(&tables::HISTORY, &(event.at, vrf, event.addr), &event)
+            .put_typed(
+                &tables::HISTORY,
+                &(event.at, vrf, event.addr),
+                &HistoryRow::of(&event),
+            )
             .expect("row");
     }
     for second in seconds6 {

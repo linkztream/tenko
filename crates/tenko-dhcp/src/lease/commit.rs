@@ -7,8 +7,8 @@
 //!
 //! 1. takes the queued changes in order and builds each ([`batch::build`]) from the row the
 //!    role's table holds for the address into the synchronous batch, the lease row and the
-//!    client index rows it moves, and the derived one, the history row and the observation
-//!    facts (ADR 0030);
+//!    client index rows it moves, and the history event, the derived row (ADR 0030; no
+//!    observation fact since ADR 0031);
 //! 2. proposes the batches concurrently, up to [`CommitSettings::max_in_flight`], so the
 //!    store's coalescer folds the waiting ones into one Raft entry and one fsync. Changes
 //!    that touch the same address or the same client (as new or as previous holder) are
@@ -52,7 +52,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     LeaseTable, PendingChange,
-    batch::{self, BuildError, NoObservations, ObservationHook},
+    batch::{self, BuildError},
     derived::{DerivedFlusher, DerivedSettings, DerivedWriter},
     metrics,
     refusal::RefusalGate,
@@ -165,7 +165,6 @@ pub struct StoreLeases {
 pub struct Committer {
     shared: Arc<Shared>,
     store: Arc<dyn Store>,
-    hook: Arc<dyn ObservationHook>,
     settings: CommitSettings,
     hasher: RandomState,
     flusher: DerivedFlusher,
@@ -181,23 +180,12 @@ impl std::fmt::Debug for Committer {
 
 impl StoreLeases {
     /// A lease store for `node` that commits to `store` and applies its commits to
-    /// `leases`, without observation facts; and its committer.
+    /// `leases`; and its committer.
     pub fn new(
         store: Arc<dyn Store>,
         leases: SharedLeases,
         node: NodeId,
         settings: CommitSettings,
-    ) -> (Self, Committer) {
-        Self::with_hook(store, leases, node, settings, Arc::new(NoObservations))
-    }
-
-    /// As [`StoreLeases::new`], with the hook that adds the observation facts (WP8.1).
-    pub fn with_hook(
-        store: Arc<dyn Store>,
-        leases: SharedLeases,
-        node: NodeId,
-        settings: CommitSettings,
-        hook: Arc<dyn ObservationHook>,
     ) -> (Self, Committer) {
         let capacity = settings.queue.max(1);
         let (derived, flusher) = DerivedWriter::new(Arc::clone(&store), settings.derived);
@@ -220,7 +208,6 @@ impl StoreLeases {
             Committer {
                 shared,
                 store,
-                hook,
                 settings,
                 hasher: RandomState::new(),
                 flusher,
@@ -228,9 +215,9 @@ impl StoreLeases {
         )
     }
 
-    // WP9.6: the writer of the history rows and the facts.
+    // WP9.6: the writer of the history rows.
     /// The asynchronous writer of the derived rows: [`DerivedWriter::flush`] waits until
-    /// the history and the facts of every change committed so far are written.
+    /// the history of every change committed so far is written.
     pub fn derived(&self) -> &DerivedWriter {
         &self.shared.derived
     }
@@ -374,14 +361,13 @@ impl Committer {
         let Self {
             shared,
             store,
-            hook,
             settings,
             hasher,
             flusher,
         } = self;
         let flushing = CancellationToken::new();
         let writer = tokio::spawn(flusher.run(flushing.clone()));
-        let committer = Self::parts(shared, store, hook, settings, hasher);
+        let committer = Self::parts(shared, store, settings, hasher);
         committer.commit_loop(stop).await;
         flushing.cancel();
         let _ = writer.await;
@@ -390,14 +376,12 @@ impl Committer {
     fn parts(
         shared: Arc<Shared>,
         store: Arc<dyn Store>,
-        hook: Arc<dyn ObservationHook>,
         settings: CommitSettings,
         hasher: RandomState,
     ) -> Running {
         Running {
             shared,
             store,
-            hook,
             settings,
             hasher,
         }
@@ -408,7 +392,6 @@ impl Committer {
 struct Running {
     shared: Arc<Shared>,
     store: Arc<dyn Store>,
-    hook: Arc<dyn ObservationHook>,
     settings: CommitSettings,
     hasher: RandomState,
 }
@@ -534,7 +517,6 @@ impl Running {
                 self.shared.node,
                 previous.as_ref(),
                 |lease| table.index_after(lease),
-                self.hook.as_ref(),
                 now,
             )
         };
@@ -554,11 +536,11 @@ impl Running {
         };
         let shared = Arc::clone(&self.shared);
         let store = Arc::clone(&self.store);
-        let hook = Arc::clone(&self.hook);
         let deadline = tokio::time::Instant::from_std(queued.at + self.settings.commit_wait);
         let wait = self.settings.commit_wait;
         let (ticket, at) = (queued.ticket, queued.at);
         Some(Box::pin(async move {
+            let proposed_at = built.batch.proposed_at;
             let mut propose = pin!(store.propose(built.batch));
             let mut late = false;
             let result = tokio::select! {
@@ -578,16 +560,24 @@ impl Running {
             };
             match result {
                 Ok(committed) => {
+                    let derived =
+                        batch::history_batch(&built.history, Some(committed.revision), proposed_at);
                     shared.leases.apply_at(built.lease, committed.revision);
                     shared.gate.committed();
                     shared.counters.committed.fetch_add(1, Ordering::Relaxed);
                     metrics::COMMIT_DURATION
                         .observe(u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX));
-                    // ADR 0030: the history row and the facts go to the writer (a push into
-                    // its queue, never a wait) before the ticket completes, so that a flush
-                    // after a completion covers it.
-                    hook.committed(&built.derived);
-                    shared.derived.push(built.derived);
+                    // ADR 0030: the history row goes to the writer (a push into its queue,
+                    // never a wait) before the ticket completes, so that a flush after a
+                    // completion covers it; ADR 0031: it names the commit's revision.
+                    match derived {
+                        Ok(derived) => {
+                            shared.derived.push(derived);
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "the history row of a lease change did not encode");
+                        }
+                    }
                     if !late {
                         shared.complete(ticket, Ok(committed.revision));
                     }

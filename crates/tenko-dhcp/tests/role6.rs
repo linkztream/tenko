@@ -1001,6 +1001,7 @@ async fn a_snapshot_install_keeps_the_dhcpv6_rows_and_the_role_keeps_serving() {
         fqdn_flags: None,
         relay: None,
         observed_at: None,
+        granted: None,
         ddns: tenko_core::dhcp::DdnsState::default(),
     };
     let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());

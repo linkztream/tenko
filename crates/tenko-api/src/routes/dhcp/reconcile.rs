@@ -69,15 +69,23 @@ pub(super) async fn get_ipam_reconcile(
             host: None,
         }));
     }
+    // ADR 0031: the lease view has followed this view first.
+    ipam.leases().caught_up(view.revision()).await;
     let now = Timestamp::now();
     let found = if readable.is_all() {
-        reconcile(view.as_ref(), &query, now)?
+        reconcile(view.as_ref(), Some(ipam.leases()), &query, now)?
     } else {
         // A row stands for its address: it is read where the address is in scope.
         let object = ObjectRef::new(ObjectKind::Observation, Uuid::nil());
-        reconcile_where(view.as_ref(), &query, now, &|row: &ReconcileRow| {
-            readable.admits_by(|index| index.anchors_of_ip(object, row.vrf, row.address))
-        })?
+        reconcile_where(
+            view.as_ref(),
+            Some(ipam.leases()),
+            &query,
+            now,
+            &|row: &ReconcileRow| {
+                readable.admits_by(|index| index.anchors_of_ip(object, row.vrf, row.address))
+            },
+        )?
     };
     Ok(Json(ReconcilePage {
         items: found.items,

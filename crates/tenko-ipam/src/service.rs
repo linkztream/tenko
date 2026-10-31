@@ -75,6 +75,8 @@ pub struct IpamService {
     config: IpamConfig,
     /// Per-prefix allocation queues with the revision of the last local allocation.
     alloc_locks: Mutex<HashMap<PrefixId, Arc<tokio::sync::Mutex<Revision>>>>,
+    // ADR 0031: the lease tables as the observation source `dhcp:<node>`.
+    leases: Arc<crate::observe::dhcp::LeaseFacts>,
 }
 
 impl std::fmt::Debug for IpamService {
@@ -105,6 +107,7 @@ impl IpamService {
             tree,
             config,
             alloc_locks: Mutex::new(HashMap::new()),
+            leases: crate::observe::dhcp::LeaseFacts::new(crate::observe::ObserveConfig::default()),
         }))
     }
 
@@ -131,6 +134,23 @@ impl IpamService {
     /// The prefix tree.
     pub fn tree(&self) -> &Arc<PrefixTree> {
         &self.tree
+    }
+
+    // ADR 0031: the lease view.
+    /// The lease view: the DHCP leases as the facts of the sources `dhcp:<node>`. Until
+    /// [`IpamService::follow_leases`] starts its follower, a reader builds it from its own
+    /// view when the view is newer.
+    pub fn leases(&self) -> &Arc<crate::observe::dhcp::LeaseFacts> {
+        &self.leases
+    }
+
+    /// Starts the follower of the lease view on the runtime (the server does, after it
+    /// gave the view its classifier), until `stop` fires.
+    pub fn follow_leases(
+        &self,
+        stop: tokio_util::sync::CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
+        self.leases.spawn(Arc::clone(&self.store), stop)
     }
 
     /// The limits.

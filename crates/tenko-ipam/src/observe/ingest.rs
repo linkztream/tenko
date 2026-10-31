@@ -248,6 +248,12 @@ fn plan_ingest(
     }
     let received = batch.received_at;
     for ((source, subject_key), observation) in latest {
+        // ADR 0031: the lease tables are the source `dhcp:<node>`; no fact row of it is
+        // written.
+        if super::source::is_lease_source(source) {
+            report.skipped += 1;
+            continue;
+        }
         if let FactSubject::Host { external_id } = FactSubject::of(&observation.subject)
             && external_id.trim().is_empty()
         {
@@ -331,6 +337,7 @@ fn plan_ingest(
         }
     }
     if batch.complete
+        && !super::source::is_lease_source(&batch_source)
         && let Some(facts) = existing.get(&batch_source)
     {
         for (subject_key, old) in facts {

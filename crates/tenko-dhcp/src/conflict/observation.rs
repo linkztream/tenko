@@ -10,9 +10,10 @@
 //! lease fact of the same source; IPAM's reconciler compares it with the other sources'
 //! sightings and intent and raises the conflict (IPAM-23), never resolving it on its own.
 //!
-//! [`conflict_observation`] builds the value from the abandoned row; the observation hook
-//! of the lease batch (WP8.1's, `ObservationHook`) writes it with the rules of
-//! `observe::ingest`, so the fact is exactly as durable as the row.
+//! [`conflict_observation`] builds the value from the abandoned row. Since ADR 0031 nothing
+//! stores it: the abandoned row is the observation, and IPAM's lease view
+//! (`tenko_ipam::observe::dhcp::LeaseFacts`) presents it as this fact, so the fact is exactly
+//! as durable as the row.
 
 use std::net::IpAddr;
 

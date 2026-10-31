@@ -951,7 +951,12 @@ fn lease() -> impl Strategy<Value = Lease> {
         maybe(timestamp()),
     );
     let names = (maybe(text()), maybe(text()));
-    let attachments = (maybe(fingerprint()), maybe(relay()), maybe(timestamp()));
+    let attachments = (
+        maybe(fingerprint()),
+        maybe(relay()),
+        maybe(timestamp()),
+        maybe(timestamp()),
+    );
     (
         ipv4(),
         (id(VrfId::from_uuid), id(PrefixId::from_uuid)),
@@ -979,7 +984,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 (node, share),
                 (hostname, fqdn),
                 ddns,
-                (fingerprint, relay, observed_at),
+                (fingerprint, relay, observed_at, granted),
             )| Lease {
                 addr,
                 vrf,
@@ -1001,6 +1006,7 @@ fn lease() -> impl Strategy<Value = Lease> {
                 fingerprint,
                 relay,
                 observed_at,
+                granted,
             },
         )
 }

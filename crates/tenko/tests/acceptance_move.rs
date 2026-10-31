@@ -1001,14 +1001,9 @@ impl DhcpLab {
             .to_owned()
     }
 
-    /// The value of `tenko_dhcp_lease_facts_total{outcome}`.
-    fn facts_counted(&self, outcome: &str) -> u64 {
-        let text = self.api().get("/metrics").text;
-        let prefix = format!("tenko_dhcp_lease_facts_total{{outcome=\"{outcome}\"}} ");
-        text.lines()
-            .find_map(|line| line.strip_prefix(&prefix))
-            .and_then(|value| value.trim().parse().ok())
-            .unwrap_or_else(|| panic!("no {prefix} in the metrics"))
+    /// The text of `/metrics`.
+    fn metrics(&self) -> String {
+        self.api().get("/metrics").text
     }
 }
 
@@ -1035,10 +1030,10 @@ fn e25_the_dhcp_step_is_automatic_for_reserved_devices_and_a_lease_confirms_the_
     assert_eq!(relay.dora(0x21, SOURCE_NET), addr("192.0.2.21"));
     assert_eq!(relay.dora(0x22, SOURCE_NET), addr("192.0.2.22"));
     assert!(in_pool(relay.dora(0x24, SOURCE_NET), SOURCE_NET));
-    // A renewal right after the grant writes no fact: it is counted as unchanged.
-    let unchanged = lab.facts_counted("unchanged");
+    // ADR 0031: a lease change writes no fact at all, a renewal included; the lease row is
+    // the observation, and the counter of the facts the lease batch wrote is gone.
     assert_eq!(relay.renew(0x20, SOURCE_NET, addr(OLD_IP)), addr(OLD_IP));
-    assert!(lab.facts_counted("unchanged") > unchanged);
+    assert!(!lab.metrics().contains("tenko_dhcp_lease_facts_total"));
 
     // The preview of the printer and cam2: the DHCP step automatic for both, the DNS step
     // automatic for the printer. Both hold their lease of a day in the source scope, whose

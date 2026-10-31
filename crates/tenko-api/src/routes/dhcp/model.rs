@@ -10,10 +10,11 @@ use tenko_core::{
     HostId, InterfaceId, NodeId, PrefixId, RangeId, Revision, Timestamp, VrfId,
     dhcp::{
         BindingState, Class, ClassId, ClientKey, Condition, DdnsPolicy, DdnsState, DhcpSettings,
-        ExclusionRange, Filter, FilterKind, Fingerprint, Lease, Lease6Kind, LeaseEventKind,
-        LeaseTimes, MacPattern, Match, OptionData, OptionDef, OptionKind, OptionLevel, OptionOwner,
-        OptionSpace, OptionValue, Policy, PolicyAction, PolicyId, PoolSettings, PoolShare,
-        Relay6Info, RelayInfo, ReservationWarning, Scope, SharedNetwork, SharedNetworkId,
+        ExclusionRange, Filter, FilterKind, Fingerprint, HistoryNames, Lease, Lease6Kind,
+        LeaseEventKind, LeaseTimes, MacPattern, Match, OptionData, OptionDef, OptionKind,
+        OptionLevel, OptionOwner, OptionSpace, OptionValue, Policy, PolicyAction, PolicyId,
+        PoolSettings, PoolShare, Relay6Info, RelayInfo, ReservationWarning, Scope, SharedNetwork,
+        SharedNetworkId,
     },
     ipam::{RangeRole, Stamp},
     net::{Duid, HostName, MacAddr},
@@ -849,9 +850,14 @@ pub struct DhcpLeaseItem {
     /// DHCPv6: what the relay closest to the client said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay6: Option<Relay6Info>,
-    /// When the IPAM observation fact of the lease was last written.
+    /// When the IPAM observation fact of the lease was last written (rows of the versions
+    /// that wrote lease facts; ADR 0031 ended them).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<Timestamp>,
+    // ADR 0031: the grant time of the binding.
+    /// When the current binding was first granted (a renewal keeps it); the client
+    /// transaction time for a row written before ADR 0031.
+    pub granted: Timestamp,
     /// The host IPAM knows for the client, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<HostId>,
@@ -965,6 +971,13 @@ pub struct DhcpHistoryItem {
     pub hostname: Option<String>,
     /// The node that wrote it.
     pub node: NodeId,
+    // ADR 0031: the lean history row keeps no names; the read joins them.
+    /// DHCPv4: where the host name comes from: the history row itself (`stored`, a row
+    /// written before the lean history), the lease row of the change (`lease`), the lease
+    /// row as it is now, still of the same client (`lease_now`), or nowhere because the
+    /// address went to another client or its row is gone (`unknown`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<HistoryNames>,
 }
 
 /// The filters of `GET /dhcp/history`.

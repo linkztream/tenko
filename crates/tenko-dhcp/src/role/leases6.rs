@@ -243,8 +243,6 @@ impl LocalNode {
     }
 
     async fn release6_row(&self, args: &Release6Args) -> Result<Lease6Row, CommandResult> {
-        // WP9.6: as for DHCPv4, the pending facts first.
-        self.lease_store6.derived().flush().await;
         let now = Timestamp::now();
         let vrf = self.vrf_of6(args.vrf, args.addr)?;
         let key = (vrf, args.addr);
@@ -270,7 +268,7 @@ impl LocalNode {
                 ),
             ));
         }
-        let mut row = Lease6 {
+        let row = Lease6 {
             state: BindingState::Released,
             ends: now,
             preferred_ends: now,
@@ -282,14 +280,7 @@ impl LocalNode {
             tenko_core::Principal::system(tenko_core::SystemComponent::Dhcp),
             now,
         );
-        // The release expires the lease's IPAM facts in the same batch.
-        if let Some(observed) = self
-            .observations6
-            .observe6(&row, Some(&lease), &mut batch)
-            .map_err(failed)?
-        {
-            row.observed_at = Some(observed);
-        }
+        // ADR 0031: no fact to expire; the released row is what IPAM reads.
         batch.expect_typed(&tables::LEASES6, &key, Some(revision));
         batch
             .put_typed(&tables::LEASES6, &key, &row)

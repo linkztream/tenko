@@ -3540,6 +3540,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "futures",
  "ipnet",
  "proptest",
  "rust_xlsxwriter",

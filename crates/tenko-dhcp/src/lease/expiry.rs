@@ -218,7 +218,8 @@ impl ExpiryService {
                 let event = LeaseEvent::of(&row, LeaseEventKind::Expired, now);
                 batch.expect_typed(&tables::LEASES, key, Some(revision));
                 batch.put_typed(&tables::LEASES, key, &row)?;
-                batch.put_typed(&tables::HISTORY, &(now, row.vrf, row.addr), &event)?;
+                // ADR 0031: the lean history row, in the batch of the lease row itself.
+                crate::lease::batch::put_history(&mut batch, &event, None)?;
                 rows.push(row);
             }
             if rows.is_empty() {

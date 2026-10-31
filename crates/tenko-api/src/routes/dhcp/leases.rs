@@ -480,6 +480,7 @@ fn item(row: role::LeaseRow) -> DhcpLeaseItem {
         fingerprint,
         relay,
         observed_at,
+        granted,
     } = row.lease;
     DhcpLeaseItem {
         family: DhcpFamily::V4,
@@ -512,6 +513,7 @@ fn item(row: role::LeaseRow) -> DhcpLeaseItem {
         relay,
         relay6: None,
         observed_at,
+        granted: granted.map_or(cltt, |granted| granted.min(cltt)),
         host: row.host,
         reserved: row.reserved,
         revision: row.revision,
@@ -544,6 +546,7 @@ fn item6(row: role::Lease6Row) -> DhcpLeaseItem {
         relay,
         observed_at,
         ddns,
+        granted,
     } = row.lease;
     DhcpLeaseItem {
         family: DhcpFamily::V6,
@@ -576,6 +579,7 @@ fn item6(row: role::Lease6Row) -> DhcpLeaseItem {
         relay: None,
         relay6: relay,
         observed_at,
+        granted: granted.map_or(cltt, |granted| granted.min(cltt)),
         host: row.host,
         reserved: row.reserved,
         revision: row.revision,
@@ -601,6 +605,7 @@ fn event_item(event: LeaseEvent) -> DhcpHistoryItem {
         ends: event.ends,
         hostname: event.hostname,
         node: event.node,
+        names: event.names,
     }
 }
 
@@ -624,6 +629,7 @@ fn event6_item(event: Lease6Event) -> DhcpHistoryItem {
         ends: event.ends,
         hostname: None,
         node: event.node,
+        names: None,
     }
 }
 

@@ -304,19 +304,18 @@ fn probe_batch(ip: &str) -> IngestBatch {
     }
 }
 
-/// The lease facts the `dhcp` role writes with every lease change make a light run: the
-/// waiting moves are confirmed, the rules wait for the periodic run; another source's
-/// facts run the rules.
+/// A lease change (a lease row in `dhcp.leases`, ADR 0031) makes a light run: the waiting
+/// moves are confirmed, the rules wait for the periodic run; another source's facts run
+/// the rules.
 #[tokio::test]
 async fn lease_facts_alone_make_a_light_run() {
     use std::time::Duration;
 
     use tenko_core::{
         NodeId, PrefixId, Principal, VrfId,
-        dhcp::{BindingState, ClientKey, DdnsState, Lease},
+        dhcp::{BindingState, ClientKey, DdnsState, Lease, tables as dhcp_tables},
         serde_util::HexBytes,
     };
-    use tenko_ipam::observe::{ObserveConfig, dhcp::LeaseFacts};
     use tenko_store::WriteBatch;
 
     let lab = lab().await;
@@ -328,8 +327,6 @@ async fn lease_facts_alone_make_a_light_run() {
     let (rules, dns) = (lab.reconciler.rule_passes(), lab.reconciler.dns_passes());
 
     let store = Arc::new(lab.store.clone()) as Arc<dyn Store>;
-    let facts = LeaseFacts::new(NodeId(1), ObserveConfig::default());
-    facts.register(store.as_ref()).expect("register");
     let (vrf, scope) = (VrfId::generate(), PrefixId::generate());
     for last in 50..60u8 {
         let now = Timestamp::now();
@@ -358,9 +355,12 @@ async fn lease_facts_alone_make_a_light_run() {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         };
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-        facts.observe(&lease, now, &mut batch).expect("observe");
+        batch
+            .put_typed(&dhcp_tables::LEASES, &(lease.vrf, lease.addr), &lease)
+            .expect("lease");
         store.propose(batch).await.expect("commit");
     }
     lab.changed_run().await;
@@ -384,20 +384,18 @@ async fn lease_facts_alone_make_a_light_run() {
     assert_eq!(lab.reconciler.rule_passes(), rules + 2);
 }
 
-/// ADR 0030: the `dhcp` role's asynchronous writer flushes the facts of many lease changes
-/// in one batch of its own, without the lease rows; that batch is a change set of lease
-/// facts like the per-lease ones before it: it makes a light run, and the waiting moves are
-/// confirmed by it.
+/// ADR 0031: the lease rows of many leases in one batch (the role's group commit) are one
+/// change of the lease view like the per-lease ones before it: they make a light run, and
+/// the view holds one entry per row.
 #[tokio::test]
-async fn the_writers_batch_of_lease_facts_makes_a_light_run() {
+async fn a_group_commit_of_lease_rows_makes_a_light_run() {
     use std::time::Duration;
 
     use tenko_core::{
         NodeId, PrefixId, Principal, VrfId,
-        dhcp::{BindingState, ClientKey, DdnsState, Lease},
+        dhcp::{BindingState, ClientKey, DdnsState, Lease, tables as dhcp_tables},
         serde_util::HexBytes,
     };
-    use tenko_ipam::observe::{ObserveConfig, dhcp::LeaseFacts};
     use tenko_store::WriteBatch;
 
     let lab = lab().await;
@@ -409,8 +407,6 @@ async fn the_writers_batch_of_lease_facts_makes_a_light_run() {
     let (rules, dns) = (lab.reconciler.rule_passes(), lab.reconciler.dns_passes());
 
     let store = Arc::new(lab.store.clone()) as Arc<dyn Store>;
-    let facts = LeaseFacts::new(NodeId(1), ObserveConfig::default());
-    facts.register(store.as_ref()).expect("register");
     let (vrf, scope) = (VrfId::generate(), PrefixId::generate());
     let now = Timestamp::now();
     let mut flush = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
@@ -440,23 +436,22 @@ async fn the_writers_batch_of_lease_facts_makes_a_light_run() {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         };
-        let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-        facts.observe(&lease, now, &mut derived).expect("observe");
-        // The committer hands the facts to the index at once, the writer's flush follows.
-        facts.note_written(&derived);
-        flush.mutations.extend(derived.mutations);
+        flush
+            .put_typed(&dhcp_tables::LEASES, &(lease.vrf, lease.addr), &lease)
+            .expect("lease");
     }
-    assert!(
-        flush.mutations.len() >= 30,
-        "the facts of thirty leases in one batch"
-    );
-    store.propose(flush).await.expect("the writer's flush");
-    assert_eq!(
-        facts.len(),
-        60,
-        "the address and name facts of thirty leases"
-    );
+    assert_eq!(flush.mutations.len(), 30, "thirty lease rows in one batch");
+    store.propose(flush).await.expect("the lease batch");
+    // The lease view takes the rows in on read, one entry per row.
+    let view = store
+        .read(ReadConsistency::Linearizable)
+        .await
+        .expect("view");
+    lab.ipam.leases().ensure(view.as_ref()).expect("lease view");
+    assert_eq!(lab.ipam.leases().len(), 30, "one entry per lease row");
+    drop(view);
     lab.changed_run().await;
     assert_eq!(lab.reconciler.rule_passes(), rules, "a light run");
     assert_eq!(lab.reconciler.dns_passes(), dns);

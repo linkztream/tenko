@@ -46,6 +46,7 @@ use crate::{
 };
 
 pub mod class;
+pub mod history;
 pub mod lease;
 pub mod option;
 
@@ -53,6 +54,7 @@ pub use class::{
     AddressRange, Class, Condition, Filter, FilterKind, FilterVerdict, Join, MacPattern, Match,
     Policy, PolicyAction, Term, filter_verdict,
 };
+pub use history::{HistoryNames, HistoryRow, LeanEvent};
 pub use lease::{
     BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event, Lease6Kind,
     LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease, PoolShare, Relay6Info,
@@ -1118,8 +1120,8 @@ pub mod tables {
 
     use super::{
         Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
-        Lease6Event, LeaseEvent, LeaseRef, MovingClient, OptionDef, OptionDefId, OptionOwner,
-        OptionSet, Policy, PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
+        Lease6Event, LeaseRef, MovingClient, OptionDef, OptionDefId, OptionOwner, OptionSet,
+        Policy, PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
     };
     use crate::{
         Timestamp,
@@ -1156,8 +1158,9 @@ pub mod tables {
     /// ([`super::ClientKey::identity`]).
     pub static LEASES_BY_CLIENT: TableDef<(PrefixId, Vec<u8>), LeaseRef> =
         TableDef::new("dhcp.leases.by_client");
-    /// Lease history, bounded by retention (P3-Q13).
-    pub static HISTORY: TableDef<(Timestamp, VrfId, Ipv4Addr), LeaseEvent> =
+    /// Lease history, bounded by retention (P3-Q13): the lean row of ADR 0031, or the whole
+    /// event of a row written before it ([`super::HistoryRow`]).
+    pub static HISTORY: TableDef<(Timestamp, VrfId, Ipv4Addr), super::HistoryRow> =
         TableDef::new("dhcp.history");
     // WP9.1: the DHCPv6 leases and their history (additive, no format change).
     /// DHCPv6 leases, by VRF and address (an `IA_PD` prefix by its first address). The

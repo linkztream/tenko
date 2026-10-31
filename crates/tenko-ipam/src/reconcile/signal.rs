@@ -8,12 +8,14 @@
 //! - **DHCP's names only.** A change set whose watched rows are all RRsets of the origin
 //!   `dhcp` (the DDNS worker's A, AAAA, DHCID and PTR sets, with the SOA serial step of
 //!   the same batch) schedules nothing: the zones' observations take `ipam` and `manual`
-//!   records only ([`crate::observe::dns`]), the lease facts come with the lease changes
-//!   themselves (WP8.1), and the DNS planner writes `ipam` sets only. A deleted RRset
+//!   records only ([`crate::observe::dns`]), the leases are read through the lease view (ADR
+//!   0031), and the DNS planner writes `ipam` sets only. A deleted RRset
 //!   cannot be read any more, so a deletion counts as DHCP's when the DHCP role
 //!   (`system:dhcp`) wrote the change set, the only writer of `dhcp` sets.
-//! - **Lease facts only.** The facts of the sources `dhcp:<node>`, which the `dhcp` role
-//!   writes with every lease change (up to a thousand change sets a second), schedule a
+//! - **Lease facts only.** Stored facts of the sources `dhcp:<node>` are no longer written
+//!   (ADR 0031: the lease tables are the source; the purge of rows of earlier versions still
+//!   passes here). A lease change does not pass this signal at all: the lease view wakes the
+//!   loop after it took the change in (up to a thousand change sets a second), for a
 //!   light run: the move jobs that wait for a device are confirmed, the rules wait for the
 //!   next periodic run (or a change of another kind), so a busy DHCP server does not make
 //!   the leader evaluate every fact every few seconds.

@@ -1445,6 +1445,12 @@ async fn start(
             .push(tokio::spawn(Arc::clone(ipam).run_alarms(async move {
                 let _ = stop.wait_for(|stopped| *stopped).await;
             })));
+        // ADR 0031: the lease tables are the observation source `dhcp:<node>`: the lease
+        // view classifies the fingerprints by the project's table and follows the store.
+        tenko_dhcp::fingerprint::classify_leases(ipam.leases());
+        running
+            .tasks
+            .push(ipam.follow_leases(leader::stop_token(running.stop.subscribe())));
     }
     // The reconciler compares intent with observation (ADR 0005) while the IPAM module runs.
     let reconciler = match &ipam {
@@ -1858,6 +1864,10 @@ async fn start(
             );
             if let Some(topology) = &topology_service {
                 findings.set_topology(Arc::clone(topology));
+            }
+            // ADR 0031: the findings of the reconciliation view read the lease view.
+            if let Some(ipam) = &ipam {
+                findings.set_leases(Arc::clone(ipam.leases()));
             }
             let findings_task = findings.spawn(findings_stop);
             server.extensions.insert(findings);

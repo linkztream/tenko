@@ -365,19 +365,10 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         // WP9.1: the DHCPv6 listeners.
         server6: server6_config(section, resolved.node_id),
     };
-    // WP8.1: the lease batch carries the IPAM facts of the source `dhcp:<node>` (plan
-    // section 2.8), from the hook over the stored facts; its outcomes are counted.
-    metrics.register(&tenko_dhcp::lease::observe::LEASE_FACTS);
-    let hook = tenko_dhcp::lease::observe::IpamObservations::register(
-        store.as_ref(),
-        resolved.node_id,
-        tenko_ipam::observe::ObserveConfig::default(),
-    )
-    .map_err(|problem| error("start.dhcp.feed", problem.to_string()))?;
+    // ADR 0031: the lease batch carries no IPAM fact; IPAM reads the lease tables through
+    // its lease view (the source `dhcp:<node>`).
     let node_id = resolved.node_id;
-    // WP9.1: the same hook adds the facts of the DHCPv6 lease batches.
-    let hook6: Arc<dyn tenko_dhcp::v6::lease::commit::Observation6Hook> = hook.clone();
-    let role = dhcp_role::Role::start_observed6(Arc::clone(&store), node_id, settings, hook, hook6)
+    let role = dhcp_role::Role::start(Arc::clone(&store), node_id, settings)
         .await
         .map_err(|problem| match problem {
             dhcp_role::StartError::Feed(detail) => error("start.dhcp.feed", detail),

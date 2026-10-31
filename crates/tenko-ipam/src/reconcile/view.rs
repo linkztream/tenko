@@ -54,6 +54,7 @@ use crate::{
     dns::reverse,
     error::{IpamError, IpamResult, codes},
     net::{contains_ip, ip_to_u128},
+    observe::dhcp::LeaseFacts,
     observe::model::ObservedFact,
 };
 
@@ -412,7 +413,8 @@ fn invalid_filter(name: &str, detail: impl Into<String>) -> IpamError {
         .field(name, codes::INVALID_FILTER)
 }
 
-/// The view (see [`ReconcileQuery`]); `now` decides which facts are current.
+/// The view (see [`ReconcileQuery`]) over the facts of `view` and the lease view `leases`
+/// (ADR 0031); `now` decides which facts are current.
 ///
 /// # Errors
 ///
@@ -420,10 +422,11 @@ fn invalid_filter(name: &str, detail: impl Into<String>) -> IpamError {
 /// range, `ipam.invalid_cursor` for a malformed cursor, store and decoding errors.
 pub fn reconcile(
     view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
     query: &ReconcileQuery,
     now: Timestamp,
 ) -> IpamResult<ReconcilePage> {
-    reconcile_where(view, query, now, &|_| true)
+    reconcile_where(view, leases, query, now, &|_| true)
 }
 
 /// [`reconcile`] with a further condition: only rows for which `keep` answers `true` count,
@@ -434,6 +437,7 @@ pub fn reconcile(
 /// As [`reconcile`].
 pub fn reconcile_where(
     view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
     query: &ReconcileQuery,
     now: Timestamp,
     keep: &dyn Fn(&ReconcileRow) -> bool,
@@ -461,7 +465,7 @@ pub fn reconcile_where(
                 })
         })
         .transpose()?;
-    let snapshot = Snapshot::load(view, now)?;
+    let snapshot = Snapshot::load(view, leases, now)?;
     let prefix = match query.prefix {
         Some(id) => Some(
             snapshot
@@ -512,8 +516,12 @@ pub fn reconcile_where(
 /// # Errors
 ///
 /// Store and decoding errors.
-pub fn lease_conflicts(view: &dyn ReadView, now: Timestamp) -> IpamResult<Vec<ReconcileRow>> {
-    let snapshot = Snapshot::load(view, now)?;
+pub fn lease_conflicts(
+    view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
+    now: Timestamp,
+) -> IpamResult<Vec<ReconcileRow>> {
+    let snapshot = Snapshot::load(view, leases, now)?;
     let mut rows: Vec<ReconcileRow> = build(view, &snapshot)?
         .into_iter()
         .filter(|row| row.kind == ReconcileKind::Conflict)
@@ -560,8 +568,12 @@ pub(crate) struct ViewFindings {
 /// # Errors
 ///
 /// Store and decoding errors.
-pub(crate) fn findings_view(view: &dyn ReadView, now: Timestamp) -> IpamResult<ViewFindings> {
-    let snapshot = Snapshot::load(view, now)?;
+pub(crate) fn findings_view(
+    view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
+    now: Timestamp,
+) -> IpamResult<ViewFindings> {
+    let snapshot = Snapshot::load(view, leases, now)?;
     let mut rows = build(view, &snapshot)?;
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     let unseen_since = rows

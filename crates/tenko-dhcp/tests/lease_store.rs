@@ -125,7 +125,13 @@ proptest! {
             prop_assert_eq!(&found.index, &reference.client_index());
             let mut expected_history = reference.history();
             expected_history.sort_by_key(|event| (event.at, event.vrf, event.addr));
-            prop_assert_eq!(&found.history, &expected_history);
+            // The lean rows name the lease row they wrote (ADR 0031); the reference store has none.
+            let mut found_history = found.history.clone();
+            for event in &mut found_history {
+                prop_assert!(event.revision.is_some());
+                event.revision = None;
+            }
+            prop_assert_eq!(&found_history, &expected_history);
             let table = leases.read();
             prop_assert_eq!(&table.sorted_rows(), &found.leases);
             prop_assert_eq!(&table.client_index(), &found.index);

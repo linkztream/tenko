@@ -179,7 +179,7 @@ pub async fn rows(store: &dyn Store) -> Rows {
         .scan_typed(&tables::HISTORY, KeyRange::all(), usize::MAX, false)
         .expect("the history")
         .into_iter()
-        .map(|(_, value, _)| value)
+        .map(|(key, row, revision)| row.into_event(key, revision))
         .collect();
     Rows {
         leases,

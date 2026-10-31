@@ -41,9 +41,11 @@ An observation names its source. Tenko turns the source into a canonical text, t
 | Network controller connector | `network_controller:<connector id>` | The connector host (Phase 1) |
 | Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the declared raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Probes (WP2.3, see [scanning.md](scanning.md)) |
 | DNS zone | `dns:<zone>` (the parent zone for an RFC 2317 zone) | The reconciler, from the zones in the store (Phase 2, section 10) |
-| DHCP node | `dhcp:<node>` | The `dhcp` role, in the batch of every lease change (Phase 3, [dhcp.md](dhcp.md) section 12.3) |
+| DHCP node | `dhcp:<node>` | The `dhcp` role's lease tables, read through the lease view; no fact rows (Phase 3, [dhcp.md](dhcp.md) section 12.3, [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md)) |
 
 A probe method is part of the key, so the ARP and the ICMP sightings of one probe are different sources with separate facts.
+
+**Two shapes of source.** The facts of every source but `dhcp:<node>` are rows of `ipam.obs.facts`. The `dhcp` role writes none: its lease tables `dhcp.leases` and `dhcp.leases6` are the source, and `tenko_ipam::observe::dhcp::LeaseFacts` presents each lease row as the facts it stands for (section 2.2, Lease facts). Every reader reads both shapes through one trait, `FactSource` of `tenko_ipam::observe::source`, implemented by `StoredFacts` (the stored facts) and `LeaseFacts` and joined by `Observations`: the rules of a run, the adoption and the move step, the reconciliation view (section 11), the findings, the observation API and the topology. None of them knows which shape a fact had. A stored fact of a `dhcp:*` source that a version before [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md) wrote is never read; the retention (section 2.4) removes it.
 
 ### 2.2 Facts
 
@@ -63,7 +65,7 @@ A fact is stored once per source and subject, under the key (source key, subject
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
 
-**Lease facts.** The facts of `dhcp:<node>` do not come through ingest (section 2.3): the `dhcp` role writes them in the batch of the lease change itself, with ingest's rules (a fact is written when it is new, when an attribute changed, when it had expired or when its refresh is due; a renewal within the refresh interval writes nothing), and a release, a decline or an operator's release expires them in that batch. A binding that runs out needs no write: its facts expire with it. The role keeps the facts of its source in a derived index so that it never reads the store while it builds a batch; [dhcp.md](dhcp.md) section 12.3 has the details.
+**Lease facts.** The facts of `dhcp:<node>` do not come through ingest (section 2.3) and are not stored: the lease row is the fact. Its `last_seen` is the row's client transaction time, its `first_seen` the grant time (`granted`, else the client transaction time), its `expires_at` the end of the binding (for a conflict, the end of its hold) and its revision the row's; a sighting counts once per refresh interval between the grant and the last transaction. A released, expired or reset row stands for facts that expired at its client transaction time or its end, whichever came first, an abandoned row (a conflict or a decline) for the conflict's address fact until its hold ends, and a `free` or `backup` row for none. A binding that runs out needs no write: its facts expire with it. A row whose facts ended longer ago than the observation retention (section 2.4) is not presented at all, so ghost addresses and "seen since" age out as they did with stored facts; the lease rows themselves are never deleted. The view keeps one compact entry per lease row in memory, follows the store's change stream off the apply path, and is built again from the lease tables at start and after a snapshot install; [dhcp.md](dhcp.md) section 12.3 has the details.
 
 ### 2.3 Ingest
 
@@ -74,13 +76,14 @@ Ingest turns one batch of observations of one source into changes to that source
 - A sighting is counted at most once per refresh interval. Counted sightings are what the adoption constraint `min_sightings` measures.
 - A **complete** batch is the source's whole picture. The facts of the batch's source that it no longer reports expire at once (their `expires_at` becomes the receive time), even when the batch is empty. Observations of other sources inside the batch are ingested but never expired by it. Facts are not deleted here.
 - Two observations of one subject inside one batch: the later one by source time wins, and for equal times the later position.
+- An observation of a source `dhcp:<node>` is refused and counted as skipped: the lease tables are that source, and ingest never expires the facts of one.
 - Every fact write expects the revision it read. A concurrent writer makes the ingest read again with linearizable consistency and retry, up to 8 attempts, then it fails with `ipam.contended`.
 
 The report of an ingest counts `new`, `changed`, `refreshed`, `unchanged`, `gone` and `skipped` facts and carries the revision of the write, which is empty when nothing was written. The audit record names the source and the counts.
 
 ### 2.4 Retention
 
-Facts whose last sighting is older than the retention (30 days by default, section 3.1.1) are deleted together with their index rows, at most 2,000 per batch, with the audit action `ipam.observation.purge`. The same pass deletes the last sightings of intent objects that no longer exist (section 2.6). A batch that loses a race with an ingest is skipped, and the next pass takes what is still old. The leader runs the purge every hour by default. Because expiry and deletion are separate, a device that vanished stays visible as an expired fact for 30 days after its last sighting.
+Facts whose last sighting is older than the retention (30 days by default, section 3.1.1) are deleted together with their index rows, at most 2,000 per batch, with the audit action `ipam.observation.purge`. The same pass deletes the last sightings of intent objects that no longer exist (section 2.6). A batch that loses a race with an ingest is skipped, and the next pass takes what is still old. The leader runs the purge every hour by default. Fact rows of a `dhcp:*` source that a version before [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md) wrote are not read; they leave by this retention, 30 days after their last sighting, and are not removed at start (the purge reads `ipam.obs.facts` itself, not through the stored-facts source that skips them, so it does remove them). The lease view applies the same retention: the reconciler hands it the setting in force before every run and purge (`LeaseFacts::set_retention`), and a lease row whose facts ended longer ago than that is not presented. Because expiry and deletion are separate, a device that vanished stays visible as an expired fact for 30 days after its last sighting.
 
 ### 2.5 The computed view
 
@@ -117,7 +120,7 @@ The server hands the batches to the reconciler through a function sink (`sink_fn
 The loop and the purge are the leader service `ipam.reconcile`: they run on the controller that leads and nowhere else (on a single controller, at once). A run starts:
 
 - right after the controller takes office, and then on an interval (every 5 minutes by default);
-- 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table (the lease facts of the `dhcp` role make a light run, below);
+- 2 seconds (the debounce) after an ingest that wrote something, on whichever controller it happened: an ingest on a follower reaches the leader as a write to `ipam.obs.facts`, and the leader watches that table (a lease change makes a light run, below);
 - 2 seconds after a change to the intent tables, to a reverse template or to an adoption policy, including a change a person just made by approving a proposal;
 - 2 seconds after a change to the DNS zones or records (`dns.zones`, `dns.rrsets`), so that a hand-deleted `ipam` record comes back (section 10), except a change of DHCP's names alone (below);
 - on demand with `POST /api/v1/proposals/reconcile` (section 5.3), on the controller that answers.
@@ -127,12 +130,12 @@ The loop and the purge are the leader service `ipam.reconcile`: they run on the 
 | A change set of | Schedules | The rules (step 3) | The DNS steps read the zones again |
 |---|---|---|---|
 | RRsets of the origin `dhcp` only (the DDNS worker's A, AAAA, DHCID and PTR sets with the zone's SOA serial step; a deletion counts as DHCP's when the `dhcp` role, `system:dhcp`, wrote the change set) | nothing | | |
-| facts of the sources `dhcp:<node>` only (the lease facts the `dhcp` role writes with a lease change) | a light run | no: the waiting moves are confirmed (section 7), the rest waits for the periodic run | no |
+| lease rows (taken in by the lease view; not a change set of the facts table) | a light run | no: the waiting moves are confirmed (section 7), the rest waits for the periodic run | no |
 | other facts (an ingest of a probe, a connector, the zones' records) | a run | yes | no |
 | the intent, a reverse template, an adoption policy | a run | yes | the plan only (not for a policy) |
 | an RRset of any other origin (a hand-written or an `ipam` set, also beside DHCP's in the same change set), a zone | a run | yes | yes |
 
-The zones' facts take `ipam` and `manual` records only (section 10), the lease facts come with the lease change itself ([dhcp.md](dhcp.md) section 12.3) and the DNS actuator writes `ipam` sets only, so DHCP's names give a run nothing to do: a DHCP record is no DNS fact, and the name of a lease shows in the reconciliation view as the lease's own `name` fact. A busy DHCP server writes lease facts with up to a thousand commits a second; each of them used to start a run of the rules over every fact within the debounce, so the proposals for its clients (a discovered host per unknown device) wait for the periodic run instead, while a move that waits for a lease is still confirmed within the debounce. A run of the rules records the change epoch it ran at whether its write succeeded or not, so a failed pass is tried again by the next change of another kind or the periodic run, not by every lease. A run whose DNS inputs did not move since the last run that read them takes over that run's facts of the zones and its DNS findings, and skips the actuator when its last run wrote everything it planned (the report then shows the actuator with nothing written). The SOA set and the signer's rows are read by no step. The periodic run, the first run after taking office and the run on demand always do everything, so what this leaves out (a DHCP name that took over a record of another origin under `replace`) is seen within the interval. M31's stand-in measured the difference (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`).
+The zones' facts take `ipam` and `manual` records only (section 10), a lease change wakes the reconciler through the lease view ([dhcp.md](dhcp.md) section 12.3), after the view has taken it in. The DNS actuator writes `ipam` sets only, so DHCP's names give a run nothing to do: a DHCP record is no DNS fact, and the name of a lease shows in the reconciliation view as the lease's own `name` fact. A busy DHCP server commits up to a thousand leases a second; the view's signal starts at most one light run within the 2-second debounce, never a run of the rules over every fact, so the proposals for its clients (a discovered host per unknown device) wait for the periodic run instead, while a move that waits for a lease is still confirmed within the debounce. A run of the rules records the change epoch it ran at whether its write succeeded or not, so a failed pass is tried again by the next change of another kind or the periodic run, not by every lease. A run whose DNS inputs did not move since the last run that read them takes over that run's facts of the zones and its DNS findings, and skips the actuator when its last run wrote everything it planned (the report then shows the actuator with nothing written). The SOA set and the signer's rows are read by no step. The periodic run, the first run after taking office and the run on demand always do everything, so what this leaves out (a DHCP name that took over a record of another origin under `replace`) is seen within the interval. M31's stand-in measured the difference (`bench/phase3-dhcp/results/2026-10-22-m31-ddns.md`).
 
 The service also purges old facts on its own timer (every hour by default). Its writes carry the leader epoch as a precondition, so a controller that lost the leadership commits nothing more; it stops when the leadership moves, and the new leader runs at once. Ingest stays on every controller.
 
@@ -498,7 +501,7 @@ When the planner refuses, the proposal stays open. Its `adoption_error` holds th
 The device move job (IPAM-19) waits for the device to show up at its new address. Its observation step, `ipam.move.observe`, is a manual task, so a person can still confirm it. The reconciler confirms it as `system:reconciler`, with a note such as "198.51.100.10 seen at 2026-10-10T08:00:00Z by inventory:<connector id>", when an observation meets all of these conditions:
 
 - The job is waiting at its observation step. A sighting that arrives while the job still waits for an earlier manual task, such as the layer 2 change, cannot confirm anything yet; the next run confirms it from the facts that are still current.
-- It names the move's new address in the target VRF. The VRF is the source's own, or is placed as in section 3.3. A DHCP lease fact (`dhcp:<node>`) counts at any address of the target network, because a dynamic device gets an address of the pool rather than the planned one; it must come from the interface's MAC address.
+- It names the move's new address in the target VRF. The VRF is the source's own, or is placed as in section 3.3. A DHCP lease fact (`dhcp:<node>`, given by the lease view) counts at any address of the target network, because a dynamic device gets an address of the pool rather than the planned one; it must come from the interface's MAC address.
 - It comes from the MAC address of the moved interface, when the interface has one. A sighting of another device at that address does not count.
 - It was reported at or after the start of the job. A sighting from before the move does not count.
 
@@ -512,7 +515,7 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 |---|---|---|
 | Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
 | DNS records | 2 | Delivered (section 10): `name` facts of the `ipam` and `manual` A, AAAA and PTR records of the zones, and the DNS findings of the actuator, among them the orphaned `ipam` record |
-| DHCP leases | 3 | Delivered (WP8.1): `dhcp:<node>` `address` and `name` facts in the batch of every lease change, without polling (DHCP-16), which confirm waiting moves in the reconciler's next run (a lease fact starts it like any new fact); reservations are intent ([dhcp.md](dhcp.md) section 12). The `LeaseInPrefix` wake-up of the job engine is not used by moves, whose observation step is a manual task the reconciler completes |
+| DHCP leases | 3 | Delivered (WP8.1, changed by [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md)): the lease tables are the source `dhcp:<node>`, and the lease view presents `address`, `name`, `os` and `vendor` facts (and `network` facts of delegated prefixes) without polling (DHCP-16) and without a row written; after the view has taken a lease change in it wakes the reconciler's light run, which confirms waiting moves; reservations are intent ([dhcp.md](dhcp.md) section 12). The `LeaseInPrefix` wake-up of the job engine is not used by moves, whose observation step is a manual task the reconciler completes |
 
 Phase 3 also adds the reconciliation views across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch views with "who wins" rules, built on the same facts and proposals.
 
@@ -528,6 +531,7 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.obs.by_name` | (lowercase name, source key, subject key) | Empty; lists the facts that name the host |
 | `ipam.obs.last_seen` | Intent object (address or interface) | `IntentSighting`: time, source key and observation |
 | `ipam.proposals` | Proposal id | `IntentProposal` |
+
 | `ipam.proposal_keys` | Subject key | The id of the open proposal of that key |
 | `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason, and for a kept conflict the MAC addresses kept |
 | `ipam.adoption` | Prefix id | `StoredPolicy`: policy, who set it and when |
@@ -538,7 +542,7 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.wlan_policies` | SSID | `StoredWlanPolicy`: track or ignore, who and when (section 4.12) |
 | `ipam.wlan_exceptions` | (host id, SSID) | `WlanException`: the reason, who and when (section 4.12) |
 
-The index tables follow their fact in the same batch.
+The index tables follow their fact in the same batch. `ipam.obs.facts` and its three index tables hold the facts of the sources that have no table of their own: the probes, the network controllers, the inventory connectors and the zones' records. The facts of `dhcp:<node>` are not in them (section 2.1).
 
 ### 9.2 Endpoints
 
@@ -571,7 +575,7 @@ The index tables follow their fact in the same batch.
 
 ### 9.3 Live updates
 
-Changes of `ipam.proposals` and `ipam.adoption` are events of the `ipam` topic. Changes of `ipam.obs.facts` and `ipam.obs.last_seen` are table-level events of the `discovery` topic: they name the changed table and no object, because a poll can change many facts at once. Like every event they carry references, not bodies, so a client refetches what it shows. The findings index announces its own changes on the `findings` topic (section 12.4).
+Changes of `ipam.proposals` and `ipam.adoption` are events of the `ipam` topic. Changes of `ipam.obs.facts` and `ipam.obs.last_seen` are table-level events of the `discovery` topic: they name the changed table and no object, because a poll can change many facts at once. Like every event they carry references, not bodies, so a client refetches what it shows. A lease change is no change of `ipam.obs.facts`: it is an event of the `dhcp` topic. The findings index reads the leases through the lease view when it refreshes the findings of the reconciliation view, and announces its own changes on the `findings` topic (section 12.4).
 
 ## 10. The DNS actuator
 
@@ -592,7 +596,7 @@ The reconciliation view (IPAM-21, IPAM-23) puts the four truths of an address si
 | Truth | What it is | Where it comes from |
 |---|---|---|
 | Intent | the live address of intent, its host, the host's mode, the interface's MAC address, the DNS name | the IPAM tables |
-| Lease | the current facts of the sources `dhcp:<node>`: MAC addresses, sources, the latest sighting, the lease's end | the lease facts ([dhcp.md](dhcp.md) sections 12.3 and 15.3) |
+| Lease | the current facts of the sources `dhcp:<node>`: MAC addresses, sources, the latest sighting, the lease's end | the lease tables through the lease view ([dhcp.md](dhcp.md) sections 12.3 and 15.3) |
 | DNS | the owner names of A and AAAA records with the address, the targets of its PTR records, the zones | the `name` facts of the sources `dns:<zone>` (section 10); a source whose zone ends in `.arpa` gives PTR names |
 | Scan | the current facts of the probes and the connectors: MAC addresses, sources, the latest sighting | the observation layer (section 2) |
 

@@ -293,7 +293,7 @@ type Relay = (
 struct Cold {
     chaddr: Vec<u8>,
     client_id: Option<Vec<u8>>,
-    times: [Option<u64>; 4],
+    times: [Option<u64>; 5],
     share: Option<bool>,
     names: Names,
     policy: Option<(bool, Option<u32>)>,
@@ -318,7 +318,7 @@ fn name() -> impl Strategy<Value = String> {
 fn cold() -> impl Strategy<Value = Cold> {
     (
         (bytes(20), prop::option::of(bytes(300))),
-        prop::array::uniform4(prop::option::of(0u64..4_000_000_000)),
+        prop::array::uniform5(prop::option::of(0u64..4_000_000_000)),
         prop::option::of(any::<bool>()),
         (
             prop::option::of(text()),
@@ -393,7 +393,13 @@ fn whole(vrf: VrfId, scope: PrefixId, last: u8, cold: Cold) -> Lease {
     };
     let time = |secs: Option<u64>| secs.map(at);
     let doc = |octet: u8| Ipv4Addr::new(192, 0, 2, octet);
-    let [partner_told, partner_said, partner_acked, observed_at] = cold.times;
+    let [
+        partner_told,
+        partner_said,
+        partner_acked,
+        observed_at,
+        granted,
+    ] = cold.times;
     let (hostname, fqdn, fqdn_flags) = cold.names;
     let (forward, reverse, dhcid, last_error, updated) = cold.ddns;
     Lease {
@@ -454,6 +460,7 @@ fn whole(vrf: VrfId, scope: PrefixId, last: u8, cold: Cold) -> Lease {
                 raw: HexBytes(raw),
             }),
         observed_at: time(observed_at),
+        granted: time(granted),
     }
 }
 
@@ -515,4 +522,168 @@ proptest! {
             prop_assert_eq!(applied.by_client(scope, &identity), reference.by_client(scope, &identity));
         }
     }
+}
+
+// ADR 0031: the grant time of a binding, kept in the lease row.
+
+/// The row `kind` writes for client `client` at `second` seconds, over `previous`.
+fn written(
+    kind: LeaseEventKind,
+    client: u32,
+    state: BindingState,
+    second: u64,
+    previous: Option<&Lease>,
+) -> Lease {
+    let (vrf, scope) = previous.map_or_else(
+        || (VrfId::generate(), PrefixId::generate()),
+        |held| (held.vrf, held.scope),
+    );
+    change(
+        kind,
+        vrf,
+        scope,
+        addr(10),
+        client,
+        state,
+        at(second),
+        at(second + 600),
+    )
+    .to_lease(NODE, previous)
+}
+
+#[test]
+fn a_new_grant_sets_the_grant_time_and_a_renewal_keeps_it() {
+    let grant = written(LeaseEventKind::Granted, 1, BindingState::Active, 100, None);
+    assert_eq!(grant.granted, Some(at(100)));
+    assert_eq!(
+        grant.observed_at, None,
+        "the fact time is no longer written"
+    );
+    let renewal = written(
+        LeaseEventKind::Renewed,
+        1,
+        BindingState::Active,
+        400,
+        Some(&grant),
+    );
+    assert_eq!(renewal.granted, Some(at(100)));
+    assert_eq!(renewal.cltt, at(400));
+    let rebind = written(
+        LeaseEventKind::Rebound,
+        1,
+        BindingState::Active,
+        700,
+        Some(&renewal),
+    );
+    assert_eq!(rebind.granted, Some(at(100)));
+    assert_eq!(rebind.granted_at(), at(100));
+    // The release of the same client keeps it too.
+    let release = written(
+        LeaseEventKind::Released,
+        1,
+        BindingState::Released,
+        800,
+        Some(&rebind),
+    );
+    assert_eq!(release.granted, Some(at(100)));
+}
+
+#[test]
+fn a_grant_after_the_binding_ended_sets_the_grant_time_again() {
+    let grant = written(LeaseEventKind::Granted, 1, BindingState::Active, 100, None);
+    // The binding ran out at 700; the same client asks again at 5,000.
+    let again = written(
+        LeaseEventKind::Granted,
+        1,
+        BindingState::Active,
+        5_000,
+        Some(&grant),
+    );
+    assert_eq!(again.granted, Some(at(5_000)));
+    // After a release the next grant of the same client is a new grant as well.
+    let release = written(
+        LeaseEventKind::Released,
+        1,
+        BindingState::Released,
+        200,
+        Some(&grant),
+    );
+    let after_release = written(
+        LeaseEventKind::Granted,
+        1,
+        BindingState::Active,
+        300,
+        Some(&release),
+    );
+    assert_eq!(after_release.granted, Some(at(300)));
+    // And after an expiry: the expired row keeps the grant time, the next grant sets a new one.
+    let expired = written(
+        LeaseEventKind::Expired,
+        1,
+        BindingState::Expired,
+        800,
+        Some(&grant),
+    );
+    assert_eq!(expired.granted, Some(at(100)));
+    let after_expiry = written(
+        LeaseEventKind::Granted,
+        1,
+        BindingState::Active,
+        900,
+        Some(&expired),
+    );
+    assert_eq!(after_expiry.granted, Some(at(900)));
+}
+
+#[test]
+fn a_grant_to_another_client_sets_the_grant_time() {
+    let grant = written(LeaseEventKind::Granted, 1, BindingState::Active, 100, None);
+    let other = written(
+        LeaseEventKind::Granted,
+        2,
+        BindingState::Active,
+        200,
+        Some(&grant),
+    );
+    assert_eq!(other.granted, Some(at(200)));
+    assert_ne!(other.client, grant.client);
+}
+
+#[test]
+fn the_grant_time_round_trips_through_the_table() {
+    let grant = written(LeaseEventKind::Granted, 1, BindingState::Active, 100, None);
+    let renewal = written(
+        LeaseEventKind::Renewed,
+        1,
+        BindingState::Active,
+        400,
+        Some(&grant),
+    );
+    let mut table = MemLeaseTable::default();
+    let mut index = LeaseIndex::new();
+    table.apply(renewal.clone());
+    index.apply(renewal.clone());
+    assert_eq!(
+        table
+            .rows()
+            .get(&(renewal.vrf, renewal.addr))
+            .and_then(|row| row.granted),
+        Some(at(100))
+    );
+    assert_eq!(
+        index.lease(renewal.vrf, renewal.addr),
+        Some(renewal.clone())
+    );
+    // A row of an earlier version has none; it reads as granted at its client time.
+    let old = Lease {
+        granted: None,
+        ..renewal
+    };
+    index.apply(Lease {
+        cltt: at(500),
+        ..old.clone()
+    });
+    let held = index.lease(old.vrf, old.addr).expect("the row");
+    assert_eq!(held.granted, None);
+    assert_eq!(held.granted_at(), at(500));
 }

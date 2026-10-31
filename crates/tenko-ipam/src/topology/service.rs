@@ -44,7 +44,6 @@ use super::{
 use crate::{
     error::{IpamError, IpamResult},
     findings::Finding,
-    observe::tables::FACTS,
     service::IpamService,
     tables::{ADDRESSES, HOSTS, INTERFACE_ADDRESSES, INTERFACES, PREFIXES, VLANS},
     vlan::controllers::{ControllerTopology, Controllers},
@@ -262,14 +261,11 @@ impl TopologyService {
                 }
             }
         }
-        let facts = view
-            .scan_typed(&FACTS, KeyRange::all(), usize::MAX, false)?
-            .into_iter()
-            .map(|(_, mut fact, revision)| {
-                fact.revision = revision;
-                fact
-            })
-            .collect();
+        // ADR 0031: the stored facts and the lease view.
+        self.ipam.leases().caught_up(revision).await;
+        let facts =
+            crate::observe::source::Observations::new(view.as_ref(), Some(self.ipam.leases()))
+                .facts(Timestamp::now())?;
         let intent = intent(view.as_ref())?;
         let vlans = Arc::new(intent.vlans.clone());
         let mut tables = tables;

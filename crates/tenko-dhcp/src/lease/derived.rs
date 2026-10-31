@@ -2,9 +2,9 @@
 //!
 //! A lease commit holds the lease row and the client index entries it moves, nothing else
 //! (DHCP-17: the lease row is committed before the ACK). What derives from the row, the
-//! history row and the IPAM observation facts of the source `dhcp:<node>` with their
-//! index rows, goes here once the lease committed: [`DerivedWriter::push`] puts the
-//! mutations into a bounded queue without waiting, and the [`DerivedFlusher`] writes
+//! lean history row (ADR 0031; before it also the IPAM observation facts, which IPAM now
+//! reads from the lease table), goes here once the lease committed:
+//! [`DerivedWriter::push`] puts the mutations into a bounded queue without waiting, and the [`DerivedFlusher`] writes
 //! everything queued every [`DerivedSettings::interval`] (250 ms) or as soon as
 //! [`DerivedSettings::max_items`] changes wait, whichever comes first. A flush is one store
 //! batch for the changes of a quiet interval and, under load, waves of up to
@@ -22,8 +22,8 @@
 //! - **Never blocking the ACK.** A full queue drops the change's derived rows and counts
 //!   them (`tenko_dhcp_derived_dropped_total`); when the queue stays full for longer than
 //!   [`DerivedSettings::tolerance`], the health finding [`FINDING`] is raised until a
-//!   flush succeeds again. A dropped fact is written again at its next refresh or by the
-//!   catch-up at the next start, a dropped history row is lost.
+//!   flush succeeds again. A dropped history row is lost (the catch-up of the next start
+//!   rebuilds it only for the changes of its window).
 //! - **Order.** A later change of a row always lands after an earlier one: inside one
 //!   batch a later mutation of a key wins, and two batches in flight together never write
 //!   the same row (the change that would ends the wave).
@@ -52,7 +52,7 @@ use tenko_store::{
 use tokio::sync::{Notify, watch};
 use tokio_util::sync::CancellationToken;
 
-use super::{batch::ObservationHook, metrics::HISTORY_WRITTEN};
+use super::{batch::put_history, metrics::HISTORY_WRITTEN};
 
 /// The code of the health finding while the derived rows are dropped.
 pub const FINDING: &str = "dhcp.role.derived_dropped";
@@ -60,25 +60,25 @@ pub const FINDING: &str = "dhcp.role.derived_dropped";
 /// `tenko_dhcp_derived_written_total`: lease changes whose derived rows were written.
 pub static WRITTEN: Counter = Counter::new(Desc::counter(
     "tenko_dhcp_derived_written",
-    "DHCP lease changes whose history and observation rows the asynchronous writer wrote",
+    "DHCP lease changes whose history rows the asynchronous writer wrote",
 ));
 
 /// `tenko_dhcp_derived_dropped_total`: lease changes whose derived rows were dropped.
 pub static DROPPED: Counter = Counter::new(Desc::counter(
     "tenko_dhcp_derived_dropped",
-    "DHCP lease changes whose history and observation rows were dropped (queue full)",
+    "DHCP lease changes whose history rows were dropped (queue full)",
 ));
 
 /// `tenko_dhcp_derived_rebuilt_total`: derived rows rebuilt from the lease table at start.
 pub static REBUILT: Counter = Counter::new(Desc::counter(
     "tenko_dhcp_derived_rebuilt",
-    "DHCP history rows and lease facts rebuilt from the lease table at start",
+    "DHCP history rows rebuilt from the lease table at start",
 ));
 
 /// `tenko_dhcp_derived_queue`: lease changes waiting for the asynchronous writer.
 pub static QUEUED: Gauge = Gauge::new(Desc::gauge(
     "tenko_dhcp_derived_queue",
-    "DHCP lease changes waiting for the asynchronous writer of their derived rows",
+    "DHCP lease changes waiting for the asynchronous writer of their history rows",
 ));
 
 /// Registers the writer's series.
@@ -276,7 +276,7 @@ impl DerivedWriter {
                 full.since = Some((Instant::now(), Timestamp::now()));
                 tracing::warn!(
                     queue = shared.settings.queue,
-                    "the writer of the lease history and facts is full; derived rows are dropped"
+                    "the writer of the lease history is full; history rows are dropped"
                 );
             }
             full.dropped_since += 1;
@@ -289,7 +289,7 @@ impl DerivedWriter {
     }
 
     /// Waits until every change pushed before the call is written (or dropped): the
-    /// operator's commands that read the facts, the tests and the shutdown. Wakes the
+    /// tests, the tools that read the history right after a commit and the shutdown. Wakes the
     /// flusher at once.
     pub async fn flush(&self) {
         let target = self.shared.pushed.load(Ordering::Acquire);
@@ -380,8 +380,8 @@ impl DerivedFlusher {
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .len(),
-                            "the store refused the last flush of the lease history and facts at shutdown; \
-                             the start rebuilds them"
+                            "the store refused the last flush of the lease history at shutdown; \
+                             the start rebuilds what its window covers"
                         );
                     }
                     return;
@@ -471,11 +471,11 @@ impl DerivedFlusher {
                         .since = None;
                 }
                 Err(error) if is_refusal(&error) => {
-                    tracing::debug!(%error, "the store refused a flush of the lease history and facts");
+                    tracing::debug!(%error, "the store refused a flush of the lease history");
                     refused.push(items);
                 }
                 Err(error) => {
-                    tracing::warn!(%error, changes = count, "a flush of the lease history and facts failed; its rows are dropped");
+                    tracing::warn!(%error, changes = count, "a flush of the lease history failed; its rows are dropped");
                     shared.dropped.fetch_add(count, Ordering::Relaxed);
                     DROPPED.add(count);
                     self.mark_done(count);
@@ -527,8 +527,6 @@ pub struct CatchUp {
     pub leases: u64,
     /// History rows written again.
     pub history: u64,
-    /// Leases whose facts were written again.
-    pub facts: u64,
     /// The addresses whose history row was written again: their history may miss earlier
     /// changes of the lost interval.
     pub addresses: Vec<(VrfId, Ipv4Addr)>,
@@ -551,8 +549,8 @@ fn rebuilt_kind(state: BindingState) -> LeaseEventKind {
 /// Rebuilds at start what a crash may have lost of the derived rows of acknowledged
 /// changes (ADR 0030): every lease row whose client transaction time is not older than
 /// [`CATCH_UP_WINDOW`] before the newest history row (all rows when there is none) gets its
-/// history row when it is missing, and its facts by the rules of the hook, which write
-/// nothing for a fact that is already stored. The rows go through `writer`.
+/// history row when it is missing, naming the lease row's revision (ADR 0031). The rows go
+/// through `writer`. There are no facts to rebuild: IPAM reads the lease table itself.
 ///
 /// Only the last change of an address can be rebuilt: an earlier change of the same
 /// address in the lost interval is not in the lease table any more, and its history row
@@ -564,7 +562,6 @@ fn rebuilt_kind(state: BindingState) -> LeaseEventKind {
 pub async fn catch_up(
     store: &dyn Store,
     leases: impl IntoIterator<Item = Lease>,
-    hook: &dyn ObservationHook,
     writer: &DerivedWriter,
 ) -> Result<CatchUp, StoreError> {
     let view = store.read(ReadConsistency::Local).await?;
@@ -572,7 +569,13 @@ pub async fn catch_up(
         .scan_typed(&tables::HISTORY, KeyRange::all(), 1, true)?
         .into_iter()
         .next()
-        .map(|((at, _, _), _, _): ((Timestamp, VrfId, Ipv4Addr), LeaseEvent, _)| at);
+        .map(
+            |((at, _, _), _, _): (
+                (Timestamp, VrfId, Ipv4Addr),
+                tenko_core::dhcp::HistoryRow,
+                _,
+            )| at,
+        );
     let from = newest.map(|at| at.checked_sub(CATCH_UP_WINDOW).unwrap_or(at));
     let now = Timestamp::now();
     let mut out = CatchUp::default();
@@ -581,40 +584,34 @@ pub async fn catch_up(
             continue;
         }
         out.leases += 1;
-        let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
         let key = (lease.cltt, lease.vrf, lease.addr);
-        if view.get_typed(&tables::HISTORY, &key)?.is_none() {
-            let event = LeaseEvent::of(&lease, rebuilt_kind(lease.state), lease.cltt);
-            derived.put_typed(&tables::HISTORY, &key, &event)?;
-            out.history += 1;
-            out.addresses.push((lease.vrf, lease.addr));
+        if view.get_typed(&tables::HISTORY, &key)?.is_some() {
+            continue;
         }
-        let before = derived.mutations.len();
-        hook.observe(&lease, None, &mut derived)?;
-        if derived.mutations.len() > before {
-            out.facts += 1;
-        }
-        if !derived.mutations.is_empty() {
-            hook.committed(&derived);
-            writer.push(derived);
-        }
+        let revision = view
+            .get_typed(&tables::LEASES, &(lease.vrf, lease.addr))?
+            .map(|(_, revision): (Lease, _)| revision);
+        let event = LeaseEvent::of(&lease, rebuilt_kind(lease.state), lease.cltt);
+        let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+        put_history(&mut derived, &event, revision)?;
+        out.history += 1;
+        out.addresses.push((lease.vrf, lease.addr));
+        writer.push(derived);
     }
-    REBUILT.add(out.history + out.facts);
-    if out.history + out.facts > 0 {
+    REBUILT.add(out.history);
+    if out.history > 0 {
         tracing::info!(
             history = out.history,
-            facts = out.facts,
             looked_at = out.leases,
-            "the lease history and facts a crash lost were rebuilt from the lease table"
+            "the lease history a crash lost was rebuilt from the lease table"
         );
     }
     Ok(out)
 }
 
 // WP9.1 rows: the DHCPv6 leases by the same rule.
-/// [`catch_up`] for the DHCPv6 leases (`dhcp.history6` and the facts of
-/// [`Observation6Hook`](crate::v6::lease::commit::Observation6Hook)); the addresses it
-/// reports are not filled (they are IPv4 addresses).
+/// [`catch_up`] for the DHCPv6 leases (`dhcp.history6`, whose rows keep the whole event);
+/// the addresses it reports are not filled (they are IPv4 addresses).
 ///
 /// # Errors
 ///
@@ -622,7 +619,6 @@ pub async fn catch_up(
 pub async fn catch_up6(
     store: &dyn Store,
     leases: impl IntoIterator<Item = tenko_core::dhcp::Lease6>,
-    hook: &dyn crate::v6::lease::commit::Observation6Hook,
     writer: &DerivedWriter,
 ) -> Result<CatchUp, StoreError> {
     let view = store.read(ReadConsistency::Local).await?;
@@ -647,23 +643,16 @@ pub async fn catch_up6(
             derived.put_typed(&tables::HISTORY6, &key, &event)?;
             out.history += 1;
         }
-        let before = derived.mutations.len();
-        hook.observe6(&lease, None, &mut derived)?;
-        if derived.mutations.len() > before {
-            out.facts += 1;
-        }
         if !derived.mutations.is_empty() {
-            hook.committed6(&derived);
             writer.push(derived);
         }
     }
-    REBUILT.add(out.history + out.facts);
-    if out.history + out.facts > 0 {
+    REBUILT.add(out.history);
+    if out.history > 0 {
         tracing::info!(
             history = out.history,
-            facts = out.facts,
             looked_at = out.leases,
-            "the DHCPv6 lease history and facts a crash lost were rebuilt from the lease table"
+            "the DHCPv6 lease history a crash lost was rebuilt from the lease table"
         );
     }
     Ok(out)

@@ -20,10 +20,9 @@
 //! | Module | What |
 //! |---|---|
 //! | [`table`] | [`LeaseIndex`], the production table, and [`SharedLeases`], its shared handle |
-//! | [`batch`] | the lease change as one batch: row, client index, history, observation hook |
+//! | [`batch`] | the lease change as batches: the row and the client index, and the lean history row (ADR 0031) |
 //! | [`commit`] | [`StoreLeases`], the [`LeaseStore`](crate::store::LeaseStore) on the replicated store, and its [`Committer`] |
 //! | [`follow`] | the table from the feed ([`LeaseFollower`]) and from a store view ([`rebuild_from_view`]) |
-//! | [`observe`] | the IPAM facts of the lease batch ([`observe::IpamObservations`], WP8.1) |
 //! | [`offer`] | [`OfferTable`], the offer hold |
 //! | [`expiry`] | [`ExpiryService`], expiry as a leader service |
 //! | [`history`] | [`PurgeService`], history retention per profile (P3-Q13) |
@@ -33,14 +32,12 @@
 
 pub mod batch;
 pub mod commit;
-// WP9.6: the asynchronous writer of the history rows and the facts (ADR 0030).
+// WP9.6: the asynchronous writer of the history rows (ADR 0030).
 pub mod derived;
 pub mod expiry;
 pub mod follow;
 pub mod history;
 pub mod metrics;
-// WP8.1: the observation hook over the lease facts of IPAM.
-pub mod observe;
 pub mod offer;
 pub mod refusal;
 // E32: the compact row of the table and the view the DORA path reads.
@@ -468,9 +465,24 @@ impl PendingChange {
                     .filter(|_| same_client)
                     .and_then(|held| held.relay.clone())
             }),
-            observed_at: previous
-                .filter(|_| same_client)
-                .and_then(|held| held.observed_at),
+            // ADR 0031: the lease row is the observation; nothing records a fact's write.
+            observed_at: None,
+            granted: Some(self.granted(previous.filter(|_| same_client))),
+        }
+    }
+
+    // ADR 0031: the grant time of the binding.
+    /// When the binding after the change was first granted, given the same client's row
+    /// held before: a change of a binding that still held at the change's time (a renewal,
+    /// a rebind, a repeated request, and a release, decline or expiry of it) keeps the
+    /// grant time of that row; anything else is a new grant at the change's time.
+    fn granted(&self, held: Option<&Lease>) -> Timestamp {
+        match held {
+            Some(held) if held.state == BindingState::Active && held.ends > self.cltt => {
+                held.granted_at()
+            }
+            Some(held) if self.state != BindingState::Active => held.granted_at(),
+            _ => self.cltt,
         }
     }
 
@@ -487,6 +499,8 @@ impl PendingChange {
             ends: self.ends,
             hostname: self.hostname.to_text(),
             node,
+            revision: None,
+            names: None,
         }
     }
 }

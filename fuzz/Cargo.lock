@@ -3319,6 +3319,7 @@ dependencies = [
  "calamine",
  "csv",
  "encoding_rs",
+ "futures",
  "ipnet",
  "serde",
  "serde_json",

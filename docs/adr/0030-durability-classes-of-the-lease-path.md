@@ -1,6 +1,6 @@
 # ADR 0030: Durability classes of the lease path
 
-- Status: Accepted (the owner decided the package on 2026-10-30, "all four as one package"; the choices of this record within it are the builder's)
+- Status: Accepted (points 1 to 5 amended by ADR 0031)
 - Date: 2026-10-30
 - Amends: [ADR 0019](0019-dhcp-data-model-and-lease-path.md) point 3 (what one lease commit writes) and the plan's decision P3-Q8 (the IPAM observation in the batch of the lease change); ADR 0002 decision 4 (the coalescer's bound) and condition 4 (the snapshot policy)
 

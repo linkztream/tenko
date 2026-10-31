@@ -282,6 +282,7 @@ impl Lab {
             fqdn_flags: fqdn.map(|(_, flags)| flags),
             relay: None,
             observed_at: None,
+            granted: None,
             ddns: DdnsState::default(),
         }
     }
@@ -318,6 +319,7 @@ impl Lab {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         }
     }
 

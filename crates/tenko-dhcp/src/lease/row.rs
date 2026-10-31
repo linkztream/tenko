@@ -11,8 +11,8 @@
 //! - **the rest**, one boxed byte string per row ([`Row::blob`]): the client (hardware
 //!   type, `chaddr`, client identifier) first, then only the fields the row has of the
 //!   partner times, the pool share, the names, the option 81 flags, the DDNS policy and
-//!   outcome, the fingerprint, the relay and the observation time, in a compact encoding
-//!   of this module.
+//!   outcome, the fingerprint, the relay, the observation time of earlier versions and the
+//!   grant time (ADR 0031), in a compact encoding of this module.
 //!
 //! The DORA path reads the client from the start of the byte string without allocating
 //! ([`ClientView`]); everything else is decoded only when a whole [`Lease`] is wanted (the
@@ -264,6 +264,7 @@ impl Row {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         };
         decode_cold(&mut reader, &mut lease);
         debug_assert!(reader.ok && reader.at == self.blob.len(), "a row decodes");
@@ -284,6 +285,8 @@ const DDNS: u32 = 1 << 8;
 const FINGERPRINT: u32 = 1 << 9;
 const RELAY: u32 = 1 << 10;
 const OBSERVED_AT: u32 = 1 << 11;
+// ADR 0031: the grant time of the binding.
+const GRANTED: u32 = 1 << 12;
 
 /// The encoding: the hardware type, `chaddr` with its length, the client identifier's
 /// length plus one (zero: none) and its octets, the presence mask of the cold fields, then
@@ -323,6 +326,7 @@ fn encode(lease: &Lease, out: &mut Vec<u8>) {
         (FINGERPRINT, lease.fingerprint.is_some()),
         (RELAY, lease.relay.is_some()),
         (OBSERVED_AT, lease.observed_at.is_some()),
+        (GRANTED, lease.granted.is_some()),
     ]
     .iter()
     .filter(|(_, present)| *present)
@@ -359,6 +363,9 @@ fn encode(lease: &Lease, out: &mut Vec<u8>) {
         put_relay(out, relay);
     }
     if let Some(time) = lease.observed_at {
+        put_time(out, time);
+    }
+    if let Some(time) = lease.granted {
         put_time(out, time);
     }
 }
@@ -465,6 +472,9 @@ fn decode_cold(reader: &mut Reader<'_>, lease: &mut Lease) {
     }
     if has(OBSERVED_AT) {
         lease.observed_at = Some(reader.time());
+    }
+    if has(GRANTED) {
+        lease.granted = Some(reader.time());
     }
 }
 
@@ -699,6 +709,7 @@ mod tests {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         }
     }
 
@@ -764,6 +775,8 @@ mod tests {
             raw: HexBytes(vec![1, 2, 1, 2, 2, 3, 3, 4, 5]),
         });
         lease.observed_at = Some(now);
+        // ADR 0031: the grant time of the binding.
+        lease.granted = Timestamp::from_unix_nanos(now.unix_nanos() - 3_600_000_000_000).ok();
         let (back, _) = round_trip(&lease);
         assert_eq!(back, lease);
     }

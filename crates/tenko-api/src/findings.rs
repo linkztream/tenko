@@ -127,6 +127,12 @@ impl FindingsService {
         })
     }
 
+    // ADR 0031: the reconciliation view reads the leases through the lease view.
+    /// Gives the index the lease view of the IPAM service, once.
+    pub fn set_leases(&self, leases: Arc<tenko_ipam::observe::dhcp::LeaseFacts>) {
+        self.index.set_leases(leases);
+    }
+
     /// Sets the topology service whose findings (the root, the WLAN rules) the index holds.
     pub fn set_topology(&self, topology: Arc<TopologyService>) {
         *self.topology.lock().unwrap_or_else(PoisonError::into_inner) = Some(topology);
@@ -255,6 +261,10 @@ impl FindingsService {
                 return;
             }
         };
+        // ADR 0031: the lease view has followed this view first.
+        if let Some(leases) = self.index.leases() {
+            leases.caught_up(view.revision()).await;
+        }
         let service = Arc::clone(self);
         let refreshed = tokio::task::spawn_blocking(move || {
             service.index.refresh_view(view.as_ref(), Timestamp::now())

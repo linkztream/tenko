@@ -27,16 +27,11 @@ use tenko_core::{
     dhcp::{BindingState, Lease6, Lease6Event, Lease6Kind, LeaseEventKind, tables},
 };
 use tenko_dhcp::{
-    lease::{
-        CommitSettings, ExpirySettings, LeaseIndex, PendingChange, SharedLeases, StoreLeases,
-        batch::NoObservations,
-    },
+    lease::{CommitSettings, ExpirySettings, LeaseIndex, PendingChange, SharedLeases, StoreLeases},
     store::{CommitError, Completion, LeaseStore as _, SubmitError, Ticket},
     v6::lease::{
         Binding6, Lease6Index, Lease6Table as _, PendingChange6, SharedLeases6,
-        commit::{NoObservations6, StoreLeases6},
-        expiry::Expiry6Service,
-        store::Lease6Store as _,
+        commit::StoreLeases6, expiry::Expiry6Service, store::Lease6Store as _,
     },
 };
 use tenko_store::{
@@ -148,7 +143,6 @@ fn start6(
         leases.clone(),
         NODE,
         settings,
-        Arc::new(NoObservations6),
         lease_store4.gate_handle(),
     );
     let stop = CancellationToken::new();
@@ -457,7 +451,6 @@ async fn a_full_queue_answers_full_and_stopping_fails_what_is_queued() {
         SharedLeases6::new(Lease6Index::new()),
         NODE,
         settings,
-        Arc::new(NoObservations6),
         lease_store4.gate_handle(),
     );
     let pending = grant(
@@ -569,20 +562,13 @@ async fn a_refusing_store_closes_the_gate_of_both_families_and_a_commit_opens_it
     };
     let as_store: Arc<dyn Store> = store.clone();
     let v4 = SharedLeases::new(LeaseIndex::new());
-    let (lease_store4, committer4) = StoreLeases::with_hook(
-        as_store.clone(),
-        v4,
-        NODE,
-        settings,
-        Arc::new(NoObservations),
-    );
+    let (lease_store4, committer4) = StoreLeases::new(as_store.clone(), v4, NODE, settings);
     let leases6 = SharedLeases6::new(Lease6Index::new());
     let (lease_store6, committer6) = StoreLeases6::new(
         as_store,
         leases6.clone(),
         NODE,
         settings,
-        Arc::new(NoObservations6),
         lease_store4.gate_handle(),
     );
     let stop = CancellationToken::new();

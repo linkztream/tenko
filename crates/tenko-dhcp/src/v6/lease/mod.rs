@@ -460,7 +460,7 @@ impl PendingChange6 {
     }
 
     /// The lease row of `binding` after the change. Fields the change does not carry (the
-    /// DDNS outcome, the observation time, the name and the relay of a change that has
+    /// DDNS outcome, the grant time, the name and the relay of a change that has
     /// none) come from the row held before, for the same client.
     pub fn to_lease(&self, binding: &Binding6, node: NodeId, previous: Option<&Lease6>) -> Lease6 {
         let duid = duid_of(self.duid.as_slice());
@@ -505,8 +505,17 @@ impl PendingChange6 {
                 .fqdn_flags
                 .or_else(|| kept.and_then(|held| held.fqdn_flags)),
             relay: relay.or_else(|| kept.and_then(|held| held.relay.clone())),
-            observed_at: kept.and_then(|held| held.observed_at),
+            // ADR 0031: the lease row is the observation; nothing records a fact's write.
+            observed_at: None,
             ddns: kept.map(|held| held.ddns.clone()).unwrap_or_default(),
+            // ADR 0031: a binding that still held at the change keeps its grant time.
+            granted: Some(match kept {
+                Some(held) if held.state == BindingState::Active && held.ends > self.cltt => {
+                    held.granted_at()
+                }
+                Some(held) if binding.state != BindingState::Active => held.granted_at(),
+                _ => self.cltt,
+            }),
         }
     }
 

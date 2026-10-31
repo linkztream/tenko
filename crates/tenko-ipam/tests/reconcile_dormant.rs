@@ -416,7 +416,8 @@ async fn the_reconciliation_view_shows_no_conflict_for_a_stopped_and_a_running_g
         .read(ReadConsistency::Linearizable)
         .await
         .expect("view");
-    let rows = lease_conflicts(view.as_ref(), at("08:01")).expect("conflicts");
+    let rows = lease_conflicts(view.as_ref(), Some(world.service.leases()), at("08:01"))
+        .expect("conflicts");
     let addresses: Vec<String> = rows.iter().map(|row| row.address.to_string()).collect();
     assert_eq!(
         addresses,
@@ -425,7 +426,13 @@ async fn the_reconciliation_view_shows_no_conflict_for_a_stopped_and_a_running_g
     );
     assert_eq!(rows[0].kind, ReconcileKind::Conflict);
 
-    let page = reconcile(view.as_ref(), &ReconcileQuery::default(), at("08:01")).expect("page");
+    let page = reconcile(
+        view.as_ref(),
+        Some(world.service.leases()),
+        &ReconcileQuery::default(),
+        at("08:01"),
+    )
+    .expect("page");
     let conflicting: Vec<String> = page
         .items
         .iter()

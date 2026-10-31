@@ -19,13 +19,9 @@ use tenko_core::{
     dhcp::{BindingState, LeaseEventKind, tables},
 };
 use tenko_dhcp::{
-    lease::{
-        CommitSettings, LeaseIndex, PendingChange, SharedLeases, StoreLeases,
-        batch::ObservationHook, observe::IpamObservations,
-    },
+    lease::{CommitSettings, LeaseIndex, PendingChange, SharedLeases, StoreLeases},
     store::{LeaseStore, Ticket},
 };
-use tenko_ipam::observe::ObserveConfig;
 use tenko_store::{
     ChangeStream, Committed, DerivedIndex, Leadership, MemStore, MemStoreConfig, ReadConsistency,
     ReadView, Store, StoreError, StoreStatus, WatchFilter, WriteBatch,
@@ -33,9 +29,11 @@ use tenko_store::{
 };
 use tokio_util::sync::CancellationToken;
 
-// The figures of 2026-10-30, on the shape of `grant` below. Before WP9.6 one lease commit
-// was 13 rows and 3,714 bytes in its batch, and appended 3,738 bytes of log per lease in
-// entries of 415,321 bytes on average (1,000 concurrent commits).
+// The figures of 2026-10-31 (WP9.7, ADR 0031), on the shape of `grant` below. Before WP9.6 one
+// lease commit was 13 rows and 3,714 bytes in its batch, and appended 3,738 bytes of log per
+// lease in entries of 415,321 bytes on average (1,000 concurrent commits). After WP9.6 the
+// writer added 11 rows and 3,048 bytes per lease change (357 bytes of log); since ADR 0031
+// it adds the history row alone: 1 row and 125 bytes (26 bytes of log).
 
 /// Rows (mutations) of the synchronous batch of one lease commit: the lease row and the
 /// client index entry. Measured 2; the cap is 2 plus 25 %.
@@ -43,25 +41,30 @@ const CAP_SYNC_ROWS: f64 = 1.25 * 2.0;
 /// CBOR bytes of the synchronous batch of one lease commit, as the store encodes it into
 /// the Raft entry.
 const CAP_SYNC_BYTES: f64 = 1.25 * MEASURED_SYNC_BYTES;
-const MEASURED_SYNC_BYTES: f64 = 673.0;
-/// Rows the asynchronous writer adds per lease change: the history row, the address, name,
-/// OS and vendor facts and their index rows.
-const CAP_DERIVED_ROWS: f64 = 1.25 * 11.0;
+const MEASURED_SYNC_BYTES: f64 = 669.0;
+/// Rows the asynchronous writer adds per lease change: the history row (ADR 0031; it also
+/// wrote the address, name, OS and vendor facts and their index rows before). Measured 1.
+const CAP_DERIVED_ROWS: f64 = 1.25 * 1.0;
 /// CBOR bytes of those rows per lease change.
 const CAP_DERIVED_BYTES: f64 = 1.25 * MEASURED_DERIVED_BYTES;
-const MEASURED_DERIVED_BYTES: f64 = 3_048.0;
+const MEASURED_DERIVED_BYTES: f64 = 125.0;
 /// Bytes appended to the Raft log per lease commit (the entry's share of one lease, the
 /// entry compressed on its way to disk).
 const CAP_LOG_BYTES_PER_LEASE: f64 = 1.25 * MEASURED_LOG_BYTES_PER_LEASE;
-const MEASURED_LOG_BYTES_PER_LEASE: f64 = 64.0;
+const MEASURED_LOG_BYTES_PER_LEASE: f64 = 61.0;
 /// Bytes of log the writer's batches append per lease change.
 const CAP_DERIVED_LOG_BYTES_PER_LEASE: f64 = 1.25 * MEASURED_DERIVED_LOG_BYTES_PER_LEASE;
-const MEASURED_DERIVED_LOG_BYTES_PER_LEASE: f64 = 357.0;
+const MEASURED_DERIVED_LOG_BYTES_PER_LEASE: f64 = 26.0;
 /// Bytes of a Raft entry of lease commits on average, on disk, under a load of concurrent
 /// commits. The store bounds an entry at 64 KiB of batches before compression
 /// (`tenko_store::raft::ENTRY_BOUND`).
 const CAP_ENTRY_BYTES: f64 = 1.25 * MEASURED_ENTRY_BYTES;
-const MEASURED_ENTRY_BYTES: f64 = 3_990.0;
+const MEASURED_ENTRY_BYTES: f64 = 5_114.0;
+/// CBOR bytes of the synchronous batch of one renewal: the lease row alone.
+const CAP_RENEWAL_BYTES: f64 = 1.25 * 555.0;
+/// Octets of the key and the value of a history row (ADR 0031: the lean row; it was about
+/// 250 with the host name). Measured 85.
+const CAP_HISTORY_PAYLOAD_BYTES: f64 = 100.0;
 
 /// Leases a test commits.
 const LEASES: u32 = 1_000;
@@ -73,7 +76,11 @@ struct Recorded {
     bytes: usize,
     /// A lease commit (it writes `dhcp.leases`), else a flush of the derived writer.
     lease: bool,
+    /// Puts into the client index `dhcp.leases.by_client`.
+    index: usize,
     history: usize,
+    /// Octets of the keys and values of the Puts to `dhcp.history`.
+    history_payload: usize,
 }
 
 /// A store that records what each batch it is handed writes, over a memory store.
@@ -112,7 +119,20 @@ impl Store for Recording {
             rows: batch.mutations.len(),
             bytes,
             lease: writes(tables::LEASES.name()) > 0,
+            index: writes(tables::LEASES_BY_CLIENT.name()),
             history: writes(tables::HISTORY.name()),
+            history_payload: batch
+                .mutations
+                .iter()
+                .map(|mutation| match mutation {
+                    tenko_store::Mutation::Put { table, key, value }
+                        if table == tables::HISTORY.name() =>
+                    {
+                        key.len() + value.len()
+                    }
+                    _ => 0,
+                })
+                .sum(),
         };
         self.batches
             .lock()
@@ -183,13 +203,11 @@ fn grant(vrf: VrfId, scope: PrefixId, k: u32) -> PendingChange {
     change
 }
 
-/// Commits `LEASES` grants through a lease store with the IPAM hook on `store`; returns
-/// the lease store (for the derived writer) once every grant completed.
-async fn commit_all(store: Arc<dyn Store>) -> (StoreLeases, CancellationToken) {
-    let hook = IpamObservations::register(store.as_ref(), NODE, ObserveConfig::default())
-        .expect("the hook");
+/// Commits `LEASES` grants through a lease store on `store`; returns the lease store (for the
+/// derived writer), its stop token, the VRF and the scope once every grant completed.
+async fn commit_all(store: Arc<dyn Store>) -> (StoreLeases, CancellationToken, VrfId, PrefixId) {
     let leases = SharedLeases::new(LeaseIndex::new());
-    let (lease_store, committer) = StoreLeases::with_hook(
+    let (lease_store, committer) = StoreLeases::new(
         Arc::clone(&store),
         leases,
         NODE,
@@ -204,7 +222,6 @@ async fn commit_all(store: Arc<dyn Store>) -> (StoreLeases, CancellationToken) {
             },
             ..CommitSettings::default()
         },
-        hook as Arc<dyn ObservationHook>,
     );
     let stop = CancellationToken::new();
     tokio::spawn(committer.run(stop.clone()));
@@ -220,7 +237,7 @@ async fn commit_all(store: Arc<dyn Store>) -> (StoreLeases, CancellationToken) {
         done.iter().all(|done| done.outcome.is_ok()),
         "every grant commits"
     );
-    (lease_store, stop)
+    (lease_store, stop, vrf, scope)
 }
 
 #[allow(clippy::cast_precision_loss, reason = "test figures")]
@@ -236,7 +253,7 @@ fn mean(values: impl Iterator<Item = usize>) -> f64 {
 async fn the_synchronous_batch_of_a_lease_commit_stays_within_its_caps() {
     let recording = Recording::new();
     let store: Arc<dyn Store> = recording.clone();
-    let (lease_store, stop) = commit_all(Arc::clone(&store)).await;
+    let (lease_store, stop, _, _) = commit_all(Arc::clone(&store)).await;
     lease_store.derived().flush().await;
     let batches = recording.take();
     let commits: Vec<_> = batches.iter().filter(|batch| batch.lease).collect();
@@ -254,9 +271,15 @@ async fn the_synchronous_batch_of_a_lease_commit_stays_within_its_caps() {
         flushes.iter().map(|batch| batch.rows).sum::<usize>() as f64 / f64::from(LEASES);
     let derived_bytes =
         flushes.iter().map(|batch| batch.bytes).sum::<usize>() as f64 / f64::from(LEASES);
+    let history_payload = flushes
+        .iter()
+        .map(|batch| batch.history_payload)
+        .sum::<usize>() as f64
+        / f64::from(LEASES);
     eprintln!(
         "WRITE COST sync batch: rows_per_lease={rows:.2} bytes_per_lease={bytes:.0}; \
-         derived: flushes={} rows_per_lease={derived_rows:.2} bytes_per_lease={derived_bytes:.0}",
+         derived: flushes={} rows_per_lease={derived_rows:.2} bytes_per_lease={derived_bytes:.0} \
+         history_payload_octets={history_payload:.0}",
         flushes.len()
     );
     assert!(
@@ -275,6 +298,89 @@ async fn the_synchronous_batch_of_a_lease_commit_stays_within_its_caps() {
         derived_bytes <= CAP_DERIVED_BYTES,
         "{derived_bytes:.0} derived bytes per lease, cap {CAP_DERIVED_BYTES}"
     );
+    assert!(
+        history_payload < CAP_HISTORY_PAYLOAD_BYTES,
+        "{history_payload:.0} octets in the key and value of a history row, cap {CAP_HISTORY_PAYLOAD_BYTES}"
+    );
+    stop.cancel();
+}
+
+/// The renewal of grant `k` a minute later, as the same client sends it.
+fn renewal(vrf: VrfId, scope: PrefixId, k: u32) -> PendingChange {
+    let mut change = grant(vrf, scope, k);
+    change.kind = LeaseEventKind::Renewed;
+    change.cltt = change
+        .cltt
+        .checked_add(Duration::from_secs(60))
+        .expect("a time");
+    change.ends = from_now(3_660);
+    change
+}
+
+/// A renewal changes one row of the binding and moves no client index entry; the writer
+/// adds its history row (the figures of 2026-10-31, after ADR 0031).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(clippy::cast_precision_loss, reason = "test figures")]
+async fn a_renewal_writes_one_lease_row_and_one_history_row() {
+    let recording = Recording::new();
+    let store: Arc<dyn Store> = recording.clone();
+    let (lease_store, stop, vrf, scope) = commit_all(Arc::clone(&store)).await;
+    lease_store.derived().flush().await;
+    recording.take();
+
+    for k in 0..LEASES {
+        lease_store
+            .submit(&renewal(vrf, scope, k), Ticket(u64::from(LEASES + k)))
+            .expect("the queue has room");
+    }
+    let done = completions(&lease_store, LEASES as usize, Duration::from_secs(60)).await;
+    assert_eq!(done.len(), LEASES as usize);
+    assert!(
+        done.iter().all(|done| done.outcome.is_ok()),
+        "every renewal commits"
+    );
+    lease_store.derived().flush().await;
+    let batches = recording.take();
+    let commits: Vec<_> = batches.iter().filter(|batch| batch.lease).collect();
+    assert_eq!(commits.len(), LEASES as usize, "one batch per renewal");
+    assert!(
+        commits
+            .iter()
+            .all(|batch| batch.rows == 1 && batch.index == 0),
+        "a renewal writes its lease row and no client index entry"
+    );
+    let flushes: Vec<_> = batches.iter().filter(|batch| !batch.lease).collect();
+    let history: usize = flushes.iter().map(|batch| batch.history).sum();
+    let derived_rows: usize = flushes.iter().map(|batch| batch.rows).sum();
+    assert_eq!(history, LEASES as usize, "one history row per renewal");
+    assert_eq!(
+        derived_rows, history,
+        "the history row is all the writer adds"
+    );
+    let bytes = mean(commits.iter().map(|batch| batch.bytes));
+    let derived_bytes =
+        flushes.iter().map(|batch| batch.bytes).sum::<usize>() as f64 / f64::from(LEASES);
+    let history_payload = flushes
+        .iter()
+        .map(|batch| batch.history_payload)
+        .sum::<usize>() as f64
+        / f64::from(LEASES);
+    eprintln!(
+        "WRITE COST renewal: rows_per_renewal=1 bytes_per_renewal={bytes:.0}; derived: \
+         rows_per_renewal=1 bytes_per_renewal={derived_bytes:.0} history_payload_octets={history_payload:.0}"
+    );
+    assert!(
+        bytes <= CAP_RENEWAL_BYTES,
+        "{bytes:.0} bytes per renewal, cap {CAP_RENEWAL_BYTES}"
+    );
+    assert!(
+        derived_bytes <= CAP_DERIVED_BYTES,
+        "{derived_bytes:.0} derived bytes per renewal, cap {CAP_DERIVED_BYTES}"
+    );
+    assert!(
+        history_payload < CAP_HISTORY_PAYLOAD_BYTES,
+        "{history_payload:.0} octets in the key and value of a history row, cap {CAP_HISTORY_PAYLOAD_BYTES}"
+    );
     stop.cancel();
 }
 
@@ -287,7 +393,7 @@ async fn the_raft_entries_of_lease_commits_stay_within_their_caps() {
     let raft = RaftStore::open(config).await.expect("the store");
     let before = raft.engine_stats();
     let store: Arc<dyn Store> = Arc::new(raft.clone());
-    let (lease_store, stop) = commit_all(Arc::clone(&store)).await;
+    let (lease_store, stop, _, _) = commit_all(Arc::clone(&store)).await;
     let after = raft.engine_stats();
     lease_store.derived().flush().await;
     let flushed = raft.engine_stats();
@@ -368,9 +474,7 @@ async fn the_writer_outruns_the_lease_commits_it_follows() {
     let dir = tempfile::tempdir().expect("a directory");
     let raft = raft_store(dir.path()).await;
     let store: Arc<dyn Store> = Arc::new(raft.clone());
-    let hook = IpamObservations::register(store.as_ref(), NODE, ObserveConfig::default())
-        .expect("the hook");
-    let (lease_store, committer) = StoreLeases::with_hook(
+    let (lease_store, committer) = StoreLeases::new(
         Arc::clone(&store),
         SharedLeases::new(LeaseIndex::new()),
         NODE,
@@ -383,7 +487,6 @@ async fn the_writer_outruns_the_lease_commits_it_follows() {
             },
             ..CommitSettings::default()
         },
-        hook as Arc<dyn ObservationHook>,
     );
     let stop = CancellationToken::new();
     let task = tokio::spawn(committer.run(stop.clone()));
@@ -456,9 +559,7 @@ async fn ack_path(rate: u32, secs: u32) {
     let dir = tempfile::tempdir().expect("a directory");
     let raft = raft_store(dir.path()).await;
     let store: Arc<dyn Store> = Arc::new(raft.clone());
-    let hook = IpamObservations::register(store.as_ref(), NODE, ObserveConfig::default())
-        .expect("the hook");
-    let (lease_store, committer) = StoreLeases::with_hook(
+    let (lease_store, committer) = StoreLeases::new(
         Arc::clone(&store),
         SharedLeases::new(LeaseIndex::new()),
         NODE,
@@ -466,7 +567,6 @@ async fn ack_path(rate: u32, secs: u32) {
             queue: 16_384,
             ..CommitSettings::default()
         },
-        hook as Arc<dyn ObservationHook>,
     );
     let stop = CancellationToken::new();
     let task = tokio::spawn(committer.run(stop.clone()));

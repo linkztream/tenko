@@ -33,7 +33,6 @@ use tenko_ipam::{
         MoveRequest,
         dhcp::{DhcpMoves, DhcpRolePort, MoveDhcpOutput, MoveDhcpStep, Released, codes},
     },
-    observe::{ObserveConfig, dhcp::LeaseFacts},
     query,
     reconcile::ReconcilerConfig,
 };
@@ -274,6 +273,7 @@ impl Moving {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         };
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
         batch
@@ -488,17 +488,14 @@ async fn a_lease_of_the_mac_in_the_target_network_confirms_the_move() {
     let job = moving.submit(camera).await;
     moving.tick_until(job, "ipam.move.observe").await;
     let vrf = moving.address_at("192.0.2.40").await.expect("old").vrf;
-    let facts = LeaseFacts::new(NodeId(1), ObserveConfig::default());
-    facts
-        .register(moving.world.store.as_ref())
-        .expect("register");
     let commit = |lease: Lease| {
-        let facts = Arc::clone(&facts);
         let store = Arc::clone(&moving.world.store);
         async move {
             let now = Timestamp::now();
             let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-            facts.observe(&lease, now, &mut batch).expect("observe");
+            batch
+                .put_typed(&dhcp_tables::LEASES, &(lease.vrf, lease.addr), &lease)
+                .expect("lease");
             store.propose(batch).await.expect("commit");
         }
     };
@@ -530,6 +527,7 @@ async fn a_lease_of_the_mac_in_the_target_network_confirms_the_move() {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         }
     };
 

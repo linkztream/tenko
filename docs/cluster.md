@@ -545,7 +545,7 @@ Work that must happen once for the whole installation runs on the leader only, u
 | Service | What it does |
 |---|---|
 | `jobs.runner` | Drives every job of the installation. A new leader takes the running and waiting jobs over at once; a step that was running when the old leader went away is run again when it is idempotent and otherwise fails and is rolled back. Before each step that is not idempotent the runner confirms with the cluster that it still leads. Group limits and `[jobs] workers` hold for the whole cluster, because only one runner drives jobs |
-| `ipam.reconcile` | The reconciler: its interval runs, the debounced run after an observation reached any controller (the leader watches `ipam.obs.facts`) and the purge of old observations on its own timer. Its settings are read from the store at every run (`PUT /api/v1/settings/reconciler`, [reconciliation.md](reconciliation.md)) |
+| `ipam.reconcile` | The reconciler: its interval runs, the debounced run after an observation reached any controller (the leader watches `ipam.obs.facts`, and its lease view follows the lease tables for a lease change) and the purge of old observations on its own timer. Its settings are read from the store at every run (`PUT /api/v1/settings/reconciler`, [reconciliation.md](reconciliation.md)) |
 | `connect.poll` | The poll schedule of every connector instance. The plugin processes, the health checks and the runs a person asks for stay on every controller ([connectors.md](connectors.md)) |
 | `vault.kek_rotation` | The online rotation of the key-encryption key |
 | `cluster.prune` | The hourly prune of expired revocations and old enrolment tokens |

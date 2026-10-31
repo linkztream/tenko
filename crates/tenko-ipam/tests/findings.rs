@@ -108,7 +108,8 @@ async fn a_scan_hit_on_an_ipv4_network_or_broadcast_address_is_an_artifact_not_a
     );
     let view = world.service.view(None).await.expect("view");
     assert_eq!(
-        lease_conflicts(view.as_ref(), at("08:01")).expect("conflicts"),
+        lease_conflicts(view.as_ref(), Some(world.service.leases()), at("08:01"))
+            .expect("conflicts"),
         Vec::new(),
         "the view lists no conflict row either"
     );

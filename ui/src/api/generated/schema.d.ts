@@ -7723,6 +7723,7 @@ export interface components {
              * @example 00:00:5e:00:53:01
              */
             mac?: string | null;
+            names?: components["schemas"]["HistoryNames"] | null;
             /** @description The node that wrote it. */
             node: components["schemas"]["NodeId"];
             /**
@@ -7778,6 +7779,11 @@ export interface components {
              * @description The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).
              */
             fqdn_flags?: number | null;
+            /**
+             * @description When the current binding was first granted (a renewal keeps it); the client
+             *     transaction time for a row written before ADR 0031.
+             */
+            granted: components["schemas"]["Timestamp"];
             host?: components["schemas"]["HostId"] | null;
             /** @description DHCPv4: the host name the client sent (option 12). */
             hostname?: string | null;
@@ -9509,6 +9515,11 @@ export interface components {
             /** @description The revision of the batch that wrote the entry (filled when read). */
             revision?: components["schemas"]["Revision"];
         };
+        /**
+         * @description Where the host name of a history item comes from when the history is read (ADR 0031).
+         * @enum {string}
+         */
+        HistoryNames: "stored" | "lease" | "lease_now" | "unknown";
         /** @description A host: the unit of intent (IPAM-12). */
         Host: {
             decommissioned?: components["schemas"]["Decommission"] | null;
@@ -11053,6 +11064,7 @@ export interface components {
              * @description The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).
              */
             fqdn_flags?: number | null;
+            granted?: components["schemas"]["Timestamp"] | null;
             /** @description The host name the client sent (option 12), as text. */
             hostname?: string | null;
             /** @description The node that wrote the row. */
@@ -14187,6 +14199,7 @@ export interface components {
                  * @example 00:00:5e:00:53:01
                  */
                 mac?: string | null;
+                names?: components["schemas"]["HistoryNames"] | null;
                 /** @description The node that wrote it. */
                 node: components["schemas"]["NodeId"];
                 /**
@@ -14243,6 +14256,11 @@ export interface components {
                  * @description The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).
                  */
                 fqdn_flags?: number | null;
+                /**
+                 * @description When the current binding was first granted (a renewal keeps it); the client
+                 *     transaction time for a row written before ADR 0031.
+                 */
+                granted: components["schemas"]["Timestamp"];
                 host?: components["schemas"]["HostId"] | null;
                 /** @description DHCPv4: the host name the client sent (option 12). */
                 hostname?: string | null;

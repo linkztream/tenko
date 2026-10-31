@@ -96,6 +96,7 @@ fn lease() -> Lease {
             raw: HexBytes(vec![1, 6, b'e', b't', b'h', b'0', b'/', b'1']),
         }),
         observed_at: None,
+        granted: None,
     }
 }
 

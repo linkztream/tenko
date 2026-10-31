@@ -13,7 +13,7 @@ use common::*;
 use reconcile_support::*;
 use tenko_core::{
     HostId, NodeId, ObservationId, Principal, SystemComponent, Timestamp, VrfId,
-    dhcp::{BindingState, ClientKey, DdnsState, Fingerprint, Lease},
+    dhcp::{BindingState, ClientKey, DdnsState, Fingerprint, Lease, tables},
     ipam::AssignmentMode,
     net::Fqdn,
     observe::{Observation, ObservationSource, Observed, ProbeMethod},
@@ -22,14 +22,15 @@ use tenko_core::{
 use tenko_ipam::{
     IpamCommand,
     observe::{
-        IngestBatch, ObserveConfig,
-        dhcp::{LeaseClassifier, LeaseFacts, OsReading},
+        IngestBatch,
+        dhcp::{LeaseClassifier, OsReading},
     },
     reconcile::view::{
         ReconcileKind, ReconcilePage, ReconcileQuery, ReconcileRow, Truth, WinRule,
         lease_conflicts, reconcile,
     },
 };
+use tenko_ipam::{proposals::IntentProposalKind, reconcile::names};
 use tenko_store::{ReadConsistency, WriteBatch};
 
 /// The time the truths are seen: a month after the intent was written, so that an
@@ -68,7 +69,6 @@ impl LeaseClassifier for ByVendor {
 struct Lab {
     world: World,
     vrf: VrfId,
-    leases: Arc<LeaseFacts>,
     printer: HostId,
     nas: HostId,
     tv: HostId,
@@ -122,13 +122,10 @@ impl Lab {
             None,
         )
         .await;
-        let leases = LeaseFacts::new(NodeId(1), ObserveConfig::default());
-        leases.register(world.store.as_ref()).expect("register");
-        assert!(leases.set_classifier(Arc::new(ByVendor)));
+        assert!(world.service.leases().set_classifier(Arc::new(ByVendor)));
         Self {
             world,
             vrf,
-            leases,
             printer,
             nas,
             tv,
@@ -159,12 +156,18 @@ impl Lab {
         id
     }
 
-    /// A lease of `ip` to the MAC `00:00:5e:00:53:<low>` committed through the hook.
+    /// A lease of `ip` to the MAC `00:00:5e:00:53:<low>`, committed into the lease table.
     async fn lease(&self, ip: &str, low: u8, vendor: Option<&str>) {
+        self.commit(&self.lease_row(ip, low, vendor)).await;
+    }
+
+    /// The row of a lease of `ip` to the MAC `00:00:5e:00:53:<low>`, held from `base` for an
+    /// hour.
+    fn lease_row(&self, ip: &str, low: u8, vendor: Option<&str>) -> Lease {
         let now = base();
         // Built from its serialized form, so that optional fields other packages add to the
         // row keep their defaults.
-        let lease: Lease = serde_json::from_value(serde_json::json!({
+        serde_json::from_value(serde_json::json!({
             "addr": ip,
             "vrf": self.vrf,
             "scope": tenko_core::PrefixId::generate(),
@@ -184,11 +187,16 @@ impl Lab {
                 ..Fingerprint::default()
             },
         }))
-        .expect("a lease row");
-        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-        self.leases
-            .observe(&lease, now, &mut batch)
-            .expect("observe");
+        .expect("a lease row")
+    }
+
+    /// Commits the lease row itself, as the role does: the lease table is the observation
+    /// source.
+    async fn commit(&self, lease: &Lease) {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), base());
+        batch
+            .put_typed(&tables::LEASES, &(lease.vrf, lease.addr), lease)
+            .expect("lease");
         self.world.store.propose(batch).await.expect("commit");
     }
 
@@ -224,7 +232,13 @@ impl Lab {
             .read(ReadConsistency::Linearizable)
             .await
             .expect("view");
-        reconcile(view.as_ref(), &query, later(1)).expect("the view")
+        reconcile(
+            view.as_ref(),
+            Some(self.world.service.leases()),
+            &query,
+            later(1),
+        )
+        .expect("the view")
     }
 
     /// The seeded world: one case of every kind and three quiet hosts.
@@ -391,7 +405,8 @@ async fn the_view_lists_every_seeded_case_and_nothing_else() {
         .read(ReadConsistency::Linearizable)
         .await
         .expect("view");
-    let conflicts = lease_conflicts(view.as_ref(), later(1)).expect("conflicts");
+    let conflicts = lease_conflicts(view.as_ref(), Some(lab.world.service.leases()), later(1))
+        .expect("conflicts");
     assert_eq!(conflicts.len(), 1);
     assert_eq!(conflicts[0].address.to_string(), "192.0.2.60");
 }
@@ -507,7 +522,13 @@ async fn pages_carry_on_where_the_last_ended_and_bad_queries_are_refused() {
         },
     ] {
         assert!(
-            reconcile(view.as_ref(), &query, later(1)).is_err(),
+            reconcile(
+                view.as_ref(),
+                Some(lab.world.service.leases()),
+                &query,
+                later(1)
+            )
+            .is_err(),
             "{query:?}"
         );
     }
@@ -577,4 +598,204 @@ async fn the_os_field_follows_the_precedence_of_the_sources() {
         .await
         .items;
     assert_eq!(rows, Vec::new());
+}
+
+#[tokio::test]
+async fn a_lease_and_a_probe_with_two_mac_addresses_on_one_address_are_a_conflict() {
+    let lab = Lab::new().await;
+    lab.lease("192.0.2.60", 0x60, None).await;
+    // The same address answers the probe with another MAC address.
+    lab.world
+        .probe(
+            lab.vrf,
+            &[("192.0.2.60", Some("00:00:5e:00:53:61"))],
+            base(),
+        )
+        .await;
+    let page = lab.view(ReconcileQuery::default()).await;
+    let conflict = row(&page, ReconcileKind::Conflict);
+    assert_eq!(conflict.address.to_string(), "192.0.2.60");
+    assert_eq!(
+        (conflict.rule_id, conflict.winner),
+        (WinRule::NeverAutomatic, None)
+    );
+    assert_eq!(
+        conflict
+            .macs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["00:00:5e:00:53:60", "00:00:5e:00:53:61"]
+    );
+    assert_eq!(
+        conflict.lease.as_ref().map(|lease| lease.sources.clone()),
+        Some(vec!["dhcp:1".to_owned()]),
+        "the lease table is the source of the lease side"
+    );
+    assert_eq!(
+        conflict.scan.as_ref().map(|scan| scan.sources.clone()),
+        Some(vec!["probe:7:arp".to_owned()])
+    );
+
+    // The health view lists the same row, and the reconciler opens a conflict proposal.
+    let view = lab.world.service.view(None).await.expect("view");
+    let conflicts =
+        lease_conflicts(view.as_ref(), Some(lab.world.service.leases()), later(1)).expect("rows");
+    assert_eq!(conflicts.len(), 1);
+    lab.world.reconcile(base()).await;
+    assert_eq!(lab.world.open(IntentProposalKind::Conflict).await.len(), 1);
+
+    // The device that was leased the address released it: a released row's facts expired
+    // when it was released, and the conflict ends with them.
+    let mut released = lab.lease_row("192.0.2.60", 0x60, None);
+    released.state = BindingState::Released;
+    released.cltt = later(0);
+    released.ends = later(0);
+    lab.commit(&released).await;
+    let page = lab.view(ReconcileQuery::default()).await;
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.kind != ReconcileKind::Conflict),
+        "{:?}",
+        kinds(&page)
+    );
+}
+
+#[tokio::test]
+async fn a_lease_of_an_address_without_intent_is_a_discovered_host() {
+    let lab = Lab::new().await;
+    let mut leased = lab.lease_row("192.0.2.55", 0x55, Some("MSFT 5.0"));
+    leased.hostname = Some("laptop-anna".to_owned());
+    lab.commit(&leased).await;
+    lab.world.reconcile(base()).await;
+
+    let proposals = lab.world.open(IntentProposalKind::DiscoveredHost).await;
+    assert_eq!(proposals.len(), 1, "{proposals:#?}");
+    let proposal = &proposals[0];
+    assert_eq!(
+        proposal.subject.mac.map(|mac| mac.to_string()),
+        Some("00:00:5e:00:53:55".to_owned())
+    );
+    assert_eq!(
+        proposal.subject.ip,
+        Some("192.0.2.55".parse::<IpAddr>().expect("ip"))
+    );
+    assert_eq!(
+        proposal.params.get("name_source").map(String::as_str),
+        Some("dhcp"),
+        "the lease names the device"
+    );
+
+    let page = lab.view(ReconcileQuery::default()).await;
+    let rogue = row(&page, ReconcileKind::Rogue);
+    assert_eq!(rogue.address.to_string(), "192.0.2.55");
+    assert_eq!(rogue.host, None);
+    assert_eq!(
+        (rogue.rule_id, rogue.winner),
+        (WinRule::NewestSighting, Some(Truth::Lease))
+    );
+    assert_eq!(rogue.proposal, Some(proposal.id), "the proposal is linked");
+    assert_eq!(rogue.vendors, ["MSFT 5.0"]);
+    assert_eq!(
+        rogue.lease.as_ref().and_then(|lease| lease.last_seen),
+        Some(leased.cltt)
+    );
+}
+
+#[tokio::test]
+async fn a_lease_name_that_differs_from_the_dns_name_is_a_name_conflict() {
+    let lab = Lab::new().await;
+    // The camera (intent: dynamic, named `camera`) is leased its address under the name
+    // `doorcam`, and reverse DNS names the address `cam-front`.
+    let mut leased = lab.lease_row("192.0.2.30", 0x30, None);
+    leased.hostname = Some("doorcam".to_owned());
+    lab.commit(&leased).await;
+    lab.world
+        .names(&[("192.0.2.30", "cam-front.example.test")], base())
+        .await;
+    lab.world.reconcile(base()).await;
+
+    let renames = lab.world.open(IntentProposalKind::HostName).await;
+    assert_eq!(renames.len(), 1, "{renames:#?}");
+    let rename = &renames[0];
+    assert_eq!(rename.rule, names::rule::NAME_CONFLICT);
+    assert_eq!(rename.subject.name.as_deref(), Some("camera"));
+    assert_eq!(
+        rename.params.get("name").map(String::as_str),
+        Some("cam-front.example.test"),
+        "the DNS name outranks the DHCP name"
+    );
+    assert_eq!(
+        rename.params.get("other_names").map(String::as_str),
+        Some("doorcam"),
+        "the lease's name is the other candidate"
+    );
+}
+
+#[tokio::test]
+async fn a_lease_name_renames_a_host_that_carries_a_placeholder() {
+    let lab = Lab::new().await;
+    Lab::host(
+        &lab.world,
+        "host-00005e005344",
+        AssignmentMode::Dynamic,
+        ":44",
+        "192.0.2.44",
+        None,
+    )
+    .await;
+    let mut leased = lab.lease_row("192.0.2.44", 0x44, None);
+    leased.hostname = Some("thermostat".to_owned());
+    lab.commit(&leased).await;
+    lab.world.reconcile(base()).await;
+    let renames = lab.world.open(IntentProposalKind::HostName).await;
+    assert_eq!(renames.len(), 1, "{renames:#?}");
+    assert_eq!(renames[0].rule, names::rule::PLACEHOLDER_NAME);
+    assert_eq!(
+        renames[0].params.get("name").map(String::as_str),
+        Some("thermostat")
+    );
+    assert_eq!(
+        renames[0].params.get("name_source").map(String::as_str),
+        Some("dhcp")
+    );
+}
+
+#[tokio::test]
+async fn an_address_no_lease_and_no_sighting_shows_is_a_ghost_and_a_live_lease_ends_it() {
+    let lab = Lab::new().await;
+    // Nothing shows the printer's address; it was created a month ago in this world's
+    // clock, so it has been unseen for longer than the orphan age.
+    let page = lab.view(ReconcileQuery::default()).await;
+    let ghost = row(&page, ReconcileKind::Ghost);
+    assert_eq!(ghost.address.to_string(), "192.0.2.20");
+    assert_eq!(ghost.last_seen, None, "never seen");
+
+    // A lease that was released long ago is no sighting now, but it is the last one: the
+    // ghost remembers when the lease was last seen (a released row's facts expired at its
+    // last transaction).
+    let mut gone = lab.lease_row("192.0.2.20", 0x20, None);
+    gone.state = BindingState::Released;
+    gone.cltt = base()
+        .checked_sub(Duration::from_secs(10 * 86_400))
+        .expect("time");
+    gone.ends = gone.cltt;
+    lab.commit(&gone).await;
+    let page = lab.view(ReconcileQuery::default()).await;
+    let ghost = row(&page, ReconcileKind::Ghost);
+    assert_eq!(ghost.address.to_string(), "192.0.2.20");
+    assert_eq!(ghost.last_seen, Some(gone.cltt));
+    assert_eq!(ghost.host, Some(lab.printer));
+
+    // A current lease of the printer's MAC address ends it.
+    lab.lease("192.0.2.20", 0x20, None).await;
+    let page = lab.view(ReconcileQuery::default()).await;
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.address.to_string() != "192.0.2.20"),
+        "{:?}",
+        kinds(&page)
+    );
 }

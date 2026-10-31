@@ -269,6 +269,7 @@ fn foreign_lease(vrf: VrfId, scope: PrefixId, addr: Ipv4Addr) -> Lease {
         fingerprint: None,
         relay: None,
         observed_at: None,
+        granted: None,
     }
 }
 
@@ -489,6 +490,8 @@ async fn the_role_serves_from_the_store_follows_it_and_survives_a_snapshot_insta
     assert_eq!(missing.code, Some(tenko_core::dhcp::codes::LEASE_NOT_FOUND));
     assert_eq!(active(node.as_ref()), 1);
 
+    // The grant's history row comes from the writer; flush it so that the read finds it.
+    node.lease_store().derived().flush().await;
     // dhcp.history.read: newest first.
     let history = node
         .execute(

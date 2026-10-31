@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{
     HostId, MacAddr, PrefixId, Revision, Timestamp, VrfId,
     dhcp::{
-        BindingState, Lease, Lease6, Lease6Event, Lease6Kind, LeaseEvent, LeaseEventKind, tables,
+        BindingState, HistoryNames, HistoryRow, Lease, Lease6, Lease6Event, Lease6Kind, LeaseEvent,
+        LeaseEventKind, tables,
     },
     net::Duid,
 };
@@ -271,6 +272,7 @@ mod addr_filter_tests {
             fqdn_flags: None,
             relay: None,
             observed_at: None,
+            granted: None,
             ddns: DdnsState::default(),
         }
     }
@@ -569,17 +571,23 @@ type Scanned<K, V> = (Vec<(K, V)>, Option<K>);
 
 /// Reads up to `limit` rows of a history table that `keep` passes, newest first, before
 /// `before`: pages of the table are read backwards until the page is full, the time `from`
-/// is passed, or [`HISTORY_SCAN`] rows were looked at. Answers the rows with their keys and
-/// the key the next read starts before, when there may be more.
-fn scan_back<K, V>(
+/// is passed, or [`HISTORY_SCAN`] rows were looked at. Each row is read as `event` makes it
+/// of its key, its value and its revision. Answers the rows with their keys and the key the
+/// next read starts before, when there may be more.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the table, the window, the reading and the filter of one scan"
+)]
+fn scan_back<K, V, T>(
     view: &dyn ReadView,
     table: &tenko_core::table::TableDef<K, V>,
     before: Option<&K>,
     from: Option<Timestamp>,
-    at: impl Fn(&V) -> Timestamp,
-    keep: impl Fn(&V) -> bool,
+    event: impl Fn(&K, V, Revision) -> T,
+    at: impl Fn(&T) -> Timestamp,
+    keep: impl Fn(&T) -> bool,
     limit: usize,
-) -> Result<Scanned<K, V>, StoreError>
+) -> Result<Scanned<K, T>, StoreError>
 where
     K: tenko_core::codec::key::KeyCodec + Clone,
     V: Serialize + serde::de::DeserializeOwned,
@@ -594,9 +602,10 @@ where
         let page = view.scan_typed(table, range.clone(), 512, true)?;
         let full = page.len() == 512;
         let mut last = None;
-        for (key, row, _) in page {
+        for (key, value, revision) in page {
             seen += 1;
             last = Some(key.clone());
+            let row = event(&key, value, revision);
             if from.is_some_and(|from| at(&row) < from) {
                 return Ok((items, None));
             }
@@ -668,6 +677,7 @@ pub fn read_history_both(
             &tables::HISTORY,
             args.before.as_ref(),
             args.from,
+            |key, row: HistoryRow, revision| row.into_event(*key, revision),
             |event: &LeaseEvent| event.at,
             |event| args.matches(event),
             limit,
@@ -681,6 +691,7 @@ pub fn read_history_both(
             &tables::HISTORY6,
             args.before6.as_ref(),
             args.from,
+            |_, event: Lease6Event, _| event,
             |event: &Lease6Event| event.at,
             |event| args.matches6(event),
             limit,
@@ -708,11 +719,12 @@ pub fn read_history_both(
     let resume4 = (wants4 && !ended4).then(|| resume_of(&rows4, taken4, args.before, next4));
     let ended6 = taken6 == rows6.len() && next6.is_none();
     let resume6 = (wants6 && !ended6).then(|| resume_of(&rows6, taken6, args.before6, next6));
-    let items: Vec<LeaseEvent> = rows4
+    let mut items: Vec<LeaseEvent> = rows4
         .into_iter()
         .take(taken4)
         .map(|(_, event)| event)
         .collect();
+    join_names(view, &mut items)?;
     let items6: Vec<Lease6Event> = rows6
         .into_iter()
         .take(taken6)
@@ -725,6 +737,48 @@ pub fn read_history_both(
         resume: resume4,
         resume6,
     })
+}
+
+/// A page of `dhcp.history` alone, with the names joined from the lease rows.
+fn joined(
+    view: &dyn ReadView,
+    mut items: Vec<LeaseEvent>,
+    next: Option<HistoryKey>,
+) -> Result<HistoryPage, StoreError> {
+    join_names(view, &mut items)?;
+    Ok(v4_page(items, next))
+}
+
+// ADR 0031: the lean history row keeps no names; they are joined from the lease row.
+/// Joins the host name of each lean event from its lease row (ADR 0031): the row of the
+/// change itself when the lease row is still at the event's revision
+/// ([`HistoryNames::Lease`]), the row as it is now when it changed since but still belongs
+/// to the same client ([`HistoryNames::LeaseNow`]), none when another client holds it or it
+/// is gone ([`HistoryNames::Unknown`]). A row written before ADR 0031 keeps its own
+/// ([`HistoryNames::Stored`]).
+///
+/// # Errors
+///
+/// A storage or decoding failure of a lease row.
+pub fn join_names(view: &dyn ReadView, items: &mut [LeaseEvent]) -> Result<(), StoreError> {
+    for event in items.iter_mut() {
+        if event.names.is_some() {
+            continue;
+        }
+        let row = view.get_typed(&tables::LEASES, &(event.vrf, event.addr))?;
+        event.names = Some(match row {
+            Some((lease, revision)) if lease.client == event.client => {
+                event.hostname = lease.hostname;
+                if Some(revision) == event.revision {
+                    HistoryNames::Lease
+                } else {
+                    HistoryNames::LeaseNow
+                }
+            }
+            _ => HistoryNames::Unknown,
+        });
+    }
+    Ok(())
 }
 
 /// A page of `dhcp.history` alone.
@@ -757,27 +811,28 @@ pub fn read_history(view: &dyn ReadView, args: &HistoryArgs) -> Result<HistoryPa
         let page = view.scan_typed(&tables::HISTORY, range.clone(), 512, true)?;
         let full = page.len() == 512;
         let mut last = None;
-        for (key, event, _) in page {
+        for (key, row, revision) in page {
             seen += 1;
             last = Some(key);
+            let event = row.into_event(key, revision);
             if args.from.is_some_and(|from| event.at < from) {
-                return Ok(v4_page(items, None));
+                return joined(view, items, None);
             }
             if args.matches(&event) {
                 items.push(event);
                 if items.len() == limit {
-                    return Ok(v4_page(items, last));
+                    return joined(view, items, last);
                 }
             }
         }
         let Some(last) = last else {
-            return Ok(v4_page(items, None));
+            return joined(view, items, None);
         };
         if !full {
-            return Ok(v4_page(items, None));
+            return joined(view, items, None);
         }
         if seen >= HISTORY_SCAN {
-            return Ok(v4_page(items, Some(last)));
+            return joined(view, items, Some(last));
         }
         range = KeyRange::all().before(tables::HISTORY.key(&last));
     }

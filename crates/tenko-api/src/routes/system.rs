@@ -829,7 +829,8 @@ pub(crate) async fn assemble(
     // conflict rows of the reconciliation view; never resolved automatically.
     if let Some(Extension(ipam)) = ipam
         && let Ok(view) = ipam.view(None).await
-        && let Ok(conflicts) = tenko_ipam::reconcile::view::lease_conflicts(view.as_ref(), now)
+        && let Ok(conflicts) =
+            tenko_ipam::reconcile::view::lease_conflicts(view.as_ref(), Some(ipam.leases()), now)
     {
         status.warnings.extend(lease_conflict_warning(&conflicts));
     }

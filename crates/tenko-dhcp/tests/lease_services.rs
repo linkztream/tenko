@@ -14,7 +14,7 @@ use lease_support::{
 };
 use tenko_core::{
     PrefixId, Principal, SystemComponent, Timestamp, VrfId,
-    dhcp::{BindingState, DhcpSettings, LeaseEvent, LeaseEventKind, audit, tables},
+    dhcp::{BindingState, DhcpSettings, HistoryRow, LeaseEvent, LeaseEventKind, audit, tables},
 };
 use tenko_dhcp::{
     allocator::OfferHold,
@@ -330,7 +330,11 @@ async fn the_purge_deletes_what_is_older_than_the_retention() {
         )
         .to_event(NODE);
         batch
-            .put_typed(&tables::HISTORY, &(row.at, row.vrf, row.addr), &row)
+            .put_typed(
+                &tables::HISTORY,
+                &(row.at, row.vrf, row.addr),
+                &HistoryRow::of(&row),
+            )
             .expect("encodes");
     }
     let settings = DhcpSettings {

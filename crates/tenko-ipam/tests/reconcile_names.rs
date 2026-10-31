@@ -279,6 +279,7 @@ async fn a_placeholder_never_names_a_discovered_host() {
     let view = lab.world.service.view(None).await.expect("view");
     let facts = tenko_ipam::observe::view::list_facts(
         view.as_ref(),
+        Some(lab.world.service.leases()),
         &tenko_ipam::observe::view::FactQuery {
             source: Some(format!("inventory:{}", lab.unifi)),
             ..Default::default()

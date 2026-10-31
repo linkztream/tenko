@@ -12,8 +12,8 @@ use tenko_api::routes::dhcp::DhcpNodeSlot;
 use tenko_core::{
     NodeId, PrefixId, Principal, SystemComponent, Timestamp, VrfId,
     dhcp::{
-        BindingState, ClientKey, DdnsState, Lease, Lease6, Lease6Event, Lease6Kind, LeaseEvent,
-        LeaseEventKind, tables,
+        BindingState, ClientKey, DdnsState, HistoryRow, Lease, Lease6, Lease6Event, Lease6Kind,
+        LeaseEvent, LeaseEventKind, tables,
     },
     net::Duid,
     serde_util::HexBytes,
@@ -69,6 +69,7 @@ fn lease4(vrf: VrfId, scope: PrefixId, addr: &str) -> Lease {
         fingerprint: None,
         relay: None,
         observed_at: None,
+        granted: None,
     }
 }
 
@@ -92,6 +93,7 @@ fn lease6(vrf: VrfId, scope: PrefixId, addr: &str, duid: &str, mac: bool) -> Lea
         fqdn_flags: None,
         relay: None,
         observed_at: None,
+        granted: None,
         ddns: DdnsState::default(),
     }
 }
@@ -156,7 +158,7 @@ async fn world() -> World {
         .put_typed(
             &tables::HISTORY,
             &(t1, vrf, v4_lease.addr),
-            &LeaseEvent::of(&v4_lease, LeaseEventKind::Granted, t1),
+            &HistoryRow::of(&LeaseEvent::of(&v4_lease, LeaseEventKind::Granted, t1)),
         )
         .expect("history");
     batch

@@ -1,153 +1,109 @@
-//! Leases as observations (plan section 2.8, decision P3-Q8, WP8.1): the facts of the source
-//! `dhcp:<node>` ([`ObservationSource::DhcpLease`]), written by the `dhcp` role in the batch
-//! of the lease change itself, with no polling and no second commit.
+//! Leases as observations (plan section 2.8, ADR 0031): the lease tables are the observation
+//! source `dhcp:<node>` ([`ObservationSource::DhcpLease`]), read through [`LeaseFacts`], a
+//! view that presents each lease row as the facts it stands for. The `dhcp` role writes no
+//! fact rows (it did from WP8.1 to ADR 0030: four facts and their index rows per change, a
+//! copy of what the lease row holds).
 //!
 //! # The facts of a lease
 //!
-//! | Subject | Fact | When |
+//! | Subject | Fact | Current while |
 //! |---|---|---|
-//! | `address:<vrf>/<ip>` | `Observed::Address` with the lease's address and the client's MAC | the lease binds |
-//! | `name:<ip>` | `Observed::Name` with the client's FQDN (option 81), else its host name (option 12) | the lease binds and the client sent a name |
+//! | `address:<vrf>/<ip>` | `Observed::Address` with the lease's address and the client's MAC | the binding holds (`active` until its end) |
+//! | `name:<ip>` | `Observed::Name` with the client's FQDN (option 81), else its host name (option 12) | the binding holds and the client sent a name |
 //! | `address:<vrf>/<ip>` | `Observed::Address` with the MAC address that answered the conflict probe (an ARP answer), else none (ICMP, a DECLINE) | the row is `abandoned` (a conflict, WP8.5), until its hold ends |
-//! | `os:<ip>` | `Observed::Os` with the guess of the lease's fingerprint (options 55, 60, 77, 81, 93) and its confidence | the lease binds and the [`LeaseClassifier`] knows the fingerprint (WP8.2) |
-//! | `vendor:<mac>` | `Observed::Vendor` with the vendor class of option 60 | the lease binds, the client has a MAC address and sent a vendor class (WP8.2) |
+//! | `os:<ip>` | `Observed::Os` with the guess of the lease's fingerprint (options 55, 60, 77, 81, 93) and its confidence | the binding holds and the [`LeaseClassifier`] knows the fingerprint (WP8.2) |
+//! | `vendor:<mac>` | `Observed::Vendor` with the vendor class of option 60 | the binding holds, the client has a MAC address and sent a vendor class (WP8.2) |
 //!
-//! A DHCPv6 lease (WP9.1, [`LeaseFacts::observe6`]) gives the address and name facts by
-//! the same rules: the address fact of its IPv6 address carries the client's MAC address
-//! from its link-layer address (the Client Link-Layer Address option a relay added, RFC
-//! 6939, else its DUID-LLT or DUID-LL), so that the reconciler sees the DHCPv4 and the
-//! DHCPv6 address of one device under one MAC (DHCP-11); the name fact is the name of
-//! RFC 4704. A DHCPv6 request has no fingerprint and no vendor class here.
+//! A DHCPv6 address lease (WP9.1) gives the address and name facts by the same rules: the
+//! address fact of its IPv6 address carries the client's MAC address from its link-layer
+//! address (the Client Link-Layer Address option a relay added, RFC 6939, else its DUID-LLT
+//! or DUID-LL), so that the reconciler sees the DHCPv4 and the DHCPv6 address of one device
+//! under one MAC (DHCP-11); the name fact is the name of RFC 4704. A delegated prefix (WP9.2,
+//! an `IA_PD` binding) is no address in use: its fact is `Observed::Network` with the prefix
+//! as the subnet, under the subject `network:dhcp-pd/<vrf>/<prefix>/<length>`, named by the
+//! router's link-layer address or DUID. The reconciler reads network facts of network
+//! controllers only, so a delegation never becomes a proposal.
 //!
-//! A delegated prefix (WP9.2, an `IA_PD` binding) is no address in use: its fact is
-//! `Observed::Network` with the prefix as the subnet, under the subject
-//! `network:dhcp-pd/<vrf>/<prefix>` (the controller field holds that reference), named by
-//! the router's link-layer address or DUID, while the binding holds. The reconciler reads
-//! network facts of network controllers only, so a delegation never becomes a proposal for
-//! a host, an address or a VLAN, and the observation view shows it under the delegation
-//! network. It has no name fact: a name of RFC 4704 belongs to an address.
+//! # The rules of the view
 //!
-//! The guess comes from the classifier the role hands the index ([`LeaseFacts::set_classifier`],
-//! the rule table of `tenko_dhcp::fingerprint`); without one no OS fact is written. A
-//! fact's `last_seen` is the lease's client transaction time, its `expires_at` the end of
-//! the binding as it was when the fact was written, so a binding that runs out takes its
-//! facts with it without a write.
+//! The rules of [`super::ingest()`] became the rules of the view: the lease row is the fact.
 //!
-//! # The rules
+//! - **Times.** A fact's `last_seen` (and `received_at`) is the row's client transaction
+//!   time, its `first_seen` the row's grant time (`granted`, the first grant of the current
+//!   binding; a row of an earlier version reads as granted at its `cltt`), its revision the
+//!   row's.
+//! - **Current.** A binding fact expires at the binding's end (`ends` of an `active` row), so
+//!   a binding that runs out takes its facts with it without a write; a conflict's address
+//!   fact at the end of its hold. A row that no longer binds (released, expired, reset) stands
+//!   for facts that expired at its client transaction time or its end, whichever came
+//!   first; an `abandoned` row (a conflict or a decline) for the conflict's address fact
+//!   until its hold ends; a `free` or `backup` row for none.
+//! - **Retention.** A row whose facts ended longer ago than the observation retention
+//!   ([`ObserveConfig::retention`], 30 days; the reconciler hands over the setting in force
+//!   with [`LeaseFacts::set_retention`]) is not presented at all, as a stored fact whose last
+//!   sighting is older is purged; the build at start leaves such rows out too. Lease rows
+//!   are never deleted, so without the cut a released address would show for ever.
+//! - **Sightings.** A sighting counts once per refresh interval ([`ObserveConfig::refresh`]):
+//!   a binding held from its grant to its last transaction counts one sighting plus one per
+//!   interval in between.
+//! - **The observation id** is derived from the source, the subject, the grant time and the
+//!   reported attributes: it changes when the binding or what it reports changes, as the
+//!   ingest's id did.
+//! - Two rows of one node that give the same subject (the name of one address in two VRFs,
+//!   the vendor of one MAC address on two leases) give one fact: the current one, else the
+//!   most recently seen.
 //!
-//! The rules of [`super::ingest()`], applied to one lease change:
+//! # The view
 //!
-//! - A subject without a fact gets a new one with one sighting.
-//! - A known fact is written again only when its attributes changed (another MAC, another
-//!   name), when it had expired, or when its refresh is due ([`ObserveConfig::refresh`]
-//!   since its last sighting, or less than half of the fresh lifetime left). A renewal or a
-//!   repeated request within the refresh interval writes nothing and is counted
-//!   ([`FactOutcome::Unchanged`]).
-//! - A sighting is counted at most once per refresh interval.
-//! - A lease that no longer binds (released, declined, reclaimed by an operator) expires the
-//!   current facts of its address: their `expires_at` becomes the time of the change. An
-//!   expiry needs no write: the facts end with the binding.
+//! [`LeaseFacts`] keeps one compact entry per lease row of `dhcp.leases` and `dhcp.leases6`
+//! (the node, the state, the times, the MAC address, the name, the vendor class, the OS
+//! guess) and builds the facts when they are read. It is built from the lease tables when it
+//! starts and follows the lease changes of the store's journal ([`Store::watch`], the stream
+//! the API's event stream reads), off the store's apply path; a stream that ends with
+//! `Lagged` or `Compacted` (a snapshot install, a follower that fell behind) rebuilds it from
+//! the tables. [`LeaseFacts::caught_up`] waits until it has followed a revision, so a reader
+//! with a read view sees the leases of that view. [`LeaseFacts::changes`] wakes the
+//! reconciler after a lease change, as the fact changes did.
 //!
-//! # The stored facts
-//!
-//! The rules need the stored fact, and the role builds the batch without a store read
-//! (the committer runs off the DORA path but never waits on a read view). [`LeaseFacts`]
-//! is therefore a derived index of the store: it keeps the facts of its source in memory,
-//! built from `ipam.obs.facts` at registration and on a snapshot install, and follows every
-//! change set that touches the table. The role is the only writer of its source, so its
-//! writes carry no version precondition: a lease change never fails on its observation.
-//! The retention purge of the reconciler deletes facts with a precondition and loses a
-//! race against the role, not the other way round.
+//! The guess comes from the classifier the server hands the view ([`LeaseFacts::set_classifier`],
+//! the rule table of `tenko_dhcp::fingerprint`) before it starts; without one there is no OS
+//! fact.
 
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, OnceLock, PoisonError, RwLock},
+    sync::{
+        Arc, OnceLock, PoisonError, RwLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::Duration,
 };
 
+use futures::{FutureExt as _, StreamExt as _};
 use tenko_core::{
-    MacAddr, NodeId, ObservationId, Revision, Timestamp,
-    codec::encode_key,
-    dhcp::{BindingState, Fingerprint, Lease, Lease6, Lease6Kind},
+    MacAddr, NodeId, ObservationId, Revision, Timestamp, VrfId,
+    dhcp::{BindingState, Fingerprint, Lease, Lease6, Lease6Kind, tables},
     observe::{NetworkDhcp, ObservationSource, Observed},
 };
 use tenko_store::{
-    ChangeSet, DerivedIndex, IndexImage, KeyRange, ReadView, ReadViewExt, Store, StoreError,
-    WatchFilter, WriteBatch, downcast_image,
+    ChangeSet, KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, WatchFilter,
 };
+use tokio::sync::{Notify, watch};
+use tokio_util::sync::CancellationToken;
 
 use super::{
     ObserveConfig,
-    ingest::{IndexRows, refresh_due},
-    model::{FactSubject, ObservedFact, observed_macs, source_key},
-    tables::FACTS,
+    model::{FactSubject, ObservedFact, observed_ips, observed_macs, observed_name},
 };
 
-/// Facts read per page when the index is built.
-const PAGE: usize = 10_000;
+/// Rows read per page when the view is built.
+const PAGE: usize = 4_096;
 
-/// What one lease change did to one fact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum FactOutcome {
-    /// No fact is involved: the lease does not bind and no current fact names its address
-    /// (or the client sent no name).
-    None,
-    /// A new fact.
-    New,
-    /// An attribute changed (or the fact had expired): written.
-    Changed,
-    /// The refresh was due: written with the new sighting.
-    Refreshed,
-    /// Nothing changed and no refresh was due: nothing written.
-    Unchanged,
-    /// The lease no longer binds: the fact expired.
-    Expired,
-}
+/// How long a reader waits for the view to follow the revision of its read view.
+pub const CATCH_UP_WAIT: Duration = Duration::from_secs(1);
 
-impl FactOutcome {
-    /// Whether the outcome wrote the fact.
-    pub const fn wrote(self) -> bool {
-        matches!(
-            self,
-            FactOutcome::New | FactOutcome::Changed | FactOutcome::Refreshed | FactOutcome::Expired
-        )
-    }
-
-    /// The label of the outcome (`new`, `changed`, `refreshed`, `unchanged`, `expired`), or
-    /// `None` for [`FactOutcome::None`].
-    pub const fn label(self) -> Option<&'static str> {
-        match self {
-            FactOutcome::None => None,
-            FactOutcome::New => Some("new"),
-            FactOutcome::Changed => Some("changed"),
-            FactOutcome::Refreshed => Some("refreshed"),
-            FactOutcome::Unchanged => Some("unchanged"),
-            FactOutcome::Expired => Some("expired"),
-        }
-    }
-}
-
-/// What a lease change did to the facts of its address.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LeaseObservation {
-    /// The address fact.
-    pub address: FactOutcome,
-    /// The name fact.
-    pub name: FactOutcome,
-    /// The OS fact (the fingerprint's guess, WP8.2).
-    pub os: FactOutcome,
-    /// The vendor fact (option 60, WP8.2).
-    pub vendor: FactOutcome,
-    /// The time to record as the lease row's `observed_at` when a fact was written.
-    pub observed_at: Option<Timestamp>,
-}
-
-impl LeaseObservation {
-    /// Whether the change wrote a fact.
-    pub const fn wrote(&self) -> bool {
-        self.address.wrote() || self.name.wrote() || self.os.wrote() || self.vendor.wrote()
-    }
-}
+/// Change sets the follower takes from the stream before it reads their rows.
+const DRAIN: usize = 4_096;
 
 /// An OS guess for a lease's fingerprint (DHCP-14).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +115,7 @@ pub struct OsReading {
 }
 
 /// Maps a lease's fingerprint to an OS guess: the rule table of `tenko_dhcp::fingerprint`
-/// (P3-Q15), handed to [`LeaseFacts::set_classifier`] by the role. Runs on the commit side.
+/// (P3-Q15), handed to [`LeaseFacts::set_classifier`] by the server.
 pub trait LeaseClassifier: Send + Sync {
     /// The guess, or `None` when no rule knows the fingerprint.
     fn os(&self, fingerprint: &Fingerprint) -> Option<OsReading>;
@@ -177,7 +133,8 @@ pub fn lease_vendor(lease: &Lease) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The client's MAC address, when its hardware type is Ethernet.
+/// The client's MAC address, when its hardware type is Ethernet (of an abandoned row: the
+/// MAC address that answered the conflict probe, when ARP gave one).
 pub fn lease_mac(lease: &Lease) -> Option<MacAddr> {
     lease.client.mac().map(MacAddr::new)
 }
@@ -193,577 +150,747 @@ pub fn lease_name(lease: &Lease) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The image of the index: the facts of the source by subject key.
+/// What a row binds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Kind {
+    /// A DHCPv4 address.
+    V4,
+    /// A DHCPv6 address (`IA_NA`).
+    V6,
+    /// A delegated prefix (`IA_PD`): its length and who holds it.
+    Delegation { prefix_len: u8, holder: Box<str> },
+}
+
+/// What the view keeps of one lease row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Entry {
+    kind: Kind,
+    node: NodeId,
+    state: BindingState,
+    cltt: Timestamp,
+    ends: Timestamp,
+    granted: Timestamp,
+    revision: Revision,
+    mac: Option<MacAddr>,
+    name: Option<Box<str>>,
+    vendor: Option<Box<str>>,
+    os: Option<(Box<str>, u8)>,
+}
+
+/// The entries by VRF and address (a delegated prefix by its first address).
+#[derive(Debug, Default)]
 struct Image {
     revision: Revision,
-    facts: HashMap<String, ObservedFact>,
+    entries: HashMap<(VrfId, IpAddr), Entry>,
 }
 
-impl IndexImage for Image {
-    fn revision(&self) -> Revision {
-        self.revision
-    }
+/// What a subject query names: a MAC address, an IP address or a lowercase name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Naming {
+    /// Facts that name this MAC address.
+    Mac(MacAddr),
+    /// Facts that name this IP address.
+    Ip(IpAddr),
+    /// Facts whose name is this one, compared without case.
+    Name(String),
+}
 
-    fn memory_bytes(&self) -> usize {
-        self.facts.len() * 320
+impl Naming {
+    /// Whether `fact` names it, as the index tables of the stored facts say.
+    pub fn names(&self, fact: &ObservedFact) -> bool {
+        match self {
+            Naming::Mac(mac) => observed_macs(&fact.observed).contains(mac),
+            Naming::Ip(ip) => observed_ips(&fact.observed).contains(ip),
+            Naming::Name(name) => observed_name(&fact.observed)
+                .is_some_and(|own| own.trim().eq_ignore_ascii_case(name.trim())),
+        }
     }
 }
 
-/// The lease facts of one DHCP node: the rules of the module documentation over the facts
-/// of its source, kept as a derived index of the store.
+/// The lease view of every DHCP node (see the module documentation).
 pub struct LeaseFacts {
-    source: ObservationSource,
-    source_key: String,
     config: ObserveConfig,
     image: RwLock<Image>,
     classifier: OnceLock<Arc<dyn LeaseClassifier>>,
+    /// The revision the view has followed to.
+    followed: watch::Sender<Revision>,
+    /// Whether a follower runs.
+    following: AtomicBool,
+    /// Builds of the view from the tables (the start, a lag, a snapshot install).
+    builds: AtomicU64,
+    /// Woken after a lease change.
+    changes: Notify,
+    /// The observation retention in seconds ([`ObserveConfig::retention`]): a row that
+    /// ended longer ago is not presented.
+    retention: AtomicU64,
 }
 
 impl std::fmt::Debug for LeaseFacts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LeaseFacts")
-            .field("source", &self.source_key)
             .field("config", &self.config)
+            .field("revision", &self.revision())
             .finish_non_exhaustive()
     }
 }
 
-/// What the rules read of a lease of either family.
-struct Parts<'a> {
-    vrf: tenko_core::VrfId,
-    ip: IpAddr,
-    conflict: bool,
-    bound: bool,
-    mac: Option<MacAddr>,
-    name: Option<String>,
-    vendor: Option<String>,
-    fingerprint: Option<&'a Fingerprint>,
-    cltt: Timestamp,
-    ends: Timestamp,
-}
-
-/// The fact a binding lease asks for.
-struct Wanted {
-    observed: Observed,
-    seen: Timestamp,
-    expires: Timestamp,
-}
-
 impl LeaseFacts {
-    /// The facts of the node `node` under `config`; [`LeaseFacts::register`] fills them.
-    pub fn new(node: NodeId, config: ObserveConfig) -> Arc<Self> {
-        let source = ObservationSource::DhcpLease { node };
+    /// An empty view under `config`; [`LeaseFacts::build`] or [`LeaseFacts::spawn`] fills it.
+    pub fn new(config: ObserveConfig) -> Arc<Self> {
         Arc::new(Self {
-            source_key: source_key(&source),
-            source,
             config,
-            image: RwLock::new(Image {
-                revision: Revision::ZERO,
-                facts: HashMap::new(),
-            }),
+            image: RwLock::new(Image::default()),
             classifier: OnceLock::new(),
+            followed: watch::channel(Revision::ZERO).0,
+            following: AtomicBool::new(false),
+            builds: AtomicU64::new(0),
+            changes: Notify::new(),
+            retention: AtomicU64::new(config.retention.as_secs()),
         })
     }
 
+    // The retention of the stored facts, applied to the lease rows.
+    /// Sets the observation retention (the reconciler hands over the setting in force,
+    /// [`ObserveConfig::retention`], the one its purge of the stored facts uses): a row whose
+    /// facts ended longer ago than that is not presented, as a stored fact whose last
+    /// sighting is older is purged.
+    pub fn set_retention(&self, retention: Duration) {
+        self.retention.store(retention.as_secs(), Ordering::Relaxed);
+    }
+
+    /// The observation retention in force.
+    pub fn retention(&self) -> Duration {
+        Duration::from_secs(self.retention.load(Ordering::Relaxed))
+    }
+
+    /// Whether the facts of `entry` are within the retention at `now`: a binding or a
+    /// conflict that has not ended, or one that ended (at its end, or for a row that no
+    /// longer binds at its client transaction time or its end, whichever came first) at most
+    /// the retention ago.
+    fn retained(&self, entry: &Entry, now: Timestamp) -> bool {
+        let ended = match entry.state {
+            BindingState::Active | BindingState::Abandoned => entry.ends,
+            _ => entry.cltt.min(entry.ends),
+        };
+        ended >= now || now.saturating_since(ended) <= self.retention()
+    }
+
     /// Sets the classifier of the fingerprints, once (later calls change nothing); `true`
-    /// when this call set it.
+    /// when this call set it. Set it before the follower starts: a followed view's entries
+    /// read before keep no guess until their row changes; a view without a follower is
+    /// built again by its next reader.
     pub fn set_classifier(&self, classifier: Arc<dyn LeaseClassifier>) -> bool {
-        self.classifier.set(classifier).is_ok()
+        let set = self.classifier.set(classifier).is_ok();
+        if set && !self.is_following() {
+            self.write().revision = Revision::ZERO;
+        }
+        set
     }
 
-    /// Registers the index with `store`, which builds it from the stored facts.
-    ///
-    /// # Errors
-    ///
-    /// The store's error when the facts cannot be read.
-    pub fn register(self: &Arc<Self>, store: &dyn Store) -> Result<(), StoreError> {
-        store.register_index(Arc::clone(self) as Arc<dyn DerivedIndex>)
+    /// The revision the view has followed to.
+    pub fn revision(&self) -> Revision {
+        *self.followed.borrow()
     }
 
-    /// The source, `dhcp:<node>`.
-    pub fn source(&self) -> &ObservationSource {
-        &self.source
+    /// Builds of the view from the lease tables since it was made.
+    pub fn builds(&self) -> u64 {
+        self.builds.load(Ordering::Relaxed)
     }
 
-    /// The stored fact of a subject, as the index holds it.
-    pub fn fact(&self, subject: &FactSubject) -> Option<ObservedFact> {
-        self.image
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .facts
-            .get(&subject.key())
-            .cloned()
+    /// Whether a follower keeps the view current ([`LeaseFacts::spawn`]).
+    pub fn is_following(&self) -> bool {
+        self.following.load(Ordering::Acquire)
     }
 
-    /// The number of facts the index holds.
+    /// Woken after every batch of lease changes the view took in: the reconciler's light
+    /// run (the waiting moves).
+    pub fn changes(&self) -> &Notify {
+        &self.changes
+    }
+
+    /// The number of lease rows the view holds.
     pub fn len(&self) -> usize {
-        self.image
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .facts
-            .len()
+        self.read().entries.len()
     }
 
-    /// Whether the index holds no fact.
+    /// Whether the view holds no lease row.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    // WP9.6 (ADR 0030): the role writes the facts in batches of its own, after the lease.
-    /// Takes the facts of the source that `batch` writes as stored, before the store has
-    /// them: the role's lease commit hands its facts to an asynchronous writer, and the next
-    /// change of the same address must be judged against them. The index's own apply sets
-    /// their revisions once the writer's batch is applied; a batch the writer drops leaves
-    /// the facts here until the next refresh, a rebuild of the index or the next start.
-    pub fn note_written(&self, batch: &WriteBatch) {
-        let prefix = encode_key(&(self.source_key.clone(),));
-        let mut image = self.image.write().unwrap_or_else(PoisonError::into_inner);
-        for mutation in &batch.mutations {
-            let tenko_store::Mutation::Put { table, key, value } = mutation else {
-                continue;
-            };
-            if table != FACTS.name() || !key.starts_with(&prefix) {
-                continue;
-            }
-            let (Ok((source, subject)), Ok(fact)) = (FACTS.decode_key(key), FACTS.decode(value))
-            else {
-                continue;
-            };
-            if source == self.source_key {
-                image.facts.insert(subject, fact);
-            }
-        }
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Image> {
+        self.image.read().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Adds the facts of `lease` (the row after the change) to `batch` by the rules of the
-    /// module documentation, at `now`, against the stored facts of its address.
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Image> {
+        self.image.write().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Builds the view from the lease tables of `view` and installs it whole.
     ///
     /// # Errors
     ///
-    /// A fact that does not encode.
-    pub fn observe(
-        &self,
-        lease: &Lease,
-        now: Timestamp,
-        batch: &mut WriteBatch,
-    ) -> Result<LeaseObservation, StoreError> {
-        self.observe_parts(
-            &Parts {
-                vrf: lease.vrf,
-                ip: IpAddr::V4(lease.addr),
-                // A conflict (a probe answer or a DECLINE, WP8.5) is an `abandoned` row:
-                // its address fact names the answering MAC address (an ARP answer stores
-                // it as the row's `chaddr` with hardware type 1), or none (ICMP, a
-                // DECLINE), until the hold ends. It replaces the decliner's lease fact; the
-                // name fact ends.
-                conflict: lease.state == BindingState::Abandoned && lease.ends > now,
-                bound: lease.is_bound(now),
-                mac: lease_mac(lease),
-                name: lease_name(lease),
-                vendor: lease_vendor(lease),
-                fingerprint: lease.fingerprint.as_ref(),
-                cltt: lease.cltt,
-                ends: lease.ends,
-            },
-            now,
-            batch,
-        )
-    }
-
-    // WP9.1: the facts of a DHCPv6 lease.
-    /// Adds the facts of a DHCPv6 lease (the row after the change) to `batch` by the same
-    /// rules: the address fact with the client's MAC address from its link-layer address,
-    /// the name fact of RFC 4704; an abandoned row (a DECLINE) is a conflict without a MAC
-    /// address.
-    ///
-    /// # Errors
-    ///
-    /// A fact that does not encode.
-    pub fn observe6(
-        &self,
-        lease: &Lease6,
-        now: Timestamp,
-        batch: &mut WriteBatch,
-    ) -> Result<LeaseObservation, StoreError> {
-        if lease.kind == Lease6Kind::Pd {
-            return self.observe_delegation(lease, now, batch);
-        }
-        let conflict = lease.state == BindingState::Abandoned && lease.ends > now;
-        self.observe_parts(
-            &Parts {
-                vrf: lease.vrf,
-                ip: IpAddr::V6(lease.addr6()),
-                conflict,
-                bound: lease.is_bound(now),
-                mac: lease.mac().filter(|_| !conflict).map(MacAddr::new),
-                name: lease
-                    .fqdn
-                    .as_deref()
-                    .map(|name| name.trim().trim_end_matches('.'))
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_owned),
-                vendor: None,
-                fingerprint: None,
-                cltt: lease.cltt,
-                ends: lease.ends,
-            },
-            now,
-            batch,
-        )
-    }
-
-    // WP9.2: the fact of a delegated prefix.
-    /// The network fact of a delegated prefix while its binding holds; it expires with the
-    /// binding, on a release at once.
-    fn observe_delegation(
-        &self,
-        lease: &Lease6,
-        now: Timestamp,
-        batch: &mut WriteBatch,
-    ) -> Result<LeaseObservation, StoreError> {
-        let prefix = ipnet::Ipv6Net::new(lease.addr6(), lease.prefix_len.min(128))
-            .map(|net| ipnet::IpNet::V6(net.trunc()))
-            .ok();
-        let reference = format!(
-            "dhcp-pd/{}/{}/{}",
-            lease.vrf,
-            lease.addr6(),
-            lease.prefix_len
-        );
-        let holder = match lease.mac() {
-            Some(mac) => MacAddr::new(mac).to_string(),
-            None => format!("DUID {}", hex(lease.duid.as_bytes())),
-        };
-        let observed = Observed::Network {
-            controller: reference,
-            name: format!("delegated to {holder}"),
-            subnet: prefix,
-            vlan: None,
-            dhcp: NetworkDhcp::Server,
-            management: false,
-        };
-        let subject = FactSubject::of(&observed);
-        let stored = self
-            .image
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .facts
-            .get(&subject.key())
-            .cloned();
-        let wanted = lease.is_bound(now).then(|| Wanted {
-            observed,
-            seen: lease.cltt.min(now),
-            expires: lease.ends,
-        });
-        let address = self.apply(&subject, stored.as_ref(), wanted, now, batch)?;
-        let observed_at = address.wrote().then_some(if lease.is_bound(now) {
-            lease.cltt.min(now)
-        } else {
-            now
-        });
-        Ok(LeaseObservation {
-            address,
-            name: FactOutcome::None,
-            os: FactOutcome::None,
-            vendor: FactOutcome::None,
-            observed_at,
-        })
-    }
-
-    fn observe_parts(
-        &self,
-        lease: &Parts<'_>,
-        now: Timestamp,
-        batch: &mut WriteBatch,
-    ) -> Result<LeaseObservation, StoreError> {
-        let ip = lease.ip;
-        let (conflict, bound) = (lease.conflict, lease.bound);
-        let address = Observed::Address {
-            vrf: lease.vrf,
-            ip,
-            mac: lease.mac,
-        };
-        let name = lease.name.clone().map(|name| Observed::Name {
-            ip,
-            placeholder: tenko_core::observe::is_placeholder_name(&name),
-            name,
-        });
-        let wanted = |observed: Observed| Wanted {
-            observed,
-            seen: lease.cltt.min(now),
-            expires: lease.ends,
-        };
-        // WP8.2: the fingerprint's guess and the vendor class, while the lease binds.
-        let os = self
-            .classifier
-            .get()
-            .zip(lease.fingerprint)
-            .and_then(|(classifier, fingerprint)| classifier.os(fingerprint))
-            .filter(|reading| !reading.guess.trim().is_empty())
-            .map(|reading| Observed::Os {
-                ip,
-                guess: reading.guess,
-                confidence: reading.confidence.min(100),
-            });
-        let mac = lease.mac;
-        let vendor = mac
-            .zip(lease.vendor.clone())
-            .map(|(mac, vendor)| Observed::Vendor { mac, vendor });
-        let address_subject = FactSubject::of(&address);
-        let name_subject = FactSubject::Name { ip };
-        let os_subject = FactSubject::Os { ip };
-        let vendor_subject = mac.map(|mac| FactSubject::Vendor { mac });
-        let image = self.image.read().unwrap_or_else(PoisonError::into_inner);
-        let stored_address = image.facts.get(&address_subject.key()).cloned();
-        let stored_name = image.facts.get(&name_subject.key()).cloned();
-        let stored_os = image.facts.get(&os_subject.key()).cloned();
-        let stored_vendor = vendor_subject
-            .as_ref()
-            .and_then(|subject| image.facts.get(&subject.key()).cloned());
-        drop(image);
-        let address = self.apply(
-            &address_subject,
-            stored_address.as_ref(),
-            (bound || conflict).then(|| wanted(address)),
-            now,
-            batch,
-        )?;
-        let name = self.apply(
-            &name_subject,
-            stored_name.as_ref(),
-            name.filter(|_| bound).map(wanted),
-            now,
-            batch,
-        )?;
-        let os = self.apply(
-            &os_subject,
-            stored_os.as_ref(),
-            os.filter(|_| bound).map(wanted),
-            now,
-            batch,
-        )?;
-        let vendor = match &vendor_subject {
-            Some(subject) => self.apply(
-                subject,
-                stored_vendor.as_ref(),
-                vendor.filter(|_| bound).map(wanted),
-                now,
-                batch,
-            )?,
-            None => FactOutcome::None,
-        };
-        // The row records when its facts were last written.
-        let wrote = address.wrote() || name.wrote() || os.wrote() || vendor.wrote();
-        let observed_at = wrote.then_some(if bound || conflict {
-            lease.cltt.min(now)
-        } else {
-            now
-        });
-        Ok(LeaseObservation {
-            address,
-            name,
-            os,
-            vendor,
-            observed_at,
-        })
-    }
-
-    /// One fact: the write the rules ask for, and what it was.
-    fn apply(
-        &self,
-        subject: &FactSubject,
-        stored: Option<&ObservedFact>,
-        wanted: Option<Wanted>,
-        now: Timestamp,
-        batch: &mut WriteBatch,
-    ) -> Result<FactOutcome, StoreError> {
-        let subject_key = subject.key();
-        let key = (self.source_key.clone(), subject_key.clone());
-        let Some(wanted) = wanted else {
-            // The lease does not bind (or sent no name): a current fact expires.
-            let Some(old) = stored.filter(|fact| fact.is_current(now)) else {
-                return Ok(FactOutcome::None);
-            };
-            let mut fact = old.clone();
-            fact.expires_at = Some(now);
-            fact.received_at = now;
-            fact.revision = Revision::ZERO;
-            batch.put_typed(&FACTS, &key, &fact)?;
-            return Ok(FactOutcome::Expired);
-        };
-        let rows = IndexRows::of(&wanted.observed);
-        let Some(old) = stored else {
-            let fact = ObservedFact {
-                source: self.source.clone(),
-                source_key: self.source_key.clone(),
-                subject: subject.clone(),
-                subject_key: subject_key.clone(),
-                observed: wanted.observed,
-                observation: ObservationId::generate(),
-                first_seen: wanted.seen,
-                last_seen: wanted.seen,
-                received_at: now,
-                expires_at: Some(wanted.expires),
-                sightings: 1,
-                counted_at: Some(wanted.seen),
-                revision: Revision::ZERO,
-            };
-            batch.put_typed(&FACTS, &key, &fact)?;
-            index(
-                &rows,
-                &IndexRows::default(),
-                &self.source_key,
-                &subject_key,
-                batch,
-            )?;
-            return Ok(FactOutcome::New);
-        };
-        let changed = old.observed != wanted.observed;
-        let revived = !old.is_current(now);
-        let due = refresh_due(
-            old,
-            wanted.seen,
-            now,
-            Some(wanted.expires),
-            self.config.refresh,
-        );
-        if !(changed || revived || due) {
-            return Ok(FactOutcome::Unchanged);
-        }
-        // Another client on the address is another device: its fact starts again. Otherwise
-        // ingest's rules: the sighting counts once per refresh interval, or after a gap.
-        let other_device = observed_macs(&old.observed) != observed_macs(&wanted.observed);
-        let counted_since = old.counted_at.unwrap_or(old.first_seen);
-        let counts = revived || wanted.seen.saturating_since(counted_since) >= self.config.refresh;
-        let before = IndexRows::of(&old.observed);
-        let mut fact = old.clone();
-        fact.observed = wanted.observed;
-        if changed {
-            fact.observation = ObservationId::generate();
-        }
-        if other_device {
-            fact.first_seen = wanted.seen;
-            fact.last_seen = wanted.seen;
-            fact.sightings = 1;
-            fact.counted_at = Some(wanted.seen);
-        } else {
-            fact.first_seen = fact.first_seen.min(wanted.seen);
-            fact.last_seen = fact.last_seen.max(wanted.seen);
-            if counts {
-                fact.sightings = fact.sightings.saturating_add(1);
-                fact.counted_at = Some(wanted.seen);
-            }
-        }
-        fact.received_at = now;
-        fact.expires_at = Some(wanted.expires);
-        fact.revision = Revision::ZERO;
-        batch.put_typed(&FACTS, &key, &fact)?;
-        index(&rows, &before, &self.source_key, &subject_key, batch)?;
-        Ok(if changed || revived {
-            FactOutcome::Changed
-        } else {
-            FactOutcome::Refreshed
-        })
-    }
-
-    fn build_image(&self, view: &dyn ReadView) -> Result<Image, StoreError> {
-        let prefix = encode_key(&(self.source_key.clone(),));
-        let mut range = KeyRange::prefix(prefix.clone());
-        let mut facts = HashMap::new();
+    /// A storage or decoding failure of the scan.
+    pub fn build(&self, view: &dyn ReadView) -> Result<(), StoreError> {
+        let mut entries = HashMap::new();
+        // The rows past the retention are not kept (the start's cut, as the readers' own).
+        let now = Timestamp::now();
+        let mut range = KeyRange::all();
         loop {
-            let rows = view.scan_typed(&FACTS, range.clone(), PAGE, false)?;
-            let full = rows.len() == PAGE;
-            let mut last = None;
-            for ((source, subject), mut fact, revision) in rows {
-                fact.revision = revision;
-                last = Some(FACTS.key(&(source, subject.clone())));
-                facts.insert(subject, fact);
+            let page = view.scan_typed(&tables::LEASES, range.clone(), PAGE, false)?;
+            let full = page.len() == PAGE;
+            let last = page.last().map(|(key, _, _)| tables::LEASES.key(key));
+            for ((vrf, addr), lease, revision) in page {
+                if let Some(entry) = self.entry4(&lease, revision)
+                    && self.retained(&entry, now)
+                {
+                    entries.insert((vrf, IpAddr::V4(addr)), entry);
+                }
             }
             match (full, last) {
-                (true, Some(last)) => range = KeyRange::prefix(prefix.clone()).after(last),
+                (true, Some(last)) => range = KeyRange::all().after(last),
                 _ => break,
             }
         }
-        Ok(Image {
-            revision: view.revision(),
-            facts,
+        let mut range = KeyRange::all();
+        loop {
+            let page = view.scan_typed(&tables::LEASES6, range.clone(), PAGE, false)?;
+            let full = page.len() == PAGE;
+            let last = page.last().map(|(key, _, _)| tables::LEASES6.key(key));
+            for ((vrf, addr), lease, revision) in page {
+                if let Some(entry) = entry6(&lease, revision)
+                    && self.retained(&entry, now)
+                {
+                    entries.insert((vrf, IpAddr::V6(addr)), entry);
+                }
+            }
+            match (full, last) {
+                (true, Some(last)) => range = KeyRange::all().after(last),
+                _ => break,
+            }
+        }
+        let revision = view.revision();
+        *self.write() = Image { revision, entries };
+        self.builds.fetch_add(1, Ordering::Relaxed);
+        self.followed.send_replace(revision);
+        self.changes.notify_one();
+        Ok(())
+    }
+
+    /// Starts the follower on the runtime: it builds the view from `store` and follows its
+    /// lease changes until `stop` fires or the store shuts down.
+    pub fn spawn(
+        self: &Arc<Self>,
+        store: Arc<dyn Store>,
+        stop: CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
+        self.following.store(true, Ordering::Release);
+        tokio::spawn(Arc::clone(self).follow(store, stop))
+    }
+
+    /// The follower (see the module documentation).
+    async fn follow(self: Arc<Self>, store: Arc<dyn Store>, stop: CancellationToken) {
+        self.following.store(true, Ordering::Release);
+        let mut retry = Duration::from_millis(100);
+        loop {
+            if stop.is_cancelled() {
+                break;
+            }
+            match self.follow_once(store.as_ref(), &stop).await {
+                Ok(Followed::Stopped) => break,
+                Ok(Followed::Rebuild) => retry = Duration::from_millis(100),
+                Err(error) => {
+                    tracing::warn!(%error, "the lease view could not follow the store; it tries again");
+                    tokio::select! {
+                        () = stop.cancelled() => break,
+                        () = tokio::time::sleep(retry) => {}
+                    }
+                    retry = (retry * 2).min(Duration::from_secs(5));
+                }
+            }
+        }
+        self.following.store(false, Ordering::Release);
+    }
+
+    /// One build and the following of the journal from it, until the stream ends.
+    async fn follow_once(
+        &self,
+        store: &dyn Store,
+        stop: &CancellationToken,
+    ) -> Result<Followed, StoreError> {
+        let view = store.read(ReadConsistency::Local).await?;
+        self.build(view.as_ref())?;
+        let from = view.revision();
+        drop(view);
+        let mut stream = store.watch(Some(from), WatchFilter::all())?;
+        loop {
+            let first = tokio::select! {
+                () = stop.cancelled() => return Ok(Followed::Stopped),
+                next = stream.next() => next,
+            };
+            let Some(first) = first else {
+                // The store shuts down.
+                return Ok(Followed::Stopped);
+            };
+            let mut sets = Vec::new();
+            let mut failed = None;
+            match first {
+                Ok(set) => sets.push(set),
+                Err(error) => failed = Some(error),
+            }
+            while failed.is_none() && sets.len() < DRAIN {
+                match stream.next().now_or_never() {
+                    Some(Some(Ok(set))) => sets.push(set),
+                    Some(Some(Err(error))) => failed = Some(error),
+                    Some(None) | None => break,
+                }
+            }
+            if !sets.is_empty() {
+                self.apply(store, &sets).await?;
+            }
+            if let Some(error) = failed {
+                tracing::info!(%error, "the lease view rebuilds from the lease tables");
+                return Ok(Followed::Rebuild);
+            }
+        }
+    }
+
+    /// Takes in the lease rows a run of change sets wrote, read from a view at least as new.
+    async fn apply(&self, store: &dyn Store, sets: &[ChangeSet]) -> Result<(), StoreError> {
+        let Some(last) = sets.last().map(|set| set.revision) else {
+            return Ok(());
+        };
+        let mut keys4 = Vec::new();
+        let mut keys6 = Vec::new();
+        for change in sets.iter().flat_map(|set| &set.changes) {
+            if change.table == *tables::LEASES.name() {
+                if let Ok(key) = tables::LEASES.decode_key(&change.key) {
+                    keys4.push(key);
+                }
+            } else if change.table == *tables::LEASES6.name()
+                && let Ok(key) = tables::LEASES6.decode_key(&change.key)
+            {
+                keys6.push(key);
+            }
+        }
+        if keys4.is_empty() && keys6.is_empty() {
+            self.advance(last);
+            return Ok(());
+        }
+        let view = store.read(ReadConsistency::AtLeast(last)).await?;
+        let mut rows = Vec::with_capacity(keys4.len() + keys6.len());
+        for (vrf, addr) in keys4 {
+            let entry = view
+                .get_typed(&tables::LEASES, &(vrf, addr))?
+                .and_then(|(lease, revision)| self.entry4(&lease, revision));
+            rows.push(((vrf, IpAddr::V4(addr)), entry));
+        }
+        for (vrf, addr) in keys6 {
+            let entry = view
+                .get_typed(&tables::LEASES6, &(vrf, addr))?
+                .and_then(|(lease, revision)| entry6(&lease, revision));
+            rows.push(((vrf, IpAddr::V6(addr)), entry));
+        }
+        drop(view);
+        {
+            let mut image = self.write();
+            for (key, entry) in rows {
+                match entry {
+                    Some(entry) => {
+                        // A later row never gives way to an earlier read of it.
+                        if image
+                            .entries
+                            .get(&key)
+                            .is_none_or(|held| held.revision <= entry.revision)
+                        {
+                            image.entries.insert(key, entry);
+                        }
+                    }
+                    None => {
+                        image.entries.remove(&key);
+                    }
+                }
+            }
+            image.revision = image.revision.max(last);
+        }
+        self.advance(last);
+        self.changes.notify_one();
+        Ok(())
+    }
+
+    fn advance(&self, revision: Revision) {
+        self.followed.send_if_modified(|held| {
+            if revision > *held {
+                *held = revision;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Waits until the view has followed `revision` (the revision of a reader's view), at
+    /// most [`CATCH_UP_WAIT`]. `false` when it has not by then: the reader then reads the
+    /// view as it is (its leases a little behind its read view), never fails its request,
+    /// and the wait is logged at debug with the lag in revisions. A view without a follower
+    /// answers at once.
+    pub async fn caught_up(&self, revision: Revision) -> bool {
+        if !self.is_following() {
+            return self.revision() >= revision;
+        }
+        let mut followed = self.followed.subscribe();
+        let wait = followed.wait_for(|held| *held >= revision);
+        if matches!(tokio::time::timeout(CATCH_UP_WAIT, wait).await, Ok(Ok(_))) {
+            return true;
+        }
+        let held = self.revision();
+        tracing::debug!(
+            wanted = revision.get(),
+            followed = held.get(),
+            lag = revision.get().saturating_sub(held.get()),
+            "the lease view had not followed the reader's view in time; the reader reads it as it is"
+        );
+        false
+    }
+
+    /// Makes sure the view covers `view` when no follower keeps it current (a tool, a test):
+    /// builds it from `view` when it is older. A followed view is left to its follower.
+    ///
+    /// # Errors
+    ///
+    /// A storage or decoding failure of the build.
+    pub fn ensure(&self, view: &dyn ReadView) -> Result<(), StoreError> {
+        if self.is_following() || self.read().revision >= view.revision() {
+            return Ok(());
+        }
+        self.build(view)
+    }
+
+    /// Every fact the leases stand for, current or not, at `now`.
+    pub fn facts(&self, now: Timestamp) -> Vec<ObservedFact> {
+        self.select(now, |_| true)
+    }
+
+    /// The facts that name `naming`, at `now`.
+    pub fn facts_naming(&self, naming: &Naming, now: Timestamp) -> Vec<ObservedFact> {
+        self.select(now, |fact| naming.names(fact))
+    }
+
+    /// The fact of one subject of one source, as the view gives it.
+    pub fn fact(&self, source_key: &str, subject: &FactSubject) -> Option<ObservedFact> {
+        let subject_key = subject.key();
+        self.facts(Timestamp::now())
+            .into_iter()
+            .find(|fact| fact.source_key == source_key && fact.subject_key == subject_key)
+    }
+
+    /// The facts of every entry that `keep` passes, one per source and subject.
+    fn select(&self, now: Timestamp, keep: impl Fn(&ObservedFact) -> bool) -> Vec<ObservedFact> {
+        let image = self.read();
+        let mut out = Vec::with_capacity(image.entries.len() * 2);
+        // Subjects that two rows may share (a name or an OS of one address in two VRFs, the
+        // vendor of one MAC address): the current fact, else the latest, wins.
+        let mut shared: HashMap<(String, String), usize> = HashMap::new();
+        let mut facts = Vec::with_capacity(4);
+        for ((vrf, ip), entry) in &image.entries {
+            if !self.retained(entry, now) {
+                continue;
+            }
+            facts.clear();
+            self.facts_of(*vrf, *ip, entry, now, &mut facts);
+            for fact in facts.drain(..) {
+                if !keep(&fact) {
+                    continue;
+                }
+                if matches!(
+                    fact.subject,
+                    FactSubject::Address { .. } | FactSubject::Network { .. }
+                ) {
+                    out.push(fact);
+                    continue;
+                }
+                let key = (fact.source_key.clone(), fact.subject_key.clone());
+                if let Some(&index) = shared.get(&key) {
+                    let held = &out[index];
+                    let better = (fact.is_current(now), fact.last_seen)
+                        > (held.is_current(now), held.last_seen);
+                    if better {
+                        out[index] = fact;
+                    }
+                } else {
+                    shared.insert(key, out.len());
+                    out.push(fact);
+                }
+            }
+        }
+        out
+    }
+
+    /// The facts one entry stands for (see the module documentation).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the facts of one row, one after the other, read best together"
+    )]
+    fn facts_of(
+        &self,
+        vrf: VrfId,
+        ip: IpAddr,
+        entry: &Entry,
+        now: Timestamp,
+        out: &mut Vec<ObservedFact>,
+    ) {
+        let bound = entry.state == BindingState::Active;
+        let conflict = entry.state == BindingState::Abandoned;
+        if !(bound || conflict || ended(entry.state)) {
+            return;
+        }
+        // A binding's facts end with it; the facts of a row that no longer binds ended at
+        // its last transaction or its end, whichever came first.
+        let until = if bound {
+            entry.ends
+        } else {
+            entry.cltt.min(entry.ends)
+        };
+        let source = ObservationSource::DhcpLease { node: entry.node };
+        let source_key = format!("dhcp:{}", entry.node);
+        let last_seen = entry.cltt.min(now);
+        let first_seen = entry.granted.min(last_seen);
+        let refresh = self.config.refresh.max(Duration::from_secs(1));
+        let span = last_seen.saturating_since(first_seen);
+        let sightings = u32::try_from(span.as_nanos() / refresh.as_nanos())
+            .unwrap_or(u32::MAX)
+            .saturating_add(1);
+        let counted_at = first_seen
+            .checked_add(refresh.saturating_mul(sightings.saturating_sub(1)))
+            .unwrap_or(last_seen)
+            .min(last_seen);
+        let fact = |observed: Observed, expires: Timestamp| {
+            let subject = FactSubject::of(&observed);
+            let subject_key = subject.key();
+            let observation = observation_id(&source_key, &subject_key, first_seen, &observed);
+            ObservedFact {
+                source: source.clone(),
+                source_key: source_key.clone(),
+                subject,
+                subject_key,
+                observed,
+                observation,
+                first_seen,
+                last_seen,
+                received_at: last_seen,
+                expires_at: Some(expires),
+                sightings,
+                counted_at: Some(counted_at),
+                revision: entry.revision,
+            }
+        };
+        if let Kind::Delegation { prefix_len, holder } = &entry.kind {
+            let IpAddr::V6(first) = ip else {
+                return;
+            };
+            let subnet = ipnet::Ipv6Net::new(first, (*prefix_len).min(128))
+                .map(|net| ipnet::IpNet::V6(net.trunc()))
+                .ok();
+            out.push(fact(
+                Observed::Network {
+                    controller: format!("dhcp-pd/{vrf}/{first}/{prefix_len}"),
+                    name: format!("delegated to {holder}"),
+                    subnet,
+                    vlan: None,
+                    dhcp: NetworkDhcp::Server,
+                    management: false,
+                },
+                until,
+            ));
+            return;
+        }
+        // The address fact: the client's MAC address while it binds, the answering MAC
+        // address of a conflict until its hold ends.
+        let address_until = if conflict { entry.ends } else { until };
+        out.push(fact(
+            Observed::Address {
+                vrf,
+                ip,
+                mac: entry.mac,
+            },
+            address_until,
+        ));
+        if let Some(name) = &entry.name {
+            out.push(fact(
+                Observed::Name {
+                    ip,
+                    placeholder: tenko_core::observe::is_placeholder_name(name),
+                    name: name.to_string(),
+                },
+                until,
+            ));
+        }
+        if let Some((guess, confidence)) = &entry.os {
+            out.push(fact(
+                Observed::Os {
+                    ip,
+                    guess: guess.to_string(),
+                    confidence: *confidence,
+                },
+                until,
+            ));
+        }
+        if let (Some(mac), Some(vendor)) = (entry.mac, &entry.vendor) {
+            out.push(fact(
+                Observed::Vendor {
+                    mac,
+                    vendor: vendor.to_string(),
+                },
+                until,
+            ));
+        }
+    }
+
+    /// The entry of a DHCPv4 row.
+    fn entry4(&self, lease: &Lease, revision: Revision) -> Option<Entry> {
+        if !(lease.state == BindingState::Active
+            || lease.state == BindingState::Abandoned
+            || ended(lease.state))
+        {
+            return None;
+        }
+        let conflict = lease.state == BindingState::Abandoned;
+        let os = (!conflict)
+            .then(|| {
+                self.classifier
+                    .get()
+                    .zip(lease.fingerprint.as_ref())
+                    .and_then(|(classifier, fingerprint)| classifier.os(fingerprint))
+            })
+            .flatten()
+            .filter(|reading| !reading.guess.trim().is_empty())
+            .map(|reading| (reading.guess.into_boxed_str(), reading.confidence.min(100)));
+        Some(Entry {
+            kind: Kind::V4,
+            node: lease.node,
+            state: lease.state,
+            cltt: lease.cltt,
+            ends: lease.ends,
+            granted: lease.granted_at(),
+            revision,
+            mac: lease_mac(lease),
+            // A conflict names the address that answered, not the decliner's names.
+            name: (!conflict)
+                .then(|| lease_name(lease))
+                .flatten()
+                .map(String::into_boxed_str),
+            vendor: (!conflict)
+                .then(|| lease_vendor(lease))
+                .flatten()
+                .map(String::into_boxed_str),
+            os,
         })
     }
 }
 
-/// The index rows of a fact write, with the error of the IPAM rows as a store error.
-fn index(
-    rows: &IndexRows,
-    before: &IndexRows,
-    source: &str,
-    subject: &str,
-    batch: &mut WriteBatch,
-) -> Result<(), StoreError> {
-    rows.write(before, source, subject, batch)
-        .map_err(|error| StoreError::Codec(error.to_string()))
+/// How a follow of the journal ended.
+enum Followed {
+    /// `stop` fired or the store shut down.
+    Stopped,
+    /// The stream lagged or the journal was compacted past it: build again.
+    Rebuild,
 }
 
-impl DerivedIndex for LeaseFacts {
-    fn name(&self) -> &'static str {
-        "ipam.obs.dhcp"
-    }
+/// Whether a state is the end of a binding that the row still records (released, expired,
+/// reset): its facts expired, the view keeps them as the history of the address.
+const fn ended(state: BindingState) -> bool {
+    matches!(
+        state,
+        BindingState::Released | BindingState::Expired | BindingState::Reset
+    )
+}
 
-    fn filter(&self) -> WatchFilter {
-        WatchFilter::tables([FACTS.name().clone()])
+/// The entry of a DHCPv6 row.
+fn entry6(lease: &Lease6, revision: Revision) -> Option<Entry> {
+    if !(lease.state == BindingState::Active
+        || lease.state == BindingState::Abandoned
+        || ended(lease.state))
+    {
+        return None;
     }
-
-    fn build(&self, view: &dyn ReadView) -> Result<Box<dyn IndexImage>, StoreError> {
-        Ok(Box::new(self.build_image(view)?))
-    }
-
-    fn install(&self, image: Box<dyn IndexImage>) {
-        if let Some(image) = downcast_image::<Image>(image) {
-            *self.image.write().unwrap_or_else(PoisonError::into_inner) = *image;
-        }
-    }
-
-    fn apply(&self, changes: &ChangeSet, view: &dyn ReadView) {
-        let prefix = encode_key(&(self.source_key.clone(),));
-        let mut image = self.image.write().unwrap_or_else(PoisonError::into_inner);
-        image.revision = changes.revision;
-        for change in &changes.changes {
-            if change.table != *FACTS.name() || !change.key.starts_with(&prefix) {
-                continue;
+    let conflict = lease.state == BindingState::Abandoned;
+    let kind = match lease.kind {
+        Lease6Kind::Na => Kind::V6,
+        Lease6Kind::Pd => {
+            if conflict {
+                return None;
             }
-            let Ok((source, subject)) = FACTS.decode_key(&change.key) else {
-                continue;
+            let holder = match lease.mac() {
+                Some(mac) => MacAddr::new(mac).to_string(),
+                None => format!("DUID {}", hex(lease.duid.as_bytes())),
             };
-            if source != self.source_key {
-                continue;
-            }
-            if change.deleted {
-                image.facts.remove(&subject);
-                continue;
-            }
-            // WP9.6: a fact the role took as written at its commit (`note_written`, revision
-            // zero) is the value its writer's batch stored: it takes the revision without
-            // a read. The role is the only writer of its source; the retention purge only
-            // deletes.
-            if let Some(fact) = image.facts.get_mut(&subject)
-                && fact.revision == Revision::ZERO
-            {
-                fact.revision = changes.revision;
-                continue;
-            }
-            match view.get_typed(&FACTS, &(source, subject.clone())) {
-                Ok(Some((mut fact, revision))) => {
-                    fact.revision = revision;
-                    image.facts.insert(subject, fact);
-                }
-                Ok(None) => {
-                    image.facts.remove(&subject);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, %subject, "a lease fact could not be read into the index");
-                }
+            Kind::Delegation {
+                prefix_len: lease.prefix_len,
+                holder: holder.into_boxed_str(),
             }
         }
+    };
+    Some(Entry {
+        kind,
+        node: lease.node,
+        state: lease.state,
+        cltt: lease.cltt,
+        ends: lease.ends,
+        granted: lease.granted_at(),
+        revision,
+        // An abandoned row (a DECLINE) is a conflict without a MAC address.
+        mac: lease.mac().filter(|_| !conflict).map(MacAddr::new),
+        name: lease
+            .fqdn
+            .as_deref()
+            .filter(|_| !conflict && lease.kind == Lease6Kind::Na)
+            .map(|name| name.trim().trim_end_matches('.'))
+            .filter(|name| !name.is_empty())
+            .map(Box::from),
+        vendor: None,
+        os: None,
+    })
+}
+
+/// The observation id of a fact the view gives: stable for one binding reporting the same
+/// attributes, new when either changes (FNV-1a over the parts, as a UUID).
+fn observation_id(
+    source_key: &str,
+    subject_key: &str,
+    first_seen: Timestamp,
+    observed: &Observed,
+) -> ObservationId {
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let mut hash = OFFSET;
+    let mut feed = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u128::from(*byte);
+            hash = hash.wrapping_mul(PRIME);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(PRIME);
+    };
+    feed(source_key.as_bytes());
+    feed(subject_key.as_bytes());
+    feed(&first_seen.unix_nanos().to_be_bytes());
+    match observed {
+        Observed::Address { mac, .. } => {
+            feed(mac.map(MacAddr::octets).unwrap_or_default().as_slice());
+        }
+        Observed::Name { name, .. } | Observed::Network { name, .. } => feed(name.as_bytes()),
+        Observed::Os {
+            guess, confidence, ..
+        } => {
+            feed(guess.as_bytes());
+            feed(&[*confidence]);
+        }
+        Observed::Vendor { vendor, .. } => feed(vendor.as_bytes()),
+        _ => {}
     }
+    // A UUID of version 8 (custom) and the RFC 9562 variant.
+    let hash = (hash & !(0xf_u128 << 76) | (0x8_u128 << 76)) & !(0x3_u128 << 62) | (0x2_u128 << 62);
+    ObservationId::from_uuid(uuid::Uuid::from_u128(hash))
 }
 
 /// Lower-case hexadecimal octets.

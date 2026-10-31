@@ -21,8 +21,10 @@ use tenko_store::{KeyRange, ReadView, ReadViewExt};
 use utoipa::ToSchema;
 
 use super::{
+    dhcp::{LeaseFacts, Naming},
     model::{IntentSighting, ObservedFact, source_connector},
-    tables::{BY_IP, BY_MAC, BY_NAME, FACTS, LAST_SEEN},
+    source::Observations,
+    tables::LAST_SEEN,
 };
 use crate::{
     error::{IpamError, IpamResult, codes},
@@ -296,14 +298,20 @@ impl<'a> FactFilter<'a> {
     }
 }
 
-/// Lists facts (see [`FactQuery`]); `now` decides which facts are current.
+/// Lists facts (see [`FactQuery`]): the stored facts of `view` and the facts of the lease
+/// view `leases` (ADR 0031); `now` decides which facts are current.
 ///
 /// # Errors
 ///
 /// `ipam.invalid_filter` for an unknown sort field or subject type, `ipam.invalid_cursor`
 /// for a malformed cursor, store and decoding errors.
-pub fn list_facts(view: &dyn ReadView, query: &FactQuery, now: Timestamp) -> IpamResult<FactPage> {
-    list_facts_where(view, query, now, &|_| true)
+pub fn list_facts(
+    view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
+    query: &FactQuery,
+    now: Timestamp,
+) -> IpamResult<FactPage> {
+    list_facts_where(view, leases, query, now, &|_| true)
 }
 
 /// [`list_facts`] with a further condition: only facts for which `keep` answers `true` count,
@@ -314,6 +322,7 @@ pub fn list_facts(view: &dyn ReadView, query: &FactQuery, now: Timestamp) -> Ipa
 /// As [`list_facts`].
 pub fn list_facts_where(
     view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
     query: &FactQuery,
     now: Timestamp,
     keep: &dyn Fn(&ObservedFact) -> bool,
@@ -322,11 +331,10 @@ pub fn list_facts_where(
     let sorts = parse_sorts(&query.sort)?;
     let after = decode_cursor(query.cursor.as_deref())?;
     let filter = FactFilter::new(query, now)?;
-    let mut rows: Vec<(Vec<u8>, ObservedFact)> = view
-        .scan_typed(&FACTS, KeyRange::all(), usize::MAX, false)?
+    let mut rows: Vec<(Vec<u8>, ObservedFact)> = Observations::new(view, leases)
+        .facts(now)?
         .into_iter()
-        .filter_map(|(_, mut fact, revision)| {
-            fact.revision = revision;
+        .filter_map(|fact| {
             (filter.keeps(&fact) && keep(&fact)).then(|| (composite_key(&fact, &sorts), fact))
         })
         .filter(|(key, _)| after.as_ref().is_none_or(|after| key > after))
@@ -377,6 +385,17 @@ impl FromStr for SubjectQuery {
             ));
         }
         Ok(SubjectQuery::Name(text.to_ascii_lowercase()))
+    }
+}
+
+impl SubjectQuery {
+    /// What the query names, as the fact sources take it.
+    pub fn naming(&self) -> Naming {
+        match self {
+            SubjectQuery::Mac(mac) => Naming::Mac(*mac),
+            SubjectQuery::Ip(ip) => Naming::Ip(*ip),
+            SubjectQuery::Name(name) => Naming::Name(name.clone()),
+        }
     }
 }
 
@@ -497,7 +516,8 @@ pub struct SubjectView {
     pub revision: Revision,
 }
 
-/// The computed view of one subject; `now` decides which facts are current.
+/// The computed view of one subject over the stored facts of `view` and the facts of the
+/// lease view `leases` (ADR 0031); `now` decides which facts are current.
 ///
 /// # Errors
 ///
@@ -505,16 +525,11 @@ pub struct SubjectView {
 /// decoding errors.
 pub fn subject_view(
     view: &dyn ReadView,
+    leases: Option<&LeaseFacts>,
     subject: &SubjectQuery,
     now: Timestamp,
 ) -> IpamResult<SubjectView> {
-    let mut facts = Vec::new();
-    for key in fact_keys(view, subject)? {
-        if let Some((mut fact, revision)) = view.get_typed(&FACTS, &key)? {
-            fact.revision = revision;
-            facts.push(fact);
-        }
-    }
+    let mut facts = Observations::new(view, leases).facts_naming(&subject.naming(), now)?;
     if facts.is_empty() {
         return Err(IpamError::new(
             crate::codes::NOT_FOUND,
@@ -543,46 +558,6 @@ pub fn subject_view(
         intent: matches.into_intent(),
         sightings,
         revision: view.revision(),
-    })
-}
-
-/// The keys (source key, subject key) of the facts that name the subject, from the index
-/// tables.
-fn fact_keys(
-    view: &dyn ReadView,
-    subject: &SubjectQuery,
-) -> IpamResult<BTreeSet<(String, String)>> {
-    Ok(match subject {
-        SubjectQuery::Mac(mac) => view
-            .scan_typed(
-                &BY_MAC,
-                KeyRange::prefix(encode_key(&(*mac,))),
-                usize::MAX,
-                false,
-            )?
-            .into_iter()
-            .map(|((_, source, subject), (), _)| (source, subject))
-            .collect(),
-        SubjectQuery::Ip(ip) => view
-            .scan_typed(
-                &BY_IP,
-                KeyRange::prefix(encode_key(&(*ip,))),
-                usize::MAX,
-                false,
-            )?
-            .into_iter()
-            .map(|((_, source, subject), (), _)| (source, subject))
-            .collect(),
-        SubjectQuery::Name(name) => view
-            .scan_typed(
-                &BY_NAME,
-                KeyRange::prefix(encode_key(&(name.trim().to_ascii_lowercase(),))),
-                usize::MAX,
-                false,
-            )?
-            .into_iter()
-            .map(|((_, source, subject), (), _)| (source, subject))
-            .collect(),
     })
 }
 

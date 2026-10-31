@@ -308,7 +308,7 @@ impl Fixture {
             limit: Some(1_000),
             ..query
         };
-        list_facts(view.as_ref(), &query, time(now))
+        list_facts(view.as_ref(), None, &query, time(now))
             .expect("list")
             .items
             .into_iter()
@@ -327,7 +327,7 @@ fn walk(view: &dyn ReadView, base: &FactQuery, limit: usize, now: Timestamp) -> 
             cursor: cursor.take(),
             ..base.clone()
         };
-        let page = list_facts(view, &query, now).expect("page");
+        let page = list_facts(view, None, &query, now).expect("page");
         pages.push(
             page.items
                 .into_iter()
@@ -415,6 +415,7 @@ async fn pages_cover_every_fact_once_in_every_order() {
     // The last page has no cursor, and a page that ends exactly at the end has none either.
     let page = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             limit: Some(7),
             ..FactQuery::default()
@@ -442,7 +443,7 @@ async fn a_cursor_stays_valid_when_facts_arrive_elsewhere() {
         limit: Some(2),
         ..FactQuery::default()
     };
-    let first = list_facts(read(&store).await.as_ref(), &base, now).expect("first");
+    let first = list_facts(read(&store).await.as_ref(), None, &base, now).expect("first");
     let cursor = first.next_cursor.clone().expect("more");
     // A fact that sorts before the cursor, and one after it.
     let extra = ["0", "e"]
@@ -452,6 +453,7 @@ async fn a_cursor_stays_valid_when_facts_arrive_elsewhere() {
     push(&store, &inv, extra, false, "08:01:00").await;
     let second = list_facts(
         read(&store).await.as_ref(),
+        None,
         &FactQuery {
             cursor: Some(cursor),
             ..base
@@ -467,6 +469,7 @@ async fn a_cursor_stays_valid_when_facts_arrive_elsewhere() {
     assert_eq!(keys, ["host:c", "host:d"]);
     let last = list_facts(
         read(&store).await.as_ref(),
+        None,
         &FactQuery {
             cursor: second.next_cursor,
             sort: vec!["subject".to_owned()],
@@ -524,6 +527,7 @@ async fn sort_orders_by_time_source_and_subject() {
     let view = read(&fixture.store).await;
     let facts = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             limit: Some(1_000),
             ..FactQuery::default()
@@ -610,9 +614,10 @@ async fn filter_by_subject_type() {
     assert_eq!(fixture.keys(kind("link")).await, [LINK_KEY]);
 
     let view = read(&fixture.store).await;
-    let error = list_facts(view.as_ref(), &kind("router"), time("08:12:00")).expect_err("type");
+    let error =
+        list_facts(view.as_ref(), None, &kind("router"), time("08:12:00")).expect_err("type");
     assert_coded(&error, codes::INVALID_FILTER, 400, Some("type"));
-    let error = list_facts(view.as_ref(), &kind("Host"), time("08:12:00")).expect_err("case");
+    let error = list_facts(view.as_ref(), None, &kind("Host"), time("08:12:00")).expect_err("case");
     assert_coded(&error, codes::INVALID_FILTER, 400, Some("type"));
 }
 
@@ -824,6 +829,7 @@ async fn items_carry_their_revision_and_the_page_the_view_revision() {
     let view = read(&store).await;
     let page = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             sort: vec!["subject".to_owned()],
             ..FactQuery::default()
@@ -851,6 +857,7 @@ async fn invalid_parameters_are_refused() {
 
     let error = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             sort: vec!["name".to_owned()],
             ..FactQuery::default()
@@ -861,6 +868,7 @@ async fn invalid_parameters_are_refused() {
     assert_coded(&error, codes::INVALID_FILTER, 400, Some("sort"));
     let error = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             sort: vec!["last_seen,-bogus".to_owned()],
             ..FactQuery::default()
@@ -873,6 +881,7 @@ async fn invalid_parameters_are_refused() {
     for cursor in ["zz", "abc", "not hex at all"] {
         let error = list_facts(
             view.as_ref(),
+            None,
             &FactQuery {
                 cursor: Some(cursor.to_owned()),
                 ..FactQuery::default()
@@ -886,6 +895,7 @@ async fn invalid_parameters_are_refused() {
     for limit in [0, 1_001, usize::MAX] {
         let error = list_facts(
             view.as_ref(),
+            None,
             &FactQuery {
                 limit: Some(limit),
                 ..FactQuery::default()
@@ -898,6 +908,7 @@ async fn invalid_parameters_are_refused() {
     for limit in [1, 1_000] {
         list_facts(
             view.as_ref(),
+            None,
             &FactQuery {
                 limit: Some(limit),
                 ..FactQuery::default()
@@ -910,6 +921,7 @@ async fn invalid_parameters_are_refused() {
     // starts after everything it is smaller than.
     let page = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             cursor: Some("ff".to_owned()),
             ..FactQuery::default()
@@ -930,6 +942,7 @@ async fn a_mac_collects_the_facts_of_every_source() {
     let view = read(&fixture.store).await;
     let result = subject_view(
         view.as_ref(),
+        None,
         &subject("00-00-5E-00-53-01"),
         time("08:12:00"),
     )
@@ -1001,8 +1014,13 @@ async fn a_mac_collects_the_facts_of_every_source() {
 async fn an_ip_collects_services_and_os_guesses() {
     let fixture = Fixture::new().await;
     let view = read(&fixture.store).await;
-    let result =
-        subject_view(view.as_ref(), &subject("192.0.2.10"), time("08:12:00")).expect("view");
+    let result = subject_view(
+        view.as_ref(),
+        None,
+        &subject("192.0.2.10"),
+        time("08:12:00"),
+    )
+    .expect("view");
     assert_eq!(result.subject, "ip:192.0.2.10");
     let mut keys: Vec<String> = result.facts.iter().map(|f| f.subject_key.clone()).collect();
     keys.sort();
@@ -1024,8 +1042,13 @@ async fn an_ip_collects_services_and_os_guesses() {
     assert_eq!(summary.sources.len(), 4);
 
     // An IPv6 address finds only the host that names it.
-    let result =
-        subject_view(view.as_ref(), &subject("2001:db8::10"), time("08:12:00")).expect("view");
+    let result = subject_view(
+        view.as_ref(),
+        None,
+        &subject("2001:db8::10"),
+        time("08:12:00"),
+    )
+    .expect("view");
     assert_eq!(result.subject, "ip:2001:db8::10");
     assert_eq!(result.facts.len(), 1);
     assert_eq!(result.summary.ips, [ip("192.0.2.10"), ip("2001:db8::10")]);
@@ -1060,6 +1083,7 @@ async fn a_name_is_compared_without_case_and_not_as_a_prefix() {
     let view = read(&fixture.store).await;
     let result = subject_view(
         view.as_ref(),
+        None,
         &subject("WEB01.Example.TEST"),
         time("08:12:00"),
     )
@@ -1072,6 +1096,7 @@ async fn a_name_is_compared_without_case_and_not_as_a_prefix() {
 
     let longer = subject_view(
         view.as_ref(),
+        None,
         &subject("web01.example.tests"),
         time("08:12:00"),
     )
@@ -1131,7 +1156,7 @@ async fn current_facts_come_first_and_the_summary_follows_them() {
 
     // Both current: the host was seen last.
     let view = read(&store).await;
-    let result = subject_view(view.as_ref(), &at_mac, time("08:11:00")).expect("view");
+    let result = subject_view(view.as_ref(), None, &at_mac, time("08:11:00")).expect("view");
     assert_eq!(
         keys(&result.facts),
         ["host:101", &format!("attachment:{}", mac(1))]
@@ -1149,7 +1174,7 @@ async fn current_facts_come_first_and_the_summary_follows_them() {
     let report = push(&store, &inv, vec![], true, "08:12:00").await;
     assert_eq!(report.gone, 1);
     let view = read(&store).await;
-    let result = subject_view(view.as_ref(), &at_mac, time("08:13:00")).expect("view");
+    let result = subject_view(view.as_ref(), None, &at_mac, time("08:13:00")).expect("view");
     assert_eq!(
         keys(&result.facts),
         [&format!("attachment:{}", mac(1)), "host:101"]
@@ -1170,7 +1195,7 @@ async fn current_facts_come_first_and_the_summary_follows_them() {
     assert_eq!(summary.last_seen, Some(time("08:10:00")), "over every fact");
 
     // Later still, the attachment lapses too: nothing is current and every fact counts.
-    let result = subject_view(view.as_ref(), &at_mac, time("09:00:00")).expect("view");
+    let result = subject_view(view.as_ref(), None, &at_mac, time("09:00:00")).expect("view");
     let summary = &result.summary;
     assert!(!summary.current);
     assert_empty(&summary.sources);
@@ -1295,7 +1320,8 @@ async fn intent_matches_by_mac_ip_and_name_and_skips_deleted_objects() {
 
     let now = time("08:10:00");
     let view = read(&store).await;
-    let by_mac = subject_view(view.as_ref(), &subject("00:00:5e:00:53:01"), now).expect("view");
+    let by_mac =
+        subject_view(view.as_ref(), None, &subject("00:00:5e:00:53:01"), now).expect("view");
     assert_eq!(by_mac.intent.hosts, [web_id]);
     assert_eq!(by_mac.intent.interfaces, [web_eth0]);
     let mut addresses = vec![web_address_id, lab_address_id];
@@ -1329,15 +1355,17 @@ async fn intent_matches_by_mac_ip_and_name_and_skips_deleted_objects() {
 
     // The same objects by address (the interface is found through the MAC of the host fact),
     // and by name.
-    let by_ip = subject_view(view.as_ref(), &subject("192.0.2.10"), now).expect("view");
+    let by_ip = subject_view(view.as_ref(), None, &subject("192.0.2.10"), now).expect("view");
     assert_eq!(by_ip.intent, by_mac.intent);
-    let by_name = subject_view(view.as_ref(), &subject("web01.example.test"), now).expect("view");
+    let by_name =
+        subject_view(view.as_ref(), None, &subject("web01.example.test"), now).expect("view");
     assert_eq!(by_name.intent, by_mac.intent);
     assert_eq!(by_name.sightings, by_mac.sightings);
 
     // A name finds the host and its interfaces even when no MAC of the observation matches;
     // the unrelated MAC and address find nothing.
-    let db_view = subject_view(view.as_ref(), &subject("DB01.example.test"), now).expect("view");
+    let db_view =
+        subject_view(view.as_ref(), None, &subject("DB01.example.test"), now).expect("view");
     assert_eq!(db_view.intent.hosts, [db_id]);
     assert_eq!(db_view.intent.interfaces, [db_eth0]);
     assert_empty(&db_view.intent.addresses);
@@ -1364,11 +1392,13 @@ async fn intent_matches_by_mac_ip_and_name_and_skips_deleted_objects() {
     )
     .await;
     let view = read(&store).await;
-    let by_mac = subject_view(view.as_ref(), &subject("00:00:5e:00:53:01"), now).expect("view");
+    let by_mac =
+        subject_view(view.as_ref(), None, &subject("00:00:5e:00:53:01"), now).expect("view");
     assert_eq!(by_mac.intent.addresses, [web_address_id]);
     assert_eq!(by_mac.intent.vrfs.len(), 1);
     assert_eq!(by_mac.sightings.len(), 2);
-    let db_view = subject_view(view.as_ref(), &subject("db01.example.test"), now).expect("view");
+    let db_view =
+        subject_view(view.as_ref(), None, &subject("db01.example.test"), now).expect("view");
     assert_empty(&db_view.intent.hosts);
     assert_empty(&db_view.intent.interfaces);
     assert_empty(&db_view.sightings);
@@ -1408,6 +1438,7 @@ async fn an_interface_of_another_mac_does_not_match() {
     let view = read(&store).await;
     let result = subject_view(
         view.as_ref(),
+        None,
         &subject("00:00:5e:00:53:01"),
         time("08:05:00"),
     )
@@ -1430,6 +1461,7 @@ async fn an_interface_of_another_mac_does_not_match() {
     let view = read(&store).await;
     let result = subject_view(
         view.as_ref(),
+        None,
         &subject("00:00:5e:00:53:02"),
         time("08:07:00"),
     )
@@ -1448,7 +1480,8 @@ async fn an_unknown_subject_is_not_found() {
         "2001:db8:ffff::1",
         "nobody.example.test",
     ] {
-        let error = subject_view(view.as_ref(), &subject(text), time("08:12:00")).expect_err(text);
+        let error =
+            subject_view(view.as_ref(), None, &subject(text), time("08:12:00")).expect_err(text);
         assert_coded(&error, codes::NOT_FOUND, 404, None);
         let params = &error.coded().params;
         assert_eq!(
@@ -1466,10 +1499,11 @@ async fn an_unknown_subject_is_not_found() {
     // An empty store has nothing to show either.
     let empty = mem();
     let view = read(&empty).await;
-    let error =
-        subject_view(view.as_ref(), &subject("192.0.2.1"), time("08:12:00")).expect_err("empty");
+    let error = subject_view(view.as_ref(), None, &subject("192.0.2.1"), time("08:12:00"))
+        .expect_err("empty");
     assert_coded(&error, codes::NOT_FOUND, 404, None);
-    let page = list_facts(view.as_ref(), &FactQuery::default(), time("08:12:00")).expect("list");
+    let page =
+        list_facts(view.as_ref(), None, &FactQuery::default(), time("08:12:00")).expect("list");
     assert_empty(&page.items);
     assert_eq!(page.next_cursor, None);
 }
@@ -1524,20 +1558,27 @@ async fn probe_names_and_vendors_join_the_view_of_their_device() {
     // The name finds the device; a name fact is indexed like an inventory name.
     let by_name = subject_view(
         view.as_ref(),
+        None,
         &subject("printer.example.test"),
         time("08:06:00"),
     )
     .expect("view by name");
     assert_eq!(by_name.facts.len(), 1);
     assert_eq!(by_name.facts[0].subject_key, "name:192.0.2.40");
-    let by_ip = subject_view(view.as_ref(), &subject("192.0.2.40"), time("08:06:00"))
-        .expect("view by address");
+    let by_ip = subject_view(
+        view.as_ref(),
+        None,
+        &subject("192.0.2.40"),
+        time("08:06:00"),
+    )
+    .expect("view by address");
     let summary = &by_ip.summary;
     assert_eq!(summary.names, ["Printer.Example.Test"]);
     assert_eq!(summary.open_tcp, [443, 631]);
     assert_eq!(summary.tls_tcp, [443]);
     let by_mac = subject_view(
         view.as_ref(),
+        None,
         &subject("00:00:5e:00:53:28"),
         time("08:06:00"),
     )
@@ -1545,6 +1586,7 @@ async fn probe_names_and_vendors_join_the_view_of_their_device() {
     assert_eq!(by_mac.summary.vendors, ["ICANN, IANA Department"]);
     let vendors = list_facts(
         view.as_ref(),
+        None,
         &FactQuery {
             subject_type: Some("vendor".to_owned()),
             ..FactQuery::default()
@@ -1553,4 +1595,137 @@ async fn probe_names_and_vendors_join_the_view_of_their_device() {
     )
     .expect("list");
     assert_eq!(vendors.items.len(), 1);
+}
+
+/// A bound lease row of `address` to the MAC `00:00:5e:00:53:<client>`, granted at 08:00
+/// and last renewed at 08:10, ending at 09:00.
+fn lease_row(address: &str, client: u8, vrf: VrfId) -> tenko_core::dhcp::Lease {
+    use tenko_core::dhcp::{BindingState, ClientKey, DdnsState, Lease};
+    Lease {
+        addr: address.parse().expect("address"),
+        vrf,
+        scope: tenko_core::PrefixId::generate(),
+        client: ClientKey {
+            htype: 1,
+            chaddr: tenko_core::serde_util::HexBytes(mac(client).octets().to_vec()),
+            client_id: None,
+        },
+        state: BindingState::Active,
+        cltt: time("08:10:00"),
+        ends: time("09:00:00"),
+        tstp: None,
+        tsfp: None,
+        atsfp: None,
+        node: NodeId(1),
+        share: None,
+        hostname: Some("printer".to_owned()),
+        fqdn: None,
+        fqdn_flags: None,
+        ddns_policy: None,
+        ddns: DdnsState::default(),
+        fingerprint: None,
+        relay: None,
+        observed_at: None,
+        granted: Some(time("08:00:00")),
+    }
+}
+
+#[tokio::test]
+async fn the_fact_list_presents_the_lease_rows_and_reads_no_stored_lease_fact() {
+    use tenko_core::dhcp::tables::LEASES;
+    use tenko_ipam::observe::{ObservedFact, dhcp::LeaseFacts, model::FactSubject, tables::FACTS};
+
+    let store = mem();
+    let vrf = VrfId::generate();
+    let lease = lease_row("192.0.2.40", 0x40, vrf);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), time("08:10:00"));
+    batch
+        .put_typed(&LEASES, &(vrf, lease.addr), &lease)
+        .expect("lease");
+    // A fact row of the lease source, as an older version wrote them: it is never read.
+    let stale = ObservedFact {
+        source: ObservationSource::DhcpLease { node: NodeId(1) },
+        source_key: "dhcp:1".to_owned(),
+        subject: FactSubject::Address {
+            vrf,
+            ip: ip("192.0.2.41"),
+        },
+        subject_key: format!("address:{vrf}/192.0.2.41"),
+        observed: Observed::Address {
+            vrf,
+            ip: ip("192.0.2.41"),
+            mac: Some(mac(0x41)),
+        },
+        observation: ObservationId::generate(),
+        first_seen: time("08:00:00"),
+        last_seen: time("08:10:00"),
+        received_at: time("08:10:00"),
+        expires_at: Some(time("09:00:00")),
+        sightings: 1,
+        counted_at: Some(time("08:00:00")),
+        revision: tenko_core::Revision::ZERO,
+    };
+    batch
+        .put_typed(
+            &FACTS,
+            &(stale.source_key.clone(), stale.subject_key.clone()),
+            &stale,
+        )
+        .expect("stale fact");
+    store.propose(batch).await.expect("commit");
+
+    let leases = LeaseFacts::new(ObserveConfig::default());
+    let view = read(&store).await;
+    leases.ensure(view.as_ref()).expect("lease view");
+    let query = FactQuery {
+        source: Some("dhcp:1".to_owned()),
+        sort: vec!["subject".to_owned()],
+        ..FactQuery::default()
+    };
+    let page =
+        list_facts(view.as_ref(), Some(&leases), &query, time("08:30:00")).expect("with leases");
+    let keys: Vec<&str> = page
+        .items
+        .iter()
+        .map(|fact| fact.subject_key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            format!("address:{vrf}/192.0.2.40").as_str(),
+            "name:192.0.2.40"
+        ],
+        "the lease row gives its address and name facts; the stored row is not read"
+    );
+    let address = &page.items[0];
+    assert_eq!(address.source_key, "dhcp:1");
+    assert_eq!(address.first_seen, time("08:00:00"), "the grant time");
+    assert_eq!(address.last_seen, time("08:10:00"), "the last transaction");
+    assert_eq!(address.expires_at, Some(time("09:00:00")), "the end");
+    assert_eq!(
+        address.observed,
+        Observed::Address {
+            vrf,
+            ip: ip("192.0.2.40"),
+            mac: Some(mac(0x40)),
+        }
+    );
+    // The id is derived from the row, so a second view of the same row names it alike.
+    let again = LeaseFacts::new(ObserveConfig::default());
+    again.ensure(view.as_ref()).expect("second view");
+    let second =
+        list_facts(view.as_ref(), Some(&again), &query, time("08:30:00")).expect("second page");
+    assert_eq!(second.items[0].observation, address.observation);
+
+    // Without the lease view the list holds the stored facts of other sources only.
+    let none = list_facts(view.as_ref(), None, &query, time("08:30:00")).expect("without");
+    assert_empty(&none.items);
+
+    // After its end the binding's facts are expired, not gone.
+    let current = FactQuery {
+        current: Some(true),
+        ..query.clone()
+    };
+    let late = list_facts(view.as_ref(), Some(&leases), &current, time("09:30:00")).expect("late");
+    assert_empty(&late.items);
 }

@@ -50,26 +50,30 @@ use std::{
 use ipnet::Ipv4Net;
 use lease_support::{NODE, client_id, mac};
 use tenko_core::{
-    PrefixId, RangeId, Revision, Timestamp, VrfId,
+    PrefixId, Principal, RangeId, Revision, SystemComponent, Timestamp, VrfId,
     dhcp::{
-        BindingState, DdnsPolicy, LeaseEventKind, LeaseTimes, lease::MAX_IDENTITY, tables,
-        write_identity,
+        BindingState, ClientKey, DdnsPolicy, HistoryNames, HistoryRow, LeaseEvent, LeaseEventKind,
+        LeaseTimes, lease::MAX_IDENTITY, tables, write_identity,
     },
+    serde_util::HexBytes,
 };
 use tenko_dhcp::{
     allocator::{AdmitAll, Allocator, ReferenceAllocator, Request, SingleNode},
     image::{ConfigImage, ImageBuilder, PoolImage, ScopeImage},
     lease::{
         CommitSettings, LeaseTable, MemLeaseTable, OfferTable, PendingChange, SharedLeases,
-        StoreLeases, batch::NoObservations, derived, rebuild_from_view,
+        StoreLeases, derived, rebuild_from_view,
     },
     store::{LeaseStore, Ticket},
 };
 use tenko_store::{
-    KeyRange, ReadConsistency, ReadViewExt, Store,
+    KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, WriteBatch,
     raft::{RaftStore, RaftStoreConfig},
 };
 use tokio_util::sync::CancellationToken;
+
+/// The key of a `dhcp.history` row.
+type HistoryKey = (Timestamp, VrfId, Ipv4Addr);
 
 const CHILD: &str = "TENKO_LEASE_CRASH_CHILD";
 const SEED: &str = "TENKO_LEASE_CRASH_SEED";
@@ -205,14 +209,9 @@ async fn node(dir: PathBuf, seed: u64) {
     let stop = CancellationToken::new();
     tokio::spawn(committer.run(stop.clone()));
     // ADR 0030: the start rebuilds the history a kill lost, as the role does.
-    derived::catch_up(
-        store.as_ref(),
-        recent,
-        &NoObservations,
-        lease_store.derived(),
-    )
-    .await
-    .expect("the catch-up");
+    derived::catch_up(store.as_ref(), recent, lease_store.derived())
+        .await
+        .expect("the catch-up");
     let image = image();
     let scope = image.scope(scope_id()).expect("the scope").clone();
     let offers = OfferTable::new(Duration::from_secs(10), 4_096);
@@ -427,18 +426,41 @@ async fn catch_up(raft: &RaftStore) -> derived::CatchUp {
         derived::DerivedWriter::new(Arc::clone(&store), derived::DerivedSettings::default());
     let stop = CancellationToken::new();
     let task = tokio::spawn(flusher.run(stop.clone()));
-    let rebuilt = derived::catch_up(
-        store.as_ref(),
-        table.sorted_rows().into_values(),
-        &NoObservations,
-        &writer,
-    )
-    .await
-    .expect("the catch-up");
+    let rebuilt = derived::catch_up(store.as_ref(), table.sorted_rows().into_values(), &writer)
+        .await
+        .expect("the catch-up");
     writer.flush().await;
     stop.cancel();
     task.await.expect("the flusher");
     rebuilt
+}
+
+/// Every `dhcp.history` row as an event with its key and the row's store revision (ADR
+/// 0031: rows written by earlier versions decode as well as lean ones).
+fn read_history(view: &dyn ReadView) -> Vec<(HistoryKey, LeaseEvent, Revision)> {
+    view.scan_typed(&tables::HISTORY, KeyRange::all(), usize::MAX, false)
+        .expect("the history")
+        .into_iter()
+        .map(|(key, row, revision)| (key, row.into_event(key, revision), revision))
+        .collect()
+}
+
+/// What the check of the ACKs looks up in the history: the address, the client, the end
+/// and the kind of every event.
+fn history_events(
+    history: &[(HistoryKey, LeaseEvent, Revision)],
+) -> HashSet<(Ipv4Addr, String, i128, String)> {
+    history
+        .iter()
+        .map(|(_, event, _)| {
+            (
+                event.addr,
+                hex(&event.client.identity()),
+                event.ends.unix_nanos(),
+                format!("{:?}", event.kind),
+            )
+        })
+        .collect()
 }
 
 /// Checks the data directory against every ACK received so far; `gaps` collects the
@@ -477,9 +499,7 @@ async fn verify(dir: &Path, acks: &[Ack], gaps: &mut HashSet<Ipv4Addr>) -> (usiz
         .into_iter()
         .map(|(key, value, _)| (key, value))
         .collect();
-    let history = view
-        .scan_typed(&tables::HISTORY, KeyRange::all(), usize::MAX, false)
-        .expect("the history");
+    let history = read_history(view.as_ref());
 
     // 1. No acknowledged lease lost.
     let vrf = vrf_id();
@@ -502,17 +522,7 @@ async fn verify(dir: &Path, acks: &[Ack], gaps: &mut HashSet<Ipv4Addr>) -> (usiz
     // 2. Every ACK's history row is there, or a later ACK of its address superseded it
     // within the interval the kill lost (ADR 0030). A rebuilt row records the state of the
     // lease row; a renewal's rebuilt row reads as a grant.
-    let events: HashSet<(Ipv4Addr, String, i128, String)> = history
-        .iter()
-        .map(|(_, event, _)| {
-            (
-                event.addr,
-                hex(&event.client.identity()),
-                event.ends.unix_nanos(),
-                format!("{:?}", event.kind),
-            )
-        })
-        .collect();
+    let events = history_events(&history);
     let mut lost = 0;
 
     for ack in acks {
@@ -658,4 +668,72 @@ async fn verify_after_power_off() {
         "POWER-OFF OK: {} ACKs checked, {rows} rows, {history} history rows ({lost} superseded lost), none lost, no address on two clients",
         acks.len()
     );
+}
+
+/// A history row written before ADR 0031 (a whole `LeaseEvent` as a CBOR map, put as raw
+/// octets) decodes next to a lean one and is counted by the reading the crash check uses.
+#[tokio::test]
+async fn a_history_row_of_the_old_shape_is_read_and_counted() {
+    let store = lease_support::mem_store();
+    let (vrf, scope) = (vrf_id(), scope_id());
+    let event = |second: u64, last: u8, kind, hostname: Option<&str>| LeaseEvent {
+        at: lease_support::at(second),
+        kind,
+        addr: Ipv4Addr::new(192, 0, 2, last),
+        vrf,
+        scope,
+        client: ClientKey {
+            htype: 1,
+            chaddr: HexBytes(mac(7).to_vec()),
+            client_id: client_id(7).map(HexBytes),
+        },
+        state: BindingState::Active,
+        ends: lease_support::at(second + LEASE_SECS),
+        hostname: hostname.map(str::to_owned),
+        node: NODE,
+        revision: None,
+        names: None,
+    };
+    let old = event(10, 20, LeaseEventKind::Renewed, Some("laptop"));
+    let lean = LeaseEvent {
+        revision: Some(Revision(5)),
+        ..event(20, 21, LeaseEventKind::Granted, None)
+    };
+    let octets = tenko_core::codec::to_cbor(&old).expect("the old shape encodes");
+    assert_eq!(octets[0] >> 5, 5, "the old shape is a CBOR map");
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+    batch.put(
+        tables::HISTORY.name().clone(),
+        tables::HISTORY.key(&(old.at, old.vrf, old.addr)),
+        octets,
+    );
+    batch
+        .put_typed(
+            &tables::HISTORY,
+            &(lean.at, lean.vrf, lean.addr),
+            &HistoryRow::of(&lean),
+        )
+        .expect("the lean row encodes");
+    store.propose(batch).await.expect("the rows are written");
+
+    let view = store.read(ReadConsistency::Local).await.expect("a view");
+    let history = read_history(view.as_ref());
+    assert_eq!(history.len(), 2);
+    let read_old = &history[0].1;
+    assert_eq!(read_old.hostname.as_deref(), Some("laptop"));
+    assert_eq!(read_old.names, Some(HistoryNames::Stored));
+    assert_eq!(read_old.revision, None);
+    let read_lean = &history[1].1;
+    assert_eq!(read_lean.hostname, None);
+    assert_eq!(read_lean.names, None);
+    assert_eq!(read_lean.revision, Some(Revision(5)));
+    let events = history_events(&history);
+    for expected in [&old, &lean] {
+        assert!(events.contains(&(
+            expected.addr,
+            hex(&expected.client.identity()),
+            expected.ends.unix_nanos(),
+            format!("{:?}", expected.kind),
+        )));
+    }
 }

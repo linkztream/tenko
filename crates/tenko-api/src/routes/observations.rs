@@ -172,14 +172,20 @@ async fn list_observations(
     if readable.is_nothing() {
         return Ok(Json(Page::new(Vec::new(), None, view.revision())));
     }
+    // ADR 0031: the lease view has followed this view first.
+    ipam.leases().caught_up(view.revision()).await;
     // A scoped principal reads the facts whose addresses lie in its scope (IAM-01); a fact
     // that names no address is read with a global reach only.
     let facts = if readable.is_all() {
-        list_facts(view.as_ref(), &query, Timestamp::now())?
+        list_facts(view.as_ref(), Some(ipam.leases()), &query, Timestamp::now())?
     } else {
-        list_facts_where(view.as_ref(), &query, Timestamp::now(), &|fact| {
-            readable.admits_by(|index| index.anchors_of_fact(fact))
-        })?
+        list_facts_where(
+            view.as_ref(),
+            Some(ipam.leases()),
+            &query,
+            Timestamp::now(),
+            &|fact| readable.admits_by(|index| index.anchors_of_fact(fact)),
+        )?
     };
     Ok(Json(Page::new(
         facts.items,
@@ -221,7 +227,13 @@ async fn get_observation(
     authorize(&app, &cx, Action::Read, new_of(ObjectKind::Observation))?;
     let subject: SubjectQuery = subject.parse()?;
     let view = ipam.view(at_least).await?;
-    let found = subject_view(view.as_ref(), &subject, Timestamp::now())?;
+    ipam.leases().caught_up(view.revision()).await;
+    let found = subject_view(
+        view.as_ref(),
+        Some(ipam.leases()),
+        &subject,
+        Timestamp::now(),
+    )?;
     if !subject_in_scope(&app, &cx, &ipam, &found) {
         return Err(Denied {
             action: Action::Read,

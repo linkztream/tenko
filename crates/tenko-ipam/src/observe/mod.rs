@@ -21,6 +21,14 @@
 //! ([`crate::reconcile::Reconciler`]) wraps it: after an ingest it wakes jobs that wait for
 //! the observations and schedules a reconcile run.
 //!
+//! # The leases (ADR 0031)
+//!
+//! The DHCP leases are not ingested: the lease tables are the source `dhcp:<node>`, and
+//! [`dhcp::LeaseFacts`] presents each lease row as the facts it stands for. The readers take
+//! the stored facts and the lease facts together through [`source::Observations`]; an
+//! ingest refuses observations of a lease source, and a stored fact of one (written before
+//! ADR 0031) is never read and leaves with the retention.
+//!
 //! # Retention
 //!
 //! [`retention::purge`] deletes facts whose last sighting is older than
@@ -32,12 +40,14 @@
 //! and `ipam.obs.by_name`, and `ipam.obs.last_seen` for the last sighting of addresses and
 //! interfaces of intent.
 
-// WP8.1: the facts of the DHCP leases, written in the lease's batch.
+// ADR 0031: the lease tables as the source `dhcp:<node>`, read through the lease view.
 pub mod dhcp;
 pub mod dns;
 pub mod ingest;
 pub mod model;
 pub mod retention;
+// ADR 0031: the stored facts and the lease view behind one trait.
+pub mod source;
 pub mod tables;
 pub mod view;
 

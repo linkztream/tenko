@@ -20,8 +20,10 @@ use crate::{
     error::IpamResult,
     net::{EdgeAddress, Family, contains_ip, contains_net, edge_address, ip_to_u128},
     observe::{
+        dhcp::LeaseFacts,
         model::{IntentSighting, ObservedFact, observed_placeholder},
-        tables::{FACTS, LAST_SEEN},
+        source::Observations,
+        tables::LAST_SEEN,
     },
     proposals::model::{
         ADOPTION, IntentProposal, OPEN_KEYS, PROPOSALS, REJECTIONS, Rejection, StoredPolicy,
@@ -385,16 +387,15 @@ impl Snapshot {
 }
 
 impl Snapshot {
-    pub(crate) fn load(view: &dyn ReadView, now: Timestamp) -> IpamResult<Self> {
+    /// Everything a run reads from `view`, with the lease facts of `leases` (ADR 0031: the
+    /// leases are read through the lease view, not as stored facts).
+    pub(crate) fn load(
+        view: &dyn ReadView,
+        leases: Option<&LeaseFacts>,
+        now: Timestamp,
+    ) -> IpamResult<Self> {
         let intent = Intent::load(view)?;
-        let facts: Vec<ObservedFact> = view
-            .scan_typed(&FACTS, KeyRange::all(), usize::MAX, false)?
-            .into_iter()
-            .map(|(_, mut fact, revision)| {
-                fact.revision = revision;
-                fact
-            })
-            .collect();
+        let facts: Vec<ObservedFact> = Observations::new(view, leases).facts(now)?;
         let mut seen = Vec::new();
         let mut name_facts: BTreeMap<IpAddr, Vec<usize>> = BTreeMap::new();
         let mut vendors: BTreeMap<MacAddr, BTreeSet<String>> = BTreeMap::new();

@@ -264,16 +264,30 @@ pub struct Lease {
     /// What the relay said, for a relayed client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<RelayInfo>,
-    /// When the IPAM observation fact of the lease was last written (plan section 2.8), so
-    /// that a renewal adds a fact only when its refresh is due.
+    /// When the IPAM observation fact of the lease was last written. Rows of the versions
+    /// that wrote the lease facts carry it (plan section 2.8, ADR 0030); since ADR 0031 the
+    /// lease row is the observation itself and the field is no longer written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<Timestamp>,
+    // ADR 0031: the grant time, so that "seen since" comes from the row.
+    /// When the current binding was first granted: a renewal or a rebind keeps it, a new
+    /// grant sets it. A row without it (written before ADR 0031) reads as granted at its
+    /// `cltt` ([`Lease::granted_at`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted: Option<Timestamp>,
 }
 
 impl Lease {
     /// Whether the lease holds its address for the client at `now`.
     pub fn is_bound(&self, now: Timestamp) -> bool {
         self.state == BindingState::Active && self.ends > now
+    }
+
+    /// When the current binding was first granted: [`Lease::granted`], or the client
+    /// transaction time for a row without it; never after the client transaction time.
+    pub fn granted_at(&self) -> Timestamp {
+        self.granted
+            .map_or(self.cltt, |granted| granted.min(self.cltt))
     }
 
     /// Whether the address may not be given to another client at `now`.
@@ -394,6 +408,15 @@ pub struct LeaseEvent {
     pub hostname: Option<String>,
     /// The node that wrote it.
     pub node: NodeId,
+    // ADR 0031: the lean history row names the lease row at the revision of the change.
+    /// The revision of the lease row the change wrote; none for a row written before ADR
+    /// 0031.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<crate::id::Revision>,
+    /// Where the host name comes from when the history is read: the row itself, the lease
+    /// row at the change, the lease row as it is now, or nowhere (ADR 0031).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<super::history::HistoryNames>,
 }
 
 impl LeaseEvent {
@@ -410,6 +433,8 @@ impl LeaseEvent {
             ends: lease.ends,
             hostname: lease.hostname.clone(),
             node: lease.node,
+            revision: None,
+            names: None,
         }
     }
 }
@@ -496,12 +521,19 @@ pub struct Lease6 {
     /// What the relay closest to the client said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<Relay6Info>,
-    /// When the IPAM observation facts of the lease were last written (plan section 2.8).
+    /// When the IPAM observation facts of the lease were last written by the versions that
+    /// wrote them (plan section 2.8); no longer written since ADR 0031.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_at: Option<Timestamp>,
     /// The DDNS outcome.
     #[serde(default)]
     pub ddns: DdnsState,
+    // ADR 0031: the grant time, as on the DHCPv4 row.
+    /// When the current binding was first granted: a renewal or a rebind keeps it, a new
+    /// grant sets it. A row without it reads as granted at its `cltt`
+    /// ([`Lease6::granted_at`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted: Option<Timestamp>,
 }
 
 impl Lease6 {
@@ -517,6 +549,13 @@ impl Lease6 {
     /// Whether the lease holds its address for the client at `now`.
     pub fn is_bound(&self, now: Timestamp) -> bool {
         self.state == BindingState::Active && self.ends > now
+    }
+
+    /// When the current binding was first granted: [`Lease6::granted`], or the client
+    /// transaction time for a row without it; never after the client transaction time.
+    pub fn granted_at(&self) -> Timestamp {
+        self.granted
+            .map_or(self.cltt, |granted| granted.min(self.cltt))
     }
 
     /// Whether the address may not be given to another client at `now`.

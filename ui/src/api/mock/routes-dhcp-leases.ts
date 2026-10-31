@@ -76,6 +76,7 @@ export function grantMockLease(client: { mac: string; hostname?: string; addr?: 
     cltt: at,
     ends: new Date(Date.now() + 3_600_000).toISOString(),
     family: "v4",
+    granted: at,
     ...(client.hostname ? { hostname: client.hostname } : {}),
     mac: client.mac.replace(/-/g, ":").toLowerCase(),
     node: NODE,

@@ -271,6 +271,7 @@ impl Lab {
                 fqdn_flags: Some(1),
                 relay: None,
                 observed_at: None,
+                granted: None,
                 ddns: DdnsState {
                     forward: forward.map(|name| DnsName::new(name).expect("a name")),
                     reverse: forward.map(|_| {

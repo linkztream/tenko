@@ -525,6 +525,8 @@ impl Reconciler {
 
     async fn purge_fenced(&self, now: Timestamp, epoch: Option<u64>) -> IpamResult<usize> {
         let config = self.effective().await;
+        // ADR 0031: the lease view cuts at the retention the purge of the stored facts uses.
+        self.ipam.leases().set_retention(config.observe.retention);
         observe::retention::purge_fenced(self.ipam.store(), &config.observe, now, epoch).await
     }
 
@@ -566,6 +568,7 @@ impl Reconciler {
     ) -> IpamResult<ReconcileReport> {
         let _guard = self.run_lock.lock().await;
         let config = self.effective().await;
+        self.ipam.leases().set_retention(config.observe.retention);
         let mut report = ReconcileReport::empty(now);
         // Read before the views, so that a change landing in between makes the next run
         // read again rather than be missed.
@@ -618,7 +621,9 @@ impl Reconciler {
             {
                 return Err(deposed());
             }
-            let snapshot = Snapshot::load(view.as_ref(), now)?;
+            // ADR 0031: the lease view follows the store; it has followed this view first.
+            self.ipam.leases().caught_up(view.revision()).await;
+            let snapshot = Snapshot::load(view.as_ref(), Some(self.ipam.leases()), now)?;
             let dns_findings = match self.dns.get() {
                 Some(_) => {
                     let (findings, planned) =
@@ -993,7 +998,8 @@ impl Reconciler {
         if !any_policy {
             return Ok(());
         }
-        let snapshot = Snapshot::load(view.as_ref(), now)?;
+        self.ipam.leases().caught_up(view.revision()).await;
+        let snapshot = Snapshot::load(view.as_ref(), Some(self.ipam.leases()), now)?;
         drop(view);
         let cx = reconciler_cx(now);
         for (proposal, _) in snapshot.open.values() {
@@ -1040,7 +1046,8 @@ impl Reconciler {
         if waiting.is_empty() {
             return Ok(0);
         }
-        let snapshot = Snapshot::load(view.as_ref(), now)?;
+        self.ipam.leases().caught_up(view.revision()).await;
+        let snapshot = Snapshot::load(view.as_ref(), Some(self.ipam.leases()), now)?;
         drop(view);
         let mut confirmed = 0;
         for waiting_move in &waiting {
@@ -1109,6 +1116,14 @@ impl Reconciler {
                     }
                 }
                 () = self.changed.notified() => {
+                    tokio::select! {
+                        () = stop.cancelled() => return Ok(()),
+                        () = sleep(config.debounce) => false,
+                    }
+                }
+                // ADR 0031: a lease change, after the lease view took it in: a light run
+                // (the waiting moves), as a change of lease facts scheduled before.
+                () = self.ipam.leases().changes().notified() => {
                     tokio::select! {
                         () = stop.cancelled() => return Ok(()),
                         () = sleep(config.debounce) => false,

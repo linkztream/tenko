@@ -43053,6 +43053,17 @@
             "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its\nDUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).",
             "example": "00:00:5e:00:53:01"
           },
+          "names": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HistoryNames",
+                "description": "DHCPv4: where the host name comes from: the history row itself (`stored`, a row\nwritten before the lean history), the lease row of the change (`lease`), the lease\nrow as it is now, still of the same client (`lease_now`), or nowhere because the\naddress went to another client or its row is gone (`unknown`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "node": {
             "$ref": "#/components/schemas/NodeId",
             "description": "The node that wrote it."
@@ -43112,6 +43123,7 @@
           "cltt",
           "ends",
           "node",
+          "granted",
           "reserved",
           "revision"
         ],
@@ -43219,6 +43231,10 @@
             "description": "The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).",
             "minimum": 0
           },
+          "granted": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the current binding was first granted (a renewal keeps it); the client\ntransaction time for a row written before ADR 0031."
+          },
           "host": {
             "oneOf": [
               {
@@ -43293,7 +43309,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "When the IPAM observation fact of the lease was last written."
+                "description": "When the IPAM observation fact of the lease was last written (rows of the versions\nthat wrote lease facts; ADR 0031 ended them)."
               },
               {
                 "type": "null"
@@ -47526,6 +47542,16 @@
             "description": "The revision of the batch that wrote the entry (filled when read)."
           }
         }
+      },
+      "HistoryNames": {
+        "type": "string",
+        "description": "Where the host name of a history item comes from when the history is read (ADR 0031).",
+        "enum": [
+          "stored",
+          "lease",
+          "lease_now",
+          "unknown"
+        ]
       },
       "Host": {
         "type": "object",
@@ -51902,6 +51928,17 @@
             "description": "The flags of option 81 as the client sent them (S, O, E, N; RFC 4702).",
             "minimum": 0
           },
+          "granted": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the current binding was first granted: a renewal or a rebind keeps it, a new\ngrant sets it. A row without it (written before ADR 0031) reads as granted at its\n`cltt` ([`Lease::granted_at`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hostname": {
             "type": [
               "string",
@@ -51917,7 +51954,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "When the IPAM observation fact of the lease was last written (plan section 2.8), so\nthat a renewal adds a fact only when its refresh is due."
+                "description": "When the IPAM observation fact of the lease was last written. Rows of the versions\nthat wrote the lease facts carry it (plan section 2.8, ADR 0030); since ADR 0031 the\nlease row is the observation itself and the field is no longer written."
               },
               {
                 "type": "null"
@@ -59647,6 +59684,17 @@
                   "description": "The client's MAC address where the row says it: the Ethernet hardware address of a\nDHCPv4 client; the link-layer address of a DHCPv6 client (RFC 6939, else its\nDUID-LLT or DUID-LL; rows written before WP9.4 only the DUID's).",
                   "example": "00:00:5e:00:53:01"
                 },
+                "names": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HistoryNames",
+                      "description": "DHCPv4: where the host name comes from: the history row itself (`stored`, a row\nwritten before the lean history), the lease row of the change (`lease`), the lease\nrow as it is now, still of the same client (`lease_now`), or nowhere because the\naddress went to another client or its row is gone (`unknown`)."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "node": {
                   "$ref": "#/components/schemas/NodeId",
                   "description": "The node that wrote it."
@@ -59711,6 +59759,7 @@
                 "cltt",
                 "ends",
                 "node",
+                "granted",
                 "reserved",
                 "revision"
               ],
@@ -59818,6 +59867,10 @@
                   "description": "The flags of that option, in the layout of option 81 (S, O, E, N; RFC 4702).",
                   "minimum": 0
                 },
+                "granted": {
+                  "$ref": "#/components/schemas/Timestamp",
+                  "description": "When the current binding was first granted (a renewal keeps it); the client\ntransaction time for a row written before ADR 0031."
+                },
                 "host": {
                   "oneOf": [
                     {
@@ -59892,7 +59945,7 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/Timestamp",
-                      "description": "When the IPAM observation fact of the lease was last written."
+                      "description": "When the IPAM observation fact of the lease was last written (rows of the versions\nthat wrote lease facts; ADR 0031 ended them)."
                     },
                     {
                       "type": "null"

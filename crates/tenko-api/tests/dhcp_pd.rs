@@ -69,6 +69,7 @@ fn lease6(vrf: VrfId, scope: PrefixId, addr: &str, len: u8, duid: &str, mac: boo
         fqdn_flags: None,
         relay: None,
         observed_at: None,
+        granted: None,
         ddns: DdnsState::default(),
     }
 }

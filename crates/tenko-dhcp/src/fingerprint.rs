@@ -278,10 +278,10 @@ pub fn lease_classifier() -> Arc<dyn LeaseClassifier> {
     Arc::new(RuleTable::builtin())
 }
 
-/// Hands the lease facts of a node the project's table, once (the role's start).
+/// Hands IPAM's lease view the project's table, once (the server's start, ADR 0031).
 pub fn classify_leases(facts: &LeaseFacts) {
     if !facts.set_classifier(lease_classifier()) {
-        tracing::debug!("the lease facts already have a classifier");
+        tracing::debug!("the lease view already has a classifier");
     }
 }
 

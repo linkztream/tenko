@@ -1,8 +1,8 @@
-//! The lease change as store batches (plan section 2.1, ADR 0019 point 3, ADR 0030): the
-//! lease row and the client index rows it moves, committed before the ACK as one
-//! transaction with one revision; and the rows derived from it, the history row and the
-//! IPAM observation facts, built at the same time against the same row but written by the
-//! asynchronous writer ([`super::derived`]) once the lease committed.
+//! The lease change as store batches (plan section 2.1, ADR 0019 point 3, ADR 0030, ADR
+//! 0031): the lease row and the client index rows it moves, committed before the ACK as one
+//! transaction with one revision; and the history row derived from it, built at the same
+//! time against the same row but written by the asynchronous writer ([`super::derived`])
+//! once the lease committed, with the revision of that commit.
 //!
 //! [`build`] runs on the committer's side, after the hand-off: it completes a
 //! [`PendingChange`] into the row with the fields of the row held before
@@ -13,59 +13,22 @@
 //! |---|---|---|---|
 //! | synchronous | `dhcp.leases` | VRF, address | the row after the change |
 //! | synchronous | `dhcp.leases.by_client` | scope, client identity | the client's latest row; the previous holder's entry moved or removed |
-//! | derived | `dhcp.history` | time, VRF, address | the [`LeaseEvent`](tenko_core::dhcp::LeaseEvent) |
-//! | derived | IPAM observations | the hook's | the facts of `dhcp:<node>` ([`ObservationHook`], WP8.1) |
+//! | derived | `dhcp.history` | time, VRF, address | the lean event ([`HistoryRow`]): the event, the state and its end, the scope, the client identity, the node and the lease row's revision |
+//!
+//! No IPAM observation fact is written (ADR 0031): the lease table is the observation
+//! source `dhcp:<node>`, which IPAM reads through its lease view
+//! (`tenko_ipam::observe::dhcp::LeaseFacts`).
 //!
 //! The principal is `system:dhcp`; the role's lease commits are not audited one by one (the
 //! history is their record, `docs/dhcp-contracts.md` section 7).
 
 use tenko_core::{
-    NodeId, Principal, SystemComponent, Timestamp,
-    dhcp::{Lease, LeaseEventKind, tables},
+    NodeId, Principal, Revision, SystemComponent, Timestamp,
+    dhcp::{HistoryRow, Lease, LeaseEvent, LeaseEventKind, tables},
 };
 use tenko_store::{StoreError, WriteBatch};
 
 use super::{PendingChange, table::IndexUpdate};
-
-/// Adds the IPAM observation fact of a lease change to its batch (plan section 2.8). The
-/// role's hook is [`IpamObservations`](super::observe::IpamObservations), over the helper
-/// of `tenko-ipam`; [`NoObservations`] adds none.
-pub trait ObservationHook: Send + Sync {
-    /// Adds the fact for `lease` (the row after the change; `previous` the row before) to
-    /// `batch` when the rules of `observe::ingest` say one is due, and returns the time to
-    /// record as the row's `observed_at` (`None` keeps the row's value).
-    ///
-    /// # Errors
-    ///
-    /// A store error when the fact cannot be encoded; the change then fails.
-    fn observe(
-        &self,
-        lease: &Lease,
-        previous: Option<&Lease>,
-        batch: &mut WriteBatch,
-    ) -> Result<Option<Timestamp>, StoreError>;
-
-    /// The lease of a derived batch this hook filled committed and the batch goes to the
-    /// asynchronous writer (ADR 0030): the hook takes its facts as written, so that the
-    /// next change of the address is judged against them and not against the store, which
-    /// has them only after the flush.
-    fn committed(&self, _derived: &WriteBatch) {}
-}
-
-/// No observation facts (the lease tests, and a role started without the hook).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoObservations;
-
-impl ObservationHook for NoObservations {
-    fn observe(
-        &self,
-        _lease: &Lease,
-        _previous: Option<&Lease>,
-        _batch: &mut WriteBatch,
-    ) -> Result<Option<Timestamp>, StoreError> {
-        Ok(None)
-    }
-}
 
 /// Why a change was not turned into a batch.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -79,16 +42,63 @@ pub enum BuildError {
     Encode(String),
 }
 
-/// A built change: the synchronous batch, the derived one and the row it writes.
+/// A built change: the synchronous batch, the history event and the row it writes.
 #[derive(Debug, Clone)]
 pub struct LeaseBatch {
     /// The synchronous batch: the lease row and the client index rows (DHCP-17).
     pub batch: WriteBatch,
-    /// The derived rows, the history row and the observation facts, for the asynchronous
-    /// writer once `batch` committed (ADR 0030).
-    pub derived: WriteBatch,
+    /// The history event of the change, for the asynchronous writer once `batch` committed
+    /// ([`LeaseBatch::derived`], ADR 0030 and ADR 0031).
+    pub history: LeaseEvent,
     /// The lease row after the change, for the table once the batch commits.
     pub lease: Lease,
+}
+
+impl LeaseBatch {
+    /// The derived batch of the change once its lease row committed at `revision`: the
+    /// lean history row, which names that revision.
+    ///
+    /// # Errors
+    ///
+    /// The row does not encode.
+    pub fn derived(&self, revision: Revision) -> Result<WriteBatch, StoreError> {
+        history_batch(&self.history, Some(revision), self.batch.proposed_at)
+    }
+}
+
+/// A batch of the lean history row of `event`, naming the lease row's `revision` (`None`:
+/// the row is written in the lease row's own batch), proposed at `now`.
+///
+/// # Errors
+///
+/// The row does not encode.
+pub fn history_batch(
+    event: &LeaseEvent,
+    revision: Option<Revision>,
+    now: Timestamp,
+) -> Result<WriteBatch, StoreError> {
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+    put_history(&mut batch, event, revision)?;
+    Ok(batch)
+}
+
+/// Adds the lean history row of `event` to `batch`, naming the lease row's `revision`
+/// (`None`: the lease row is written in `batch` itself).
+///
+/// # Errors
+///
+/// The row does not encode.
+pub fn put_history(
+    batch: &mut WriteBatch,
+    event: &LeaseEvent,
+    revision: Option<Revision>,
+) -> Result<(), StoreError> {
+    let mut row = HistoryRow::of(event);
+    if let HistoryRow::Lean(lean) = &mut row {
+        lean.revision = revision;
+    }
+    batch.put_typed(&tables::HISTORY, &(event.at, event.vrf, event.addr), &row)?;
+    Ok(())
 }
 
 /// Whether `previous` stops `change`: another client's binding (or abandoned address) that
@@ -127,7 +137,6 @@ pub fn build(
     node: NodeId,
     previous: Option<&Lease>,
     index: impl FnOnce(&Lease) -> Vec<IndexUpdate>,
-    hook: &dyn ObservationHook,
     now: Timestamp,
 ) -> Result<LeaseBatch, BuildError> {
     if held_by_other(change, previous, now) {
@@ -140,16 +149,10 @@ pub fn build(
         && previous.cltt > lease.cltt
     {
         lease.cltt = previous.cltt;
+        lease.granted = lease.granted.map(|granted| granted.min(lease.cltt));
     }
     let encode = |error: StoreError| BuildError::Encode(error.to_string());
     let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-    let mut derived = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
-    if let Some(observed) = hook
-        .observe(&lease, previous, &mut derived)
-        .map_err(encode)?
-    {
-        lease.observed_at = Some(observed);
-    }
     batch
         .put_typed(&tables::LEASES, &(lease.vrf, lease.addr), &lease)
         .map_err(encode)?;
@@ -166,14 +169,11 @@ pub fn build(
             }
         }
     }
-    let mut event = change.to_event(node);
-    event.at = lease.cltt;
-    derived
-        .put_typed(&tables::HISTORY, &(event.at, event.vrf, event.addr), &event)
-        .map_err(encode)?;
+    let mut history = change.to_event(node);
+    history.at = lease.cltt;
     Ok(LeaseBatch {
         batch,
-        derived,
+        history,
         lease,
     })
 }

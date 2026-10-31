@@ -4,8 +4,8 @@
 //!
 //! [`StoreLeases6::submit6`] copies the change into a queue allocated up front and wakes
 //! the [`Committer6`]. The committer builds each change into one batch ([`build`]: a
-//! `dhcp.leases6` row and a `dhcp.history6` row per binding, and the IPAM facts of the
-//! source `dhcp:<node>` through the [`Observation6Hook`]), proposes the batches
+//! `dhcp.leases6` row and a `dhcp.history6` row per binding; no IPAM fact since ADR 0031,
+//! IPAM reads the lease table), proposes the batches
 //! concurrently with the changes that touch the same address or client one after another,
 //! applies a committed batch's rows to the role's [`SharedLeases6`] and only then reports
 //! the ticket committed. It shares the [`RefusalGate`] of the role's DHCPv4 lease store, so
@@ -45,42 +45,6 @@ use crate::{
     store::{CommitError, Completion, SubmitError, Ticket},
 };
 
-/// Adds the IPAM facts of a DHCPv6 lease change to its batch (plan section 2.8).
-pub trait Observation6Hook: Send + Sync {
-    /// Adds the facts of `lease` (the row after the change) to `batch` when they are due,
-    /// and returns the time to record as the row's `observed_at`.
-    ///
-    /// # Errors
-    ///
-    /// A store error when a fact does not encode; the change then fails.
-    fn observe6(
-        &self,
-        lease: &Lease6,
-        previous: Option<&Lease6>,
-        batch: &mut WriteBatch,
-    ) -> Result<Option<Timestamp>, StoreError>;
-
-    /// The lease of a derived batch this hook filled committed and the batch goes to the
-    /// asynchronous writer (ADR 0030); see
-    /// [`ObservationHook::committed`](crate::lease::batch::ObservationHook::committed).
-    fn committed6(&self, _derived: &WriteBatch) {}
-}
-
-/// No observation facts.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoObservations6;
-
-impl Observation6Hook for NoObservations6 {
-    fn observe6(
-        &self,
-        _lease: &Lease6,
-        _previous: Option<&Lease6>,
-        _batch: &mut WriteBatch,
-    ) -> Result<Option<Timestamp>, StoreError> {
-        Ok(None)
-    }
-}
-
 /// Why a change was not turned into a batch.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Build6Error {
@@ -94,7 +58,7 @@ pub enum Build6Error {
 
 /// Builds the batches of one change (ADR 0030): the synchronous one with the row of each
 /// binding (completed from the row held before), and the derived one with each binding's
-/// history row and the observation facts, for the asynchronous writer. `previous` gives the
+/// history row, for the asynchronous writer. `previous` gives the
 /// row the table holds at an address.
 ///
 /// # Errors
@@ -105,7 +69,6 @@ pub fn build<'t>(
     change: &PendingChange6,
     node: NodeId,
     previous: impl Fn(&super::Binding6) -> Option<&'t Lease6>,
-    hook: &dyn Observation6Hook,
     now: Timestamp,
 ) -> Result<(WriteBatch, WriteBatch, Vec<Lease6>), Build6Error> {
     if change
@@ -127,9 +90,7 @@ pub fn build<'t>(
             && held.cltt > lease.cltt
         {
             lease.cltt = held.cltt;
-        }
-        if let Some(observed) = hook.observe6(&lease, held, &mut derived).map_err(encode)? {
-            lease.observed_at = Some(observed);
+            lease.granted = lease.granted.map(|granted| granted.min(lease.cltt));
         }
         let key = (lease.vrf, lease.addr6());
         batch
@@ -212,7 +173,6 @@ impl std::fmt::Debug for StoreLeases6 {
 pub struct Committer6 {
     shared: Arc<Shared>,
     store: Arc<dyn Store>,
-    hook: Arc<dyn Observation6Hook>,
     settings: CommitSettings,
     hasher: RandomState,
     flusher: Option<DerivedFlusher>,
@@ -228,14 +188,12 @@ impl std::fmt::Debug for Committer6 {
 
 impl StoreLeases6 {
     /// A DHCPv6 lease store for `node` that commits to `store`, applies its commits to
-    /// `leases`, adds the facts of `hook` and shares `gate` with the DHCPv4 store; and its
-    /// committer.
+    /// `leases` and shares `gate` with the DHCPv4 store; and its committer.
     pub fn new(
         store: Arc<dyn Store>,
         leases: SharedLeases6,
         node: NodeId,
         settings: CommitSettings,
-        hook: Arc<dyn Observation6Hook>,
         gate: Arc<RefusalGate>,
     ) -> (Self, Committer6) {
         let capacity = settings.queue.max(1);
@@ -259,7 +217,6 @@ impl StoreLeases6 {
             Committer6 {
                 shared,
                 store,
-                hook,
                 settings,
                 hasher: RandomState::new(),
                 flusher: Some(flusher),
@@ -267,7 +224,7 @@ impl StoreLeases6 {
         )
     }
 
-    // WP9.6: the writer of the history rows and the facts.
+    // WP9.6: the writer of the history rows.
     /// The asynchronous writer of the derived rows (ADR 0030).
     pub fn derived(&self) -> &DerivedWriter {
         &self.shared.derived
@@ -502,7 +459,6 @@ impl Committer6 {
                 &queued.change,
                 self.shared.node,
                 |binding| table.get(binding.vrf, binding.addr),
-                self.hook.as_ref(),
                 now,
             )
         };
@@ -522,7 +478,6 @@ impl Committer6 {
         };
         let shared = Arc::clone(&self.shared);
         let store = Arc::clone(&self.store);
-        let hook = Arc::clone(&self.hook);
         let deadline = tokio::time::Instant::from_std(queued.at + self.settings.commit_wait);
         let wait = self.settings.commit_wait;
         let (ticket, at) = (queued.ticket, queued.at);
@@ -557,9 +512,8 @@ impl Committer6 {
                     shared.counters.committed.fetch_add(1, Ordering::Relaxed);
                     metrics::COMMIT_DURATION
                         .observe(u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX));
-                    // ADR 0030: the history rows and the facts go to the writer before the
-                    // ticket completes (a push, never a wait).
-                    hook.committed6(&derived);
+                    // ADR 0030: the history rows go to the writer before the ticket
+                    // completes (a push, never a wait).
                     shared.derived.push(derived);
                     if !late {
                         shared.complete(ticket, Ok(committed.revision));

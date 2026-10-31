@@ -50,6 +50,14 @@
 # a change that adds to that floor, and the Linux lab is where the lease path's own cost
 # shows. The bytes vary by a quarter between runs because the Windows stop is not a clean
 # close and redb grows its files by doubling; hence the wider tolerance.
+#
+# Lowered on 2026-10-31 (ADR 0031, the lease table as the observation source): the lease
+# change writes no fact rows any more, so the store grows by less than half per lease. The
+# median of three runs on the same workstation and build profile:
+#
+#   commit_avg_ms      9.22, 9.00, 9.38          (kept at 8.9: the floor of this machine)
+#   closed_loop_per_s  5,083, 5,046, 5,095       (kept at 5,750; see ADR 0031, Figures)
+#   bytes_per_lease    2,789, 2,961, 2,931       (lowered from 6,774 to 2,931)
 
 [commit_avg_ms]
 threshold = 8.9
@@ -60,7 +68,7 @@ threshold = 5750
 tolerance = 0.25
 
 [bytes_per_lease]
-threshold = 6774
+threshold = 2931
 tolerance = 0.30
 
 # [rows_per_lease]

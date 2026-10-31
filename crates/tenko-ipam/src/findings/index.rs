@@ -254,6 +254,8 @@ impl FindingQuery {
 pub struct FindingsIndex {
     config: FindingsConfig,
     state: RwLock<State>,
+    // ADR 0031: the lease view the reconciliation view reads.
+    leases: std::sync::OnceLock<std::sync::Arc<crate::observe::dhcp::LeaseFacts>>,
 }
 
 impl FindingsIndex {
@@ -262,7 +264,19 @@ impl FindingsIndex {
         Self {
             config,
             state: RwLock::new(State::default()),
+            leases: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Gives the index the lease view the findings of the reconciliation view read (ADR
+    /// 0031), once; without one they see no lease.
+    pub fn set_leases(&self, leases: std::sync::Arc<crate::observe::dhcp::LeaseFacts>) {
+        let _ = self.leases.set(leases);
+    }
+
+    /// The lease view, when the index has one.
+    pub fn leases(&self) -> Option<&std::sync::Arc<crate::observe::dhcp::LeaseFacts>> {
+        self.leases.get()
     }
 
     /// The settings.
@@ -443,7 +457,7 @@ impl FindingsIndex {
     }
 
     fn view_findings(&self, view: &dyn ReadView, now: Timestamp) -> IpamResult<Vec<ViewFinding>> {
-        let derived = view::findings_view(view, now)?;
+        let derived = view::findings_view(view, self.leases.get().map(AsRef::as_ref), now)?;
         let mut out: Vec<ViewFinding> = derived
             .rows
             .iter()

@@ -62,9 +62,7 @@ use crate::{
     config::image::build,
     feed::{Change, DhcpData, DhcpFeed, FeedError, FeedEvent},
     lease::{
-        CommitSettings, LeaseTable as _, SharedLeases, StoreLeases,
-        batch::{NoObservations, ObservationHook},
-        follow::index_from_data,
+        CommitSettings, LeaseTable as _, SharedLeases, StoreLeases, follow::index_from_data,
         refusal::Finding,
     },
     server::{DhcpServer, ListenerInfo, ServerConfig},
@@ -72,11 +70,7 @@ use crate::{
     store_feed::{self, FeedProgress, StoreFeed},
     // WP9.1: the DHCPv6 server and its lease path beside the DHCPv4 ones.
     v6::{
-        lease::{
-            SharedLeases6,
-            commit::{NoObservations6, Observation6Hook, StoreLeases6},
-            index_from_data6,
-        },
+        lease::{SharedLeases6, commit::StoreLeases6, index_from_data6},
         server::{Dhcp6Server, Listener6Info, Server6Config},
     },
 };
@@ -207,14 +201,10 @@ pub struct LocalNode {
     installs: Arc<AtomicU64>,
     probe: AtomicBool,
     probe_expected: AtomicBool,
-    // WP8.1: the observation hook, for the operator's release as for the committer.
-    observations: Arc<dyn ObservationHook>,
     // WP9.1: the DHCPv6 server, its table and its lease store.
     server6: RwLock<Option<Arc<Dhcp6Server>>>,
     leases6: SharedLeases6,
     lease_store6: StoreLeases6,
-    // WP9.4: the DHCPv6 observation hook, for the operator's release of a DHCPv6 lease.
-    observations6: Arc<dyn Observation6Hook>,
     // WP9.2: what the router advertisement check heard.
     ra: Arc<crate::ra::RaWatch>,
 }
@@ -330,9 +320,6 @@ impl LocalNode {
         &self,
         args: &commands::ReleaseArgs,
     ) -> Result<commands::LeaseRow, CommandResult> {
-        // WP9.6: the facts of the committed changes are stored before this batch expires
-        // them, so that a later flush cannot write an older fact over the release.
-        self.lease_store.derived().flush().await;
         let now = Timestamp::now();
 
         let vrf = self.vrf_of(args.vrf, args.addr)?;
@@ -358,7 +345,7 @@ impl LocalNode {
                 ),
             ));
         }
-        let mut row = Lease {
+        let row = Lease {
             state: BindingState::Released,
             ends: now,
             node: self.node,
@@ -370,21 +357,12 @@ impl LocalNode {
             now,
         );
         let encode = |error: StoreError| CommandResult::failed(error.to_string());
-        // WP8.1: the release expires the lease's IPAM facts in the same batch.
-        if let Some(observed) = self
-            .observations
-            .observe(&row, Some(&lease), &mut batch)
-            .map_err(encode)?
-        {
-            row.observed_at = Some(observed);
-        }
+        // ADR 0031: no fact to expire; the released row is what IPAM reads.
         batch.expect_typed(&tables::LEASES, &key, Some(revision));
         batch
             .put_typed(&tables::LEASES, &key, &row)
             .map_err(encode)?;
-        batch
-            .put_typed(&tables::HISTORY, &(now, vrf, args.addr), &event)
-            .map_err(encode)?;
+        crate::lease::batch::put_history(&mut batch, &event, None).map_err(encode)?;
         match self.store.propose(batch).await {
             Ok(committed) => {
                 self.leases.apply_at(row.clone(), committed.revision);
@@ -844,50 +822,19 @@ impl Role {
         node: NodeId,
         settings: RoleSettings,
     ) -> Result<Self, StartError> {
-        Self::start_observed(store, node, settings, Arc::new(NoObservations)).await
+        Self::start_both(store, node, settings).await
     }
 
-    // WP8.1: the start with the observation hook of the lease batch.
-    /// [`Role::start`] with `observations`, the hook that adds the IPAM facts of every lease
-    /// change to its batch (plan section 2.8): the committer's changes and the operator's
-    /// releases.
-    ///
-    /// # Errors
-    ///
-    /// As [`Role::start`].
-    pub async fn start_observed(
-        store: Arc<dyn Store>,
-        node: NodeId,
-        settings: RoleSettings,
-        observations: Arc<dyn ObservationHook>,
-    ) -> Result<Self, StartError> {
-        Self::start_observed6(
-            store,
-            node,
-            settings,
-            observations,
-            Arc::new(NoObservations6),
-        )
-        .await
-    }
-
-    // WP9.1: the start with the observation hooks of both families.
-    /// [`Role::start_observed`] with `observations6`, the hook that adds the IPAM facts of
-    /// every DHCPv6 lease change to its batch.
-    ///
-    /// # Errors
-    ///
-    /// As [`Role::start`].
+    // WP9.1: the start steps of both families; ADR 0031: no observation hooks any more, IPAM
+    // reads the lease tables.
     #[allow(
         clippy::too_many_lines,
         reason = "the start steps of both families in their order"
     )]
-    pub async fn start_observed6(
+    async fn start_both(
         store: Arc<dyn Store>,
         node: NodeId,
         settings: RoleSettings,
-        observations: Arc<dyn ObservationHook>,
-        observations6: Arc<dyn Observation6Hook>,
     ) -> Result<Self, StartError> {
         let feed_store = Arc::clone(&store);
         let mut feed = tokio::task::spawn_blocking(move || store_feed::register(feed_store))
@@ -923,46 +870,38 @@ impl Role {
             queue: sizing::room(sizing::leasable6(built.image.v6()), queue_cap),
             ..settings.commit
         };
-        let (lease_store, committer) = StoreLeases::with_hook(
-            Arc::clone(&store),
-            leases.clone(),
-            node,
-            commit,
-            Arc::clone(&observations),
-        );
+        let (lease_store, committer) =
+            StoreLeases::new(Arc::clone(&store), leases.clone(), node, commit);
         // WP9.1: the DHCPv6 lease store shares the refusal gate.
         let (lease_store6, committer6) = StoreLeases6::new(
             Arc::clone(&store),
             leases6.clone(),
             node,
             commit6,
-            Arc::clone(&observations6),
             lease_store.gate_handle(),
         );
         let stop = CancellationToken::new();
         let committer = tokio::spawn(committer.run(stop.child_token()));
         let committer6 = tokio::spawn(committer6.run(stop.child_token()));
-        // WP9.6 (ADR 0030): the history rows and facts a crash may have lost, rebuilt from
-        // the lease rows through the writers, before the role answers.
+        // WP9.6 (ADR 0030): the history rows a crash may have lost, rebuilt from the lease
+        // rows through the writers, before the role answers.
         if let Err(error) = crate::lease::derived::catch_up(
             store.as_ref(),
             rows4.into_values(),
-            observations.as_ref(),
             lease_store.derived(),
         )
         .await
         {
-            tracing::warn!(%error, "the lease history and facts could not be rebuilt at start");
+            tracing::warn!(%error, "the lease history could not be rebuilt at start");
         }
         if let Err(error) = crate::lease::derived::catch_up6(
             store.as_ref(),
             rows6.into_values(),
-            observations6.as_ref(),
             lease_store6.derived(),
         )
         .await
         {
-            tracing::warn!(%error, "the DHCPv6 lease history and facts could not be rebuilt at start");
+            tracing::warn!(%error, "the DHCPv6 lease history could not be rebuilt at start");
         }
         let mut config = settings.server.clone();
         config.node = node;
@@ -1075,11 +1014,9 @@ impl Role {
             installs,
             probe: AtomicBool::new(settings.probe),
             probe_expected: AtomicBool::new(settings.probe_expected),
-            observations,
             server6: RwLock::new(server6),
             leases6,
             lease_store6,
-            observations6,
             ra,
         });
         let mut tasks = vec![follow, wake, reporter, committer, committer6];

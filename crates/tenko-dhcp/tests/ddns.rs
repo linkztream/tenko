@@ -253,6 +253,7 @@ impl Lab {
             fingerprint: None,
             relay: None,
             observed_at: None,
+            granted: None,
         }
     }
 

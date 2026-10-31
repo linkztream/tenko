@@ -273,8 +273,10 @@ fn baseline(
     for network in &run.networks {
         let mut cursor = None;
         loop {
+            // The probes' baseline takes their own sources only: no lease view.
             let page = list_facts(
                 view,
+                None,
                 &FactQuery {
                     within: Some(*network),
                     limit: Some(tenko_ipam::observe::view::MAX_LIMIT),
