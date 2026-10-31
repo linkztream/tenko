@@ -428,7 +428,7 @@ fn canonical_zip(bytes: &[u8]) -> TestResult<Vec<u8>> {
     let mut package = ZipWriter::new(Cursor::new(Vec::new()));
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
-        let name = file.name().to_owned();
+        let name = file.name()?.into_owned();
         let options = entry_options(file.compression())?;
         let mut content = Vec::new();
         file.read_to_end(&mut content)?;
@@ -765,7 +765,7 @@ fn zip_entries(bytes: &[u8]) -> TestResult<Vec<(String, CompressionMethod, Vec<u
         let mut file = archive.by_index(index)?;
         let mut content = Vec::new();
         file.read_to_end(&mut content)?;
-        entries.push((file.name().to_owned(), file.compression(), content));
+        entries.push((file.name()?.into_owned(), file.compression(), content));
     }
     Ok(entries)
 }
@@ -951,7 +951,7 @@ fn assert_platform_neutral(label: &str, package: &[u8]) -> TestResult {
     let mut archive = ZipArchive::new(Cursor::new(package))?;
     for index in 0..archive.len() {
         let mut file = archive.by_index(index)?;
-        let name = file.name().to_owned();
+        let name = file.name()?.into_owned();
         assert_eq!(file.last_modified(), Some(entry_time()?), "{label}: {name}");
         assert_eq!(
             file.unix_mode().map(|mode| mode & 0o777),

@@ -1,11 +1,5 @@
 # cargo-audit reads this file from the workspace root's `.cargo` directory. It mirrors the
-# `ignore` list of `deny.toml` and the two lists stay equal.
-#
-# RUSTSEC-2026-0367, 0368 and 0369 concern `ZipArchive::extract` and the stream extraction
-# API writing entries to the file system (SUID and SGID bits kept, symbolic links not
-# confined). Tenko never extracts an archive to disk: calamine reads spreadsheet entries into
-# memory, and the only direct use of `zip` is the import fixture generator in tenko-ipam's
-# tests, which writes and reads archives in memory. The ignores go when calamine and
-# rust_xlsxwriter accept zip 9 (their newest releases still require zip 8).
+# `ignore` list of `deny.toml` and the two lists stay equal. Both are empty since calamine and
+# rust_xlsxwriter moved to zip 9.
 [advisories]
-ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
+ignore = []

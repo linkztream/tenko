@@ -10,21 +10,8 @@ feature-depth = 1
 # Security advisories from the RustSec database. Vulnerabilities are always errors.
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# "warn" since 2026-10-16: every 8.x release of `zip` was yanked while the only released
-# calamine (0.36) and rust_xlsxwriter (0.99) still require zip 8, so no lockfile passes
-# "deny" until both move to zip 9. Back to "deny" with that update; the check still prints
-# the yanked crate on every run.
-yanked = "warn"
+yanked = "deny"
 unmaintained = "all"
-# Ignored since 2026-10-17 with the same cause as the yanked warning above: RUSTSEC-2026-0367,
-# 0368 and 0369 concern `ZipArchive::extract` and the stream extraction API writing entries to
-# the file system (SUID and SGID bits kept, symbolic links not confined). Tenko never extracts
-# an archive to disk: calamine reads spreadsheet entries into memory, and the only direct use of
-# `zip` is the import fixture generator in tenko-ipam's tests, which writes and reads archives in
-# memory. The ignores go when calamine and rust_xlsxwriter move to zip 9 (newest releases on
-# 2026-10-17: calamine 0.36.1 and rust_xlsxwriter 0.99.1 still require zip 8).
-# `.cargo/audit.toml` mirrors this list for cargo-audit; change both together.
-ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
 
 # The project licence is the Business Source License 1.1 with AGPL-3.0-or-later as the
 # Change License (ADR 0022). A copyleft dependency would bind the converted versions, so
