@@ -89,6 +89,13 @@ pub fn register(registry: &Registry) {
     registry.register(&QUEUED);
 }
 
+/// Publishes the queue length. The series is a gauge, so it takes a float; a gauge's
+/// `set_total` is for a mirrored counter and would store the count as the bits of a float.
+fn set_queued(len: usize) {
+    #[allow(clippy::cast_precision_loss)]
+    QUEUED.set(len as f64);
+}
+
 /// The writer's limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DerivedSettings {
@@ -263,7 +270,7 @@ impl DerivedWriter {
             }
         };
         shared.pushed.fetch_add(1, Ordering::AcqRel);
-        QUEUED.set_total(u64::try_from(len).unwrap_or(u64::MAX));
+        set_queued(len);
         if accepted {
             if len >= shared.settings.max_items.max(1) {
                 shared.wake.notify_one();
@@ -487,7 +494,7 @@ impl DerivedFlusher {
         for item in refused.into_iter().flatten().rev() {
             queue.push_front(item);
         }
-        QUEUED.set_total(u64::try_from(queue.len()).unwrap_or(u64::MAX));
+        set_queued(queue.len());
         if refused_any {
             Flushed::Refused
         } else {
@@ -859,6 +866,25 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(40)).await;
         let finding = writer.finding().expect("the finding");
         assert_eq!((finding.code, finding.dropped), (FINDING, 1));
+    }
+
+    #[tokio::test]
+    async fn the_queue_gauge_reads_as_the_count() {
+        let store: Arc<dyn Store> = Arc::new(MemStore::new(MemStoreConfig::default()));
+        let settings = DerivedSettings {
+            queue: 8,
+            ..DerivedSettings::default()
+        };
+        // No flusher runs: the pushed changes stay queued.
+        let (writer, _flusher) = DerivedWriter::new(store, settings);
+        for i in 1..=3 {
+            assert!(writer.push(row(i)));
+        }
+        assert_eq!(
+            QUEUED.get(),
+            Some(3.0),
+            "the gauge holds the count as a number, not as the bits of one"
+        );
     }
 
     #[tokio::test]
