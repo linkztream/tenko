@@ -177,8 +177,12 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
         let reply = call(&harness, &key, &operation, Anonymous).await;
         let label = format!("{key}: {} {}", reply.status, reply.text);
         match requirement {
-            Requirement::Public | Requirement::PublicUntilSetup => {
+            Requirement::Public => {
                 assert_ne!(reply.status.as_u16(), 401, "a public operation: {label}");
+            }
+            // The installation has completed setup: refused before the body is read.
+            Requirement::PublicUntilSetup => {
+                assert!(refused_as_unauthenticated(&reply), "{label}");
             }
             Requirement::Session | Requirement::SessionOrToken => {
                 assert!(refused_as_unauthenticated(&reply), "{label}");

@@ -774,7 +774,8 @@ async fn change_password(
 
 /// Checks a candidate password against the live policy and the breach lists, for feedback
 /// while the user types. Open while first-run setup is open (with the preset of the chosen
-/// profile); a session or token is needed afterwards.
+/// profile); a session or token is needed afterwards, and the refusal of a caller without
+/// one comes before the body is read.
 #[utoipa::path(
     post,
     path = "/auth/password/check",
@@ -793,12 +794,21 @@ async fn change_password(
 async fn check_password(
     Svc(service): Svc,
     caller: Result<Ctx, ApiError>,
-    ApiJson(request): ApiJson<PasswordCheck>,
+    body: Request,
 ) -> Result<Json<PasswordCheckResult>, RouteError> {
     let (ctx, refusal) = match caller {
         Ok(Ctx(ctx)) => (Some(ctx), None),
         Err(refusal) => (None, Some(refusal)),
     };
+    // Once setup has completed, a caller without a valid session or token gets the
+    // authentication refusal before the body is read: the body parser is reached by
+    // authenticated callers, or while setup is open.
+    if let Some(refusal) = &refusal
+        && service.is_installed().await?
+    {
+        return Err(refusal.clone().into());
+    }
+    let ApiJson(request) = ApiJson::<PasswordCheck>::from_request(body, &()).await?;
     match (
         service.check_password(ctx.as_ref(), &request).await,
         refusal,
@@ -2267,6 +2277,40 @@ mod tests {
             )
             .await
             .assert_problem(401, "auth.unauthenticated");
+    }
+
+    #[tokio::test]
+    async fn the_password_check_refuses_a_caller_without_credentials_before_the_body() {
+        let harness = Harness::fresh().await;
+        // While setup is open the caller is not refused, so the parser's verdict stands.
+        harness
+            .call("POST", "/auth/password/check", Anonymous, Some(&json!({})))
+            .await
+            .assert_problem(400, "sys.invalid_request");
+        harness.env.setup(Profile::Home).await.expect("setup");
+        // After setup, the refusal of the missing credentials comes first.
+        harness
+            .call("POST", "/auth/password/check", Anonymous, Some(&json!({})))
+            .await
+            .assert_problem(401, "auth.unauthenticated");
+        harness
+            .call("POST", "/auth/password/check", Anonymous, None)
+            .await
+            .assert_problem(401, "auth.unauthenticated");
+    }
+
+    #[tokio::test]
+    async fn the_password_check_reads_the_body_of_an_authenticated_caller() {
+        let (harness, admin) = Harness::installed().await;
+        harness
+            .call(
+                "POST",
+                "/auth/password/check",
+                Cookie(&admin),
+                Some(&json!({})),
+            )
+            .await
+            .assert_problem(400, "sys.invalid_request");
     }
 
     #[tokio::test]
