@@ -1049,6 +1049,13 @@ async fn a_member_reports_its_binary_once_after_a_start() {
         .into_iter()
         .find(|member| member.node() != lab.first.node())
         .expect("a joined controller");
+    // The voters are set before a leader is elected or known to the follower, and a write
+    // needs both.
+    lab.leader().await;
+    wait_until("the follower to see the leader", || {
+        follower.store.leadership().borrow().is_some()
+    })
+    .await;
     // A controller that joined has a record without its binary's details until it reports
     // them at its next start.
     assert!(follower.peers.announce().await.expect("announce"));
