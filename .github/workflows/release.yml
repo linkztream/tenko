@@ -4,35 +4,56 @@
 # changelog has the section `## [X.Y.Z] - <date>` and whose crates/tenko/Cargo.toml has
 # `version = "X.Y.Z"`. The workflow
 #
-#   1. verify   checks the tag against the crate version and the changelog;
-#   2. ui       builds and tests the web UI once;
-#   3. build    builds the binaries for Linux and Windows with the real UI embedded. The Linux
-#               binary is static, built for x86_64-unknown-linux-musl (S3-Q10, OPS-01), so one
-#               file runs on every distribution; the job fails when it is not static;
-#   4. smoke    runs the Linux binary in a Debian 12 and a RHEL 9 compatible container
-#               (version, config check, a real start and a stop with SIGTERM);
-#      msi      (WP6.7) builds the Windows MSI from the Windows binary, signs it when a
-#               certificate is configured, and installs, upgrades and removes it on the
-#               runner (deploy/windows/msi-smoke.ps1);
-#   5. image    builds and pushes the container image to ghcr.io (amd64 only; `latest` moves
-#               for stable releases only, S3-Q9);
-#   6. publish  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), takes the
-#               release text from the changelog (scripts/changelog.mjs notes) and creates
-#               the GitHub release with the binaries, releases.json and SHA256SUMS.
+#   1. verify    checks the tag against the crate version and the changelog;
+#   2. ui        audits the production dependencies of the web UI (npm audit, blocking on
+#                high and critical), then builds and tests the web UI once;
+#   3. build     builds the binaries for Linux and Windows with the real UI embedded. The Linux
+#                binary is static, built for x86_64-unknown-linux-musl (S3-Q10, OPS-01), so one
+#                file runs on every distribution; the job fails when it is not static;
+#   4. smoke     runs the Linux binary in a Debian 12 and a RHEL 9 compatible container
+#                (version, config check, a real start and a stop with SIGTERM);
+#      msi       (WP6.7) builds the Windows MSI from the Windows binary, signs it when a
+#                certificate is configured, and installs, upgrades and removes it on the
+#                runner (deploy/windows/msi-smoke.ps1);
+#   5. image     builds and pushes the container image to ghcr.io (amd64 only; `latest` moves
+#                for stable releases only, S3-Q9) and hands its digest on;
+#   6. sbom      writes the CycloneDX SBOMs (L1.9 of docs/plans/security-audit-plan.md): the
+#                two binaries from Cargo.lock (cargo cyclonedx, restricted to the crates
+#                `cargo tree` lists by scripts/sbom-prune.mjs), the web UI from
+#                ui/package-lock.json (cyclonedx-npm) and the pushed image (syft);
+#   7. manifest  builds releases.json and SHA256SUMS (scripts/release-manifest.mjs), adds the
+#                installers and the SBOMs to SHA256SUMS, and hands the release files on as one
+#                artifact, so that the files attested are the files published;
+#   8. attest    the only job with id-token: write and attestations: write (L1.10): a SLSA
+#                build provenance attestation for every release file and for the image digest,
+#                and an SBOM attestation binding each SBOM to its binary or the image, with
+#                GitHub's own actions/attest and nothing else;
+#   9. publish   takes the release text from the changelog (scripts/changelog.mjs notes) and
+#                creates the GitHub release with the files of `manifest`.
 #
 # Running installations read releases.json from the latest release to learn about updates;
 # the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md
-# (the platform of the musl binary stays linux-x86_64).
+# (the platform of the musl binary stays linux-x86_64). SECURITY.md, "Verifying a release",
+# says how a user checks the attestations with `gh attestation verify`.
 #
 # Re-running: when a run fails before `publish`, re-run the failed jobs. When `publish`
 # failed after the release was created, delete that release (not the tag) and re-run.
 # The workflow_dispatch trigger builds an existing tag by hand; it never creates a tag.
 #
-# Not yet here: signing of the Linux binary and of releases.json. It arrives with its own
-# requirement; the places for it are marked SIGNING below. (WP6.7) The Windows binary and the
-# MSI are signed with Authenticode when the secrets WINDOWS_SIGNING_CERT_PFX (the PFX file,
-# base64) and WINDOWS_SIGNING_PASSWORD exist, and ship unsigned with a notice in the job log
-# otherwise (deploy/windows/sign.ps1, deploy/windows/README.md "Signing").
+# Not yet here: signatures a node verifies (API-19). The provenance of `attest` proves that
+# this repository's workflow built a file, not that the owner released it: whoever can push a
+# tag gets the same proof. Section 7.2 of docs/plans/security-audit-plan.md proposes the
+# remedy: a key GitHub never holds (the owner's hardware key) signs SHA256SUMS, and with it
+# releases.json, after the security round, outside this workflow; the places that change for
+# it are marked SIGNING below. (WP6.7) The Windows binary and the MSI are signed with
+# Authenticode when the secrets WINDOWS_SIGNING_CERT_PFX (the PFX file, base64) and
+# WINDOWS_SIGNING_PASSWORD exist, and ship unsigned with a notice in the job log otherwise
+# (deploy/windows/sign.ps1, deploy/windows/README.md "Signing").
+#
+# Every `uses:` is pinned to a full commit SHA with its tag in a comment (L1.6); the version
+# updates for github-actions in .github/dependabot.yml move the pins. dtolnay/rust-toolchain
+# has no release tags: its pin is a commit of its default branch, the same one ci.yml uses,
+# and rust-toolchain.toml selects the toolchain.
 
 # Every Linux job runs on GitHub's hosted runners (ubuntu-latest) and the Windows build on
 # windows-latest; no job runs on a machine of the owner's (see ci.yml).
@@ -48,8 +69,11 @@ on:
         required: true
         type: string
 
-# Least privilege: the jobs that build run with read access only; `image` and `publish`
-# raise what they need. (Together they use contents: write and packages: write.)
+# Least privilege: every job runs with read access only except three, which raise what they
+# need: `image` (packages: write, to push), `attest` (id-token: write, attestations: write and
+# packages: write, to sign through Sigstore, store the attestations and push those of the
+# image) and `publish` (contents: write, to create the release). The SBOM tools run in `sbom`,
+# which holds no token able to write and never sees the binaries, the MSI or the UI bundle.
 permissions:
   contents: read
 
@@ -76,12 +100,14 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v5
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+          package-manager-cache: false
       - name: Tag, crate version and changelog
         id: tag
         run: |
@@ -115,16 +141,38 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v5
+          persist-credentials: false
+      # No npm cache in a release: the packages come from the registry, checked against
+      # package-lock.json, as the Rust build below has no cache either.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
+          package-manager-cache: false
       - name: Install dependencies
         run: npm ci
+      # L1.4: the full audit, development dependencies included, is a report; a high or
+      # critical advisory in a production dependency (what the bundle is built from) stops
+      # the release in the next step.
+      - name: Audit all dependencies (report)
+        run: |
+          status=0
+          npm audit > "$RUNNER_TEMP/npm-audit.txt" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/npm-audit.txt"
+          {
+            echo "### npm audit, all dependencies (report)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/npm-audit.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" != 0 ]; then
+            echo "::warning::npm audit lists advisories (above); only those in production dependencies at high or critical block the release."
+          fi
+      - name: Audit production dependencies (blocks on high and critical)
+        run: npm audit --omit=dev --audit-level=high
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
@@ -133,7 +181,7 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ui-dist
           path: ui/dist
@@ -163,10 +211,11 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       EXE: ${{ matrix.exe }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           targets: ${{ matrix.target }}
       - name: Install the musl C compiler
@@ -180,12 +229,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
       # No Rust cache here: a release is built from a clean state. TENKO_UI_STUB is not set,
       # so the build embeds the real UI and refuses the placeholder page.
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: ui-dist
           path: ui/dist
       - name: Build
-        run: cargo build --release --locked -p tenko --target ${{ matrix.target }}
+        shell: bash
+        run: cargo build --release --locked -p tenko --target "$TARGET"
       - name: Check that the Linux binary is static
         if: runner.os == 'Linux'
         run: |
@@ -219,8 +269,10 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp "target/${TARGET}/release/tenko${EXE}" "dist/tenko-${VERSION}-${PLATFORM}${EXE}"
-          # SIGNING (later): sign dist/tenko-${VERSION}-${PLATFORM} here on Linux (a detached
-          # signature) and upload the signature next to it. Windows: the next step.
+          # SIGNING (later, API-19): no signature is made here. Section 7.2 of
+          # docs/plans/security-audit-plan.md: a key in this workflow would prove no more than
+          # the provenance of the `attest` job; the owner's hardware key signs SHA256SUMS, which
+          # lists this file, after the security round. Windows: Authenticode in the next step.
       # WP6.7: Authenticode signature of the Windows binary, before it is uploaded, so that the
       # release asset, the binary in the MSI and the binary that in-app updates install are one
       # file. Without the secrets the step leaves a notice and the binary unsigned.
@@ -237,7 +289,7 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
           SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: ./deploy/windows/sign.ps1 -File "dist/tenko-$env:VERSION-$env:PLATFORM.exe"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: binary-${{ matrix.platform }}
           path: dist/tenko-${{ needs.verify.outputs.version }}-${{ matrix.platform }}${{ matrix.exe }}
@@ -263,10 +315,11 @@ jobs:
       VERSION: ${{ needs.verify.outputs.version }}
       SMOKE_IMAGE: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/download-artifact@v5
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: binary-linux-x86_64
           path: dist
@@ -384,11 +437,12 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
       # The runner image has the .NET SDK; the WiX version comes from .config/dotnet-tools.json.
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: binary-windows-x86_64
           path: bin
@@ -411,13 +465,13 @@ jobs:
         # Install, upgrade, uninstall and purge on the runner, which runs elevated. The package
         # under test is the one that is published.
         run: ./deploy/windows/msi-smoke.ps1 -Msi "dist/tenko-$env:VERSION-windows-x86_64.msi" -UpgradeMsi "upgrade-test/tenko-$env:VERSION-windows-x86_64.msi" -LogDir $env:RUNNER_TEMP
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: failure()
         with:
           name: msi-smoke-logs
           path: ${{ runner.temp }}/msi-smoke-*.log
           retention-days: 7
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: installer-windows-x86_64
           path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.msi
@@ -434,10 +488,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      # The digest of what was pushed (the image index), for the SBOM and the attestations.
+      digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
       - name: Tags
         id: tags
         env:
@@ -452,49 +510,159 @@ jobs:
             if [ "$PRERELEASE" != "true" ]; then echo "${IMAGE}:latest"; fi
             echo "TAGS_END"
           } >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@ # 
+        id: push
         with:
           context: .
           file: deploy/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          # SIGNING (later): sign the image digest (cosign) after the push.
+          # The job `attest` attests this digest (provenance and SBOM, pushed to the registry
+          # beside the image). SIGNING (later, API-19): a signature of the image by the owner's
+          # key follows section 7.2 of docs/plans/security-audit-plan.md, as for SHA256SUMS.
 
   # -------------------------------------------------------------------------------------
-  publish:
-    name: Publish the release
-    # WP6.7: msi in needs.
-    needs: [verify, build, smoke-linux, image, msi]
+  # L1.9: the SBOMs, CycloneDX JSON, one per published thing. This job reads only: it holds no
+  # token able to write, never sees the binaries, the MSI or the UI bundle, and runs the
+  # third-party tools of the SBOMs (each pinned by version and SHA-256, or by exact version
+  # for cyclonedx-npm) apart from the jobs that build what is published.
+  sbom:
+    name: SBOMs
+    needs: [verify, image]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       VERSION: ${{ needs.verify.outputs.version }}
-      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
-      GH_TOKEN: ${{ github.token }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+      CARGO_CYCLONEDX_VERSION: 0.5.9
+      CARGO_CYCLONEDX_SHA256: fb8dbee9f182173e062a64a387b21a0badc6fab8b2abf9294973f012972bf6d8
+      SYFT_VERSION: 1.55.0
+      SYFT_SHA256: bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d
+      SYFT_CHECK_FOR_APP_UPDATE: "false"
+      CYCLONEDX_NPM_VERSION: 6.0.1
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-node@v5
+          persist-credentials: false
+      # cargo tree and cargo metadata only: no target is installed and nothing is built.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v5
+          package-manager-cache: false
+      - name: Install cargo-cyclonedx and syft
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/sbom-tools"
+          mkdir -p "$tools/bin"
+          cd "$tools"
+          curl -fsSL -o cargo-cyclonedx.tar.xz \
+            "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-${CARGO_CYCLONEDX_VERSION}/cargo-cyclonedx-x86_64-unknown-linux-gnu.tar.xz"
+          echo "${CARGO_CYCLONEDX_SHA256}  cargo-cyclonedx.tar.xz" | sha256sum --check --strict -
+          mkdir cargo-cyclonedx && tar -xJf cargo-cyclonedx.tar.xz -C cargo-cyclonedx
+          bin="$(find cargo-cyclonedx -type f -name cargo-cyclonedx -print -quit)"
+          test -n "$bin"
+          install -m 0755 "$bin" bin/cargo-cyclonedx
+          curl -fsSL -o syft.tar.gz \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256}  syft.tar.gz" | sha256sum --check --strict -
+          tar -xzf syft.tar.gz syft
+          install -m 0755 syft bin/syft
+          echo "$tools/bin" >> "$GITHUB_PATH"
+      - name: SBOMs of the binaries
+        # cargo cyclonedx reads `cargo metadata`, whose resolve also lists optional
+        # dependencies that the build leaves out; scripts/sbom-prune.mjs keeps the crates that
+        # `cargo tree` lists for the package and target of the build (build dependencies and
+        # dev-dependencies excluded, proc macros included) and says what it removed.
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          echo "### SBOMs" >> "$GITHUB_STEP_SUMMARY"
+          for pair in x86_64-unknown-linux-musl:linux-x86_64 x86_64-pc-windows-msvc:windows-x86_64; do
+            target="${pair%%:*}"
+            platform="${pair#*:}"
+            cargo tree -e normal --target "$target" -p tenko --prefix none --locked > "$RUNNER_TEMP/tree-$platform.txt"
+            rm -f crates/tenko/tenko.cdx.json
+            cargo cyclonedx --format json --spec-version 1.5 --target "$target" --no-build-deps --quiet
+            node scripts/sbom-prune.mjs --bom crates/tenko/tenko.cdx.json --tree "$RUNNER_TEMP/tree-$platform.txt" \
+              --out "sbom/tenko-${VERSION}-${platform}.cdx.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+      - name: SBOM of the web UI
+        working-directory: ui
+        env:
+          # The tool's own dependencies run no install scripts.
+          npm_config_ignore_scripts: "true"
+        run: |
+          set -euo pipefail
+          npx --yes "@cyclonedx/cyclonedx-npm@${CYCLONEDX_NPM_VERSION}" \
+            --omit dev --package-lock-only --flatten-components --output-reproducible \
+            --output-file "../sbom/tenko-${VERSION}-ui.cdx.json"
+      - name: SBOM of the container image
+        # The image is public; syft reads it from the registry by digest, without a token.
+        run: |
+          set -euo pipefail
+          syft scan "registry:${IMAGE}@${DIGEST}" --platform linux/amd64 \
+            --output "cyclonedx-json=sbom/tenko-${VERSION}-image.cdx.json"
+      - name: Count the components
+        run: |
+          set -euo pipefail
+          {
+            echo
+            echo "| SBOM | Components |"
+            echo "|---|---|"
+            for f in sbom/*.cdx.json; do
+              echo "| $(basename "$f") | $(jq '.components | length' "$f") |"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$(find sbom -name '*.cdx.json' | wc -l)" -eq 4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sbom
+          path: sbom/*.cdx.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------------------
+  # The release files, complete, before anything is attested or published: the binaries, the
+  # MSI, the SBOMs, the installers, releases.json and SHA256SUMS. `attest` attests exactly
+  # these files and `publish` attaches exactly these files.
+  manifest:
+    name: Release files
+    # WP6.7: msi in needs.
+    needs: [verify, build, smoke-linux, msi, sbom]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           pattern: binary-*
           path: dist
           merge-multiple: true
       # WP6.7: the MSI; release-manifest.mjs lists it under `installers` and in SHA256SUMS.
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: installer-windows-x86_64
           path: dist
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom
+          path: sbom
       - name: Data-directory format
         # The format number of this version, from the Linux binary that is being released
         # (a matrix job cannot hand one leg's output on reliably).
@@ -533,12 +701,15 @@ jobs:
           )
           if [ -f prev/releases.json ]; then args+=(--previous prev/releases.json); fi
           node scripts/release-manifest.mjs "${args[@]}"
-          # SIGNING (later): sign dist/releases.json and dist/SHA256SUMS here.
+          # SIGNING (later, API-19): nothing is signed here. Section 7.2 of
+          # docs/plans/security-audit-plan.md: the owner's hardware key signs SHA256SUMS (and
+          # with it releases.json) after the security round, outside this workflow, and the
+          # signature is added to the published release.
           ls -l dist
       # WP6.6: the installers as release assets, with their lines appended to SHA256SUMS
       # (not to releases.json: they are no update of a node). The Proxmox script is pinned
-      # to the scripts of this tag. A signature of SHA256SUMS (SIGNING above) must come after
-      # this step.
+      # to the scripts of this tag. A signature of SHA256SUMS (SIGNING above) covers these
+      # lines and those of the SBOMs below.
       - name: The installers
         run: |
           set -euo pipefail
@@ -548,12 +719,127 @@ jobs:
           grep -q "/linkztream/tenko/${TAG}/deploy/proxmox" dist/tenko-proxmox.sh
           (cd dist && sha256sum install.sh tenko-proxmox.sh >> SHA256SUMS)
           sort -k 2 -o dist/SHA256SUMS dist/SHA256SUMS
+      # L1.9: the SBOMs as release assets, listed in SHA256SUMS like the installers and not in
+      # releases.json (release-manifest.mjs ignores them: they are no asset of a platform).
+      - name: The SBOMs
+        run: |
+          set -euo pipefail
+          cp sbom/*.cdx.json dist/
+          (cd dist && sha256sum -- *.cdx.json >> SHA256SUMS)
+          sort -k 2 -o dist/SHA256SUMS dist/SHA256SUMS
           cat dist/SHA256SUMS
+          ls -l dist
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------------------
+  # L1.10: the only job that can sign. It checks out nothing and runs no code of this
+  # repository and no third-party action: it downloads the release files and calls GitHub's
+  # own actions/attest (the action that actions/attest-build-provenance and
+  # actions/attest-sbom wrap since their version 4). The attestations are signed through
+  # Sigstore's public instance, recorded in its transparency log and stored on the
+  # repository; those of the image are also pushed to the registry beside it.
+  attest:
+    name: Attest
+    needs: [verify, image, manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      packages: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release
+          path: dist
+      - name: Provenance of the release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          # Every binary, the MSI, the SBOMs, install.sh, tenko-proxmox.sh, releases.json and
+          # SHA256SUMS, in one attestation with a subject per file.
+          subject-path: dist/*
+      - name: SBOM of the Linux binary
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/tenko-${{ needs.verify.outputs.version }}-linux-x86_64
+          sbom-path: dist/tenko-${{ needs.verify.outputs.version }}-linux-x86_64.cdx.json
+      - name: SBOM of the Windows binary
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.exe
+          sbom-path: dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.cdx.json
+      - name: SBOM of the web UI in both binaries
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/tenko-${{ needs.verify.outputs.version }}-linux-x86_64
+            dist/tenko-${{ needs.verify.outputs.version }}-windows-x86_64.exe
+          sbom-path: dist/tenko-${{ needs.verify.outputs.version }}-ui.cdx.json
+      # The attestations of the image are pushed to the registry with the credentials of the
+      # Docker configuration; the login is a shell step, not a third-party action.
+      - name: Log in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Provenance of the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.image.outputs.digest }}
+          push-to-registry: true
+          # Storage records exist for repositories of an organisation only.
+          create-storage-record: false
+      - name: SBOM of the image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.image.outputs.digest }}
+          sbom-path: dist/tenko-${{ needs.verify.outputs.version }}-image.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Log out of the registry
+        if: always()
+        run: docker logout ghcr.io
+
+  # -------------------------------------------------------------------------------------
+  publish:
+    name: Publish the release
+    # After `attest`: a release whose files could not be attested is not published.
+    needs: [verify, manifest, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # The files of `manifest`, which `attest` attested.
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release
+          path: dist
       - name: Release notes
         run: node scripts/changelog.mjs notes "$VERSION" > notes.md
       - name: Create the release
         run: |
           set -euo pipefail
+          ls -l dist
           flags=()
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "$TAG" dist/* \

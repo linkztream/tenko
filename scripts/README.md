@@ -8,6 +8,7 @@ root.
 |---|---|
 | `changelog.mjs` | Validates `CHANGELOG.md`, prints the notes of one release, and checks that a change to the product comes with an entry. |
 | `release-manifest.mjs` | Builds `releases.json` (the manifest running installations read) and `SHA256SUMS` from the changelog and the release binaries. |
+| `sbom-prune.mjs` | Restricts the CycloneDX SBOM that `cargo cyclonedx` writes for a binary to the crates `cargo tree -e normal -p tenko --target <triple>` lists, the set the release build compiles (`cargo metadata`, which the tool reads, also lists optional dependencies the build leaves out). Used by the job `sbom` of the release workflow: `node scripts/sbom-prune.mjs --bom <file> --tree <file> --out <file>`; exit codes 0, 1 (bad input), 2 (bad usage). |
 | `requirement-trace.mjs` | Generates `docs/plans/phase-1-trace.md` (and with `--phase 2` or `--phase 3` `docs/plans/phase-2-trace.md` or `docs/plans/phase-3-trace.md`), the table of a phase's requirements and exit criteria against the tests, measurements and documents that name them, and checks that the committed file is current. |
 | `root-anchors.mjs` | WP10.0: converts the shipped DNS root trust anchors (`crates/tenko-dns/anchors/root-anchors.xml`, RFC 7958) and root hints (`named.root`) into `crates/tenko-dns/src/recursion/shipped.rs`, and with `--check` (exit 1) verifies that the committed file is current. `crates/tenko-dns/anchors/README.md` says how to refresh the inputs. |
 | `label-catalog.mjs` | Finds the job kinds and audit actions the Rust code can write; `label-catalog.test.mjs` fails, naming each one, when `ui/i18n/<language>.d/labels.xlf` has no `jobs.title.<kind>` or `audit.action.<code>` unit (with a Swedish target) for it. |
@@ -148,6 +149,7 @@ and separately those that no test, measurement or document names.
 - `.github/workflows/ci.yml`, job `changelog` (pull requests and pushes): `node --test`, then
   `changelog.mjs validate` and `changelog.mjs check --base <base>`.
 - `.github/workflows/release.yml` (tags `v*`): `verify` runs `changelog.mjs notes <version>` to
-  prove that the section exists; `publish` runs `release-manifest.mjs` over the binaries,
-  `changelog.mjs notes <version>` for the release text, and attaches `releases.json` and
-  `SHA256SUMS` to the GitHub release.
+  prove that the section exists; `sbom` runs `sbom-prune.mjs` on the SBOM of each binary;
+  `manifest` runs `release-manifest.mjs` over the binaries; `publish` runs
+  `changelog.mjs notes <version>` for the release text and attaches `releases.json`,
+  `SHA256SUMS` and the other release files, which `attest` attested, to the GitHub release.

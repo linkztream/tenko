@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Added
+
+- A release says what it is made of and where it was built (API-19, in part; SA-E3 of `docs/plans/security-audit-plan.md`): it carries a CycloneDX SBOM for the Linux binary and the Windows binary (`tenko-<version>-<platform>.cdx.json`, the crates the release build compiles, from `Cargo.lock`), for the web UI that both embed (`tenko-<version>-ui.cdx.json`, its production dependencies) and for the container image (`tenko-<version>-image.cdx.json`), each listed in `SHA256SUMS`, and a SLSA build provenance attestation for every release file (the binaries, the MSI, the SBOMs, `install.sh`, `tenko-proxmox.sh`, `releases.json`, `SHA256SUMS`) and for the image digest, plus an SBOM attestation that binds each SBOM to its binary or the image. The attestations are signed through Sigstore's public instance and are checked with `gh attestation verify <file> --repo linkztream/tenko` (`SECURITY.md`, "Verifying a release"). They prove that the project's release workflow built a file, not that the owner released it; a signature that a node checks before it installs is still to come. The release stops when the web UI has a production dependency with a high or critical advisory (`npm audit`), and every action of the release workflow is pinned to a commit.
+
 ## [0.0.10] - 2026-10-31
 
 ### Changed

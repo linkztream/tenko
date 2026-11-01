@@ -925,9 +925,13 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    binary is described below.
 3. **Smoke.** The job `smoke-linux` runs the Linux binary on two distributions (below).
 4. **Image.** The container image from `deploy/Dockerfile`.
-5. **Publish.** `SHA256SUMS` and the manifest `releases.json`
-   (`scripts/release-manifest.mjs`), a release text taken from the changelog section, and the
-   attachment of all of it to the release.
+5. **SBOMs.** A CycloneDX SBOM for each binary, the web UI and the image (below).
+6. **Release files.** `SHA256SUMS` and the manifest `releases.json`
+   (`scripts/release-manifest.mjs`), with the installers and the SBOMs added to `SHA256SUMS`.
+7. **Attest.** A build provenance attestation for every release file and the image digest,
+   and an SBOM attestation for each SBOM.
+8. **Publish.** A release text taken from the changelog section, and the attachment of the
+   release files to the release.
 
 The Linux binary is built for `x86_64-unknown-linux-musl` on `ubuntu-latest` with
 `musl-tools`, so it is one static executable that does not depend on the glibc of the host
@@ -949,8 +953,21 @@ start on those distributions is never published.
 | Windows binary | `tenko-<version>-windows-x86_64.exe` | |
 | Windows installer | `tenko-<version>-windows-x86_64.msi` | Built, smoke-tested and (with a certificate) signed by the job `msi`; `deploy/windows/README.md` |
 | Container image | `ghcr.io/linkztream/tenko:<version>` | The tag `latest` moves only for releases without a pre-release part |
-| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary of this release |
+| Installers | `install.sh`, `tenko-proxmox.sh` | The Linux installer and the Proxmox script of this tag |
+| SBOMs | `tenko-<version>-linux-x86_64.cdx.json`, `tenko-<version>-windows-x86_64.cdx.json`, `tenko-<version>-ui.cdx.json`, `tenko-<version>-image.cdx.json` | CycloneDX JSON; not in `releases.json` |
+| Checksums | `SHA256SUMS` | `sha256sum` format, one line per binary, installer package, installer script and SBOM of this release |
 | Manifest | `releases.json` | Section 6.3 |
+
+From the release after 0.0.10 on, a release also carries an SBOM in CycloneDX JSON for
+the Linux binary and the Windows binary (their crates, from `Cargo.lock`), for the web UI
+that both embed (its production dependencies, from `ui/package-lock.json`) and for the
+container image, and attestations that are no files: a SLSA build provenance attestation
+for every file of the release and for the image digest, and an SBOM attestation that binds
+each SBOM to its binary or the image, all made by the job `attest` of the release workflow
+and stored with the repository (the image's also in the registry). An operator checks any
+downloaded file with `gh attestation verify <file> --repo linkztream/tenko`; `SECURITY.md`,
+"Verifying a release", gives the commands for the image and the SBOMs and what the
+attestations do not prove.
 
 The manifest names each binary by `<base-url>/<file name>`, where the base URL is the
 download URL of the release, `https://github.com/linkztream/tenko/releases/download/v<version>`.
@@ -1074,8 +1091,11 @@ publisher is who it claims to be; that is what signing is for (section 6.6).
 
 ### 6.6 Signing
 
-Releases are not signed yet. Signing (Sigstore for the binaries and the image, Authenticode
-for the Windows binary) and an SBOM arrive with API-19. The release workflow already signs
+Releases are not signed yet. A signature that a node checks before it installs (API-19) and
+Authenticode for the Windows binary are still to come. Since the release after 0.0.10 every
+release carries SBOMs and Sigstore-backed build provenance attestations (section 6.2); they
+show which workflow built a file, not that the owner released it, and a node does not check
+them (`SECURITY.md`, "Verifying a release"). The release workflow already signs
 the Windows binary and the MSI with Authenticode once a certificate is configured
 (`deploy/windows/README.md`, "Signing and SmartScreen"); until then they ship unsigned. The manifest field `signature` is
 reserved for it. The build feature `release-signatures` already wires the check into the
@@ -2130,7 +2150,7 @@ reserved.
 
 | Item | What is missing | Tracked by |
 |---|---|---|
-| Signed releases | Signatures for the binaries and the image, Authenticode for the Windows binary, and an SBOM. The manifest field `signature` is reserved and the build feature `release-signatures` is wired into the install job and off. Until it exists the checksum comes from the same origin as the file (section 8.11). | API-19 |
+| Signed releases | Signatures for the binaries and the image that a node checks, and Authenticode for the Windows binary (the SBOMs and the build provenance attestations exist, section 6.2). The manifest field `signature` is reserved and the build feature `release-signatures` is wired into the install job and off. Until it exists the checksum comes from the same origin as the file (section 8.11). | API-19 |
 | Conversion of redb files | A step that runs offline, before the store is opened, for a release that moves to a redb version with another file format. A `Migration` cannot do it (section 4.7). A release should not move across such a change before the step exists. | |
 | A fuzz target for the manifest | `ReleaseManifest::parse` reads input from the network and from uploads and needs a fuzz target under `fuzz/` (CONTRIBUTING rule 3); the fuzz harness has no targets yet. | API-15 |
 | Migrations over 16 MiB | The `Migration` trait yields one batch. A migration that exceeds the batch limit needs idempotent batches with the bump in the last (section 4.6). | |
