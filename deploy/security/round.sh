@@ -9,6 +9,10 @@
 #   sudo BINARY=<path to the tenko binary> bash deploy/security/round.sh
 #   sudo BINARY=<path> ROWS="net tls" bash deploy/security/round.sh   # one or more groups
 #   sudo BINARY=<path> ROWS="web" bash deploy/security/round.sh       # the web rows only
+#   sudo BINARY=<path> SOURCE=<checkout of the binary's tag> bash deploy/security/round.sh
+#                                                                     # a binary built from another
+#                                                                     # commit: that source's fuzz
+#                                                                     # targets run (default: this checkout)
 #   sudo BINARY=<path> PLANT=listener bash deploy/security/round.sh   # DoH on 443, a planted
 #                                                                     # extra listener
 #

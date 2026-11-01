@@ -8,13 +8,18 @@
 #   fuzz.targets   every in-process target of `cargo fuzz list` for the release budget
 #                  (FUZZ_RELEASE_SECS, default 120 s), four at a time, from fuzz/seeds/ and
 #                  the corpus the workflow caches; a crash fails the row and its input goes
-#                  into the bundle.
+#                  into the bundle. The targets, seeds, corpus and artifacts are those of
+#                  the tree in SOURCE (default: this checkout).
 #   fuzz.dns_wire  deploy/security/dnswire.py sends malformed DNS over UDP and TCP to the
 #                  node under test while a probe asks a known name once a second; the row
 #                  fails on a crash, a hang, a restart of the unit, a listener that stops
 #                  answering, or resident memory more than 20 percent above the start.
 #
 # The budget is documented beside the weekly one in fuzz/README.md.
+#
+# Settings (environment): FUZZ_RELEASE_SECS, the budget of one target in seconds (default 120);
+# SOURCE, a checkout of the source the binary under test was built from, for a binary built
+# from another commit than the checkout that holds these scripts (default: this checkout).
 
 # run_fuzz_rows: called from round.sh main().
 run_fuzz_rows() {
@@ -24,7 +29,7 @@ run_fuzz_rows() {
 
 row_fuzz_targets() {
   row_tool=cargo-fuzz
-  local budget="${FUZZ_RELEASE_SECS:-120}" fuzz_dir="$repo/fuzz"
+  local budget="${FUZZ_RELEASE_SECS:-120}" src="${SOURCE:-$repo}" fuzz_dir="$src/fuzz"
   if ! command -v cargo >/dev/null 2>&1 || ! cargo +nightly fuzz --help >/dev/null 2>&1; then
     row_skip="cargo-fuzz or a nightly toolchain is not available (it runs in CI)"
     return 0
@@ -38,11 +43,11 @@ row_fuzz_targets() {
   fi
   mkdir -p "$EVIDENCE/fuzz"
   local failed=() target running=0
-  # Four at a time, run from the repository root as the weekly smoke does (cargo-fuzz finds
+  # Four at a time, run from the root of the source tree as the weekly smoke does (cargo-fuzz finds
   # the fuzz workspace); the corpus and seed directories are relative to it.
   for target in $targets; do
     (
-      cd "$repo" || exit 97
+      cd "$src" || exit 97
       local corpus=("fuzz/corpus/$target")
       mkdir -p "fuzz/corpus/$target"
       [[ -d "fuzz/seeds/$target" ]] && corpus+=("fuzz/seeds/$target")
@@ -60,11 +65,11 @@ row_fuzz_targets() {
   # A crash leaves an input under fuzz/artifacts/<target>/.
   for target in $targets; do
     local crashes
-    crashes="$(find "$repo/fuzz/artifacts/$target" -type f 2>/dev/null | wc -l || echo 0)"
+    crashes="$(find "$src/fuzz/artifacts/$target" -type f 2>/dev/null | wc -l || echo 0)"
     if ((crashes > 0)); then
       failed+=("$target")
       mkdir -p "$EVIDENCE/fuzz/artifacts/$target"
-      cp -r "$repo/fuzz/artifacts/$target/." "$EVIDENCE/fuzz/artifacts/$target/" 2>/dev/null || true
+      cp -r "$src/fuzz/artifacts/$target/." "$EVIDENCE/fuzz/artifacts/$target/" 2>/dev/null || true
       evidence_add "fuzz/artifacts/$target"
     fi
     evidence_add "fuzz/$target.log"
@@ -77,6 +82,7 @@ row_fuzz_targets() {
 
 row_fuzz_dns_wire() {
   row_tool=dnswire.py
+  local src="${SOURCE:-$repo}"
   local duration="${FUZZ_DNS_WIRE_SECS:-600}" rate="${FUZZ_DNS_WIRE_RATE:-200}"
   local dns_host dns_udp=53 dns_tcp=53 report="$EVIDENCE/fuzz/dnswire.json"
   mkdir -p "$EVIDENCE/fuzz"
@@ -87,7 +93,7 @@ row_fuzz_dns_wire() {
   restarts_start="$(systemctl show -p NRestarts --value tenko 2>/dev/null || echo 0)"
   rss_start="$(rss_of "$main_pid")"
   local rc=0
-  python3 -I "$here/dnswire.py" --seeds "$repo/fuzz/seeds/dns_codec" \
+  python3 -I "$here/dnswire.py" --seeds "$src/fuzz/seeds/dns_codec" \
     --duration "$duration" --rate "$rate" \
     --host "$dns_host" --udp "$dns_udp" --tcp "$dns_tcp" \
     --probe-name probe.security.example.test --probe-type 1 --probe-expect 192.0.2.53 \

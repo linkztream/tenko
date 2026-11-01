@@ -9,6 +9,11 @@
 #                   checks it against the release's SHA256SUMS before testing. This is how the
 #                   round is rehearsed between releases.
 #
+# The workspace is always the workflow's own commit (github.sha), so the round runs the
+# scripts of deploy/security/ of this commit. On a dispatch the tag's tree is checked out as
+# well, into release-source, and the fuzz targets of that tree are run (SOURCE); on a release
+# call the workspace is the source of the binary.
+#
 # The job installs the node under test as a user installs it (deploy/install.sh), sets it up
 # through the API under the Standard profile, and runs deploy/security/round.sh. The log of a
 # run is public on this public repository, so only the row lines and counts go to the log and
@@ -91,8 +96,20 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # A release call passes the commit; a direct dispatch passes the tag to build.
-          ref: ${{ inputs.tag != '' && inputs.tag || inputs.commit }}
+          # The round's scripts (deploy/security/) are those of this workflow's own commit,
+          # whatever is tested: a tag from before the scripts existed must still run.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # The in-process fuzz targets (fuzz.targets) must be those of the source the tested
+      # binary was built from, so a dispatch gets the tag's tree beside the scripts. On a
+      # release call the workspace itself is that source.
+      - name: The source of the tag under test (dispatch)
+        if: inputs.tag != ''
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.tag }}
+          path: release-source
           persist-credentials: false
 
       # The binary under test. On a release call it is the artifact of this run; on a dispatch
@@ -140,7 +157,8 @@ jobs:
         if: contains(inputs.rows, 'fuzz')
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: fuzz/corpus
+          # The fuzz row writes its corpus under the source it tests (see SOURCE below).
+          path: ${{ inputs.tag != '' && 'release-source/fuzz/corpus' || 'fuzz/corpus' }}
           key: security-fuzz-corpus-${{ inputs.version || inputs.tag }}
           restore-keys: |
             security-fuzz-corpus-
@@ -163,8 +181,13 @@ jobs:
           export BUNDLE="$RUNNER_TEMP/evidence.tar.gz"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
           # The round prints the row lines to its standard output; capture them for the summary.
+          # On a dispatch the fuzz targets are those of the tag's tree (checked out beside the
+          # scripts); on a release call SOURCE stays unset and the workspace is the source.
+          if [ -n "$TAG" ]; then
+            export SOURCE="$GITHUB_WORKSPACE/release-source"
+          fi
           rc=0
-          sudo --preserve-env=BINARY,ROWS,BUNDLE,VERSION \
+          sudo --preserve-env=BINARY,ROWS,BUNDLE,VERSION,SOURCE \
             env "PATH=$PATH" "TENKO_UI_STUB=1" \
             bash deploy/security/round.sh | tee "$RUNNER_TEMP/rows.txt" || rc=$?
           echo "ROUND_RC=$rc" >> "$GITHUB_ENV"

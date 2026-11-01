@@ -30,6 +30,7 @@ Settings (environment):
 | `PLANT` | `listener`: the node also serves DNS over HTTPS on port 443, a listener `net.tcp` and `net.listeners` must report. This is the plan's deliberate-failure run (SA3): the planted extra listener cannot be a metrics listener on `0.0.0.0`, because the configuration accepts the metrics listener only on loopback, so DoH on 443 stands in for it. |
 | `BUNDLE` | The `tar.gz` the evidence is packed into (default: a temporary file; the workflow sets it and encrypts it). |
 | `KEEP` | `1`: leave the node installed and the work directory in place for hand tests. |
+| `SOURCE` | A checkout of the source the binary was built from, for a binary built from another commit than the checkout that holds these scripts; the fuzz rows run that source's fuzz targets and seeds. Default: this checkout. The workflow sets it on a dispatch to the tag's tree. |
 
 The scanner containers (`compose.yml`) talk to the node over a bridge network whose gateway
 is the host, so they see it as another machine on the link would. Checks that need the host
