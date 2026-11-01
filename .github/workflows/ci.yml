@@ -53,16 +53,19 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Free disk space
         if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest
       - name: Format
@@ -86,12 +89,15 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest
       - name: Format
@@ -111,9 +117,13 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-deny
       - run: cargo deny --all-features check
@@ -125,11 +135,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
       # cargo-audit itself, not the rustsec/audit-check action: that action still runs
       # on Node 20 and only wrapped the same command.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -142,8 +156,10 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
@@ -158,6 +174,27 @@ jobs:
       # list of scripts/licenses.mjs (the npm counterpart of cargo deny check).
       - name: Licences of the dependencies
         run: npm run licenses
+      # L1.4 of docs/plans/security-audit-plan.md. The full report first, development
+      # dependencies included: it is printed and written to the job summary and never fails
+      # the job.
+      - name: npm audit, every dependency (reports)
+        run: |
+          status=0
+          npm audit > "$RUNNER_TEMP/npm-audit.txt" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/npm-audit.txt"
+          {
+            echo "### npm audit, every dependency (reported, not blocking)"
+            echo
+            echo "Exit status: $status"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/npm-audit.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # A High or Critical advisory against a production dependency (what the embedded UI
+      # ships) fails the job.
+      - name: npm audit, production dependencies, High and above (blocks)
+        run: npm audit --omit=dev --audit-level=high
       - name: Test
         # Half the cores: vitest starts one process per test file and a self-hosted runner
         # shares its machine, so one worker per core oversubscribes it and tests time out.
@@ -165,7 +202,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Keep the bundle for the embedded build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ui-dist
           path: ui/dist
@@ -179,15 +216,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: ui-dist
           path: ui/dist
@@ -209,7 +250,7 @@ jobs:
         run: npm run e2e
       - name: Keep the Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: playwright-report
           path: ui/e2e/.artifacts/
@@ -223,10 +264,14 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: ui-dist
           path: ui/dist
@@ -253,13 +298,17 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Free disk space
         if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the test binaries
         # Compiling stays out of the timed step below. The commands here and in the next
         # step must stay identical apart from --no-run, so that nothing is rebuilt.
@@ -303,13 +352,17 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Free disk space
         if: runner.environment == 'github-hosted'
         # The hosted runner ships toolchains this build never uses.
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Cluster lab tests
         run: |
           set -euo pipefail
@@ -356,7 +409,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Free disk space
         if: runner.environment == 'github-hosted'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -380,9 +435,13 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build tenko
         run: cargo build -p tenko --locked
       - name: Windows service unit tests
@@ -415,9 +474,13 @@ jobs:
       # Rust-only builds use a placeholder UI page; release builds refuse it.
       TENKO_UI_STUB: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build tenko
         run: cargo build -p tenko --locked
       - name: Install the binary, the service account and the unit
@@ -553,12 +616,16 @@ jobs:
       FUZZ_SHARDS: "4"
       FUZZ_SHARD: ${{ matrix.shard }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: nightly
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-fuzz
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The fuzz crate is its own workspace with its own target directory.
           workspaces: fuzz
@@ -619,7 +686,7 @@ jobs:
           fi
       - name: Keep the crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: fuzz-artifacts-shard-${{ matrix.shard }}
           path: fuzz/artifacts/
@@ -636,7 +703,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: deploy/proxmox/test/run.sh --no-container
         run: bash deploy/proxmox/test/run.sh --no-container
 
@@ -669,11 +738,12 @@ jobs:
       contents: read
       pull-requests: read # to read the labels of the pull request
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           # The check needs the history between the base and the head.
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
       - name: Look for the no-changelog label
@@ -711,8 +781,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           # The commits of the pull request: between the base and the head of the merge.
           fetch-depth: 0
       - name: Check the trailers
@@ -750,3 +821,146 @@ jobs:
             echo "::error::$missing commit(s) lack a matching Signed-off-by trailer."
             exit 1
           fi
+
+  # -------------------------------------------------------------------------------------
+  # Layer 1 of docs/plans/security-audit-plan.md: the checks L1.3, L1.6 and L1.8. L1.4
+  # (npm audit) is in the UI job, L1.7 (CodeQL) in codeql.yml, L1.2 (Dependabot) in
+  # .github/dependabot.yml.
+
+  # Which of the path-filtered jobs below a push or pull request needs. The workflow's own
+  # filter (paths-ignore) applies to the whole workflow, so the jobs that matter only for
+  # some paths read the outputs of this job instead: the files changed between the base (of
+  # the pull request, or the commit before the push) and the head. A manual run, a first
+  # push and a base that no longer exists run every filtered job. Plain git, no third-party
+  # action.
+  changes:
+    name: Changed paths
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      workflows: ${{ steps.paths.outputs.workflows }}
+      systemd: ${{ steps.paths.outputs.systemd }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # The diff needs the base commit.
+          fetch-depth: 0
+      - name: Compare with the base
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ] || [ -z "$BASE" ] ||
+            [ "$BASE" = "0000000000000000000000000000000000000000" ] ||
+            ! git cat-file -e "${BASE}^{commit}" 2> /dev/null; then
+            echo "No usable base ('${BASE}', event ${EVENT}): every filtered job runs."
+            { echo "workflows=true"; echo "systemd=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" HEAD)"
+          printf '%s\n' "$changed"
+          workflows=false
+          systemd=false
+          # zizmor reads the workflows, .github/dependabot.yml and .github/zizmor.yml.
+          if grep -qE '^\.github/' <<< "$changed"; then workflows=true; fi
+          # The unit, its drop-ins and the check; deploy/install.sh writes the drop-ins that
+          # check-hardening.sh mirrors; this file runs the check.
+          if grep -qE '^(deploy/systemd/|deploy/install\.sh$|\.github/workflows/ci\.yml$)' <<< "$changed"; then
+            systemd=true
+          fi
+          { echo "workflows=$workflows"; echo "systemd=$systemd"; } >> "$GITHUB_OUTPUT"
+          echo "workflows=$workflows systemd=$systemd"
+
+  # L1.3: a pull request adds no dependency with a High or Critical advisory and none whose
+  # licence is outside the allow list. The list is the allow list of deny.toml
+  # ([licenses] allow), in its order; keep the two equal. The production dependencies of the
+  # UI are also held to ui/scripts/licenses.mjs by the UI job. Development-only npm packages
+  # are not checked (fail-on-scopes); Cargo.lock does not mark them, so every crate is. The
+  # summary is posted on the pull request when the check fails (a pull request from a fork
+  # gets a read-only token, and the action then only warns that it cannot comment).
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # the summary comment on a failing pull request
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime, unknown
+          allow-licenses: >-
+            MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause, BSD-3-Clause,
+            ISC, Zlib, Unicode-3.0, MPL-2.0, CC0-1.0, OpenSSL,
+            0BSD, Unlicense, BlueOak-1.0.0, Python-2.0
+          comment-summary-in-pr: on-failure
+
+  # L1.6: zizmor over the repository's workflows, .github/dependabot.yml and any action
+  # definition, configured by .github/zizmor.yml (every suppression there carries its
+  # reason). The pinned action installs zizmor from a wheel whose hash its own tree pins,
+  # where `uvx zizmor` would take whatever the package index serves at the time. First every
+  # finding, in the log and the job summary, without failing; then the findings of High
+  # severity, which fail the job. No SARIF upload, so the job needs no write permission.
+  workflow-lint:
+    name: Workflow lint (zizmor)
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: zizmor, every finding (reports)
+        id: report
+        continue-on-error: true
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: 1.31.1
+          config: .github/zizmor.yml
+          advanced-security: false
+          color: false
+      - name: Findings to the job summary
+        if: always()
+        env:
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+        run: |
+          {
+            echo "### zizmor, every finding (reported, not blocking)"
+            echo
+            echo "Outcome: ${REPORT_OUTCOME}"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/zizmor" 2> /dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: zizmor, High severity (blocks)
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: 1.31.1
+          config: .github/zizmor.yml
+          advanced-security: false
+          color: false
+          min-severity: high
+
+  # L1.8: the exposure of the shipped unit, alone and with each drop-in, against the gates
+  # written in deploy/systemd/check-hardening.sh (offline, no root; the release workflow can
+  # call the same script). shellcheck of the script itself comes first.
+  unit-check:
+    name: Unit hardening (systemd-analyze security)
+    needs: changes
+    if: needs.changes.outputs.systemd == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck -S warning deploy/systemd/check-hardening.sh
+      - name: Exposure gates
+        run: bash deploy/systemd/check-hardening.sh

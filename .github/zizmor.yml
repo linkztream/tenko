@@ -1,0 +1,16 @@
+# Configuration of zizmor, the linter of the workflows (check L1.6 of
+# docs/plans/security-audit-plan.md; the job `workflow-lint` of ci.yml). Findings of High
+# severity fail the job; everything else is reported in its summary.
+#
+# A finding is suppressed here, never with a comment in the workflow, and every suppression
+# carries its reason and, when it is temporary, what removes it. Prefer the narrowest form:
+# `<file>:<line>` for one place, a whole file only when the reason covers all of it.
+# CONTRIBUTING.md, "Continuous integration", has the procedure.
+
+rules:
+  unpinned-uses:
+    ignore:
+      # Temporary: release.yml is pinned by its own package (SA2 of the security audit
+      # plan), which removes this entry in the same change. Until then its `uses:` lines
+      # name tags, and this keeps the job from failing on a file this package does not own.
+      - release.yml

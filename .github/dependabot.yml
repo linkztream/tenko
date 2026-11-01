@@ -1,0 +1,32 @@
+# Dependabot version updates (check L1.2 of docs/plans/security-audit-plan.md).
+#
+# Only the GitHub Actions of the workflows: every `uses:` is pinned to a commit SHA with
+# its tag in a comment, and these weekly pull requests move the SHA and the comment
+# together, so the pins stay current without anyone resolving tags by hand.
+#
+# Cargo and npm get no version updates on purpose: their advisories are covered by
+# `cargo audit`, `cargo deny`, `npm audit` (ci.yml) and by Dependabot's security updates,
+# which are a repository setting and need no entry here; weekly version-bump pull requests
+# for them are not wanted. A dependency is upgraded deliberately, in its own change.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    # A release is taken only once it is a week old, so that a compromised or broken
+    # release has time to be noticed and withdrawn before it is proposed here.
+    cooldown:
+      default-days: 7
+    # One pull request a week for every action, not one per action.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5

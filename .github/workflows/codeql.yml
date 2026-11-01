@@ -1,0 +1,51 @@
+name: CodeQL
+
+# Code scanning (check L1.7 of docs/plans/security-audit-plan.md): Rust, JavaScript and
+# TypeScript, and the GitHub Actions workflows. On pull requests and weekly, not on every
+# push, for the wall time. It reports only (decision SA-Q1 of the plan): the alerts land in
+# the repository's Security tab and are an input of the release triage; nothing here fails
+# on an alert. Every language uses `build-mode: none`, the only mode CodeQL documents for
+# Rust: the database is extracted from the sources without building the workspace.
+
+on:
+  pull_request:
+  schedule:
+    # Weekly, Monday 04:41 UTC.
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, javascript-typescript, actions]
+    env:
+      # Should the extractor run a build script, the web UI is not built in this job.
+      TENKO_UI_STUB: "1"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
