@@ -95,3 +95,14 @@ list passes 44. A target that crashes does not stop the others of its shard or t
 shard fails at its end and uploads `fuzz/artifacts/` as `fuzz-artifacts-shard-<n>`. Each shard writes
 a table to its job summary (target, result, seconds, number of crash files). To reproduce one target
 run `cargo +nightly fuzz run <target>` as above; the workflow has no single-target input.
+
+## Release budget (the row `fuzz.targets` of the security round)
+
+The lab round `security` ([`deploy/security/`](../deploy/security/README.md), the row
+`fuzz.targets`) runs the same targets at release, beside the weekly smoke, for a longer budget:
+**120 seconds per target** (`FUZZ_RELEASE_SECS`), four at a time, on the release commit,
+starting from `fuzz/seeds/` and the corpus the previous release run left in the Actions cache.
+A crash fails the row and its input goes into the round's evidence bundle. The weekly smoke
+stays at 60 seconds per target: it runs every week on `main`, while the release budget is the
+deeper pass on the exact commit being shipped.
+

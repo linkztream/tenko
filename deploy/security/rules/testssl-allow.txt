@@ -1,0 +1,22 @@
+# testssl.sh findings the security round pardons (deploy/security/README.md, "The rule
+# files"). One finding id per line; text after '#' is a comment. The round ignores a listed
+# id at severity MEDIUM or above and fails tls.api or tls.dot on any other such finding.
+#
+# Each entry names why it is not a weakness here. Remove an entry when the reason no longer
+# holds; add one only with a reason, as narrow as the tool allows (an id, not a category).
+
+# BREACH: the web UI's static assets are served Brotli-compressed. BREACH needs a secret
+# that is reflected into a compressed response together with attacker-controlled input; the
+# UI bundle is static files with no per-request secret, and the API's JSON answers are not
+# compressed (verified on 0.0.10: `vary: accept-encoding` with `content-encoding: br` on /,
+# none on /api/v1/*). So compression here does not leak a secret.
+BREACH
+
+# cert_crlDistributionPoints / cert_ocspURL / cert_revocation: the internal CA issues the
+# server certificate (OPS-22 mode a) and publishes no CRL or OCSP responder by design. A
+# client of the node pins the CA root (its SHA-256 fingerprint is shown at install and in
+# the setup answer); revocation is not checked over the network, so the absence of a CRL or
+# OCSP URL is intended, not a gap.
+cert_crlDistributionPoints
+cert_ocspURL
+cert_revocation

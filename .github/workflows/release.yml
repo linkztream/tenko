@@ -809,10 +809,27 @@ jobs:
         run: docker logout ghcr.io
 
   # -------------------------------------------------------------------------------------
+  # Layer 2 of docs/plans/security-audit-plan.md: the lab round `security` on the binary being
+  # released, before `publish` (SA-Q1 (b): the deterministic rows block). The reusable
+  # workflow holds contents: read and no secret; it reads the repository variable
+  # SECURITY_AGE_RECIPIENT to encrypt its evidence, and uploads nothing without it.
+  security:
+    name: Security round
+    needs: [verify, build]
+    uses: ./.github/workflows/security-round.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      commit: ${{ github.sha }}
+      binary-artifact: binary-linux-x86_64
+    permissions:
+      contents: read
+
+  # -------------------------------------------------------------------------------------
   publish:
     name: Publish the release
-    # After `attest`: a release whose files could not be attested is not published.
-    needs: [verify, manifest, attest]
+    # After `attest` and the security round: a release whose files could not be attested, or
+    # whose round had a blocking row fail, is not published.
+    needs: [verify, manifest, attest, security]
     runs-on: ubuntu-latest
     permissions:
       contents: write

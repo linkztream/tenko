@@ -142,6 +142,20 @@ What this does not prove (section 7.2 of
   crates are those of the Linux SBOM.
 - Releases up to 0.0.10 carry neither SBOMs nor attestations.
 
+## Checks at every release
+
+Besides the deterministic CI checks, every release runs a **lab round `security`** on the
+binary being released, before it is published: it installs a throwaway node from that binary,
+looks at it from outside (the ports it answers on, its TLS, malformed DNS on the wire) and
+from the host (the systemd unit and the service account), and leaves a report with stable
+finding IDs. A review of the changes since the last reviewed release asks an attacker's
+questions of the security-relevant diff. A public summary of what each release's checks found
+is published under [`docs/security/`](docs/security/README.md) (`release-<version>.md`); the
+full report and its evidence stay in a private repository, so an open weakness of a released
+version is not disclosed before its fix. [`docs/plans/security-audit-plan.md`](docs/plans/security-audit-plan.md)
+describes the layers; the round's scripts are in [`deploy/security/`](deploy/security/README.md).
+A human penetration test is planned for the first external user or 1.0.
+
 ## Scope
 
 In scope:

@@ -1,0 +1,48 @@
+# The security paths (section 5.2 of docs/plans/security-audit-plan.md): the one list that
+# the release review reads in order and the gate rule for `/security-review` on a branch
+# both use, so both read the same file. One glob per line, grouped; '#' comments.
+#
+# A path change in any of these groups makes a branch run `/security-review` before the
+# gate, and orders what the release review reads. The groups are read in this order.
+
+# 1. The authentication and authorization boundary.
+crates/tenko-auth/**
+crates/tenko-api/src/middleware/**
+crates/tenko-api/src/extract.rs
+crates/tenko-api/src/redact.rs
+crates/tenko-api/src/routes/**
+
+# 2. Privilege crossings and the update path.
+crates/tenko/src/upgrade/**
+crates/tenko/src/platform/**
+crates/tenko/src/plugin/**
+crates/tenko/src/backup/**
+deploy/install.sh
+deploy/systemd/**
+deploy/windows/**
+deploy/Dockerfile
+deploy/proxmox/**
+
+# 3. Parsers of network and file input.
+crates/tenko-dns/**
+crates/tenko-dhcp/**
+crates/tenko-scan/**
+crates/tenko-connect/**
+crates/tenko-connect-proxmox/**
+crates/tenko-connect-unifi/**
+crates/tenko-connect-hass/**
+crates/tenko-connect-windows/**
+crates/tenko-cluster/**
+fuzz/fuzz_targets/**
+
+# 4. Secrets and keys.
+crates/tenko-vault/**
+crates/tenko/src/kek.rs
+
+# 5. The release path.
+.github/workflows/**
+scripts/release-manifest.mjs
+Cargo.lock
+ui/package-lock.json
+deny.toml
+.cargo/audit.toml
