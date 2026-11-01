@@ -244,6 +244,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 - **External actuators for coexistence**: DHCP (CONN-12) and DNS (CONN-13).
 - **Windows interop lab**: a Windows Server 2016 or later test domain (API-18).
 - **Identity** (Slice 13, the owner's decisions ID-Q1 to ID-Q18 of 2026-10-25, moved here from Phase 5): OIDC sign-in, LDAP sign-in with group mapping, LDAPS set up from the UI by importing the domain controllers' certificate chain, and Kerberos sign-in to the web UI (IAM-11 to IAM-13), planned in [identity-plan.md](plans/identity-plan.md) and ADR 0026.
+- **The Windows takeover** (Slice 14, Phase 4's first slice, the owner's decisions WT-Q1 to WT-Q7 of 2026-11-01): the AD zones by zone transfer and a flip in place, the Windows DHCP scopes, reservations and leases by a mirror that a scheduled script on a controller pushes to the API, and a reversible takeover per scope that adopts the leases and the names Windows DHCP wrote, rehearsed first on a throwaway domain; planned in [windows-takeover-plan.md](plans/windows-takeover-plan.md) (MIG-04, MIG-08 partly, MIG-17).
 
 ### Coexistence and verification
 
