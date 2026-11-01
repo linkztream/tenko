@@ -16,6 +16,13 @@
 # the lab smokes, a failed check is not run a second time with a trace: a scan takes
 # minutes and its output is in the bundle already.
 #
+# SEC_PUBLIC_REASONS=1 (the workflow's `reasons` input, for rehearsing the round against a
+# throwaway node) also prints a FAIL row's reason sentence, and only that sentence, on the
+# line after the row line:
+#
+#   FAIL tls.api            the API's TLS is current
+#     reason: the API's TLS has findings the allow list does not pardon: ...
+#
 # A check returns 0 to pass and anything else to fail. It may set, for the row's JSON line:
 #   row_tool       the tool, for example "nmap"
 #   row_version    the tool's version, or the image it ran from
@@ -63,9 +70,14 @@ evidence_add() {
 # sec_now_ms: milliseconds since the epoch.
 sec_now_ms() { date +%s%3N; }
 
+# The row whose check is running, for the round's exit path: a check that ends the shell
+# (an unbound variable under `set -u`, an `exit`) leaves its name here, and row_abort
+# records it as failed.
+row_current="" row_current_what="" row_current_began=0
+
 # row <name> <description> <check...>
 row() {
-  local name="$1" what="$2" began ended rc state blocking=true reason_line="" line
+  local name="$1" what="$2" began ended rc state
   shift 2
   wanted "$name" || return 0
   row_tool="" row_version="" row_evidence=() row_reason="" row_skip="" row_findings=""
@@ -74,20 +86,46 @@ row() {
     printf '== %s: %s\n' "$name" "$what"
     printf '== started %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >>"$EVIDENCE/rows/$name.log"
+  row_current="$name" row_current_what="$what" row_current_began="$began"
   if "$@" >>"$EVIDENCE/rows/$name.log" 2>&1; then rc=0; else rc=$?; fi
+  row_current=""
   ended="$(sec_now_ms)"
   if [[ -n "$row_skip" ]]; then
     state=SKIP
-    rows_skipped=$((rows_skipped + 1))
-    reason_line=" (skipped: $row_skip)"
   elif ((rc == 0)); then
     state=PASS
-    rows_passed=$((rows_passed + 1))
   else
     state=FAIL
-    rows_failed=$((rows_failed + 1))
     [[ -n "$row_reason" ]] || row_reason="the check exited with status $rc"
   fi
+  row_record "$name" "$what" "$state" "$began" "$ended"
+}
+
+# row_abort <status>: called by the round's exit path. When a check ended the shell, its row
+# is recorded as failed (blocking unless it is a reporting row), so the tally and the bundle
+# still name it.
+row_abort() {
+  [[ -n "$row_current" ]] || return 0
+  local name="$row_current"
+  row_current=""
+  row_skip=""
+  row_reason="the round stopped during this row with status $1 (rows/$name.log in the bundle)"
+  row_record "$name" "$row_current_what" FAIL "$row_current_began" "$(sec_now_ms)"
+}
+
+# row_record <name> <description> <state> <began ms> <ended ms>: counts the row, writes its
+# log trailer and JSON line, and prints its line (and, with SEC_PUBLIC_REASONS=1, a FAIL's
+# reason sentence).
+row_record() {
+  local name="$1" what="$2" state="$3" began="$4" ended="$5" blocking=true reason_line="" line
+  case "$state" in
+    SKIP)
+      rows_skipped=$((rows_skipped + 1))
+      reason_line=" (skipped: $row_skip)"
+      ;;
+    PASS) rows_passed=$((rows_passed + 1)) ;;
+    *) rows_failed=$((rows_failed + 1)) ;;
+  esac
   case " $SEC_REPORTING_ROWS " in *" $name "*) blocking=false ;; esac
   if [[ "$state" == FAIL && "$blocking" == true ]]; then
     rows_blocking_failed=$((rows_blocking_failed + 1))
@@ -112,6 +150,10 @@ row() {
       started: $started, findings: ($findings[0] // [])}' >>"$EVIDENCE/rows.jsonl"
   line="$(printf '%s %-18s %s%s' "$state" "$name" "$what" "$reason_line")"
   printf '%s\n' "$line"
+  # The reason sentence only, on one line; never the tools' output or an evidence file.
+  if [[ "$state" == FAIL && "${SEC_PUBLIC_REASONS:-0}" == 1 && -n "$row_reason" ]]; then
+    printf '  reason: %s\n' "$(printf '%s' "$row_reason" | tr '\n\r\t' '   ')"
+  fi
 }
 
 # rows_tally: the counts, one line, for the end of a round.

@@ -247,7 +247,10 @@ PY
 # zap_row <tag> <auth header> <auth value> <ZAP script and arguments...>: the body of both
 # ZAP rows.
 zap_row() {
-  local tag="$1" rc=0 verdict=0 log="$EVIDENCE/rows/web.${tag}_baseline.log"
+  # Two declarations: one `local` expands all its words before it assigns, so "$tag" in the
+  # same line would be unbound under `set -u`.
+  local tag="$1" rc=0 verdict=0
+  local log="$EVIDENCE/rows/web.${tag}_baseline.log"
   row_tool=zap
   row_version="$(zap_image)"
   if [[ "$WEB_ACCESS_OK" != 1 ]]; then

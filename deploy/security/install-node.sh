@@ -64,11 +64,13 @@ wait_ready() {
 }
 
 # 2. DoT with a certificate of the lab CA, as the DNS lab's round xfr makes one: an EC P-256
-#    CA and a leaf for the host name, valid 30 days. The CA's key stays in WORK.
+#    CA and a leaf for the host name, valid 90 days: testssl.sh rates a certificate that
+#    expires within 30 days HIGH and within 60 days MEDIUM (cert_expirationStatus), which
+#    would fail tls.dot on the round's own choice, not the node's. The CA's key stays in WORK.
 ca_dir="$WORK/lab-ca"
 mkdir -p "$ca_dir"
 openssl ecparam -name prime256v1 -genkey -noout -out "$ca_dir/ca.key" 2>/dev/null
-openssl req -x509 -new -key "$ca_dir/ca.key" -sha256 -days 30 -subj "/CN=Tenko security round lab CA" \
+openssl req -x509 -new -key "$ca_dir/ca.key" -sha256 -days 90 -subj "/CN=Tenko security round lab CA" \
   -addext "basicConstraints=critical,CA:true" -addext "keyUsage=critical,keyCertSign,cRLSign" \
   -out "$ca_dir/ca.pem" 2>/dev/null
 openssl ecparam -name prime256v1 -genkey -noout -out "$ca_dir/dot.key" 2>/dev/null
@@ -76,7 +78,7 @@ openssl req -new -key "$ca_dir/dot.key" -subj "/CN=$HOST_NAME" -out "$ca_dir/dot
 printf 'subjectAltName=DNS:%s\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n' \
   "$HOST_NAME" >"$ca_dir/dot.ext"
 openssl x509 -req -in "$ca_dir/dot.csr" -CA "$ca_dir/ca.pem" -CAkey "$ca_dir/ca.key" -CAcreateserial \
-  -days 30 -sha256 -extfile "$ca_dir/dot.ext" -out "$ca_dir/dot.pem" 2>/dev/null
+  -days 90 -sha256 -extfile "$ca_dir/dot.ext" -out "$ca_dir/dot.pem" 2>/dev/null
 install -m 0640 -o root -g tenko "$ca_dir/dot.pem" /etc/tenko/dot.pem
 install -m 0640 -o root -g tenko "$ca_dir/dot.key" /etc/tenko/dot.key
 if grep -q '^\[dns\.tls\]' "$CONFIG"; then

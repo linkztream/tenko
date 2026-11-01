@@ -24,6 +24,8 @@
 #   BUNDLE    the tar.gz the evidence is packed into (default: a file in a temporary dir;
 #             the workflow sets it so the job can encrypt and upload it)
 #   KEEP      1: leave the node installed and the work directory in place (hand tests)
+#   SEC_PUBLIC_REASONS  1: print each FAIL row's reason sentence after its line (rehearsals
+#                     against a throwaway node; the workflow's `reasons` input)
 #   SEC_SKIP_INSTALL  1: do not install; test a node round.sh installed in a previous run
 #                     with KEEP=1 (the work directory is reused). For development.
 #
@@ -66,11 +68,52 @@ API_URL="" API_CA="" API_STATE="" DATA_DIR=""
 SCAN_TARGET=tenko.example.test
 SCAN_IP6=""
 
+# The round's own standard output and error, kept on spare descriptors: a check runs with
+# its output redirected into its row's log, and when it ends the shell (an unbound variable
+# under `set -u`, a failed command outside a row) the exit path must still reach the log.
+exec {round_stdout}>&1 {round_stderr}>&2
+# 1 once main() has packed the bundle; until then the exit path packs it.
+round_packed=0
+
+# round_stopped <line>: the ERR trap. It runs where `set -e` is about to end the round and
+# prints the position only (the function and the line, never the command or a value), to
+# the round's standard output so the public log shows where the round stopped. A failure
+# inside a command substitution or another subshell does not end the round and is not
+# reported.
+round_stopped() {
+  ((BASH_SUBSHELL == 0)) || return 0
+  printf 'round: stopped in %s, line %s\n' "${FUNCNAME[1]:-round.sh}" "$1" >&"$round_stdout"
+}
+trap 'round_stopped "$LINENO"' ERR
+
+# round_finish_early <status>: the exit path of a round that ends before main() packed the
+# bundle. It records the row that was running as failed, prints the tally, and packs the
+# bundle so the workflow still encrypts and uploads it; the exit status stays non-zero.
+round_finish_early() {
+  echo "round: stopped with status $1 before the end of the round"
+  row_abort "$1"
+  echo
+  rows_tally
+  mkdir -p "$EVIDENCE/node"
+  journalctl -u tenko --no-pager >"$EVIDENCE/node/journal.txt" 2>&1 || true
+  if declare -F web_mask_evidence >/dev/null; then web_mask_evidence; fi
+  if bundle_pack "$BUNDLE"; then
+    echo "round: evidence packed into $BUNDLE"
+  fi
+}
+
 cleanup() {
   local status=$?
   set +e
+  trap - ERR
+  exec 1>&"$round_stdout" 2>&"$round_stderr"
+  if ((round_packed == 0)) && [[ -d "$EVIDENCE" ]]; then
+    ((status != 0)) || status=1
+    round_finish_early "$status"
+  fi
   if [[ "$keep" != 1 ]]; then
-    docker compose -f "$here/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
+    SEC_OUT="$EVIDENCE/scan" SEC_IN="$WORK/in" \
+      docker compose -f "$here/compose.yml" down --remove-orphans >/dev/null 2>&1 || true
     if [[ "${SEC_SKIP_INSTALL:-0}" != 1 ]]; then
       bash "$repo/deploy/install.sh" --yes --uninstall --purge >/dev/null 2>&1 || true
     fi
@@ -131,18 +174,38 @@ PY
 # finding). DNS on 53/udp is a net.udp matter.
 expected_tcp() {
   printf 'tcp/53\ntcp/853\ntcp/8443\n'
-  [[ "$plant" == listener ]] && printf 'tcp/443\n'
+  if [[ "$plant" == listener ]]; then printf 'tcp/443\n'; fi
 }
 
 # The baseline, captured before the install so the net rows attribute only the ports the
-# install added. Filled by baseline_capture() in main(), before install_node().
-BEFORE_TCP="" BEFORE_UDP=""
+# install added. Filled by baseline_capture() in main(), before install_node(). A host has
+# listeners of its own on IPv6 as on IPv4 (sshd on ::, a CI runner's agent, Docker), so
+# net.ipv6 gets a baseline too when the scan network has IPv6; BEFORE_TCP6_OK says whether
+# that scan completed.
+BEFORE_TCP="" BEFORE_UDP="" BEFORE_TCP6="" BEFORE_TCP6_OK=0
+# The TCP ports net.tcp saw the install add, for net.ipv6 (empty until net.tcp ran).
+ADDED_TCP=""
+
+# scan_ip6: the host's IPv6 address on the scan network (its gateway), empty without IPv6.
+# The network exists once a scanner has run on it.
+scan_ip6() {
+  docker network inspect tenkosec_scan --format '{{range .IPAM.Config}}{{.Gateway}} {{end}}' 2>/dev/null |
+    tr ' ' '\n' | grep ':' | head -n 1 || true
+}
+
+# nmap_completed <tag>: the scan wrote its XML and ran to its end.
+nmap_completed() { grep -qs '<finished ' "$EVIDENCE/scan/$1.xml"; }
 
 baseline_capture() {
   mkdir -p "$WORK/in" "$EVIDENCE/scan"
   echo "round: baseline scan of the host before the install"
   BEFORE_TCP="$(nmap_scan tcp-before -sT -p- --open -Pn 2>/dev/null)"
   BEFORE_UDP="$(nmap_scan udp-before -sU --top-ports 1000 -p U:53,67,68,123,161,547,5353,9464 --open -Pn 2>/dev/null)"
+  SCAN_IP6="$(scan_ip6)"
+  if [[ -n "$SCAN_IP6" ]] && wanted net.ipv6; then
+    BEFORE_TCP6="$(NMAP_TARGET="$SCAN_IP6" nmap_scan tcp6-before -6 -sT -p- --open -Pn 2>/dev/null)"
+    if nmap_completed tcp6-before; then BEFORE_TCP6_OK=1; fi
+  fi
 }
 
 row_net_tcp() {
@@ -154,6 +217,7 @@ row_net_tcp() {
   after="$(nmap_scan tcp-after -sT -p- --open -Pn)"
   evidence_add scan/tcp-after.nmap scan/tcp-after.xml
   added="$(comm -13 <(printf '%s\n' "$before" | sort -u) <(printf '%s\n' "$after" | sort -u))"
+  ADDED_TCP="$added"
   expected="$(expected_tcp | sort -u)"
   unexpected="$(comm -23 <(printf '%s\n' "$added" | grep -v '^$' | sort -u) <(printf '%s\n' "$expected"))"
   {
@@ -305,20 +369,46 @@ wait_api_ready() {
 }
 
 row_net_ipv6() {
-  # net.tcp and net.udp against the host's IPv6 address on the scan network.
+  # net.tcp against the host's IPv6 address on the scan network, with the same baseline
+  # treatment: the TCP ports the install added on IPv6 must be among those it added on IPv4
+  # (net.tcp's, or the expected set when net.tcp did not run). A port the host had open on
+  # IPv6 before the install is not the node's. SKIP without IPv6 on the scan network or
+  # without a completed baseline scan.
   row_tool=nmap
   if [[ -z "$SCAN_IP6" ]]; then
     row_skip="no IPv6 address on the scan network"
     return 0
   fi
-  local tcp6
-  tcp6="$(NMAP_TARGET="$SCAN_IP6" nmap_scan tcp6 -6 -sT -p- --open -Pn)"
-  evidence_add scan/tcp6.nmap scan/tcp6.xml
-  local expected unexpected
-  expected="$(expected_tcp | sort -u)"
-  unexpected="$(comm -23 <(printf '%s\n' "$tcp6" | grep -v '^$' | sort -u) <(printf '%s\n' "$expected"))"
+  if [[ "$BEFORE_TCP6_OK" != 1 ]]; then
+    row_skip="the IPv6 baseline scan before the install did not complete"
+    return 0
+  fi
+  local after added added4 unexpected missing
+  evidence_add scan/tcp6-before.nmap scan/tcp6-before.xml
+  after="$(NMAP_TARGET="$SCAN_IP6" nmap_scan tcp6-after -6 -sT -p- --open -Pn)"
+  evidence_add scan/tcp6-after.nmap scan/tcp6-after.xml
+  if ! nmap_completed tcp6-after; then
+    row_reason="the IPv6 scan after the install did not complete"
+    return 1
+  fi
+  added="$(comm -13 <(printf '%s\n' "$BEFORE_TCP6" | sort -u) <(printf '%s\n' "$after" | sort -u) | grep -v '^$' || true)"
+  if [[ -n "$ADDED_TCP" ]]; then
+    added4="$(printf '%s\n' "$ADDED_TCP" | grep -v '^$' | sort -u)"
+  else
+    added4="$(expected_tcp | sort -u)"
+  fi
+  unexpected="$(comm -23 <(printf '%s\n' "$added" | sort -u) <(printf '%s\n' "$added4"))"
+  missing="$(comm -13 <(printf '%s\n' "$added" | sort -u) <(printf '%s\n' "$added4"))"
+  {
+    echo "IPv6 ports before the install:"; printf '%s\n' "$BEFORE_TCP6"
+    echo "IPv6 ports after the install:"; printf '%s\n' "$after"
+    echo "added on IPv6 by the install:"; printf '%s\n' "$added"
+    echo "added on IPv4 by the install (the reference):"; printf '%s\n' "$added4"
+    echo "added on IPv4 but not on IPv6 (not a failure: the node may listen on IPv4 only):"
+    printf '%s\n' "$missing"
+  } >>"$EVIDENCE/rows/net.ipv6.log"
   if [[ -n "$unexpected" ]]; then
-    row_reason="the IPv6 TCP surface has ports beyond the IPv4 one: $(echo "$unexpected" | tr '\n' ' ')"
+    row_reason="the install added TCP ports on IPv6 beyond those it added on IPv4: $(echo "$unexpected" | tr '\n' ' ')"
     return 1
   fi
 }
@@ -328,11 +418,18 @@ testssl_run() {
   # testssl_run <tag> <host:port> [extra args...]: runs testssl.sh with the run's CA added,
   # writes scan/<tag>.json, returns its path on standard output.
   local tag="$1" target="$2"; shift 2
-  mkdir -p "$EVIDENCE/scan"
-  # The scanner image runs as its own user; make the file it writes land in /out.
+  # The image runs as its own unprivileged user, which cannot write to /out (the bundle's
+  # scan/, root's): it writes into scan/testssl-<tag>/, writable for it during the scan only,
+  # and the JSON is moved into scan/ afterwards. Its console output goes to the row's log.
+  local dir="$EVIDENCE/scan/testssl-$tag"
+  install -d -m 0777 "$dir"
   compose_run testssl \
-    --jsonfile "/out/${tag}.json" --add-ca /in/ca-root.pem --warnings batch --quiet \
-    --severity MEDIUM "$@" "$target" >>"$EVIDENCE/rows/${tag%%.*}.log" 2>&1 || true
+    --jsonfile "/out/testssl-${tag}/${tag}.json" --add-ca /in/ca-root.pem --warnings batch --quiet \
+    --severity MEDIUM "$@" "$target" >>"$EVIDENCE/rows/${tag}.log" 2>&1 || true
+  if [[ -f "$dir/$tag.json" ]]; then
+    install -m 0644 "$dir/$tag.json" "$EVIDENCE/scan/$tag.json"
+  fi
+  rm -rf "$dir"
   echo "$EVIDENCE/scan/${tag}.json"
 }
 
@@ -343,7 +440,8 @@ testssl_findings() {
   local json="$1" allow="$here/rules/testssl-allow.txt"
   python3 -I - "$json" "$allow" <<'PY'
 import json, sys
-order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+# FATAL is testssl.sh's "the scan could not be done" (scanProblem): no verdict, so a failure.
+order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4, "FATAL": 4}
 allow = set()
 try:
     with open(sys.argv[2], encoding="utf-8") as f:
@@ -420,9 +518,18 @@ row_tls_headers() {
   fi
   # A plain HTTP request to the TLS port must not be served as HTTP (the listener answers a
   # TLS alert, not an HTTP response).
-  local plain
-  plain="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://${API_URL#https://}/" 2>/dev/null || echo 000)"
-  echo "plain HTTP to the TLS port returned status: $plain" >>"$EVIDENCE/rows/tls.headers.log"
+  # The same name mapping as above, so the request reaches the node rather than failing to
+  # resolve (which would also read 000). curl prints 000 itself when no HTTP answer came, and
+  # exits non-zero then; its exit status goes to the log.
+  local plain curl_rc=0
+  plain="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' --resolve "${API_URL#https://}:127.0.0.1" \
+    "http://${API_URL#https://}/" 2>/dev/null)" || curl_rc=$?
+  [[ -n "$plain" ]] || plain=000
+  echo "plain HTTP to the TLS port returned status: $plain (curl exit status $curl_rc)" >>"$EVIDENCE/rows/tls.headers.log"
+  if ((curl_rc == 6 || curl_rc == 7)); then
+    row_reason="the plain-HTTP probe did not reach the API port (curl exit status $curl_rc)"
+    return 1
+  fi
   if [[ "$plain" != 000 && "$plain" != 400 ]]; then
     row_reason="a plain-HTTP request to the TLS port was answered (status $plain)"
     return 1
@@ -499,8 +606,9 @@ main() {
   fi
   install_node
 
-  # The scan target's IPv6 address, if the scan network has one.
-  SCAN_IP6="$(docker network inspect tenkosec_scan --format '{{range .IPAM.Config}}{{.Gateway}} {{end}}' 2>/dev/null | tr ' ' '\n' | grep ':' | head -n 1 || true)"
+  # The scan target's IPv6 address, if the scan network has one (baseline_capture sets it
+  # when the net rows run).
+  [[ -n "$SCAN_IP6" ]] || SCAN_IP6="$(scan_ip6)"
 
   row net.tcp "only 53, 853 and 8443 were added on TCP" row_net_tcp
   row net.udp "only 53 was added on UDP" row_net_udp
@@ -541,6 +649,7 @@ main() {
   ((web == 0)) || web_mask_evidence
 
   bundle_pack "$BUNDLE"
+  round_packed=1
   echo "round: evidence packed into $BUNDLE"
   if ((rows_blocking_failed > 0)); then
     echo "round: $rows_blocking_failed blocking row(s) failed" >&2

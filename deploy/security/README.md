@@ -42,7 +42,13 @@ One `PASS`, `FAIL` or `SKIP` line per row; a `SKIP` carries its reason. Each row
 one JSON line to the bundle (`rows.jsonl`): the row, the state, the duration, the tool and
 version, and the paths of its raw output inside the bundle. The log of a CI run is public, so
 only the row lines and counts reach it; the raw tool output, the node's journal and any crash
-input go into the bundle, which the workflow encrypts with `age` before uploading.
+input go into the bundle, which the workflow encrypts with `age` before uploading. A round
+that stops early still prints where (`round: stopped in <function>, line <n>`, the position
+only), records the row that was running as failed, prints the counts and packs the bundle.
+The dispatch input `reasons` (`SEC_PUBLIC_REASONS=1` by hand) is for rehearsing the round
+against a throwaway node: it prints each failed row's one reason sentence after its line in
+the log and the job summary, and is off by default because findings on a release are
+disclosed through the report (section 4.6 of the plan).
 
 | Row | Tool | Blocks | What it checks |
 |---|---|---|---|
@@ -50,13 +56,13 @@ input go into the bundle, which the workflow encrypts with `age` before uploadin
 | `net.udp` | nmap | yes | Only 53 is added on UDP; a port that turns `open\|filtered` fails. |
 | `net.listeners` | ss (host) | yes | Every listening socket of a `tenko` process is on an expected address and port; a metrics listener, if any, only on loopback. |
 | `net.cluster_port` | ss (host) | yes | 8444 is closed on a fresh node, opens when an enrolment token is created, and is closed again after the token is withdrawn and the node restarts ([`docs/cluster.md`](../../docs/cluster.md) section 7.2). A reporting sub-check: while the port is open it refuses an enrolment without a valid token. |
-| `net.ipv6` | nmap | yes | The IPv6 surface is the IPv4 one (`SKIP` without IPv6 on the scan network). |
+| `net.ipv6` | nmap | yes | The IPv6 surface is the IPv4 one: against a baseline scan of the host's IPv6 address before the install, as for `net.tcp`, the install adds on IPv6 no TCP port it did not add on IPv4 (`SKIP` without IPv6 on the scan network or when the baseline scan did not complete). |
 | `tls.api` | testssl.sh | yes | The API's TLS is current: TLS 1.2/1.3 only, no weak cipher, the chain verifies against the internal CA, no finding of severity Medium or above except those in `rules/testssl-allow.txt`. |
 | `tls.dot` | testssl.sh | yes | The same for DoT on 853 (its certificate is the round's lab CA). |
 | `tls.headers` | curl | yes | `Strict-Transport-Security` is sent; a plain-HTTP request to the TLS port is not served. |
 | `unit.exposure` | systemd-analyze | yes | The installed unit's exposure level is below 2.5. |
 | `unit.account` | getent (host) | yes | The service account `tenko` has a `nologin` shell, no password, no `sudo`, `cron` or `at` entry, no lingering user manager and no supplementary group. |
-| `fuzz.targets` | cargo-fuzz | yes | No in-process fuzz target crashes in the release budget (`fuzz/README.md`); a crash input goes into the bundle. |
+| `fuzz.targets` | cargo-fuzz | yes | No in-process fuzz target crashes in the release budget (`fuzz/README.md`); a crash input goes into the bundle. The build and the fuzzers run as the account that started the round through `sudo`, with its nightly toolchain, not as root. |
 | `fuzz.dns_wire` | `dnswire.py` | yes | The running node survives malformed DNS over UDP and TCP: every probe is answered, the unit does not restart, no panic in the journal, resident memory within 20 percent of the start. |
 | `web.unauth` | `nodeapi.py` | yes | Every operation of the OpenAPI document the node serves that `rules/public-operations.txt` does not name (and each `setup-only` entry of it) answers 401 or 403 without a session or a token, with a placeholder for each path parameter; the operations the document declares public are exactly the list. An operation of a module the node was installed without is not served (404 `sys.route_not_found`) and passes. |
 | `web.ui_baseline` | ZAP (`zap-baseline.py`) | no, reports | The ZAP baseline scan of the web interface: a one-minute spider from the start page and the passive rules, signed in as an account with the role `viewer`, with `rules/zap-baseline.tsv`; an alert of a `FAIL` rule fails the row, every alert of a `WARN` rule is a finding of the report. |

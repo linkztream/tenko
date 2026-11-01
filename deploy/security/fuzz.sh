@@ -9,7 +9,8 @@
 #                  (FUZZ_RELEASE_SECS, default 120 s), four at a time, from fuzz/seeds/ and
 #                  the corpus the workflow caches; a crash fails the row and its input goes
 #                  into the bundle. The targets, seeds, corpus and artifacts are those of
-#                  the tree in SOURCE (default: this checkout).
+#                  the tree in SOURCE (default: this checkout). The build and the fuzzers
+#                  run as the account that started the round through sudo, not as root.
 #   fuzz.dns_wire  deploy/security/dnswire.py sends malformed DNS over UDP and TCP to the
 #                  node under test while a probe asks a known name once a second; the row
 #                  fails on a crash, a hang, a restart of the unit, a listener that stops
@@ -27,16 +28,36 @@ run_fuzz_rows() {
   row fuzz.dns_wire "the running node survives malformed DNS on the wire" row_fuzz_dns_wire
 }
 
+# fuzz_builder <command...>: runs a step of the fuzz build as the account that started the
+# round through sudo (SUDO_USER), with that account's home and Rust toolchain, so the build
+# scripts and the fuzzers of the source tree never run as root and the corpus stays the
+# account's (the workflow caches it); as root only when the round was not started through
+# sudo. CARGO_HOME and RUSTUP_HOME are kept when set (the workflow passes the runner's).
+fuzz_builder() {
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != root ]]; then
+    local home
+    home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+    runuser -u "$SUDO_USER" -- env HOME="$home" PATH="$PATH" \
+      CARGO_HOME="${CARGO_HOME:-$home/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$home/.rustup}" \
+      TENKO_UI_STUB=1 "$@"
+  else
+    TENKO_UI_STUB=1 "$@"
+  fi
+}
+
 row_fuzz_targets() {
   row_tool=cargo-fuzz
-  local budget="${FUZZ_RELEASE_SECS:-120}" src="${SOURCE:-$repo}" fuzz_dir="$src/fuzz"
-  if ! command -v cargo >/dev/null 2>&1 || ! cargo +nightly fuzz --help >/dev/null 2>&1; then
+  # Two declarations: bash expands every word of one `local` before it assigns any, so
+  # "$src" in the same line is unbound under `set -u` and ends the round.
+  local budget="${FUZZ_RELEASE_SECS:-120}" src="${SOURCE:-$repo}"
+  local fuzz_dir="$src/fuzz"
+  if ! command -v cargo >/dev/null 2>&1 || ! fuzz_builder cargo +nightly fuzz --help >/dev/null 2>&1; then
     row_skip="cargo-fuzz or a nightly toolchain is not available (it runs in CI)"
     return 0
   fi
-  row_version="$(cargo +nightly fuzz --version 2>/dev/null | head -n 1)"
+  row_version="$(fuzz_builder cargo +nightly fuzz --version 2>/dev/null | head -n 1)"
   local targets
-  targets="$(cd "$fuzz_dir" && cargo +nightly fuzz list 2>/dev/null | LC_ALL=C sort)"
+  targets="$(cd "$fuzz_dir" && fuzz_builder cargo +nightly fuzz list 2>/dev/null | LC_ALL=C sort)"
   if [[ -z "$targets" ]]; then
     row_reason="cargo fuzz list printed no targets"
     return 1
@@ -49,9 +70,9 @@ row_fuzz_targets() {
     (
       cd "$src" || exit 97
       local corpus=("fuzz/corpus/$target")
-      mkdir -p "fuzz/corpus/$target"
+      fuzz_builder mkdir -p "fuzz/corpus/$target"
       [[ -d "fuzz/seeds/$target" ]] && corpus+=("fuzz/seeds/$target")
-      TENKO_UI_STUB=1 cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" \
+      fuzz_builder cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" \
         "${corpus[@]}" -- -max_total_time="$budget" \
         >"$EVIDENCE/fuzz/$target.log" 2>&1
     ) &

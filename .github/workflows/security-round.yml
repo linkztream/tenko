@@ -65,6 +65,15 @@ on:
         required: false
         type: string
         default: "net tls unit fuzz web"
+      # For rehearsing the round against a throwaway node: each FAIL row's reason sentence
+      # (the row's one sentence, never scanner output or evidence) is printed after its line
+      # in the public log and the job summary. Off by default because findings on a release
+      # are disclosed through the report, not the public log (section 4.6 of the plan).
+      reasons:
+        description: "Print each FAIL row's reason sentence in the public log (rehearsals only)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -176,6 +185,9 @@ jobs:
           tool: cargo-fuzz
 
       - name: Run the round
+        env:
+          # Set only by a dispatch with `reasons` (a release call has no such input).
+          SEC_PUBLIC_REASONS: ${{ inputs.reasons && '1' || '' }}
         run: |
           set -euo pipefail
           export BUNDLE="$RUNNER_TEMP/evidence.tar.gz"
@@ -186,8 +198,12 @@ jobs:
           if [ -n "$TAG" ]; then
             export SOURCE="$GITHUB_WORKSPACE/release-source"
           fi
+          # The round runs as root (install.sh, ss, systemd-analyze); its fuzz build runs as
+          # this runner account again (fuzz.sh, fuzz_builder, through SUDO_USER), with the
+          # nightly toolchain and cargo-fuzz the steps above installed for it: sudo resets
+          # HOME to root's, so CARGO_HOME and RUSTUP_HOME are passed when they are set.
           rc=0
-          sudo --preserve-env=BINARY,ROWS,BUNDLE,VERSION,SOURCE \
+          sudo --preserve-env=BINARY,ROWS,BUNDLE,VERSION,SOURCE,SEC_PUBLIC_REASONS,CARGO_HOME,RUSTUP_HOME \
             env "PATH=$PATH" "TENKO_UI_STUB=1" \
             bash deploy/security/round.sh | tee "$RUNNER_TEMP/rows.txt" || rc=$?
           echo "ROUND_RC=$rc" >> "$GITHUB_ENV"
@@ -200,7 +216,9 @@ jobs:
             echo "### Security round, Tenko ${VERSION:-${TAG}}"
             echo
             echo '```'
-            sed -nE 's/^(PASS|FAIL|SKIP|rows:) .*/&/p' "$RUNNER_TEMP/rows.txt" 2>/dev/null || true
+            # The row lines, the counts, where a round stopped early, and (only with the
+            # `reasons` input, which makes the round print them) the FAIL reason sentences.
+            sed -nE '/^(PASS|FAIL|SKIP|rows:) |^round: stopped |^  reason: /p' "$RUNNER_TEMP/rows.txt" 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
