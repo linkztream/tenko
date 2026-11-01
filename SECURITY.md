@@ -146,7 +146,8 @@ What this does not prove (section 7.2 of
 
 Besides the deterministic CI checks, every release runs a **lab round `security`** on the
 binary being released, before it is published: it installs a throwaway node from that binary,
-looks at it from outside (the ports it answers on, its TLS, malformed DNS on the wire) and
+looks at it from outside (the ports it answers on, its TLS, malformed DNS on the wire, every
+API operation sent without credentials, a passive scan of the web interface and the API) and
 from the host (the systemd unit and the service account), and leaves a report with stable
 finding IDs. A review of the changes since the last reviewed release asks an attacker's
 questions of the security-relevant diff. A public summary of what each release's checks found

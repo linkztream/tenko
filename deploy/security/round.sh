@@ -2,12 +2,13 @@
 # The lab round `security` (layer 2 of docs/plans/security-audit-plan.md): it installs the
 # node under test from the binary given, as a user installs it, completes first-run setup
 # through the API under the Standard profile, then runs the row groups net, tls and unit of
-# section 4.2 against it and packs the evidence into a bundle. SA5 adds the fuzz group
-# (deploy/security/fuzz.sh), SA4 the web group (deploy/security/web.sh).
+# section 4.2 against it, the fuzz group (deploy/security/fuzz.sh) and, last, the web group
+# (deploy/security/web.sh), and packs the evidence into a bundle.
 #
 # Run by hand on any Linux host with systemd and Docker, as root:
 #   sudo BINARY=<path to the tenko binary> bash deploy/security/round.sh
 #   sudo BINARY=<path> ROWS="net tls" bash deploy/security/round.sh   # one or more groups
+#   sudo BINARY=<path> ROWS="web" bash deploy/security/round.sh       # the web rows only
 #   sudo BINARY=<path> PLANT=listener bash deploy/security/round.sh   # DoH on 443, a planted
 #                                                                     # extra listener
 #
@@ -23,8 +24,9 @@
 #                     with KEEP=1 (the work directory is reused). For development.
 #
 # The scanners run in containers (deploy/security/compose.yml) on a bridge network whose
-# gateway is the host, so they reach the node as another machine on the link would. Checks
-# that need the host (ss, systemd-analyze, getent) run on the host. The log carries only the
+# gateway is the host (nmap, testssl.sh and ZAP alike), so they reach the node as another
+# machine on the link would. Checks that need the host (ss, systemd-analyze, getent) and the
+# API client of the web rows (nodeapi.py) run on the host. The log carries only the
 # row lines and counts (it is public on a public repository, section 4.6); the raw scanner
 # output and the node's journal go into the bundle, which the caller encrypts.
 
@@ -517,10 +519,22 @@ main() {
     run_fuzz_rows
   fi
 
+  # SA4: the web rows, after the other groups. web.sh is sourced like fuzz.sh; it creates
+  # the scanners' viewer session and token at its start and revokes them at its end.
+  local web=0
+  # shellcheck source=deploy/security/web.sh
+  . "$here/web.sh"
+  if web_wanted; then
+    web=1
+    run_web_rows
+  fi
+
   echo
   rows_tally
   # The node's journal goes into the bundle (not the public log).
   journalctl -u tenko --no-pager >"$EVIDENCE/node/journal.txt" 2>&1 || true
+  # The scan secrets are masked once more, now that the journal is in the bundle too.
+  ((web == 0)) || web_mask_evidence
 
   bundle_pack "$BUNDLE"
   echo "round: evidence packed into $BUNDLE"

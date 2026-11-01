@@ -1,0 +1,59 @@
+# The operations of the API that answer without a session or a token (the row web.unauth,
+# deploy/security/README.md, "The rule files"). One operation per line, `METHOD /path` with
+# the path as the OpenAPI document writes it; text after '#' is a comment. Every entry
+# carries its reason in the comment above it.
+#
+# web.unauth sends every other operation of the document the node serves without
+# credentials and fails on any answer but 401 or 403; it also fails when the operations the
+# document declares public (no security requirement, or an optional one) are not exactly
+# this list. An entry marked `setup-only` is public only while first-run setup is open: the
+# round tests a node after setup, so the walk sends it as well and expects a refusal.
+#
+# Add an entry only with a reason, for one operation, when the operation is public by
+# design; remove it when the reason no longer holds.
+
+# Liveness and readiness: probes of load balancers, systemd and `tenko health`, which hold
+# no credentials. They answer a status and no data of the installation.
+GET /api/v1/health
+GET /api/v1/health/ready
+
+# The setup flow. GET reports whether first-run setup is still open, so the web interface
+# knows whether to show the wizard. POST completes setup and needs the one-time setup token,
+# which exists only while setup is open (`tenko setup token` on the host).
+GET /api/v1/setup
+POST /api/v1/setup
+
+# The password check of the setup wizard: open while setup is open, so the first
+# administrator gets feedback before an account exists; a session or a token afterwards.
+POST /api/v1/auth/password/check setup-only
+
+# Sign-in: the password step, the second factor (TOTP or a recovery code) and the passkey
+# ceremony. Each step is the way to get a session; the address limiter and the account
+# lockout (IAM-05) guard them.
+POST /api/v1/auth/login/password
+POST /api/v1/auth/login/totp
+POST /api/v1/auth/login/recovery
+POST /api/v1/auth/webauthn/login/start
+POST /api/v1/auth/webauthn/login/finish
+
+# The languages of the sign-in page: the page is shown before anyone is signed in.
+GET /api/v1/i18n/languages
+GET /api/v1/i18n/packs/{tag}
+
+# Node enrolment: a joining node authenticates with the enrolment token in the body, a
+# single-use, time-limited secret an administrator created (docs/cluster.md section 1).
+POST /api/v1/nodes/enrol
+
+# The internal CA's root certificate: public by nature, so a client can fetch it and pin it
+# by the fingerprint shown at install (OPS-22).
+GET /api/v1/system/ca-root
+
+# The OpenAPI document: it describes the API and holds no data of the installation.
+GET /api/v1/openapi.json
+
+# The web interface's files: every path outside /api/ is the single-page application's
+# static files (index.html for the application's own routes, the content-hashed files under
+# /assets/), the same for everyone and with no data of the installation. They are not
+# operations of the document, so the walk does not send them; web.ui_baseline scans them.
+GET /
+GET /assets/{file}

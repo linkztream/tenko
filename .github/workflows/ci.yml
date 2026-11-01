@@ -709,13 +709,13 @@ jobs:
       - name: deploy/proxmox/test/run.sh --no-container
         run: bash deploy/proxmox/test/run.sh --no-container
       - name: Syntax and shellcheck of the security round scripts
-        # The scripts of the lab round `security` (deploy/security/, SA3/SA5 of
+        # The scripts of the lab round `security` (deploy/security/, SA3 to SA5 of
         # docs/plans/security-audit-plan.md): bash -n and shellcheck, like run.sh does for
-        # install.sh and the Proxmox scripts. lib.sh and fuzz.sh are sourced by round.sh, so
-        # shellcheck follows the source directives from the directory.
+        # install.sh and the Proxmox scripts. lib.sh, fuzz.sh and web.sh are sourced by
+        # round.sh, so shellcheck follows the source directives from the directory.
         run: |
           set -euo pipefail
-          files=(deploy/security/round.sh deploy/security/install-node.sh deploy/security/lib.sh deploy/security/fuzz.sh)
+          files=(deploy/security/round.sh deploy/security/install-node.sh deploy/security/lib.sh deploy/security/fuzz.sh deploy/security/web.sh)
           for f in "${files[@]}"; do bash -n "$f"; done
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
             -x -P SCRIPTDIR -S warning "${files[@]}"

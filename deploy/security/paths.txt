@@ -46,3 +46,6 @@ Cargo.lock
 ui/package-lock.json
 deny.toml
 .cargo/audit.toml
+# The rule files of the round decide what passes before a release (the public operations,
+# the ZAP and testssl.sh rules): loosening one is a change of the release gate.
+deploy/security/rules/**

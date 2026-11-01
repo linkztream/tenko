@@ -59,6 +59,40 @@ explains why; it stays on the list and becomes `fixed` only when a later report 
 (decided or fixed earlier, seen again). Only the owner moves a finding to `accepted` or `not a
 finding`; the triage never does, and never silently closes a finding.
 
+## The rule files
+
+The round turns a tool's raw output into a verdict with the files in
+[`deploy/security/rules/`](../../deploy/security/rules/); what they allow is part of what a
+report means, so they change only as described below.
+
+**`public-operations.txt`** lists the API operations that answer without a session or a
+token, one `METHOD /path` per line as the OpenAPI document writes it, each with its reason in
+a comment: liveness and readiness, the setup flow, the sign-in steps, the languages of the
+sign-in page, node enrolment, the internal CA's root, the OpenAPI document, and the web
+interface's static files. The row `web.unauth` sends every other operation without
+credentials and blocks the release on any answer but 401 or 403, and also when the operations
+the document declares public are not exactly this list, so a route that loses its
+authentication fails the round twice over: by its answer, and by the document's declaration.
+
+**`zap-baseline.tsv`** is ZAP's rule file for `web.ui_baseline` and `web.api_baseline`: per
+ZAP rule id, `FAIL` (the alert must never be raised, for example a missing
+Content-Security-Policy or a session cookie without `HttpOnly`), `WARN` (the alert is a
+finding of the report for the triage) or `IGNORE` (dropped, only with the reason in the
+comment above it). A rule that is not listed is `WARN`. The two rows report and do not block
+until the file has been through two releases without a new finding of High or above (SA-Q1
+(b) of the plan); the commit that makes them blocking says so.
+
+**`testssl-allow.txt`** lists the testssl.sh finding ids that `tls.api` and `tls.dot` pardon
+at severity Medium or above, each with its reason.
+
+**How a rule changes.** A change to a rule file is its own commit, or part of the commit that
+changes what the rule is about (a route that becomes public adds its entry beside the route),
+and carries its reason in the file, as narrowly as the tool allows: one operation, one rule
+id, one finding id, never a category or a pattern. A rule is never loosened to make a release
+pass: a finding the round raises goes into the report with an ID, and only the owner moves it
+to `accepted` or `not a finding`, after which the rule may follow with that decision named in
+its comment. Removing an entry whose reason no longer holds needs no decision.
+
 ## Severity
 
 Critical, High, Medium, Low, Info. A tool's own severity is the starting point; the triage may

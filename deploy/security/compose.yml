@@ -5,9 +5,10 @@
 # where the node under test runs, is the network's gateway (198.51.100.1 and
 # 2001:db8:5ec::1), so the scanners see the node as another machine on the link would.
 # They get the round's output directory (/out) and the CA files of the run (/in, read
-# only), and nothing else: no token, no secret, no repository checkout. The workflow runs
-# them in a job that holds no token able to write (section 4.6 of
-# docs/plans/security-audit-plan.md).
+# only), and nothing else: no repository token, no secret of the workflow, no repository
+# checkout; ZAP alone also gets the read-only scan credential of the node under test (see
+# its service). The workflow runs them in a job that holds no token able to write (section
+# 4.6 of docs/plans/security-audit-plan.md).
 #
 # Every image is pinned by the digest of its multi-platform index, with the tag beside it
 # for the reader; a new version changes both in one commit. Resolve a digest with
@@ -47,3 +48,14 @@ services:
   testssl:
     <<: *scanner
     image: ghcr.io/testssl/testssl.sh:3.2@sha256:07eef6f0a35ac86fddc28b5e81efbb6f1c009535d63cdfac43e8b20711e62df5
+
+  # ZAP 2.17.0 (the project's own image on ghcr.io): the baseline scan of the web interface
+  # and the API scan in safe mode (passive rules only) of web.ui_baseline and
+  # web.api_baseline (deploy/security/web.sh). It runs as the image's own user; web.sh
+  # mounts a work directory at /zap/wrk for each scan and passes the scan's viewer session
+  # or viewer token in the environment (ZAP_AUTH_HEADER_VALUE, sent to the node's host
+  # only), never on the command line. It is the only scanner that holds a credential of the
+  # node, and that credential can read and not change.
+  zap:
+    <<: *scanner
+    image: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238

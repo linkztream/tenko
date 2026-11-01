@@ -22,20 +22,27 @@
 #   row_evidence   (array) paths inside the bundle of the raw output
 #   row_reason     one sentence on why it failed (bundle only)
 #   row_skip       a reason: the row is SKIP, whatever the check returned
+#   row_findings   the path inside the bundle of a JSON array of the row's findings, each
+#                  {tool, rule, location, severity, title}: what a scanner found, one entry
+#                  per rule and location (the web rows); scripts/security-report.mjs turns
+#                  each into a finding with the fingerprint <tool>:<rule>:<location>
 #
 # Every row writes one JSON line to rows.jsonl in the bundle: row, state, blocking,
-# duration_ms, tool, version, evidence, reason, description, started (UTC).
+# duration_ms, tool, version, evidence, reason, description, started (UTC), and findings
+# (the array row_findings names, empty without it).
 
 # EVIDENCE: the bundle directory; created when missing.
 : "${EVIDENCE:?EVIDENCE must name the bundle directory}"
 mkdir -p "$EVIDENCE/rows"
 
 rows_failed=0 rows_passed=0 rows_skipped=0 rows_blocking_failed=0
-row_tool="" row_version="" row_evidence=() row_reason="" row_skip=""
+row_tool="" row_version="" row_evidence=() row_reason="" row_skip="" row_findings=""
 
-# The rows that do not block a release (SA-Q1 (b)): none of the groups of this round yet.
-# The web baselines (SA4) and priv.* (SA6, until ADR 0023 is built) will be listed here.
-SEC_REPORTING_ROWS="${SEC_REPORTING_ROWS:-}"
+# The rows that do not block a release (SA-Q1 (b)): the ZAP baselines of the web group
+# report until their rule file has been through two releases without a new finding of High
+# or above (section 4.4 of the plan); priv.* (SA6) will be listed here until ADR 0023 is
+# built. A failing reporting row is a finding in the report, not a stop.
+SEC_REPORTING_ROWS="${SEC_REPORTING_ROWS:-web.ui_baseline web.api_baseline}"
 
 # wanted <row name>: the row is selected by ROWS ("net tls", "net.tcp fuzz", empty: all).
 wanted() {
@@ -61,7 +68,7 @@ row() {
   local name="$1" what="$2" began ended rc state blocking=true reason_line="" line
   shift 2
   wanted "$name" || return 0
-  row_tool="" row_version="" row_evidence=() row_reason="" row_skip=""
+  row_tool="" row_version="" row_evidence=() row_reason="" row_skip="" row_findings=""
   began="$(sec_now_ms)"
   {
     printf '== %s: %s\n' "$name" "$what"
@@ -88,17 +95,21 @@ row() {
   printf '== %s %s in %d ms%s\n' "$state" "$name" "$((ended - began))" "${row_reason:+: $row_reason}" \
     >>"$EVIDENCE/rows/$name.log"
   evidence_add "rows/$name.log"
-  local evidence_json
+  local evidence_json findings_file=/dev/null
   evidence_json="$(printf '%s\n' ${row_evidence[@]+"${row_evidence[@]}"} | jq -R . | jq -sc 'map(select(length > 0))')"
+  if [[ -n "$row_findings" && -s "$EVIDENCE/$row_findings" ]] &&
+    jq -e 'type == "array"' "$EVIDENCE/$row_findings" >/dev/null 2>&1; then
+    findings_file="$EVIDENCE/$row_findings"
+  fi
   jq -cn \
     --arg row "$name" --arg state "$state" --argjson blocking "$blocking" \
     --argjson duration_ms "$((ended - began))" --arg tool "$row_tool" --arg version "$row_version" \
     --arg reason "${row_skip:-$row_reason}" --arg description "$what" \
     --arg started "$(date -u -d "@$((began / 1000))" +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson evidence "$evidence_json" \
+    --argjson evidence "$evidence_json" --slurpfile findings "$findings_file" \
     '{row: $row, state: $state, blocking: $blocking, duration_ms: $duration_ms, tool: $tool,
       version: $version, evidence: $evidence, reason: $reason, description: $description,
-      started: $started}' >>"$EVIDENCE/rows.jsonl"
+      started: $started, findings: ($findings[0] // [])}' >>"$EVIDENCE/rows.jsonl"
   line="$(printf '%s %-18s %s%s' "$state" "$name" "$what" "$reason_line")"
   printf '%s\n' "$line"
 }

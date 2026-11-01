@@ -1,7 +1,9 @@
 // The deterministic part of a security report (section 4.5 of
 // docs/plans/security-audit-plan.md) from the JSON lines the security round writes. It fills
 // section 1 (layer 1, when a summary of the alerts is given) and section 2 (the layer 2
-// rows), turns every failed row into a finding with a stable fingerprint, carries the finding
+// rows), turns every failed row, and every entry of a row's `findings` (what a scanner of the
+// web rows found: an operation that answers without credentials, a ZAP alert per plugin and
+// path), into a finding with a stable fingerprint, carries the finding
 // IDs of the previous report over by fingerprint and gives an unmatched finding the next free
 // `SF-NNNN`, and writes the public summary of SA-Q3 (b). The triage (Appendix A) writes
 // sections 3 to 5 and the judgement; this script does the mechanical part it can check.
@@ -13,8 +15,9 @@
 //
 // A finding's fingerprint is `<tool>:<rule>:<location>`; a location with an identifier (a
 // UUID, a long hex id, a numeric id in a path) is normalised to its OpenAPI-style template
-// so the same weakness keeps its id when the id in the path changes, and line numbers are
-// never part of it. Node's standard library only.
+// so the same weakness keeps its id when the id in the path changes, a content-hashed file of
+// the web interface to `<name>-{hash}.<ext>`, a URL to its path, and line numbers are never
+// part of it. Node's standard library only.
 //
 // Exit codes: 0 success, 1 the inputs are wrong, 2 bad command line.
 
@@ -48,7 +51,21 @@ const ROW_SEVERITY = {
   "unit.account": "High",
   "fuzz.targets": "High",
   "fuzz.dns_wire": "High",
+  "web.unauth": "High",
+  "web.ui_baseline": "Medium",
+  "web.api_baseline": "Medium",
 };
+
+/** The severities of the report, and the names scanners use for them. */
+const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
+const SEVERITY_ALIASES = { informational: "Info", information: "Info", warning: "Low" };
+
+/** A scanner's severity in the report's words (unknown: Info). */
+export function normaliseSeverity(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const known = SEVERITIES.find((s) => s.toLowerCase() === text);
+  return known ?? SEVERITY_ALIASES[text] ?? "Info";
+}
 
 /** Parse JSON lines (one object per non-empty line). */
 export function parseJsonl(text) {
@@ -81,6 +98,10 @@ export function normaliseLocation(location) {
   // (a leading slash), so a resource id such as `/nodes/42` is templated while a port in an
   // nmap location such as `tcp/8444` keeps its number. A UUID or a long hex id is always an
   // identifier.
+  // A location may start with an HTTP method (`GET /api/v1/roles`, the web.unauth rows).
+  const method = loc.match(/^([A-Z]+) (\/.*)$/);
+  const prefix = method ? `${method[1]} ` : "";
+  if (method) loc = method[2];
   const urlPath = loc.startsWith("/");
   const parts = loc.split("/");
   const normalised = parts.map((seg) => {
@@ -88,9 +109,24 @@ export function normaliseLocation(location) {
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return "{id}";
     if (/^[0-9a-f]{16,}$/i.test(seg)) return "{id}";
     if (urlPath && /^\d+$/.test(seg)) return "{id}";
+    // A content-hashed file of the web interface (`index-B3xY_9aQ.js`): the hash changes with
+    // every build, the file is the same weakness.
+    const hashed = seg.match(/^(.+)-([A-Za-z0-9_-]{8})\.(js|css|mjs|map|woff2?|svg|png|webp)$/);
+    if (urlPath && hashed && /[0-9A-Z_]/.test(hashed[2])) return `${hashed[1]}-{hash}.${hashed[3]}`;
     return seg;
   });
-  return normalised.join("/");
+  return prefix + normalised.join("/");
+}
+
+/**
+ * A URL as a scanner reports it (`https://host:8443/api/v1/zones/7?x=1`) reduced to its
+ * normalised path: no scheme, host, port, query or fragment.
+ */
+export function normaliseUrl(url) {
+  const text = String(url ?? "").trim();
+  const match = text.match(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*([^?#]*)/i);
+  const pathOnly = match ? match[1] || "/" : text.split(/[?#]/, 1)[0];
+  return normaliseLocation(pathOnly);
 }
 
 /** `<tool>:<rule>:<location>` with the location normalised. */
@@ -98,13 +134,46 @@ export function fingerprint({ tool, rule, location }) {
   return `${tool}:${rule}:${normaliseLocation(location)}`;
 }
 
-/** A finding for every failed row (SKIP and PASS produce none). */
+/**
+ * The findings of the rows: a row that carries `findings` (what its scanner found, one entry
+ * per rule and location: the web rows) gives one finding per entry, whatever its state,
+ * with the fingerprint `<tool>:<rule>:<location>` and the location normalised (a URL to its
+ * path, identifiers and content hashes to templates); entries that normalise to the same
+ * fingerprint are one finding at the highest severity. A failed row without such entries
+ * is one finding `row:<row>`. PASS and SKIP rows without entries produce none.
+ */
 export function findingsFromRows(rows) {
-  const findings = [];
+  const byFingerprint = new Map();
+  const rank = (severity) => SEVERITIES.indexOf(severity);
   for (const row of rows) {
-    if (row.state !== "FAIL") continue;
+    const entries = Array.isArray(row.findings) ? row.findings : [];
+    for (const entry of entries) {
+      const tool = entry.tool || row.tool || "row";
+      const location = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry.location ?? "")
+        ? normaliseUrl(entry.location)
+        : entry.location;
+      const fp = fingerprint({ tool, rule: entry.rule ?? "", location });
+      const severity = normaliseSeverity(entry.severity);
+      const known = byFingerprint.get(fp);
+      if (known) {
+        if (rank(severity) < rank(known.severity)) known.severity = severity;
+        continue;
+      }
+      byFingerprint.set(fp, {
+        fingerprint: fp,
+        source: tool,
+        severity,
+        title: entry.title || `${tool} ${entry.rule ?? ""}`.trim(),
+        reason: row.reason || "",
+        evidence: row.evidence || [],
+        blocking: row.blocking !== false,
+        row: row.row,
+      });
+    }
+    if (row.state !== "FAIL" || entries.length) continue;
     const fp = fingerprint({ tool: "row", rule: row.row, location: "" }).replace(/:$/, "");
-    findings.push({
+    if (byFingerprint.has(fp)) continue;
+    byFingerprint.set(fp, {
       fingerprint: fp,
       source: "row",
       severity: ROW_SEVERITY[row.row] ?? "Medium",
@@ -112,9 +181,10 @@ export function findingsFromRows(rows) {
       reason: row.reason || "",
       evidence: row.evidence || [],
       blocking: row.blocking !== false,
+      row: row.row,
     });
   }
-  return findings;
+  return [...byFingerprint.values()];
 }
 
 /**
@@ -183,6 +253,11 @@ export function countBySeverity(findings) {
   return counts;
 }
 
+/** A table cell: a `|` in a scanner's text would end the cell, so it becomes `/`. */
+function cell(text) {
+  return String(text ?? "").replace(/\|/g, "/").replace(/\s*\n\s*/g, " ");
+}
+
 function rowLine(row) {
   const evidence = (row.evidence || []).join(", ");
   return `| ${row.row} | ${row.state} | ${row.duration_ms ?? ""} | ${evidence} |`;
@@ -221,7 +296,7 @@ export function renderReport(meta, rows, findings, layer1) {
   for (const f of findings) {
     const evidence = (f.evidence || []).join(", ");
     lines.push(
-      `| ${f.id} | ${f.severity} | ${f.state} | ${f.source} | ${f.fingerprint} | ${f.title} | ${f.firstSeen} | ${evidence} |`,
+      `| ${f.id} | ${f.severity} | ${f.state} | ${f.source} | ${cell(f.fingerprint)} | ${cell(f.title)} | ${f.firstSeen} | ${evidence} |`,
     );
   }
   if (!findings.length) lines.push("| — | — | — | — | — | No failed row | — | — |");

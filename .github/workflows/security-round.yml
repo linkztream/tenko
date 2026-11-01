@@ -18,10 +18,14 @@
 # and the summary says why; the deterministic rows still run and still block (section 4.6).
 #
 # Least privilege (SA-R6): this job holds contents: read and no other token, and no secret.
-# The scanners (nmap, testssl.sh, pinned by digest in deploy/security/compose.yml) run in
-# containers that reach only the node under test, so a compromised image reads the binary it
-# tests and nothing else. Every `uses:` is pinned to a full commit SHA with its tag in a
-# comment, the same commits ci.yml and release.yml use for the same actions.
+# The scanners (nmap, testssl.sh and ZAP, pinned by digest in deploy/security/compose.yml)
+# run in containers that reach only the node under test, so a compromised image reads the
+# binary it tests and nothing else; the round does not pass GH_TOKEN to the scripts or the
+# containers. ZAP, which scans the web interface and the API in the web group (run last,
+# after the net, tls, unit and fuzz groups, in this same job), gets a read-only viewer
+# session and token of the throwaway node, which the round revokes at the end of the group.
+# Every `uses:` is pinned to a full commit SHA with its tag in a comment, the same commits
+# ci.yml and release.yml use for the same actions.
 name: Security round
 
 on:
@@ -44,7 +48,7 @@ on:
         description: "Row groups to run (space separated); empty: every deterministic row"
         required: false
         type: string
-        default: "net tls unit fuzz"
+        default: "net tls unit fuzz web"
   workflow_dispatch:
     inputs:
       tag:
@@ -55,7 +59,7 @@ on:
         description: "Row groups to run (space separated)"
         required: false
         type: string
-        default: "net tls unit fuzz"
+        default: "net tls unit fuzz web"
 
 permissions:
   contents: read

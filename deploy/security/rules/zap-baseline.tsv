@@ -1,0 +1,84 @@
+# The ZAP rule file of the security round (web.ui_baseline and web.api_baseline,
+# deploy/security/README.md, "The rule files"). ZAP's own format: one rule per line, three
+# fields separated by a tab: the rule (plugin) id, the action, the rule's name in
+# parentheses. A line that starts with '#' is a comment.
+#
+# Actions: FAIL fails the row (an alert of this rule should never be raised on Tenko); WARN
+# reports the alert as a finding of the release report for the triage; IGNORE drops the
+# alert. A rule that is not listed is WARN (ZAP's default). Every IGNORE carries its reason
+# in the comment lines above it. Both rows report and do not block a release until this
+# file has been through two releases without a new finding of High or above (section 4.4 of
+# docs/plans/security-audit-plan.md).
+#
+# Change a rule with its reason in the same commit, as narrowly as ZAP allows (a rule id,
+# never a category). The ZAP version's full rule list is in every bundle
+# (scan/zap-ui/rules-default.tsv), for checking this file against a new version.
+
+# FAIL: the response headers every answer carries (crates/tenko-api/src/middleware/headers.rs:
+# CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS over HTTPS) and the
+# session cookie's flags (HttpOnly, Secure, SameSite=Strict).
+10010	FAIL	(Cookie No HttpOnly Flag)
+10011	FAIL	(Cookie Without Secure Flag)
+10054	FAIL	(Cookie without SameSite Attribute)
+10020	FAIL	(Missing Anti-clickjacking Header)
+10021	FAIL	(X-Content-Type-Options Header Missing)
+10035	FAIL	(Strict-Transport-Security Header)
+10038	FAIL	(Content Security Policy (CSP) Header Not Set)
+
+# FAIL: what a single-origin application with no third-party script and no server banner
+# never shows.
+3	FAIL	(Session ID in URL Rewrite)
+10003	FAIL	(Vulnerable JS Library)
+10017	FAIL	(Cross-Domain JavaScript Source File Inclusion)
+10033	FAIL	(Directory Browsing)
+10036	FAIL	(Server Leaks Version Information via Server HTTP Response Header Field)
+10037	FAIL	(Server Leaks Information via X-Powered-By HTTP Response Header Field(s))
+10039	FAIL	(X-Backend-Server Header Information Leak)
+10040	FAIL	(Secure Pages Include Mixed Content)
+10041	FAIL	(HTTP to HTTPS Insecure Transition in Form Post)
+10042	FAIL	(HTTPS to HTTP Insecure Transition in Form Post)
+10052	FAIL	(X-ChromeLogger-Data (XCOLD) Header Information Leak)
+10056	FAIL	(X-Debug-Token Information Leak)
+10061	FAIL	(X-AspNet-Version Response Header)
+10098	FAIL	(Cross-Domain Misconfiguration)
+10115	FAIL	(Script Served From Malicious Domain (polyfill))
+
+# WARN: findings the triage reads and decides; some are expected on today's node (no
+# Permissions-Policy and no Cross-Origin-Embedder-Policy header are sent).
+2	WARN	(Private IP Disclosure)
+10015	WARN	(Re-examine Cache-control Directives)
+10019	WARN	(Content-Type Header Missing)
+10023	WARN	(Information Disclosure - Debug Error Messages)
+10024	WARN	(Information Disclosure - Sensitive Information in URL)
+10027	WARN	(Information Disclosure - Suspicious Comments)
+10049	WARN	(Storable and Cacheable Content)
+10055	WARN	(CSP)
+10062	WARN	(PII Disclosure)
+10063	WARN	(Permissions Policy Header Not Set)
+10096	WARN	(Timestamp Disclosure)
+10097	WARN	(Hash Disclosure)
+10099	WARN	(Source Code Disclosure)
+10108	WARN	(Reverse Tabnabbing)
+10110	WARN	(Dangerous JS Functions)
+10202	WARN	(Absence of Anti-CSRF Tokens)
+90003	WARN	(Sub Resource Integrity Attribute Missing)
+90004	WARN	(Insufficient Site Isolation Against Spectre Vulnerability)
+90011	WARN	(Charset Mismatch)
+90022	WARN	(Application Error Disclosure)
+90033	WARN	(Loosely Scoped Cookie)
+
+# IGNORE 10116: the alert says the ZAP release is older than the newest. The image is
+# pinned by digest on purpose (compose.yml), so a scan never changes under the round; a
+# new ZAP version arrives as a commit that moves the tag and the digest together.
+10116	IGNORE	(ZAP is Out of Date)
+# IGNORE 10109: the alert says the site is a single-page application and suggests the
+# AJAX spider. The web interface is one by design; the passive rules still see every
+# response the spider fetches, and web.api_baseline covers the API the application calls.
+10109	IGNORE	(Modern Web Application)
+# IGNORE 10111, 10112, 10113: informational alerts with which ZAP's authentication helper
+# marks the sign-in request, the session cookie and a request that shows the signed-in
+# state, for ZAP's own configuration of an authenticated scan. They name no weakness; the
+# cookie's flags are checked by 10010, 10011 and 10054 above.
+10111	IGNORE	(Authentication Request Identified)
+10112	IGNORE	(Session Management Response Identified)
+10113	IGNORE	(Verification Request Identified)
