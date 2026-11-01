@@ -1,4 +1,7 @@
 # shellcheck shell=bash
+# fuzz.sh is sourced by round.sh, which assigns repo and here and reads the row_tool, row_version,
+# row_reason and row_skip variables the rows set (lib.sh row helper); shellcheck sees this file alone.
+# shellcheck disable=SC2034,SC2154
 # The fuzz rows of the security round (SA5 of docs/plans/security-audit-plan.md), sourced by
 # round.sh so they share the row helper, the bundle and the node under test:
 #

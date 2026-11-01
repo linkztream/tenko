@@ -46,14 +46,15 @@ keep="${KEEP:-0}"
 # evidence bundle directory. WORK is never in the bundle.
 WORK="$(mktemp -d /tmp/tenko-sec-work.XXXXXX)"
 export WORK
-export EVIDENCE="$(mktemp -d /tmp/tenko-sec-evidence.XXXXXX)"
+EVIDENCE="$(mktemp -d /tmp/tenko-sec-evidence.XXXXXX)"
+export EVIDENCE
 BUNDLE="${BUNDLE:-$(mktemp -u /tmp/tenko-sec-bundle.XXXXXX.tar.gz)}"
 
 # shellcheck source=deploy/security/lib.sh
 . "$here/lib.sh"
 
 # The node under test: the API on 8443, DNS on 53, DoT on 853; addresses in node.env.
-API_URL="" API_CA="" API_STATE="" NODE_CONFIG="" DATA_DIR="" DOT_CA=""
+API_URL="" API_CA="" API_STATE="" DATA_DIR=""
 # The host's address on the scan network, which the scanners aim at. The compose network's
 # gateway is the host (deploy/security/compose.yml); on the runner that is this address.
 SCAN_TARGET=tenko.example.test
@@ -290,8 +291,7 @@ cluster_refuses_without_token() {
 }
 
 wait_api_ready() {
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     "$BINARY" health --url "https://localhost:8443" --ca-file "$DATA_DIR/tls/ca-root.pem" >/dev/null 2>&1 && return 0
     sleep 2
   done
@@ -460,7 +460,7 @@ row_unit_account() {
   case "$hash" in "" | "!" | "*" | "!!") ;; *) problems+="the account has a password hash; " ;; esac
   # No sudo rule.
   if (sudo -nl -U tenko 2>/dev/null | grep -qvE 'not allowed|may not run'); then
-    sudo -nl -U tenko >>"$EVIDENCE/rows/unit.account.log" 2>&1 || true
+    sudo -nl -U tenko 2>&1 | tee -a "$EVIDENCE/rows/unit.account.log" >/dev/null || true
     grep -rqs tenko /etc/sudoers /etc/sudoers.d 2>/dev/null && problems+="a sudoers entry names tenko; "
   fi
   # No cron or at entry.

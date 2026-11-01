@@ -52,8 +52,7 @@ sed -E 's/^( *Setup token: *).*/\1(removed by the round)/' "$WORK/install.log" >
 
 # wait_ready: the API answers `tenko health` with the internal CA.
 wait_ready() {
-  local i
-  for i in $(seq 1 90); do
+  for _ in $(seq 1 90); do
     if [[ -f "$DATA_DIR/tls/ca-root.pem" ]] &&
       "$BIN" health --url "https://localhost:${API_PORT}" --ca-file "$DATA_DIR/tls/ca-root.pem" >/dev/null 2>&1; then
       return 0
