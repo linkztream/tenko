@@ -407,6 +407,15 @@ The lead writes these with one Opus builder before any other Slice 7 package sta
 - **Acceptance:** E22, E32; the exit document with every criterion's state, the recorded deviation for the failover line of the ROADMAP, and the owner-run steps.
 - **Size and risk:** M.
 
+#### WP9.9 Tenko's own zone-file reader and writer (M)
+
+Added on 2026-11-03 on the owner's decision, after the security round's `fuzz.targets` found a panic in the zone-file scanner of the dependency `domain` 0.12.3 (reported upstream) and the question of why Tenko reads an operator's zone files through a third-party scanner at all. The wire codec stays with `domain` behind the `Codec` trait: it is the hot path and changes only with a measurement (the parked WP9.8).
+
+- **Owns:** `crates/tenko-dns/src/zone/zonefile.rs` (the reader and the writer, the `zonefile` feature of `domain` dropped from `tenko-dns`), the presentation format of every record type the model holds plus RFC 3597 for the others, `crates/tenko-dns/src/zone/keys.rs`'s base64 without `domain`, the differential test against `domain`'s reader (a dev-dependency, never shipped), the zone-file fuzz target's seeds, `docs/dns.md`'s import section.
+- **Depends on:** nothing open; the import, export and the fuzz target keep their contracts (`Reader`, `Item`, the loss codes, `header`, `presentation`, `write_rrset`).
+- **Acceptance:** every record type of the model and RFC 3597 data read and written by Tenko's code with exact line numbers; the differential test agrees with `domain`'s reader on the test zones, the seeds, the model's vectors and a generated corpus; an export read back gives the same records; the `dns_zonefile` fuzz target runs on the new reader with its seeds; the import's tests green; `tenko-dns` compiles `domain` without the `zonefile` feature.
+- **Size and risk:** M (three to four builder-days). The risk is a parser of our own with its own bugs; the fuzz target, the differential test and the round trip are the answer. Cold path: the import of a 100,000-record zone is timed against the old reader and must not be slower.
+
 ## 5. Order, parallelism and merging
 
 ```mermaid
