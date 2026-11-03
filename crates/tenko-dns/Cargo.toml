@@ -13,9 +13,9 @@ arc-swap = { workspace = true }
 async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
-# `zonefile` adds the zone file scanner (`domain::zonefile::inplace`) for the import; it
-# brings no crate the workspace does not already build (`bytes`, `serde`).
-domain = { workspace = true, features = ["zonefile"] }
+# The wire codec (src/codec) only: zone files are read and written by Tenko's own code
+# (src/zone/zonefile.rs), so the `zonefile` feature is a dev-dependency feature below.
+domain = { workspace = true }
 # Block list versions above 64 KiB of entries are deflated (src/lists); the version
 # tenko-api and tenko-cluster already build.
 flate2 = "1.1.10"
@@ -53,6 +53,9 @@ uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# The zone file scanner of `domain` (`zonefile`): the reference reader of the differential
+# test of Tenko's own zone file reader (tests/zonefile_differential.rs); never shipped.
+domain = { workspace = true, features = ["zonefile"] }
 hickory-proto = { workspace = true }
 # The DoH client of tests/tls*.rs (HTTP/2 and HTTP/1.1 over a rustls client).
 hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }

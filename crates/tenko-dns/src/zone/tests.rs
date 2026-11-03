@@ -718,7 +718,7 @@ async fn tsig_keys_keep_their_secret_in_the_vault() {
         )
         .await
         .expect("key");
-    let secret: Vec<u8> = domain::utils::base64::decode(created.secret.as_str()).expect("base64");
+    let secret = super::encoding::base64_decode(created.secret.as_str()).expect("base64");
     assert_eq!(secret.len(), 32);
     let error = service
         .create_key(

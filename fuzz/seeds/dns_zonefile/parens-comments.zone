@@ -1,0 +1,9 @@
+$ORIGIN example.test.
+long IN TXT ( "first string" ; a comment with ( and " inside
+             "second string" ) ; done
+mx IN MX ( 10 ; preference
+            mail )
+  IN TXT "same owner, indented"
+sig IN RRSIG ( A 13 3 300 20261201000000
+               20261101000000 12345 example.test.
+               AQIDBAUGBwg= )

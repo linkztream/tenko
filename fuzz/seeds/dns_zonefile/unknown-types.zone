@@ -1,0 +1,4 @@
+$ORIGIN example.test.
+host IN A 192.0.2.1
+loc IN LOC 52 22 23.000 N 4 53 32.000 E -2.00m 0.00m 10000m 10m
+after IN A 192.0.2.2

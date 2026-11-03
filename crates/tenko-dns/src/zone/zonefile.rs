@@ -1,47 +1,69 @@
 //! Zone files (RFC 1035, section 5): the reader of the import and the writer of the export
-//! (MIG-15).
+//! (MIG-15), both Tenko's own code.
 //!
 //! # Reading
 //!
-//! [`Reader`] scans a file with `domain`'s zone file scanner and yields one record at a
-//! time with its line, or a [`Loss`] for a record the import cannot take. `$ORIGIN` and
-//! `$TTL` are honoured (the zone apex is the first origin); `$INCLUDE` is refused, since
-//! the import reads one uploaded file; `$GENERATE` (the BIND extension) is expanded before
-//! scanning, at most [`ZoneConfig::max_generate`](super::ZoneConfig::max_generate) records
-//! per line, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`), `\$`
-//! and `$$`. A syntax error stops the read with `dns.zonefile.invalid` and its line; the
-//! scanner cannot continue after one. A parenthesis still open at the end of the file is
-//! refused before the scan, with the line that opened it.
+//! [`Reader`] reads a file one entry at a time and yields one record with its line, or a
+//! [`Loss`] for a record the import cannot take. The tokenizer (`lexer`) follows
+//! RFC 1035: blank lines and `;` comments, `(` `)` across lines, quoted strings, `\X` and
+//! `\DDD` escapes. An entry is `owner [ttl] [class] type data`: the owner `@` is the
+//! origin, a relative name is completed with the origin, an entry whose line starts with
+//! white space has the previous owner; the TTL and the class come in either order and are
+//! optional. The TTL is a number of seconds or a duration with BIND's units (`1h30m`, `2d`,
+//! `1w`), and a record without one takes `$TTL`, else the last TTL given, else 3600 s. The
+//! class is IN (another class is a loss); the type is its mnemonic (any case) or `TYPEnnn`.
 //!
-//! The losses: a record of a class other than IN, an owner outside the zone, a name or
-//! data the model refuses (outside the name character set of the model, an invalid
-//! length), and a record that breaks a rule of its type.
+//! `$ORIGIN` and `$TTL` are honoured (the zone apex is the first origin); `$INCLUDE` is
+//! refused, since the import reads one uploaded file; `$GENERATE` (the BIND extension) is
+//! expanded one line at a time, at most
+//! [`ZoneConfig::max_generate`](super::ZoneConfig::max_generate) records per directive,
+//! with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`), `\$` and `$$`;
+//! the lines it makes carry the directive's line.
+//!
+//! The data of every type the model holds is read in its presentation form (`parse`,
+//! `svcb`), and so is that of a few types the model keeps opaque; every type also reads
+//! the generic form of RFC 3597 (`\# length hex`). The parsed data goes through the
+//! model's own check ([`Rdata::from_wire`]).
+//!
+//! A syntax error stops the read with `dns.zonefile.invalid`, the line of the token where
+//! it was found and a reason; so does a quote or a parenthesis still open at the end of
+//! the file (with the line that opened it). The losses: a record of a class other than
+//! IN, an owner outside the zone, a name or data the model refuses (outside the name
+//! character set of the model, an invalid length), a record of a type whose data is
+//! written in a form the reader does not know (only the generic form is read for it), and
+//! a record that breaks a rule of its type.
+//!
+//! Hardening: the reader indexes the text only within checked bounds and slices it only at
+//! ASCII separators; names, labels, character strings and record data keep their limits
+//! (255, 63, 255 and 65,535 octets); nothing recurses on the input; what it allocates is
+//! bounded by the length of the text (the reader keeps one copy of it, one entry's tokens
+//! and one `$GENERATE` line at a time).
 //!
 //! # Writing
 //!
 //! [`header`] writes `$ORIGIN` and `$TTL`; [`write_rrset`] writes one RRset, one line per
 //! record: the owner relative to the apex (`@` for the apex), the TTL, `IN`, the type and
-//! the data in presentation format, its records in canonical order (by wire form). The
-//! export writes the apex SOA first, then every RRset in key order, which is the canonical
-//! name order of RFC 4034, types ascending, so the same data always gives the same bytes.
+//! the data in presentation format (`present`), its records in canonical order (by wire
+//! form). The export writes the apex SOA first, then every RRset in key order, which is the
+//! canonical name order of RFC 4034, types ascending, so the same data always gives the
+//! same bytes.
+
+mod generate;
+mod lexer;
+mod parse;
+mod present;
+mod svcb;
+mod text;
+mod types;
 
 use std::fmt::Write as _;
 
-use bytes::Bytes;
-use domain::{base::name::ParsedName, dep::octseq::Parser};
-use domain::{
-    base::{
-        iana::{Class, Rtype as WireRtype},
-        name::{Name, ToName},
-        rdata::{ComposeRecordData, ParseRecordData},
-        zonefile_fmt::{DisplayKind, ZonefileFmt},
-    },
-    rdata::ZoneRecordData,
-    zonefile::inplace::{Entry, Zonefile},
-};
 use tenko_core::dns::{DnsName, Rdata, RrSet, Rtype};
 
 use super::{ZoneError, ZoneResult, relative_name};
+use generate::Generate;
+use lexer::{Entry, LexError, Lexer};
+use parse::Fields;
 
 /// The code of a loss: a record of another class than IN.
 pub const LOSS_CLASS: &str = "dns.zonefile.class";
@@ -57,6 +79,9 @@ pub const LOSS_ORIGIN: &str = "dns.zonefile.origin";
 pub const LOSS_DUPLICATE: &str = "dns.zonefile.duplicate";
 /// The code of a loss: an SOA record that is not the apex SOA, or a second one.
 pub const LOSS_SOA: &str = "dns.zonefile.soa";
+
+/// The TTL of a record without one before any `$TTL` or TTL in the file.
+const DEFAULT_TTL: u32 = 3_600;
 
 /// One record of a zone file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,136 +118,313 @@ pub enum Item {
     Loss(Loss),
 }
 
-/// Where the lines of the scanned text come from.
-#[derive(Debug, Default)]
-struct LineMap {
-    /// Byte offset of the start of each scanned line.
-    starts: Vec<usize>,
-    /// The original line of each scanned line (a `$GENERATE` line gives many).
-    origin: Vec<u32>,
-    /// Whether a scanned line is blank or a comment.
-    blank: Vec<bool>,
-}
-
-impl LineMap {
-    fn push(&mut self, start: usize, origin: usize, text: &str) {
-        self.starts.push(start);
-        self.origin.push(u32::try_from(origin).unwrap_or(u32::MAX));
-        let content = text.trim_start();
-        self.blank
-            .push(content.is_empty() || content.starts_with(';'));
-    }
-
-    /// The original line of the first non-blank scanned line at or after `offset`.
-    fn line_at(&self, offset: usize) -> usize {
-        let mut index = self
-            .starts
-            .partition_point(|start| *start <= offset)
-            .saturating_sub(1);
-        while index + 1 < self.blank.len() && self.blank[index] {
-            index += 1;
-        }
-        self.original(index + 1)
-    }
-
-    /// The original line of a scanned line number (from 1).
-    fn original(&self, scanned: usize) -> usize {
-        self.origin
-            .get(scanned.saturating_sub(1))
-            .map_or(scanned, |line| *line as usize)
-    }
+/// What the reader carries from one entry to the next.
+#[derive(Debug)]
+struct State {
+    apex: DnsName,
+    /// The current origin in wire form.
+    origin: Vec<u8>,
+    /// The `$TTL` value.
+    dollar_ttl: Option<u32>,
+    /// The last TTL a record gave.
+    last_ttl: u32,
+    /// The last owner in wire form; empty before the first.
+    owner: Vec<u8>,
+    /// The data of the current record in wire form.
+    data: Vec<u8>,
 }
 
 /// Reads the records of a zone file one by one.
 pub struct Reader {
-    zonefile: Zonefile,
-    lines: LineMap,
-    apex: DnsName,
+    text: String,
+    lexer: Lexer,
+    entry: Entry,
+    generate: Option<Generate>,
+    state: State,
+    max_generate: u32,
+    done: bool,
 }
 
 impl std::fmt::Debug for Reader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Reader")
-            .field("apex", &self.apex)
+            .field("apex", &self.state.apex)
             .finish_non_exhaustive()
     }
 }
 
+fn lex_error((line, reason): LexError) -> ZoneError {
+    ZoneError::zone_file(line, reason)
+}
+
 impl Reader {
-    /// A reader over `text` for the zone `apex`.
+    /// A reader over `text` for the zone `apex`; `$GENERATE` makes at most `max_generate`
+    /// records per directive.
     ///
     /// # Errors
     ///
-    /// `dns.zonefile.invalid` for `$INCLUDE`, a malformed `$GENERATE` or one that makes too
-    /// many records.
+    /// None today; the signature keeps room for checks before the first entry.
     pub fn new(text: &str, apex: &DnsName, max_generate: u32) -> ZoneResult<Self> {
-        let (scanned, lines) = preprocess(text, max_generate)?;
-        // Records of another class are read and reported as losses, not refused.
-        let mut zonefile = Zonefile::with_capacity(scanned.len()).allow_invalid();
-        zonefile.extend_from_slice(scanned.as_bytes());
-        drop(scanned);
-        let origin = Name::<Bytes>::from_octets(Bytes::from(apex.to_wire()))
-            .map_err(|_| ZoneError::zone_file(1, "the zone apex is not a valid name"))?;
-        zonefile.set_origin(origin);
-        zonefile.set_default_class(Class::IN);
         Ok(Self {
-            zonefile,
-            lines,
-            apex: apex.clone(),
+            text: text.to_owned(),
+            lexer: Lexer::new(1),
+            entry: Entry::default(),
+            generate: None,
+            state: State {
+                apex: apex.clone(),
+                origin: apex.to_wire(),
+                dollar_ttl: None,
+                last_ttl: DEFAULT_TTL,
+                owner: Vec::new(),
+                data: Vec::new(),
+            },
+            max_generate,
+            done: false,
         })
     }
 
-    /// The next record or loss; `None` at the end.
+    /// The next record or loss; `None` at the end, and after an error.
     ///
     /// # Errors
     ///
-    /// `dns.zonefile.invalid` with the line of a syntax error or of `$INCLUDE`.
+    /// `dns.zonefile.invalid` with the line and the reason of a syntax error, `$INCLUDE`,
+    /// a malformed `$GENERATE` or one that makes too many records.
     pub fn next_item(&mut self) -> ZoneResult<Option<Item>> {
-        let offset = self.zonefile.current_offset();
-        let entry = match self.zonefile.next_entry() {
-            Ok(Some(entry)) => entry,
-            Ok(None) => return Ok(None),
-            Err(error) => {
-                // The scanner's own line can be the next one when the error shows at the
-                // end of a line; the entry started where the previous one ended.
-                let text = error.to_string();
-                let reason = text
-                    .splitn(3, ':')
-                    .nth(2)
-                    .unwrap_or(&text)
-                    .trim()
-                    .to_owned();
-                return Err(ZoneError::zone_file(self.lines.line_at(offset), reason));
+        if self.done {
+            return Ok(None);
+        }
+        let next = self.read();
+        if !matches!(next, Ok(Some(_))) {
+            self.done = true;
+        }
+        next
+    }
+
+    fn read(&mut self) -> ZoneResult<Option<Item>> {
+        loop {
+            if let Some(generate) = &mut self.generate {
+                let line = generate.line;
+                let bad =
+                    |reason: String| ZoneError::zone_file(line, format!("$GENERATE: {reason}"));
+                let Some(text) = generate.next_line().map_err(bad)? else {
+                    self.generate = None;
+                    continue;
+                };
+                let mut lexer = Lexer::new(line);
+                if !lexer.entry(&text, &mut self.entry).map_err(lex_error)? {
+                    continue;
+                }
+                if self
+                    .entry
+                    .tokens
+                    .first()
+                    .is_some_and(|token| !token.quoted && token.text(&text).starts_with('$'))
+                {
+                    return Err(bad("a generated line is a directive".to_owned()));
+                }
+                let item = self.state.record(&text, &self.entry)?;
+                if lexer.entry(&text, &mut self.entry).map_err(lex_error)? {
+                    return Err(bad("a generated line holds more than one record".to_owned()));
+                }
+                return Ok(Some(item));
             }
+            if !self
+                .lexer
+                .entry(&self.text, &mut self.entry)
+                .map_err(lex_error)?
+            {
+                return Ok(None);
+            }
+            let Some(first) = self.entry.tokens.first().copied() else {
+                continue;
+            };
+            if !self.entry.indented && !first.quoted && first.text(&self.text).starts_with('$') {
+                self.directive()?;
+                continue;
+            }
+            return self.state.record(&self.text, &self.entry).map(Some);
+        }
+    }
+
+    /// `$ORIGIN`, `$TTL`, `$INCLUDE` (refused) or `$GENERATE`.
+    fn directive(&mut self) -> ZoneResult<()> {
+        let src = self.text.as_str();
+        let tokens = self.entry.tokens.as_slice();
+        let first = tokens[0];
+        let line = first.line;
+        let name = first.text(src);
+        let argument = |index: usize, what: &str| {
+            tokens
+                .get(index)
+                .copied()
+                .ok_or_else(|| ZoneError::zone_file(line, format!("{name}: {what} is missing")))
         };
-        let line = self.lines.line_at(offset);
-        let record = match entry {
-            Entry::Record(record) => record,
-            Entry::Include { .. } => {
+        let only = |count: usize| match tokens.get(count) {
+            Some(extra) => Err(ZoneError::zone_file(
+                extra.line,
+                format!(
+                    "{name}: `{}` is more than the directive takes",
+                    extra.text(src)
+                ),
+            )),
+            None => Ok(()),
+        };
+        if name.eq_ignore_ascii_case("$ORIGIN") {
+            let token = argument(1, "the origin")?;
+            only(2)?;
+            let mut origin = Vec::new();
+            text::name(token.text(src), &self.state.origin, &mut origin)
+                .map_err(|reason| ZoneError::zone_file(token.line, format!("$ORIGIN: {reason}")))?;
+            self.state.origin = origin;
+        } else if name.eq_ignore_ascii_case("$TTL") {
+            let token = argument(1, "the TTL")?;
+            only(2)?;
+            let ttl = text::ttl(token.text(src)).ok_or_else(|| {
+                ZoneError::zone_file(
+                    token.line,
+                    format!(
+                        "$TTL is a number of seconds or a duration such as 1h30m, not `{}`",
+                        token.text(src)
+                    ),
+                )
+            })?;
+            self.state.dollar_ttl = Some(ttl);
+        } else if name.eq_ignore_ascii_case("$INCLUDE") {
+            return Err(ZoneError::zone_file(
+                line,
+                "$INCLUDE is refused: the import reads one file",
+            ));
+        } else if name.eq_ignore_ascii_case("$GENERATE") {
+            let range = argument(1, "the range")?;
+            let lhs = argument(2, "the owner")?;
+            if tokens.len() < 5 {
                 return Err(ZoneError::zone_file(
                     line,
-                    "$INCLUDE is refused: the import reads one file",
+                    "$GENERATE: the type and the data are missing",
                 ));
             }
+            let mut rhs = String::new();
+            for token in &tokens[3..] {
+                if !rhs.is_empty() && !token.glued {
+                    rhs.push(' ');
+                }
+                rhs.push_str(token.raw(src));
+            }
+            let generate =
+                Generate::new(range.text(src), lhs.raw(src), rhs, line, self.max_generate)
+                    .map_err(|reason| ZoneError::zone_file(line, format!("$GENERATE: {reason}")))?;
+            self.generate = Some(generate);
+        } else {
+            return Err(ZoneError::zone_file(
+                line,
+                format!("{name} is not a directive the reader knows"),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// `[ttl] [class] type` from `tokens[*index]` on, the TTL and the class in either order
+/// (a token that reads as a TTL is one, then a type, then a class, as RFC 1035 has it).
+fn ttl_class_type(
+    src: &str,
+    tokens: &[lexer::Token],
+    index: &mut usize,
+    last_line: usize,
+) -> ZoneResult<(Option<u32>, Option<u16>, Rtype)> {
+    let mut ttl = None;
+    let mut class = None;
+    loop {
+        let token = tokens
+            .get(*index)
+            .ok_or_else(|| ZoneError::zone_file(last_line, "the record type is missing"))?;
+        let field = token.text(src);
+        *index += 1;
+        if ttl.is_none()
+            && let Some(value) = text::ttl(field)
+        {
+            ttl = Some(value);
+            continue;
+        }
+        if let Some(rtype) = types::parse(field) {
+            return Ok((ttl, class, rtype));
+        }
+        if class.is_none()
+            && let Some(value) = types::parse_class(field)
+        {
+            class = Some(value);
+            continue;
+        }
+        return Err(ZoneError::zone_file(
+            token.line,
+            format!("`{field}` is not a TTL, a class or a record type"),
+        ));
+    }
+}
+
+impl State {
+    /// One record entry.
+    fn record(&mut self, src: &str, entry: &Entry) -> ZoneResult<Item> {
+        let tokens = entry.tokens.as_slice();
+        let Some(first) = tokens.first() else {
+            return Err(ZoneError::zone_file(1, "an empty entry"));
         };
-        let loss =
-            |code: &'static str, detail: String| Ok(Some(Item::Loss(Loss { line, code, detail })));
-        let rtype = Rtype(record.rtype().to_int());
-        if record.class() != Class::IN {
+        let line = first.line;
+        let last_line = tokens.last().map_or(line, |token| token.line);
+        let mut index = 0;
+        if entry.indented {
+            if self.owner.is_empty() {
+                return Err(ZoneError::zone_file(
+                    line,
+                    "the first record has no owner name",
+                ));
+            }
+        } else {
+            self.owner.clear();
+            text::name(first.text(src), &self.origin, &mut self.owner).map_err(|reason| {
+                ZoneError::zone_file(line, format!("the owner name: {reason}"))
+            })?;
+            index = 1;
+        }
+
+        let (ttl, class, rtype) = ttl_class_type(src, tokens, &mut index, last_line)?;
+        let ttl = match ttl {
+            Some(ttl) => {
+                self.last_ttl = ttl;
+                ttl
+            }
+            None => self.dollar_ttl.unwrap_or(self.last_ttl),
+        };
+
+        // The data; a syntax error in it stops the read before any loss is reported.
+        let data = &tokens[index..];
+        let mut fields = Fields::new(src, data, last_line, &self.origin);
+        self.data.clear();
+        let parsed = if parse::is_generic(src, data) {
+            Some(parse::generic(&mut fields, &mut self.data))
+        } else {
+            parse::data(rtype, &mut fields, &mut self.data)
+        };
+        let known = match parsed {
+            Some(Ok(())) => true,
+            Some(Err((line, reason))) => return Err(ZoneError::zone_file(line, reason)),
+            None => false,
+        };
+
+        let loss = |code: &'static str, detail: String| Ok(Item::Loss(Loss { line, code, detail }));
+        let class = class.unwrap_or(types::IN);
+        if class != types::IN {
             return loss(
                 LOSS_CLASS,
-                format!("a record of class {} is not served", record.class()),
+                format!(
+                    "a record of class {} is not served",
+                    types::class_name(class)
+                ),
             );
         }
-        let mut owner_wire = Vec::new();
-        if record.owner().compose(&mut owner_wire).is_err() {
-            return loss(LOSS_DATA, "the owner name does not encode".to_owned());
-        }
-        let name = match DnsName::from_wire(&owner_wire) {
+        let name = match DnsName::from_wire(&self.owner) {
             Ok((name, _)) => name,
-            Err(error) => {
-                return loss(LOSS_DATA, format!("owner name refused: {}", error.reason));
-            }
+            Err(error) => return loss(LOSS_DATA, format!("owner name refused: {}", error.reason)),
         };
         if !name.is_subdomain_of(&self.apex) {
             return loss(
@@ -230,236 +432,27 @@ impl Reader {
                 format!("{name} is outside the zone {}", self.apex),
             );
         }
-        let mut data = Vec::new();
-        if record.data().compose_rdata(&mut data).is_err() {
+        if !known {
             return loss(
                 LOSS_DATA,
-                format!("{name} {rtype}: the data does not encode"),
+                format!(
+                    "{name} {}: the data of this type is read only in the generic form \\# (RFC 3597)",
+                    types::name(rtype)
+                ),
             );
         }
-        let rdata = match Rdata::from_wire(rtype, &data) {
+        let rdata = match Rdata::from_wire(rtype, &self.data) {
             Ok(rdata) => rdata,
-            Err(error) => {
-                return loss(LOSS_DATA, format!("{name} {rtype}: {}", error.reason));
-            }
+            Err(error) => return loss(LOSS_DATA, format!("{name} {rtype}: {}", error.reason)),
         };
-        Ok(Some(Item::Record(FileRecord {
+        Ok(Item::Record(FileRecord {
             line,
             name,
             rtype,
-            ttl: record.ttl().as_secs(),
+            ttl,
             rdata,
-        })))
+        }))
     }
-}
-
-// ----- preprocessing --------------------------------------------------------------------
-
-/// Expands `$GENERATE`, refuses `$INCLUDE`, and maps the scanned lines to the original
-/// ones. A directive counts only at the start of a line outside parentheses and quotes.
-fn preprocess(text: &str, max_generate: u32) -> ZoneResult<(String, LineMap)> {
-    let mut out = String::with_capacity(text.len() + 1);
-    let mut lines = LineMap::default();
-    let mut depth = 0usize;
-    let mut quoted = false;
-    let mut opened = 0usize;
-    for (index, raw) in text.split('\n').enumerate() {
-        let number = index + 1;
-        let line = raw.strip_suffix('\r').unwrap_or(raw);
-        if depth == 0 && !quoted && line.starts_with('$') {
-            let directive: String = line
-                .split(|c: char| c.is_ascii_whitespace())
-                .next()
-                .unwrap_or_default()
-                .to_ascii_uppercase();
-            match directive.as_str() {
-                "$INCLUDE" => {
-                    return Err(ZoneError::zone_file(
-                        number,
-                        "$INCLUDE is refused: the import reads one file",
-                    ));
-                }
-                "$GENERATE" => {
-                    for generated in generate(line, number, max_generate)? {
-                        follow(&generated, number, &mut depth, &mut quoted, &mut opened);
-                        lines.push(out.len(), number, &generated);
-                        out.push_str(&generated);
-                        out.push('\n');
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        follow(line, number, &mut depth, &mut quoted, &mut opened);
-        lines.push(out.len(), number, line);
-        out.push_str(line);
-        out.push('\n');
-    }
-    // A record whose parenthesis is still open at the end has no line end: the scanner of
-    // `domain` 0.12.3 then reads TXT data past the end of its buffer and panics
-    // (`scan_charstr_entry` stops only at a line end), so such a file is refused here.
-    if depth > 0 {
-        return Err(ZoneError::zone_file(
-            opened,
-            "the parenthesis opened on this line is not closed by the end of the file",
-        ));
-    }
-    Ok((out, lines))
-}
-
-/// Follows parentheses and quotes over one line, and records the line that opened the
-/// outermost open parenthesis.
-fn follow(line: &str, number: usize, depth: &mut usize, quoted: &mut bool, opened: &mut usize) {
-    let closed = *depth == 0;
-    scan_state(line, depth, quoted);
-    if closed && *depth > 0 {
-        *opened = number;
-    }
-}
-
-/// Follows parentheses and quotes over one line.
-fn scan_state(line: &str, depth: &mut usize, quoted: &mut bool) {
-    let mut chars = line.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => {
-                chars.next();
-            }
-            '"' => *quoted = !*quoted,
-            ';' if !*quoted => break,
-            '(' if !*quoted => *depth += 1,
-            ')' if !*quoted => *depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-}
-
-/// The lines of one `$GENERATE range lhs [ttl] [class] type rhs`.
-fn generate(line: &str, number: usize, max: u32) -> ZoneResult<Vec<String>> {
-    let content = line.split(';').next().unwrap_or_default();
-    let mut fields = content.split_ascii_whitespace();
-    let _ = fields.next();
-    let bad = |reason: &str| ZoneError::zone_file(number, format!("$GENERATE: {reason}"));
-    let range = fields.next().ok_or_else(|| bad("the range is missing"))?;
-    let lhs = fields.next().ok_or_else(|| bad("the owner is missing"))?;
-    let rest: Vec<&str> = fields.collect();
-    if rest.len() < 2 {
-        return Err(bad("the type and the data are missing"));
-    }
-    let (bounds, step) = match range.split_once('/') {
-        Some((bounds, step)) => (
-            bounds,
-            step.parse::<u64>()
-                .map_err(|_| bad("the step is not a number"))?,
-        ),
-        None => (range, 1),
-    };
-    let (low, high) = bounds
-        .split_once('-')
-        .ok_or_else(|| bad("the range is start-stop"))?;
-    let first: u64 = low
-        .parse()
-        .map_err(|_| bad("the range start is not a number"))?;
-    let last: u64 = high
-        .parse()
-        .map_err(|_| bad("the range stop is not a number"))?;
-    if step == 0 || last < first {
-        return Err(bad(
-            "the range runs from start up to stop by a step above zero",
-        ));
-    }
-    let count = (last - first) / step + 1;
-    if count > u64::from(max) {
-        return Err(bad(&format!(
-            "the range makes {count} records, more than {max}"
-        )));
-    }
-    let rest = rest.join(" ");
-    let mut out = Vec::with_capacity(usize::try_from(count).unwrap_or_default());
-    let mut value = first;
-    while value <= last {
-        let owner = substitute(lhs, value).map_err(|reason| bad(&reason))?;
-        let data = substitute(&rest, value).map_err(|reason| bad(&reason))?;
-        out.push(format!("{owner} {data}"));
-        value += step;
-    }
-    Ok(out)
-}
-
-/// Replaces `$` and `${offset,width,base}` with the iterator; `\$` and `$$` are a `$`.
-fn substitute(template: &str, value: u64) -> Result<String, String> {
-    let mut out = String::with_capacity(template.len() + 8);
-    let bytes: Vec<char> = template.chars().collect();
-    let mut index = 0;
-    while index < bytes.len() {
-        let c = bytes[index];
-        match c {
-            '\\' | '$' if bytes.get(index + 1) == Some(&'$') => {
-                out.push('$');
-                index += 2;
-            }
-            '$' if bytes.get(index + 1) == Some(&'{') => {
-                let close = bytes[index..]
-                    .iter()
-                    .position(|c| *c == '}')
-                    .ok_or("an unclosed ${")?;
-                let spec: String = bytes[index + 2..index + close].iter().collect();
-                out.push_str(&modifier(&spec, value)?);
-                index += close + 1;
-            }
-            '$' => {
-                out.push_str(&value.to_string());
-                index += 1;
-            }
-            other => {
-                out.push(other);
-                index += 1;
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// One `${offset,width,base}`.
-fn modifier(spec: &str, value: u64) -> Result<String, String> {
-    let mut parts = spec.split(',');
-    let offset: i64 = parts
-        .next()
-        .filter(|part| !part.is_empty())
-        .map_or(Ok(0), str::parse)
-        .map_err(|_| "the offset is not a number".to_owned())?;
-    let width: usize = parts
-        .next()
-        .filter(|part| !part.is_empty())
-        .map_or(Ok(0), str::parse)
-        .map_err(|_| "the width is not a number".to_owned())?;
-    let base = parts.next().unwrap_or("d");
-    let shifted = i64::try_from(value)
-        .ok()
-        .and_then(|value| value.checked_add(offset))
-        .filter(|value| *value >= 0)
-        .ok_or("the offset moves the value below zero")?;
-    let shifted = u64::try_from(shifted).unwrap_or_default();
-    Ok(match base {
-        "d" => format!("{shifted:0width$}"),
-        "o" => format!("{shifted:0width$o}"),
-        "x" => format!("{shifted:0width$x}"),
-        "X" => format!("{shifted:0width$X}"),
-        "n" | "N" => {
-            let hex = if base == "n" {
-                format!("{shifted:0width$x}")
-            } else {
-                format!("{shifted:0width$X}")
-            };
-            let mut nibbles: Vec<String> = hex.chars().rev().map(String::from).collect();
-            if width > 0 {
-                nibbles.truncate(width);
-            }
-            nibbles.join(".")
-        }
-        _ => return Err(format!("the base {base} is not d, o, x, X, n or N")),
-    })
 }
 
 // ----- writing --------------------------------------------------------------------------
@@ -484,26 +477,19 @@ pub fn absolute(name: &DnsName) -> String {
 ///
 /// `dns.record.invalid` when stored data does not parse.
 pub fn presentation(rtype: Rtype, rdata: &Rdata) -> ZoneResult<String> {
-    let mut parser = Parser::from_ref(rdata.as_bytes());
-    let parsed = ZoneRecordData::<&[u8], ParsedName<&[u8]>>::parse_rdata(
-        WireRtype::from_int(rtype.0),
-        &mut parser,
-    )
-    .ok()
-    .flatten()
-    .ok_or_else(|| {
+    let data = rdata.decode(rtype).map_err(|_| {
         ZoneError::new(
             tenko_core::dns::codes::RECORD_INVALID,
             400,
             format!("stored {rtype} data does not parse"),
         )
     })?;
-    Ok(parsed.display_zonefile(DisplayKind::Simple).to_string())
+    Ok(present::typed(&data).unwrap_or_else(|| present::generic(rdata.as_bytes())))
 }
 
 /// The type as the zone file names it.
 pub fn type_name(rtype: Rtype) -> String {
-    WireRtype::from_int(rtype.0).to_string()
+    types::name(rtype)
 }
 
 /// Writes the lines of one RRset.
@@ -524,60 +510,4 @@ pub fn write_rrset(out: &mut String, apex: &DnsName, rrset: &RrSet) -> ZoneResul
 }
 
 #[cfg(test)]
-mod tests {
-    use tenko_core::dns::codes;
-
-    use super::*;
-
-    /// Reads every item the way the fuzz target `dns_zonefile` does, until the end or the
-    /// first error.
-    fn read_all(text: &str) -> ZoneResult<Vec<Item>> {
-        let apex = DnsName::new("example.test").expect("name");
-        let mut reader = Reader::new(text, &apex, 256)?;
-        let mut items = Vec::new();
-        while let Some(item) = reader.next_item()? {
-            items.push(item);
-        }
-        Ok(items)
-    }
-
-    fn assert_unclosed(text: &str, line: usize) {
-        let error = read_all(text).expect_err("an unclosed parenthesis is refused");
-        assert!(error.is(codes::ZONE_FILE_INVALID), "{error:?}");
-        let detail = &error.coded().detail;
-        assert!(detail.starts_with(&format!("line {line}: ")), "{detail}");
-        assert!(detail.contains("parenthesis"), "{detail}");
-    }
-
-    /// The input the fuzz target `dns_zonefile` found against 0.0.10: a TXT record whose
-    /// parenthesis is still open at the end of the file made the scanner of `domain` index
-    /// past its buffer.
-    #[test]
-    fn a_parenthesis_open_at_the_end_of_the_file_is_refused_without_a_panic() {
-        let text = "txt IN TXT \"hello world\" \"second string\" ( \"third\" llo worN CAA 0 \
-                    iss\" ueca.example.test\"\n_sip._tpc IN SRV 61 60 506i p0$ORIGIN \
-                    examsple.t.";
-        assert_eq!(text.len(), 139);
-        assert_unclosed(text, 1);
-        assert_unclosed("www IN TXT ( \"a\"", 1);
-        assert_unclosed("www IN TXT ( \"a\"\n", 1);
-        assert_unclosed(
-            "www IN A 192.0.2.1\nwww IN TXT \"a\" (\n \"b\" ; ) a comment\n",
-            2,
-        );
-        // The lines `$GENERATE` makes count too.
-        assert_unclosed("$GENERATE 1-2 host$ TXT ( \"a\"\n", 1);
-        // A quote open at the end is the scanner's own error.
-        let error = read_all("www IN TXT \"a").expect_err("an unclosed quote is refused");
-        assert!(error.is(codes::ZONE_FILE_INVALID), "{error:?}");
-    }
-
-    #[test]
-    fn parentheses_closed_by_the_end_of_the_file_still_read() {
-        let items = read_all("www IN TXT ( \"a\" \"(\"\n \"b\" ) ; ( in a comment\n")
-            .expect("the file reads");
-        assert_eq!(items.len(), 1);
-        let items = read_all("www IN TXT ( \"a\"\n )").expect("the file reads");
-        assert_eq!(items.len(), 1);
-    }
-}
+mod tests;

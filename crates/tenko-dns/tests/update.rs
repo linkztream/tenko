@@ -169,7 +169,7 @@ async fn lab_with(follow: bool, settings: UpdateSettings, profile: UpdateProfile
         )
         .await
         .expect("key");
-    let secret = domain::utils::base64::decode::<Vec<u8>>(created.secret.as_str()).expect("base64");
+    let secret = tenko_dns::zone::encoding::base64_decode(created.secret.as_str()).expect("base64");
     let key = Arc::new(TsigKey::new(&name(KEY), TsigAlgorithm::HmacSha256, &secret));
     let (updaters, _) = zones
         .create_acl(

@@ -321,7 +321,7 @@ fn zones_records_and_zone_files() {
         .assert_stdout_contains("preview:")
         .assert_stdout_contains("records per type:")
         .assert_stdout_contains("losses: ")
-        .assert_stdout_contains("line 9: [dns.zonefile.class]");
+        .assert_stdout_contains("line 10: [dns.zonefile.class]");
     let preview_json = node.client(&[
         "dns",
         "import",
@@ -347,7 +347,7 @@ fn zones_records_and_zone_files() {
     imported
         .assert_code(0)
         .assert_stdout_contains("imported:")
-        .assert_stdout_contains("line 9: [dns.zonefile.class]");
+        .assert_stdout_contains("line 10: [dns.zonefile.class]");
     let after = record_lines(&node.client(&["dns", "record", "list", ZONE]));
     for wanted in [
         "host1.example.test A 192.0.2.1",

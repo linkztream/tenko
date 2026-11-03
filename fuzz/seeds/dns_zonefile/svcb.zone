@@ -1,0 +1,7 @@
+$ORIGIN example.test.
+_dns IN SVCB 1 dns.example.test. alpn=dot,doh port=853 dohpath=/dns-query{?dns}
+svc IN HTTPS 1 . ( alpn="h2,h3" ; quoted
+    no-default-alpn port=8443
+    ipv4hint=192.0.2.1,192.0.2.2 ipv6hint=2001:db8::1
+    ech=AQIDBA== mandatory=alpn,port key65000=x )
+alias IN HTTPS 0 svc.example.net.

@@ -30,7 +30,7 @@ fn name(text: &str) -> DnsName {
 }
 
 fn b64(text: &str) -> Vec<u8> {
-    domain::utils::base64::decode(text).expect("base64")
+    tenko_dns::zone::encoding::base64_decode(text).expect("base64")
 }
 
 fn hex(text: &str) -> Vec<u8> {

@@ -140,7 +140,7 @@ impl ZoneService {
             ));
         }
         let secret = if let Some(text) = &new.secret {
-            let bytes: Vec<u8> = domain::utils::base64::decode(text.trim())
+            let bytes = super::encoding::base64_decode(text.trim())
                 .map_err(|_| invalid("secret", "the secret is not base64"))?;
             if !(16..=1024).contains(&bytes.len()) {
                 return Err(invalid("secret", "a secret is 16 to 1024 octets"));
@@ -203,9 +203,7 @@ impl ZoneService {
                 Ok(committed) => {
                     return Ok(CreatedKey {
                         key,
-                        secret: Zeroizing::new(domain::utils::base64::encode_string(
-                            secret.expose(),
-                        )),
+                        secret: Zeroizing::new(super::encoding::base64_encode(secret.expose())),
                         revision: committed.revision,
                     });
                 }

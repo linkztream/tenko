@@ -83,10 +83,11 @@ fn args() -> Args {
                 eprintln!("{path}: {error}");
                 std::process::exit(2)
             });
-            let secret: Vec<u8> = domain::utils::base64::decode(text.trim()).unwrap_or_else(|_| {
-                eprintln!("{path}: not base64");
-                std::process::exit(2)
-            });
+            let secret =
+                tenko_dns::zone::encoding::base64_decode(text.trim()).unwrap_or_else(|_| {
+                    eprintln!("{path}: not base64");
+                    std::process::exit(2)
+                });
             let name = DnsName::new(&name).unwrap_or_else(|_| usage());
             Some(Arc::new(TsigKey::new(
                 &name,

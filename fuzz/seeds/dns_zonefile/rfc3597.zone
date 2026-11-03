@@ -1,0 +1,8 @@
+$ORIGIN example.test.
+; RFC 3597: the generic form, also for types the reader knows
+unknown 300 IN TYPE65280 \# 4 c0000201
+empty IN TYPE65281 \# 0
+split IN TYPE65282 \# 6 ( 0102 03
+ 040506 )
+address IN A \# 4 C0000202
+spf IN SPF \# 6 05763d737066

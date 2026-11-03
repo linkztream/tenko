@@ -146,13 +146,18 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 
 ### Import
 
-`POST /dns/zones/{id}/records/import` takes `{"zone_file": "<text>", "scope": "default", "replace": false}`. The reader is `domain`'s RFC 1035 zone file scanner:
+`POST /dns/zones/{id}/records/import` takes `{"zone_file": "<text>", "scope": "default", "replace": false}`. The reader is Tenko's own (`tenko_dns::zone::zonefile`), RFC 1035 section 5 with the BIND conventions:
 
+- an entry is `owner [ttl] [class] type data`, with blank lines, `;` comments, `(` `)` continuing an entry across lines, quoted strings and the escapes `\X` and `\DDD`; `@` is the origin, a name without a trailing dot is completed with the origin, and a line that starts with white space has the previous owner;
+- the TTL and the class come in either order and are optional; a record without a TTL takes `$TTL`, else the last TTL given, else 3600 s. A TTL (also `$TTL`, the four SOA timers and the RRSIG original TTL) is a number of seconds or a duration with BIND's units `w`, `d`, `h`, `m` and `s`, combined (`1h30m`);
+- the class is IN (another class is a loss); the type is its mnemonic in any case or `TYPEnnn`;
+- the data of every type the model serves is read in its presentation form: SVCB and HTTPS with the parameters of RFC 9460 (`mandatory`, `alpn`, `no-default-alpn`, `port`, `ipv4hint`, `ech`, `ipv6hint`, `dohpath`, `ohttp` and `keyNNNNN`, values quoted or not), RRSIG times as `YYYYMMDDHHmmSS` or seconds, base64 and hex split across tokens; so is the data of CDS, CDNSKEY, HINFO, MB, MD, MF, MG, MINFO, MR, NAPTR, OPENPGPKEY, RP, SSHFP and ZONEMD. Every type also reads the generic form of RFC 3597 (`\# 4 c0000201`); a record of another type written in its own form is a loss. A TXT string longer than 255 octets is split into strings of at most 255 octets (DNS-24);
 - `$ORIGIN` and `$TTL` are honoured; the zone apex is the first origin, so relative names work without a `$ORIGIN` line;
 - `$INCLUDE` is refused with 422 `dns.zonefile.invalid` and its line: the import reads one uploaded file;
-- `$GENERATE range lhs [ttl] [class] type rhs` (the BIND extension) is expanded, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`), `\$` and `$$`, at most 65,536 records per line;
-- a syntax error stops the import with 422 `dns.zonefile.invalid` (parameters `line` and `reason`);
-- a parenthesis still open at the end of the file (also one a `$GENERATE` line opened) is refused before the scan with 422 `dns.zonefile.invalid` and the line that opened it: `domain` 0.12.3's scanner panics on a TXT record that runs to the end of its input without a line end.
+- `$GENERATE range lhs [ttl] [class] type rhs` (the BIND extension) is expanded one record at a time, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`, a width of at most 255), `\$` and `$$`, at most 65,536 records per directive; the records carry the directive's line;
+- a syntax error stops the import with 422 `dns.zonefile.invalid`, parameters `line` (the line of the token where the error was found, also inside a record that spans lines) and `reason`; a quote or a parenthesis still open at the end of the file is refused with the line that opened it.
+
+The reader indexes the text only within checked bounds, keeps the limits of names (255 octets), labels (63), character strings (255) and record data (65,535), does not recurse on its input and holds the text, one entry and one `$GENERATE` record at a time. The fuzz target `dns_zonefile` runs it, and a differential test reads the test zones, the fuzz seeds and a generated corpus with `domain`'s zone file scanner as well (`crates/tenko-dns/tests/zonefile_differential.rs`, which lists the accepted differences with their reasons).
 
 With `dry_run=true` the answer (200) is the preview: the records per type the file brings (`types`), the RRsets the import would add, replace and, with `replace`, remove, and the losses. Without it the preview runs first (so a file that does not parse is refused at once), then the import starts as the background job `dns.import` and the answer is 202 with `job_id` and `Location: /api/v1/jobs/{id}`. The job has one step `dns.import.chunk` per 5,000 RRsets of the preview and a final step `dns.import.finish`; the steps done show the progress, and the final step's output is the report as JSON (hex in the job record): `added`, `replaced`, `removed`, `types`, the first 1,000 `losses` and `lost` (all of them), the new `serial` and the `revision`.
 
@@ -164,7 +169,7 @@ How the file is merged, per owner name (records of one owner that follow each ot
 - the apex SOA of the file is not written as a record: its values become the scope's SOA (and the zone's `soa` settings for the default scope), and its serial is kept when it is newer than the scope's serial, else the serial moves by the zone's policy, once, at the end; an import that changes no RRset and no SOA value and brings no newer serial leaves the serial and the journal alone, so importing an export into its own zone gives the same file again;
 - with `replace`, the final step deletes the `manual` RRsets of the scope the import did not write, except the apex SOA and, when the file has no apex NS set, the apex NS.
 
-The losses: a record of a class other than IN (`dns.zonefile.class`), an owner outside the zone (`dns.zonefile.outside_zone`), a name or data the model refuses, such as a name outside its character set (`dns.zonefile.data`), an SOA that is not the apex SOA or a second one (`dns.zonefile.soa`), and the two above.
+The losses: a record of a class other than IN (`dns.zonefile.class`), an owner outside the zone (`dns.zonefile.outside_zone`), a name or data the model refuses, such as a name outside its character set, and a record of a type the reader reads only in the generic form that is written in its own form, such as LOC (`dns.zonefile.data`), an SOA that is not the apex SOA or a second one (`dns.zonefile.soa`), and the two above.
 
 The chunks do not expect the versions of what they replace: a change made while an import runs may be overwritten by it. When a step fails, or the controller restarts and the staged file is gone (`dns.job.import_missing`), the chunks written so far stay and the job ends rolled back with the error; importing the same file again completes the zone.
 
@@ -189,7 +194,7 @@ www 600 IN A 192.0.2.10
 www 600 IN A 192.0.2.11
 ```
 
-The apex SOA comes first, then every RRset in canonical name order with the types ascending, one record per line: the owner relative to the apex (`@` for the apex), the TTL, `IN`, the type and the data in presentation format with absolute names, the records of an RRset in canonical order (by wire form). The same data always gives the same bytes, and a file the export wrote imports and exports to the same bytes. Every export writes the audit record `dns.zone.export`.
+The apex SOA comes first, then every RRset in canonical name order with the types ascending, one record per line: the owner relative to the apex (`@` for the apex), the TTL, `IN`, the type and the data in presentation format with absolute names, the records of an RRset in canonical order (by wire form). Character strings are quoted with octets outside printable ASCII as `\DDD`, DS, TLSA and NSEC3 salts are upper case hex, DNSKEY and RRSIG base64, RRSIG times seconds, SVCB and HTTPS parameters in the form of RFC 9460 (a value its key's form cannot carry as `keyNNNNN`); a type without a presentation form here, and data its type's form cannot carry (an empty DS digest, DNSKEY key, RRSIG signature or TLSA data, opaque data that does not parse as its type), is written in the generic form of RFC 3597. The same data always gives the same bytes, and a file the export wrote imports and exports to the same bytes. Every export writes the audit record `dns.zone.export`.
 
 ```
 tenko dns export example.test --file example.test.zone
@@ -201,11 +206,13 @@ tenko dns export example.test --file example.test.zone
 |---|---|
 | Zone file size | 1 GiB (the request body) |
 | Records per `$GENERATE` line | 65,536 |
+| Tokens per entry (record or directive) | 262,144 |
+| One token, or the base64 or hex of one record | 262,140 characters (65,535 octets as `\DDD`) |
 | RRsets per import chunk | 5,000 |
 | Losses listed in a report | 1,000 (all are counted) |
 | An import that leaves one journal entry | one chunk and at most 10,000 changed records; a larger import resets the scope's journal |
 
-The import keeps the uploaded text and the scanner's copy in memory while it runs (on the controller that took the request) and one chunk of RRsets at a time; it never holds the parsed zone.
+The import keeps the uploaded text and the reader's copy in memory while it runs (on the controller that took the request) and one chunk of RRsets at a time; it never holds the parsed zone.
 
 | Operation | Route | Scope |
 |---|---|---|

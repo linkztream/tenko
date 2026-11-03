@@ -1,0 +1,10 @@
+$ORIGIN example.test.
+$TTL 1h30m
+@ 1d IN SOA ns1 hostmaster ( 2026110301 ; serial
+        3h   ; refresh
+        15M  ; retry
+        2w   ; expire
+        5m ) ; minimum
+@ IN 1W NS ns1
+ns1 IN A 192.0.2.53
+www 10s A 192.0.2.10

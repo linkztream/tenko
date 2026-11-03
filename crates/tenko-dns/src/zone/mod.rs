@@ -12,7 +12,8 @@
 //! | [`records`] | batch changes of RRsets with a dry run and a diff |
 //! | [`serial`] | SOA serials per policy |
 //! | [`journal`] | the IXFR journal of each zone scope, bounded by entries and days |
-//! | [`zonefile`] | the zone file reader (`$ORIGIN`, `$TTL`, `$GENERATE`; `$INCLUDE` refused) and writer |
+//! | [`zonefile`] | the zone file reader (`$ORIGIN`, `$TTL`, `$GENERATE`; `$INCLUDE` refused) and writer, Tenko's own |
+//! | [`encoding`] | base64, base32hex and hex for zone files and TSIG secrets |
 //! | [`export`] | the zone file export (MIG-15) |
 //! | [`import`] | the zone file import: preview, then a background job in chunks |
 //! | [`acl`] | access lists |
@@ -38,6 +39,7 @@
 //! zone and origin), so a zone list needs no scan of the records.
 
 pub mod acl;
+pub mod encoding;
 mod error;
 pub mod export;
 pub mod import;

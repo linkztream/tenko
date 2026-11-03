@@ -1,0 +1,4 @@
+a IN A 192.0.2.1
+b IN TXT "open
+
+c IN A 192.0.2.2
