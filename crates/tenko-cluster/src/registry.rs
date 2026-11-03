@@ -212,6 +212,18 @@ fn invalid_token() -> ClusterError {
     )
 }
 
+/// What the cluster port that opens on demand (`[cluster] listen` not set) serves
+/// ([`NodeRegistry::port_demand`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortDemand {
+    /// No node is enrolled and no token is waiting: the port closes.
+    Idle,
+    /// No node is enrolled; tokens are waiting, the last of them until this time.
+    Until(Timestamp),
+    /// A node is enrolled: nodes connect to the port.
+    Enrolled,
+}
+
 /// The node registry of a controller.
 pub struct NodeRegistry {
     store: Arc<dyn Store>,
@@ -351,11 +363,21 @@ impl NodeRegistry {
         self.listener_wanted.notify_one();
     }
 
-    /// Resolves once [`want_listener`](Self::want_listener) was called.
+    /// Resolves once [`want_listener`](Self::want_listener) was called (since the last
+    /// [`forget_listener_wanted`](Self::forget_listener_wanted)).
     pub async fn listener_wanted(&self) {
         while !self.wanted.load(std::sync::atomic::Ordering::SeqCst) {
             self.listener_wanted.notified().await;
         }
+    }
+
+    /// Forgets the requests of [`want_listener`](Self::want_listener) so far. The listener
+    /// that starts on demand calls it before it reads [`port_demand`](Self::port_demand): a
+    /// token created after the call asks again, so a token that the read did not see yet
+    /// opens the port again at once after it closed.
+    pub fn forget_listener_wanted(&self) {
+        self.wanted
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     // -----------------------------------------------------------------------------------
@@ -383,17 +405,30 @@ impl NodeRegistry {
     ///
     /// A store error.
     pub async fn in_use(&self, now: Timestamp) -> Result<bool, ClusterError> {
+        Ok(self.port_demand(now).await? != PortDemand::Idle)
+    }
+
+    /// What the cluster port that opens on demand serves at `now`: enrolled nodes, waiting
+    /// tokens (until the last of them expires), or nothing.
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub async fn port_demand(&self, now: Timestamp) -> Result<PortDemand, ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         if !view
             .scan_typed(&tables::NODES, KeyRange::all(), 1, false)?
             .is_empty()
         {
-            return Ok(true);
+            return Ok(PortDemand::Enrolled);
         }
         Ok(view
             .scan_typed(&tables::ENROLMENTS, KeyRange::all(), usize::MAX, false)?
             .iter()
-            .any(|(_, record, _)| record.used.is_none() && record.expires_at > now))
+            .filter(|(_, record, _)| record.used.is_none() && record.expires_at > now)
+            .map(|(_, record, _)| record.expires_at)
+            .max()
+            .map_or(PortDemand::Idle, PortDemand::Until))
     }
 
     /// Removes expired revocations, and used or expired tokens older than

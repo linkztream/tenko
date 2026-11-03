@@ -50,7 +50,7 @@ Every field is optional. The command line flags are `--roles` (comma-separated),
 
 The answer shows the token once and carries `Cache-Control: no-store`. It holds the stored token record, the SHA-256 fingerprint of the CA root and the command line to run on the node. `tenko node enrol-token` prints the token on standard output and the other lines as notes, so a script can capture the token. The controller keeps only a digest, SHA-256 over a fixed label, the token id and the secret, so a copy of its store reveals no token.
 
-The token text has the form `tnk1.<id>.<secret>`: the prefix `tnk1`, the id of the token record as 32 hexadecimal digits, and the secret as 43 characters of unpadded base64url. Creating a token opens the cluster port when it starts on demand (section 7.2).
+The token text has the form `tnk1.<id>.<secret>`: the prefix `tnk1`, the id of the token record as 32 hexadecimal digits, and the secret as 43 characters of unpadded base64url. Creating a token opens the cluster port when it starts on demand, and the port closes again once no token is waiting and no node is enrolled (section 7.2).
 
 `GET /api/v1/nodes/enrolments` lists the tokens, newest first, with the state `pending`, `used` or `expired` and the node a used token enrolled; it never shows the token text. Used and expired tokens stay listed for seven days. `DELETE /api/v1/nodes/enrolments/{id}` withdraws a token, whatever its state.
 
@@ -286,7 +286,7 @@ Nodes connect out to the controller. Allow 8444/TCP from the node networks to th
 
 | `[cluster] listen` | Behaviour |
 |---|---|
-| Not set | `0.0.0.0:8444`. The port opens at start when a node is enrolled or a token is waiting, and else when the first token is created. A member of a cluster of controllers opens it at once, in start step 3 (section 12.2) |
+| Not set | `0.0.0.0:8444`. The port opens at start when a node is enrolled or a token is waiting, and else when a token is created. It closes again, without a restart, when no token is waiting any more (the last one was withdrawn, used or expired) and no node is enrolled (none ever was, or the last one was revoked); the next token opens it again. The log says `cluster port 0.0.0.0:8444 opens with an enrolment token` and `cluster port 0.0.0.0:8444 closed: no enrolment token waiting and no node enrolled`, and `cluster.listening` in `GET /api/v1/system/status` follows within a few seconds. A member of a cluster of controllers opens it at once, in start step 3 (section 12.2), and keeps it open |
 | A list of addresses | The port is always open on those addresses. The server does not start when one cannot be bound (`cluster.listen`) |
 | `[]` | The port is never open. A member of a cluster of controllers does not start with it (`cluster.member.port_off`) |
 

@@ -32,7 +32,7 @@ use tenko_cluster::{
     kek::VaultKekSource,
     peers::{Peers, VaultIdentity},
     probe::{DiscardProbes, IngestCounts, ProbeBatch, ProbeSink},
-    registry::{NodeRegistry, PruneService, RegistryConfig},
+    registry::{NodeRegistry, PortDemand, PruneService, RegistryConfig},
     server::{ClusterListener, ClusterService},
 };
 use tenko_core::cluster::LeaderService;
@@ -370,37 +370,35 @@ pub async fn start_with(
             );
             format!("cluster port on {}", addresses(&bound))
         }
-        ClusterListen::OnDemand(addrs) if in_use => {
-            let listener = ClusterListener::bind(&addrs)
-                .await
-                .map_err(|error| start_error(&error))?;
-            let bound = listener.local_addrs();
-            tasks.push(
-                listener
-                    .serve_with_peers(
-                        &registry,
-                        Arc::clone(&sink),
-                        resolver.clone(),
-                        layer.clone(),
-                        stop.clone(),
-                    )
-                    .map_err(|error| start_error(&error))?,
-            );
-            format!("cluster port on {}", addresses(&bound))
-        }
         ClusterListen::OnDemand(addrs) => {
+            let (open, summary) = if in_use {
+                let listener = ClusterListener::bind(&addrs)
+                    .await
+                    .map_err(|error| start_error(&error))?;
+                let bound = listener.local_addrs();
+                let port =
+                    OnDemandPort::serve(listener, &registry, &sink, &resolver, layer.as_ref())
+                        .map_err(|error| start_error(&error))?;
+                (Some(port), format!("cluster port on {}", addresses(&bound)))
+            } else {
+                (
+                    None,
+                    format!(
+                        "cluster port {} opens with an enrolment token",
+                        addresses(&addrs)
+                    ),
+                )
+            };
             tasks.push(tokio::spawn(on_demand(
                 Arc::clone(&registry),
                 addrs.clone(),
                 Arc::clone(&sink),
                 resolver.clone(),
                 layer.clone(),
+                open,
                 stop.clone(),
             )));
-            format!(
-                "cluster port {} opens with the first enrolment token",
-                addresses(&addrs)
-            )
+            summary
         }
         ClusterListen::Off => "cluster port off ([cluster] listen = [])".to_owned(),
     };
@@ -472,31 +470,141 @@ impl Cluster {
     }
 }
 
-/// Opens the cluster port once an enrolment token asks for it.
+/// A cluster port that opened on demand: `close` stops it, `task` ends once the socket is
+/// released.
+struct OnDemandPort {
+    close: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+impl OnDemandPort {
+    /// Serves `listener` until [`OnDemandPort::shut`].
+    fn serve(
+        listener: ClusterListener,
+        registry: &Arc<NodeRegistry>,
+        sink: &Arc<dyn ProbeSink>,
+        resolver: &Arc<TlsResolver>,
+        peers: Option<&Peers>,
+    ) -> Result<Self, ClusterError> {
+        let (close, closed) = watch::channel(false);
+        let task = listener.serve_with_peers(
+            registry,
+            Arc::clone(sink),
+            resolver.clone(),
+            peers.cloned(),
+            closed,
+        )?;
+        Ok(Self { close, task })
+    }
+
+    /// Stops the port the way the server's stop does (connections drained for a grace
+    /// period, then cut) and waits until its sockets are closed.
+    async fn shut(self) {
+        let _ = self.close.send(true);
+        let _ = self.task.await;
+    }
+}
+
+/// Why [`on_demand_hold`] returned.
+#[derive(Debug, PartialEq, Eq)]
+enum Hold {
+    /// No node is enrolled and no token is waiting.
+    Idle,
+    /// The server stops.
+    Stop,
+}
+
+/// The cluster port with `[cluster] listen` not set: opens when an enrolment token is
+/// created and closes again when no token is waiting (withdrawn, used or expired) and no
+/// node is enrolled. `open` is the port the start step opened already (a token was waiting
+/// or a node enrolled at start).
 async fn on_demand(
     registry: Arc<NodeRegistry>,
     addrs: Vec<SocketAddr>,
     sink: Arc<dyn ProbeSink>,
     resolver: Arc<TlsResolver>,
     peers: Option<Peers>,
+    mut open: Option<OnDemandPort>,
     mut stop: watch::Receiver<bool>,
 ) {
-    tokio::select! {
-        () = registry.listener_wanted() => {}
-        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
-    }
-    let listener = match ClusterListener::bind(&addrs).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            tracing::error!(code = %error.code(), "{}", error.detail());
+    loop {
+        let port = if let Some(port) = open.take() {
+            port
+        } else {
+            tokio::select! {
+                () = registry.listener_wanted() => {}
+                () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+            }
+            let served = match ClusterListener::bind(&addrs).await {
+                Ok(listener) => {
+                    OnDemandPort::serve(listener, &registry, &sink, &resolver, peers.as_ref())
+                }
+                Err(error) => Err(error),
+            };
+            match served {
+                Ok(port) => {
+                    tracing::info!(
+                        "cluster port {} opens with an enrolment token",
+                        addresses(&addrs)
+                    );
+                    port
+                }
+                Err(error) => {
+                    // The next token tries again.
+                    tracing::error!(code = %error.code(), "{}", error.detail());
+                    registry.forget_listener_wanted();
+                    continue;
+                }
+            }
+        };
+        let hold = on_demand_hold(&registry, &mut stop).await;
+        port.shut().await;
+        if hold == Hold::Stop {
             return;
         }
-    };
-    match listener.serve_with_peers(&registry, sink, resolver, peers, stop) {
-        Ok(task) => {
-            let _ = task.await;
+        tracing::info!(
+            "cluster port {} closed: no enrolment token waiting and no node enrolled",
+            addresses(&addrs)
+        );
+    }
+}
+
+/// Waits while the open on-demand port serves something: every write under `cluster.*`
+/// (a token created, withdrawn, used or pruned; a node enrolled or revoked) reads the
+/// demand again, and so does the expiry of the last waiting token.
+async fn on_demand_hold(registry: &NodeRegistry, stop: &mut watch::Receiver<bool>) -> Hold {
+    let filter = WatchFilter::namespaces(["cluster"]);
+    // Subscribed before the first read, so no write between the two is missed.
+    let mut changes = registry.store().watch(None, filter.clone()).ok();
+    loop {
+        // Forgotten before the read: a token the read does not see yet asks again, and the
+        // port reopens at once after it closed.
+        registry.forget_listener_wanted();
+        let wake = match registry.port_demand(Timestamp::now()).await {
+            Ok(PortDemand::Idle) => return Hold::Idle,
+            Ok(PortDemand::Until(expires)) => Some(expires.saturating_since(Timestamp::now())),
+            Ok(PortDemand::Enrolled) => None,
+            Err(error) => {
+                tracing::debug!(code = %error.code(), "the cluster port demand could not be read");
+                Some(HEALTH_INTERVAL)
+            }
+        };
+        tokio::select! {
+            () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return Hold::Stop,
+            () = async {
+                match wake {
+                    Some(after) => tokio::time::sleep(after).await,
+                    None => std::future::pending().await,
+                }
+            } => {}
+            received = next_change(&mut changes) => {
+                if received {
+                    drain(&mut changes);
+                } else {
+                    changes = registry.store().watch(None, filter.clone()).ok();
+                }
+            }
         }
-        Err(error) => tracing::error!(code = %error.code(), "{}", error.detail()),
     }
 }
 
@@ -767,7 +875,8 @@ fn drain(changes: &mut Option<ChangeStream>) {
 #[cfg(test)]
 mod tests {
     use tenko_cluster::{
-        model::{ClusterHealth, MismatchRecord, NodeMismatch},
+        ca::pem_block,
+        model::{ClusterHealth, EnrolRequest, MismatchRecord, NewEnrolment, NodeMismatch},
         version::VersionMismatch,
     };
     use tenko_core::Revision;
@@ -833,5 +942,216 @@ mod tests {
         });
         assert_eq!(electing.params["state"], "electing");
         assert!(!electing.params.contains_key("applied"));
+    }
+
+    /// A controller's node registry over a memory store, and an on-demand cluster port on
+    /// a free loopback port.
+    struct OnDemand {
+        registry: Arc<NodeRegistry>,
+        addr: SocketAddr,
+        stop: watch::Sender<bool>,
+        task: JoinHandle<()>,
+    }
+
+    /// How long a test waits for the port to change before it fails.
+    const PORT_WAIT: Duration = Duration::from_secs(20);
+
+    fn system() -> RequestCtx {
+        RequestCtx::system(SystemComponent::Cluster)
+    }
+
+    impl OnDemand {
+        async fn start() -> Self {
+            let store = Arc::new(tenko_store::mem::MemStore::default());
+            let vault = tenko_vault::MemVault::with_store(Arc::clone(&store));
+            let ca = InternalCa::load_or_init(&*store, &vault, &system(), CaPolicy::default())
+                .await
+                .expect("CA");
+            let store: Arc<dyn Store> = store;
+            let registry = NodeRegistry::new(store, Arc::new(ca), RegistryConfig::new(NodeId(1)));
+            let material = registry
+                .controller_material(&vault, &system())
+                .await
+                .expect("controller certificate");
+            let resolver = Arc::new(TlsResolver::default());
+            resolver.set(Some(material));
+            let addr = std::net::TcpListener::bind("127.0.0.1:0")
+                .and_then(|listener| listener.local_addr())
+                .expect("a free port");
+            let (stop, stopped) = watch::channel(false);
+            let task = tokio::spawn(on_demand(
+                Arc::clone(&registry),
+                vec![addr],
+                Arc::new(DiscardProbes),
+                resolver,
+                None,
+                None,
+                stopped,
+            ));
+            Self {
+                registry,
+                addr,
+                stop,
+                task,
+            }
+        }
+
+        async fn token(&self) -> (uuid::Uuid, String) {
+            let (view, token) = self
+                .registry
+                .create_enrolment(&system(), NewEnrolment::default())
+                .await
+                .expect("token");
+            (view.id, token.to_text().to_string())
+        }
+
+        async fn withdraw(&self, id: uuid::Uuid) {
+            self.registry
+                .delete_enrolment(&system(), id)
+                .await
+                .expect("withdraw the token");
+        }
+
+        async fn enrol(&self, token: String) {
+            let (_, csr) = generate_csr().expect("csr");
+            self.registry
+                .enrol(
+                    &system(),
+                    EnrolRequest {
+                        token,
+                        csr: pem_block("CERTIFICATE REQUEST", &csr),
+                        name: Some("probe-lab".to_owned()),
+                        roles: Vec::new(),
+                        address: Some("192.0.2.20".to_owned()),
+                        version: "0.0.1".to_owned(),
+                        majors: vec![1],
+                    },
+                )
+                .await
+                .expect("enrol");
+        }
+
+        /// Waits until the port is open: the registry reports it (the health field
+        /// `listening`) and the address cannot be bound by anyone else.
+        async fn wait_open(&self, what: &str) {
+            let open = || !self.registry.listening().is_empty();
+            wait(what, open).await;
+            assert!(
+                std::net::TcpListener::bind(self.addr).is_err(),
+                "{what}: the address is not taken"
+            );
+        }
+
+        /// Waits until the port is closed: the registry reports no address and the
+        /// address can be bound again.
+        async fn wait_closed(&self, what: &str) {
+            wait(what, || self.registry.listening().is_empty()).await;
+            assert!(
+                std::net::TcpListener::bind(self.addr).is_ok(),
+                "{what}: the address is still taken"
+            );
+        }
+
+        async fn stop(self) {
+            let _ = self.stop.send(true);
+            tokio::time::timeout(PORT_WAIT, self.task)
+                .await
+                .expect("the on-demand port stops")
+                .expect("the task ends");
+            assert!(std::net::TcpListener::bind(self.addr).is_ok());
+        }
+    }
+
+    async fn wait(what: &str, check: impl Fn() -> bool) {
+        let deadline = tokio::time::Instant::now() + PORT_WAIT;
+        while !check() {
+            assert!(tokio::time::Instant::now() < deadline, "timed out: {what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_on_demand_port_closes_when_the_last_token_is_withdrawn() {
+        let port = OnDemand::start().await;
+        port.wait_closed("closed with no token").await;
+        let (first, _) = port.token().await;
+        port.wait_open("a token opens the port").await;
+        let (second, _) = port.token().await;
+        port.withdraw(first).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        port.wait_open("a second token keeps the port open").await;
+        port.withdraw(second).await;
+        port.wait_closed("withdrawing the last token closes the port")
+            .await;
+        port.token().await;
+        port.wait_open("a new token opens the port again").await;
+        port.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_enrolled_node_keeps_the_on_demand_port_open() {
+        let port = OnDemand::start().await;
+        let (id, token) = port.token().await;
+        port.wait_open("a token opens the port").await;
+        port.enrol(token).await;
+        // The used token is gone; the node connects to the port.
+        port.withdraw(id).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        port.wait_open("an enrolled node keeps the port open").await;
+        port.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_expired_token_closes_the_on_demand_port() {
+        let port = OnDemand::start().await;
+        // The shortest lifetime, created so long ago that two seconds are left.
+        let ttl = tenko_cluster::registry::MIN_TOKEN_TTL;
+        let mut cx = system();
+        cx.now = Timestamp::now()
+            .checked_sub(ttl.saturating_sub(Duration::from_secs(2)))
+            .expect("a time");
+        port.registry
+            .create_enrolment(
+                &cx,
+                NewEnrolment {
+                    expires_in_secs: Some(ttl.as_secs()),
+                    ..NewEnrolment::default()
+                },
+            )
+            .await
+            .expect("token");
+        port.wait_open("a token opens the port").await;
+        port.wait_closed("the expiry of the last token closes the port")
+            .await;
+        port.token().await;
+        port.wait_open("a new token opens the port again").await;
+        port.stop().await;
+    }
+
+    #[tokio::test]
+    async fn the_demand_follows_tokens_and_nodes() {
+        let port = OnDemand::start().await;
+        let now = Timestamp::now();
+        assert_eq!(
+            port.registry.port_demand(now).await.expect("demand"),
+            PortDemand::Idle
+        );
+        let (_, token) = port.token().await;
+        let PortDemand::Until(expires) = port.registry.port_demand(now).await.expect("demand")
+        else {
+            panic!("a waiting token is a demand until it expires");
+        };
+        assert!(expires > now);
+        assert_eq!(
+            port.registry.port_demand(expires).await.expect("demand"),
+            PortDemand::Idle,
+            "an expired token is no demand"
+        );
+        port.enrol(token).await;
+        assert_eq!(
+            port.registry.port_demand(now).await.expect("demand"),
+            PortDemand::Enrolled
+        );
+        port.stop().await;
     }
 }

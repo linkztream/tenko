@@ -308,13 +308,13 @@ row_net_listeners() {
 }
 
 row_net_cluster_port() {
-  # docs/cluster.md 7.2: with [cluster] listen unset the port opens on demand and, after a
-  # restart with no token waiting and no node enrolled, is closed again. The on-demand
-  # listener is not closed when the token is withdrawn (SF-0001 of the report); this row
-  # checks the documented state (closed after a restart), and a reporting sub-check that the
-  # open listener refuses enrolment without a valid token.
+  # docs/cluster.md 7.2: with [cluster] listen unset the port opens on demand, closes again
+  # without a restart once no token is waiting and no node is enrolled, and stays closed
+  # after a restart. Closing when the last token is withdrawn is the fix of SF-0001 of the
+  # report (fixed: the on-demand listener stayed open until the next restart); a reporting
+  # sub-check records that the open listener refuses enrolment without a valid token.
   row_tool=ss
-  local id state
+  local id closed
   # Closed on a fresh node (no token, no enrolment).
   if cluster_port_open; then
     row_reason="8444 is open on a fresh node with no enrolment token waiting"
@@ -330,18 +330,32 @@ row_net_cluster_port() {
     return 1
   fi
   # The reporting sub-check: while the port is open, an enrolment attempt without a valid
-  # token is refused (recorded in the log; it does not block, SF-0001 holds the blocking
-  # concern about the port staying open).
+  # token is refused (recorded in the log; it does not block, the closing checks below do).
   cluster_refuses_without_token >>"$EVIDENCE/rows/net.cluster_port.log" 2>&1 &&
     echo "sub-check: the open cluster port refuses enrolment without a valid token (PASS, reporting)" >>"$EVIDENCE/rows/net.cluster_port.log" ||
     echo "sub-check: the open cluster port did NOT refuse an unauthenticated probe (reporting)" >>"$EVIDENCE/rows/net.cluster_port.log"
-  # Withdraw the token and restart; the documented state is that 8444 is then closed.
-  api delete "/nodes/enrolments/$id" >/dev/null 2>>"$EVIDENCE/rows/net.cluster_port.log" || true
+  # Withdraw the token: 8444 closes without a restart (SF-0001, fixed).
+  api delete "/nodes/enrolments/$id" >/dev/null 2>>"$EVIDENCE/rows/net.cluster_port.log" ||
+    { row_reason="the enrolment token could not be withdrawn"; return 1; }
+  closed=0
+  for _ in $(seq 1 10); do
+    if ! cluster_port_open; then
+      closed=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$closed" != 1 ]]; then
+    row_reason="8444 is still open 10 s after the last enrolment token was withdrawn (docs/cluster.md 7.2 says it closes without a restart); see SF-0001"
+    return 1
+  fi
+  echo "8444 closed after the token was withdrawn, without a restart" >>"$EVIDENCE/rows/net.cluster_port.log"
+  # And it stays closed after a restart with no token waiting.
   systemctl restart tenko >>"$EVIDENCE/rows/net.cluster_port.log" 2>&1
   wait_api_ready
   sleep 2
   if cluster_port_open; then
-    row_reason="8444 is still open after the token was withdrawn and the node restarted (docs/cluster.md 7.2 says it should be closed); see SF-0001"
+    row_reason="8444 is open after a restart with no token waiting and no node enrolled (docs/cluster.md 7.2 says it should be closed)"
     return 1
   fi
   evidence_add node/ss-all.txt
@@ -613,7 +627,7 @@ main() {
   row net.tcp "only 53, 853 and 8443 were added on TCP" row_net_tcp
   row net.udp "only 53 was added on UDP" row_net_udp
   row net.listeners "every tenko listener is on an expected address and port" row_net_listeners
-  row net.cluster_port "8444 is closed after a restart with no token waiting (docs/cluster.md 7.2)" row_net_cluster_port
+  row net.cluster_port "8444 closes when the last token is withdrawn and stays closed after a restart (docs/cluster.md 7.2)" row_net_cluster_port
   row net.ipv6 "the IPv6 surface is the IPv4 one" row_net_ipv6
 
   row tls.api "the API's TLS is current (TLS 1.2/1.3, no weak cipher, chain verifies)" row_tls_api
