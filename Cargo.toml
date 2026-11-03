@@ -102,7 +102,7 @@ time = { version = "0.3.55", features = ["serde", "formatting", "parsing"] }
 uuid = { version = "1.27.0", features = ["v7", "serde"] }
 
 # Import and export (WP1.5).
-calamine = "0.37.0"
+calamine = "0.38.0"
 # Writers for the import test fixtures (workbooks and their archives); tests only.
 rust_xlsxwriter = "0.102.0"
 zip = { version = "9.2.0", default-features = false }
