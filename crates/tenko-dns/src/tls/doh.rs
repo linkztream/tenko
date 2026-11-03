@@ -290,9 +290,13 @@ pub fn dns_param(query: &str) -> Option<&str> {
         .split('&')
         .find_map(|pair| pair.strip_prefix("dns="))?;
     let mut value = value.trim_end_matches('=');
-    // Padding a client percent-encoded.
-    while value.len() >= 3 && value[value.len() - 3..].eq_ignore_ascii_case("%3D") {
-        value = &value[..value.len() - 3];
+    // Padding a client percent-encoded. The comparison runs on bytes: the query may hold
+    // UTF-8, and a cut of the `&str` inside a character would panic. The three bytes are
+    // ASCII when they match, so the shorter value still ends on a character boundary.
+    while let Some(rest) = value.len().checked_sub(3)
+        && value.as_bytes()[rest..].eq_ignore_ascii_case(b"%3D")
+    {
+        value = &value[..rest];
     }
     Some(value)
 }
@@ -407,6 +411,26 @@ mod tests {
         assert_eq!(dns_param("ct=x&dns=AAAB"), Some("AAAB"));
         assert_eq!(dns_param("dns=AAAB%3D%3d"), Some("AAAB"));
         assert_eq!(dns_param("dnsx=AAAB"), None);
+    }
+
+    /// A multi-byte character in the last three bytes of the parameter is data, not a
+    /// place to cut: the padding check runs on bytes.
+    #[test]
+    fn a_multi_byte_character_at_the_end_of_the_parameter_is_refused_without_a_panic() {
+        // The input the fuzz target `dns_tls_wire` found against 0.0.10.
+        let query = "ct=&dnsctdnct=&dnct=x&dns=%\0\0\0\x04\0d%ABdns=d\u{3fbe}\x0e\0===";
+        let param = dns_param(query).expect("the parameter");
+        assert_eq!(param, "%\0\0\0\x04\0d%ABdns=d\u{3fbe}\x0e\0");
+        let mut out = Vec::new();
+        assert!(!decode_base64url(param, &mut out));
+        let _ = max_age(query.as_bytes());
+        // A client can send these: the request target may hold UTF-8 in the query.
+        for value in ["AA\u{e9}12", "AA\u{1f355}", "\u{e9}%3D", "A\u{e9}%3d%3D"] {
+            let query = format!("dns={value}");
+            let param = dns_param(&query).expect("the parameter");
+            assert!(!decode_base64url(param, &mut out), "{value}");
+        }
+        assert_eq!(dns_param("dns=\u{e9}%3D"), Some("\u{e9}"));
     }
 
     #[test]
