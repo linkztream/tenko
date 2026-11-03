@@ -75,6 +75,13 @@
 # AJAX spider. The web interface is one by design; the passive rules still see every
 # response the spider fetches, and web.api_baseline covers the API the application calls.
 10109	IGNORE	(Modern Web Application)
+# IGNORE 100000: the alert says a client error (4xx) was returned. The API scan imports the
+# OpenAPI document and sends placeholder identifiers and bodies, so a 4xx answer is the API's
+# correct refusal of them, one alert per path template and no weakness. The refusals that
+# matter are checked elsewhere: web.unauth sends every operation without credentials and
+# blocks on any answer but 401 or 403, and the FAIL rules above catch a missing header on
+# those answers. 100001 (Unexpected Content-Type, Low) stays a WARN.
+100000	IGNORE	(A Client Error response code was returned by the server)
 # IGNORE 10111, 10112, 10113: informational alerts with which ZAP's authentication helper
 # marks the sign-in request, the session cookie and a request that shows the signed-in
 # state, for ZAP's own configuration of an authenticated scan. They name no weakness; the

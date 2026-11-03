@@ -19,6 +19,19 @@
 // the web interface to `<name>-{hash}.<ext>`, a URL to its path, and line numbers are never
 // part of it. Node's standard library only.
 //
+// Informational alerts are evidence, not findings. An entry of a row's `findings` that a
+// scanner rates Info (ZAP's own rating decides) gets no ID: section 2 of the full report
+// lists them in a table by rule (rule, title, number of locations, up to three examples),
+// and the public summary counts them in one line. Finding IDs are permanent, so a report must
+// not mint hundreds for noise. Two things keep an Info alert numbered: another entry of the
+// same fingerprint rated higher, and a previous report that lists the fingerprint (the
+// triage promoted it by hand, with a reason), which then keeps its ID and severity.
+//
+// A ZAP rule whose alert concerns the site and not a path (the response-header rules and the
+// session cookie's flags, SITE_WIDE_ZAP_RULES) gets the fingerprint `zap:<rule>:site`: one
+// finding per rule, with the number of locations and up to three example paths in its
+// evidence. Every other rule keeps `zap:<rule>:<path template>`.
+//
 // Exit codes: 0 success, 1 the inputs are wrong, 2 bad command line.
 
 import { readFileSync } from "node:fs";
@@ -59,6 +72,29 @@ const ROW_SEVERITY = {
 /** The severities of the report, and the names scanners use for them. */
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Info"];
 const SEVERITY_ALIASES = { informational: "Info", information: "Info", warning: "Low" };
+
+/**
+ * The ZAP rules whose alert concerns the whole site, not a path: the response headers the
+ * server sets on every answer (and their absence), the headers that leak a server banner,
+ * and the session cookie's flags. 10020 Missing Anti-clickjacking Header, 10021
+ * X-Content-Type-Options Header Missing, 10035 Strict-Transport-Security Header, 10038
+ * Content Security Policy Header Not Set, 10063 Permissions Policy Header Not Set, 90004
+ * Insufficient Site Isolation Against Spectre (the Cross-Origin policy headers), 10036
+ * Server version leak, 10037 X-Powered-By leak, 10039 X-Backend-Server leak, 10052
+ * X-ChromeLogger-Data leak, 10056 X-Debug-Token leak, 10061 X-AspNet-Version, 10098
+ * Cross-Domain Misconfiguration (the CORS headers), 10015 Re-examine Cache-control
+ * Directives, 10049 Storable and Cacheable Content, 10054 Cookie without SameSite, 10010
+ * Cookie No HttpOnly, 10011 Cookie Without Secure. The rules that look at a response body or
+ * at one resource (10055 CSP content, 10019 Content-Type Header Missing, 90033 Loosely
+ * Scoped Cookie, 100001 Unexpected Content-Type and the rest) stay per path.
+ */
+export const SITE_WIDE_ZAP_RULES = new Set([
+  "10020", "10021", "10035", "10038", "10063", "90004", "10036", "10037", "10039", "10052",
+  "10056", "10061", "10098", "10015", "10049", "10054", "10010", "10011",
+]);
+
+/** The location part of the fingerprint of a site-wide rule. */
+export const SITE_LOCATION = "site";
 
 /** A scanner's severity in the report's words (unknown: Info). */
 export function normaliseSeverity(value) {
@@ -134,46 +170,94 @@ export function fingerprint({ tool, rule, location }) {
   return `${tool}:${rule}:${normaliseLocation(location)}`;
 }
 
+/** How many example locations a site-wide finding and an informational row carry. */
+const EXAMPLES = 3;
+
 /**
- * The findings of the rows: a row that carries `findings` (what its scanner found, one entry
- * per rule and location: the web rows) gives one finding per entry, whatever its state,
- * with the fingerprint `<tool>:<rule>:<location>` and the location normalised (a URL to its
- * path, identifiers and content hashes to templates); entries that normalise to the same
- * fingerprint are one finding at the highest severity. A failed row without such entries
- * is one finding `row:<row>`. PASS and SKIP rows without entries produce none.
+ * Every entry of the rows' `findings`, merged by fingerprint: `<tool>:<rule>:<location>` with
+ * the location normalised (a URL to its path, identifiers and content hashes to templates),
+ * and `site` for a site-wide ZAP rule. Entries with one fingerprint are one item at the
+ * highest severity, with the locations they came from.
  */
-export function findingsFromRows(rows) {
+function itemsFromEntries(rows) {
   const byFingerprint = new Map();
   const rank = (severity) => SEVERITIES.indexOf(severity);
   for (const row of rows) {
     const entries = Array.isArray(row.findings) ? row.findings : [];
     for (const entry of entries) {
       const tool = entry.tool || row.tool || "row";
+      const rule = String(entry.rule ?? "");
       const location = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry.location ?? "")
         ? normaliseUrl(entry.location)
-        : entry.location;
-      const fp = fingerprint({ tool, rule: entry.rule ?? "", location });
+        : normaliseLocation(entry.location);
+      const siteWide = tool === "zap" && SITE_WIDE_ZAP_RULES.has(rule);
+      const fp = fingerprint({ tool, rule, location: siteWide ? SITE_LOCATION : location });
       const severity = normaliseSeverity(entry.severity);
       const known = byFingerprint.get(fp);
       if (known) {
         if (rank(severity) < rank(known.severity)) known.severity = severity;
+        if (!known.locations.includes(location)) known.locations.push(location);
         continue;
       }
       byFingerprint.set(fp, {
         fingerprint: fp,
         source: tool,
+        rule,
+        siteWide,
+        locations: [location],
         severity,
-        title: entry.title || `${tool} ${entry.rule ?? ""}`.trim(),
+        title: entry.title || `${tool} ${rule}`.trim(),
         reason: row.reason || "",
         evidence: row.evidence || [],
         blocking: row.blocking !== false,
         row: row.row,
       });
     }
+  }
+  return [...byFingerprint.values()];
+}
+
+/**
+ * Whether an item is an informational alert (no ID): rated Info and not promoted. `promoted`
+ * maps the fingerprints a previous report lists to the severity it gave them.
+ */
+function isInformational(item, promoted) {
+  return item.severity === "Info" && !promoted.has(item.fingerprint);
+}
+
+/**
+ * The findings of the rows: a row that carries `findings` (what its scanner found, one entry
+ * per rule and location: the web rows) gives one finding per fingerprint, whatever its
+ * state, at the highest severity of its entries; a site-wide ZAP rule gives one finding in
+ * all, with the number of locations and up to three example paths added to its evidence. An
+ * entry rated Info is not a finding (see `informationalFromRows`) unless `promoted` has its
+ * fingerprint. A failed row without entries is one finding `row:<row>`. PASS and SKIP rows
+ * without entries produce none.
+ *
+ * @param {object[]} rows
+ * @param {Map<string, string>} [promoted] fingerprint to severity, from the previous report
+ */
+export function findingsFromRows(rows, promoted = new Map()) {
+  const found = new Map();
+  for (const item of itemsFromEntries(rows)) {
+    if (isInformational(item, promoted)) continue;
+    const { locations, siteWide, rule, ...finding } = item;
+    if (finding.severity === "Info") finding.severity = normaliseSeverity(promoted.get(finding.fingerprint));
+    if (siteWide) {
+      finding.evidence = [
+        ...finding.evidence,
+        `site-wide: ${locations.length} location${locations.length === 1 ? "" : "s"}`,
+        `e.g. ${locations.slice(0, EXAMPLES).join("; ")}`,
+      ];
+    }
+    found.set(finding.fingerprint, finding);
+  }
+  for (const row of rows) {
+    const entries = Array.isArray(row.findings) ? row.findings : [];
     if (row.state !== "FAIL" || entries.length) continue;
     const fp = fingerprint({ tool: "row", rule: row.row, location: "" }).replace(/:$/, "");
-    if (byFingerprint.has(fp)) continue;
-    byFingerprint.set(fp, {
+    if (found.has(fp)) continue;
+    found.set(fp, {
       fingerprint: fp,
       source: "row",
       severity: ROW_SEVERITY[row.row] ?? "Medium",
@@ -184,7 +268,43 @@ export function findingsFromRows(rows) {
       row: row.row,
     });
   }
-  return [...byFingerprint.values()];
+  return [...found.values()];
+}
+
+/**
+ * The informational alerts of the rows, grouped by tool and rule, as `{ tool, rule, title,
+ * count, examples }`: `count` is the number of distinct locations, `examples` the first three
+ * of them.
+ *
+ * @param {object[]} rows
+ * @param {Map<string, string>} [promoted] fingerprint to severity, from the previous report
+ */
+export function informationalFromRows(rows, promoted = new Map()) {
+  const groups = new Map();
+  for (const item of itemsFromEntries(rows)) {
+    if (!isInformational(item, promoted)) continue;
+    const key = `${item.source}:${item.rule}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { tool: item.source, rule: item.rule, title: item.title, locations: [] };
+      groups.set(key, group);
+    }
+    for (const location of item.locations) {
+      if (!group.locations.includes(location)) group.locations.push(location);
+    }
+  }
+  return [...groups.values()]
+    .map(({ locations, ...group }) => ({
+      ...group,
+      count: locations.length,
+      examples: locations.slice(0, EXAMPLES),
+    }))
+    .sort((a, b) => `${a.tool}:${a.rule}`.localeCompare(`${b.tool}:${b.rule}`, "en", { numeric: true }));
+}
+
+/** The number of informational alerts: the locations over all rules. */
+export function countInformational(informational) {
+  return informational.reduce((sum, group) => sum + group.count, 0);
 }
 
 /**
@@ -264,7 +384,7 @@ function rowLine(row) {
 }
 
 /** The full report (sections 1 and 2 filled; 3 as the findings table; 4 and 5 for the triage). */
-export function renderReport(meta, rows, findings, layer1) {
+export function renderReport(meta, rows, findings, layer1, informational = []) {
   const { version, commit, runUrl, bundleSha256, previousVersion, reviewedDiff } = meta;
   const lines = [];
   lines.push(`# Security report: Tenko ${version}`, "");
@@ -288,6 +408,21 @@ export function renderReport(meta, rows, findings, layer1) {
   lines.push("| Row | State | Duration | Evidence |");
   lines.push("|---|---|---|---|");
   for (const row of rows) lines.push(rowLine(row));
+  lines.push("");
+
+  lines.push("### Informational alerts", "");
+  lines.push(
+    `Alerts a scanner rates Info: evidence, not findings, so they carry no ID (${countInformational(informational)} in this round). The triage may promote one to a finding by hand, with a reason.`,
+    "",
+  );
+  lines.push("| Tool | Rule | Title | Locations | Examples |");
+  lines.push("|---|---|---|---|---|");
+  for (const g of informational) {
+    lines.push(
+      `| ${g.tool} | ${cell(g.rule)} | ${cell(g.title)} | ${g.count} | ${cell(g.examples.join("; "))} |`,
+    );
+  }
+  if (!informational.length) lines.push("| — | — | none | 0 | — |");
   lines.push("");
 
   lines.push("## 3. Findings", "");
@@ -321,7 +456,7 @@ export function renderReport(meta, rows, findings, layer1) {
 }
 
 /** The public summary of SA-Q3 (b): states and counts, open findings by ID and severity only. */
-export function renderSummary(meta, rows, findings) {
+export function renderSummary(meta, rows, findings, informational = []) {
   const { version, commit } = meta;
   const bySeverity = countBySeverity(findings);
   const byState = countByState(findings);
@@ -344,8 +479,8 @@ export function renderSummary(meta, rows, findings) {
   );
   lines.push(
     `By state: ${["new", "open", "fixed", "not seen", "decided"].map((s) => `${s} ${byState[s] ?? 0}`).join(", ")}.`,
-    "",
   );
+  lines.push(`Informational alerts: ${countInformational(informational)}, listed in the full report.`, "");
   lines.push("Open findings (details published when fixed or when the disclosure window of `SECURITY.md` ends):", "");
   lines.push("| ID | Severity |");
   lines.push("|---|---|");
@@ -359,13 +494,16 @@ export function renderSummary(meta, rows, findings) {
 
 /** Build the report and summary from the parsed inputs. */
 export function buildReport(meta, rows, previousText, layer1) {
-  const rowFindings = findingsFromRows(rows);
   const previous = parsePreviousFindings(previousText);
-  const findings = assignIds(rowFindings, previous, meta.version);
+  // An Info alert the previous report lists as a finding was promoted by hand: it stays one.
+  const promoted = new Map([...previous].map(([fp, entry]) => [fp, entry.severity]));
+  const findings = assignIds(findingsFromRows(rows, promoted), previous, meta.version);
+  const informational = informationalFromRows(rows, promoted);
   return {
     findings,
-    report: renderReport(meta, rows, findings, layer1),
-    summary: renderSummary(meta, rows, findings),
+    informational,
+    report: renderReport(meta, rows, findings, layer1, informational),
+    summary: renderSummary(meta, rows, findings, informational),
   };
 }
 

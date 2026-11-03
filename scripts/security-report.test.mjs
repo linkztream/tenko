@@ -16,14 +16,17 @@ import {
   assignIds,
   buildReport,
   countByState,
+  countInformational,
   fingerprint,
   findingsFromRows,
+  informationalFromRows,
   normaliseLocation,
   normaliseSeverity,
   normaliseUrl,
   parseJsonl,
   parsePreviousFindings,
   ReportError,
+  SITE_WIDE_ZAP_RULES,
 } from "./security-report.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,8 +35,10 @@ const script = path.join(here, "security-report.mjs");
 /**
  * A recorded set of row JSON lines. Without the web rows: three pass, one fails
  * (net.cluster_port), one skips. The web rows: web.unauth fails on one operation that
- * answers without credentials, web.ui_baseline passes with two WARN alerts of one ZAP rule,
- * web.api_baseline (reporting) fails on a FAIL rule, reported twice for one path template.
+ * answers without credentials, web.ui_baseline passes with a site-wide WARN rule on three
+ * paths and an Info alert of a site-wide rule on four, web.api_baseline (reporting) fails on a
+ * FAIL rule (site-wide) reported twice, has a path-specific Low rule on two path templates and
+ * an Info alert of a path-specific rule (the client-error rule) on four paths.
  */
 const RECORDED_ROWS = [
   { row: "net.tcp", state: "PASS", blocking: true, duration_ms: 4200, tool: "nmap", evidence: ["rows/net.tcp.log"], description: "only 53, 853 and 8443 were added on TCP" },
@@ -58,6 +63,11 @@ const RECORDED_ROWS = [
     findings: [
       { tool: "zap", rule: "10063", location: "/", severity: "Low", title: "Permissions Policy Header Not Set", action: "WARN", count: 1 },
       { tool: "zap", rule: "10063", location: "/assets/index-B3xY_9aQ.js", severity: "Low", title: "Permissions Policy Header Not Set", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10063", location: "/assets/app-Zx9_QwE1.js", severity: "Low", title: "Permissions Policy Header Not Set", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10049", location: "/", severity: "Informational", title: "Storable and Cacheable Content", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10049", location: "/assets/index-B3xY_9aQ.js", severity: "Informational", title: "Storable and Cacheable Content", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10049", location: "/assets/app-Zx9_QwE1.js", severity: "Informational", title: "Storable and Cacheable Content", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10049", location: "/favicon.svg", severity: "Informational", title: "Storable and Cacheable Content", action: "WARN", count: 1 },
     ],
   },
   {
@@ -68,6 +78,13 @@ const RECORDED_ROWS = [
     findings: [
       { tool: "zap", rule: "10038", location: "https://tenko.example.test:8443/api/v1/dns/zones/01a1969b-e19f-718b-aecf-31c92b1e75aa/records?limit=5", severity: "Medium", title: "Content Security Policy (CSP) Header Not Set", action: "FAIL", count: 1 },
       { tool: "zap", rule: "10038", location: "/api/v1/dns/zones/{zone}/records", severity: "Informational", title: "Content Security Policy (CSP) Header Not Set", action: "FAIL", count: 3 },
+      { tool: "zap", rule: "10096", location: "https://tenko.example.test:8443/api/v1/nodes/7", severity: "Low", title: "Timestamp Disclosure - Unix", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10096", location: "https://tenko.example.test:8443/api/v1/nodes/9", severity: "Low", title: "Timestamp Disclosure - Unix", action: "WARN", count: 1 },
+      { tool: "zap", rule: "10096", location: "/api/v1/dns/zones/{zone}/records", severity: "Low", title: "Timestamp Disclosure - Unix", action: "WARN", count: 1 },
+      { tool: "zap", rule: "100000", location: "/api/v1/dns/zones/{zone}", severity: "Informational", title: "A Client Error response code was returned by the server", action: "WARN", count: 1 },
+      { tool: "zap", rule: "100000", location: "/api/v1/nodes/{node}", severity: "Informational", title: "A Client Error response code was returned by the server", action: "WARN", count: 1 },
+      { tool: "zap", rule: "100000", location: "/api/v1/roles/{role}", severity: "Informational", title: "A Client Error response code was returned by the server", action: "WARN", count: 1 },
+      { tool: "zap", rule: "100000", location: "/api/v1/users/{user}", severity: "Informational", title: "A Client Error response code was returned by the server", action: "WARN", count: 1 },
     ],
   },
 ];
@@ -152,9 +169,10 @@ describe("findingsFromRows", () => {
     assert.deepEqual(fingerprints, [
       "row:net.cluster_port",
       "unauth:answers:GET /api/v1/roles",
-      "zap:10038:/api/v1/dns/zones/{id}/records",
-      "zap:10063:/",
-      "zap:10063:/assets/index-{hash}.js",
+      "zap:10038:site",
+      "zap:10063:site",
+      "zap:10096:/api/v1/dns/zones/{id}/records",
+      "zap:10096:/api/v1/nodes/{id}",
     ]);
     // A failed row with entries is not also a row finding.
     assert.ok(!fingerprints.includes("row:web.unauth"));
@@ -163,15 +181,76 @@ describe("findingsFromRows", () => {
     assert.equal(unauth.severity, "High");
     assert.equal(unauth.blocking, true);
     // Two entries of one plugin on one path template are one finding at the higher severity.
-    const csp = findings.find((f) => f.fingerprint.startsWith("zap:10038:"));
+    const csp = findings.find((f) => f.fingerprint === "zap:10038:site");
     assert.equal(csp.severity, "Medium");
     assert.equal(csp.blocking, false);
-    assert.deepEqual(csp.evidence, ["scan/zap-api/zap-api.json", "scan/zap-api.findings.json", "rows/web.api_baseline.log"]);
+    assert.deepEqual(csp.evidence, [
+      "scan/zap-api/zap-api.json",
+      "scan/zap-api.findings.json",
+      "rows/web.api_baseline.log",
+      "site-wide: 1 location",
+      "e.g. /api/v1/dns/zones/{id}/records",
+    ]);
+  });
+  test("a site-wide rule on three paths is one finding with three locations in its evidence", () => {
+    const findings = findingsFromRows(RECORDED_ROWS);
+    const permissions = findings.filter((f) => f.fingerprint.startsWith("zap:10063:"));
+    assert.equal(permissions.length, 1);
+    assert.equal(permissions[0].fingerprint, "zap:10063:site");
+    assert.equal(permissions[0].severity, "Low");
+    assert.ok(permissions[0].evidence.includes("site-wide: 3 locations"));
+    assert.ok(permissions[0].evidence.includes("e.g. /; /assets/index-{hash}.js; /assets/app-{hash}.js"));
+  });
+  test("a path-specific Low rule is still one finding per path template", () => {
+    const fingerprints = findingsFromRows(RECORDED_ROWS)
+      .map((f) => f.fingerprint)
+      .filter((f) => f.startsWith("zap:10096:"));
+    // Nodes 7 and 9 are one template; the zone records path is the second.
+    assert.deepEqual(fingerprints.sort(), ["zap:10096:/api/v1/dns/zones/{id}/records", "zap:10096:/api/v1/nodes/{id}"]);
+  });
+  test("an Info alert is not a finding, whether its rule is site-wide or not", () => {
+    const fingerprints = findingsFromRows(RECORDED_ROWS).map((f) => f.fingerprint);
+    assert.ok(!fingerprints.some((f) => f.startsWith("zap:10049:")));
+    assert.ok(!fingerprints.some((f) => f.startsWith("zap:100000:")));
+  });
+  test("an Info alert the previous report lists as a finding stays one, at that severity", () => {
+    const promoted = new Map([["zap:100000:/api/v1/nodes/{id}", "Low"]]);
+    const findings = findingsFromRows(RECORDED_ROWS, promoted);
+    const kept = findings.find((f) => f.fingerprint === "zap:100000:/api/v1/nodes/{id}");
+    assert.equal(kept.severity, "Low");
+    const group = informationalFromRows(RECORDED_ROWS, promoted).find((g) => g.rule === "100000");
+    assert.equal(group.count, 3);
   });
   test("a passing row's entries are findings too, a passing row without entries is none", () => {
     const pass = RECORDED_ROWS.filter((r) => r.state === "PASS");
     const findings = findingsFromRows(pass);
-    assert.deepEqual(findings.map((f) => f.fingerprint).sort(), ["zap:10063:/", "zap:10063:/assets/index-{hash}.js"]);
+    assert.deepEqual(findings.map((f) => f.fingerprint).sort(), ["zap:10063:site"]);
+  });
+});
+
+describe("informationalFromRows", () => {
+  test("Info alerts are grouped by rule with the number of locations and three examples", () => {
+    const groups = informationalFromRows(RECORDED_ROWS);
+    assert.deepEqual(
+      groups.map((g) => [g.tool, g.rule, g.count]),
+      [
+        ["zap", "10049", 4],
+        ["zap", "100000", 4],
+      ],
+    );
+    assert.equal(groups[0].title, "Storable and Cacheable Content");
+    assert.deepEqual(groups[0].examples, ["/", "/assets/index-{hash}.js", "/assets/app-{hash}.js"]);
+    assert.equal(groups[1].examples.length, 3);
+    assert.equal(countInformational(groups), 8);
+  });
+  test("an alert rated higher by another entry of its fingerprint is a finding, not Info", () => {
+    // The two 10038 entries (Medium and Informational) are one site-wide finding.
+    assert.ok(!informationalFromRows(RECORDED_ROWS).some((g) => g.rule === "10038"));
+  });
+  test("the site-wide list holds the header and cookie rules and not a body rule", () => {
+    assert.equal(SITE_WIDE_ZAP_RULES.size, 18);
+    for (const rule of ["10038", "10063", "90004", "10015", "10049", "10010"]) assert.ok(SITE_WIDE_ZAP_RULES.has(rule), rule);
+    for (const rule of ["100000", "100001", "10055", "10019"]) assert.ok(!SITE_WIDE_ZAP_RULES.has(rule), rule);
   });
 });
 
@@ -243,9 +322,10 @@ describe("buildReport", () => {
       [
         "SF-0001 row:net.cluster_port",
         "SF-0002 unauth:answers:GET /api/v1/roles",
-        "SF-0003 zap:10038:/api/v1/dns/zones/{id}/records",
-        "SF-0004 zap:10063:/",
-        "SF-0005 zap:10063:/assets/index-{hash}.js",
+        "SF-0003 zap:10038:site",
+        "SF-0004 zap:10063:site",
+        "SF-0005 zap:10096:/api/v1/dns/zones/{id}/records",
+        "SF-0006 zap:10096:/api/v1/nodes/{id}",
       ],
     );
     assert.ok(report.includes("SF-0001"));
@@ -258,18 +338,36 @@ describe("buildReport", () => {
     assert.ok(!summary.includes("/api/v1/roles"), "the summary must not name an open finding's operation");
     assert.ok(!summary.includes("Content Security Policy"), "the summary must not carry a ZAP alert's name");
   });
+  test("the informational alerts are listed in the report without IDs and counted in one line of the summary", () => {
+    const { report, summary } = buildReport(meta, RECORDED_ROWS, "", null);
+    assert.ok(report.includes("### Informational alerts"));
+    assert.ok(
+      report.includes("| zap | 10049 | Storable and Cacheable Content | 4 | /; /assets/index-{hash}.js; /assets/app-{hash}.js |"),
+    );
+    assert.match(report, /\| zap \| 100000 \| A Client Error response code was returned by the server \| 4 \|/);
+    // No ID is minted for them: the findings table has no 10049 or 100000 row.
+    assert.ok(!/\| SF-\d{4} \|[^\n]*zap:(10049|100000):/.test(report));
+    assert.ok(summary.includes("Informational alerts: 8, listed in the full report."));
+    assert.ok(!summary.includes("Storable and Cacheable"), "the summary counts them and names none");
+    assert.ok(summary.includes("Info 0"), "the severity line counts findings only");
+  });
+  test("a report with no informational alert says none", () => {
+    const { report, summary } = buildReport(meta, NON_WEB_ROWS, "", null);
+    assert.ok(report.includes("| — | — | none | 0 | — |"));
+    assert.ok(summary.includes("Informational alerts: 0, listed in the full report."));
+  });
   test("counts by state are recorded", () => {
     const { findings } = buildReport(meta, RECORDED_ROWS, "", null);
-    assert.deepEqual(countByState(findings), { new: 5, open: 0, fixed: 0, "not seen": 0, decided: 0 });
+    assert.deepEqual(countByState(findings), { new: 6, open: 0, fixed: 0, "not seen": 0, decided: 0 });
   });
   test("a web finding of the previous report keeps its ID", () => {
     const previousText = [
       "| ID | Severity | State | Source | Fingerprint | Title | First seen | Evidence |",
       "|---|---|---|---|---|---|---|---|",
-      "| SF-0007 | Low | new | zap | zap:10063:/assets/index-{hash}.js | Permissions Policy Header Not Set | 0.0.10 | scan/zap-ui/zap-ui.json |",
+      "| SF-0007 | Low | new | zap | zap:10063:site | Permissions Policy Header Not Set | 0.0.10 | scan/zap-ui/zap-ui.json |",
     ].join("\n");
     const { findings } = buildReport({ ...meta, version: "0.0.12" }, RECORDED_ROWS, previousText, null);
-    const kept = findings.find((f) => f.fingerprint === "zap:10063:/assets/index-{hash}.js");
+    const kept = findings.find((f) => f.fingerprint === "zap:10063:site");
     assert.equal(kept.id, "SF-0007");
     assert.equal(kept.state, "open");
     assert.equal(kept.firstSeen, "0.0.10");

@@ -50,6 +50,20 @@ disclosure window of `SECURITY.md` ends.
   fingerprint. The triage matches a new run's findings to the open ones by fingerprint; one
   that matches nothing gets the next ID.
 
+**Informational alerts and site-wide rules.** An alert a scanner rates Info (for ZAP, its own
+rating decides) is evidence, not a finding: it gets no ID. The full report lists them in a
+table under section 2 (tool, rule, title, number of locations, up to three examples), and the
+public summary counts them in one line ("Informational alerts: N, listed in the full
+report"). The triage may promote an Info alert to a finding by hand, with its reason, by
+adding it to the findings table; the script then keeps it numbered in later reports, because
+the previous report lists its fingerprint. A ZAP rule whose alert concerns the site and not a
+path (the response-header rules and the session cookie's flags: 10010, 10011, 10015, 10020,
+10021, 10035, 10036, 10037, 10038, 10039, 10049, 10052, 10054, 10056, 10061, 10063, 10098,
+90004) has the fingerprint `zap:<rule>:site`, one finding per rule, with the number of
+locations and up to three example paths in its evidence; every other rule keeps
+`zap:<rule>:<path template>`. The list is `SITE_WIDE_ZAP_RULES` in
+`scripts/security-report.mjs`.
+
 ## States
 
 `new` (first seen in this report), `open` (seen again), `fixed` (no longer seen **and** a
