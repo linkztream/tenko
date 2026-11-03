@@ -217,6 +217,9 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          # Pinned to a commit, the action no longer takes the toolchain from its ref: it is
+          # named here (rust-toolchain.toml selects the same channel for cargo).
+          toolchain: stable
           targets: ${{ matrix.target }}
       - name: Install the musl C compiler
         # musl-tools provides musl-gcc, which the C code of aws-lc-sys, ring and jemalloc (the
@@ -552,6 +555,8 @@ jobs:
           persist-credentials: false
       # cargo tree and cargo metadata only: no target is installed and nothing is built.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
