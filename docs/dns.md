@@ -151,7 +151,8 @@ POST /api/v1/dns/zones/{id}/records/batch?dry_run=true
 - `$ORIGIN` and `$TTL` are honoured; the zone apex is the first origin, so relative names work without a `$ORIGIN` line;
 - `$INCLUDE` is refused with 422 `dns.zonefile.invalid` and its line: the import reads one uploaded file;
 - `$GENERATE range lhs [ttl] [class] type rhs` (the BIND extension) is expanded, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`), `\$` and `$$`, at most 65,536 records per line;
-- a syntax error stops the import with 422 `dns.zonefile.invalid` (parameters `line` and `reason`).
+- a syntax error stops the import with 422 `dns.zonefile.invalid` (parameters `line` and `reason`);
+- a parenthesis still open at the end of the file (also one a `$GENERATE` line opened) is refused before the scan with 422 `dns.zonefile.invalid` and the line that opened it: `domain` 0.12.3's scanner panics on a TXT record that runs to the end of its input without a line end.
 
 With `dry_run=true` the answer (200) is the preview: the records per type the file brings (`types`), the RRsets the import would add, replace and, with `replace`, remove, and the losses. Without it the preview runs first (so a file that does not parse is refused at once), then the import starts as the background job `dns.import` and the answer is 202 with `job_id` and `Location: /api/v1/jobs/{id}`. The job has one step `dns.import.chunk` per 5,000 RRsets of the preview and a final step `dns.import.finish`; the steps done show the progress, and the final step's output is the report as JSON (hex in the job record): `added`, `replaced`, `removed`, `types`, the first 1,000 `losses` and `lost` (all of them), the new `serial` and the `revision`.
 

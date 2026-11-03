@@ -10,7 +10,8 @@
 //! scanning, at most [`ZoneConfig::max_generate`](super::ZoneConfig::max_generate) records
 //! per line, with `$`, `${offset,width,base}` (bases `d`, `o`, `x`, `X`, `n`, `N`), `\$`
 //! and `$$`. A syntax error stops the read with `dns.zonefile.invalid` and its line; the
-//! scanner cannot continue after one.
+//! scanner cannot continue after one. A parenthesis still open at the end of the file is
+//! refused before the scan, with the line that opened it.
 //!
 //! The losses: a record of a class other than IN, an owner outside the zone, a name or
 //! data the model refuses (outside the name character set of the model, an invalid
@@ -261,6 +262,7 @@ fn preprocess(text: &str, max_generate: u32) -> ZoneResult<(String, LineMap)> {
     let mut lines = LineMap::default();
     let mut depth = 0usize;
     let mut quoted = false;
+    let mut opened = 0usize;
     for (index, raw) in text.split('\n').enumerate() {
         let number = index + 1;
         let line = raw.strip_suffix('\r').unwrap_or(raw);
@@ -279,6 +281,7 @@ fn preprocess(text: &str, max_generate: u32) -> ZoneResult<(String, LineMap)> {
                 }
                 "$GENERATE" => {
                     for generated in generate(line, number, max_generate)? {
+                        follow(&generated, number, &mut depth, &mut quoted, &mut opened);
                         lines.push(out.len(), number, &generated);
                         out.push_str(&generated);
                         out.push('\n');
@@ -288,12 +291,31 @@ fn preprocess(text: &str, max_generate: u32) -> ZoneResult<(String, LineMap)> {
                 _ => {}
             }
         }
-        scan_state(line, &mut depth, &mut quoted);
+        follow(line, number, &mut depth, &mut quoted, &mut opened);
         lines.push(out.len(), number, line);
         out.push_str(line);
         out.push('\n');
     }
+    // A record whose parenthesis is still open at the end has no line end: the scanner of
+    // `domain` 0.12.3 then reads TXT data past the end of its buffer and panics
+    // (`scan_charstr_entry` stops only at a line end), so such a file is refused here.
+    if depth > 0 {
+        return Err(ZoneError::zone_file(
+            opened,
+            "the parenthesis opened on this line is not closed by the end of the file",
+        ));
+    }
     Ok((out, lines))
+}
+
+/// Follows parentheses and quotes over one line, and records the line that opened the
+/// outermost open parenthesis.
+fn follow(line: &str, number: usize, depth: &mut usize, quoted: &mut bool, opened: &mut usize) {
+    let closed = *depth == 0;
+    scan_state(line, depth, quoted);
+    if closed && *depth > 0 {
+        *opened = number;
+    }
 }
 
 /// Follows parentheses and quotes over one line.
@@ -499,4 +521,63 @@ pub fn write_rrset(out: &mut String, apex: &DnsName, rrset: &RrSet) -> ZoneResul
         let _ = writeln!(out, "{owner} {} IN {type_name} {data}", rrset.ttl);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::dns::codes;
+
+    use super::*;
+
+    /// Reads every item the way the fuzz target `dns_zonefile` does, until the end or the
+    /// first error.
+    fn read_all(text: &str) -> ZoneResult<Vec<Item>> {
+        let apex = DnsName::new("example.test").expect("name");
+        let mut reader = Reader::new(text, &apex, 256)?;
+        let mut items = Vec::new();
+        while let Some(item) = reader.next_item()? {
+            items.push(item);
+        }
+        Ok(items)
+    }
+
+    fn assert_unclosed(text: &str, line: usize) {
+        let error = read_all(text).expect_err("an unclosed parenthesis is refused");
+        assert!(error.is(codes::ZONE_FILE_INVALID), "{error:?}");
+        let detail = &error.coded().detail;
+        assert!(detail.starts_with(&format!("line {line}: ")), "{detail}");
+        assert!(detail.contains("parenthesis"), "{detail}");
+    }
+
+    /// The input the fuzz target `dns_zonefile` found against 0.0.10: a TXT record whose
+    /// parenthesis is still open at the end of the file made the scanner of `domain` index
+    /// past its buffer.
+    #[test]
+    fn a_parenthesis_open_at_the_end_of_the_file_is_refused_without_a_panic() {
+        let text = "txt IN TXT \"hello world\" \"second string\" ( \"third\" llo worN CAA 0 \
+                    iss\" ueca.example.test\"\n_sip._tpc IN SRV 61 60 506i p0$ORIGIN \
+                    examsple.t.";
+        assert_eq!(text.len(), 139);
+        assert_unclosed(text, 1);
+        assert_unclosed("www IN TXT ( \"a\"", 1);
+        assert_unclosed("www IN TXT ( \"a\"\n", 1);
+        assert_unclosed(
+            "www IN A 192.0.2.1\nwww IN TXT \"a\" (\n \"b\" ; ) a comment\n",
+            2,
+        );
+        // The lines `$GENERATE` makes count too.
+        assert_unclosed("$GENERATE 1-2 host$ TXT ( \"a\"\n", 1);
+        // A quote open at the end is the scanner's own error.
+        let error = read_all("www IN TXT \"a").expect_err("an unclosed quote is refused");
+        assert!(error.is(codes::ZONE_FILE_INVALID), "{error:?}");
+    }
+
+    #[test]
+    fn parentheses_closed_by_the_end_of_the_file_still_read() {
+        let items = read_all("www IN TXT ( \"a\" \"(\"\n \"b\" ) ; ( in a comment\n")
+            .expect("the file reads");
+        assert_eq!(items.len(), 1);
+        let items = read_all("www IN TXT ( \"a\"\n )").expect("the file reads");
+        assert_eq!(items.len(), 1);
+    }
 }
