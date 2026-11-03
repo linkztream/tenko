@@ -45,6 +45,8 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+          # Test, bench, fuzz and mockup paths are not scanned (docs/security/README.md).
+          config-file: ./.github/codeql/config.yml
       - name: Analyze
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:

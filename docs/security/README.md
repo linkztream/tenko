@@ -64,6 +64,18 @@ locations and up to three example paths in its evidence; every other rule keeps
 `zap:<rule>:<path template>`. The list is `SITE_WIDE_ZAP_RULES` in
 `scripts/security-report.mjs`.
 
+**Code scanning alerts.** The triage counts CodeQL alerts by rule and crate, not by file. The
+path classes that `.github/codeql/config.yml` ignores (tests, benchmarks, fuzz targets, design
+mockups, the UI's dev mock) are not scanned and mint no ID. An alert in a test module inside
+`src/` (a `#[cfg(test)]` module or a `testing` module) cannot be reached by a path: the owner
+dismisses it in GitHub as "used in tests", and it mints no ID either. An alert in product code
+is one finding per rule and crate with the fingerprint `codeql:<rule>:<crate>`, for example
+`codeql:rust/disabled-certificate-check:tenko`; its evidence lists the alert numbers and up to
+three locations, a new alert of the same rule in the same crate joins the finding, and the
+owner decides its state (a dismissal needs a reason, which the report quotes). The
+fingerprint form is applied by the triage: `scripts/security-report.mjs` reads only the check
+states of `--layer1` and builds no finding from a code scanning alert.
+
 ## States
 
 `new` (first seen in this report), `open` (seen again), `fixed` (no longer seen **and** a

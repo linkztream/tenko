@@ -1,0 +1,32 @@
+name: tenko-codeql
+
+# Read by the "Initialize CodeQL" step of .github/workflows/codeql.yml. The classes below hold
+# fixtures, benchmarks and mockups, not shipped code: they carried 413 of the 523 open alerts
+# of 0.0.10 (hard-coded test passwords and keys, secrets in assertion messages). Product code,
+# the build scripts (`scripts/`, `ui/scripts/`) and the workflows stay scanned. Whether
+# `paths-ignore` applies to Rust with `build-mode: none` is checked by the first run after this
+# file lands; a pattern that matches nothing in a language is harmless.
+#
+# An alert inside a `#[cfg(test)]` module of a `src/` file cannot be reached by a path; the
+# owner dismisses it as "used in tests" (docs/security/README.md).
+paths-ignore:
+  # Integration tests of the Rust crates.
+  - "**/tests/**"
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+  # Test helper modules inside src/ (tenko-auth/src/testing, tenko-scan/src/snmp/testing.rs).
+  - "**/testing/**"
+  - "**/testing.rs"
+  # Standalone benchmark and spike packages, excluded from the workspace and never shipped.
+  - bench
+  # Fuzz targets, excluded from the workspace and never shipped.
+  - fuzz
+  # Static design mockups, neither built nor embedded.
+  - design
+  # End-to-end tests of the web UI.
+  - ui/e2e
+  # The dev-only mock API of the web UI (npm run dev:mock and the UI tests).
+  - ui/src/api/mock
+  # Unit tests of the web UI.
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
